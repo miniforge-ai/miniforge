@@ -170,30 +170,55 @@
 (defn ^{:stratum 0} install-dist!
   "Keep a whole extracted archive (LuaLS loads main.lua and script/ from
    beside its binary): rename the staging `extract/` dir to a new
-   `.dist/<binary>-<version>-<staging name>/` in the bin dir, then swap a
+   `.dist/<binary>/<version>-<staging name>/` in the bin dir, then swap a
    launcher over `final-binary` that execs the binary by its real path.
    Not a symlink: LuaLS on macOS locates itself with _NSGetExecutablePath,
    which does not resolve links. Both renames stay on one filesystem; the
    swap is atomic. If the swap fails the new dist dir is removed, so the
-   existing install is untouched.
+   existing install is untouched. Returns the new dist dir, its mtime set
+   to now so finish-install! can tell it is the newest.
    Plain try: this base declares no slingshot dep (rule 211 exemption 1)."
   [{:keys [dest-dir extract-dir temp-dir binary server-entry platform-asset]} final-binary]
-  (let [dist-name (str binary "-" (:version server-entry) "-" (fs/file-name temp-dir))
-        dist-dir  (fs/path dest-dir ".dist" dist-name)
-        launcher  (fs/path temp-dir "launcher")]
+  (let [dist-dir (fs/path dest-dir ".dist" binary
+                          (str (:version server-entry) "-" (fs/file-name temp-dir)))
+        launcher (fs/path temp-dir "launcher")]
     (fs/create-dirs (fs/parent dist-dir))
     (Files/move (fs/path extract-dir) dist-dir
                 (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE]))
     (try
+      (fs/set-last-modified-time dist-dir (fs/millis->file-time (System/currentTimeMillis)))
       (let [real (str (fs/real-path (fs/path dist-dir (get platform-asset :binary-in-archive binary))))]
         (spit (str launcher) (str "#!/bin/sh\nexec '" (str/replace real "'" "'\\''") "' \"$@\"\n")))
       (fs/set-posix-file-permissions launcher "rwxr-xr-x")
       (Files/move launcher (fs/path final-binary)
                   (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
                                           StandardCopyOption/REPLACE_EXISTING]))
+      dist-dir
       (catch Exception e
         (fs/delete-tree dist-dir)
         (throw e)))))
+
+(defn ^{:stratum 0} finish-install!
+  "Cleanup once the target has been replaced, so the install has already
+   succeeded: delete the staging dir and, for an archive install, prune
+   trees under `.dist/<binary>/` other than `dist` and the newest other
+   one (a server still running from the previous install keeps its
+   files). Returns warning strings instead of throwing.
+   Plain try: this base declares no slingshot dep (rule 211 exemption 1)."
+  [temp-dir dist]
+  (let [delete! (fn [path]
+                  (try (fs/delete-tree path) nil
+                       (catch Exception e (str "could not remove " path ": " (ex-message e)))))
+        older   (fn []
+                  (->> (fs/list-dir (fs/parent dist))
+                       (remove #(= (str %) (str dist)))
+                       (sort-by #(fs/file-time->millis (fs/last-modified-time %)) >)
+                       rest))]
+    (into (filterv some? [(delete! temp-dir)])
+          (when dist
+            (try (into [] (keep delete!) (older))
+                 (catch Exception e
+                   [(str "could not list " (fs/parent dist) ": " (ex-message e))]))))))
 
 (defn ^{:stratum 0} contained-regular-file?
   "True when `rel` names a regular file under `root`, reached with no
@@ -277,24 +302,30 @@
             archive-path (str temp-dir "/" (:file platform-asset))]
         (try
           (if-let [download-anomaly (download-file url archive-path)]
-            (do
-              (fs/delete-tree temp-dir)
-              (assoc state :failure download-anomaly))
+            (fail-and-discard state download-anomaly)
             (assoc state :url url :archive-path archive-path :binary binary))
           (catch Exception e
-            (fs/delete-tree temp-dir)
-            (fail state (str "Download failed: " (.getMessage e))))))))
+            (fail-and-discard state (response/make-anomaly
+                                     :anomalies/fault
+                                     (str "Download failed: " (.getMessage e)))))))))
 
 (defn ^{:stratum 1} step-verify-checksum
   "Check the downloaded archive against the asset's `:sha256` when the
    registry pins one; a mismatch fails the install before extraction.
-   Without a pinned hash the archive is used unverified, said on stderr."
+   Without a pinned hash the archive is used unverified, said on stderr.
+   An error while hashing fails the install and deletes the staging dir."
   [state]
   (if (failed? state) state
       (let [{:keys [platform-asset archive-path]} state
             expected (some-> (:sha256 platform-asset) str/lower-case)
-            actual   (when expected (file-sha256 archive-path))]
+            actual   (try (when expected (file-sha256 archive-path))
+                          (catch Exception e e))]
         (cond
+          (instance? Exception actual)
+          (fail-and-discard state (response/make-anomaly
+                                   :anomalies/fault
+                                   (str "Checksum failed: " (ex-message actual))))
+
           (nil? expected)
           (do (binding [*out* *err*]
                 (println "No sha256 pinned for" (:file platform-asset) "- installing unverified"))
@@ -316,7 +347,8 @@
    keeps the whole archive via install-dist!; a single-file asset is
    renamed over the target in one atomic move (Files/move, which refuses
    a directory target rather than moving into it as fs/move would). On
-   any failure the staging dir is deleted and the target is untouched."
+   any failure before that move the staging dir is deleted and the target
+   is untouched; after it, cleanup errors are warnings on a success."
   [state]
   (if (failed? state) state
       (let [{:keys [dest-dir extract-dir platform-asset binary temp-dir]} state
@@ -331,24 +363,32 @@
                               (str "Binary not found in the archive (no regular file at "
                                    in-archive ")")))]
             (fail-and-discard state anomaly)
-            (do (if (#{:zip :tar-gz} (:extract platform-asset))
-                  (install-dist! state final-binary)
-                  (Files/move (fs/path staged) (fs/path final-binary)
-                              (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
-                                                      StandardCopyOption/REPLACE_EXISTING])))
-                (fs/delete-tree temp-dir)
-                (assoc state :installed final-binary)))
+            (let [dist     (if (#{:zip :tar-gz} (:extract platform-asset))
+                             (install-dist! state final-binary)
+                             (do (Files/move (fs/path staged) (fs/path final-binary)
+                                             (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                                                     StandardCopyOption/REPLACE_EXISTING]))
+                                 nil))
+                  ;; The target is replaced: the install has succeeded, and
+                  ;; cleanup problems from here on are warnings.
+                  warnings (finish-install! temp-dir dist)]
+              (binding [*out* *err*]
+                (doseq [w warnings] (println "Warning:" w)))
+              (cond-> (assoc state :installed final-binary)
+                (seq warnings) (assoc :warnings warnings))))
           (catch Exception e
             (fail-and-discard state (response/make-anomaly
                                      :anomalies/fault
                                      (str "Binary placement failed: " (.getMessage e)))))))))
 
 (defn ^{:stratum 1} install-pipeline->result
-  "Convert pipeline state to result."
+  "Convert pipeline state to result. Cleanup warnings from a successful
+   install ride along as `:lsp-installer/warnings`."
   [state]
   (if (failed? state)
     (:failure state)
-    {:installed (:installed state)}))
+    (cond-> {:installed (:installed state)}
+      (seq (:warnings state)) (assoc :lsp-installer/warnings (:warnings state)))))
 
 (defn ^{:stratum 1} install-via-npm
   "Install an LSP binary via npm."

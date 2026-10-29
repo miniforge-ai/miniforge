@@ -59,7 +59,7 @@
         entry    {:github "example/tool" :version "v1" :binary "tool"
                   :assets {"test-platform" asset}}]
     (with-redefs [installer/bin-dir       (constantly bin-dir)
-                  fs/create-temp-dir      (fn [opts] (fs/create-dirs (fs/path (:dir opts) "staging tmp's")))
+                  fs/create-temp-dir      (fn [opts] (fs/create-dirs (fs/path (:dir opts) (str "staging tmp's " (random-uuid)))))
                   installer/download-file (fn [_url dest] (write-archive! dest) nil)]
       [(binding [*err* (java.io.StringWriter.)]
          (installer/install-via-github entry "test-platform"))
@@ -93,6 +93,20 @@
     (fs/create-dirs (fs/parent path))
     (spit path "stale")
     (f path)))
+
+(defn ^{:stratum 0} write-tool-tgz!
+  "Write a tar.gz under `base` holding bin/tool (prints its own $0) and
+   script/x.lua; return its path."
+  [base]
+  (let [src (str (fs/create-dirs (fs/path base "src")))
+        tgz (str (fs/path base "dist.tar.gz"))]
+    (fs/create-dirs (fs/path src "bin"))
+    (fs/create-dirs (fs/path src "script"))
+    (spit (str src "/bin/tool") "#!/bin/sh\necho \"$0\"\n")
+    (fs/set-posix-file-permissions (str src "/bin/tool") "rwxr-xr-x")
+    (spit (str src "/script/x.lua") "return 1")
+    (bp/sh ["tar" "czf" tgz "-C" src "bin" "script"])
+    tgz))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -314,3 +328,58 @@
                 (is (response/anomaly-map? result) (pr-str result))
                 (is (= "stale" (slurp target)))
                 (is (not (fs/executable? target)))))))))))
+
+(defn ^{:stratum 1} install-tgz!
+  "Install `tgz` as an archive asset. Returns [result tree bin-dir], where
+   tree is the .dist dir the launcher runs from (nil when it failed)."
+  [base tgz]
+  (let [[result bin-dir] (install! base {:file "tool.tar.gz" :extract :tar-gz
+                                         :binary-in-archive "bin/tool"}
+                                   #(fs/copy tgz % {:replace-existing true}))
+        launched (some-> (:installed result) vector bp/sh :out str/trim)]
+    [result (some-> launched fs/parent fs/parent str) bin-dir]))
+
+(deftest ^{:stratum 1} checksum-error-discards-staging-test
+  (testing "an error while hashing fails the install as an anomaly and leaves no staging dir"
+    (with-base-dir
+      (fn [base]
+        (let [[result bin-dir] (with-redefs [installer/file-sha256
+                                             (fn [_] (throw (java.io.IOException. "read failed")))]
+                                 (install! base {:file "tool.gz" :extract :gzip
+                                                 :sha256 (apply str (repeat 64 "0"))}
+                                           #(write-gzip! % script)))]
+          (is (response/anomaly-map? result))
+          (is (str/includes? (str (:anomaly/message result)) "read failed"))
+          (is (not-any? #(str/starts-with? (str (fs/file-name %)) "staging tmp's")
+                        (fs/list-dir bin-dir))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} archive-installs-prune-to-current-and-previous-test
+  (testing "trees live under .dist/<binary>/; all but the current and the previous one are pruned"
+    (with-base-dir
+      (fn [base]
+        (let [tgz             (write-tool-tgz! base)
+              [_ t1]          (install-tgz! base tgz)
+              [_ t2]          (install-tgz! base tgz)
+              [r3 t3 bin-dir] (install-tgz! base tgz)]
+          (is (= (str (fs/real-path (fs/path bin-dir ".dist" "tool"))) (some-> t3 fs/parent str)))
+          (is (not (contains? r3 :lsp-installer/warnings)) (pr-str r3))
+          (is (fs/exists? t3) "current tree kept")
+          (is (fs/exists? t2) "previous tree kept for a server still running from it")
+          (is (not (fs/exists? t1)) "older tree pruned")
+          (is (= 2 (count (fs/list-dir (fs/path bin-dir ".dist" "tool"))))))))))
+
+(deftest ^{:stratum 2} cleanup-errors-after-replace-are-warnings-test
+  (testing "once the target is replaced, failing to delete staging or prune is a warning"
+    (with-base-dir
+      (fn [base]
+        (let [tgz     (write-tool-tgz! base)
+              [_ t1]  (install-tgz! base tgz)
+              _       (install-tgz! base tgz)
+              [r3 t3] (with-redefs [fs/delete-tree (fn [& _] (throw (java.io.IOException. "busy")))]
+                        (install-tgz! base tgz))]
+          (is (not (response/anomaly-map? r3)) (pr-str r3))
+          (is (some? t3) "the new install runs")
+          (is (= 2 (count (:lsp-installer/warnings r3))) "staging dir and the pruned tree")
+          (is (fs/exists? t1) "its removal failed, so the oldest tree is still there"))))))
