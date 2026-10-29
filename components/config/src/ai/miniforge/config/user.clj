@@ -23,6 +23,7 @@
 
    Default configuration is loaded from resources/config/default-user-config.edn"
   (:require
+   [ai.miniforge.messages.interface :as messages]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.pprint]
@@ -52,14 +53,8 @@
   [resource-path]
   (io/resource resource-path))
 
-(defn ^{:stratum 0} read-edn-file
-  "Safely read an EDN file, returning nil on error."
-  [path]
-  (try
-    (when (and path (fs/exists? path))
-      (edn/read-string (slurp path)))
-    (catch Exception _e
-      nil)))
+(def ^{:stratum 0} ^:private t
+  (messages/create-translator "config/config/messages/system.edn" :config/system))
 
 (defn ^{:stratum 0} write-edn-file
   "Write EDN data to a file, creating parent directories if needed."
@@ -90,6 +85,19 @@
 
 (def ^{:stratum 1} default-user-config-path
   (str (miniforge-home) "/config.edn"))
+
+(defn ^{:stratum 1} read-edn-file
+  "Read an EDN file; nil when it is absent or does not parse. A parse failure
+   is reported on stderr, naming the file, so a typo in config.edn does not
+   silently run every workflow on defaults."
+  [path]
+  (try
+    (when (and path (fs/exists? path))
+      (edn/read-string (slurp path)))
+    (catch Exception e
+      (binding [*out* *err*]
+        (println (t :config-file/ignored {:path path :error (.getMessage e)})))
+      nil)))
 
 (defn- ^{:stratum 1} read-config-resource
   "Read an EDN config resource, returning nil on missing resource or parse failure."
