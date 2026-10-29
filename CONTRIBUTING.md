@@ -179,7 +179,7 @@ bb test
 bb run workflow list
 
 # Via JVM (full features)
-clojure -M:cli workflow run :simple-v2
+clojure -M:cli workflow run :quick-fix
 ```
 
 ### Debug a Test Failure

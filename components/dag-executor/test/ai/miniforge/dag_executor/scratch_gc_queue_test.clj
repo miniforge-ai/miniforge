@@ -34,6 +34,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.edn :as edn]
+   [ai.miniforge.config.interface :as mf-config]
    [ai.miniforge.dag-executor.scratch-gc-queue :as sut]
    [ai.miniforge.dag-executor.scratch-commit :as scratch-commit]
    [ai.miniforge.dag-executor.result :as result])
@@ -106,7 +107,9 @@
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path) sut/repo-key one-repo]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           (let [r (sut/enqueue-workflow-gc! "wf-test-001")]
             (is (result/ok? r))
             (let [data (result/unwrap r)]
@@ -119,7 +122,9 @@
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path) sut/repo-key one-repo]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           (sut/enqueue-workflow-gc! "wf-a")
           (sut/enqueue-workflow-gc! "wf-b")
           (let [r (sut/enqueue-workflow-gc! "wf-c")]
@@ -132,7 +137,9 @@
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path) sut/repo-key one-repo]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           (sut/enqueue-workflow-gc! "wf-ts-test")
           (let [entries (read-raw-queue tmp-path)
                 entry   (first entries)]
@@ -149,7 +156,9 @@
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path) sut/repo-key one-repo]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           (let [r (sut/run-deferred-gc! "/unused" 7)]
             (is (result/ok? r))
             (let [data (result/unwrap r)]
@@ -163,7 +172,9 @@
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path) sut/repo-key one-repo]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           ;; Enqueue a just-created entry.
           (sut/enqueue-workflow-gc! "wf-fresh")
           ;; Run GC with a large max-age so nothing qualifies.
@@ -185,6 +196,7 @@
           gc-result {:deleted ["refs/miniforge/scratch/wf-stale-001"] :retained 0}]
       (try
         (with-redefs [sut/gc-queue-path             (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
                       sut/repo-key                  one-repo
                       scratch-commit/gc-scratch-refs! (fn [_ _]
                                                         (result/ok gc-result))]
@@ -212,6 +224,7 @@
                              (* 8 24 60 60 1000)))]
       (try
         (with-redefs [sut/gc-queue-path             (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
                       sut/repo-key                  one-repo
                       scratch-commit/gc-scratch-refs! (fn [_ _]
                                                         (result/ok
@@ -299,7 +312,9 @@
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path) sut/repo-key one-repo]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           ;; Fresh entry — must not be pruned with default 7-day window.
           (sut/enqueue-workflow-gc! "wf-arity-test")
           (let [r (sut/run-deferred-gc! "/unused")]
@@ -313,7 +328,9 @@
     (let [tmp-dir  (make-temp-dir!)
           tmp-path (str tmp-dir "/scratch-gc-queue.edn")]
       (try
-        (with-redefs [sut/gc-queue-path (constantly tmp-path) sut/repo-key one-repo]
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
+                      sut/repo-key one-repo]
           ;; Write an entry with no :finished-at (manually crafted or migrated).
           (spit tmp-path (pr-str [{:git-dir "/unused" :workflow-id "wf-no-timestamp"}]))
           ;; Even with max-age-days=0 the entry must NOT be pruned.
@@ -344,6 +361,7 @@
                              (* 8 24 60 60 1000)))]
       (try
         (with-redefs [sut/gc-queue-path             (constantly tmp-path)
+                      mf-config/miniforge-home-override (constantly (str tmp-dir))
                       sut/repo-key                  one-repo
                       scratch-commit/gc-scratch-refs! (fn [_ _]
                                                         (result/err

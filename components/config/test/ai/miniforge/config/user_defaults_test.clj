@@ -39,15 +39,9 @@
     (testing "default self-healing keeps failover inside OpenCode"
       (is (= [:opencode] (get-in cfg [:self-healing :allowed-failover-backends]))))
 
-    (testing "default workflow checkpoint root is configured as data"
-      (is (= "~/.miniforge/checkpoints"
-             (get-in cfg [:workflow :checkpoint-root]))))
-
-    (testing "default worktree root lives under ~/.miniforge and not /tmp"
-      (is (= "~/.miniforge/worktrees"
-             (get cfg :workflow/worktree-root))
-          ":workflow/worktree-root must be present in the default config so
-           create-worktree-executor picks it up without a disk read"))))
+    (testing "defaults name no checkpoint or worktree root: both follow MINIFORGE_HOME"
+      (is (nil? (get-in cfg [:workflow :checkpoint-root])))
+      (is (nil? (get cfg :workflow/worktree-root))))))
 
 (deftest ^{:stratum 0} load-default-config-falls-back-to-edn-resource-test
   (let [orig-resource io/resource]
@@ -61,12 +55,8 @@
         (is (= :opencode (get-in cfg [:llm :backend])))
         (is (nil? (get-in cfg [:llm :model])))
         (is (nil? (get-in cfg [:agents :default-models])))
-        (is (= "~/.miniforge/checkpoints"
-               (get-in cfg [:workflow :checkpoint-root])))
-        (is (= "~/.miniforge/worktrees"
-               (get cfg :workflow/worktree-root))
-            "fallback EDN must carry :workflow/worktree-root so the dag-executor
-             can locate worktrees even when the primary resource is missing")))))
+        (is (nil? (get-in cfg [:workflow :checkpoint-root])))
+        (is (nil? (get cfg :workflow/worktree-root)))))))
 
 (deftest ^{:stratum 0} repo-config-support-test
   (testing "repo-config-path appends .miniforge/config.edn to the provided root"
@@ -114,6 +104,18 @@
         (spit tmp "{:llm {:backend :claude}")
         (is (nil? (binding [*err* err] (config/load-user-config (.getPath tmp)))))
         (is (str/includes? (str err) (.getPath tmp)))
+        (finally (.delete tmp))))))
+
+(deftest ^{:stratum 0} unparseable-user-config-is-reported-once-test
+  (testing "one process reading an unparseable config.edn many times warns once"
+    (let [tmp (java.io.File/createTempFile "unparseable-user-config-once" ".edn")
+          err (java.io.StringWriter.)]
+      (try
+        (spit tmp "{:llm {:backend :claude}")
+        (binding [*err* err]
+          (dotimes [_ 10] (config/load-user-config (.getPath tmp))))
+        (is (= 1 (count (re-seq (re-pattern (java.util.regex.Pattern/quote (.getPath tmp)))
+                                (str err)))))
         (finally (.delete tmp))))))
 
 ;; Variables that used to be mapped onto keys nothing reads. Setting one

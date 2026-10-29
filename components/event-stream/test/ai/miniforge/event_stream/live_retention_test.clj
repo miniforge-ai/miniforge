@@ -181,6 +181,19 @@
         "a run with no events is not deleted through the directory")
     (is (.isDirectory (live dir completed)) "a completed run is not archived")))
 
+(deftest ^{:stratum 1} failed-and-cancelled-idle-runs-move-to-archived
+  (let [dir       (temp-events-dir)
+        failed    (write-run! dir :workflow/started :workflow/failed)
+        cancelled (write-run! dir :workflow/started :workflow/cancelled)]
+    (run! #(age-tree! (live dir %)) [failed cancelled])
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (doseq [wf-id [failed cancelled]]
+      (is (not (.exists (live dir wf-id))))
+      (is (.isFile (io/file (archived dir wf-id) "archived.marker")))
+      (is (= (str (archived dir wf-id)) (str (es/workflow-events-dir (str dir) wf-id)))
+          "a resume reads the run from archived/")
+      (is (= 2 (count (es/read-workflow-events-by-id (str dir) wf-id)))))))
+
 (deftest ^{:stratum 1} live-runs-that-may-still-matter-stay
   (let [dir      (temp-events-dir)
         running  (write-run! dir :workflow/started :workflow/phase-started)
@@ -190,13 +203,12 @@
                              :workflow/started :workflow/phase-started)
         jvm-run  (write-run! dir :workflow/started :workflow/completed)]
     (spit (io/file (live dir jvm-run) "manifest.json") "{}")
-    (run! #(age-tree! (live dir %)) [running failed resumed jvm-run])
+    (run! #(age-tree! (live dir %)) [running resumed jvm-run])
     (sinks/cleanup-stale-events! {:events-dir dir})
     (testing "no terminal event: running, or crashed"
       (is (.isDirectory (live dir running))))
-    (testing "completed, but written within the TTL"
-      (is (.isDirectory (live dir recent))))
-    (testing "failed: mf resume may still reuse its id"
+    (testing "completed or failed, but written within the TTL"
+      (is (.isDirectory (live dir recent)))
       (is (.isDirectory (live dir failed))))
     (testing "failed, then resumed and running: the failure is not the newest"
       (is (.isDirectory (live dir resumed))))

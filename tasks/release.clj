@@ -39,18 +39,26 @@
   (let [now (java.time.LocalDate/now)]
     (format "%d%02d%02d" (.getYear now) (.getMonthValue now) (.getDayOfMonth now))))
 
+(defn ^{:stratum 0} next-datever
+  "The DateVer for the next release on `date`: one past the highest N
+   among `tags-out` (the `git tag -l vYYYY.MM.DD.*` output for that day),
+   or N = 1 when the day has no release tag yet. Only whole
+   vYYYY.MM.DD.N tags count: blank lines and any other suffix (rc.99,
+   1-rc) are ignored, so empty output gives .1 and a gap left by a
+   deleted tag is never reused."
+  [^java.time.LocalDate date tags-out]
+  (let [taken (keep (fn [tag] (some-> (re-matches #"v\d{4}\.\d{2}\.\d{2}\.(\d+)" (str/trim tag))
+                                      second parse-long))
+                    (str/split-lines (str tags-out)))
+        n     (inc (reduce max 0 taken))]
+    (format "%d.%02d.%02d.%d" (.getYear date) (.getMonthValue date) (.getDayOfMonth date) n)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} datever []
-  (let [now   (java.time.LocalDate/now)
-        year  (.getYear now)
-        month (.getMonthValue now)
-        day   (.getDayOfMonth now)
-        ;; Count existing tags for today to determine N
-        prefix (format "v%d.%02d.%02d." year month day)
-        existing (or (sh "git" "tag" "-l" (str prefix "*")) "")
-        n (inc (count (str/split-lines (str/trim existing))))]
-    (format "%d.%02d.%02d.%d" year month day n)))
+  (let [now    (java.time.LocalDate/now)
+        prefix (format "v%d.%02d.%02d." (.getYear now) (.getMonthValue now) (.getDayOfMonth now))]
+    (next-datever now (sh "git" "tag" "-l" (str prefix "*")))))
 
 (defn- ^{:stratum 1} on-main? []
   (= "main" (sh "git" "branch" "--show-current")))

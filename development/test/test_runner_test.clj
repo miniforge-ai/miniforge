@@ -65,7 +65,8 @@
   (edn/read-string (slurp (str "projects/" project "/deps.edn"))))
 
 (deftest ^{:stratum 0} discovers-miniforge-core-project-test-test
-  (is (= ["ai.miniforge.workflow.kernel-loader-integration-test"]
+  (is (= ["ai.miniforge.cli.core-help-examples-test"
+          "ai.miniforge.workflow.kernel-loader-integration-test"]
          (sut/discovered-project-tests "miniforge-core"))))
 
 (deftest ^{:stratum 0} external-tests-are-skipped-by-default-test

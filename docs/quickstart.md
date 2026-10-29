@@ -87,8 +87,12 @@ in config.
 
 ## Container runtime
 
-Miniforge runs every task inside an isolated OCI container. Any
-OCI-compatible local runtime works; Podman is the recommended default.
+By default (`--execution-mode local`) miniforge runs each task in a git
+worktree on your machine. The agent has your user's privileges: your
+files, network and credentials. Nothing isolates it, and `mf run` says
+so when it starts. With `--execution-mode governed`, each task runs
+inside an isolated OCI container (a capsule) instead. Any OCI-compatible
+local runtime works; Podman is the recommended default.
 
 ```bash
 # Verify the resolved runtime

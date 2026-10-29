@@ -19,13 +19,16 @@
   "Durable commit and reconciliation for one exact deployment proposal."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.phase-deployment.messages :as msg]
    [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} default-store-dir-relative-path ".miniforge/effects")
+(def ^{:stratum 0} default-store-dir-relative-path
+  "The effect store's directory under the miniforge home."
+  "effects")
 
 (def ^{:stratum 0} target-keys
   [:kustomize-dir :context :namespace :deployment-name :app-label])
@@ -43,7 +46,7 @@
 (defn ^{:stratum 1} store-dir
   [context]
   (or (:effect-store-dir context)
-      (str (System/getProperty "user.home") "/" default-store-dir-relative-path)))
+      (str (config/miniforge-home) "/" default-store-dir-relative-path)))
 
 (defn- ^{:stratum 1} apply-report
   [operations proposal]

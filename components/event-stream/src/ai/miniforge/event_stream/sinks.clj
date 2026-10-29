@@ -249,11 +249,13 @@
                  children))))
 
 (defn- ^{:stratum 0} run-verdict
-  ":archive when the newest workflow lifecycle event in live run `dir` is
-   a successful :workflow/completed, the newest by event timestamp then
-   sequence number across all of its event files; :keep when it is not
-   (a started, resumed, failed or cancelled run: resume can still write
-   to it). When any file in `dir` is a symlink, or an event file cannot
+  ":archive when the newest workflow lifecycle event in live run `dir`,
+   by event timestamp then sequence number across all of its event files,
+   ends the run: :workflow/completed (whatever its status),
+   :workflow/failed or :workflow/cancelled. Only a run idle for the TTL
+   is asked about, and resuming an archived run starts a new attempt from
+   archived/. :keep when the newest is a start or a resume (running, or
+   crashed). When any file in `dir` is a symlink, or an event file cannot
    be read or decoded, a string saying which: the run stays, since the
    event it cannot see could be a later start. File mtimes play no part
    here; only the idle check reads them. Reads the transit-JSON this
@@ -280,8 +282,8 @@
     (cond
       symlink (str "symlinked file " (.getName ^java.io.File symlink))
       bad     (str "unreadable or undecodable event file " (.getName ^java.io.File bad))
-      (and (= "~:workflow/completed" (get newest "~:event/type"))
-           (not (#{"~:failure" "~:failed" "~:cancelled"} (get newest "~:workflow/status"))))
+      (#{"~:workflow/completed" "~:workflow/failed" "~:workflow/cancelled"}
+       (get newest "~:event/type"))
       :archive
       :else :keep)))
 
@@ -481,9 +483,10 @@
                       written to: resume replays it. A manifest-less run
                       (a Babashka run, which never archives) idle for
                       the TTL is archived here when its newest lifecycle
-                      event is a successful completion (a failed or
-                      cancelled run may still be resumed), so the
-                      archived/ rules below apply to it next; if it
+                      event ends it (completed, failed or cancelled; a
+                      resume after that is a new attempt read from
+                      archived/), so the archived/ rules below apply to
+                      it next; one running or crashed stays; if it
                       holds no event file, its directory goes. A run
                       with a symlinked, unreadable or undecodable file
                       stays, with one warning per process.

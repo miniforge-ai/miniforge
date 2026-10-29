@@ -583,6 +583,8 @@
       :msg/agent-output     (events/handle-agent-output model payload)
       :msg/workflow-done    (events/handle-workflow-done model payload)
       :msg/workflow-failed  (events/handle-workflow-failed model payload)
+      :msg/workflow-resumed (events/handle-workflow-resumed model payload)
+      :msg/workflow-named   (events/handle-workflow-named model payload)
       :msg/gate-started     (events/handle-gate-started model payload)
       :msg/gate-result      (events/handle-gate-result model payload)
       :msg/tool-invoked     (events/handle-tool-invoked model payload)

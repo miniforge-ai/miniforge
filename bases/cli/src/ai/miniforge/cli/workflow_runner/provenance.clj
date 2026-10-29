@@ -34,8 +34,13 @@
       (println (display/colorize color line)))))
 
 (defn- ^{:stratum 0} runtime-provenance-lines
+  "Banner lines for the run's runtime. In :local execution mode (the
+   default) the first line says the agent runs unisolated, with the
+   operator's privileges, and how to isolate it."
   [context]
   (concat
+   (when (= :local (get context :execution-mode :local))
+     [[:yellow (messages/t :workflow-runner/local-mode-notice)]])
    [[:cyan (messages/t :workflow-runner/runtime-source
                        {:path (:source-root context)})]
     [:cyan (messages/t :workflow-runner/runtime-worktree

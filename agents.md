@@ -195,7 +195,9 @@ Good: `In the enter-verify function: remove artifact retrieval from [:execution/
 
 ## Container Runtime (N11-delta)
 
-Miniforge runs every task inside an OCI container. The runtime adapter
+In governed mode (`--execution-mode governed`) miniforge runs every task
+inside an OCI container; the default local mode runs it in a host git
+worktree, unisolated. The runtime adapter
 (see `components/dag-executor/src/.../runtime/`) treats Docker, Podman,
 and nerdctl as interchangeable providers of the same OCI surface.
 

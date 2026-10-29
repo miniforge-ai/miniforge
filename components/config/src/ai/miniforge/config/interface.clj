@@ -56,11 +56,15 @@
    resource). Empty map {} if neither resource can be read."
   user/default-config)
 
-(def ^{:stratum 0} miniforge-home
-  "Function returning the miniforge home directory as a string.
-   Args: none. Returns: MINIFORGE_HOME env var if set, else
-   `<user.home>/.miniforge`. Never nil."
-  user/miniforge-home)
+(def ^{:stratum 0} miniforge-home-override
+  "Function returning MINIFORGE_HOME when it is set, else nil. Args: none."
+  user/miniforge-home-override)
+
+(def ^{:stratum 0} path-outside?
+  "True when `path` does not resolve inside directory `home`. Args:
+   [home path]. With `miniforge-home-override`, a command that deletes
+   under a root can refuse one outside the home the user chose."
+  user/path-outside?)
 
 (def ^{:stratum 0} repo-config-dir-name
   "String naming the repo-level config directory: \".miniforge\"."
@@ -140,3 +144,13 @@
   "Resolve git token for a host kind using profile + env var chain."
   [host-kind & [opts]]
   (profile/resolve-token host-kind opts))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} miniforge-home
+  "The miniforge home directory as a string: MINIFORGE_HOME when set
+   (`miniforge-home-override`), else `<user.home>/.miniforge`. Never nil.
+   It reads the override through its var, so a test that binds the
+   override moves the home too."
+  []
+  (or (miniforge-home-override) (user/default-miniforge-home)))

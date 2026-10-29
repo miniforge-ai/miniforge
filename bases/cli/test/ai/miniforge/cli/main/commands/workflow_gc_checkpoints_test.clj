@@ -63,4 +63,18 @@
                              {:deleted [] :kept {}
                               :failures [(anomaly/anomaly :unavailable "Could not delete" {})]}))))))
 
+(deftest ^{:stratum 1} gc-checkpoints-root-and-a-refused-root
+  (testing "--root is passed as the checkpoint root"
+    (is (= {:checkpoint/root "/srv/checkpoints"}
+           (:gc-opts (run-cmd {:opts {:root "/srv/checkpoints"}}
+                              {:deleted [] :kept {} :failures []})))))
+  (testing "a refused root prints why, exits 1 and reports no GC"
+    (let [err (java.io.StringWriter.)
+          {:keys [exit out]} (binding [*err* err]
+                               (run-cmd {:opts {}}
+                                        (anomaly/anomaly :conflict "Refusing to collect checkpoints under /x" {})))]
+      (is (= 1 exit))
+      (is (str/includes? (str out err) "Refusing to collect checkpoints under /x"))
+      (is (not (str/includes? out "deleted"))))))
+
 (comment ::workflow-gc-checkpoints)

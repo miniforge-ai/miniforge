@@ -93,8 +93,8 @@
       (is (= 1 (exit-code sut/workflow-run-cmd opts {:execution/status :failed}))))
     (testing "a workflow that throws exits 1"
       (is (= 1 (exit-code sut/workflow-run-cmd opts :throw))))
-    (testing "a missing workflow id exits 1"
-      (is (= 1 (exit-code sut/workflow-run-cmd {} {:execution/status :completed}))))))
+    (testing "a missing workflow id is a usage error: exit 2"
+      (is (= 2 (exit-code sut/workflow-run-cmd {} {:execution/status :completed}))))))
 
 (deftest ^{:stratum 1} chain-run-exit-code-test
   (let [opts {:chain-id "c"}]
@@ -104,8 +104,8 @@
       (is (= 1 (exit-code sut/chain-run-cmd opts {:chain/status :failed}))))
     (testing "a chain that throws exits 1"
       (is (= 1 (exit-code sut/chain-run-cmd opts :throw))))
-    (testing "a missing chain id exits 1"
-      (is (= 1 (exit-code sut/chain-run-cmd {} {:chain/status :completed}))))))
+    (testing "a missing chain id is a usage error: exit 2"
+      (is (= 2 (exit-code sut/chain-run-cmd {} {:chain/status :completed}))))))
 
 (deftest ^{:stratum 1} resume-exit-code-test
   (let [opts {:workflow-id "wf-1"}]
@@ -117,8 +117,8 @@
       (is (= :no-exit (exit-code sut/resume-cmd opts nil))))
     (testing "a resume that throws exits 1"
       (is (= 1 (exit-code sut/resume-cmd opts :throw))))
-    (testing "a missing workflow id exits 1"
-      (is (= 1 (exit-code sut/resume-cmd {} {:execution/status :completed}))))))
+    (testing "a missing workflow id is a usage error: exit 2"
+      (is (= 2 (exit-code sut/resume-cmd {} {:execution/status :completed}))))))
 
 (deftest ^{:stratum 1} resume-failure-is-reported-on-stderr-test
   (testing "a refused resume prints the anomaly's message on stderr, exits 1"

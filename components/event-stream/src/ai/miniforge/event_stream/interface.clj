@@ -30,6 +30,8 @@
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.digest :as digest]
    [ai.miniforge.event-stream.boundary.heartbeat :as heartbeat]
+   [ai.miniforge.event-stream.layout-reader :as layout-reader]
+   [ai.miniforge.event-stream.layout-tail :as layout-tail]
    [ai.miniforge.event-stream.operator-requests :as operator-requests]
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.sinks :as sinks]
@@ -192,6 +194,13 @@
    asks every registered hold). Workflow id is the events directory name;
    events-dir is the events root being cleaned."
   sinks/retention-hold)
+
+(def ^{:stratum 0} cleanup-stale-events!
+  "`(cleanup-stale-events! {:events-dir dir :ttl-ms ms})`: run the event
+   retention pass now, as the file sink does in the background when it is
+   created (which runs are archived or pruned: see the sinks namespace).
+   Returns the number of files removed."
+  sinks/cleanup-stale-events!)
 
 (def ^{:stratum 0} default-events-dir
   "The default events root (`~/.miniforge/events`) as a java.io.File —
@@ -1069,6 +1078,12 @@
    archived → live → legacy directories of a workflow, or nil."
   reader/workflow-events-dir)
 
+(def ^{:stratum 0} event-order-key
+  "`(event-order-key event)`: [timestamp-ms sequence-number], the order to
+   sort read events by before taking the newest; file names order them
+   only to their recorded time."
+  reader/event-order-key)
+
 (def ^{:stratum 0} read-workflow-events-by-id
   "Read events for a workflow id under a base events dir, probing the
    archived → live → legacy layouts and reading the first that exists.
@@ -1077,6 +1092,22 @@
    workflow. Unreadable files are skipped; their paths are in the
    vector's metadata under `:event-stream/unreadable-files`."
   reader/read-workflow-events-by-id)
+
+(def ^{:stratum 0} start-layout-tail!
+  "`(start-layout-tail! events-dir on-event & [opts])`: follow the runs
+   other processes write under `events-dir` (live/ and archived/
+   workflow directories) on a daemon thread, calling `on-event` with each
+   new event in creation order, with UUID ids. Runs active at start are
+   read in full; older history is skipped. Opts: :poll-ms (500),
+   :window-ms (600000, how recently a directory was written to count as
+   active), :thread-name. Returns a function that stops it."
+  layout-tail/start!)
+
+(def ^{:stratum 0} read-layout-start-event
+  "`(read-layout-start-event events-dir workflow-id)`: the run's
+   :workflow/started event from its archived/ or live/ directory under
+   `events-dir`, ids as UUIDs; nil when there is none."
+  layout-reader/start-event)
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event timeline renderer

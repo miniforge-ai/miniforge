@@ -124,7 +124,9 @@
   "Create a workflow summary map for the model."
   [{:keys [id name status phase progress started-at gate-results]}]
   {:id           id
-   :name         (or name (str "workflow-" (subs (str id) 0 8)))
+   ;; At most 8 characters of the id: a short id (a keyword, say) is kept whole.
+   :name         (or name (let [s (if (keyword? id) (clojure.core/name id) (str id))]
+                            (str "workflow-" (subs s 0 (min 8 (count s))))))
    :status       (or status :pending)
    :phase        phase
    :progress     (or progress 0)
