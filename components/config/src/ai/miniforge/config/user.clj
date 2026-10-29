@@ -18,17 +18,17 @@
 (ns ai.miniforge.config.user
   "User configuration management for Miniforge.
 
-   Provides loading, merging, and saving of user configuration.
-   Configuration precedence: repo > user > env > defaults.
+   Provides loading and merging of user configuration. Nothing here writes
+   the config file: writers go through ai.miniforge.config.interface.file,
+   which holds the config lock and writes atomically.
+   Configuration precedence, highest first: env > repo > user > defaults.
 
    Default configuration is loaded from resources/config/default-user-config.edn"
   (:require
    [ai.miniforge.messages.interface :as messages]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [clojure.pprint]
-   [babashka.fs :as fs]
-   [babashka.process]))
+   [babashka.fs :as fs]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -55,12 +55,6 @@
 
 (def ^{:stratum 0} ^:private t
   (messages/create-translator "config/config/messages/system.edn" :config/system))
-
-(defn ^{:stratum 0} write-edn-file
-  "Write EDN data to a file, creating parent directories if needed."
-  [path data]
-  (fs/create-dirs (fs/parent path))
-  (spit path (with-out-str (clojure.pprint/pprint data))))
 
 ;; Repo-level configuration
 (def ^{:stratum 0} repo-config-dir-name
@@ -130,15 +124,8 @@
    Supports these env vars:
    - MINIFORGE_LLM_BACKEND
    - MINIFORGE_LLM_MODEL
-   - MINIFORGE_LLM_TIMEOUT
-   - MINIFORGE_LLM_LINE_TIMEOUT
-   - MINIFORGE_LLM_MAX_TOKENS
    - MINIFORGE_AGENT_THINKING_MODEL
    - MINIFORGE_AGENT_EXECUTION_MODEL
-   - MINIFORGE_MAX_ITERATIONS
-   - MINIFORGE_MAX_TOKENS
-   - MINIFORGE_FAILURE_STRATEGY
-   - MINIFORGE_ARTIFACTS_DIR
    - MINIFORGE_MODEL_SELECTION_ENABLED
    - MINIFORGE_MODEL_SELECTION_STRATEGY
    - MINIFORGE_MODEL_SELECTION_COST_LIMIT
@@ -146,7 +133,12 @@
    - MINIFORGE_SELF_HEALING_ENABLED
    - MINIFORGE_SELF_HEALING_AUTO_APPLY
    - MINIFORGE_BACKEND_AUTO_SWITCH
-   - MINIFORGE_BACKEND_HEALTH_THRESHOLD"
+   - MINIFORGE_BACKEND_HEALTH_THRESHOLD
+
+   Map a variable only when code reads the key it sets: an operator who sets
+   a variable that nothing reads believes a setting is in force. The
+   MODEL_SELECTION_*, SELF_HEALING_* and BACKEND_* entries do not meet that
+   yet; no run reads :model-selection or :self-healing from this config."
   [config]
   (cond-> config
     ;; LLM settings
@@ -156,35 +148,12 @@
     (get-env-var "MINIFORGE_LLM_MODEL")
     (assoc-in [:llm :model] (get-env-var "MINIFORGE_LLM_MODEL"))
 
-    (get-env-var "MINIFORGE_LLM_TIMEOUT")
-    (assoc-in [:llm :timeout-ms] (parse-env-value (get-env-var "MINIFORGE_LLM_TIMEOUT")))
-
-    (get-env-var "MINIFORGE_LLM_LINE_TIMEOUT")
-    (assoc-in [:llm :line-timeout-ms] (parse-env-value (get-env-var "MINIFORGE_LLM_LINE_TIMEOUT")))
-
-    (get-env-var "MINIFORGE_LLM_MAX_TOKENS")
-    (assoc-in [:llm :max-tokens] (parse-env-value (get-env-var "MINIFORGE_LLM_MAX_TOKENS")))
-
     ;; Agent model defaults
     (get-env-var "MINIFORGE_AGENT_THINKING_MODEL")
     (assoc-in [:agents :default-models :thinking] (get-env-var "MINIFORGE_AGENT_THINKING_MODEL"))
 
     (get-env-var "MINIFORGE_AGENT_EXECUTION_MODEL")
     (assoc-in [:agents :default-models :execution] (get-env-var "MINIFORGE_AGENT_EXECUTION_MODEL"))
-
-    ;; Workflow settings
-    (get-env-var "MINIFORGE_MAX_ITERATIONS")
-    (assoc-in [:workflow :max-iterations] (parse-env-value (get-env-var "MINIFORGE_MAX_ITERATIONS")))
-
-    (get-env-var "MINIFORGE_MAX_TOKENS")
-    (assoc-in [:workflow :max-tokens] (parse-env-value (get-env-var "MINIFORGE_MAX_TOKENS")))
-
-    (get-env-var "MINIFORGE_FAILURE_STRATEGY")
-    (assoc-in [:workflow :failure-strategy] (keyword (get-env-var "MINIFORGE_FAILURE_STRATEGY")))
-
-    ;; Artifact settings
-    (get-env-var "MINIFORGE_ARTIFACTS_DIR")
-    (assoc-in [:artifacts :dir] (get-env-var "MINIFORGE_ARTIFACTS_DIR"))
 
     ;; Model selection settings
     (get-env-var "MINIFORGE_MODEL_SELECTION_ENABLED")
@@ -260,13 +229,6 @@
                     configs)]
     (apply-env-overrides base)))
 
-;; Config saving and initialization
-(defn ^{:stratum 2} save-user-config
-  ([config] (save-user-config config default-user-config-path))
-  ([config path]
-   (write-edn-file path config)
-   config))
-
 ;------------------------------------------------------------------------------ Layer 3
 
 (def ^{:stratum 3} default-config
@@ -306,44 +268,3 @@
    (merge-configs default-config
                   (load-user-config user-path)
                   (load-repo-config repo-path))))
-
-(defn ^{:stratum 4} init-user-config
-  "Initialize user config file with defaults if it doesn't exist.
-   Returns path to config file."
-  ([] (init-user-config default-user-config-path))
-  ([path]
-   (when-not (fs/exists? path)
-     (save-user-config default-config path))
-   path))
-
-(defn ^{:stratum 4} update-user-config
-  "Update a specific key in user config.
-   Loads existing config, updates key, and saves.
-
-   key-path: vector of keys (e.g., [:llm :backend])
-   value: new value to set"
-  ([key-path value]
-   (update-user-config key-path value default-user-config-path))
-  ([key-path value path]
-   (let [current-config (or (load-user-config path) default-config)
-         updated-config (assoc-in current-config key-path value)]
-     (save-user-config updated-config path))))
-
-(defn ^{:stratum 4} reset-user-config
-  ([] (reset-user-config default-user-config-path))
-  ([path]
-   (save-user-config default-config path)))
-
-;------------------------------------------------------------------------------ Layer 5
-
-(defn ^{:stratum 5} edit-user-config
-  "Open user config in $EDITOR.
-   Creates config file if it doesn't exist.
-   Returns path to config file."
-  ([] (edit-user-config default-user-config-path))
-  ([path]
-   (init-user-config path)
-   (let [editor (or (System/getenv "EDITOR") "vim")
-         result (babashka.process/shell editor (str path))]
-     (when (zero? (:exit result))
-       path))))

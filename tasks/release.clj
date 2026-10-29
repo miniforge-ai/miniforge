@@ -15,29 +15,33 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns release
   "Release and stability tagging tasks.
 
    Two distinct concerns:
    - stable!  — Run full test suite, tag as stable if green. For poly change detection.
-   - cut!     — Tag a DateVer release + stable tag, push to trigger CI + Homebrew."
+   - cut!     — Tag a DateVer release + stable tag, push to trigger CI + Homebrew.
+                Runs no tests itself: it refuses unless HEAD's ci.yml push run
+                on main passed (see release-gate)."
   (:require
    [babashka.process :as p]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [release-gate]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helpers
 
-(defn- sh [& args]
+;; Helpers
+(defn- ^{:stratum 0} sh [& args]
   (let [{:keys [exit out]} (apply p/sh {:out :string :err :string} args)]
     (when (zero? exit) (str/trim out))))
 
-(defn- today-str []
+(defn- ^{:stratum 0} today-str []
   (let [now (java.time.LocalDate/now)]
     (format "%d%02d%02d" (.getYear now) (.getMonthValue now) (.getDayOfMonth now))))
 
-(defn- datever []
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} datever []
   (let [now   (java.time.LocalDate/now)
         year  (.getYear now)
         month (.getMonthValue now)
@@ -48,16 +52,16 @@
         n (inc (count (str/split-lines (str/trim existing))))]
     (format "%d.%02d.%02d.%d" year month day n)))
 
-(defn- on-main? []
+(defn- ^{:stratum 1} on-main? []
   (= "main" (sh "git" "branch" "--show-current")))
 
-(defn- clean-working-tree? []
+(defn- ^{:stratum 1} clean-working-tree? []
   (str/blank? (sh "git" "status" "--porcelain")))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Stable tag — run tests, tag if green
+;------------------------------------------------------------------------------ Layer 2
 
-(defn stable!
+;; Stable tag — run tests, tag if green
+(defn ^{:stratum 2} stable!
   "Run the full test suite (brick + project + integration). If green,
    push a stable-YYYYMMDD tag so poly only tests changed bricks."
   []
@@ -75,18 +79,21 @@
         (p/shell "git" "push" "origin" tag)
         (println (str "Pushed " tag))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Release — version tag + stable tag, push to trigger CI
-
-(defn cut!
+(defn ^{:stratum 2} cut!
   "Tag a DateVer release + stable tag, push both to trigger the release
-   workflow (CI builds binaries, creates GitHub release, updates Homebrew)."
+   workflow (CI builds binaries, creates GitHub release, updates Homebrew).
+   Runs no tests: refuses unless on main with a clean tree and HEAD's
+   ci.yml push run on main passed."
   []
   (when-not (on-main?)
     (println "Must be on main to cut a release.")
     (System/exit 1))
   (when-not (clean-working-tree?)
     (println "Working tree is dirty. Commit or stash first.")
+    (System/exit 1))
+  (when-let [blocker (release-gate/ci-blocker (sh "git" "rev-parse" "HEAD"))]
+    (println blocker)
     (System/exit 1))
   (let [version    (datever)
         vtag       (str "v" version)

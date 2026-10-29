@@ -16,9 +16,8 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.agent.model-backend-test
-  "Backend selection for agent roles when the configured default models
-   are ids the model catalog does not list (the shipped defaults use
-   provider-prefixed opencode ids such as \"anthropic/claude-sonnet-4-6\")."
+  "Backend and model selection for agent roles: the backend never changes,
+   and the model follows the backend unless the user config names one."
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.agent.model :as model]
@@ -29,11 +28,17 @@
 
 ;; Fixtures
 (def ^{:stratum 0} ^:private shipped-default-models
-  "Same shape and ids as :agents :default-models in
-   resources/config/default-user-config.edn."
+  "User config naming opencode-style provider-prefixed models, as the
+   shipped defaults did before they stopped naming any."
   {:agents {:default-models {:thinking   "anthropic/claude-opus-4-6"
                              :execution  "anthropic/claude-sonnet-4-6"
                              :escalation "anthropic/claude-opus-4-7"}}})
+
+(defn- ^{:stratum 0} over-shipped-defaults
+  "`user-cfg` layered over the shipped default config the way
+   merge-configs layers them, without reading environment variables."
+  [user-cfg]
+  (merge-with merge config/default-config user-cfg))
 
 (defn- ^{:stratum 0} resolve-with-config
   "Resolve `role` against `client` with `cfg` as the merged user config."
@@ -79,10 +84,81 @@
              (backend+model (resolve-with-config shipped-default-models
                                                  :planner client)))))))
 
-;; Catalog-listed models keep their cross-backend routing
-(deftest ^{:stratum 1} listed-model-on-other-backend-still-switches-test
-  (testing "a catalog model of another backend gets a client on that backend"
-    (is (= [:codex "gpt-5.4"]
+;; The shipped defaults name no model, so each backend gets its own
+(deftest ^{:stratum 1} shipped-defaults-follow-the-backend-test
+  (let [shipped (over-shipped-defaults {})]
+    (testing "codex gets no model from miniforge: the codex CLI uses its own"
+      (doseq [role [:planner :implementer :reviewer]]
+        (is (= [:codex nil]
+               (backend+model (resolve-with-config
+                               shipped role (llm/create-client {:backend :codex}))))
+            (str role " must not get a Claude model id on codex"))))
+    (testing "anthropic-api gets the bare Claude ids the Messages API takes"
+      (let [client (llm/create-client {:backend :anthropic-api})]
+        (is (= [:anthropic-api "claude-opus-4-6"]
+               (backend+model (resolve-with-config shipped :planner client))))
+        (is (= [:anthropic-api "claude-sonnet-4-6"]
+               (backend+model (resolve-with-config shipped :implementer client))))))
+    (testing "opencode keeps its provider-prefixed ids"
+      (is (= [:opencode "anthropic/claude-sonnet-4-6"]
+             (backend+model (resolve-with-config
+                             shipped :implementer (llm/create-client {:backend :opencode}))))))))
+
+;; An explicit model is the user's choice over any default
+(deftest ^{:stratum 1} llm-model-beats-the-defaults-test
+  (testing "llm.model (MINIFORGE_LLM_MODEL) sets every role's model"
+    (doseq [[backend llm-model] [[:claude "claude-sonnet-4-5"] [:ollama "qwen3:32b"]]
+            :let [cfg (over-shipped-defaults {:llm {:backend backend :model llm-model}})]
+            role [:planner :implementer :tester]]
+      (is (= llm-model (with-redefs [config/load-merged-config (constantly cfg)]
+                         (model/default-model-for-role role)))
+          (str role " on " backend " must use the configured llm.model"))))
+  (testing "an anthropic/ llm.model reaches the claude CLI as the bare id"
+    ;; `mf config set|init|backend` used to write this value into new files.
+    (is (= [:claude "claude-sonnet-4-5"]
+           (backend+model
+            (resolve-with-config
+             (over-shipped-defaults {:llm {:model "anthropic/claude-sonnet-4-5"}})
+             :implementer (llm/create-client {:backend :claude}))))))
+  (testing "a role tier setting beats llm.model for that tier only"
+    (let [cfg (over-shipped-defaults {:llm {:model "gpt-5.4"}
+                                      :agents {:default-models {:thinking "gpt-5.4-pro"}}})]
+      (with-redefs [config/load-merged-config (constantly cfg)]
+        (is (= "gpt-5.4-pro" (model/default-model-for-role :planner)))
+        (is (= "gpt-5.4" (model/default-model-for-role :implementer)))))))
+
+;; A model id reaches a CLI argv, which takes only strings
+(deftest ^{:stratum 1} symbol-model-in-config-reaches-the-client-as-a-string-test
+  (testing "a bare word an older `config set` stored as a symbol"
+    (let [resolved (resolve-with-config
+                    (over-shipped-defaults {:llm {:backend :codex :model 'gpt-5.4}})
+                    :implementer (llm/create-client {:backend :codex}))]
+      (is (= [:codex "gpt-5.4"] (backend+model resolved))))))
+
+(deftest ^{:stratum 1} blank-model-setting-is-unset-test
+  (testing "a blank llm.model falls back to the backend default"
+    (is (= [:claude "claude-sonnet-4-6"]
+           (backend+model (resolve-with-config
+                           (over-shipped-defaults {:llm {:backend :claude :model ""}})
+                           :implementer (llm/create-client {:backend :claude}))))))
+  (testing "a blank tier setting falls back to llm.model"
+    (with-redefs [config/load-merged-config
+                  (constantly {:llm {:backend :claude :model "claude-haiku-4-5"}
+                               :agents {:default-models {:execution "  "}}})]
+      (is (= "claude-haiku-4-5" (model/default-model-for-role :implementer))))))
+
+;; Selecting a model never changes the backend
+(deftest ^{:stratum 1} catalog-model-keeps-the-configured-backend-test
+  (testing "a Claude catalog model keeps an anthropic-api client on the API"
+    (let [client   (llm/create-client {:backend :anthropic-api :api-key "test-key"})
+          resolved (resolve-with-config
+                    {:agents {:default-models {:execution "claude-sonnet-4-6"}}}
+                    :implementer client)]
+      (is (= [:anthropic-api "claude-sonnet-4-6"] (backend+model resolved)))
+      (is (= "test-key" (get-in resolved [:config :api-key]))
+          "the client keeps the rest of its config")))
+  (testing "a catalog model of another backend stays on the configured backend"
+    (is (= [:claude "gpt-5.4"]
            (backend+model
             (resolve-with-config {:agents {:default-models {:thinking "gpt-5.4"}}}
                                  :planner
