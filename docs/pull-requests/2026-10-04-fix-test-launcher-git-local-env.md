@@ -105,7 +105,8 @@ test run. To give a test run its own config, set `GIT_CONFIG_GLOBAL`.
       `GIT_INTERNAL_SUPER_PREFIX`, which a current git does not print.
    3. `test-sanitize-git-worktree-env-keeps-variables-set-on-purpose` passes eight `GIT_*` variables that bind
       to no repository and expects all eight back.
-2. `test-runner-test` (new, `development/test`), two tests:
+2. `test-runner-test` (`development/test`), two tests from this PR. Main's #2169 added a namespace of the
+   same name; the merge keeps both sets of tests in one file.
    1. `test-run-stream-keeps-git-off-the-repository-a-hook-names` builds a decoy repository and a target
       directory. It aims `GIT_DIR`, `GIT_INDEX_FILE`, `GIT_PREFIX` and `GIT_CONFIG` at the decoy and starts
       `git config` in the target through `run-stream!`. The write lands in the target and the decoy's config
@@ -113,8 +114,9 @@ test run. To give a test run its own config, set `GIT_CONFIG_GLOBAL`.
       environment is one that redirects. The test lays its `GIT_*` variables over `PATH` and `HOME` alone, so
       it can reach the decoy and nothing else.
    2. `test-every-launcher-starts-its-processes-with-the-sanitized-environment` calls `poly-all`,
-      `integration`, `conformance`, `graalvm` and `precommit-smoke` with no environment passed. The process
-      entry points only record. Every recorded environment must be the sanitizer's output.
+      `integration`, `development`, `conformance`, `graalvm` and `precommit-smoke` with no environment
+      passed. The process entry points only record. Every recorded environment must be the sanitizer's
+      output. `development` (`bb test:dev`) came from main's #2197 and was added to the list on merge.
 3. The six tests, run against weakened code swapped in with `with-redefs`. Columns: the installed-git check,
    the older-git name, the keep list, the decoy test, the launcher wiring test.
 
@@ -125,7 +127,7 @@ test run. To give a test run its own config, set `GIT_CONFIG_GLOBAL`.
    | 15 names, older-git name left out | green | red | green | green | green |
    | `GIT_` prefix | green | green | red | green | green |
    | No strip | red | red | green | red | green |
-   | `run-stream!` as on `main` | n/a | n/a | n/a | red | red, all five launchers |
+   | `run-stream!` as on `main` | n/a | n/a | n/a | red | red, every launcher |
 
 4. From a real pre-commit hook. A scratch copy of `main` was committed into a decoy launch repository with a
    linked worktree. `git commit` in that worktree ran the namespaces under audit. The decoy's git directory
@@ -145,9 +147,9 @@ test run. To give a test run its own config, set `GIT_CONFIG_GLOBAL`.
 
    The failing files overlap and none is in a brick this PR changes. No bb task or CI job calls the script.
 
-`test-runner-test` runs in the pre-commit smoke set, like `commit-budget-test` and `lint-test`. CI runs
-`bb test` and `bb test:all`; neither loads `development/test`. A change that breaks the wiring in
-`tasks/test_runner.clj` is caught by the hook and not by CI.
+`test-runner-test` runs in the pre-commit smoke set, like `commit-budget-test` and `lint-test`. Since
+main's #2197, CI also runs every `development/test` namespace through `bb test:dev`. A change that breaks
+the wiring in `tasks/test_runner.clj` fails CI as well.
 
 ## Deployment Plan
 
@@ -206,10 +208,9 @@ Two findings beyond the config writes:
    this by hand. Run in CI it would catch a new unscrubbed fixture in the PR that adds it.
 3. `bb ccov` starts Cloverage, which runs tests, through `bb-dev-tools` with the launch environment
    unstripped. `bb-test-runner/run-coverage` does the same.
-4. No CI job runs the tests under `development/test`, this PR's `test-runner-test` among them.
-5. `run-stream!` strips `:env`. A caller that adds a listed variable back through `:extra-env` gets it; no
+4. `run-stream!` strips `:env`. A caller that adds a listed variable back through `:extra-env` gets it; no
    caller does.
-6. `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_VALUE_<n>` stay in the environment. git ignores them once
+5. `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_VALUE_<n>` stay in the environment. git ignores them once
    `GIT_CONFIG_COUNT` is gone.
 
 ## Related Issues/PRs
