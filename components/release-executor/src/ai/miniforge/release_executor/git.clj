@@ -192,6 +192,8 @@
   "Commit staged changes with the given message. Optional `git-args` are
    global git options placed before `commit`, such as
    `[\"-c\" \"core.hooksPath=/dev/null\"]` to keep every hook from running.
+   Optional `extra-env` is merged into both git calls' environment, such
+   as `{\"GIT_INDEX_FILE\" tmp}` to commit from a temporary index.
 
    Secrets in `commit-message` are replaced with the redaction marker
    (components/redaction) before git records it: a commit is pushed and
@@ -201,14 +203,15 @@
   ([worktree-path commit-message]
    (commit-changes! worktree-path commit-message nil))
   ([worktree-path commit-message git-args]
+   (commit-changes! worktree-path commit-message git-args nil))
+  ([worktree-path commit-message git-args extra-env]
    (try
-     (let [commit-r (apply process/shell
-                           {:dir (str worktree-path) :out :string :err :string :continue true}
+     (let [opts     (cond-> {:dir (str worktree-path) :out :string :err :string :continue true}
+                      extra-env (assoc :extra-env extra-env))
+           commit-r (apply process/shell opts
                            "git" (concat git-args ["commit" "-m" (redaction/redact commit-message)]))]
        (if (zero? (:exit commit-r))
-         (let [sha-r (process/shell
-                      {:dir (str worktree-path) :out :string :err :string :continue true}
-                      "git" "rev-parse" "HEAD")]
+         (let [sha-r (process/shell opts "git" "rev-parse" "HEAD")]
            (if (zero? (:exit sha-r))
              (result/shell-success {:commit-sha (str/trim (get sha-r :out ""))
                                     :output (get commit-r :out "")})
