@@ -27,6 +27,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.release-executor.core :as core]
    [ai.miniforge.release-executor.git :as git]
+   [ai.miniforge.release-executor.push-auth :as push-auth]
    [ai.miniforge.release-executor.shell :as shell]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -154,7 +155,8 @@
                   the token only in the retry's environment")
       (let [pushes (atom [])
             shells (atom [])
-            r      (with-redefs [shell/run-bounded
+            r      (with-redefs [push-auth/inherited-env-config? (constantly false)
+                                 shell/run-bounded
                                  (fn [args opts]
                                    (swap! pushes conj {:args args :opts opts})
                                    (if (= 1 (count @pushes))
@@ -185,13 +187,16 @@
                 "GIT_CONFIG_VALUE_2" "git@github.com:o/r.git"}
                (dissoc env "GH_TOKEN")))
         (is (not-any? #(some #{"set-url"} %) @shells) "origin is read, never rewritten")
+        (is (every? #(some #{"origin"} (:args %)) @pushes)
+            "both pushes name origin, so pushRemote/pushDefault cannot redirect them")
         (is (not-any? #(str/includes? (str/join " " (:args %)) "tok") @pushes)
             "the token is never in argv")))))
 
 (deftest ^{:stratum 0} push-https-fallback-origin-kinds-test
   (let [retry-env (fn [origin token]
                     (let [pushes (atom [])]
-                      (with-redefs [shell/run-bounded (fn [_args opts]
+                      (with-redefs [push-auth/inherited-env-config? (constantly false)
+                                    shell/run-bounded (fn [_args opts]
                                                         (swap! pushes conj opts)
                                                         {:exit 1 :out "" :err "denied"})
                                     process/shell (fn [_opts & args]
@@ -208,7 +213,17 @@
     (testing "an origin with no HTTPS form (a local path) is not retried"
       (is (= 1 (:pushes (retry-env "/srv/git/r.git" "tok")))))
     (testing "no token, no retry"
-      (is (= 1 (:pushes (retry-env "git@github.com:o/r.git" nil)))))))
+      (is (= 1 (:pushes (retry-env "git@github.com:o/r.git" nil))))))
+  (testing "git config already in the environment: no retry, reason given"
+    (let [pushes (atom 0)
+          r      (with-redefs [push-auth/inherited-env-config? (constantly true)
+                               shell/run-bounded (fn [_args _opts]
+                                                   (swap! pushes inc)
+                                                   {:exit 1 :out "" :err "denied"})
+                               process/shell (fn [& _] {:exit 0 :out "git@github.com:o/r.git" :err ""})]
+                   (git/push-branch! "/tmp/wt" "b" "tok"))]
+      (is (= 1 @pushes))
+      (is (= :push/token-retry-env-config (:token-retry-skipped r))))))
 
 ;;------------------------------------------- core host-mode dispatch
 (deftest ^{:stratum 0} step-validate-inputs-host-mode-test
@@ -352,7 +367,7 @@
           leaked? #(let [c (slurp %)] (or (str/includes? c token) (str/includes? c encoded)))
           origin  "git@github.com:o/r.git"
           config  (str (fs/path dir ".git" "config"))]
-      (with-open [proxy (java.net.ServerSocket. 0 1 (java.net.InetAddress/getLoopbackAddress))]
+      (with-open [proxy (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))]
         (try
           (.setSoTimeout proxy 20000)
           (init-repo! dir)
@@ -363,7 +378,8 @@
           ;; reaches github.com.
           (sh! dir "git" "config" "core.sshCommand" "false")
           (sh! dir "git" "config" "http.proxy" (str "http://127.0.0.1:" (.getLocalPort proxy)))
-          (with-redefs [shell/default-timeout-ms 2000]
+          (with-redefs [shell/default-timeout-ms 2000
+                        push-auth/inherited-env-config? (constantly false)]
             (let [push (future (git/push-branch! dir "release/token" token))]
               (with-open [_conn (.accept proxy)]
                 (is (not (leaked? config))
@@ -386,6 +402,8 @@
     (doseq [[label setup expected]
             [["SSH github.com origin" [github] :retry]
              ["HTTPS github.com origin" [["remote" "add" "origin" h]] :retry]
+             ["uppercase SSH host" [["remote" "add" "origin" "git@GITHUB.COM:o/r.git"]] :retry]
+             ["HTTPS origin with :443" [["remote" "add" "origin" "https://github.com:443/o/r.git"]] :retry]
              ["single SSH pushurl on github.com"
               [["remote" "add" "origin" h] (add "git@github.com:o/r.git")] :retry]
              ["mirror pushurl"
@@ -400,6 +418,9 @@
              ["equal-length pushInsteadOf"
               [["remote" "add" "origin" h] ["config" "url.git@github.com:o/r.git.pushInsteadOf" h]]
               :push/token-retry-rewritten]
+             ["identity pushInsteadOf"
+              [github ["config" "url.git@github.com:o/r.git.pushInsteadOf" "git@github.com:o/r.git"]]
+              :push/token-retry-rewritten]
              ["insteadOf alias"
               [["remote" "add" "origin" "gh:o/r.git"] ["config" "url.git@github.com:.insteadOf" "gh:"]]
               :push/token-retry-rewritten]]]
@@ -410,7 +431,8 @@
             (doseq [args setup] (apply sh! dir "git" args))
             (sh! dir "git" "config" (str "http." h ".extraHeader") "Authorization: Basic OLD")
             (let [envs     (atom [])
-                  r        (with-redefs [shell/run-bounded (fn [_args opts]
+                  r        (with-redefs [push-auth/inherited-env-config? (constantly false)
+                                         shell/run-bounded (fn [_args opts]
                                                              (swap! envs conj (:extra-env opts))
                                                              {:exit 1 :out "" :err "denied"})]
                              (git/push-branch! dir "main" "tok"))

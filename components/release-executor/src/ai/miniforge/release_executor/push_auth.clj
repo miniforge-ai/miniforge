@@ -20,15 +20,18 @@
    per-command environment that sends it.
 
    The retry runs only in the plain case: origin has exactly one push URL,
-   git does not rewrite it (no insteadOf / pushInsteadOf applies), and it is
-   on github.com, the host the pipeline's GH_TOKEN belongs to (nothing in
-   miniforge configures a GitHub Enterprise host). Mirrors, rewritten URLs
-   and other hosts get no retry, so the token never goes anywhere the
-   repository's own config redirects it.
+   no insteadOf / pushInsteadOf rule matches it (not even one rewriting it
+   to itself), it is on github.com, the host the pipeline's GH_TOKEN
+   belongs to (nothing in miniforge configures a GitHub Enterprise host),
+   and the environment carries no git config of its own. Mirrors,
+   rewritten URLs and other hosts get no retry, so the token never goes
+   anywhere the repository's own config redirects it.
 
    The settings travel as GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n /
    GIT_CONFIG_VALUE_n (git 2.31+): nothing is written to .git/config and
-   the token never appears in argv.")
+   the token never appears in argv."
+  (:require
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -38,14 +41,31 @@
 
 (defn ^{:stratum 0} https-url
   "HTTPS form of a push URL — scp-style SSH (user@host:path),
-   ssh://[user@]host[:port]/path, or https://[user@]host/path — as
-   [host url], or nil for anything else (a local path, file://)."
+   ssh://[user@]host[:port]/path, or https://[user@]host[:443]/path — as
+   [host url] with the host lowercased, or nil for anything else (a local
+   path, file://, HTTPS on another port)."
   [url]
   (when-let [[_ host path]
              (or (re-matches #"[^@/:]+@([^:/]+):/?(.+)" (str url))
                  (re-matches #"ssh://(?:[^@/]+@)?([^:/]+)(?::\d+)?/(.+)" (str url))
-                 (re-matches #"https://(?:[^@/]+@)?([^/]+)/(.+)" (str url)))]
-    [host (str "https://" host "/" path)]))
+                 (re-matches #"https://(?:[^@/]+@)?([^:/]+)(?::443)?/(.+)" (str url)))]
+    (let [host (str/lower-case host)]
+      [host (str "https://" host "/" path)])))
+
+(defn ^{:stratum 0} inherited-env-config?
+  "True when this process's environment already carries git config
+   (GIT_CONFIG_COUNT or GIT_CONFIG_PARAMETERS). The retry's own
+   GIT_CONFIG_COUNT would replace the first and be followed by the second,
+   so the retry would not run under the config the probes saw."
+  []
+  (boolean (or (System/getenv "GIT_CONFIG_COUNT")
+               (System/getenv "GIT_CONFIG_PARAMETERS"))))
+
+(defn ^{:stratum 0} rewrite-prefixes
+  "Values of the url.<base>.insteadOf / pushInsteadOf rules in `git config
+   --list` output lines."
+  [config-lines]
+  (keep #(nth (re-matches #"url\..*\.(?:push)?insteadof=(.*)" %) 1 nil) config-lines))
 
 (defn ^{:stratum 0} basic-auth-header
   "HTTP header carrying `token` as Basic x-access-token:<token>, the form
@@ -61,21 +81,27 @@
   "Decide the token retry for origin. `configured` are origin's push targets
    as written (remote.origin.pushurl values when `pushurl?`, else
    remote.origin.url values); `effective` is what git pushes to
-   (`git remote get-url --push --all origin`).
+   (`git remote get-url --push --all origin`); `config` is `git config
+   --list` output (nil when it could not be read); `env-config?` is
+   `inherited-env-config?`.
 
    Returns {:env <environment>} for the plain case, else {:skip <message
    key>} naming why no credential is sent. The env clears inherited
    http.<url>.extraHeader values for the exact push URL, adds the token
    header there, and for an SSH URL adds a rule sending that one configured
    URL over HTTPS (pushInsteadOf for a url, insteadOf for a pushurl, which
-   pushInsteadOf does not reach). No existing rule matches the URL —
-   otherwise it would differ from `effective` — so the rule cannot tie."
-  [{:keys [configured effective pushurl?]} token]
+   pushInsteadOf does not reach). No existing rule matches the URL, so
+   that rule cannot tie."
+  [{:keys [configured effective pushurl? config env-config?]} token]
   (let [target      (first effective)
         [host https] (https-url target)]
     (cond
+      env-config?                                   {:skip :push/token-retry-env-config}
       (not= 1 (count configured) (count effective)) {:skip :push/token-retry-not-single-target}
-      (not= target (first configured))             {:skip :push/token-retry-rewritten}
+      (or (nil? config)
+          (not= target (first configured))
+          (some #(str/starts-with? target %) (rewrite-prefixes config)))
+      {:skip :push/token-retry-rewritten}
       (not= trusted-host host)                      {:skip :push/token-retry-untrusted-host}
       :else
       (let [entries (cond-> [[(str "http." https ".extraHeader") ""]

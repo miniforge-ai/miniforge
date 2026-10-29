@@ -31,6 +31,8 @@
   "git rewrites origin's push URL (insteadOf or pushInsteadOf), so the destination is not the configured URL"
   :push/token-retry-untrusted-host
   "origin's push URL is not on github.com, the only host the token is sent to"
+  :push/token-retry-env-config
+  "the environment already sets GIT_CONFIG_COUNT or GIT_CONFIG_PARAMETERS, so the retry could not run under the config that was checked"
 
   ;; push HTTPS+token fallback
   :push/https-fallback-setup-failed
