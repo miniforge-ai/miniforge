@@ -24,13 +24,27 @@
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.compound-events :as compound]
    [ai.miniforge.event-stream.gate-events :as gate-events]
+   [ai.miniforge.event-stream.heartbeat-events :as heartbeat-events]
    [ai.miniforge.event-stream.phase-events :as phase-events]
+   [ai.miniforge.event-stream.recovery-events :as recovery]
    [ai.miniforge.event-stream.workflow-entry-events :as workflow-entry]
    [ai.miniforge.event-stream.workflow-terminal-events :as workflow-terminal]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Event constructors
+(def ^{:stratum 0} checkpoint-written recovery/checkpoint-written)
+
+(def ^{:stratum 0} checkpoint-write-failed recovery/checkpoint-write-failed)
+
+(def ^{:stratum 0} machine-snapshot-written recovery/machine-snapshot-written)
+
+(def ^{:stratum 0} machine-snapshot-write-failed recovery/machine-snapshot-write-failed)
+
+(def ^{:stratum 0} workflow-resumed recovery/resumed)
+
+(def ^{:stratum 0} workflow-spec-hash-mismatch recovery/spec-hash-mismatch)
+
 (def ^{:stratum 0} workflow-started
   "Build and return a :workflow/started event envelope map. Multi-arity
    for the legacy 2/3-arg call shape; the opts arity may carry
@@ -90,11 +104,10 @@
   core/tool-call-completed)
 
 (def ^{:stratum 0} phase-heartbeat
-  "Build and return a :workflow/phase-heartbeat event envelope map for
-   long-running phase liveness (:phase/active-since,
-   :phase/events-emitted, :phase/last-event-at,
-   :phase/gap-since-last-event-ms)."
-  core/phase-heartbeat)
+  "Build a heartbeat without publishing. Current streams require N3 §3.1.1
+   liveness and explicit progress coverage; legacy streams retain tick fields.
+   Current drafts acquire their journal sequence only on publication."
+  heartbeat-events/phase-heartbeat)
 
 (def ^{:stratum 0} workflow-completed
   "Build and return a :workflow/completed event envelope map carrying a

@@ -18,8 +18,10 @@
 (ns ai.miniforge.llm.model-selector-test
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.llm.model-selector :as selector]
-   [ai.miniforge.llm.model-registry :as registry]))
+   [ai.miniforge.llm.model-registry :as registry]
+   [ai.miniforge.logging.interface :as log]))
 
 ;; Simulate all provider API keys being set so selection tests are
 ;; deterministic regardless of the CI environment's real env vars.
@@ -223,3 +225,34 @@
           selection (selector/select-model classification)]
       (is (:model selection))
       (is (:model-id selection)))))
+
+;; Nothing selected: the documented fallback, and :require-local refusing a
+;; cloud model. Both used to throw from the fallback warning.
+(deftest ^{:stratum 0} test-nothing-selected-returns-the-fallback
+  (testing "a task type :automatic reads no tier of returns the Sonnet fallback"
+    (let [entries   (atom [])
+          logger    (log/create-logger {:output #(swap! entries conj %)})
+          selection (selector/select-model {:type :privacy-sensitive :confidence 0.9}
+                                           {:logger logger}
+                                           {})]
+      (is (= :sonnet-4.6 (:model selection)))
+      (is (true? (:fallback-used selection)))
+      (is (= 1 (count @entries)) "the fallback is reported to the caller's logger"))))
+
+(deftest ^{:stratum 0} test-require-local-refuses-cloud-models
+  (testing ":require-local with no local model for the task type is an anomaly"
+    (let [result (selector/select-model {:type :large-context :confidence 0.9}
+                                        {}
+                                        {:require-local true})]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result)))
+      (is (= :sonnet-4.6 (get-in result [:anomaly/data :non-local-model])))))
+  (testing ":require-local refuses a cloud model from a strategy that ignores it"
+    (is (anomaly/anomaly? (selector/select-model {:type :execution-focused :confidence 0.9}
+                                                 {:strategy :speed}
+                                                 {:require-local true}))))
+  (testing ":require-local still returns a local model where one fits"
+    (let [selection (selector/select-model {:type :privacy-sensitive :confidence 0.9}
+                                           {}
+                                           {:require-local true})]
+      (is (get-in (registry/get-model (:model selection)) [:capabilities :local])))))

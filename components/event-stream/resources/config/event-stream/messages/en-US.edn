@@ -5,6 +5,12 @@
   :workflow/unknown-error "unknown error"
   :gate/decision "Phase {phase} decision: {decision}"
   :workflow/started "Workflow started"
+  :workflow/checkpoint-written "Checkpoint written for phase {name}"
+  :workflow/checkpoint-write-failed "Checkpoint write failed for phase {name}: {message}"
+  :workflow/machine-snapshot-written "Machine snapshot written at state {state}"
+  :workflow/machine-snapshot-write-failed "Machine snapshot write failed at {state}: {message}"
+  :workflow/resumed "Workflow resumed at {from-phase}; skipped: {skipping}"
+  :workflow/spec-hash-mismatch "Spec hash mismatch on resume: expected {expected-hash}"
   :workflow/phase-started "{phase} phase started"
   :workflow/phase-completed "{phase} phase {outcome}"
   :gate/rule-applied "Rule {rule-id} {status} in {phase}"
@@ -129,6 +135,10 @@
 
   :fleet-sink.system/flush-error
   "fleet-sink: flush error: {error}"
+
+  ;; Event retention (bounded in-memory history) — programmer-error guard.
+  :retention.system/invalid-limits
+  "Event retention limits must be positive integers; got :max-workflows {max-workflows}, :max-events-per-workflow {max-events-per-workflow}"
 
   ;; Reliability metric event constructors (N3 §3.17, N1 §5.5)
   ;; System-facing observability strings — routed through catalog so

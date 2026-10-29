@@ -27,10 +27,12 @@
    — for backward compatibility — via the `--resume <id>` flag on
    `mf run`."
   (:require
+   [ai.miniforge.agent-runtime.interface :as agent-runtime]
    [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.main.display.classified-error :as classified-error]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.cli.workflow-runner.context :as context]
@@ -40,7 +42,8 @@
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow.interface :as workflow]
-   [ai.miniforge.workflow-resume.interface :as wr]))
+   [ai.miniforge.workflow-resume.interface :as wr]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -90,6 +93,7 @@
    or its FSM snapshot parked on it."
   [reconstructed phase]
   (or (boolean (some #{phase} (:completed-phases reconstructed)))
+      (boolean (some #{phase} (get-in reconstructed [:checkpoint-manifest :workflow/phases-completed])))
       (contains? (:phase-results reconstructed) phase)
       (= phase (get-in reconstructed [:machine-snapshot :execution/current-phase]))))
 
@@ -176,6 +180,75 @@
         (response/throw-anomaly! :anomalies/fault
                                  (messages/t :resume/run-id-unchecked {:run-id (str run-id) :error error})
                                  {:run-id (str run-id) :error error})))))
+
+(defn ^{:stratum 0} print-resume-failure
+  "Report a resume that threw, on stderr, for the CLI boundary. `caught`
+   is what was thrown (an anomaly map, for most resume refusals) and
+   `throwable` the exception carrying it. The message is the anomaly's,
+   else the exception's. It is printed in the classified view when the
+   agent-runtime classifier matched one of its known error patterns, and
+   as `Resume failed: <message>` otherwise. The classifier's catch-all
+   (an unmatched error reads as a task-code error) is not shown: for a
+   missing run or a refused option it would misdirect."
+  [caught throwable]
+  (let [message (or (when (map? caught) (:anomaly/message caught))
+                    (ex-message throwable)
+                    (.getName (class throwable)))
+        classification (try+
+                         (agent-runtime/classify-error message (ex-data throwable))
+                         (catch Object _ nil))]
+    (if (:regex classification)
+      (binding [*out* *err*]
+        (classified-error/print-classified-error classification)
+        (flush))
+      (display/print-error (messages/t :resume/failed {:error message})))))
+
+(defn- ^{:stratum 0} check-spec-drift!
+  "Check the spec file run `workflow-id` started from against the hash its
+   checkpoint manifest recorded, reading the manifest on its own so an
+   unrestorable snapshot does not skip the check. A changed or missing
+   spec refuses the resume; with --force it goes ahead after a warning.
+   When no hash can be checked (no readable manifest, or none recorded
+   for a run started from a spec or one whose snapshot was not restored),
+   a warning says so: an unknown hash is
+   not a pass, but refusing would block every run checkpointed before
+   hashes were recorded. Returns the recorded spec fields to carry into
+   the resumed run's checkpoints, or nil."
+  [workflow-id recorded force?]
+  (let [manifest (workflow/read-checkpoint-manifest (str workflow-id))
+        readable (when (and (map? manifest) (not (anomaly/anomaly? manifest))) manifest)
+        drift (some-> readable workflow/spec-drift)
+        params (when drift
+                 {:workflow-id (str workflow-id)
+                  :path (:workflow/spec-path drift)
+                  :expected (:spec/expected-hash drift)
+                  :actual (or (:spec/actual-hash drift) (messages/t :resume/spec-unreadable))})
+        ;; Without a restored snapshot nothing shows the run was not
+        ;; started from a spec, so a missing hash is reported then too.
+        spec-run? (or (nil? (:machine-snapshot recorded))
+                      (some? (get-in recorded [:machine-snapshot :execution/input :spec/path])))]
+    (cond
+      (and drift force?)
+      (display/print-info (messages/t :resume/spec-changed-forced params))
+
+      drift
+      (response/throw-anomaly! :anomalies/conflict
+                               (messages/t :resume/spec-changed params)
+                               (assoc drift :workflow-id (str workflow-id)))
+
+      (:workflow/spec-hash readable) nil
+
+      (nil? readable)
+      (display/print-info (messages/t :resume/spec-unverified
+                                      {:workflow-id (str workflow-id)
+                                       :reason (messages/t :resume/spec-unverified-no-manifest)}))
+
+      spec-run?
+      (display/print-info (messages/t :resume/spec-unverified
+                                      {:workflow-id (str workflow-id)
+                                       :reason (messages/t :resume/spec-unverified-no-hash)})))
+    (when (:workflow/spec-hash readable)
+      (select-keys readable [:workflow/spec-path :workflow/spec-hash]))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -287,7 +360,20 @@
                                             {:workflow-id workflow-id})))
         recorded (wr/reconstruct-context events-dir (str workflow-id))
         _ (throw-resume-anomaly! recorded)
-        reconstructed (apply-from-phase recorded (:from-phase opts)
+        ;; Shown even when quiet: an unreadable checkpoint file means work
+        ;; the run already paid for may be done again.
+        _ (doseq [failure (:checkpoint-read-failures recorded)]
+            (display/print-info (messages/t :resume/checkpoint-unreadable
+                                            {:error (:anomaly/message failure)})))
+        ;; A phase whose checkpointed result did not read is rewound to, as
+        ;; `--from-phase` would: the snapshot is parked after it, and
+        ;; restoring it would run later phases without that output.
+        unreadable-phase (wr/unreadable-checkpoint-phase recorded)
+        from-phase (or (:from-phase opts) unreadable-phase)
+        _ (when (and unreadable-phase (nil? (:from-phase opts)))
+            (display/print-info (messages/t :resume/rewinding-to-unreadable
+                                            {:phase (name unreadable-phase)})))
+        reconstructed (apply-from-phase recorded from-phase
                                         #(wr/extract-workspace-checkpoints (read-event-file workflow-id)))
         ;; Checked before a completed run is reported done: an invalid
         ;; request is refused, not answered "already completed".
@@ -301,7 +387,8 @@
     (if (:completed? reconstructed)
       (do (display/print-info (messages/t :resume/already-completed)) nil)
 
-      (let [completed-phases (:completed-phases reconstructed)
+      (let [recorded-spec (check-spec-drift! workflow-id recorded (:force opts))
+            completed-phases (:completed-phases reconstructed)
             _ (when-not quiet
                 (display/print-info
                   (messages/t :resume/completed-phases
@@ -365,7 +452,7 @@
             _ (when new-attempt?
                 (doseq [checkpoint (inherited-workspaces
                                     (wr/extract-workspace-checkpoints (read-event-file workflow-id))
-                                    (:from-phase opts)
+                                    from-phase
                                     (:completed-phases reconstructed))]
                   (es/publish! event-stream (es/workspace-persisted event-stream resume-run-id checkpoint))))]
 
@@ -394,6 +481,9 @@
                                       :resume-phase-results (when (wr/checkpointed-phase-results recorded)
                                                               (:phase-results reconstructed))
                                       :resume-workspace (:workspace-checkpoint reconstructed)
+                                      ;; A new attempt keeps checking against the
+                                      ;; spec the run started from.
+                                      :checkpoint/spec recorded-spec
                                       :skip-lifecycle-events false
                                       :pre-completed-dag-tasks (:completed-dag-tasks reconstructed)
                                       :pre-completed-artifacts (:completed-dag-artifacts reconstructed)
@@ -422,9 +512,5 @@
                 {:workflow-id workflow-id
                  :status final-status}))
             result)
-          (catch Exception e
-            (display/print-error (messages/t :resume/failed
-                                             {:error (ex-message e)}))
-            (throw e))
           (finally
             (control/release-workflow-control! resume-run-id)))))))

@@ -49,17 +49,28 @@
   (:import
    [java.io ByteArrayOutputStream]
    [java.net.http HttpClient HttpResponse$BodyHandlers]
-   [java.time Instant ZonedDateTime ZoneOffset]
+   [java.nio.file Files StandardCopyOption]
+   [java.time Instant LocalDateTime ZonedDateTime ZoneOffset]
    [java.time.format DateTimeFormatter]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;;------------------------------------------------------------------------------ Defaults
 (def ^{:stratum 0} ^:private default-event-ttl-ms
-  "How long a persisted event file is kept before cleanup prunes it —
-   7 days. Long enough to debug a failed run days later; short enough that
-   the on-disk event log doesn't grow unbounded on a busy fleet."
+  "How long cleanup keeps stored events — 7 days: an archived workflow
+   for this long after its archive, an operator event or a legacy
+   workflow directory for this long after its last write. Long enough to
+   debug a failed run days later; short enough that the on-disk event log
+   doesn't grow unbounded on a busy fleet."
   (* 7 24 60 60 1000))
+
+(def ^{:stratum 0} ^:private manifest-filename
+  "The per-workflow manifest's file name, read from the manifest
+   contract defaults. The manifest namespace is JVM-only; this one also
+   loads under Babashka, so it reads the name from the resource."
+  (:manifest-filename
+   (config/load-config-resource "config/event-stream/manifest-defaults.edn"
+                                [:manifest-filename])))
 
 (def ^{:stratum 0} ^:private default-fleet-sink-batch-size
   "Events buffered before the fleet HTTP sink flushes a batch. 10 keeps
@@ -110,23 +121,100 @@
   (and (uuid? id)
        (zero? (.getLeastSignificantBits ^java.util.UUID id))))
 
-(defn- ^{:stratum 0} ensure-parent-dir!
-  [file-path]
-  (some-> file-path .getParentFile .mkdirs))
-
 ;; File Sink paths
-(defn- ^{:stratum 0} workflow-id-segment
-  "Normalize a workflow-id into a path segment safe for the OS
-   filesystem. Keywords become their plain name (`:canonical-sdlc` →
-   `canonical-sdlc`) — `(str ...)` would otherwise include the colon
-   prefix, which is invalid on Windows and creates surprising layouts
-   elsewhere. UUIDs / strings pass through `str` unchanged. Reused by
-   `workflow-dir` and `event-file-path` so on-disk path normalisation
-   is consistent across all callers."
-  ^String [workflow-id]
-  (if (keyword? workflow-id)
-    (name workflow-id)
-    (str workflow-id)))
+(defn- ^{:stratum 0} safe-path-segment
+  "`s` when it can only name one entry inside its parent: letters, digits,
+   `.`, `_` and `-`, starting with a letter or digit (so never `.`, `..`,
+   a hidden name or anything with a separator). Otherwise `id-` plus the
+   first 16 hex digits of its SHA-256: the same input always maps to the
+   same name, and nothing an event carries can climb out of the events
+   directory. Ids reach here from the unauthenticated ingest endpoint."
+  ^String [^String s]
+  (if (re-matches #"[A-Za-z0-9][A-Za-z0-9._-]*" s)
+    s
+    (let [digest (.digest (java.security.MessageDigest/getInstance "SHA-256")
+                          (.getBytes s "UTF-8"))]
+      (str "id-" (subs (apply str (map #(format "%02x" %) digest)) 0 16)))))
+
+;; Cleanup
+(defn- ^{:stratum 0} walk-tree
+  "`dir` and every entry under it, parents before children. Unlike
+   `file-seq` it does not descend into a symlinked directory below `dir`
+   (`dir` itself may be one), so a link inside the events tree cannot
+   lead cleanup to files outside it."
+  [^java.io.File dir]
+  (let [real-dir? (fn [^java.io.File f]
+                    (and (.isDirectory f) (not (Files/isSymbolicLink (.toPath f)))))
+        children (fn [^java.io.File f] (seq (.listFiles f)))]
+    (cons dir (mapcat #(tree-seq real-dir? children %)
+                      (when (.isDirectory dir) (children dir))))))
+
+(defn- ^{:stratum 0} delete-all!
+  "Delete each of `files` in order; return how many regular files went.
+   Directories in `files` are deleted too but not counted, and only go
+   once empty, so pass children before their parents."
+  [files]
+  (reduce (fn [n ^java.io.File f]
+            (let [file? (.isFile f)]
+              (if (and (.delete f) file?) (inc n) n)))
+          0
+          files))
+
+(defn- ^{:stratum 0} child-dirs
+  "The directories directly inside `dir`, symlinks excluded; empty when
+   `dir` does not exist."
+  [^java.io.File dir]
+  (filter (fn [^java.io.File f]
+            (and (.isDirectory f) (not (Files/isSymbolicLink (.toPath f)))))
+          (.listFiles dir)))
+
+(defn- ^{:stratum 0} archive-expired?
+  "True when the archived workflow directory `dir` finished archiving
+   before `cutoff` (epoch ms). The archive time is the mtime of its
+   `archived.marker`: the archive creates the marker once, as its last
+   step, and nothing writes it afterwards. A directory without the
+   marker is a half-finished archive that recovery still has to
+   complete, so it never counts as expired."
+  [^java.io.File dir cutoff]
+  (let [marker (io/file dir (layout/archived-marker-filename))]
+    (and (.isFile marker) (< (.lastModified marker) cutoff))))
+
+(defmulti ^{:stratum 0} retention-hold
+  "Whether a store outside the event stream still needs a workflow's
+   stored events past their TTL. Dispatches on a hold key; each owner
+   registers one method under its own key (the workflow checkpoint store
+   holds a run's events while its checkpoint exists, so a resume does not
+   find a checkpoint and no events). `cleanup-stale-events!` keeps an
+   expired archived or legacy workflow directory when any registered hold
+   answers true for its directory name. Args: hold key, workflow id
+   (the directory name, a string), and the events root being cleaned (so
+   a hold can read the workflow's own events)."
+  (fn [hold _workflow-id _events-dir] hold))
+
+(defmethod ^{:stratum 0} retention-hold :default [_hold _workflow-id _events-dir] false)
+
+(defn- ^{:stratum 0} legacy-workflow-expired?
+  "True when `dir`, a directory directly under the events root outside
+   the live, archived and operator trees, is a pre-archive flat workflow
+   directory nobody has written since `cutoff` (epoch ms): a visible
+   name; nothing inside but event and temp files (no subdirectory, no
+   manifest, nothing another tool keeps there); and the directory and
+   every file in it last modified before `cutoff`. The file sink no
+   longer writes this layout, so such a directory is a finished or
+   abandoned run, and it goes whole or not at all."
+  [^java.io.File dir cutoff manifest-name]
+  (let [children (.listFiles dir)]
+    (and (some? children)
+         (not (str/starts-with? (.getName dir) "."))
+         (< (.lastModified dir) cutoff)
+         (every? (fn [^java.io.File f]
+                   (let [n (.getName f)]
+                     (and (.isFile f)
+                          (not= manifest-name n)
+                          (or (str/ends-with? n ".json")
+                              (str/ends-with? n ".transit.tmp"))
+                          (< (.lastModified f) cutoff))))
+                 children))))
 
 ;; Stream Sinks
 (defn ^{:stratum 0} stdout-sink
@@ -201,7 +289,35 @@
           ;; Continue with other sinks even if one fails
           nil)))))
 
+(defn ^{:stratum 0} event-file-ms
+  "The epoch ms an event file name records, inverting `event-filename`:
+   a legacy `{yyyyMMddTHHmmss[SSS]Z}-{uuid}.json` timestamp, or a
+   `{snowflake-hex16}__{seq12}.transit.json` id's timestamp bits. Orders
+   a directory mixing the grammars; nil for any other name."
+  [^String file-name]
+  (if-let [[_ ts ms] (re-matches #"(\d{8}T\d{6})(\d{3})?Z-[^/]+\.json" file-name)]
+    (+ (.toEpochMilli (.toInstant (LocalDateTime/parse ts (DateTimeFormatter/ofPattern "yyyyMMdd'T'HHmmss"))
+                                  ZoneOffset/UTC))
+       (if ms (Long/parseLong ms) 0))
+    (when-let [[_ hex] (re-matches #"([0-9a-f]{16})__\d{12}\.transit\.json" file-name)]
+      (+ snowflake/miniforge-epoch-ms
+         (bit-shift-right (Long/parseUnsignedLong hex 16) snowflake/ts-shift)))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} workflow-id-segment
+  "Normalize a workflow-id into a path segment safe for the OS
+   filesystem. Keywords become their plain name (`:canonical-sdlc` →
+   `canonical-sdlc`) — `(str ...)` would otherwise include the colon
+   prefix, which is invalid on Windows and creates surprising layouts
+   elsewhere. UUIDs and plain names pass through unchanged; anything else
+   goes through `safe-path-segment`. Reused by `workflow-dir` and
+   `event-file-path` so on-disk path normalisation is consistent across
+   all callers."
+  ^String [workflow-id]
+  (safe-path-segment (if (keyword? workflow-id)
+                       (name workflow-id)
+                       (str workflow-id))))
 
 (defn ^{:stratum 1} event->transit-json
   "Serialize `event` to a Transit-JSON string using the verbose writer.
@@ -239,7 +355,7 @@
            "__"
            (format "%012d" seq-num)
            ".transit.json")
-      (str (now-sortable-str) "-" (or id (random-uuid)) ".json"))))
+      (str (now-sortable-str) "-" (safe-path-segment (str (or id (random-uuid)))) ".json"))))
 
 (defn ^{:stratum 1} live-dir
   "Return the `{base-dir}/live/` directory that holds in-flight
@@ -264,27 +380,83 @@
    (io/file base-dir (layout/operator-subdir))))
 
 (defn ^{:stratum 1} cleanup-stale-events!
-  "Delete event files older than TTL from the events directory.
-   Walks all subdirectories (per-workflow and operator).
+  "Prune stored events whose retention has run out. What goes depends on
+   where it lives under the events directory:
+
+     live/{wid}/      Nothing. An in-flight, paused or not-yet-archived
+                      workflow keeps every event file and its manifest
+                      however old they are: resume replays them.
+     archived/{wid}/  The whole directory, once its archive is older
+                      than the TTL (by its `archived.marker`). One still
+                      missing the marker is left for archive recovery.
+     operator/        Each event file older than the TTL.
+     {wid}/ (legacy)  The whole directory, once it and every file in it
+                      are older than the TTL; never one that holds
+                      anything but event files.
+
+   An archived or legacy workflow a `retention-hold` keeps stays, however
+   old: its checkpoint (say) still points at it.
+
+   Anywhere in the tree, `.transit.tmp` files older than the TTL go too:
+   a writer killed between its temp write and the rename leaves one, and
+   no reader ever picks it up. No symlink below the events directory is
+   followed, a symlinked archived/ or operator/ included; the events
+   directory itself may be a symlink.
 
    Arguments:
      opts - Map with optional:
        :events-dir - Directory to clean (default: ~/.miniforge/events)
        :base-dir   - Alias for :events-dir
-       :ttl-ms     - Max age in milliseconds (default: 7 days)
+       :ttl-ms     - Retention in milliseconds (default: 7 days)
 
    Returns: Number of files deleted"
   [& [opts]]
   (let [ttl-ms (get opts :ttl-ms default-event-ttl-ms)
-        events-dir (or (:events-dir opts) (:base-dir opts) (default-events-dir))
-        cutoff (- (System/currentTimeMillis) ttl-ms)]
+        events-dir (io/file (or (:events-dir opts) (:base-dir opts) (default-events-dir)))
+        cutoff (- (System/currentTimeMillis) ttl-ms)
+        stale? (fn [^java.io.File f suffix]
+                 (and (.isFile f)
+                      (str/ends-with? (.getName f) suffix)
+                      (< (.lastModified f) cutoff)))
+        ;; A registered `retention-hold` keeps the workflow; one that
+        ;; throws (an ex-info included, whose thrown object try+ sees as
+        ;; its data map) keeps it too: an unanswered question deletes
+        ;; nothing.
+        holds (remove #{:default} (keys (methods retention-hold)))
+        nonfatal? (fn [thrown] (not (instance? Error thrown)))
+        held? (fn [^java.io.File dir]
+                (boolean (some (fn [hold]
+                                 (try+ (retention-hold hold (.getName dir) events-dir)
+                                       (catch nonfatal? _ true)))
+                               holds)))]
     (if (.isDirectory events-dir)
-      (let [stale-files (->> (file-seq events-dir)
-                             (filter #(and (.isFile %)
-                                           (str/ends-with? (.getName %) ".json")
-                                           (< (.lastModified %) cutoff))))]
-        (doseq [f stale-files] (.delete f))
-        (count stale-files))
+      (let [reserved #{(layout/live-subdir) (layout/archived-subdir) (layout/operator-subdir)}
+            ;; A symlinked archived/ or operator/ points outside the
+            ;; events tree: never list or delete through it.
+            real-subdir (fn [subdir]
+                          (let [d (io/file events-dir subdir)]
+                            (when-not (Files/isSymbolicLink (.toPath d)) d)))
+            archived-root (real-subdir (layout/archived-subdir))
+            operator-root (real-subdir (layout/operator-subdir))
+            archives (when archived-root
+                       (->> (child-dirs archived-root)
+                            (filter #(archive-expired? % cutoff))
+                            (remove held?)))
+            legacy (->> (child-dirs events-dir)
+                        (remove #(contains? reserved (.getName ^java.io.File %)))
+                        (filter #(legacy-workflow-expired? % cutoff manifest-filename))
+                        (remove held?))
+            pruned (reduce + 0 (map #(delete-all! (reverse (walk-tree %)))
+                                    (concat archives legacy)))
+            operator (if operator-root
+                       (->> (walk-tree operator-root)
+                            (filter #(stale? % ".json"))
+                            delete-all!)
+                       0)
+            temps (->> (walk-tree events-dir)
+                       (filter #(stale? % ".transit.tmp"))
+                       delete-all!)]
+        (+ pruned operator temps))
       0)))
 
 ;; Fleet Sink
@@ -458,12 +630,13 @@
 
    Each event gets its own file (no append).
 
-   Performs lazy cleanup of stale event files (older than 7 days) on creation.
+   Starts one background `cleanup-stale-events!` pass on creation (see
+   it for what is pruned and what never is).
 
    Arguments:
      opts - Map with optional:
        :base-dir - Base directory (default: ~/.miniforge/events)
-       :ttl-ms   - Max event file age in ms (default: 7 days)
+       :ttl-ms   - Retention for that cleanup pass in ms (default: 7 days)
 
    Returns: Sink function (fn [event] -> nil)"
   [& [opts]]
@@ -474,12 +647,24 @@
       (let [base-dir (or (:base-dir opts) (default-events-dir))
             file-path (if-let [workflow-id (:workflow/id event)]
                         (event-file-path base-dir workflow-id event)
-                        (operator-event-file-path base-dir event))]
-        (ensure-parent-dir! file-path)
-        ;; Explicit UTF-8: payload strings can carry non-ASCII and these
-        ;; files are a cross-language contract surface — platform default
-        ;; encoding must never decide the on-disk bytes.
-        (spit file-path (event->transit-json event) :encoding "UTF-8"))
+                        (operator-event-file-path base-dir event))
+            f   (io/file file-path)
+            dir (or (.getParentFile f) (io/file "."))
+            _   (.mkdirs dir)
+            tmp (java.io.File/createTempFile ".es-" ".transit.tmp" dir)]
+        (try
+          ;; Explicit UTF-8: payload strings can carry non-ASCII and these
+          ;; files are a cross-language contract surface — platform default
+          ;; encoding must never decide the on-disk bytes.
+          (spit tmp (event->transit-json event) :encoding "UTF-8")
+          (Files/move (.toPath tmp) (.toPath f)
+                      (into-array StandardCopyOption
+                                  [StandardCopyOption/ATOMIC_MOVE
+                                   StandardCopyOption/REPLACE_EXISTING]))
+          (catch Throwable e
+            (try (Files/deleteIfExists (.toPath tmp))
+                 (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
+            (throw e))))
       (catch Exception e
         ;; Log to stderr so failures are visible without breaking the event stream
         (binding [*out* *err*]

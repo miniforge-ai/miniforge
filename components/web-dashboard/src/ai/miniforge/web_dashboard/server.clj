@@ -25,6 +25,7 @@
    [cheshire.core :as json]
    [ai.miniforge.web-dashboard.config :as dashboard-config]
    [ai.miniforge.web-dashboard.control-identity :as control-identity]
+   [ai.miniforge.web-dashboard.messages :as messages]
    [ai.miniforge.web-dashboard.state :as state]
    [ai.miniforge.web-dashboard.views :as views]
    [ai.miniforge.web-dashboard.server.auth :as auth]
@@ -46,14 +47,56 @@
 ;; Configuration defaults
 (def ^{:stratum 0} ^:private defaults dashboard-config/defaults)
 
+(defn ^{:stratum 0} loopback-host?
+  "True for a host string only this machine can reach: localhost, a literal
+   IPv4 address in 127.0.0.0/8, or ::1. Matched on the string, never
+   resolved, so a DNS name that merely starts with `127.` does not count,
+   and no lookup or reflection is needed."
+  [host]
+  (let [h (str/lower-case (str host))]
+    (or (= "localhost" h)
+        (contains? #{"::1" "[::1]" "0:0:0:0:0:0:0:1"} h)
+        (boolean (some->> (re-matches #"127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})" h)
+                          rest
+                          (every? #(<= (parse-long %) 255)))))))
+
+(defn ^{:stratum 0} connect-host
+  "The host a client on this machine should dial for a listener bound to
+   `host`: a wildcard bind (0.0.0.0, ::) answers on localhost; any other
+   address is dialed as given, bracketed when it is an IPv6 literal."
+  [host]
+  (let [h (str host)]
+    (cond
+      (contains? #{"0.0.0.0" "::" "[::]"} h) "localhost"
+      (and (str/includes? h ":") (not (str/starts-with? h "["))) (str "[" h "]")
+      :else h)))
+
+(defn ^{:stratum 0} dashboard-stream
+  "The stream the dashboard reads: `event-stream` when the caller supplies
+   one, else a dashboard-local stream. That stream has NO file sinks, so
+   events the watcher reads from ~/.miniforge/events/ are not written back,
+   and a bounded history, since the dashboard runs for days and re-reads
+   the history on every workflow-list refresh."
+  [event-stream]
+  (or event-stream
+      (es/create-event-stream {:sinks [] :retention es/bounded-retention})))
+
+(defn- ^{:stratum 0} banner-line
+  "One line of the startup box: `text` padded to the box's inner width."
+  [text]
+  (str "│ " text (apply str (repeat (max 1 (- 52 (count text))) " ")) "│"))
+
 ;; Discovery file
 (defn ^{:stratum 0} write-discovery-file!
-  "Write dashboard discovery file for auto-connect."
-  [port]
+  "Write dashboard discovery file for auto-connect. `host` is the address
+   clients should dial (see `connect-host`); readers default to localhost
+   when it is absent, as in files written before it was published."
+  [port host]
   (try
     (let [discovery-dir (config/miniforge-home)
           discovery-file (str discovery-dir "/dashboard.port")
           info {:port port
+                :host host
                 :pid (.pid (java.lang.ProcessHandle/current))
                 :started (str (java.time.Instant/now))}]
       (.mkdirs (io/file discovery-dir))
@@ -381,17 +424,23 @@
 
    Options:
    - :port - Port to listen on (default 7878)
+   - :host - Address to bind (default MINIFORGE_WEB_HOST, else 127.0.0.1).
+             Any non-loopback address requires dashboard login, since
+             event ingest and the event websocket are unauthenticated.
    - :event-stream - Event stream atom for subscribing to workflow events
    - :pr-train-manager - PR train manager instance
    - :repo-dag-manager - Repo DAG manager instance
    - :auth - Optional dashboard auth config"
-  [{:keys [port event-stream pr-train-manager repo-dag-manager auth]
+  [{:keys [port host event-stream pr-train-manager repo-dag-manager auth]
     :or {port (:port defaults)}} resources]
-  (let [;; Create dashboard-local event stream with NO file sinks to prevent write-back loop.
-        ;; The watcher reads from ~/.miniforge/events/ and publishes to this in-memory-only stream.
-        dashboard-event-stream (or event-stream (es/create-event-stream {:sinks []}))
+  (let [host (or host (System/getenv "MINIFORGE_WEB_HOST") (:host defaults))
+        auth-state (auth/build-auth-state auth)
+        _ (when-not (or (loopback-host? host) (auth/enabled? auth-state))
+            (throw (ex-info (messages/t :server/public-bind-without-auth {:host host})
+                            {:host host})))
+        dashboard-event-stream (dashboard-stream event-stream)
         state (state/create-state {:event-stream dashboard-event-stream
-                                   :auth (auth/build-auth-state auth)
+                                   :auth auth-state
                                    :pr-train-manager pr-train-manager
                                    :repo-dag-manager repo-dag-manager
                                    :start-time (System/currentTimeMillis)})
@@ -400,7 +449,7 @@
                  {:registry (cp/create-registry)
                   :decision-manager (cp/create-decision-manager)})
         handler (control-identity/ready-handler state (create-handler state))
-        server (http/run-server handler {:port port :legacy-return-value? false})
+        server (http/run-server handler {:ip host :port port :legacy-return-value? false})
         _ (swap! resources assoc :server server :state state)
         actual-port (http/server-port server)
         ;; Start file watcher to tail-follow event files
@@ -425,16 +474,17 @@
     (println "│ Miniforge Web Dashboard                             │")
     (println "│ Production-ready fleet control interface            │")
     (println "├─────────────────────────────────────────────────────┤")
-    (println  "│ URL: http://localhost:" actual-port (apply str (repeat (- 28 (count (str actual-port))) " ")) "│")
-    (println  "│ WebSocket: ws://localhost:" actual-port "/ws" (apply str (repeat (- 21 (count (str actual-port))) " ")) "│")
+    (println (banner-line (str "URL: http://" (connect-host host) ":" actual-port)))
+    (println (banner-line (str "WebSocket: ws://" (connect-host host) ":" actual-port "/ws")))
     (println  "│ Events: " events-dir (apply str (repeat (max 1 (- 40 (count events-dir))) " ")) "│")
     (println "└─────────────────────────────────────────────────────┘")
     ;; No fallible startup work follows listener acquisition.
     (control-identity/attach! state)
     ;; Discovery publication is best-effort and follows control readiness.
-    (write-discovery-file! actual-port)
+    (write-discovery-file! actual-port (connect-host host))
     {:server server
      :port actual-port
+     :url (str "http://" (connect-host host) ":" actual-port)
      :state state
      :watcher-cleanup watcher-cleanup}))
 

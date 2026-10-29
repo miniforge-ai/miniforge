@@ -28,8 +28,8 @@ Do not infer receipts for paths that never attempted artifact publication.
 
 Focused artifact tests passed: 17 tests, 111 assertions. All three product
 phase-opsv suites passed serially (48 seconds). After updating to merged main,
-the rebuilt CLI passed 23 tests and 166 assertions outside the source tree,
-including receipt, storage failure, identity, event, and native-agent contracts.
+the rebuilt CLI passed 23 tests and 166 assertions outside the source tree.
+These cover receipt, storage failure, identity, event, and native-agent contracts.
 
 The adversarial pass traced acknowledgment ordering, partial failure, inherited
 receipts, and retry behavior; shared factories replace repeated discovery maps.

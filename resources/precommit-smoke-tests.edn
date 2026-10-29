@@ -66,8 +66,9 @@
   ;; commits still dispatch to autofix. Pure with-redefs — no
   ;; subprocess, no filesystem.
   "lint-test"
-  ;; Pins the git-environment strip the test-runner tasks apply before
-  ;; starting a test process, this smoke run included. Two throwaway
-  ;; repositories under java.io.tmpdir and four git commands; the
-  ;; launcher wiring check starts no process.
+  ;; Pins the test-runner tasks: the git-environment strip applied before
+  ;; starting a test process (this smoke run included), and which project
+  ;; tests `bb test:integration` discovers. Two throwaway repositories
+  ;; under java.io.tmpdir and four git commands; the rest reads files or
+  ;; stubs process starts.
   "test-runner-test"]}

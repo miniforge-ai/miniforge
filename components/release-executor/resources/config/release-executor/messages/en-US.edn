@@ -22,6 +22,18 @@
   :pr/reuse-unresolved "A PR already exists for this branch but could not be resolved via gh pr view: {error}"
   :pr/reuse-no-url "gh pr view returned no PR URL"
 
+  ;; push HTTPS+token fallback (host mode): why no credential was sent
+  :push/token-retry-skipped
+  "The HTTPS token retry was not attempted and no credential was sent: {reason}."
+  :push/token-retry-not-single-target
+  "origin has more than one push URL (a mirror or several url/pushurl entries)"
+  :push/token-retry-rewritten
+  "git rewrites origin's push URL (insteadOf or pushInsteadOf), so the destination is not the configured URL"
+  :push/token-retry-untrusted-host
+  "origin's push URL is not on github.com, the only host the token is sent to"
+  :push/token-retry-env-config
+  "the environment already sets GIT_CONFIG_COUNT or GIT_CONFIG_PARAMETERS, so the retry could not run under the config that was checked"
+
   ;; push HTTPS+token fallback
   :push/https-fallback-setup-failed
   "Push failed and the HTTPS token fallback could not be applied: repointing origin to the token URL failed, so origin is unchanged (no token persisted). Push error: {push-error}. Set-url error: {set-url-error}"
@@ -29,6 +41,10 @@
   "Pushed via HTTPS token fallback but could not restore the origin remote URL; it may still embed the GitHub token. Scrub it: git remote set-url origin {remote-url}. Restore error: {restore-error}"
   :push/https-fallback-push-and-restore-failed
   "HTTPS token-fallback push failed and the origin remote URL could not be restored; it may still embed the GitHub token. Scrub it: git remote set-url origin {remote-url}. Push error: {push-error}. Restore error: {restore-error}"
+
+  ;; bounded remote calls (fetch, push, gh)
+  :shell/timed-out
+  "{command} did not finish within {timeout-ms} ms; it and its child processes were killed. A stalled connection or a credential prompt can cause this."
 
   ;; pipeline steps
   :step/metadata-generation-failed "Releaser agent failed to generate release metadata"

@@ -43,6 +43,13 @@
   []
   (str (java.time.Instant/now)))
 
+(def ^{:stratum 0} checkpoint-format-version
+  "The checkpoint format this build writes, stamped on every record as
+   `:checkpoint/format-version`, and the newest one it reads. Bump it when
+   a record's shape changes in a way an older reader would misread. A
+   record with no version predates the stamp and reads as legacy."
+  1)
+
 (def ^{:stratum 0} persisted-execution-keys
   "Serializable execution fields kept in the durable machine snapshot.
 
@@ -63,6 +70,8 @@
    :execution/fsm-state
    :execution/response-chain
    :execution/errors
+   :execution/phase-error-offset
+   :execution/attempt-phase
    :execution/phase-handoffs
    :execution/artifacts
    :execution/dag-result
@@ -88,11 +97,22 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} readable-format?
+  "True when this build can read `record`: it has no format-version key
+   (legacy, or no record at all), or an integer version no newer than
+   `checkpoint-format-version`. A newer or malformed version, an explicit
+   nil included, is not guessed at."
+  [record]
+  (let [version (:checkpoint/format-version record)]
+    (or (not (contains? record :checkpoint/format-version))
+        (and (integer? version) (<= version checkpoint-format-version)))))
+
 (defn ^{:stratum 1} active-or-last-phase
-  "Current phase when present, otherwise the last checkpointed phase."
+  "Current or latest attempted phase, then the legacy checkpoint-order fallback."
   [ctx]
-  (or (:execution/current-phase ctx)
-      (last (ordered-phase-ids ctx))))
+  (if-some [phase (or (:execution/current-phase ctx) (:execution/attempt-phase ctx))]
+    phase
+    (last (ordered-phase-ids ctx))))
 
 (defn ^{:stratum 1} build-machine-snapshot
   "Build the durable machine snapshot for an execution context.
@@ -105,6 +125,7 @@
    from one writer and a live Date from another for the same key."
   [ctx]
   (-> (select-keys ctx persisted-execution-keys)
+      (assoc :checkpoint/format-version checkpoint-format-version)
       coerce/stringify-instants))
 
 (defn ^{:stratum 1} build-phase-checkpoint
@@ -112,7 +133,8 @@
   [ctx phase-name phase-result]
   (let [checkpointed-at (current-checkpoint-timestamp)]
     (coerce/stringify-instants
-     {:workflow/id (:execution/id ctx)
+     {:checkpoint/format-version checkpoint-format-version
+      :workflow/id (:execution/id ctx)
       :workflow/workflow-id (:execution/workflow-id ctx)
       :workflow/workflow-version (:execution/workflow-version ctx)
       :workflow/phase phase-name
@@ -142,7 +164,8 @@
                                    current-phase-ids)
          phase-paths (merge existing-phase-paths current-phase-paths)]
      (coerce/stringify-instants
-      {:workflow/id workflow-run-id
+      {:checkpoint/format-version checkpoint-format-version
+       :workflow/id workflow-run-id
        :workflow/workflow-id (:execution/workflow-id ctx)
        :workflow/workflow-version (:execution/workflow-version ctx)
        :workflow/phases-completed phase-ids

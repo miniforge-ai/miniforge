@@ -17,7 +17,8 @@
 ;; limitations under the License.
 
 {:workflow/messages
- {:chain/child-incomplete "Chain child did not complete successfully."
+ {:gate/decision-unacknowledged "Gate decision was not acknowledged by the event stream; the gated phase cannot advance."
+  :chain/child-incomplete "Chain child did not complete successfully."
   :chain/publication-unconfirmed "Chain lifecycle publication was rejected or did not return a matching acknowledgment."
   :chain/completion-publication-failed "Chain completion publication failed."
   :chain/start-publication-failed "Chain start publication failed."
@@ -37,16 +38,28 @@
   :chain/retention-unconfirmed "Chain retention did not receive a matching durable acknowledgment."
   :chain/retention-missing "A required chain recovery manifest is unavailable."
   :chain/retention-conflict "Chain recovery manifests conflict with the retained identity or composition."
+  ;; Checkpoint reads
+  :checkpoint/read-failed    "Checkpoint file {path} could not be read: {error}"
+  :checkpoint/no-record      "it holds no checkpoint record"
+  :checkpoint/unreadable     "The checkpoint for run {run-id} cannot be restored. {files}"
+  :checkpoint/newer-format   "Checkpoint file {path} was written in checkpoint format {version}; this miniforge reads up to format {supported}. Resume it with a newer miniforge."
+
   ;; Event publishing warnings
   :warn/websocket-send       "Warning: Failed to send event via WebSocket: {error}"
   :warn/publish-event        "Warning: Failed to publish event: {error}"
   :warn/publish-started      "Warning: Failed to publish workflow-started event: {error}"
   :warn/publish-completed    "Warning: Failed to publish workflow-completed event: {error}"
+  :warn/publish-pr           "Warning: Failed to publish auxiliary PR notification: {error}"
   :warn/publish-phase-started   "Warning: Failed to publish phase-started event: {error}"
   :warn/publish-phase-completed "Warning: Failed to publish phase-completed event: {error}"
   :warn/heartbeat-start      "Warning: Failed to start phase heartbeat: {error}"
   :warn/heartbeat-stop       "Warning: Failed to stop phase heartbeat: {error}"
   :warn/health-check         "Warning: Self-healing health check failed: {error}"
+
+  ;; Checkpoint persistence
+  :checkpoint/write-failed   "Checkpoint write failed for run {run-id}: {error}"
+  :checkpoint/manifest-invalid "the existing manifest {path} fails the checkpoint schema"
+  :warn/checkpoint-write-failed "Warning: Could not write the checkpoint for phase {phase}; the run continues, but cannot be resumed from this point: {error}"
 
   ;; Workflow status messages
   :status/failed             "Workflow failed"
@@ -143,6 +156,14 @@
   ;; Execution mode
   :governed/no-capsule      "No capsule executor available for governed workflow"
   :governed/no-capsule-hint "Start Docker or configure a Kubernetes cluster"
+  :governed/runtime-selection-failed
+  "No capsule executor available for governed workflow: container runtime selection failed. {detail}"
+  :governed/runtime-selection-hint
+  "Start Podman or Docker, or set MINIFORGE_RUNTIME to a runtime that is installed and running"
+
+  ;; Checkpoint retention
+  :checkpoint/gc-delete-failed "Could not delete checkpoint {path}: {error}"
+  :warn/checkpoint-announce-failed "Warning: The checkpoint for phase {phase} was written, but announcing it failed: {error}"
 
   ;; Environment lifecycle
   :env/acquisition-failed   "Environment acquisition failed: {error}"

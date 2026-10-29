@@ -58,7 +58,7 @@
               port (:port info)
               pid (:pid info)]
           (if (pid-alive? pid)
-            (str "http://localhost:" port)
+            (str "http://" (get info :host "localhost") ":" port)
             ;; Stale file from crashed dashboard — clean up
             (do (.delete discovery-file) nil)))))
     (catch Exception _ nil)))

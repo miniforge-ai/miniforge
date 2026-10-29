@@ -24,6 +24,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.interface.gate :as phase-gate]
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
    [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
@@ -245,10 +246,12 @@
 (defn- ^{:stratum 1} apply-verdict
   "Carry out the side-effects implied by a verdict — attach anomalies
    for terminal verdicts, attach handoff feedback for repair-requested,
-   mark completed for approved and accept-with-warnings. The FSM drives
+   mark completed for approved and accept-with-warnings unless the phase's
+   gates failed (a denial or an unacknowledged decision outranks review
+   acceptance; the phase stays :failed and is not counted). The FSM drives
    the actual phase transition; this fn only enriches the ctx with
    payload data that evidence-bundle / downstream phases consume."
-  [verdict updated-ctx feedback fingerprint-history review-cycle-count]
+  [verdict updated-ctx feedback fingerprint-history review-cycle-count gate-failed?]
   (case verdict
     :stagnated
     (attach-stagnated-anomaly updated-ctx fingerprint-history)
@@ -266,17 +269,19 @@
     (attach-backend-timeout-anomaly updated-ctx)
 
     :accept-with-warnings
-    (let [review-artifact (get-in updated-ctx [:phase :result :output])
-          warnings        (get review-artifact :review/warnings [])]
-      ;; Override :phase :status from :failed (set by accumulate-base-ctx because
-      ;; reviewer-blocked? was true) back to :completed — the phase succeeds despite
-      ;; the warning-only rejection; the PR proceeds with warnings surfaced.
-      (-> (mark-completed updated-ctx)
-          (assoc-in [:phase :status] :completed)
-          (assoc-in [:phase :unresolved-warnings] warnings)))
+    (if gate-failed?
+      updated-ctx
+      (let [review-artifact (get-in updated-ctx [:phase :result :output])
+            warnings        (get review-artifact :review/warnings [])]
+        ;; Override :phase :status from :failed (set by accumulate-base-ctx because
+        ;; reviewer-blocked? was true) back to :completed — the phase succeeds despite
+        ;; the warning-only rejection; the PR proceeds with warnings surfaced.
+        (-> (mark-completed updated-ctx)
+            (assoc-in [:phase :status] :completed)
+            (assoc-in [:phase :unresolved-warnings] warnings))))
 
     :approved
-    (mark-completed updated-ctx)))
+    (cond-> updated-ctx (not gate-failed?) mark-completed)))
 
 (defn- ^{:stratum 1} accumulate-base-ctx
   "Apply the always-on context updates: phase metadata, metrics,
@@ -395,6 +400,7 @@
         metrics     (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
                         (assoc :duration-ms duration-ms))
         iterations  (get-in ctx [:phase :iterations] 1)
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))
         ;; All convergence decision logic is pure in review-convergence; this
         ;; interceptor gathers the ctx inputs, then applies the decision.
         decision (conv/compute-review-decision
@@ -404,7 +410,7 @@
                    :prior-fingerprints       (get-in ctx [:execution :review-fingerprints] [])
                    :prior-blocking-counts    (get-in ctx [:execution :review-blocking-counts] [])
                    :prior-warning-only-count (get-in ctx [:execution :review-warning-only-cycles] 0)
-                   :gate-failed?             (= :failed (:phase/status (get-in ctx [:phase])))
+                   :gate-failed?             gate-failed?
                    :within-budget?           (< iterations
                                                 (get-in ctx [:phase :budget :iterations]
                                                         (get-in default-config [:budget :iterations])))
@@ -426,7 +432,8 @@
                                 (attach-verdict verdict))
                       reviewer-blocked? (record-warning-cycle-count warning-only-count))
         next-ctx (apply-verdict verdict updated-ctx feedback
-                                (conj prior-history current-fp) review-cycle-count)]
+                                (conj prior-history current-fp) review-cycle-count
+                                gate-failed?)]
     (when (= :repair-requested verdict)
       (knowledge/capture-feedback-learning!
        (:knowledge-store ctx) :reviewer

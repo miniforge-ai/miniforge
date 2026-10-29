@@ -134,29 +134,6 @@
       (fn []
         (is (= [] (sut/get-configured-repos state)))))))
 
-(deftest ^{:stratum 0} with-config-lock-timeout-test
-  (testing "returns lock-failure within timeout when another thread holds the lock"
-    (let [path    (str (System/getProperty "java.io.tmpdir") "/mf-trains-lock-test-" (System/nanoTime) ".edn")
-          latch   (java.util.concurrent.CountDownLatch. 1)
-          release (java.util.concurrent.CountDownLatch. 1)
-          holder  (future (#'sut/with-config-lock! path
-                            (fn []
-                              (.countDown latch)
-                              (.await release))))]
-      (is (.await latch 5 java.util.concurrent.TimeUnit/SECONDS)
-          "lock holder did not acquire lock in time")
-      (try
-        (let [start   (System/currentTimeMillis)
-              result  (#'sut/with-config-lock! path #(throw (Exception. "should not run")))
-              elapsed (- (System/currentTimeMillis) start)]
-          (is (false? (:success? result)))
-          (is (str/includes? (str/lower-case (:error result)) "lock"))
-          (is (<= elapsed 1500)))
-        (finally
-          (.countDown release)
-          (deref holder 2000 nil)
-          (.delete (io/file path)))))))
-
 ;; ============================================================================
 ;; Provider PR field parsing
 ;; ============================================================================
@@ -1236,6 +1213,22 @@
           (is (true? (:success? second-add)))
           (is (false? (:added? second-add)))
           (is (= ["acme/service"] (sut/get-configured-repos state))))))))
+
+(deftest ^{:stratum 1} repo-writers-refuse-unparseable-config-test
+  (doseq [[label write!] [["add-configured-repo!" #(sut/add-configured-repo! % "acme/service")]
+                          ["discover-configured-repos!" #(sut/discover-configured-repos! % {:owner "acme"})]]]
+    (testing (str label " leaves a config.edn that does not parse untouched")
+      (let [config-path (temp-config-path)
+            garbage     "{:llm {:backend :claude} :fleet {:repos [\"acme/old\"]} :policy-packs"]
+        (spit config-path garbage)
+        (with-redefs-fn {#'sut/default-fleet-config-path config-path
+                         #'sut/run-gh (constantly {:success? true :out "[{\"full_name\":\"acme/x\"}]" :err ""})}
+          (fn []
+            (let [result (write! (atom {}))]
+              (is (false? (:success? result)))
+              (is (str/includes? (:error result) config-path))
+              (is (= :invalid-input (get-in result [:anomaly :anomaly/type]))))))
+        (is (= garbage (slurp config-path)))))))
 
 (deftest ^{:stratum 1} add-configured-repo-blank-test
   (let [config-path (temp-config-path)

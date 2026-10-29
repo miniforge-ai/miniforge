@@ -23,7 +23,7 @@ host migration and workflow-level lifecycle publication remain separate work.
 
 ## Verification plan
 
-Unit coverage for owned facts and direct-interceptor isolation; actual runner with
+Unit coverage for owned facts and direct-interceptor isolation. Actual runner with
 current journal and durable reopen; all affected product consumers; rebuilt CLI
 with isolated package tests. Normal signed commits, adversarial standards review,
 exact-head review and all CI gates. No storage migration; normal CLI deployment.

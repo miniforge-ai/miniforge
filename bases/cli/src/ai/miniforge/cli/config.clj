@@ -22,13 +22,15 @@
   (:require
    [clojure.edn :as edn]
    [clojure.string :as str]
-   [clojure.pprint :as pprint]
    [babashka.fs :as fs]
    [babashka.process :as process]
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.config.interface.file :as config-file]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.backends :as backends]
    [ai.miniforge.cli.backends.config :as backend-config]
    [ai.miniforge.cli.backends.status :as backend-status]
+   [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.resource-config :as resource-config]))
 
@@ -49,10 +51,9 @@
     (str "\033[" (get colors color "37") "m" text "\033[0m")))
 
 (defn ^{:stratum 0} write-config-file
-  "Write config to file with pretty printing."
+  "Replace the config file under the shared config lock. `config` or an anomaly."
   [path config]
-  (fs/create-dirs (fs/parent path))
-  (spit path (with-out-str (pprint/pprint config))))
+  (config-file/write-config! path config))
 
 ;; Config display and manipulation
 (defn ^{:stratum 0} format-config-value
@@ -69,20 +70,42 @@
   (when key-str
     (mapv keyword (str/split key-str #"\."))))
 
+(def ^{:stratum 0} keyword-valued-keys
+  "Config keys whose values are keywords. `config set llm.backend opencode` must
+   store :opencode: as a string or symbol it names no backend. Only keys a run
+   reads belong here."
+  #{[:llm :backend]})
+
+(def ^{:stratum 0} string-valued-keys
+  "Config keys whose values are model ids, stored as strings whatever EDN
+   reads the value as: a model id reaches a CLI argv, which takes only
+   strings, so `config set llm.model 1.5` must not store a number. nil
+   stays nil, so `config set llm.model nil` clears the setting."
+  #{[:llm :model]
+    [:agents :default-models :thinking]
+    [:agents :default-models :execution]})
+
 (defn ^{:stratum 0} parse-config-value
-  "Parse config value from string."
+  "Parse config value from string. A bare word, which EDN reads as a symbol,
+   stays a string (`anthropic/claude-sonnet-4-5` is a model id, not a symbol)."
   [value-str]
-  (try
-    (edn/read-string value-str)
-    (catch Exception _
-      value-str)))
+  (let [value (try
+                (edn/read-string value-str)
+                (catch Exception _
+                  value-str))]
+    (if (symbol? value) (str value) value)))
 
 (defn ^{:stratum 0} get-llm-backend
-  "Get LLM backend from config, with workflow override support."
+  "Get LLM backend from config, with workflow override support. A string or
+   symbol (as an older `config set` wrote) is read as the keyword of its full
+   text, namespace included, so `vendor/opencode` stays unknown either way."
   [config workflow-override]
-  (or workflow-override
-      (get-in config [:llm :backend])
-      :opencode))
+  (let [backend (or workflow-override
+                    (get-in config [:llm :backend])
+                    :opencode)]
+    (if (or (string? backend) (symbol? backend))
+      (keyword (str backend))
+      backend)))
 
 (defn ^{:stratum 0} get-llm-timeout
   "Get LLM timeout from config."
@@ -113,6 +136,26 @@
 (defn ^{:stratum 1} print-info [msg]
   (println (style msg :cyan)))
 
+(defn ^{:stratum 1} exit-with-anomaly!
+  "Print the anomaly's message to stderr and exit 1."
+  [anomaly]
+  (binding [*out* *err*]
+    (println (style (messages/t :config/error-prefix {:message (:anomaly/message anomaly)}) :red)))
+  (shared/exit! 1))
+
+(defn ^{:stratum 1} coerce-config-value
+  "`value` as `config set` stores it under `key-path`: a keyword for the
+   `keyword-valued-keys`, a string for the `string-valued-keys`."
+  [key-path value]
+  (cond
+    (and (contains? keyword-valued-keys key-path) (string? value))
+    (keyword value)
+
+    (and (contains? string-valued-keys key-path) (some? value) (not (string? value)))
+    (str value)
+
+    :else value))
+
 ;; Config file operations
 (defn ^{:stratum 1} read-config-file
   "Read config file, returns nil if doesn't exist."
@@ -138,21 +181,15 @@
                         :provider (or (get-in backend-config/backend-specs
                                               [(get-in config [:llm :backend]) :provider])
                                       (messages/t :config/llm-backend-provider-unknown))}))
-  (println (messages/t :config/llm-model {:model (get-in config [:llm :model])}))
-  (println (messages/t :config/llm-max-tokens {:max-tokens (get-in config [:llm :max-tokens])}))
-  (println (messages/t :config/llm-timeout {:minutes (quot (get-in config [:llm :timeout-ms]) 60000)}))
+  (println (if-let [model (get-in config [:llm :model])]
+             (messages/t :config/llm-model {:model model})
+             (messages/t :config/llm-model-unset)))
   (println)
 
-  ;; Workflow Settings
-  (println (messages/t :config/section-workflow))
-  (println (messages/t :config/workflow-max-iterations {:max-iterations (get-in config [:workflow :max-iterations])}))
-  (println (messages/t :config/workflow-max-tokens {:max-tokens (get-in config [:workflow :max-tokens])}))
-  (println (messages/t :config/workflow-failure-strategy {:failure-strategy (format-config-value (get-in config [:workflow :failure-strategy]))}))
-  (println)
-
-  ;; Artifacts
+  ;; Artifacts. The directory comes from MINIFORGE_HOME, not from
+  ;; [:artifacts :dir], so show the one the artifact commands use.
   (println (messages/t :config/section-artifacts))
-  (println (messages/t :config/artifacts-dir {:dir (get-in config [:artifacts :dir])}))
+  (println (messages/t :config/artifacts-dir {:dir (app-config/artifacts-dir)}))
   (println)
 
   ;; Config file location
@@ -201,11 +238,11 @@
         (print-error (messages/t :config/set-missing-args))
         (println (messages/t :config/set-usage {:command (app-config/command-string "config set <key> <value>")}))
         (println (messages/t :config/set-example {:command (app-config/command-string "config set llm.backend opencode")})))
-      (let [user-config (or (read-config-file config-path) default-config)
-            key-path (parse-config-key key-str)
-            value (parse-config-value value-str)
-            updated-config (assoc-in user-config key-path value)]
-        (write-config-file config-path updated-config)
+      (let [key-path (parse-config-key key-str)
+            value (coerce-config-value key-path (parse-config-value value-str))
+            result (config-file/update-config! config-path #(assoc-in (or % default-config) key-path value))]
+        (when (anomaly/anomaly? result)
+          (exit-with-anomaly! result))
         (println)
         (print-success (messages/t :config/set-success {:key key-str :value (pr-str value)}))
         (println (messages/t :config/set-saved {:path config-path}))
@@ -219,8 +256,9 @@
       (do
         (print-info (messages/t :config/init-exists {:path config-path}))
         (println (messages/t :config/init-modify-hint {:command (app-config/command-string "config set <key> <value>")})))
-      (do
-        (write-config-file config-path default-config)
+      (let [result (config-file/update-config! config-path #(or % default-config))]
+        (when (anomaly/anomaly? result)
+          (exit-with-anomaly! result))
         (println)
         (print-success (messages/t :config/init-created {:path config-path}))
         (println)
@@ -235,7 +273,9 @@
         editor (or (System/getenv "EDITOR") "vim")]
     ;; Create config if it doesn't exist
     (when-not (fs/exists? config-path)
-      (write-config-file config-path default-config))
+      (let [result (config-file/update-config! config-path #(or % default-config))]
+        (when (anomaly/anomaly? result)
+          (exit-with-anomaly! result))))
 
     (try
       (process/shell editor (str config-path))
@@ -253,8 +293,9 @@
     (flush)
     (let [response (read-line)]
       (if (= (str/lower-case (str/trim response)) "y")
-        (do
-          (write-config-file config-path default-config)
+        (let [result (write-config-file config-path default-config)]
+          (when (anomaly/anomaly? result)
+            (exit-with-anomaly! result))
           (println)
           (print-success (messages/t :config/reset-success))
           (println))
@@ -279,9 +320,9 @@
             validation (backend-status/validate-backend backend-kw)]
         (if (:valid? validation)
           ;; Backend is available, set it
-          (let [user-config (or (read-config-file config-path) default-config)
-                updated-config (assoc-in user-config [:llm :backend] backend-kw)]
-            (write-config-file config-path updated-config)
+          (let [result (config-file/update-config! config-path #(assoc-in (or % default-config) [:llm :backend] backend-kw))]
+            (when (anomaly/anomaly? result)
+              (exit-with-anomaly! result))
             (println)
             (print-success (messages/t :config/backend-set-success {:backend backend-str}))
             (println (messages/t :config/backend-saved {:path config-path}))

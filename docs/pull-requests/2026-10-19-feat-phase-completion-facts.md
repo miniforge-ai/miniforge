@@ -69,7 +69,7 @@ The next review found two additional cases, reproduced as nine failed assertions
 against the previous CLI. A refused terminal event now retains post-artifact
 output through shared event/finalization handling, including exception conversion.
 Successful-actuation recovery uses that same handling. Bundle-only retries clear
-old receipts and declare an empty attempt before publication; repeated refusals
+old receipts and declare an empty attempt before publication. Repeated refusals
 preserve the provider error and all other retained output without claiming old
 material. The integration tests exercise two consecutive refused retries and
 verify no provider replay. No new commit-budget exception is used.

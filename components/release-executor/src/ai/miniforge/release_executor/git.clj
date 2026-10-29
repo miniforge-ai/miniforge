@@ -22,10 +22,19 @@
    the host working tree (babashka.process). This is the counterpart to
    sandbox.clj which routes operations through the DAG executor container.
 
-   Used when :host-mode? is true (local-dogfood / no executor supplied)."
+   Used when :host-mode? is true (local-dogfood / no executor supplied).
+
+   Calls that reach a remote (git fetch, git push, gh) go through
+   `shell/run-bounded`: a deadline, empty stdin, and prompts disabled, so a
+   stalled connection or a credential prompt fails the call instead of
+   blocking the release phase. Local git calls use process/shell directly."
   (:require
+   [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.release-executor.messages :as msg]
+   [ai.miniforge.release-executor.push-auth :as push-auth]
    [ai.miniforge.release-executor.result :as result]
+   [ai.miniforge.release-executor.shell :as shell]
+   [babashka.fs :as fs]
    [babashka.process :as process]
    [clojure.string :as str]))
 
@@ -72,15 +81,35 @@
       :else nil)))
 
 (defn- ^{:stratum 0} gh-shell-opts
-  "process/shell option map for a gh call, injecting the caller's
-   `github-token` as GH_TOKEN so host-mode uses the same credential the
-   pipeline resolved — parity with sandbox's gh-exec-opts :env injection.
+  "shell/run-bounded option map for a remote git or gh call, injecting the
+   caller's `github-token` as GH_TOKEN so host-mode uses the same credential
+   the pipeline resolved — parity with sandbox's gh-exec-opts :env injection.
    `worktree-path` may be nil (e.g. `gh auth status` needs no cwd). When no
-   token is supplied the call inherits the ambient environment."
-  [worktree-path github-token]
-  (cond-> {:out :string :err :string :continue true}
-    worktree-path (assoc :dir (str worktree-path))
-    github-token  (assoc :extra-env {"GH_TOKEN" github-token})))
+   token is supplied the call inherits the ambient environment. `extra-env`
+   (the push fallback's `push-auth/retry-plan` env) is merged in. A call
+   carrying a token runs with git's tracing variables removed
+   (`shell/trace-env-var?`), so a trace cannot log the credential."
+  ([worktree-path github-token] (gh-shell-opts worktree-path github-token nil))
+  ([worktree-path github-token extra-env]
+   (let [env (merge (when github-token {"GH_TOKEN" github-token}) extra-env)]
+     (cond-> {}
+       worktree-path (assoc :dir (str worktree-path))
+       (seq env)     (assoc :extra-env env)
+       github-token  (assoc :no-trace? true)))))
+
+(defn- ^{:stratum 0} branch-refspec
+  "Full refspec pushing local `branch` to the same-named branch on the
+   remote. Without an explicit destination, remote.origin.push can remap
+   one release push (`<branch>` -> review/<branch>) but not another, so
+   the PR branch could be left unchanged while the push succeeds."
+  [branch]
+  (str "refs/heads/" branch ":refs/heads/" branch))
+
+(defn- ^{:stratum 0} timeout-data
+  "The :timed-out? flag and :timeout anomaly of a shell/run-bounded result,
+   to carry into a shell-failure; {} when the call did not time out."
+  [run-result]
+  (select-keys run-result [:timed-out? :anomaly]))
 
 ;; Generic command runner
 (defn ^{:stratum 0} exec!
@@ -162,12 +191,16 @@
 (defn ^{:stratum 0} commit-changes!
   "Commit staged changes with the given message.
 
+   Secrets in `commit-message` are replaced with the redaction marker
+   (components/redaction) before git records it: a commit is pushed and
+   kept in history, so the message is written once, redacted.
+
    Returns {:success? bool :commit-sha string :error string}"
   [worktree-path commit-message]
   (try
     (let [commit-r (process/shell
                     {:dir (str worktree-path) :out :string :err :string :continue true}
-                    "git" "commit" "-m" commit-message)]
+                    "git" "commit" "-m" (redaction/redact commit-message))]
       (if (zero? (:exit commit-r))
         (let [sha-r (process/shell
                      {:dir (str worktree-path) :out :string :err :string :continue true}
@@ -183,16 +216,6 @@
         (result/shell-failure (get commit-r :err "") {:commit-sha nil})))
     (catch Exception e
       (result/shell-failure (.getMessage e) {:commit-sha nil}))))
-
-(defn- ^{:stratum 0} ssh->https-with-token
-  "Convert an SSH or HTTPS git remote URL to HTTPS with token auth embedded,
-   or nil when conversion is not possible. Mirrors sandbox/ssh->https-with-token."
-  [remote-url token]
-  (when remote-url
-    (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" remote-url)]
-      (str "https://x-access-token:" token "@" host "/" path)
-      (when (str/starts-with? (str remote-url) "https://")
-        (str/replace remote-url #"https://" (str "https://x-access-token:" token "@"))))))
 
 (defn- ^{:stratum 0} inside-worktree?
   "True when `file` resolves inside `worktree-path` after canonicalization
@@ -233,24 +256,28 @@
    auth); the 0-arity keeps the historical public-interface signature and
    inherits the ambient environment.
 
-   Returns {:available? bool :authenticated? bool :user string :error string}"
+   Returns {:available? bool :authenticated? bool :user string :error string},
+   plus :timed-out? and :anomaly when `gh auth status` hit its deadline."
   ([] (check-gh-auth! nil))
   ([github-token]
    (try
-    (let [which-r (process/shell
-                   {:out :string :err :string :continue true}
-                   "which" "gh")]
-      (if-not (zero? (:exit which-r))
-        (gh-unavailable "gh CLI not found. Install with: brew install gh")
-        (let [auth-r (process/shell
-                      (gh-shell-opts nil github-token)
-                      "gh" "auth" "status")]
-          (if (zero? (:exit auth-r))
-            (let [output (get auth-r :out "")
-                  user-match (re-find #"Logged in to [^\s]+ account (\S+)" output)]
-              (gh-authenticated (or (second user-match) "unknown")))
-            (gh-available-unauthenticated
-             (str "gh not authenticated. Run: gh auth login\n" (get auth-r :err "")))))))
+    ;; fs/which, not the `which` binary: Windows has none, so shelling out
+    ;; to it reported gh missing on every Windows host.
+    (if-not (fs/which "gh")
+      (gh-unavailable "gh CLI not found. Install with: brew install gh")
+      (let [auth-r (shell/run-bounded ["gh" "auth" "status"]
+                                      (gh-shell-opts nil github-token))]
+        (if (zero? (:exit auth-r))
+          (let [output (get auth-r :out "")
+                user-match (re-find #"Logged in to [^\s]+ account (\S+)" output)]
+            (gh-authenticated (or (second user-match) "unknown")))
+          ;; A timeout is not an auth failure: report its own message and
+          ;; carry :timed-out? / :anomaly like the other bounded calls.
+          (merge (gh-available-unauthenticated
+                  (if (:timed-out? auth-r)
+                    (get auth-r :err "")
+                    (str "gh not authenticated. Run: gh auth login\n" (get auth-r :err ""))))
+                 (timeout-data auth-r)))))
     (catch Exception e
       (gh-unavailable (.getMessage e))))))
 
@@ -280,7 +307,8 @@
           ;; against current tips (sandbox/create-branch! fetches too).
           ;; Best-effort: a fetch failure (offline worktree) degrades to a
           ;; possibly-stale base rather than aborting the release.
-          _ (process/shell dir-opts "git" "fetch" "origin" default-branch)
+          _ (shell/run-bounded ["git" "fetch" "origin" default-branch]
+                               (gh-shell-opts worktree-path nil))
           checkout-r (process/shell dir-opts
                                     "git" "checkout" "-b" branch-name)]
       (if (zero? (:exit checkout-r))
@@ -304,12 +332,11 @@
   (or
    (validate-safe-branch-name branch)
    (try
-     (let [r (process/shell
-              {:dir (str worktree-path) :out :string :err :string :continue true}
-              "git" "fetch" "origin" (str branch))]
+     (let [r (shell/run-bounded ["git" "fetch" "origin" (str branch)]
+                                (gh-shell-opts worktree-path nil))]
        (if (zero? (:exit r))
          (result/shell-success {:output (get r :out "")})
-         (result/shell-failure (get r :err ""))))
+         (result/shell-failure (get r :err "") (timeout-data r))))
      (catch Exception e
        (result/shell-failure (.getMessage e))))))
 
@@ -369,86 +396,71 @@
       (catch Exception _ nil))))
 
 (defn- ^{:stratum 1} raw-push!
-  "One `git push -u origin <branch>` with GH_TOKEN injected. Returns a
+  "One `git push -u origin <branch-refspec>` with GH_TOKEN and `auth-env`
+   (nil, or the fallback's `push-auth/retry-plan` env) injected. Returns a
    shell-result."
-  [worktree-path branch-name github-token]
+  [worktree-path branch-name github-token auth-env]
   (try
-    (let [r (process/shell
-             (gh-shell-opts worktree-path github-token)
-             "git" "push" "-u" "origin" branch-name)]
+    (let [r (shell/run-bounded ["git" "push" "-u" "origin" (branch-refspec branch-name)]
+                               (gh-shell-opts worktree-path github-token auth-env))]
       (if (zero? (:exit r))
         (result/shell-success {:output (get r :out "")})
-        (result/shell-failure (get r :err ""))))
+        (result/shell-failure (get r :err "") (timeout-data r))))
     (catch Exception e
       (result/shell-failure (.getMessage e)))))
 
 (defn- ^{:stratum 1} with-https-token-fallback!
-  "Run `push!` (a 0-arg thunk returning a shell-result). On failure with a
-   token present, retry once over HTTPS+token auth: rewrite origin to an https
-   URL embedding the token, re-run `push!`, then restore the original URL so
-   the token never persists in git config. If the restore itself fails, fail
-   loud — even when the push succeeded — with the scrub command and
-   :push-succeeded?, rather than report a clean success while a credential
-   lingers in git config. Covers an SSH `origin` that GH_TOKEN alone can't
-   authenticate. Shared by push-branch! and force-push!; mirrors
-   sandbox/push-branch!."
+  "Run `push!` (a 1-arg fn: extra env map or nil -> shell-result) with no
+   extra env. On failure with a token present, retry once over HTTPS with
+   the token in that push's environment only (`push-auth/retry-plan`), so
+   an SSH `origin` that GH_TOKEN alone can't authenticate still pushes.
+   The retry runs only when origin has one push URL, no rewrite rule
+   matches it, it is on github.com, and the environment carries no git
+   config of its own. Both pushes name origin, so the destination checked
+   is the one used. Otherwise (mirrors, insteadOf rewrites, other hosts)
+   the original failure comes back with the reason no credential was sent
+   appended to :error and the message key in :token-retry-skipped. origin
+   and .git/config are never modified.
+   Shared by push-branch! and force-push!."
   [worktree-path github-token push!]
-  (let [result (push!)]
+  (let [result (push! nil)]
     (if (or (result/succeeded? result) (not github-token))
       result
-      (let [url-r      (exec! worktree-path ["git" "remote" "get-url" "origin"])
-            remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
-            https-url  (ssh->https-with-token remote-url github-token)]
-        (if https-url
-          (let [set-r (exec! worktree-path ["git" "remote" "set-url" "origin" https-url])]
-            (if-not (result/succeeded? set-r)
-              ;; Could not repoint origin at the token URL, so the fallback
-              ;; never applied — origin is unchanged (still the original URL,
-              ;; no token persisted, nothing to scrub). Report both the
-              ;; original push failure and the set-url error rather than
-              ;; pushing over the unchanged remote and masking the reason.
-              (result/shell-failure
-               (msg/t :push/https-fallback-setup-failed
-                      {:push-error    (:error result)
-                       :set-url-error (:error set-r)})
-               {:push-succeeded? false})
-              (let [retry     (push!)
-                    ;; Restore the original remote URL so the token never
-                    ;; persists in the worktree's git config.
-                    restore-r (exec! worktree-path
-                                     ["git" "remote" "set-url" "origin" remote-url])]
-                (if (result/succeeded? restore-r)
-                  retry
-                  ;; The restore failed — origin may still embed the token.
-                  ;; Fail loud (even when the push itself succeeded) with the
-                  ;; scrub command, rather than report a clean success while a
-                  ;; credential is persisted in git config. When the retry push
-                  ;; also failed, carry its error too so the root cause isn't
-                  ;; lost.
-                  (let [pushed? (result/succeeded? retry)]
-                    (result/shell-failure
-                     (if pushed?
-                       (msg/t :push/https-fallback-restore-failed
-                              {:remote-url    remote-url
-                               :restore-error (:error restore-r)})
-                       (msg/t :push/https-fallback-push-and-restore-failed
-                              {:remote-url    remote-url
-                               :push-error    (:error retry)
-                               :restore-error (:error restore-r)}))
-                     {:push-succeeded? pushed?}))))))
-          result)))))
+      (let [lines    (fn [args]
+                       (let [r (exec! worktree-path args)]
+                         (when (result/succeeded? r)
+                           (remove str/blank? (str/split-lines (:output r))))))
+            pushurls (lines ["git" "config" "--get-all" "remote.origin.pushurl"])
+            {:keys [env skip]}
+            (push-auth/retry-plan
+             {:configured  (or (seq pushurls)
+                               (lines ["git" "config" "--get-all" "remote.origin.url"]))
+              :effective   (lines ["git" "remote" "get-url" "--push" "--all" "origin"])
+              :pushurl?    (boolean (seq pushurls))
+              :config      (lines ["git" "config" "--list"])
+              :env-config? (push-auth/inherited-env-config? (shell/parent-env))}
+             github-token)]
+        (if env
+          (push! env)
+          (assoc result
+                 :error (str (:error result) "\n"
+                             (msg/t :push/token-retry-skipped {:reason (msg/t skip)}))
+                 :token-retry-skipped skip))))))
 
 (defn- ^{:stratum 1} raw-force-push!
-  "One `git push --force-with-lease` with GH_TOKEN injected. Returns a
-   shell-result."
-  [worktree-path github-token]
+  "One `git push --force-with-lease origin <branch-refspec>` with GH_TOKEN
+   and `auth-env` (nil, or the fallback's `push-auth/retry-plan` env)
+   injected. Names origin and the full refspec, the same target as
+   raw-push!, so pushRemote/pushDefault and remote.origin.push cannot send
+   it elsewhere. Returns a shell-result."
+  [worktree-path branch-name github-token auth-env]
   (try
-    (let [r (process/shell
-             (gh-shell-opts worktree-path github-token)
-             "git" "push" "--force-with-lease")]
+    (let [r (shell/run-bounded ["git" "push" "--force-with-lease" "origin"
+                                (branch-refspec branch-name)]
+                               (gh-shell-opts worktree-path github-token auth-env))]
       (if (zero? (:exit r))
         (result/shell-success {:output (get r :out "")})
-        (result/shell-failure (get r :err ""))))
+        (result/shell-failure (get r :err "") (timeout-data r))))
     (catch Exception e
       (result/shell-failure (.getMessage e)))))
 
@@ -471,18 +483,18 @@
         (catch Exception e
           (result/shell-failure (.getMessage e)))))))
 
-(defn ^{:stratum 1} edit-pr-body!
-  "Update the body of an existing PR using gh CLI on the host. Injects
-   `github-token` as GH_TOKEN.
+(defn- ^{:stratum 1} gh-edit-pr-body!
+  "Run `gh pr edit <n> --body <body>` on the host, injecting `github-token`
+   as GH_TOKEN. `body` is published as given; callers go through
+   edit-pr-body!, which redacts it first.
    Returns {:success? bool :output string :error string}."
   [worktree-path pr-number body github-token]
   (try
-    (let [r (process/shell
-             (gh-shell-opts worktree-path github-token)
-             "gh" "pr" "edit" (str pr-number) "--body" (or body ""))]
+    (let [r (shell/run-bounded ["gh" "pr" "edit" (str pr-number) "--body" (or body "")]
+                               (gh-shell-opts worktree-path github-token))]
       (if (zero? (:exit r))
         (result/shell-success {:output (get r :out "")})
-        (result/shell-failure (get r :err ""))))
+        (result/shell-failure (get r :err "") (timeout-data r))))
     (catch Exception e
       (result/shell-failure (.getMessage e)))))
 
@@ -494,9 +506,8 @@
    view — so retries are debuggable."
   [worktree-path github-token]
   (try
-    (let [r (process/shell
-             (gh-shell-opts worktree-path github-token)
-             "gh" "pr" "view" "--json" "url" "--jq" ".url")]
+    (let [r (shell/run-bounded ["gh" "pr" "view" "--json" "url" "--jq" ".url"]
+                               (gh-shell-opts worktree-path github-token))]
       (if-let [pr (and (zero? (:exit r))
                        (parse-pr-ref (get r :out "")))]
         (result/shell-success pr)
@@ -504,19 +515,28 @@
                                      {:error (or (not-empty (str/trim (get r :err "")))
                                                  (not-empty (str/trim (get r :out "")))
                                                  (msg/t :pr/reuse-no-url))})
-                              {:pr-url nil :pr-number nil})))
+                              (merge {:pr-url nil :pr-number nil} (timeout-data r)))))
     (catch Exception e
       (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} edit-pr-body!
+  "Update the body of an existing PR using gh CLI on the host. Secrets in
+   `body` are replaced with the redaction marker (components/redaction)
+   first: the body is LLM-written and the PR may be public. Injects
+   `github-token` as GH_TOKEN.
+   Returns {:success? bool :output string :error string}."
+  [worktree-path pr-number body github-token]
+  (gh-edit-pr-body! worktree-path pr-number (redaction/redact body) github-token))
+
 (defn ^{:stratum 2} push-branch!
   "Push the current branch to origin. Injects `github-token` as GH_TOKEN for
    gh's git credential helper. If the initial push fails and a token is
-   present, retries over HTTPS with the token embedded in a temporary origin
-   URL (restoring the original afterwards) — so a token-only environment
-   whose `origin` is an SSH remote can still push, matching
-   sandbox/push-branch!.
+   present, retries over HTTPS with the token passed in that push's
+   environment only (see `push-auth/retry-plan`) — so a token-only environment
+   whose `origin` is a github.com SSH remote can still push. Mirrors,
+   rewritten URLs and other hosts are not retried.
 
    The optional `github-token` drives GH_TOKEN injection and the HTTPS
    fallback; the 2-arity keeps the historical public-interface signature
@@ -529,7 +549,7 @@
     (validate-safe-branch-name branch-name)
     (with-https-token-fallback!
      worktree-path github-token
-     #(raw-push! worktree-path branch-name github-token)))))
+     #(raw-push! worktree-path branch-name github-token %)))))
 
 (defn ^{:stratum 2} force-push!
   "Force-push the current branch with --force-with-lease, injecting
@@ -538,11 +558,15 @@
    fails and a token is present, retries over HTTPS + token auth via the same
    with-https-token-fallback! that push-branch! uses — an SSH `origin` can't be
    authenticated by GH_TOKEN alone, so without this the PR-doc amend push would
-   fail in a token-only local run. Returns a shell-result."
-  [worktree-path github-token]
-  (with-https-token-fallback!
-   worktree-path github-token
-   #(raw-force-push! worktree-path github-token)))
+   fail in a token-only local run. `branch-name` is the release branch
+   push-branch! pushed; both push the same full refspec. Returns a
+   shell-result."
+  [worktree-path branch-name github-token]
+  (or
+   (validate-safe-branch-name branch-name)
+   (with-https-token-fallback!
+    worktree-path github-token
+    #(raw-force-push! worktree-path branch-name github-token %))))
 
 (defn ^{:stratum 2} create-pr!
   "Create a pull request using gh CLI on the host.
@@ -557,19 +581,25 @@
    credential path; the 2-arity keeps the historical public-interface
    signature and inherits the ambient environment.
 
+   Secrets in the title and body are replaced with the redaction marker
+   (components/redaction) before gh runs.
+
    Returns {:success? bool :pr-number int :pr-url string :error string}"
   ([worktree-path pr-opts] (create-pr! worktree-path pr-opts nil))
   ([worktree-path {:keys [title body base-branch]} github-token]
-   (let [base (or base-branch "main")]
+   (let [base  (or base-branch "main")
+         ;; Title and body are LLM-written and may quote a credential the
+         ;; agent saw; a PR is public, so strip secrets before gh sees them.
+         title (redaction/redact title)
+         body  (redaction/redact body)]
      (or
       (validate-safe-branch-name base)
       (try
-        (let [result (process/shell
-                      (gh-shell-opts worktree-path github-token)
-                      "gh" "pr" "create"
-                      "--title" title
-                      "--body"  (or body "")
-                      "--base"  base)]
+        (let [result (shell/run-bounded ["gh" "pr" "create"
+                                         "--title" title
+                                         "--body"  (or body "")
+                                         "--base"  base]
+                                        (gh-shell-opts worktree-path github-token))]
           (cond
             (zero? (:exit result))
             (if-let [pr (parse-pr-ref (get result :out ""))]
@@ -582,6 +612,7 @@
             (reuse-existing-pr! worktree-path github-token)
 
             :else
-            (result/shell-failure (get result :err "") {:pr-url nil :pr-number nil})))
+            (result/shell-failure (get result :err "")
+                                  (merge {:pr-url nil :pr-number nil} (timeout-data result)))))
         (catch Exception e
           (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil})))))))
