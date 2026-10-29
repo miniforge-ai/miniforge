@@ -95,18 +95,28 @@
 
 (defn ^{:stratum 0} tail-dir
   "Publish the unseen events of directory `dir`, named `wf-name`, in
-   creation order. Returns `state` with the directory's seen names. A
-   failing publish skips that event only."
+   creation order. Returns `state` with the workflow's seen names, which
+   a file name keeps whichever root holds it (the sink names each file
+   after its event). They only grow: a directory gone when listed (moved
+   to archived/) clears nothing, and a file gone before it was decoded is
+   not counted, so the archived path reads it. A failing publish skips
+   that event only."
   [publish-fn state wf-name dir]
-  (let [[names files] (event-files/unseen-files
-                       dir
-                       (get-in state [:seen wf-name])
-                       (get-in state [:since wf-name] (:since-ms state)))]
-    (doseq [event (event-files/read-ordered files)]
+  (let [seen          (get-in state [:seen wf-name])
+        [names files] (event-files/unseen-files
+                       dir seen (get-in state [:since wf-name] (:since-ms state)))
+        events        (event-files/read-ordered files)
+        decoded       (into #{} (map event-files/source-file) events)
+        vanished      (into #{}
+                            (comp (remove decoded)
+                                  (remove #(.exists ^java.io.File %))
+                                  (map event-files/file-name))
+                            files)]
+    (doseq [event events]
       (try+
         (publish-fn event)
         (catch Exception _ nil)))
-    (assoc-in state [:seen wf-name] names)))
+    (assoc-in state [:seen wf-name] (into (or seen #{}) (remove vanished) names))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
