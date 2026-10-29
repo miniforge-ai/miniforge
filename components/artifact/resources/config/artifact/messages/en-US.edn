@@ -16,4 +16,5 @@
   :link/self "An artifact cannot be linked to itself."
   :index/unreadable "Artifact index is unreadable or is not a map."
   :index/rebuilt "Artifact index was unreadable; copied it aside and rebuilt it from the artifact files."
-  :store/close-timeout "Timed out waiting for queued artifact writes; recent artifacts may be missing from disk."}}
+  :store/close-timeout "Timed out waiting for queued artifact writes; recent artifacts may be missing from disk."
+  :store/close-unindexed "Some saved artifacts were written to disk but could not be added to the index."}}

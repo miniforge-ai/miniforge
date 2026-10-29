@@ -18,7 +18,8 @@
 (ns ai.miniforge.artifact.protocols.impl.transit-store-persistence-test
   "Disk persistence of the transit store: atomic file writes, close
    waiting for queued writes, index merge and link preservation across
-   stores that share a directory, and recovery from an unreadable index."
+   stores that share a directory, recovery from an unreadable index, file
+   modes kept on replacement, and close reporting unindexed artifacts."
   (:require [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
             [ai.miniforge.artifact.protocols.impl.transit-store :as impl]
             [ai.miniforge.artifact.protocols.records.transit-store :as store]
@@ -28,8 +29,8 @@
             [clojure.test :refer [deftest is testing]]
             [cognitect.transit :as transit])
   (:import [java.io File]
-           [java.nio.file Files OpenOption]
-           [java.nio.file.attribute FileAttribute]
+           [java.nio.file Files LinkOption OpenOption]
+           [java.nio.file.attribute FileAttribute PosixFilePermissions]
            [java.util Arrays]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -386,7 +387,6 @@
       (finally
         (delete-dir! dir)))))
 
-
 (deftest ^{:stratum 1} test-unreadable-index-is-rebuilt-from-artifact-files
   (let [dir (temp-dir)
         index-path (impl/index-file-path (artifacts-path dir))
@@ -456,5 +456,38 @@
         (is (contains? (logged-events entries) :artifact/index-rebuilt)))
       (testing "and the index on disk holds both artifacts"
         (is (= #{"a1" "a2"} (on-disk-ids dir))))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-replacing-a-file-keeps-its-permissions
+  (let [dir (temp-dir)
+        file (.toPath (io/file dir "private.transit.json"))
+        path (str file)]
+    (try
+      (when (contains? (.supportedFileAttributeViews (.getFileSystem file)) "posix")
+        (impl/write-transit path {:version 1})
+        (Files/setPosixFilePermissions file (PosixFilePermissions/fromString "rw-------"))
+        (impl/write-transit path {:version 2})
+        (testing "a replaced owner-only file stays owner-only"
+          (is (= "rw-------" (PosixFilePermissions/toString
+                              (Files/getPosixFilePermissions file (make-array LinkOption 0)))))
+          (is (= {:version 2} (read-or-unreadable path)))))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-close-reports-unindexed-artifacts
+  (let [dir (temp-dir)
+        write impl/write-transit
+        [logger entries] (log/collecting-logger)]
+    (try
+      (with-redefs [impl/write-transit (fn [path data]
+                                         (when (str/ends-with? path "/index.transit.json")
+                                           (throw (ex-info "disk full" {})))
+                                         (write path data))]
+        (let [s (open-store dir {:logger logger})]
+          (p/save s (artifact "a1"))
+          (testing "close returns false and warns when a written artifact is not indexed"
+            (is (false? (p/close s)))
+            (is (contains? (logged-events entries) :artifact/store-close-unindexed)))))
       (finally
         (delete-dir! dir)))))

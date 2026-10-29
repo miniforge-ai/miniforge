@@ -48,7 +48,8 @@
   (:import
    [java.io File]
    [java.nio.channels FileChannel]
-   [java.nio.file CopyOption Files OpenOption StandardCopyOption StandardOpenOption]))
+   [java.nio.file CopyOption Files LinkOption OpenOption StandardCopyOption StandardOpenOption]
+   [java.nio.file.attribute FileAttribute]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -96,17 +97,25 @@
   (.mkdirs (io/file dir))
   dir)
 
-;; Transit serialization
 (defn ^{:stratum 0} write-transit
   "Write data to a file in Transit JSON format.
    Writes a sibling temp file, then renames it over the target, so the
    file holds either its old content or the new content, never a
-   truncated mix."
+   truncated mix. When the target exists on a POSIX file system, the
+   temp file gets its permissions before any content is written, so a
+   private (e.g. 0600) file is never replaced by a more readable one;
+   new files get the default mode."
   [file-path data]
   (let [target (io/file file-path)
         tmp (io/file (.getParentFile target)
                      (str (.getName target) "." (random-uuid) ".tmp"))]
     (try
+      (Files/createFile (.toPath tmp) (make-array FileAttribute 0))
+      (when (and (.exists target)
+                 (contains? (.supportedFileAttributeViews (.getFileSystem (.toPath target))) "posix"))
+        (Files/setPosixFilePermissions (.toPath tmp)
+                                       (Files/getPosixFilePermissions (.toPath target)
+                                                                      (make-array LinkOption 0))))
       (with-open [out (io/output-stream tmp)]
         (transit/write (transit/writer out :json) data))
       (Files/move (.toPath tmp) (.toPath target)
@@ -272,18 +281,23 @@
 
 (defn ^{:stratum 1} close-store
   "Close store implementation. Waits up to the store's close timeout
-   for queued disk writes; returns true when they all finished, false
-   (and logs a warning) when the timeout ran out first."
+   for queued disk writes. Returns true when they all finished and every
+   written artifact is indexed; otherwise logs a warning and returns
+   false."
   [{:keys [cache logger writer close-timeout-ms]}]
   (let [timeout-ms (or close-timeout-ms default-close-timeout-ms)
-        flushed? (if writer (await-for timeout-ms writer) true)]
-    (if flushed?
-      (log/info logger :system :artifact/store-closed
-                {:data {:artifact-count (count @cache)}})
-      (log/warn logger :system :artifact/store-close-timeout
-                {:message (messages/t :store/close-timeout)
-                 :data {:timeout-ms timeout-ms}}))
-    flushed?))
+        flushed? (if writer (await-for timeout-ms writer) true)
+        unindexed (when (and writer flushed?) (seq @writer))]
+    (cond
+      (not flushed?) (log/warn logger :system :artifact/store-close-timeout
+                               {:message (messages/t :store/close-timeout)
+                                :data {:timeout-ms timeout-ms}})
+      unindexed (log/warn logger :system :artifact/store-close-unindexed
+                          {:message (messages/t :store/close-unindexed)
+                           :data {:artifact-ids (vec unindexed)}})
+      :else (log/info logger :system :artifact/store-closed
+                      {:data {:artifact-count (count @cache)}}))
+    (and flushed? (empty? unindexed))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -325,7 +339,9 @@
         copied-to (str path ".corrupt-" (System/currentTimeMillis))
         {rebuilt :index skipped :skipped} (rebuild-index artifacts-dir)]
     (Files/copy (.toPath (io/file path)) (.toPath (io/file copied-to))
-                (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING]))
+                ^"[Ljava.nio.file.CopyOption;"
+                (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING
+                                        StandardCopyOption/COPY_ATTRIBUTES]))
     (write-transit path rebuilt)
     (log/warn logger :system :artifact/index-rebuilt
               {:message (messages/t :index/rebuilt)
