@@ -293,13 +293,13 @@
 
 (println "  (llm/select-model classification {} {:cost-limit 0.05 :require-local true})")
 
-(println "  Neither is a hard limit. :cost-limit filters models by price tier;")
+(println "  :cost-limit filters models by price tier; it does not cap spend.")
 
-(println "  it does not cap spend. :require-local selects nothing for task types")
+(println "  Today select-model throws when it selects nothing, and can return a")
 
-(println "  that list no local model, and create-agent then keeps the role's")
+(println "  cloud model under :require-local (#2198), or a model that fails")
 
-(println "  configured model, usually a cloud one; it does not keep data local.")
+(println "  :context-size or :cost-limit (#2203). See docs/MODEL_SELECTION.md.")
 
 (println)
 
