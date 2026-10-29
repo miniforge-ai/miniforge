@@ -496,6 +496,11 @@
    gone."
   checkpoint-spec/spec-drift)
 
+(def ^{:stratum 0} spec-content-hash
+  "The digest `spec-file-hash` records, of spec text already read. Args:
+   [content]."
+  checkpoint-spec/spec-content-hash)
+
 (def ^{:stratum 0} spec-file-hash
   "The SHA-256 digest a run's manifest records for its spec file, or nil
    when `path` is not a readable file. Args: [path]."
