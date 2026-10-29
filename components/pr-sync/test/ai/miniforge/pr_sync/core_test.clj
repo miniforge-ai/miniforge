@@ -206,7 +206,7 @@
   (testing "Returns empty vec for empty repos"
     (is (= [] (core/normalized-repos {:fleet {:repos []}})))))
 
-(deftest ^{:stratum 0} with-config-lock-first-run-creates-parent-dir-test
+(deftest ^{:stratum 0} add-repo-first-run-creates-parent-dir-test
   (testing "add-repo! succeeds when parent directory does not yet exist"
     (let [base    (java.io.File/createTempFile "miniforge-firstrun-" "")
           _       (.delete base)
@@ -220,39 +220,6 @@
           (.delete (io/file path))
           (.delete subdir)
           (.delete base))))))
-
-(deftest ^{:stratum 0} with-config-lock-timeout-test
-  (testing "returns lock-failure within timeout when another thread holds the lock"
-    (let [path    (str (System/getProperty "java.io.tmpdir") "/mf-lock-timeout-test-" (System/nanoTime) ".edn")
-          latch   (java.util.concurrent.CountDownLatch. 1)
-          release (java.util.concurrent.CountDownLatch. 1)
-          holder  (future (#'core/with-config-lock! path
-                            (fn []
-                              (.countDown latch)
-                              (.await release))))]
-      (is (.await latch 5 java.util.concurrent.TimeUnit/SECONDS)
-          "lock holder did not acquire lock in time")
-      (try
-        (let [start   (System/currentTimeMillis)
-              result  (#'core/with-config-lock! path #(throw (Exception. "should not run")))
-              elapsed (- (System/currentTimeMillis) start)]
-          (is (false? (:success? result)))
-          (is (str/includes? (str/lower-case (:error result)) "lock"))
-          ;; Should fail within timeout window (500ms) + generous CI margin.
-          (is (<= elapsed 1500)))
-        (finally
-          (.countDown release)
-          (deref holder 2000 nil)
-          (.delete (io/file path)))))))
-
-(deftest ^{:stratum 0} with-config-lock-thunk-exception-test
-  (testing "thunk exception reports config update failure, not lock failure"
-    (let [path (str (System/getProperty "java.io.tmpdir") "/mf-lock-thunk-test-" (System/nanoTime) ".edn")
-          result (#'core/with-config-lock! path #(throw (Exception. "disk full")))]
-      (.delete (io/file path))
-      (is (false? (:success? result)))
-      (is (str/includes? (:error result) "Config update failed"))
-      (is (not (str/includes? (str/lower-case (:error result)) "lock"))))))
 
 ;; ============================================================================
 ;; Provider CLI interaction (mocked)
@@ -569,6 +536,21 @@
 
   (testing "Returns empty for missing file"
     (is (= [] (core/get-configured-repos "/tmp/nonexistent-cfg-42.edn")))))
+
+(deftest ^{:stratum 1} repo-writers-refuse-unparseable-config-test
+  (doseq [[label write!] [["add-repo!" #(core/add-repo! "acme/app" %)]
+                          ["remove-repo!" #(core/remove-repo! "old/lib" %)]
+                          ["discover-repos!" #(core/discover-repos! {:owner "acme" :config-path %})]]]
+    (testing (str label " leaves a config.edn that does not parse untouched")
+      (let [path    (temp-config-path)
+            garbage "{:llm {:backend :claude} :fleet {:repos [\"old/lib\"]} :policy-packs"]
+        (spit path garbage)
+        (with-redefs [clojure.java.shell/sh (constantly {:exit 0 :out "[{\"full_name\":\"acme/x\"}]" :err ""})]
+          (let [result (write! path)]
+            (is (false? (:success? result)))
+            (is (str/includes? (:error result) path))
+            (is (= :invalid-input (get-in result [:anomaly :anomaly/type])))))
+        (is (= garbage (slurp path)))))))
 
 (deftest ^{:stratum 1} add-repo-test
   (testing "Adds new repo to empty config"
