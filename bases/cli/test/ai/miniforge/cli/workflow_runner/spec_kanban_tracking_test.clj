@@ -42,8 +42,20 @@
                (:spec/location input)))
         (is (= digest (:spec/hash input)) "taken before the move")
         (with-redefs [workflow/record-spec-path! (fn [id path] (reset! recorded [id path]))]
-          (kanban/finish-spec! "run-1" provenance {:execution/status :failed}))
-        (is (= ["run-1" (str (fs/absolutize (str root "/work/failed/task.spec.edn")))]
+          ;; The id the pipeline checkpointed under, not the CLI's own.
+          (kanban/finish-spec! provenance {:execution/status :failed :execution/id "exec-1"}))
+        (is (= ["exec-1" (str (fs/absolutize (str root "/work/failed/task.spec.edn")))]
                @recorded))))))
+
+(deftest ^{:stratum 1} a-run-that-never-reached-the-pipeline-moves-without-a-record
+  (with-kanban
+    (fn [root]
+      (let [spec (str root "/work/other.spec.edn")
+            _ (fs/create-dirs (fs/parent spec))
+            _ (spit spec "v1")
+            recorded (atom nil)]
+        (with-redefs [workflow/record-spec-path! (fn [& args] (reset! recorded args))]
+          (is (some? (kanban/finish-spec! {:source-file spec} {:execution/status :failed}))))
+        (is (nil? @recorded))))))
 
 (comment ::spec-kanban-tracking)

@@ -209,7 +209,8 @@
    unrestorable snapshot does not skip the check. A changed or missing
    spec refuses the resume; with --force it goes ahead after a warning.
    When no hash can be checked (no readable manifest, or none recorded
-   for a run started from a spec), a warning says so: an unknown hash is
+   for a run started from a spec or one whose snapshot was not restored),
+   a warning says so: an unknown hash is
    not a pass, but refusing would block every run checkpointed before
    hashes were recorded. Returns the recorded spec fields to carry into
    the resumed run's checkpoints, or nil."
@@ -222,7 +223,10 @@
                   :path (:workflow/spec-path drift)
                   :expected (:spec/expected-hash drift)
                   :actual (or (:spec/actual-hash drift) (messages/t :resume/spec-unreadable))})
-        spec-run? (some? (get-in recorded [:machine-snapshot :execution/input :spec/path]))]
+        ;; Without a restored snapshot nothing shows the run was not
+        ;; started from a spec, so a missing hash is reported then too.
+        spec-run? (or (nil? (:machine-snapshot recorded))
+                      (some? (get-in recorded [:machine-snapshot :execution/input :spec/path])))]
     (cond
       (and drift force?)
       (display/print-info (messages/t :resume/spec-changed-forced params))

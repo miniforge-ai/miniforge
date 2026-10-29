@@ -268,7 +268,7 @@
                                            :sandbox-cleanup sandbox-cleanup
                                            :opts opts})
               outcome-status (if (phase/succeeded? result) :completed :failed)]
-          (spec-kanban/finish-spec! workflow-id provenance result)
+          (spec-kanban/finish-spec! provenance result)
           ;; Trigger meta-loop learning cycle in background
           (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
           result)

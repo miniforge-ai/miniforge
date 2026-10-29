@@ -106,6 +106,11 @@
                                      {:workflow/id 1} {})]
       (is (str/includes? out "no spec hash was recorded")))))
 
+(deftest ^{:stratum 1} a-hash-free-manifest-without-a-snapshot-warns
+  ;; No snapshot restored: nothing shows the run was not started from a spec.
+  (is (str/includes? (:out (resume-with events-only {:workflow/id 1} {}))
+                     "no spec hash was recorded")))
+
 (deftest ^{:stratum 1} the-resumed-run-carries-the-recorded-spec
   (fs/with-temp-dir [dir {:prefix "resume-spec-"}]
     (let [spec (str (fs/path dir "task.spec.edn"))

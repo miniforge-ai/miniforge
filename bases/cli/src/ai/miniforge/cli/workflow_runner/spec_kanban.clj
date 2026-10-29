@@ -93,11 +93,13 @@
        spec-hash (assoc :spec/hash spec-hash))]))
 
 (defn ^{:stratum 2} finish-spec!
-  "`move-spec-on-completion!` that also points run `workflow-id`'s
-   checkpoint manifest at the spec's new place (work/done or work/failed),
-   so a later resume still finds it. Returns the new path, nil when nothing
-   moved."
-  [workflow-id provenance result]
+  "`move-spec-on-completion!` that also points the run's checkpoint
+   manifest at the spec's new place (work/done or work/failed), so a later
+   resume still finds it. The manifest is the one the pipeline wrote,
+   under the result's `:execution/id`; a run that never reached the
+   pipeline has none. Returns the new path, nil when nothing moved."
+  [provenance result]
   (when-let [new-path (move-spec! provenance (if (phase/succeeded? result) :done :failed))]
-    (workflow/record-spec-path! (str workflow-id) (str (fs/absolutize new-path)))
+    (when-let [run-id (:execution/id result)]
+      (workflow/record-spec-path! (str run-id) (str (fs/absolutize new-path))))
     new-path))
