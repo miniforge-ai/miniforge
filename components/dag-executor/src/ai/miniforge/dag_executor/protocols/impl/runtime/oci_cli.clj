@@ -32,6 +32,7 @@
    and the executor picks it up without code changes."
   (:require
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.dag-executor.execution-plan :as execution-plan]
    [ai.miniforge.dag-executor.plan-security :as plan-security]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.workspace :as workspace]
@@ -159,6 +160,12 @@
 (def ^{:stratum 0} secret-pattern
   "Regex matching env var names that carry sensitive values."
   #"(?i)(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)")
+
+(def ^{:stratum 0} agent-credential-names
+  "Env vars N11 §8.1 injects into every capsule, whatever its trust level,
+   for the agent itself: ANTHROPIC_API_KEY, the primary secret for current
+   tasks. `filter-env-by-trust` keeps these."
+  #{"ANTHROPIC_API_KEY"})
 
 (defn ^{:stratum 0} build-mount-args
   "Build -v mount arguments from an execution plan map.
@@ -505,18 +512,22 @@
     (mapcat (fn [entry] ["-e" (env-arg cli-names entry)]) env-map)))
 
 (defn ^{:stratum 1} filter-env-by-trust
-  "Return env-map with sensitive entries removed for :untrusted trust level.
+  "Return env-map with sensitive entries removed unless trust-level is
+   :trusted or :privileged; :untrusted, nil and any unknown level all filter.
    `build-launch-plan` applies it to the container env, which every process
    in the capsule inherits; host-side callers that need a secret for one
    command (release's GH_TOKEN for `gh`) pass it on that exec instead.
 
-   For :trusted and :privileged trust levels the map is returned unchanged.
    A var is considered sensitive when its name contains any of:
-   KEY, SECRET, TOKEN, PASSWORD, CREDENTIAL (case-insensitive)."
+   KEY, SECRET, TOKEN, PASSWORD, CREDENTIAL (case-insensitive), except the
+   agent's own credentials (`agent-credential-names`), which N11 §8.1
+   injects at every trust level."
   [env-map trust-level]
-  (if (= trust-level :untrusted)
-    (into {} (remove (fn [[k _]] (re-find secret-pattern (name k))) env-map))
-    env-map))
+  (if (contains? #{:trusted :privileged} trust-level)
+    env-map
+    (into {} (remove (fn [[k _]] (and (re-find secret-pattern (name k))
+                                      (not (contains? agent-credential-names (name k)))))
+                     env-map))))
 
 (defn ^{:stratum 1} build-resource-args
   "Build resource limit arguments.
@@ -722,13 +733,15 @@
    pass through only when env-config carries them — absent fields stay absent
    rather than being filled with guesses. The :env keys are normalized to
    strings so the plan conforms to ExecutionPlanSchema, and secrets are
-   dropped for an :untrusted plan (`filter-env-by-trust`).
+   dropped for an :untrusted plan (`filter-env-by-trust`). A nil or unknown
+   :trust-level becomes :untrusted, so neither the secret filter nor the
+   read-only mount rule can be skipped by a malformed value.
 
    This one plan is both what `check-plan-security` inspects and what
    `create-container` receives as :execution-plan, so the plan the gate
    checked is the plan that runs."
   [image-digest env-config]
-  (let [trust-level (get env-config :trust-level :untrusted)]
+  (let [trust-level (get execution-plan/trust-levels (:trust-level env-config) :untrusted)]
     (cond-> {:image-digest image-digest
              :command      ["sleep" "infinity"]
              :mounts       (get env-config :mounts [])
