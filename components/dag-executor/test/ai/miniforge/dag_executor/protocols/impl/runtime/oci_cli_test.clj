@@ -398,7 +398,21 @@
     (testing "a username alone is stripped and carries no credential"
       (is (= "https://github.com/o/r.git"
              (:https-url (git-remote {:repo-url "https://bob@github.com/o/r.git"}))))
-      (is (nil? (:url-auth (git-remote {:repo-url "https://bob@github.com/o/r.git"})))))))
+      (is (nil? (:url-auth (git-remote {:repo-url "https://bob@github.com/o/r.git"})))))
+    (testing "a mixed-case scheme is lowercased, with or without userinfo,
+              so the credential env still matches the URL"
+      (doseq [[given url auth k]
+              [["HTTPS://bob:pw@git.example.com/r.git" "https://git.example.com/r.git"
+                {:user "bob" :token "pw"} "http.https://git.example.com/.extraheader"]
+               ["Http://bob:pw@git.example.com/r.git" "http://git.example.com/r.git"
+                {:user "bob" :token "pw"} "http.http://git.example.com/.extraheader"]
+               ["HTTPS://git.example.com/r.git" "https://git.example.com/r.git"
+                nil "http.https://git.example.com/.extraheader"]]]
+        (let [remote (git-remote {:repo-url given})]
+          (is (= url (:repo-url remote) (:https-url remote)))
+          (is (= auth (:url-auth remote)))
+          (is (= k (get ((private-fn 'git-credential-env) (:https-url remote) {:user "u" :token "t"})
+                        "GIT_CONFIG_KEY_0"))))))))
 
 (deftest ^{:stratum 1} git-auth-test
   (let [git-auth (private-fn 'git-auth)]

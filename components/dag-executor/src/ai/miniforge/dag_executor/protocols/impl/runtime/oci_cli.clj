@@ -404,12 +404,14 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} split-userinfo
-  "[url auth] for an http(s) URL: the URL without any `user[:password]@`,
-   and {:user :token} when it carried a password, else nil."
+  "[url auth] for an http(s) URL: the URL with its scheme lowercased (the
+   credential's extraheader origin and git's transport expect `https://`,
+   not `HTTPS://`) and without any `user[:password]@`, and {:user :token}
+   when it carried a password, else nil."
   [url]
-  (if-let [[_ scheme userinfo more] (re-matches #"(?i)(https?://)([^/]*)@(.*)" url)]
-    (let [[user password] (str/split userinfo #":" 2)]
-      [(str scheme more)
+  (if-let [[_ scheme userinfo more] (re-matches #"(?i)(https?://)(?:([^/]*)@)?(.*)" url)]
+    (let [[user password] (some-> userinfo (str/split #":" 2))]
+      [(str (str/lower-case scheme) more)
        (when password {:user (percent-decode user) :token (percent-decode password)})])
     [url nil]))
 
