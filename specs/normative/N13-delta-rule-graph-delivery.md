@@ -141,7 +141,7 @@ gate never checks.
 1. **Rule graph.** A derived, read-only index over the resolved packs and the per-repo ledger.
 2. **Delivery set.** What one agent session receives for one phase, task and changeset.
 3. **Enforcement class.** For a rule, phase and changeset: `:gated`, `:checked`, `:judged` or `:unenforced` (§7.2).
-4. **Always-on set.** Rules delivered with behavior text in every authoring phase, declared as data (§7.8).
+4. **Always-on set.** Rules delivered with behavior text at plan and implement, declared as data (§7.8).
 5. **Manifest entry.** Rule id, Dewey code, title and enforcement class, without behavior text.
 6. **Unfold.** Fetching a rule's behavior or body by id (N12 §6.2).
 
@@ -156,12 +156,13 @@ pack: ids and behavior first, bodies only on demand.
 
 | Node | Key | Attributes |
 |---|---|---|
-| rule | `:rule/id` | title, Dewey code, behavior, body size and digest, detector, action, severity, enabled, pack, source path |
+| rule | `:rule/id` | Dewey code, behavior and body digests and sizes, detector, action, severity, enabled, pack, source path |
 | category | taxonomy id | Dewey range, label |
 | scope | glob, phase or task type | none |
 | detector | detector kind | whether it acts |
 
-Every attribute is a projection of pack or ledger data. The graph reads `:rule/applies-to` as the compiled map of
+Every attribute is a projection of pack or ledger data. Rule text, meaning title, behavior and body, resolves from
+the pack by id (§4.4). The graph reads `:rule/applies-to` as the compiled map of
 `:phases`, `:file-globs` and `:task-types`, not as the N4 §2.3 vector.
 
 ### 4.2 Edges
@@ -189,18 +190,19 @@ differently. An inferred edge MUST record a digest of the matched text, so a sca
 ### 4.4 Build and Load
 
 1. The step that compiles a pack (`bb standards:pack`) MUST also compile that pack's graph from the same input.
-2. At load, the runtime MUST merge the graphs of the resolved pack set (§4.6). A pack without a graph gets one built
-   at load by the same function.
+2. At load, the runtime MUST build the graph of each pack in the resolved set (§4.6) from the verified pack, then
+   merge them. The function is the same one the compile step uses.
 3. The build MUST be deterministic. Graph digests MUST be computed over canonical rule content and exclude
    timestamps such as `:pack/created-at`, so a recompile of unchanged rules keeps the digest.
 4. Each graph MUST record the id, version and content digest of its pack, and the standards commit.
-5. The runtime MUST check each graph's recorded digest against the loaded pack. On a mismatch, it MUST rebuild that
-   graph from the loaded rules and emit a fact. The graph inherits trust from the signed pack (N4 §8) through this
-   check and needs no signature of its own.
-6. The graph MUST NOT store rule text. Rule text resolves from the pack by id.
+5. A shipped graph is a reviewable build output, never an authority. A matching recorded digest does not
+   authenticate the graph content. The runtime MUST NOT use a shipped graph unless it is byte-identical to the
+   load-time rebuild. When the two differ, the runtime MUST use the rebuild and emit a fact. Trust comes from the
+   signed pack (N4 §8) through the rebuild, so the graph needs no signature of its own.
+6. The graph MUST NOT store rule text: no title, behavior or body. Rule text resolves from the pack by id.
 7. The graph MUST NOT be edited by hand. Corrections go to the standards source or the compiler.
-8. The graph SHOULD ship as a separate artifact beside its pack, `packs/<pack>.graph.edn`, so pack bytes stay
-   unchanged.
+8. The graph SHOULD ship as a separate artifact beside its pack, `packs/<pack>.graph.edn`. Pack bytes then stay
+   unchanged, and the §7.7 diff can show graph changes.
 
 ### 4.5 Storage and Runtime
 
@@ -231,8 +233,14 @@ Every query takes and returns data. The same inputs, graph digest and ledger sna
  :scope-paths  [string]                         ; intent scope, files-in-scope, explore results
  :repo-paths   [string]                         ; tracked files, passed in by the caller
  :failed-rules [keyword]                        ; ids failed by the prior attempt's gate or review
+ :enforcement  {:gate-checks {keyword keyword}  ; rule id → :acting or :non-acting, for rules the gates check
+                :reviewer?   boolean}           ; an LLM reviewer runs for this changeset
  :budget       {:behavior-tokens int :manifest-tokens int}}
 ```
+
+`:enforcement` is a snapshot of the enforcement context. The caller builds `:gate-checks` from the pack set the
+policy gates load, with the §7.2 predicates. A rule absent from `:gate-checks` has no check. The snapshot keeps
+both queries pure while their output depends on gate coverage and reviewer availability.
 
 At review and release, `:changeset` MUST come from the artifact resolution the policy gates use. It MUST NOT come
 from `:files-in-scope`, which describes intended scope rather than the change.
@@ -241,7 +249,8 @@ The query runs these steps in order:
 
 1. **Candidates.** Keep resolved rules whose phase and task type match. Keep a file-scoped rule only when a glob
    matches a path. Paths are the changeset; when it is empty, the scope paths; when those are empty, the repo
-   paths. Glob matching MUST use the gate's function.
+   paths. Glob matching MUST use the gate's function. At plan and implement, always-on rules bypass phase, task and
+   file filtering. At review they are filtered like any rule. At release they are not delivered (§6.3).
 2. **Classify.** Compute each candidate's enforcement class (§7.2).
 3. **Rank.** Always-on rules come first, then failed rules, then rules one edge from a failed rule. Next comes ledger
    rank (N13 §5.4), once the ledger is confident. Ties break on the number of matching paths, then on citations from
@@ -274,7 +283,7 @@ Budget rules:
 | `related` | `:id`, `:hops` (1–2), `:edge-types` | entries with edge type and source |
 | `rules-for-paths` | `:paths`, `:phase` | manifest entries; for a new file type met mid-task |
 | `search` | `:text`, `:dewey-prefix` | manifest entries; lexical over title, behavior and body |
-| `enforcement-classes` | `:phase`, `:task-type`, `:changeset` | class for every applicable rule (§7) |
+| `enforcement-classes` | `:phase`, `:task-type`, `:changeset`, `:enforcement` | class for every applicable rule (§7) |
 
 ---
 
@@ -348,15 +357,18 @@ Those gates evaluate the complete applicable set (N13 §2.1). Coverage checks ru
 
 | Class | Meaning |
 |---|---|
-| `:gated` | A check with `:hard-halt` or `:require-approval` runs, by detector or semantic judge |
-| `:checked` | A deterministic detector runs, and its findings do not block |
-| `:judged` | No check runs; the gate reports the rule as `:guidance` in `gate/rule-applied` (N3) |
+| `:gated` | The gates load the rule and run a check with `:hard-halt` or `:require-approval` |
+| `:checked` | The gates load the rule and run a deterministic check whose findings do not block |
+| `:judged` | No check runs: the gate reports `:guidance` (N3 `gate/rule-applied`), or the gates do not load the rule |
 | `:unenforced` | A `:checked` or `:judged` rule that no reviewer receives for this changeset |
+
+Classification covers every resolved rule (§4.6), not only the rules the gates load. It reads gate coverage and
+reviewer availability from the `:enforcement` snapshot (§5.1).
 
 1. The gate's predicates for whether a check runs MUST move into the `policy-pack` interface. Today they are private
    to the gate. Gate and graph then call one definition.
-2. Classification MUST run against the pack set the gates load. A rule from a pack the gates do not load is
-   never `:gated`.
+2. A rule from a pack the gates do not load is `:judged` at best. The built-ins `:400-check-existing-work` and
+   `:420-structural-validity` are examples. Both apply at implement only, so both are `:unenforced`.
 3. A rule is applicable when it applies to the changeset at any phase of the run. A `:checked` or `:judged` rule
    whose phases exclude `:review` has no reviewer, so it is `:unenforced`. `:std/standards` is an example.
 4. A `:checked` rule's detector often covers one pattern of a longer rule. `:std/clojure` is an example. The rest of
@@ -413,8 +425,9 @@ analysis produced this diff by hand. It becomes a build output.
 ### 7.8 Always-On Set
 
 The always-on set MUST be declared as data in miniforge, with a reason per entry. It MUST NOT be inferred from
-`alwaysApply`. A repo MAY add entries in `.miniforge/config.edn`; removing one MUST record a reason there. The v0
-proposal follows. Its behavior text totals 3,054 characters, about 764 tokens.
+`alwaysApply`. At plan and implement, always-on rules reach the agent whatever the phase, task or file scope. A
+repo MAY add entries in `.miniforge/config.edn`; removing one MUST record a reason there. The v0 proposal follows.
+Its behavior text totals 3,054 characters, about 764 tokens.
 
 | Rule | Dewey | Reason |
 |---|---|---|
@@ -505,11 +518,11 @@ These extend N13 §10:
 
 | ID | Level | Stage | Requirement |
 |----|-------|-------|-------------|
-| N13D.RG.1 | MUST | 1 | Build and load graphs deterministically, checked against the loaded pack's digest (§4.4). |
+| N13D.RG.1 | MUST | 1 | Build graphs deterministically from verified packs at load; use no unverified shipped graph (§4.4). |
 | N13D.RG.2 | MUST NOT | 1 | Store rule text in the graph, or edit the graph by hand (§4.4). |
 | N13D.RG.3 | MUST | 1 | Resolve rules for delivery and classification with one `policy-pack` function (§4.6). |
-| N13D.RG.4 | MUST | 1 | Select delivered rules with `delivery-set`, keyed by phase, task type and changeset (§5.1). |
-| N13D.RG.5 | MUST | 1 | Account for every candidate as behavior text, a manifest entry or the overflow count (§5.1). |
+| N13D.RG.4 | MUST | 1, 2 | Select delivered rules with `delivery-set`: review and release in Stage 1, plan and implement in Stage 2 (§5.1, §10). |
+| N13D.RG.5 | MUST | 1, 2 | Account for every candidate as behavior, manifest entry or count, on the RG.4 schedule (§5.1). |
 | N13D.RG.6 | MUST | 1 | Show the id of every delivered rule, plus pack versions and the graph digest (§6.1). |
 | N13D.RG.7 | MUST | 1 | Match review and release rules per changed file, with the gate's glob function (§5.1, §8). |
 | N13D.RG.8 | MUST NOT | 1 | Let `:policy-verify` or `:policy-review` rule selection read graph, delivery set or ledger (§7.1). |
@@ -523,15 +536,22 @@ These extend N13 §10:
 
 ### 13.1 Test Obligations
 
-1. A one-file `.py` changeset puts `:std/python` in review delivery. A Clojure-only changeset does not.
-2. With an empty always-on set, a one-token budget and no pull tools, every candidate appears as an entry or count.
-3. With a non-empty always-on set and a one-token budget, loading fails with a configuration error.
-4. A fixture rule flipped from `alwaysApply: true` to `globs` compiles to the same action and severity in Stage 1.
-5. A review without an LLM backend emits `policy/rule-unenforced` for applicable `:checked` and `:judged` rules.
-   It reports none of them as passed.
-6. The same inputs, graph digest and ledger snapshot give byte-identical `delivery-set` output.
-7. `:policy-verify` and `:policy-review` verdicts are identical with the graph present and absent.
-8. A recompile of unchanged rules keeps every graph digest.
+Each obligation names the stage from which it applies.
+
+1. Stage 1. A one-file `.py` changeset puts `:std/python` in review delivery. A Clojure-only changeset does not.
+2. Stage 2. At implement, with an empty always-on set, a one-token budget and no pull tools, every candidate
+   appears as a manifest entry or in the count.
+3. Stage 2. At implement, with a non-empty always-on set and a one-token budget, loading fails with a configuration
+   error.
+4. Stage 1. A fixture rule with explicit `enforcement.action: hard-halt` keeps its action and severity when
+   `alwaysApply` flips. A fixture rule without explicit values gets a compiler warning and a §7.7 diff entry.
+5. Stage 2. Both fixtures in item 4 keep their action and severity when `alwaysApply` flips.
+6. Stage 1. A review without an LLM backend emits `policy/rule-unenforced` for applicable `:checked` and `:judged`
+   rules. It reports none of them as passed.
+7. Stage 1. The same inputs, graph digest, enforcement snapshot and ledger snapshot give byte-identical output.
+8. Stage 1. `:policy-verify` and `:policy-review` verdicts are identical with the graph present and absent.
+9. Stage 1. A recompile of unchanged rules keeps every graph digest.
+10. Stage 1. A shipped graph edited to drop a rule is not used; the load-time rebuild is, and a fact is emitted.
 
 ---
 
