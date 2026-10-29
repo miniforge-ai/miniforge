@@ -108,4 +108,24 @@
       (testing "the unreadable file is still reported"
         (is (str/includes? output "/tmp/run/phases/plan.edn could not be read") (name status))))))
 
+(deftest ^{:stratum 2} a-redirect-back-to-a-phase-reruns-it-when-a-later-result-is-lost
+  ;; review redirected back to implement; implement's earlier result is
+  ;; still there, review.edn did not read. The run is parked at implement:
+  ;; the repair must run, not be skipped as already completed.
+  (let [unreadable-review (anomaly/anomaly :unavailable
+                                           "Checkpoint file /tmp/run/phases/review.edn could not be read: EOF"
+                                           {:checkpoint/path "/tmp/run/phases/review.edn"
+                                            :phase/name :review})
+        {:keys [workflow opts]}
+        (resume-with (-> (parked-at-implement)
+                         (assoc :completed-phases [:plan :implement]
+                                :phase-results {:plan {:summary "plan"} :implement {:summary "first try"}}
+                                :checkpoint-manifest {:workflow/phases-completed [:plan :implement :review]}
+                                :checkpoint-read-failures [unreadable-review]))
+                     {})]
+    (is (nil? (:resume-machine-snapshot opts)))
+    (is (= [{:phase :implement} {:phase :verify}] (:workflow/pipeline workflow))
+        "implement runs again from the plan")
+    (is (= {:plan {:summary "plan"}} (:resume-phase-results opts)))))
+
 (comment ::resume-checkpoint-warning)
