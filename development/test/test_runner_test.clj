@@ -76,6 +76,29 @@
   (testing "each skip carries a reason"
     (is (every? (comp not str/blank?) (vals sut/known-failing-project-tests)))))
 
+(deftest ^{:stratum 0} external-tests-are-skipped-by-default-test
+  (testing "the skip form drops :test from ^:external vars only"
+    (let [test-ns (create-ns 'test-runner-test.external-fixture)
+          external (intern test-ns (with-meta 'calls-backend {:external true :test (fn [])}) nil)
+          local (intern test-ns (with-meta 'stays-local {:test (fn [])}) nil)]
+      (try
+        (binding [*out* (java.io.StringWriter.)]
+          (load-string (sut/external-test-skip-form ["test-runner-test.external-fixture"])))
+        (is (nil? (:test (meta external))))
+        (is (some? (:test (meta local))))
+        (finally
+          (remove-ns 'test-runner-test.external-fixture)))))
+  (testing "every development test that needs the real claude CLI is tagged ^:external"
+    (require 'ai.miniforge.cli-integration-test 'ai.miniforge.dogfood-test)
+    (doseq [v ['ai.miniforge.cli-integration-test/cli-availability-test
+               'ai.miniforge.cli-integration-test/claude-simple-prompt-test
+               'ai.miniforge.cli-integration-test/claude-system-prompt-test
+               'ai.miniforge.cli-integration-test/claude-code-generation-test
+               'ai.miniforge.dogfood-test/real-docstring-addition-test
+               'ai.miniforge.dogfood-test/real-test-generation-test
+               'ai.miniforge.dogfood-test/real-bug-fix-test]]
+      (is (:external (meta (resolve v))) (str v)))))
+
 (def ^{:stratum 0} ^:private stripped-probe
   "A `user.name` only the stripped write sets: the config file holding it
    is the one that write reached."
@@ -94,6 +117,7 @@
   "Every function in `test-runner` that starts a process, by task name."
   {"test:poly"        sut/poly-all
    "test:integration" sut/integration
+   "test:dev"         sut/development
    "test:conformance" sut/conformance
    "test:graalvm"     sut/graalvm
    "test:precommit"   sut/precommit-smoke})
@@ -134,6 +158,17 @@
     (testing "e2e tests (real claude CLI / Docker) are not"
       (is (empty? (filter (test-files-under "projects/miniforge/e2e")
                           discovered))))))
+
+(deftest ^{:stratum 1} discovers-every-development-test-test
+  (let [discovered (set (sut/discovered-development-tests))]
+    (testing "every *_test.clj under development/test is discovered"
+      (is (= (test-files-under "development/test") discovered)))
+    (testing "including this namespace and the task tests CI never ran"
+      (doseq [ns-name ["test-runner-test" "build-test" "deps-resources-test"
+                       "ai.miniforge.dogfood-test"]]
+        (is (contains? discovered ns-name) ns-name)))
+    (testing "support namespaces are not run as tests"
+      (is (not (contains? discovered "ai.miniforge.test-harness"))))))
 
 (deftest ^{:stratum 1} project-test-code-is-not-on-paths-test
   (let [{:keys [paths aliases]} (project-deps "miniforge")]
