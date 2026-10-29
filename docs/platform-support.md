@@ -162,8 +162,11 @@ bb test
   read-only; `java.nio.file.Files.delete` does not clear the read-only
   flag before unlinking. Workaround in test code:
   `setWritable(true)` recursively before deleting, or use
-  `babashka.fs/delete-tree` (which handles this). The `test-windows`
-  CI job is `continue-on-error: true` until this is fixed.
+  `babashka.fs/delete-tree` (which handles this). Until this is fixed,
+  the `test-windows` CI job runs only the bb-platform and bb-proc unit
+  tests, not the integration suite. The job is not `continue-on-error`:
+  a failure fails the CI run, and on `main` the `main-status` alert
+  counts it.
 
 ## Windows — WSL2 or Git Bash (Works Today)
 
