@@ -37,6 +37,12 @@
   :chain/retention-unconfirmed "Chain retention did not receive a matching durable acknowledgment."
   :chain/retention-missing "A required chain recovery manifest is unavailable."
   :chain/retention-conflict "Chain recovery manifests conflict with the retained identity or composition."
+  ;; Checkpoint reads
+  :checkpoint/read-failed    "Checkpoint file {path} could not be read: {error}"
+  :checkpoint/no-record      "it holds no checkpoint record"
+  :checkpoint/unreadable     "The checkpoint for run {run-id} cannot be restored. {files}"
+  :checkpoint/newer-format   "Checkpoint file {path} was written in checkpoint format {version}; this miniforge reads up to format {supported}. Resume it with a newer miniforge."
+
   ;; Event publishing warnings
   :warn/websocket-send       "Warning: Failed to send event via WebSocket: {error}"
   :warn/publish-event        "Warning: Failed to publish event: {error}"
@@ -149,6 +155,10 @@
   ;; Execution mode
   :governed/no-capsule      "No capsule executor available for governed workflow"
   :governed/no-capsule-hint "Start Docker or configure a Kubernetes cluster"
+
+  ;; Checkpoint retention
+  :checkpoint/gc-delete-failed "Could not delete checkpoint {path}: {error}"
+  :warn/checkpoint-announce-failed "Warning: The checkpoint for phase {phase} was written, but announcing it failed: {error}"
 
   ;; Environment lifecycle
   :env/acquisition-failed   "Environment acquisition failed: {error}"
