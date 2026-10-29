@@ -171,26 +171,41 @@
   "Keep a whole extracted archive (LuaLS loads main.lua and script/ from
    beside its binary): rename the staging `extract/` dir to a new
    `.dist/<binary>-<version>-<staging name>/` in the bin dir, then swap a
-   relative symlink to the binary inside it over `final-binary`. Both
-   renames stay on one filesystem; the swap is atomic. If the swap fails
-   the new dist dir is removed, so the existing install is untouched.
+   launcher over `final-binary` that execs the binary by its real path.
+   Not a symlink: LuaLS on macOS locates itself with _NSGetExecutablePath,
+   which does not resolve links. Both renames stay on one filesystem; the
+   swap is atomic. If the swap fails the new dist dir is removed, so the
+   existing install is untouched.
    Plain try: this base declares no slingshot dep (rule 211 exemption 1)."
   [{:keys [dest-dir extract-dir temp-dir binary server-entry platform-asset]} final-binary]
   (let [dist-name (str binary "-" (:version server-entry) "-" (fs/file-name temp-dir))
         dist-dir  (fs/path dest-dir ".dist" dist-name)
-        link      (fs/path temp-dir "link")]
+        launcher  (fs/path temp-dir "launcher")]
     (fs/create-dirs (fs/parent dist-dir))
     (Files/move (fs/path extract-dir) dist-dir
                 (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE]))
     (try
-      (fs/create-sym-link link (fs/path ".dist" dist-name
-                                        (get platform-asset :binary-in-archive binary)))
-      (Files/move link (fs/path final-binary)
+      (let [real (str (fs/real-path (fs/path dist-dir (get platform-asset :binary-in-archive binary))))]
+        (spit (str launcher) (str "#!/bin/sh\nexec '" (str/replace real "'" "'\\''") "' \"$@\"\n")))
+      (fs/set-posix-file-permissions launcher "rwxr-xr-x")
+      (Files/move launcher (fs/path final-binary)
                   (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
                                           StandardCopyOption/REPLACE_EXISTING]))
       (catch Exception e
         (fs/delete-tree dist-dir)
         (throw e)))))
+
+(defn ^{:stratum 0} contained-regular-file?
+  "True when `rel` names a regular file under `root`, reached with no
+   symlink at any path component, whose real path stays under `root`.
+   `:nofollow-links` alone checks only the last component: an archive
+   holding `bin -> ../..` would make `bin/tool` the live install target."
+  [root rel]
+  (let [steps (reductions fs/path (fs/path root) (fs/components (fs/path rel)))
+        file  (last steps)]
+    (and (not-any? fs/sym-link? (rest steps))
+         (fs/regular-file? file {:nofollow-links true})
+         (str/starts-with? (str (fs/real-path file)) (str (fs/real-path root) "/")))))
 
 ;; Installation orchestration
 (defn ^{:stratum 0} find-server-entry
@@ -296,8 +311,8 @@
                                                     :lsp-installer/actual-sha256   actual}))))))
 
 (defn ^{:stratum 1} step-place-binary
-  "Check the extracted binary is a regular file in the staging dir (a
-   symlink does not count) and chmod it there. A zip or tar.gz install
+  "Check the extracted binary is a regular file inside the staging tree
+   (no symlink anywhere on its path) and chmod it there. A zip or tar.gz install
    keeps the whole archive via install-dist!; a single-file asset is
    renamed over the target in one atomic move (Files/move, which refuses
    a directory target rather than moving into it as fs/move would). On
@@ -309,7 +324,7 @@
             staged       (str extract-dir "/" in-archive)
             final-binary (str dest-dir "/" binary)]
         (try
-          (if-let [anomaly (if (fs/regular-file? staged {:nofollow-links true})
+          (if-let [anomaly (if (contained-regular-file? extract-dir in-archive)
                              (sh-anomaly "chmod" (bp/sh ["chmod" "+x" staged]))
                              (response/make-anomaly
                               :anomalies/fault

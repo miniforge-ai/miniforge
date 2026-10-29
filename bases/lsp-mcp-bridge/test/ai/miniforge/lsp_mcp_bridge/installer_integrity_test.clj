@@ -266,25 +266,27 @@
               (is (not (fs/executable? target))))))))))
 
 (deftest ^{:stratum 1} archive-install-keeps-distribution-test
-  (testing "a tar.gz install keeps the whole tree; the target is a symlink resolve-binary accepts"
+  (testing "a tar.gz install keeps the whole tree; the target launches the real binary inside it"
     (with-base-dir
       (fn [base]
         (let [src   (str (fs/create-dirs (fs/path base "src")))
               tgz   (str (fs/path base "dist.tar.gz"))
               asset {:file "tool.tar.gz" :extract :tar-gz :binary-in-archive "bin/tool"}
-              lua   #(fs/path (fs/parent (fs/parent (fs/real-path %))) "script" "x.lua")]
+              lua   #(fs/path (fs/parent (fs/parent %)) "script" "x.lua")
+              run   #(str/trim (:out (bp/sh [%])))]
           (fs/create-dirs (fs/path src "bin"))
           (fs/create-dirs (fs/path src "script"))
-          (spit (str src "/bin/tool") script)
+          (spit (str src "/bin/tool") "#!/bin/sh\necho \"$0\"\n")
           (fs/set-posix-file-permissions (str src "/bin/tool") "rwxr-xr-x")
           (spit (str src "/script/x.lua") "return 1")
           (bp/sh ["tar" "czf" tgz "-C" src "bin" "script"])
           (let [[result bin-dir] (install! base asset #(fs/copy tgz % {:replace-existing true}))
-                target (:installed result)]
+                target   (:installed result)
+                launched (run target)]
             (is (= (str bin-dir "/tool") target) (pr-str result))
-            (is (fs/sym-link? target))
-            (is (fs/exists? (lua target)) "runtime file kept beside the real binary")
-            (is (= "ok" (str/trim (:out (bp/sh [target])))))
+            (is (str/includes? launched "/.dist/") "execs the binary inside the distribution")
+            (is (= launched (str (fs/real-path launched))) "by its real path, not via a link")
+            (is (fs/exists? (lua launched)) "runtime file kept beside the real binary")
             (with-redefs [installer/bin-dir (constantly bin-dir)]
               (is (= target (installer/resolve-binary "tool"))))
             (testing "and a failed reinstall leaves that install intact"
@@ -293,5 +295,22 @@
                                          #(fs/write-bytes (str %) (java.util.Arrays/copyOf
                                                                    bytes (quot (alength bytes) 2))))]
                 (is (response/anomaly-map? again))
-                (is (fs/exists? (lua target)))
-                (is (= "ok" (str/trim (:out (bp/sh [target])))))))))))))
+                (is (= launched (run target)))
+                (is (fs/exists? (lua launched)))))))))))
+
+(deftest ^{:stratum 1} parent-dir-symlink-in-archive-is-rejected-test
+  (testing "an archive whose bin/ is a symlink to ../.. cannot point bin/tool at the live target"
+    (with-base-dir
+      (fn [base]
+        (with-stale-binary base
+          (fn [target]
+            (let [src (str (fs/create-dirs (fs/path base "src")))
+                  tgz (str (fs/path base "evil.tar.gz"))]
+              (fs/create-sym-link (fs/path src "bin") "../..")
+              (bp/sh ["tar" "czf" tgz "-C" src "bin"])
+              (let [[result _] (install! base {:file "tool.tar.gz" :extract :tar-gz
+                                               :binary-in-archive "bin/tool"}
+                                         #(fs/copy tgz % {:replace-existing true}))]
+                (is (response/anomaly-map? result) (pr-str result))
+                (is (= "stale" (slurp target)))
+                (is (not (fs/executable? target)))))))))))
