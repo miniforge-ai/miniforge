@@ -19,18 +19,19 @@
   "Auto-installation of LSP server binaries.
 
    Checks if LSP binaries are available on PATH, and downloads/installs
-   them to ~/.miniforge/bin/ if not found.
-
-   Layer 0: Platform detection
-   Layer 1: Binary resolution
-   Layer 2: Download and extraction
-   Layer 3: Installation pipeline
-   Layer 4: Installation orchestration"
+   them to ~/.miniforge/bin/ if not found. A GitHub asset whose registry
+   entry pins `:sha256` is verified before extraction. Every extraction
+   step's result is checked, and the install fails unless the binary is
+   on disk afterwards."
   (:require
    [babashka.fs :as fs]
    [babashka.process :as bp]
+   [clojure.java.io :as io]
    [clojure.string :as str]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.response.interface :as response])
+  (:import
+   (java.security MessageDigest)
+   (java.util.zip GZIPInputStream)))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -71,11 +72,13 @@
 ;; Download and extraction
 (defn ^{:stratum 0} download-file
   "Download a file from a URL to a local path.
-   Returns nil on success or a canonical anomaly map on curl failure."
+   Returns nil on success or a canonical anomaly map on curl failure.
+   `--fail` turns an HTTP error status into a non-zero exit; without it
+   curl saved the error page as the archive and exited 0."
   [url dest-path]
   (binding [*out* *err*]
     (println "Downloading" url "..."))
-  (let [result (bp/sh ["curl" "-L" "-o" (str dest-path) "--progress-bar" url])]
+  (let [result (bp/sh ["curl" "--fail" "-L" "-o" (str dest-path) "--progress-bar" url])]
     (when-not (zero? (:exit result))
       (response/make-anomaly :anomalies/fault
                              "Download failed"
@@ -94,9 +97,18 @@
   (bp/sh ["tar" "xzf" (str archive-path) "-C" (str dest-dir)]))
 
 (defn ^{:stratum 0} extract-gzip
-  "Extract a gzip file (single file, not tar)."
+  "Decompress a single-file gzip archive to `dest-path` in-process
+   (java.util.zip, no shell, so a space or quote in $HOME or TMPDIR is
+   just part of the path). Writes beside the archive first and moves
+   into place only after the whole stream decompressed, so a corrupt
+   or truncated archive leaves nothing at `dest-path`. Throws on a
+   corrupt stream."
   [archive-path dest-path]
-  (bp/sh ["sh" "-c" (str "gunzip -c " archive-path " > " dest-path)]))
+  (let [staged (str archive-path ".out")]
+    (with-open [in  (GZIPInputStream. (io/input-stream (str archive-path)))
+                out (io/output-stream staged)]
+      (io/copy in out))
+    (fs/move staged dest-path {:replace-existing true})))
 
 (defn ^{:stratum 0} github-release-url
   "Build a GitHub Releases download URL."
@@ -110,6 +122,39 @@
   "Mark pipeline as failed with anomaly."
   [state message]
   (assoc state :failure (response/make-anomaly :anomalies/fault message)))
+
+(defn ^{:stratum 0} sh-anomaly
+  "Nil when a `bp/sh` result exited 0, else a fault anomaly naming
+   `step` with its exit code and stderr. `bp/sh` does not throw on a
+   non-zero exit, so each call whose failure matters goes through this."
+  [step result]
+  (when-not (zero? (:exit result))
+    (response/make-anomaly :anomalies/fault
+                           (str step " failed: " (str/trim (str (:err result))))
+                           {:lsp-installer/step   step
+                            :lsp-installer/exit   (:exit result)
+                            :lsp-installer/stderr (:err result)})))
+
+(defn ^{:stratum 0} file-sha256
+  "Lower-case hex SHA-256 of the file at `path`."
+  [path]
+  (let [md  (MessageDigest/getInstance "SHA-256")
+        buf (byte-array 8192)]
+    (with-open [^java.io.InputStream in (io/input-stream (str path))]
+      (loop [n (.read in buf)]
+        (when (pos? n)
+          (.update md buf 0 (int n))
+          (recur (.read in buf)))))
+    (apply str (map #(format "%02x" %) (.digest md)))))
+
+(defn ^{:stratum 0} discard-install!
+  "Remove the temp dir and any partial binary extraction left at the
+   final path, so a later resolve-binary does not pick it up. Called
+   only after extraction ran; ensure-installed installs only when
+   resolve-binary found nothing at that path."
+  [{:keys [temp-dir dest-dir binary]}]
+  (fs/delete-tree temp-dir)
+  (fs/delete-if-exists (str dest-dir "/" binary)))
 
 ;; Installation orchestration
 (defn ^{:stratum 0} find-server-entry
@@ -132,17 +177,16 @@
           local-path))))
 
 (defn ^{:stratum 1} extract-archive
-  "Extract an archive based on its type."
+  "Extract an archive based on its type. Returns nil on success or an
+   anomaly when unzip or tar exits non-zero; a corrupt gzip throws.
+   step-place-binary checks the result is on disk and makes it executable."
   [archive-path dest-dir extract-type binary-name]
-  (case extract-type
-    :zip (extract-zip archive-path dest-dir)
-    :tar-gz (extract-tar-gz archive-path dest-dir)
-    :gzip (let [dest (str dest-dir "/" binary-name)]
-            (extract-gzip archive-path dest)
-            (bp/sh ["chmod" "+x" dest]))
-    :none (let [dest (str dest-dir "/" binary-name)]
-            (fs/copy archive-path dest {:replace-existing true})
-            (bp/sh ["chmod" "+x" dest]))))
+  (let [dest (str dest-dir "/" binary-name)]
+    (case extract-type
+      :zip    (sh-anomaly "unzip" (extract-zip archive-path dest-dir))
+      :tar-gz (sh-anomaly "tar" (extract-tar-gz archive-path dest-dir))
+      :gzip   (do (extract-gzip archive-path dest) nil)
+      :none   (do (fs/copy archive-path dest {:replace-existing true}) nil))))
 
 (defn ^{:stratum 1} step-resolve-asset
   "Resolve the platform-specific asset from the server entry."
@@ -178,21 +222,54 @@
             (fs/delete-tree temp-dir)
             (fail state (str "Download failed: " (.getMessage e))))))))
 
-(defn ^{:stratum 1} step-place-binary
-  "Handle nested binary location and set permissions."
+(defn ^{:stratum 1} step-verify-checksum
+  "Check the downloaded archive against the asset's `:sha256` when the
+   registry pins one; a mismatch fails the install before extraction.
+   Without a pinned hash the archive is used unverified, said on stderr."
   [state]
   (if (failed? state) state
-      (let [{:keys [dest-dir platform-asset binary temp-dir]} state]
+      (let [{:keys [platform-asset archive-path]} state
+            expected (some-> (:sha256 platform-asset) str/lower-case)
+            actual   (when expected (file-sha256 archive-path))]
+        (cond
+          (nil? expected)
+          (do (binding [*out* *err*]
+                (println "No sha256 pinned for" (:file platform-asset) "- installing unverified"))
+              state)
+
+          (= expected actual)
+          state
+
+          :else
+          (do (fs/delete-tree (:temp-dir state))
+              (assoc state :failure
+                     (response/make-anomaly :anomalies/fault
+                                            (str "Checksum mismatch for " (:file platform-asset))
+                                            {:lsp-installer/expected-sha256 expected
+                                             :lsp-installer/actual-sha256   actual})))))))
+
+(defn ^{:stratum 1} step-place-binary
+  "Move a nested binary into the bin dir, check it is there, and make it
+   executable. Fails the install when the binary is missing after
+   extraction or chmod exits non-zero."
+  [state]
+  (if (failed? state) state
+      (let [{:keys [dest-dir platform-asset binary temp-dir]} state
+            final-binary (str dest-dir "/" binary)]
         (try
           (when-let [nested (:binary-in-archive platform-asset)]
-            (let [nested-path (str dest-dir "/" nested)
-                  final-path (str dest-dir "/" binary)]
-              (when (and (not= nested-path final-path) (fs/exists? nested-path))
-                (fs/move nested-path final-path {:replace-existing true}))))
-          (let [final-binary (str dest-dir "/" binary)]
-            (bp/sh ["chmod" "+x" final-binary])
-            (fs/delete-tree temp-dir)
-            (assoc state :installed final-binary))
+            (let [nested-path (str dest-dir "/" nested)]
+              (when (and (not= nested-path final-binary) (fs/exists? nested-path))
+                (fs/move nested-path final-binary {:replace-existing true}))))
+          (if-let [anomaly (if (fs/regular-file? final-binary)
+                             (sh-anomaly "chmod" (bp/sh ["chmod" "+x" final-binary]))
+                             (response/make-anomaly
+                              :anomalies/fault
+                              (str "Binary not found after extraction: " final-binary)))]
+            (do (discard-install! state)
+                (assoc state :failure anomaly))
+            (do (fs/delete-tree temp-dir)
+                (assoc state :installed final-binary)))
           (catch Exception e
             (fs/delete-tree temp-dir)
             (fail state (str "Binary placement failed: " (.getMessage e))))))))
@@ -232,14 +309,18 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} step-extract
-  "Extract the archive and place binary."
+  "Extract the archive into the bin dir. An extractor anomaly or throw
+   (corrupt archive) fails the install and discards the partial install."
   [state]
   (if (failed? state) state
       (let [{:keys [archive-path dest-dir platform-asset binary]} state]
         (try
-          (extract-archive archive-path dest-dir (:extract platform-asset) binary)
-          state
+          (if-let [anomaly (extract-archive archive-path dest-dir (:extract platform-asset) binary)]
+            (do (discard-install! state)
+                (assoc state :failure anomaly))
+            state)
           (catch Exception e
+            (discard-install! state)
             (fail state (str "Extraction failed: " (.getMessage e))))))))
 
 ;------------------------------------------------------------------------------ Layer 3
@@ -250,6 +331,7 @@
   (-> {:server-entry server-entry :platform platform}
       step-resolve-asset
       step-download
+      step-verify-checksum
       step-extract
       step-place-binary
       install-pipeline->result))
