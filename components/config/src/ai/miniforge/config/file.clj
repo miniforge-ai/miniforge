@@ -37,10 +37,18 @@
 (def ^{:stratum 0} ^:private t
   (messages/create-translator "config/config/messages/system.edn" :config/system))
 
-;; Bounded so a contended lock never stalls a CLI command or HTTP handler.
-(def ^{:stratum 0} ^:private lock-timeout-ms 500)
+(def ^{:stratum 0} ^:private lock-timeout-ms
+  "How long a writer waits for another process's config lock before giving up.
+   Bounded so a contended lock never stalls a CLI command or HTTP handler."
+  500)
 
-(def ^{:stratum 0} ^:private lock-poll-ms 25)
+(def ^{:stratum 0} ^:private lock-poll-ms
+  "Pause between lock attempts: short next to `lock-timeout-ms`, without spinning."
+  25)
+
+(def ^{:stratum 0} ^:private lock-file-suffix
+  "Every writer of `path` locks the sidecar file `<path>.lock`."
+  ".lock")
 
 ;; A FileChannel lock belongs to the whole JVM: a second thread asking for it
 ;; gets OverlappingFileLockException instead of waiting. In-process writers
@@ -65,26 +73,28 @@
       (let [form (edn/read {:eof eof} reader)]
         (if (identical? eof form) forms (recur (conj forms form)))))))
 
-(defn ^{:stratum 0} write-atomically!
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} write-atomically!
   "Rename a forced sibling temp file holding `text` over `path`, through a
-   symlink to its target, keeping the old mode. nil, or the durability anomaly."
+   symlink to its target, keeping the old mode. nil, or an anomaly naming `path`."
   [path ^String text]
   (let [target (if (fs/exists? path) (fs/real-path path) (fs/absolutize path))
-        tmp    (fs/create-temp-file {:dir (fs/parent target) :prefix ".config-" :suffix ".tmp"})]
+        tmp    (fs/create-temp-file {:dir (fs/parent target) :prefix ".config-" :suffix ".tmp"})
+        failed #(anomaly/anomaly :fault (t :config-file/write-failed {:path path :error (:anomaly/message %)})
+                                 {:config/path (str path) :config/cause %})]
     (try
       ;; Set the mode before any content lands in the temp file.
       (when (and (fs/exists? target) (not (fs/windows?)))
         (fs/set-posix-file-permissions tmp (fs/posix-file-permissions target)))
       (let [written (durability/write-temporary-bytes! (fs/file tmp) (.getBytes text StandardCharsets/UTF_8))]
         (if (anomaly/anomaly? written)
-          written
+          (failed written)
           (do (fs/move tmp target {:atomic-move true :replace-existing true})
               (let [confirmed (durability/confirm! (fs/file target))]
-                (when (anomaly/anomaly? confirmed) confirmed)))))
+                (when (anomaly/anomaly? confirmed) (failed confirmed))))))
       (finally
         (fs/delete-if-exists tmp)))))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} parse-config
   "nil for blank text or a lone nil, the map for one EDN map, else an anomaly."
@@ -102,10 +112,10 @@
         (unreadable (ex-text e))))))
 
 (defn ^{:stratum 1} call-with-lock
-  "`(thunk)` under the config lock for `path`, held in `<path>.lock`; an anomaly
+  "`(thunk)` under the config lock for `path`; an anomaly
    when the lock stays busy past `lock-timeout-ms` or the thunk throws."
   [path thunk]
-  (let [lock-file (Paths/get (str path ".lock") (make-array String 0))
+  (let [lock-file (Paths/get (str path lock-file-suffix) (make-array String 0))
         failure   #(anomaly/anomaly :fault (t :config-file/write-failed {:path path :error (ex-text %)})
                                     {:config/path (str path)})]
     (try+

@@ -20,6 +20,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.config.file :as sut]
    [ai.miniforge.config.interface.file :as config-file]
+   [ai.miniforge.file-durability.interface :as durability]
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.string :as str]
@@ -31,6 +32,11 @@
   "A config.edn path inside a fresh temp directory, holding `content` when given."
   ([] (str (fs/path (fs/create-temp-dir) "config.edn")))
   ([content] (doto (temp-config-path) (spit content))))
+
+(def ^{:stratum 0} ^:private concurrent-writer-count
+  "Writers racing on one file: enough for read-modify-write races to lose a
+   repo if the lock did not serialize them."
+  16)
 
 (deftest ^{:stratum 0} parse-config-test
   (is (nil? (sut/parse-config "p" "")))
@@ -86,7 +92,7 @@
 
 (deftest ^{:stratum 1} concurrent-writers-share-the-lock-test
   (let [path    (temp-config-path "{}")
-        repos   (mapv #(str "owner/repo-" %) (range 16))
+        repos   (mapv #(str "owner/repo-" %) (range concurrent-writer-count))
         results (->> repos
                      (mapv (fn [repo]
                              (future (config-file/update-config!
@@ -94,6 +100,15 @@
                      (mapv deref))]
     (is (not-any? anomaly/anomaly? results))
     (is (= (set repos) (set (get-in (edn/read-string (slurp path)) [:fleet :repos]))))))
+
+(deftest ^{:stratum 1} failed-write-names-the-file-and-keeps-it-test
+  (let [path (temp-config-path "{:llm {}}")]
+    (with-redefs [durability/write-temporary-bytes! (fn [_ _] (anomaly/anomaly :fault "disk full" {}))]
+      (let [result (config-file/update-config! path #(assoc % :a 1))]
+        (is (= :fault (:anomaly/type result)))
+        (is (str/includes? (:anomaly/message result) path))))
+    (is (= "{:llm {}}" (slurp path)))
+    (is (= #{"config.edn" "config.edn.lock"} (set (map fs/file-name (fs/list-dir (fs/parent path))))))))
 
 (deftest ^{:stratum 1} write-config-replaces-unparseable-file-test
   (let [path (temp-config-path "{:broken")]
