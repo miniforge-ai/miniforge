@@ -30,8 +30,10 @@
    [clojure.string :as str]
    [ai.miniforge.response.interface :as response])
   (:import
-   (java.nio.file CopyOption Files StandardCopyOption)
+   (java.nio.channels FileChannel)
+   (java.nio.file CopyOption Files OpenOption StandardCopyOption StandardOpenOption)
    (java.security MessageDigest)
+   (java.util.concurrent Semaphore)
    (java.util.zip GZIPInputStream)))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -175,8 +177,7 @@
    Not a symlink: LuaLS on macOS locates itself with _NSGetExecutablePath,
    which does not resolve links. Both renames stay on one filesystem; the
    swap is atomic. If the swap fails the new dist dir is removed, so the
-   existing install is untouched. Returns the new dist dir, its mtime set
-   to now so finish-install! can tell it is the newest.
+   existing install is untouched. Returns the new dist dir.
    Plain try: this base declares no slingshot dep (rule 211 exemption 1)."
   [{:keys [dest-dir extract-dir temp-dir binary server-entry platform-asset]} final-binary]
   (let [dist-dir (fs/path dest-dir ".dist" binary
@@ -186,7 +187,6 @@
     (Files/move (fs/path extract-dir) dist-dir
                 (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE]))
     (try
-      (fs/set-last-modified-time dist-dir (fs/millis->file-time (System/currentTimeMillis)))
       (let [real (str (fs/real-path (fs/path dist-dir (get platform-asset :binary-in-archive binary))))]
         (spit (str launcher) (str "#!/bin/sh\nexec '" (str/replace real "'" "'\\''") "' \"$@\"\n")))
       (fs/set-posix-file-permissions launcher "rwxr-xr-x")
@@ -200,25 +200,38 @@
 
 (defn ^{:stratum 0} finish-install!
   "Cleanup once the target has been replaced, so the install has already
-   succeeded: delete the staging dir and, for an archive install, prune
-   trees under `.dist/<binary>/` other than `dist` and the newest other
-   one (a server still running from the previous install keeps its
-   files). Returns warning strings instead of throwing.
+   succeeded. For an archive install, record `dist` in
+   `.dist/<binary>/active` (atomic rename) and prune that binary's trees
+   other than `dist` and the one `active` named before: the previous
+   install, which a running server may still use. A tree left by an
+   interrupted install is never recorded, so it is pruned. The prune is
+   skipped if `active` cannot be read or written. Then delete the staging
+   dir. Returns warning strings instead of throwing.
    Plain try: this base declares no slingshot dep (rule 211 exemption 1)."
   [temp-dir dist]
   (let [delete! (fn [path]
                   (try (fs/delete-tree path) nil
                        (catch Exception e (str "could not remove " path ": " (ex-message e)))))
-        older   (fn []
-                  (->> (fs/list-dir (fs/parent dist))
-                       (remove #(= (str %) (str dist)))
-                       (sort-by #(fs/file-time->millis (fs/last-modified-time %)) >)
-                       rest))]
-    (into (filterv some? [(delete! temp-dir)])
-          (when dist
-            (try (into [] (keep delete!) (older))
-                 (catch Exception e
-                   [(str "could not list " (fs/parent dist) ": " (ex-message e))]))))))
+        root    (some-> dist fs/parent)
+        active  (some-> root (fs/path "active"))
+        record! (fn []
+                  (let [prev (when (fs/exists? active) (str/trim (slurp (str active))))
+                        tmp  (fs/path temp-dir "active")]
+                    (spit (str tmp) (str (fs/file-name dist)))
+                    (Files/move tmp active (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                                                   StandardCopyOption/REPLACE_EXISTING]))
+                    #{(str (fs/file-name dist)) prev}))]
+    (filterv some?
+             (conj (if dist
+                     (try (let [kept (record!)]
+                            (into [] (keep delete!)
+                                  (->> (fs/list-dir root)
+                                       (filter #(fs/directory? % {:nofollow-links true}))
+                                       (remove #(kept (str (fs/file-name %)))))))
+                          (catch Exception e
+                            [(str "could not record or prune " root ": " (ex-message e))]))
+                     [])
+                   (delete! temp-dir)))))
 
 (defn ^{:stratum 0} contained-regular-file?
   "True when `rel` names a regular file under `root`, reached with no
@@ -232,6 +245,16 @@
          (fs/regular-file? file {:nofollow-links true})
          (str/starts-with? (str (fs/real-path file)) (str (fs/real-path root) "/")))))
 
+;; A FileChannel lock belongs to the whole JVM: a second thread asking for it
+;; gets OverlappingFileLockException instead of waiting. Installers in this
+;; process queue on a per-binary semaphore first.
+(defonce ^{:stratum 0} ^:private install-semaphores (atom {}))
+
+(def ^{:stratum 0} ^:private install-lock-wait-ms
+  "How long an installer waits for another process's install of the same
+   binary (a download included) before giving up."
+  (* 10 60 1000))
+
 ;; Installation orchestration
 (defn ^{:stratum 0} find-server-entry
   "Find server entry in registry by tool-id."
@@ -242,6 +265,43 @@
        first))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} call-with-install-lock
+  "`(thunk contended?)` while holding `binary`'s install lock: a per-binary
+   semaphore in this process, then a FileChannel lock on
+   `<dest-dir>/.dist/<binary>/.lock` across processes, so one install and
+   its prune run at a time. `contended?` is true when another installer
+   held either lock first; the caller then rechecks the target. An anomaly
+   when the file lock stays busy past `install-lock-wait-ms` or locking
+   fails. FileLock is hinted AutoCloseable: babashka does not expose it.
+   Plain try: this base declares no slingshot dep (rule 211 exemption 1)."
+  [dest-dir binary thunk]
+  (let [^Semaphore sem (get (swap! install-semaphores update binary #(or % (Semaphore. 1))) binary)
+        waited?        (not (.tryAcquire sem))
+        lock-file      (fs/path dest-dir ".dist" binary ".lock")]
+    (when waited? (.acquire sem))
+    (try
+      (fs/create-dirs (fs/parent lock-file))
+      (with-open [channel (FileChannel/open lock-file (into-array OpenOption [StandardOpenOption/CREATE
+                                                                              StandardOpenOption/WRITE]))]
+        (let [first-try (.tryLock channel)
+              deadline  (+ (System/currentTimeMillis) install-lock-wait-ms)
+              ^java.lang.AutoCloseable held (or first-try
+                                                (loop []
+                                                  (or (.tryLock channel)
+                                                      (when (< (System/currentTimeMillis) deadline)
+                                                        (Thread/sleep 100)
+                                                        (recur)))))]
+          (if held
+            (try (thunk (or waited? (nil? first-try)))
+                 (finally (.close held)))
+            (response/make-anomaly :anomalies/unavailable
+                                   (str "Another install of " binary " holds " lock-file)
+                                   {:lsp-installer/lock-file (str lock-file)}))))
+      (catch Exception e
+        (response/make-anomaly :anomalies/fault
+                               (str "Install of " binary " failed: " (ex-message e))))
+      (finally (.release sem)))))
 
 (defn ^{:stratum 1} resolve-binary
   "Find a binary, checking PATH first then ~/.miniforge/bin/.
@@ -438,16 +498,27 @@
 ;------------------------------------------------------------------------------ Layer 3
 
 (defn ^{:stratum 3} install-via-github
-  "Install an LSP binary from GitHub Releases."
+  "Install an LSP binary from GitHub Releases under the binary's install
+   lock, so concurrent installers cannot replace or prune each other's
+   work. One that had to wait rechecks the target first and uses it when
+   the installer it waited for left a regular executable file there."
   [server-entry platform]
-  (-> {:server-entry server-entry :platform platform}
-      step-resolve-asset
-      step-stage
-      step-download
-      step-verify-checksum
-      step-extract
-      step-place-binary
-      install-pipeline->result))
+  (let [dest-dir (bin-dir)
+        binary   (:binary server-entry)
+        target   (str dest-dir "/" binary)]
+    (call-with-install-lock
+     dest-dir binary
+     (fn [contended?]
+       (if (and contended? (fs/regular-file? target) (fs/executable? target))
+         {:installed target}
+         (-> {:server-entry server-entry :platform platform}
+             step-resolve-asset
+             step-stage
+             step-download
+             step-verify-checksum
+             step-extract
+             step-place-binary
+             install-pipeline->result))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 
@@ -475,7 +546,8 @@
    - command      - Original command vector (e.g. [\"clojure-lsp\"])
 
    Returns:
-   - {:command updated-command} on success
+   - {:command updated-command} on success, plus :lsp-installer/warnings
+     when the install succeeded but its cleanup did not
    - Anomaly map on failure"
   [registry tool-id command]
   (let [binary (first command)]
@@ -491,7 +563,9 @@
             (if (response/anomaly-map? result)
               result
               (if-let [installed-path (:installed result)]
-                {:command (assoc command 0 installed-path)}
+                (cond-> {:command (assoc command 0 installed-path)}
+                  (:lsp-installer/warnings result)
+                  (assoc :lsp-installer/warnings (:lsp-installer/warnings result)))
                 (response/make-anomaly :anomalies/fault
                                        "Installation succeeded but binary not found")))))))))
 

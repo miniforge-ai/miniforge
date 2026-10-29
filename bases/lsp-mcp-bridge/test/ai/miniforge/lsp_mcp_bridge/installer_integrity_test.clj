@@ -353,6 +353,51 @@
           (is (not-any? #(str/starts-with? (str (fs/file-name %)) "staging tmp's")
                         (fs/list-dir bin-dir))))))))
 
+(deftest ^{:stratum 1} concurrent-installs-of-one-binary-serialize-test
+  (testing "a second install of the same binary waits for the first, then uses its result"
+    (with-base-dir
+      (fn [base]
+        (let [bin-dir   (str (fs/path base "bin dir's"))
+              entry     {:github "example/tool" :version "v1" :binary "tool"
+                         :assets {"test-platform" {:file "tool.gz" :extract :gzip}}}
+              entered   (java.util.concurrent.CountDownLatch. 1)
+              release   (java.util.concurrent.CountDownLatch. 1)
+              downloads (atom 0)
+              b-thread  (promise)
+              install   #(binding [*err* (java.io.StringWriter.)]
+                           (installer/install-via-github entry "test-platform"))
+              deadline  (+ (System/nanoTime) 10000000000)]
+          (with-redefs [installer/bin-dir       (constantly bin-dir)
+                        installer/download-file (fn [_url dest]
+                                                  (swap! downloads inc)
+                                                  (.countDown entered)
+                                                  (.await release)
+                                                  (write-gzip! dest script)
+                                                  nil)]
+            (let [a (future (install))
+                  _ (.await entered)
+                  b (future (deliver b-thread (Thread/currentThread)) (install))]
+              ;; A is inside its download. Wait until B parks: on the install
+              ;; lock when installs serialize, inside its own download when not.
+              (while (and (not= "WAITING" (str (.getState ^Thread @b-thread)))
+                          (< (System/nanoTime) deadline))
+                (Thread/onSpinWait))
+              (.countDown release)
+              (is (= {:installed (str bin-dir "/tool")} @a))
+              (is (= {:installed (str bin-dir "/tool")} @b))
+              (is (= 1 @downloads) "the waiting install rechecked the target instead of downloading"))))))))
+
+(deftest ^{:stratum 1} ensure-installed-passes-install-warnings-test
+  (testing "ensure-installed keeps a successful install's warnings on its result"
+    (with-base-dir
+      (fn [base]
+        (with-redefs [installer/bin-dir     (constantly base)
+                      installer/run-install (constantly {:installed "/opt/lsp/tool"
+                                                         :lsp-installer/warnings ["could not prune"]})]
+          (is (= {:command ["/opt/lsp/tool" "--stdio"] :lsp-installer/warnings ["could not prune"]}
+                 (installer/ensure-installed {:servers {:t {:tool-id :lsp/t :binary "lsp-warn-probe"}}}
+                                             :lsp/t ["lsp-warn-probe" "--stdio"]))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} archive-installs-prune-to-current-and-previous-test
@@ -368,7 +413,7 @@
           (is (fs/exists? t3) "current tree kept")
           (is (fs/exists? t2) "previous tree kept for a server still running from it")
           (is (not (fs/exists? t1)) "older tree pruned")
-          (is (= 2 (count (fs/list-dir (fs/path bin-dir ".dist" "tool"))))))))))
+          (is (= 2 (count (filter fs/directory? (fs/list-dir (fs/path bin-dir ".dist" "tool")))))))))))
 
 (deftest ^{:stratum 2} cleanup-errors-after-replace-are-warnings-test
   (testing "once the target is replaced, failing to delete staging or prune is a warning"
@@ -383,3 +428,17 @@
           (is (some? t3) "the new install runs")
           (is (= 2 (count (:lsp-installer/warnings r3))) "staging dir and the pruned tree")
           (is (fs/exists? t1) "its removal failed, so the oldest tree is still there"))))))
+
+(deftest ^{:stratum 2} prune-keeps-recorded-previous-over-a-newer-orphan-test
+  (testing "the tree kept beside the current one is the recorded previous install, not the newest dir"
+    (with-base-dir
+      (fn [base]
+        (let [tgz            (write-tool-tgz! base)
+              [_ t1]         (install-tgz! base tgz)
+              [_ t2 bin-dir] (install-tgz! base tgz)
+              orphan         (fs/create-dirs (fs/path bin-dir ".dist" "tool" "v1-interrupted"))
+              [_ t3]         (install-tgz! base tgz)]
+          (is (fs/exists? t3))
+          (is (fs/exists? t2) "recorded previous install kept")
+          (is (not (fs/exists? orphan)) "tree from an interrupted install pruned")
+          (is (not (fs/exists? t1))))))))
