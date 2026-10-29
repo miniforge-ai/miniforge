@@ -99,8 +99,10 @@
   (stable-derived/parse-project-list-output output))
 
 (defn ^{:stratum 0} sanitize-git-worktree-env
-  "Remove git worktree/index variables that must not leak into child
-   processes spawned from git hook contexts."
+  "`env` without the variables `git rev-parse --local-env-vars` lists.
+   Pass a test process's environment through this before starting it: a
+   git hook exports them, and they aim the child's git at the hook's
+   repository. `GIT_*` variables that bind to no repository are kept."
   [env]
   (stable-derived/sanitize-git-worktree-env env))
 
