@@ -28,7 +28,9 @@
    [cognitect.transit :as transit]
    [ai.miniforge.artifact.core :as core]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log])
+  (:import
+   [java.nio.file CopyOption Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -60,11 +62,24 @@
 
 ;; Transit serialization
 (defn ^{:stratum 0} write-transit
-  "Write data to a file in Transit JSON format."
+  "Write data to a file in Transit JSON format.
+   Writes a sibling temp file, then renames it over the target, so the
+   file holds either its old content or the new content, never a
+   truncated mix."
   [file-path data]
-  (with-open [out (io/output-stream file-path)]
-    (let [writer (transit/writer out :json)]
-      (transit/write writer data))))
+  (let [target (io/file file-path)
+        tmp (io/file (.getParentFile target)
+                     (str (.getName target) "." (random-uuid) ".tmp"))]
+    (try
+      (with-open [out (io/output-stream tmp)]
+        (transit/write (transit/writer out :json) data))
+      (Files/move (.toPath tmp) (.toPath target)
+                  (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                          StandardCopyOption/REPLACE_EXISTING]))
+      (finally
+        ;; Gone after a successful move; on failure, don't leave a
+        ;; uniquely named orphan behind for every attempt.
+        (Files/deleteIfExists (.toPath tmp))))))
 
 (defn ^{:stratum 0} read-transit
   "Read data from a Transit JSON file.
