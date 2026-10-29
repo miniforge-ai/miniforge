@@ -450,6 +450,54 @@
               (is (= "#!/bin/sh\necho new\n" (slurp (str bin-dir "/tool"))) "B installed its own download")
               (is (= 3 @calls)))))))))
 
+(deftest ^{:stratum 1} interrupted-lock-wait-returns-an-anomaly-test
+  (testing "interrupting an install waiting for the lock returns an anomaly and keeps the interrupt flag"
+    (with-base-dir
+      (fn [base]
+        (let [entered  (java.util.concurrent.CountDownLatch. 1)
+              release  (java.util.concurrent.CountDownLatch. 1)
+              b-thread (promise)
+              install  #(binding [*err* (java.io.StringWriter.)]
+                          (installer/install-via-github gz-entry (installer/platform-key)))]
+          (with-redefs [installer/bin-dir       (constantly (str (fs/path base "bin")))
+                        installer/download-file (fn [_url dest]
+                                                  (.countDown entered)
+                                                  (.await release)
+                                                  (write-gzip! dest script)
+                                                  nil)]
+            (let [a (future (install))
+                  _ (.await entered)
+                  b (future (deliver b-thread (Thread/currentThread))
+                            [(install) (Thread/interrupted)])]
+              (try
+                (await-parked @b-thread)
+                (.interrupt ^Thread @b-thread)
+                (let [[result flag] @b]
+                  (is (= :anomalies/interrupted (:anomaly/category result)) (pr-str result))
+                  (is flag "the interrupt flag is restored"))
+                (finally (.countDown release)))
+              (is (contains? @a :installed)))))))))
+
+(deftest ^{:stratum 1} lock-release-failure-is-a-warning-test
+  (testing "a lock release failure after a successful install is a warning, not a failure"
+    (with-base-dir
+      (fn [base]
+        (let [bin-dir (str (fs/path base "bin"))
+              install #(installer/install-via-github gz-entry (installer/platform-key))]
+          (with-redefs [installer/bin-dir               (constantly bin-dir)
+                        installer/acquire-install-lock! (constantly
+                                                         [(fn [] (throw (java.io.IOException. "release failed")))])
+                        installer/download-file         (fn [_url dest] (write-gzip! dest script) nil)]
+            (binding [*err* (java.io.StringWriter.)]
+              (let [ok (install)]
+                (is (= (str bin-dir "/tool") (:installed ok)) (pr-str ok))
+                (is (some #(str/includes? % "release failed") (:lsp-installer/warnings ok))))
+              (testing "and a failed install keeps its own anomaly"
+                (with-redefs [installer/download-file (fn [_url dest] (spit (str dest) "not gzip") nil)]
+                  (let [bad (install)]
+                    (is (str/includes? (str (:anomaly/message bad)) "Extraction failed"))
+                    (is (some #(str/includes? % "release failed") (:lsp-installer/warnings bad)))))))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} archive-installs-prune-to-current-and-previous-test

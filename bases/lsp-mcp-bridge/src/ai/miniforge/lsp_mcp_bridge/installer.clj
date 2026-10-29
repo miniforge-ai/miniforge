@@ -33,7 +33,8 @@
    (java.nio.channels FileChannel)
    (java.nio.file CopyOption Files OpenOption StandardCopyOption StandardOpenOption)
    (java.security MessageDigest)
-   (java.util.concurrent Semaphore)
+   (java.util.concurrent TimeUnit)
+   (java.util.concurrent.locks ReentrantLock)
    (java.util.zip GZIPInputStream)))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -254,15 +255,27 @@
          (fs/regular-file? file {:nofollow-links true})
          (str/starts-with? (str (fs/real-path file)) (str (fs/real-path root) "/")))))
 
-;; A FileChannel lock belongs to the whole JVM: a second thread asking for it
-;; gets OverlappingFileLockException instead of waiting. Installers in this
-;; process queue on a per-binary semaphore first.
-(defonce ^{:stratum 0} ^:private install-semaphores (atom {}))
+;; One in-process lock per binary. A FileChannel lock belongs to the whole
+;; JVM: a second thread asking for it gets OverlappingFileLockException
+;; instead of waiting, so threads in this process queue here first.
+(defonce ^{:stratum 0} ^:private install-locks (atom {}))
 
 (def ^{:stratum 0} ^:private install-lock-wait-ms
-  "How long an installer waits for another process's install of the same
-   binary (a download included) before giving up."
+  "How long an installer waits for either install lock of a binary (another
+   install, download included, may hold it) before giving up."
   (* 10 60 1000))
+
+(defn ^{:stratum 0} release-install-lock!
+  "Run `held`'s release steps (zero-arg fns) newest first. A failing step
+   becomes a warning string instead of a throw, so it cannot replace the
+   install's own result.
+   Plain try: this base declares no slingshot dep (rule 211 exemption 1)."
+  [held]
+  (into [] (keep (fn [release!]
+                   (try (release!) nil
+                        (catch Exception e
+                          (str "could not release the install lock: " (ex-message e))))))
+        (rseq held)))
 
 ;; Installation orchestration
 (defn ^{:stratum 0} find-server-entry
@@ -275,42 +288,44 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} call-with-install-lock
-  "`(thunk contended?)` while holding `binary`'s install lock: a per-binary
-   semaphore in this process, then a FileChannel lock on
-   `<dest-dir>/.dist/<binary>/.lock` across processes, so one install and
-   its prune run at a time. `contended?` is true when another installer
-   held either lock first; the caller then rechecks the target. An anomaly
-   when the file lock stays busy past `install-lock-wait-ms` or locking
-   fails. FileLock is hinted AutoCloseable: babashka does not expose it.
+(defn ^{:stratum 1} acquire-install-lock!
+  "Take `binary`'s install lock: the in-process ReentrantLock, then a
+   FileChannel lock on `<dest-dir>/.dist/<binary>/.lock`, each waiting at
+   most `install-lock-wait-ms`. Returns the release steps for
+   release-install-lock!, or an anomaly on timeout, interrupt (the
+   interrupt flag is restored) or error, after releasing whatever it had
+   taken. FileLock is hinted AutoCloseable: babashka does not expose it.
    Plain try: this base declares no slingshot dep (rule 211 exemption 1)."
-  [dest-dir binary thunk]
-  (let [^Semaphore sem (get (swap! install-semaphores update binary #(or % (Semaphore. 1))) binary)
-        waited?        (not (.tryAcquire sem))
-        lock-file      (fs/path dest-dir ".dist" binary ".lock")]
-    (when waited? (.acquire sem))
+  [dest-dir binary]
+  (let [^ReentrantLock lock (get (swap! install-locks update binary #(or % (ReentrantLock.))) binary)
+        lock-file (fs/path dest-dir ".dist" binary ".lock")
+        held      (atom [])
+        give-up   (fn [category message]
+                    (release-install-lock! @held)
+                    (response/make-anomaly category message {:lsp-installer/lock-file (str lock-file)}))
+        timed-out #(give-up :anomalies/timeout (str "Timed out waiting for another install of " binary))]
     (try
-      (fs/create-dirs (fs/parent lock-file))
-      (with-open [channel (FileChannel/open lock-file (into-array OpenOption [StandardOpenOption/CREATE
-                                                                              StandardOpenOption/WRITE]))]
-        (let [first-try (.tryLock channel)
+      (if-not (.tryLock lock install-lock-wait-ms TimeUnit/MILLISECONDS)
+        (timed-out)
+        (let [_         (swap! held conj #(.unlock lock))
+              _         (fs/create-dirs (fs/parent lock-file))
+              channel   (FileChannel/open lock-file (into-array OpenOption [StandardOpenOption/CREATE
+                                                                            StandardOpenOption/WRITE]))
+              _         (swap! held conj #(.close channel))
               deadline  (+ (System/currentTimeMillis) install-lock-wait-ms)
-              ^java.lang.AutoCloseable held (or first-try
-                                                (loop []
-                                                  (or (.tryLock channel)
-                                                      (when (< (System/currentTimeMillis) deadline)
-                                                        (Thread/sleep 100)
-                                                        (recur)))))]
-          (if held
-            (try (thunk (or waited? (nil? first-try)))
-                 (finally (.close held)))
-            (response/make-anomaly :anomalies/unavailable
-                                   (str "Another install of " binary " holds " lock-file)
-                                   {:lsp-installer/lock-file (str lock-file)}))))
+              file-lock (loop []
+                          (or (.tryLock channel)
+                              (when (< (System/currentTimeMillis) deadline)
+                                (Thread/sleep 100)
+                                (recur))))]
+          (if file-lock
+            (conj @held #(.close ^java.lang.AutoCloseable file-lock))
+            (timed-out))))
+      (catch InterruptedException _
+        (.interrupt (Thread/currentThread))
+        (give-up :anomalies/interrupted (str "Interrupted waiting for the install lock of " binary)))
       (catch Exception e
-        (response/make-anomaly :anomalies/fault
-                               (str "Install of " binary " failed: " (ex-message e))))
-      (finally (.release sem)))))
+        (give-up :anomalies/fault (str "Could not take the install lock of " binary ": " (ex-message e)))))))
 
 (defn ^{:stratum 1} resolve-binary
   "Find a binary, checking PATH first then ~/.miniforge/bin/.
@@ -487,6 +502,25 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} call-with-install-lock
+  "`(thunk)` holding `binary`'s install lock; a lock anomaly is returned as
+   is. The lock is released after the thunk, and a release failure never
+   replaces its result: it is added to :lsp-installer/warnings, on the
+   success or on the install's own anomaly."
+  [dest-dir binary thunk]
+  (let [held (acquire-install-lock! dest-dir binary)]
+    (if (response/anomaly-map? held)
+      held
+      (let [result   (try (thunk)
+                          (catch Exception e
+                            (response/make-anomaly :anomalies/fault
+                                                   (str "Install of " binary " failed: " (ex-message e)))))
+            warnings (release-install-lock! held)]
+        (binding [*out* *err*]
+          (doseq [w warnings] (println "Warning:" w)))
+        (cond-> result
+          (seq warnings) (update :lsp-installer/warnings (fnil into []) warnings))))))
+
 (defn ^{:stratum 2} step-extract
   "Extract the archive into the staging dir's `extract/`, never into the
    bin dir. An extractor anomaly or throw (corrupt archive) fails the
@@ -522,7 +556,7 @@
         target   (str dest-dir "/" binary)]
     (call-with-install-lock
      dest-dir binary
-     (fn [_contended?]
+     (fn []
        (if (and auto? (fs/regular-file? target) (fs/executable? target))
          {:installed target}
          (-> {:server-entry server-entry :platform platform}
