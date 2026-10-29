@@ -268,3 +268,21 @@
                        {"git rev-parse" (shell-result (str "\n" head-sha "\n"))})
           r (sut/git-restore! exec-fn {:branch "task/x"})]
       (is (= head-sha (:commit-sha (result/unwrap r)))))))
+
+(deftest ^{:stratum 2} git-persist!-push?-false-commits-without-pushing-test
+  (testing ":push? false commits locally, never pushes, and says so"
+    (let [[exec-fn calls] (recording-exec-fn
+                           {"git status"    (shell-result " M src/a.clj")
+                            "git rev-parse" (shell-result head-sha)})
+          r (sut/git-persist! exec-fn {:branch "task/x" :message "m" :push? false})]
+      (is (result/ok? r))
+      (is (= {:persisted? true :pushed? false :commit-sha head-sha :branch "task/x"}
+             (result/unwrap r)))
+      (is (some #(cmd-has? % "commit") @calls))
+      (is (not-any? #(cmd-has? % "push") @calls))))
+  (testing "the default still pushes"
+    (let [[exec-fn calls] (recording-exec-fn
+                           {"git status"    (shell-result " M src/a.clj")
+                            "git rev-parse" (shell-result head-sha)})]
+      (is (true? (:pushed? (result/unwrap (sut/git-persist! exec-fn {:branch "task/x"})))))
+      (is (some #(cmd-has? % "git push") @calls)))))

@@ -166,6 +166,15 @@
       branch      (assoc :branch branch)
       base-branch (assoc :base-branch base-branch))))
 
+(defn- ^{:stratum 0} gate-denial
+  "How the gates judged phase RAN in PHASE-CTX: :secrets-detected when
+   :no-secrets denied it, :gate-denied when another gate did, else nil."
+  [phase-ctx ran]
+  (let [result (get-in phase-ctx [:execution/phase-results ran])]
+    (cond
+      (some #(= :no-secrets (:gate %)) (:phase/gate-failures result)) :secrets-detected
+      (seq (:phase/gate-errors result)) :gate-denied)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} restore-local-workspace-checkpoint!
@@ -209,7 +218,13 @@
    worktree tier's no-op `persist-workspace!` meant local-mode tasks
    lost their work the moment the scratch worktree was torn down. Per
    the fidelity goal in N11 §7.4, local should match governed in not
-   destroying work on failure."
+   destroying work on failure.
+
+   A phase its gates denied is not published. When :no-secrets denied
+   it, nothing is committed at all: a commit would carry the secret into
+   history, and the next successful phase's push sends history. When
+   another gate denied it, the work is committed but not pushed
+   (`:push? false`), and repair runs on it."
   [context phase-ctx]
   (let [executor (get context :execution/executor)
         env-id   (get context :execution/environment-id)
@@ -220,6 +235,8 @@
         workdir  (or (get context :execution/worktree-path)
                      (get phase-ctx :execution/worktree-path))
         phase    (boundary-phase phase-ctx)
+        ;; The phase that just ran is the one the pre-step context was on.
+        denial   (gate-denial phase-ctx (boundary-phase context))
         ;; Governed mode pushes to a remote via the capsule, so it persists with
         ;; or without a host worktree. LOCAL mode archives a git bundle of the
         ;; worktree — with NO worktree-path there is nothing to archive and the
@@ -228,6 +245,7 @@
         ;; leak a real commit into the live worktree. So local persistence
         ;; requires a worktree.
         skip     (cond
+                   (= :secrets-detected denial) :secrets-detected
                    (nil? executor) :no-executor
                    (nil? env-id) :no-environment-id
                    (not (or (= :governed mode) workdir)) :no-worktree)]
@@ -244,8 +262,9 @@
           nil)
       (try
         (let [result (dag/persist-workspace! executor env-id
-                                             (-> (persist-opts context phase env-id)
-                                                 (assoc :workdir workdir)))
+                                             (cond-> (-> (persist-opts context phase env-id)
+                                                         (assoc :workdir workdir))
+                                               denial (assoc :push? false)))
               data   (when (dag/ok? result) (dag/unwrap result))]
           (cond
             (not (dag/ok? result))
@@ -254,6 +273,11 @@
                                             {:phase (name phase)
                                              :code (str (get-in result [:error :code]))})
                        :data {:phase phase :result result}})
+
+            (and (:persisted? data) (false? (:pushed? data)))
+            (log/warn env-logger :workflow :workflow/persist-held
+                      {:message (messages/t :env/persist-held {:phase (name phase)})
+                       :data {:phase phase :reason denial :branch (:branch data)}})
 
             (:persisted? data)
             (notifications/announce! env-logger context phase env-id data)
