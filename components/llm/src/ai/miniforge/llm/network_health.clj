@@ -121,7 +121,11 @@
    proxy's answer to the CONNECT is the probe's response. http-kit writes
    the CONNECT target from the URL and leaves out a default port, which
    proxies reject, so the returned `:url` names the port. An http URL is
-   sent to the proxy as an absolute URI."
+   sent to the proxy as an absolute URI.
+
+   Keep-alive is off (`:keepalive -1`): after a CONNECT the connection is
+   a tunnel to the provider, and http-kit would otherwise reuse it to
+   send the next probe's CONNECT into that tunnel."
   [probe-url env]
   (let [uri (java.net.URI. probe-url)
         scheme (some-> (.getScheme uri) str/lower-case)
@@ -139,7 +143,8 @@
       {}
       {:url (str scheme "://" host ":" port (.getRawPath uri) query)
        :proxy-url (with-proxy-scheme proxy)
-       :tunnel? (= "https" scheme)})))
+       :tunnel? (= "https" scheme)
+       :keepalive -1})))
 
 ;------------------------------------------------------------------------------ Layer 2
 

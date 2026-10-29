@@ -21,6 +21,7 @@
    NO_PROXY). A probe that ignored the proxy would fail on every attempt
    behind one, and the monitor would kill a healthy agent."
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.llm.network-health :as nh]
@@ -60,6 +61,39 @@
    :message "No stream output"
    :elapsed-ms 1})
 
+(def ^{:stratum 0} ^:private connect-established-reply
+  "What the fake proxy answers to every CONNECT."
+  "HTTP/1.1 200 Connection established\r\n\r\n")
+
+(def ^{:stratum 0} ^:private expected-connect-line
+  "The CONNECT request line a probe of `anthropic-probe-url` must send:
+   authority form with the port."
+  "CONNECT api.anthropic.com:443 HTTP/1.1")
+
+(def ^{:stratum 0} ^:private probe-count
+  "Probes sent through the fake proxy; more than one, so connection
+   reuse would show."
+  2)
+
+(defn- ^{:stratum 0} answer-connects!
+  "Fake-proxy side of one client connection: record each request line as
+   [connection-number line] in `seen`, skip its headers, and answer with
+   `reply`, until the client closes."
+  [^java.net.Socket socket connection-number seen reply]
+  (try
+    (with-open [socket socket]
+      (let [in (io/reader (.getInputStream socket))
+            out (.getOutputStream socket)]
+        (loop []
+          (when-let [request-line (.readLine ^java.io.BufferedReader in)]
+            (doall (take-while seq (repeatedly #(.readLine ^java.io.BufferedReader in))))
+            (swap! seen conj [connection-number request-line])
+            (.write out (.getBytes ^String reply))
+            (.flush out)
+            (recur)))))
+    (catch java.io.IOException _
+      nil)))
+
 (defn- ^{:stratum 0} probe-request
   "The request map `network-healthy?` sends for `url` under environment
    `env`."
@@ -72,6 +106,16 @@
     @captured))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} serve-connects!
+  "Run a fake proxy on `server` until it is closed: each accepted
+   connection is answered by `answer-connects!`."
+  [^java.net.ServerSocket server seen reply]
+  (future
+    (loop [connection-number 1]
+      (let [socket (.accept server)]
+        (future (answer-connects! socket connection-number seen reply))
+        (recur (inc connection-number))))))
 
 (defn- ^{:stratum 1} streaming-opts
   "The opts `handle-streaming` passes to stream-exec-fn for a :claude
@@ -95,6 +139,7 @@
     (let [request (probe-request anthropic-probe-url {"HTTPS_PROXY" corp-proxy})]
       (is (= corp-proxy (:proxy-url request)))
       (is (true? (:tunnel? request)))
+      (is (= -1 (:keepalive request)) "a tunnel is never reused for the next probe")
       (is (= "https://api.anthropic.com:443/" (:url request))
           "the URL names the port, so the CONNECT target carries it")))
 
@@ -166,6 +211,18 @@
       (is (not (contains? request :proxy-url))))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} probe-through-local-proxy-test
+  (testing "each probe opens its own CONNECT tunnel to host:443 through the proxy"
+    (with-open [server (java.net.ServerSocket. 0)]
+      (let [seen (atom [])
+            env {"HTTPS_PROXY" (str "http://127.0.0.1:" (.getLocalPort server))}]
+        (serve-connects! server seen connect-established-reply)
+        (dotimes [_ probe-count]
+          (is (true? (nh/network-healthy? anthropic-probe-url {:env env}))))
+        (is (= (mapv (fn [n] [n expected-connect-line]) (range 1 (inc probe-count)))
+               @seen)
+            "one connection per probe, each a CONNECT to api.anthropic.com:443")))))
 
 (deftest ^{:stratum 2} handle-streaming-starts-network-monitor-test
   (testing "a streaming CLI call passes :backend-key, which starts the network-drop monitor"
