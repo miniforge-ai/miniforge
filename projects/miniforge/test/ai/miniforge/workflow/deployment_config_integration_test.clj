@@ -71,19 +71,46 @@
     {:rejected? true :reason :fixture/decision-refused}
     (publish stream event)))
 
+(def ^{:stratum 0} allowed-manifests
+  "Rendered manifests that name credentials without carrying one."
+  {"an API_KEY env entry from a secretKeyRef"
+   (str "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\n"
+        "spec:\n  template:\n    spec:\n      containers:\n"
+        "        - name: api\n          image: api@sha256:abc\n          env:\n"
+        "            - name: API_KEY\n              valueFrom:\n"
+        "                secretKeyRef:\n                  name: api-keys\n"
+        "                  key: api-key\n")
+   "auth-secret and checksum/secret annotations"
+   (str "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\n"
+        "spec:\n  template:\n    metadata:\n      annotations:\n"
+        "        checksum/secret: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08\n"
+        "    spec:\n      containers:\n        - name: api\n          image: api@sha256:abc\n"
+        "---\napiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: api\n"
+        "  annotations:\n    nginx.ingress.kubernetes.io/auth-secret: basic-auth\n"
+        "spec:\n  rules: []\n")})
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} manifest-with-secret
-  (str clean-manifest
-       "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: api-config\n"
-       "data:\n  password: \"correct-horse-battery-staple\"\n"))
-
-(def ^{:stratum 1} manifest-with-plain-secret
-  "The same secret as a YAML plain scalar, with reference keys that are not secrets."
-  (str clean-manifest
-       "---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: api-db\n"
-       "stringData:\n  passwordRef: db-credentials\n  secretName: api-tls\n"
-       "  password: correct-horse-battery-staple\n"))
+(def ^{:stratum 1} blocked-manifests
+  "Rendered manifests carrying a plaintext credential, by the shape that carries it."
+  {"a quoted ConfigMap password"
+   (str clean-manifest
+        "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: api-config\n"
+        "data:\n  password: \"correct-horse-battery-staple\"\n")
+   "a Secret's stringData, beside reference keys"
+   (str clean-manifest
+        "---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: api-db\n"
+        "stringData:\n  passwordRef: db-credentials\n  secretName: api-tls\n"
+        "  password: correct-horse-battery-staple\n")
+   "a multiword ConfigMap passphrase"
+   (str clean-manifest
+        "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: api-config\n"
+        "data:\n  password: correct horse battery staple\n")
+   "an API_KEY env entry with a literal value"
+   (str "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\n"
+        "spec:\n  template:\n    spec:\n      containers:\n"
+        "        - name: api\n          image: api@sha256:abc\n          env:\n"
+        "            - name: API_KEY\n              value: sk-live-0123456789abcdef\n")})
 
 (defn- ^{:stratum 1} deploy
   "Run the real deploy interceptor through the real lifecycle and gates with
@@ -168,10 +195,15 @@
       (is (= {:dry-run 1 :apply 1} calls))
       (is (= :completed (:status result)))
       (is (= :allow (get-in result [:phase/decision-envelope :envelope/decision])))))
-  (doseq [[label manifest] {"quoted" manifest-with-secret "plain scalar" manifest-with-plain-secret}]
-    (testing (str "a manifest with a " label " plaintext secret never reaches the cluster API")
+  (doseq [[label manifest] blocked-manifests]
+    (testing (str label " never reaches the cluster API")
       (let [[result calls] (deploy manifest)]
         (is (= {:dry-run 0 :apply 0} calls) "no server dry run, no apply")
         (is (= :failed (:status result)))
         (is (= :authority (get-in result [:result :stage])))
-        (is (= :deny (get-in result [:phase/decision-envelope :envelope/decision])))))))
+        (is (= :deny (get-in result [:phase/decision-envelope :envelope/decision]))))))
+  (doseq [[label manifest] allowed-manifests]
+    (testing (str label " is not a plaintext credential")
+      (let [[result calls] (deploy manifest)]
+        (is (= {:dry-run 1 :apply 1} calls))
+        (is (= :completed (:status result)))))))
