@@ -51,6 +51,7 @@
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.main.util :as util]
    [ai.miniforge.cli.main.launchers :as launchers]
+   [ai.miniforge.cli.main.parse-errors :as parse-errors]
    [ai.miniforge.cli.main.status.history :as status-history]
    [ai.miniforge.cli.main.status.presentation :as status-presentation]
    [ai.miniforge.cli.main.status.summary :as status-summary]
@@ -148,29 +149,6 @@
                   (str/join "\n" (map #(str "  " (app-config/command-string %))
                                       (app-config/help-examples)))
                   "\n"))))
-
-(defn- ^{:stratum 0} handle-unknown-command
-  "Print help for an unrecognized CLI command."
-  [{:keys [wrong-input dispatch all-commands]}]
-  (display/print-error (messages/t :main/unknown-command
-                                   {:command (str/join " " (conj (vec dispatch) wrong-input))}))
-  (println)
-  (when (and (= (first dispatch) "fleet")
-             (contains? #{"web" "dashboard" "tui"} wrong-input))
-    (println (messages/t :main/did-you-mean))
-    (println (str "  " (app-config/command-string (if (= wrong-input "dashboard") "web" wrong-input))))
-    (println))
-  (when (seq all-commands)
-    (println (messages/t :main/available-commands
-                         {:scope (if (seq dispatch)
-                                   (str "'" (str/join " " dispatch) "' ")
-                                   "")}))
-    (doseq [cmd all-commands]
-      (println (str "  " (app-config/command-string (str/join " " (conj (vec dispatch) cmd))))))
-    (println))
-  (println (messages/t :main/run-help
-                       {:command (app-config/command-string "help")}))
-  (System/exit 1))
 
 ;; TUI components loaded conditionally (only in JVM/jlink bundled runtime).
 ;; This is an optional composition seam: miniforge-core includes the CLI
@@ -429,7 +407,7 @@
   [{:cmds ["version"] :fn version-cmd}
    {:cmds ["doctor"]  :fn doctor-cmd}
    {:cmds ["help"]    :fn help-cmd}
-   {:cmds []          :fn help-cmd}  ; default
+   {:cmds []          :fn (parse-errors/help-unless-unknown help-cmd)}  ; default
 
    ;; Tool-use supervision hook (Claude PreToolUse)
    {:cmds ["hook-eval"]
@@ -447,7 +425,6 @@
     :fn lsp-mcp-bridge-cmd}
 
    ;; LSP management commands (user-facing)
-   {:cmds ["lsp"]          :fn help-cmd}
    {:cmds ["lsp" "status"] :fn lsp-status-cmd}
    {:cmds ["lsp" "install"] :fn lsp-install-cmd}
    {:cmds ["lsp" "setup"] :fn lsp-setup-cmd}
@@ -463,7 +440,6 @@
     :spec {:path {:alias :p}}}
 
    ;; Runtime adapter (N11-delta Phase 3) — info / pass-through run
-   {:cmds ["runtime"]      :fn help-cmd}
    {:cmds ["runtime" "info"] :fn runtime-info-cmd}
    {:cmds ["runtime" "run"]  :fn runtime-run-cmd}
 
@@ -519,7 +495,8 @@
    ;; Workflow parent — `mf workflow --help` / `mf workflow` lists the
    ;; group's subcommands with their one-line summaries.
    {:cmds ["workflow"]
-    :fn (wr-help/group-handler wr-help-registry/workflow-group-help)}
+    :fn (parse-errors/help-unless-unknown
+         (wr-help/group-handler wr-help-registry/workflow-group-help))}
 
    ;; Workflow commands (each subcommand carries a `--help` / `-h`
    ;; flag wired through `wr-help/handler-with-help`; the spec from
@@ -562,7 +539,8 @@
    ;; Chain parent — `mf chain --help` / `mf chain` lists the group's
    ;; subcommands with their one-line summaries.
    {:cmds ["chain"]
-    :fn (wr-help/group-handler wr-help-registry/chain-group-help)}
+    :fn (parse-errors/help-unless-unknown
+         (wr-help/group-handler wr-help-registry/chain-group-help))}
 
    ;; Chain commands
    {:cmds ["chain" "run"]
@@ -575,7 +553,6 @@
     :spec (wr-help-registry/spec-for :chain-list)}
 
    ;; Config subcommands
-   {:cmds ["config"] :fn help-cmd}
    {:cmds ["config" "init"] :fn config-init-cmd}
    {:cmds ["config" "list"] :fn config-list-cmd}
    {:cmds ["config" "get"]  :fn config-get-cmd  :args->opts [:key]}
@@ -674,28 +651,23 @@
     :args->opts [:agent-id]}
 
    ;; Operator channel — `control-plane` above is the dashboard's HTTP API
-   {:cmds ["operator"]          :fn help-cmd}
    {:cmds ["operator" "serve"] :fn operator-serve-cmd}
 
    ;; Policy pack commands (N5)
-   {:cmds ["policy"]           :fn help-cmd}
    {:cmds ["policy" "list"]    :fn policy-list-cmd}
    {:cmds ["policy" "show"]    :fn policy-show-cmd    :args->opts [:pack-id]}
    {:cmds ["policy" "install"] :fn policy-install-cmd :args->opts [:path]}
 
    ;; Evidence bundle commands (N5)
-   {:cmds ["evidence"]           :fn help-cmd}
    {:cmds ["evidence" "list"]    :fn evidence-list-cmd}
    {:cmds ["evidence" "show"]    :fn evidence-show-cmd   :args->opts [:id]}
    {:cmds ["evidence" "export"]  :fn evidence-export-cmd :args->opts [:id :output-path]}
 
    ;; Artifact commands (N5)
-   {:cmds ["artifact"]              :fn help-cmd}
    {:cmds ["artifact" "list"]       :fn artifact-list-cmd}
    {:cmds ["artifact" "provenance"] :fn artifact-provenance-cmd :args->opts [:id]}
 
    ;; ETL commands (N5)
-   {:cmds ["etl"]             :fn help-cmd}
    {:cmds ["etl" "repo"]      :fn etl-repo-cmd     :args->opts [:url]}
    {:cmds ["etl" "run"]       :fn etl-run-cmd      :args->opts [:pack]}
    {:cmds ["etl" "list"]      :fn etl-list-cmd     :args->opts [:paths]}
@@ -705,13 +677,18 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} -main
-  "CLI entry point."
+  "CLI entry point. An unknown command exits 2 and lists the available
+   ones; a command group named without a subcommand lists its
+   subcommands."
   [& args]
   (try+
     (cli/dispatch dispatch-table args)
     #_{:clj-kondo/ignore [:unresolved-symbol]}
     (catch [:type :org.babashka/cli :cause :no-match] data
-      (handle-unknown-command data))))
+      (parse-errors/handle-unknown-command! data))
+    #_{:clj-kondo/ignore [:unresolved-symbol]}
+    (catch [:type :org.babashka/cli :cause :input-exhausted] data
+      (parse-errors/print-group-usage! data))))
 
 (alter-var-root #'cmd-monitoring/*web-available?* (constantly web-available?))
 
