@@ -17,18 +17,12 @@
 ;; limitations under the License.
 (ns ai.miniforge.event-stream.layout-tail
   "Follow the runs other processes write through the file sink, and hand
-   each new event to a callback. It polls (it runs under babashka, with a
-   directory per run ever made) only the directories modified within
-   `:window-ms`, relisting them on a root change (at most every
-   `relist-min-ms`) and every `sweep-ms`. Runs active at startup are read
-   in full; elsewhere, files recorded before startup are skipped.
-
-   Each run is tracked by a watermark and the names read above it
-   (`layout/track`). A file that fails to decode holds back the run's
-   later files until it decodes or is given up as corrupt, a gap logged
-   at :warn (`layout/read-unread`). A directory leaving the active set is
-   read again each poll until a read leaves nothing pending; then it
-   keeps only its watermark."
+   each new event to a callback. It polls the directories modified within
+   `:window-ms`, relisting them on a root change and every `sweep-ms`.
+   Runs active at startup are read in full; elsewhere, files recorded
+   before startup are skipped. Per run, see `layout/track` and
+   `layout/read-unread`; a directory leaving the active set is read each
+   poll until nothing is pending, then keeps only its watermark."
   (:require
    [ai.miniforge.event-stream.layout-reader :as layout]
    [ai.miniforge.logging.interface :as log]
@@ -77,15 +71,20 @@
   (let [tracked (get-in state [:tracked wf-name] {:watermark (:since-ms state) :names {}})
         files   (or (layout/unread-files (layout/current-dir events-dir wf-name dir) tracked)
                     (when-not (.exists (layout/current-dir events-dir wf-name dir)) []))
-        [events tracked gaps] (layout/read-unread files tracked)]
+        [events tracked gaps] (layout/read-unread files tracked)
+        ;; Anything but an Error, an ex-info included (try+ hands one
+        ;; over as its data, which an Exception selector misses).
+        nonfatal? (fn [thrown] (not (instance? Error thrown)))]
     (doseq [f gaps]
-      (log/warn (:logger state) :event-stream :event-tail/gap
-                {:message "Event file given up after repeated failed reads"
-                 :data    {:workflow wf-name :file (str f)}}))
+      ;; Best effort: a logger that fails must not hold back delivery.
+      (try+ (log/warn (:logger state) :event-stream :event-tail/gap
+                      {:message "Event file given up after repeated failed reads"
+                       :data    {:workflow wf-name :file (str f)}})
+            (catch nonfatal? _ nil)))
     (doseq [event events]
       (try+
         (on-event event)
-        (catch Exception _ nil)))
+        (catch nonfatal? _ nil)))
     (assoc-in state [:tracked wf-name] tracked)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -142,6 +141,7 @@
   (let [{:keys [poll-ms window-ms thread-name]} (merge defaults opts)
         logger  (get opts :logger (log/create-logger {:min-level :warn :output :human}))
         running (atom true)
+        nonfatal? (fn [thrown] (not (instance? Error thrown)))
         thread  (Thread.
                  (fn []
                    (let [state (atom nil)]
@@ -155,7 +155,7 @@
                          (Thread/sleep (long poll-ms))
                          (catch InterruptedException _
                            (reset! running false))
-                         (catch Exception _
+                         (catch nonfatal? _
                            ;; Transient I/O error — retry on the next poll
                            (try+ (Thread/sleep 1000)
                                  (catch InterruptedException _

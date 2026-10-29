@@ -35,9 +35,11 @@
    worktree), the fix is refused rather than committing or discarding
    them.
 
-   GIT_INDEX_FILE is never inherited: the preflight sets it to
-   `<gitdir>/index`, the index this replaces; staging and the commit set
-   it to the lock file; every other call here clears it.
+   No call inherits the variables that bind git to a repository
+   (`release/repository-env-vars`: GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE
+   and the rest), so every command acts on the worktree it runs in. The
+   preflight then sets GIT_INDEX_FILE to `<gitdir>/index`, the index this
+   replaces, and staging and the commit set it to the lock file.
 
    The git dir comes from `git rev-parse --absolute-git-dir`, so a relative
    worktree path and a linked worktree both resolve to the right index.
@@ -47,6 +49,7 @@
    itself."
   (:require
    [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
+   [ai.miniforge.release-executor.interface :as release]
    [babashka.process :as process]
    [clojure.java.io :as io]
    [clojure.string :as str]
@@ -55,10 +58,11 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} git-env
-  "`environment` (a map) without GIT_INDEX_FILE, or with it set to `index`
-   when given, for one git call."
+  "`environment` (a map) without the variables that bind git to a
+   repository, with GIT_INDEX_FILE set to `index` when given, for one git
+   call."
   [environment index]
-  (cond-> (dissoc (into {} environment) "GIT_INDEX_FILE")
+  (cond-> (release/without-repository-env environment)
     index (assoc "GIT_INDEX_FILE" (str index))))
 
 (defn ^{:stratum 0} discard-index!

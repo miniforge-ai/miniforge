@@ -16,5 +16,22 @@
   (or (= :failed (:phase/status phase))
       (contains? phase :phase/decision-unacknowledged)))
 
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} completed-status
+  "The :status a :leave handler records for a phase that finished its own
+   work: :completed, unless the phase's gates failed."
+  [phase]
+  (if (gate-failed? phase) :failed :completed))
+
+(defn ^{:stratum 1} count-completed
+  "Add phase-kw to [:execution :phases-completed] unless the phase in ctx
+   failed its gates."
+  [ctx phase-kw]
+  (cond-> ctx
+    (not (gate-failed? (:phase ctx)))
+    (update-in [:execution :phases-completed] (fnil conj []) phase-kw)))
+
 (comment
-  (gate-failed? {:phase/status :failed}))
+  (gate-failed? {:phase/status :failed})
+  (completed-status {:phase/status :failed}))

@@ -23,7 +23,8 @@
    workflow and phase components."
   (:require
    [ai.miniforge.release-executor.core :as core]
-   [ai.miniforge.release-executor.git :as git]))
+   [ai.miniforge.release-executor.git :as git]
+   [ai.miniforge.release-executor.shell :as shell]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -59,6 +60,22 @@
   "Create a new git branch from main.
    Returns {:success? bool :branch string :base-branch string :error string}"
   git/create-branch!)
+
+;; Git child-process environment
+(def ^{:stratum 0} repository-env-vars
+  "The variables that bind a git command to one repository (what `git
+   rev-parse --local-env-vars` prints). Every git call the release and
+   fix-loop paths make drops them, so it acts on the worktree it runs in."
+  shell/repository-env-vars)
+
+(def ^{:stratum 0} without-repository-env
+  "`env` (a map) without `repository-env-vars`. Args: [env]."
+  shell/without-repository-env)
+
+(def ^{:stratum 0} local-git-env
+  "This process's environment without `repository-env-vars`, for a git
+   child process. Args: []."
+  shell/local-git-env)
 
 (def ^{:stratum 0} commit-changes!
   "Commit staged changes. Args: [worktree-path message], plus optional

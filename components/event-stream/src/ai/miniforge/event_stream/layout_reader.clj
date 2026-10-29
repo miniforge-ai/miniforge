@@ -94,10 +94,13 @@
 
 (defn ^{:stratum 0} retire
   "Tracking for a run leaving the active set, after its last read: the
-   watermark moves past the newest name read, and the names go."
+   watermark moves up to the newest name read, and only that
+   millisecond's names stay, so a later file of the same millisecond is
+   still unread."
   [{:keys [watermark names]}]
-  {:watermark (reduce max watermark (map inc (vals names)))
-   :names     {}})
+  (let [newest (reduce max watermark (vals names))]
+    {:watermark newest
+     :names     (into {} (filter #(= newest (val %))) names)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -149,18 +152,13 @@
 
 (defn ^{:stratum 2} read-unread
   "[events tracked gaps]: the events of a run's unread `files` (from
-   `unread-files`) in creation order (recorded ms, then
-   :event/sequence-number), its tracking after them, and the files given
-   up.
-
-   A run's events are handed on in order. A file that fails to decode
-   holds back itself and every file from its millisecond on: tracking
-   marks the run :pending?, counts the failure, and the next read tries
-   again. A file gone before decoding (the run moved to archived/) is
-   retried without counting. After `max-read-attempts` failed reads of a
-   file still there, it is given up as corrupt: it counts as read, the
-   caller reports the gap, and the files behind it go on. A listing that
-   failed (`files` nil) leaves tracking as it was, marked :pending?."
+   `unread-files`) in creation order, its tracking after them, and the
+   files given up. A file that fails to decode holds back itself and every
+   file from its millisecond on; tracking counts the failure (unless the
+   file is gone, i.e. moved) and marks the run :pending?. After
+   `max-read-attempts` failures it is given up as corrupt: it counts as
+   read, and the caller reports the gap. A failed listing (`files` nil)
+   leaves tracking as it was, marked :pending?."
   [files tracked]
   (let [done (fn [read gaps failures pending?]
                [(->> read
