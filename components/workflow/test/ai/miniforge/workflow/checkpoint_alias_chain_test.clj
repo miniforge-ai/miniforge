@@ -70,7 +70,20 @@
 (deftest ^{:stratum 1} relative-link-cycles-terminate-without-creation
   (fixture/call-with-posix-checkpoint-root verify-cycle))
 
+(defn- ^{:stratum 1} verify-sticky-parent-traversal [root]
+  (let [sticky (fs/create-dir (fs/path root "sticky"))
+        alias (fs/create-sym-link (fs/path root "alias") sticky)
+        requested (fs/path alias "unused" ".." "private")
+        expected (fs/path (fs/real-path sticky) "private")]
+    (java.nio.file.Files/setAttribute sticky "unix:mode" (int sticky-world-writable-mode)
+                                     (make-array java.nio.file.LinkOption 0))
+    (is (= expected (directory/prepare! requested)))
+    (is (= expected (directory/existing! requested)))))
+
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} parent-traversal-through-a-sticky-alias-preserves-ancestor-semantics
+  (fixture/call-with-posix-checkpoint-root verify-sticky-parent-traversal))
 
 (deftest ^{:stratum 2} root-identity-does-not-create-duplicate-owner-errors
   (fixture/call-with-posix-checkpoint-root verify-root-owner))

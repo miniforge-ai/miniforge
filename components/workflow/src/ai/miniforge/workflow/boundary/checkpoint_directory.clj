@@ -23,12 +23,16 @@
     (policy/check! path (and leaf? (= path directory))))
   directory)
 
-(defn- ^{:stratum 0} create-private! [directory segment]
+(defn- ^{:stratum 0} create-private! [directory [segment leaf?]]
   (let [path (fs/path directory segment)]
     (try+
       (fs/create-dir path {:posix-file-permissions policy/private-permissions})
       (catch FileAlreadyExistsException _ nil))
-    (policy/check! path true)))
+    (policy/check! path leaf?)))
+
+(defn- ^{:stratum 0} creation-steps [segments]
+  (let [final-index (dec (count segments))]
+    (map-indexed #(vector %2 (= %1 final-index)) segments)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -44,7 +48,8 @@
       (do
         (path-policy/check! directory)
         (fs/real-path
-         (reduce create-private! (check-ancestry! (fs/real-path ancestor) (empty? segments)) segments)))
+         (reduce create-private! (check-ancestry! (fs/real-path ancestor) (empty? segments))
+                  (creation-steps segments))))
       (fs/real-path (fs/create-dirs directory)))))
 
 (comment ::checkpoint-directory-creation)
