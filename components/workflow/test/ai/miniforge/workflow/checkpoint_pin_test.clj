@@ -33,6 +33,15 @@
     (doseq [f (reverse (file-seq (fs/file root (str (:execution/id ctx)))))]
       (.setLastModified ^java.io.File f at))))
 
+(defn- ^{:stratum 0} call-unlistable
+  "Call `f` while `dir` can be entered but not listed; skip it where the
+   permission does not stop listing (running as root)."
+  [dir f]
+  (fs/set-posix-file-permissions dir "-wx------")
+  (try
+    (when-not (fs/readable? dir) (f))
+    (finally (fs/set-posix-file-permissions dir "rwx------"))))
+
 (deftest ^{:stratum 0} pinning-a-run-without-a-manifest-is-not-found
   (fixture/call-with-temp-checkpoint-root
    (fn [root]
@@ -96,5 +105,22 @@
        (age-run! root ctx 90)
        (is (= [(:execution/id ctx)]
               (get-in (workflow/gc-checkpoints! opts) [:kept :pinned])))))))
+
+(deftest ^{:stratum 1} root-lookup-and-pin-fail-as-anomalies
+  (fixture/call-with-temp-checkpoint-root
+   (fn [root]
+     (fs/with-temp-dir [events-dir {:prefix "pin-events-"}]
+       (let [id (fixture/expired-run! root)]
+         (testing "a run directory that cannot be listed"
+           (call-unlistable (fs/file root (str id))
+                            #(let [found (workflow/run-checkpoint-root (str id) (str events-dir))]
+                               (is (anomaly/anomaly? found))
+                               (is (= :unavailable (:anomaly/type found))))))
+         (testing "a checkpoint root that cannot be resolved"
+           (with-redefs [paths/resolve-checkpoint-root
+                         (fn [& _] (throw (java.io.IOException. "config unreadable")))]
+             (let [pinned (workflow/pin-checkpoint! id)]
+               (is (anomaly/anomaly? pinned))
+               (is (= :unavailable (:anomaly/type pinned)))))))))))
 
 (comment ::checkpoint-pin)

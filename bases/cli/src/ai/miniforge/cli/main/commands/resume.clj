@@ -370,9 +370,11 @@
         ;; resume goes on.
         _ (when (:pin opts)
             (let [root (workflow/run-checkpoint-root (str workflow-id) events-dir)
-                  pinned (if root
-                           (workflow/pin-checkpoint! (str workflow-id) {:checkpoint/root root})
-                           (workflow/pin-checkpoint! (str workflow-id)))]
+                  ;; A root that cannot be looked up is a failed pin.
+                  pinned (cond
+                           (anomaly/anomaly? root) root
+                           root (workflow/pin-checkpoint! (str workflow-id) {:checkpoint/root root})
+                           :else (workflow/pin-checkpoint! (str workflow-id)))]
               (cond
                 (anomaly/anomaly? pinned)
                 (display/print-info (messages/t :resume/pin-failed

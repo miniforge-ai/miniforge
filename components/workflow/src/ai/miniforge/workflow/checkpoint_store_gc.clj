@@ -167,14 +167,23 @@
 (defn ^{:stratum 1} run-checkpoint-root
   "The checkpoint root run `workflow-id` was checkpointed under: the
    default root when it holds the run, else the root the run's own events
-   (under `events-dir`) announce, else nil."
+   (under `events-dir`) announce, else nil. An `:unavailable` anomaly when
+   the lookup fails, such as a run directory that cannot be listed."
   [workflow-id events-dir]
-  (if (checkpoint-store/checkpoint-present? workflow-id)
-    (checkpoint-paths/resolve-checkpoint-root {})
-    (let [run-dir (announced-run-dir events-dir workflow-id)]
-      (when (and run-dir (not= :unknown run-dir)
-                 (= (str workflow-id) (str (fs/file-name run-dir))))
-        (str (fs/parent run-dir))))))
+  (try+
+    (if (checkpoint-store/checkpoint-present? workflow-id)
+      (checkpoint-paths/resolve-checkpoint-root {})
+      (let [run-dir (announced-run-dir events-dir workflow-id)]
+        (when (and run-dir (not= :unknown run-dir)
+                   (= (str workflow-id) (str (fs/file-name run-dir))))
+          (str (fs/parent run-dir)))))
+    (catch Exception e
+      (anomaly/exception-anomaly :unavailable
+                                 (messages/t :checkpoint/root-lookup-failed
+                                             {:run-id (str workflow-id)
+                                              :error (or (ex-message e) (.getName (class e)))})
+                                 {:workflow/run-id workflow-id}
+                                 e))))
 
 (defn ^{:stratum 1} checkpoint-usage
   "What the checkpoint root holds, read-only, cheap enough for `mf doctor`:

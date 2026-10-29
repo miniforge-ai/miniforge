@@ -126,6 +126,14 @@
               workflow-run-id)]
      (boolean (and (fs/directory? dir) (seq (fs/list-dir dir)))))))
 
+(defn- ^{:stratum 0} pin-failure [workflow-run-id data e]
+  (anomaly/exception-anomaly :unavailable
+                             (messages/t :checkpoint/pin-failed
+                                         {:run-id workflow-run-id
+                                          :error (or (ex-message e) (.getName (class e)))})
+                             data
+                             e))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} read-checkpoint-file
@@ -215,38 +223,38 @@
    holds while it decides to delete the run: the pin lands before that
    decision or finds the run gone. Returns the marker path, or an anomaly:
    `:not-found` when the run has no checkpoint, `:unavailable` when the
-   lock stays busy or the marker cannot be written."
+   lock stays busy, the marker cannot be written or anything else fails;
+   it does not throw."
   ([workflow-run-id]
    (pin-checkpoint! workflow-run-id {}))
   ([workflow-run-id opts]
-   (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
-         path (checkpoint-paths/pin-marker-path checkpoint-root workflow-run-id)
-         data {:workflow/run-id workflow-run-id :checkpoint/path path}]
-     (checkpoint-lock/with-run-lock
-      checkpoint-root workflow-run-id
-      (fn []
-        (if-not (fs/exists? (checkpoint-paths/manifest-path checkpoint-root workflow-run-id))
-          (anomaly/anomaly :not-found
-                           (messages/t :checkpoint/pin-no-manifest {:run-id workflow-run-id})
-                           data)
-          ;; Into the run directory by path, never creating it.
-          (try+
-            (let [temp (str (fs/path (fs/parent path)
-                                     (str checkpoint-paths/pin-marker-temp-prefix
-                                          (random-uuid) temp-file-suffix)))]
-              (spit temp (pr-str {:pinned-at (str (java.time.Instant/now))}))
-              (Files/move (fs/path temp) (fs/path path)
-                          (into-array java.nio.file.CopyOption
-                                      [StandardCopyOption/ATOMIC_MOVE
-                                       StandardCopyOption/REPLACE_EXISTING]))
-              path)
-            (catch Exception e
-              (anomaly/exception-anomaly :unavailable
-                                         (messages/t :checkpoint/pin-failed
-                                                     {:run-id workflow-run-id
-                                                      :error (or (ex-message e) (.getName (class e)))})
-                                         data
-                                         e)))))))))
+   (try+
+     (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
+           path (checkpoint-paths/pin-marker-path checkpoint-root workflow-run-id)
+           data {:workflow/run-id workflow-run-id :checkpoint/path path}]
+       (checkpoint-lock/with-run-lock
+        checkpoint-root workflow-run-id
+        (fn []
+          (if-not (fs/exists? (checkpoint-paths/manifest-path checkpoint-root workflow-run-id))
+            (anomaly/anomaly :not-found
+                             (messages/t :checkpoint/pin-no-manifest {:run-id workflow-run-id})
+                             data)
+            ;; Into the run directory by path, never creating it.
+            (try+
+              (let [temp (str (fs/path (fs/parent path)
+                                       (str checkpoint-paths/pin-marker-temp-prefix
+                                            (random-uuid) temp-file-suffix)))]
+                (spit temp (pr-str {:pinned-at (str (java.time.Instant/now))}))
+                (Files/move (fs/path temp) (fs/path path)
+                            (into-array java.nio.file.CopyOption
+                                        [StandardCopyOption/ATOMIC_MOVE
+                                         StandardCopyOption/REPLACE_EXISTING]))
+                path)
+              (catch Exception e
+                (pin-failure workflow-run-id data e)))))))
+     ;; Root resolution or the lock itself failing: still an anomaly.
+     (catch Exception e
+       (pin-failure workflow-run-id {:workflow/run-id workflow-run-id} e)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
