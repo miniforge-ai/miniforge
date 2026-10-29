@@ -18,6 +18,7 @@
 (ns ai.miniforge.agent.model
   "Shared agent model policy and configuration helpers."
   (:require
+   [ai.miniforge.agent.messages :as msg]
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.llm.interface :as llm]
    [clojure.string :as str]))
@@ -27,7 +28,7 @@
 ;; Canonical role model policy
 (def ^{:stratum 0} ^:private backend-role-models
   "Miniforge's model for each role tier on the backends whose model ids it
-   knows. It applies only when the user config names no model (see
+   knows. It applies only when the user config names no usable model (see
    `default-model-for-role`).
 
    A backend missing here gets no model from miniforge, so its own default
@@ -52,6 +53,11 @@
   "Roles that default to the higher-reasoning model tier."
   #{:planner :architect})
 
+(defonce ^{:stratum 0} ^:private warned-mismatches
+  ;; [config path, model, backend] triples already reported, so a skipped
+  ;; setting is reported once per process rather than once per agent.
+  (atom #{}))
+
 (defn- ^{:stratum 0} model-text
   "`model` as the string a client sends, or nil when it names no model. A
    symbol, which an older `config set` stored for a bare word such as
@@ -62,29 +68,22 @@
     (when-not (and (string? text) (str/blank? text))
       text)))
 
-(def ^{:stratum 0} ^:private bare-id-providers
-  "Backends that take one provider's model ids without the provider
-   prefix, keyed to that provider's prefix."
-  {:claude "anthropic"
-   :anthropic-api "anthropic"})
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} model-id-for-backend
+(defn- ^{:stratum 0} model-id-for-backend
   "Return the form of `model-id` to hand to a client on `backend`.
 
    A provider-prefixed id such as \"anthropic/claude-sonnet-4-6\" is the
    form routing backends (opencode, openrouter) take. Return the bare id
-   after the prefix when `backend` takes that provider's ids bare
-   (`bare-id-providers`) or the bare id is a catalog model of `backend`
-   itself. Otherwise return `model-id` unchanged."
+   after the prefix when `backend` serves the catalog family the id
+   belongs to (claude and anthropic-api serve anthropic/ ids). Otherwise
+   return `model-id` unchanged."
   [model-id backend]
-  (let [[_ provider bare-id] (re-matches #"([^/]+)/(.+)" (str model-id))]
-    (if (and bare-id
-             (or (= provider (get bare-id-providers backend))
-                 (= backend (llm/backend-for-model bare-id nil))))
+  (let [bare-id (second (re-matches #"[^/]+/(.+)" model-id))
+        served  (get-in llm/backends [backend :catalog-backend])]
+    (if (and bare-id served (= served (llm/catalog-backend-for-model model-id)))
       bare-id
       model-id)))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} default-model-for-role
   "Return the model id `role` runs with on `backend`, or nil when nothing
@@ -92,7 +91,7 @@
    the configured llm.backend.
 
    The planner and architect use the thinking tier, every other role the
-   execution tier. First match wins:
+   execution tier. First usable match wins:
    1. The tier in the user config, [:agents :default-models :thinking] or
       [:agents :default-models :execution] (MINIFORGE_AGENT_THINKING_MODEL,
       MINIFORGE_AGENT_EXECUTION_MODEL).
@@ -101,15 +100,32 @@
 
    The shipped default config sets neither 1 nor 2, so anything found there
    is the user's own setting. A blank setting is unset, and a symbol is
-   read as its text (`model-text`)."
+   read as its text (`model-text`). A setting naming a catalog model that `backend` does not serve
+   (`llm/backend-serves-model?`), such as the anthropic/claude-sonnet-4-5
+   an older `config` command wrote, on codex, is skipped with a warning on
+   stderr, once per process; a model the catalog does not know is used as
+   given."
   ([role] (default-model-for-role role nil))
   ([role backend]
-   (let [cfg  (config/load-merged-config)
-         tier (if (thinking-roles role) :thinking :execution)]
-     (or (model-text (get-in cfg [:agents :default-models tier]))
-         (model-text (get-in cfg [:llm :model]))
-         (get-in backend-role-models
-                 [(or backend (get-in cfg [:llm :backend])) tier])))))
+   (let [cfg        (config/load-merged-config)
+         tier       (if (thinking-roles role) :thinking :execution)
+         backend    (or backend (get-in cfg [:llm :backend]))
+         configured (fn configured [path]
+                      (when-let [model (model-text (get-in cfg path))]
+                        (if (llm/backend-serves-model? backend model)
+                          model
+                          (let [seen [path model backend]
+                                [before _] (swap-vals! warned-mismatches conj seen)]
+                            (when-not (contains? before seen)
+                              (binding [*out* *err*]
+                                (println (msg/t :model/backend-mismatch
+                                                {:key (str/join "." (map name path))
+                                                 :model model
+                                                 :backend (name backend)}))))
+                            nil))))]
+     (or (configured [:agents :default-models tier])
+         (configured [:llm :model])
+         (get-in backend-role-models [backend tier])))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -124,11 +140,10 @@
 
    The backend never changes. The client's backend is the one the user
    configured (or chose for the run), and every role runs on it whatever
-   model is selected; a catalog model of another backend is passed through
-   and that backend reports it if it cannot serve it. The model is the
-   role's model on that backend (`default-model-for-role`). When there is
-   none, the client is returned as is, so the backend's own default
-   applies.
+   model is selected. The model is the role's model on that backend
+   (`default-model-for-role`, which skips a catalog model the backend does
+   not serve). When there is none, the client is returned as is, so the
+   backend's own default applies.
 
    Arguments:
      role           - Agent role keyword (:planner, :implementer, etc.)
