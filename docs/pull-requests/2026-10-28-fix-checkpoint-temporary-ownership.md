@@ -55,6 +55,14 @@ The correction has 68 reportable lines; the complete PR has 157.
 
 ## Limits and deployment
 
+The second review identified symlink-mode copying and an earlier failure point
+in the rename regression. Symlink replacements now publish privately without
+changing the linked file. File type and permissions come from one no-follow read.
+The rename test deletes the temporary only after successful permission preparation.
+The previous package fails the new symlink assertion. All three consumers pass
+in 1m40s; isolated packaged suites pass 16 tests and 64 assertions.
+Affected JVM tests take 4–36 ms, remaining within the brick test budget.
+
 No format migration. This is per-file temporary ownership, not a transaction
 across snapshots, phase results, and manifests. Force ordering and structured
 failure propagation remain separate work.
