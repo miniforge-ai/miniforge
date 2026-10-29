@@ -52,9 +52,11 @@ All configuration values can be overridden with environment variables using Aero
 - `MINIFORGE_NETWORK_MONITOR` - Set to `off` (or `false`, `0`, `no`) to turn
   off the network-drop monitor. During a streaming CLI call (`:claude`,
   `:codex`) it probes the provider every 10 s and stops the call after 3
-  failed probes in a row. The probe follows `HTTPS_PROXY` / `HTTP_PROXY` /
-  `NO_PROXY` the way the agent CLI does. Read directly from the environment,
-  not through Aero.
+  failed probes in a row. The probe targets the endpoint the CLI is set up
+  to use (`ANTHROPIC_BASE_URL`, the Bedrock and Vertex settings, or
+  `OPENAI_BASE_URL`; otherwise the provider's API host) and follows
+  `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` the way the agent CLI does. Read
+  directly from the environment, not through Aero.
 
 ### Workflow Configuration
 
