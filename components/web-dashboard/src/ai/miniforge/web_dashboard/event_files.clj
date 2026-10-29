@@ -46,12 +46,19 @@
   [^File f]
   (str/starts-with? (.getName f) "."))
 
+(defn ^{:stratum 0} file-ms
+  "The epoch ms the sink recorded in an event file's name, for either
+   name grammar; nil when the file is not an event file (a manifest,
+   snapshot, temp or other dot file). The one filter and ordering key of
+   this namespace."
+  [^File f]
+  (es/event-file-ms (.getName f)))
+
 (defn ^{:stratum 0} read-event
   "Decode one event file. nil when it cannot be read or holds no
-   :event/type (the manifest, the snapshot). The reader returns UUIDs as
-   strings; :event/id and :workflow/id come back as UUIDs, the form a
-   live event carries, so events from both sources group and dedupe as
-   one."
+   :event/type. The reader returns UUIDs as strings; :event/id and
+   :workflow/id come back as UUIDs, the form a live event carries, so
+   events from both sources group and dedupe as one."
   [f]
   (let [event (es/read-event-file f)
         as-uuid #(or (when (string? %) (parse-uuid %)) %)]
@@ -59,15 +66,6 @@
       (cond-> event
         (contains? event :event/id)    (update :event/id as-uuid)
         (contains? event :workflow/id) (update :workflow/id as-uuid)))))
-
-(defn ^{:stratum 0} file-tick
-  "What orders an event file by creation: the millisecond timestamp of a
-   legacy `{yyyyMMddTHHmmssSSSZ}-{uuid}.json` name (its random UUID part
-   does not order anything), else the whole name (a Snowflake name is
-   unique and sorts in creation order)."
-  [^File f]
-  (let [n (.getName f)]
-    (or (second (re-find #"^(\d{8}T\d{9}Z)-" n)) n)))
 
 (defn ^{:stratum 0} roots
   "The file sink's per-workflow roots under `events-dir`, live first."
@@ -86,12 +84,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} event-files
-  "Event files directly in `dir`, sorted by name. Empty when `dir` does
-   not exist."
+  "The event files directly in `dir`, in creation order (recorded ms, then
+   name). Sidecars, temp and dot files are left out before any caller
+   counts or cuts the list. Empty when `dir` does not exist."
   [dir]
   (->> (.listFiles (io/file dir))
-       (filter #(and (str/ends-with? (file-name %) ".json") (not (hidden? %))))
-       (sort-by file-name)))
+       (filter file-ms)
+       (sort-by (juxt file-ms file-name))))
 
 (defn ^{:stratum 1} workflow-dirs
   "The workflow directories under the live and archived roots, live first."
@@ -99,19 +98,19 @@
   (mapcat #(remove hidden? (.listFiles ^File %)) (roots events-dir)))
 
 (defn ^{:stratum 1} read-ordered
-  "Decode `files` and return their events in creation order: by name and,
-   among legacy names from the same millisecond, by :event/sequence-number."
+  "Decode `files` and return their events in creation order: by recorded
+   ms, then :event/sequence-number (files from one millisecond)."
   [files]
   (->> files
-       (keep (fn [f] (some->> (read-event f) (vector (file-tick f)))))
-       (sort-by (fn [[tick event]] [tick (get event :event/sequence-number 0)]))
+       (keep (fn [f] (some->> (read-event f) (vector (file-ms f)))))
+       (sort-by (fn [[ms event]] [ms (get event :event/sequence-number 0)]))
        (mapv second)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} unseen-files
   "[names files] for workflow directory `dir`: the names of all its event
-   files, and the event files whose names are not in `seen`, in name
+   files, and the event files whose names are not in `seen`, in creation
    order. The sink names each file after its event, so a name read once
    need not be read again; a file that turns up late is read whatever
    its name."
@@ -129,15 +128,15 @@
     []))
 
 (defn ^{:stratum 2} newest-batches
-  "The events of `files` (a directory's event files, in name order) in
-   batches, newest batch first. A batch holds at least `size` files and
-   is cut only between files named in different milliseconds, so a
-   same-millisecond group is never split; its events are in creation
-   order (millisecond, then :event/sequence-number). Lazy: a reader of
-   the newest `size` events decodes only the first batch, then takes the
-   last `size` of it."
+  "The events of `files` (a directory's event files, in creation order)
+   in batches, newest batch first. A batch holds at least `size` files
+   and is cut only between files recorded in different milliseconds, so
+   a same-millisecond group is never split; its events are in creation
+   order (ms, then :event/sequence-number). Lazy: a reader of the newest
+   `size` events decodes only the first batch, then takes the last
+   `size` of it."
   [files size]
-  (->> [[] (reverse (partition-by file-tick files))]
+  (->> [[] (reverse (partition-by file-ms files))]
        (iterate (fn [[_ groups]] (take-groups groups size)))
        rest
        (take-while (comp seq first))
