@@ -333,3 +333,29 @@
                                                checkpoint-root workflow-run-id phase-name))))))
         (catch Exception e
           (write-failure checkpoint-root workflow-run-id phase-name e))))))
+
+(defn ^{:stratum 2} pin-checkpoint!
+  "Pin a run's checkpoint: set `:pinned? true` in its manifest, which the
+   checkpoint GC never collects and later checkpoints of the run keep.
+   Returns the manifest path, or an anomaly: `:not-found` when the run has
+   no manifest, `:unavailable` when it cannot be read or written."
+  ([workflow-run-id]
+   (pin-checkpoint! workflow-run-id {}))
+  ([workflow-run-id opts]
+   (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
+         path (checkpoint-paths/manifest-path checkpoint-root workflow-run-id)
+         data {:workflow/run-id workflow-run-id :checkpoint/path path}]
+     (try+
+       (if-let [manifest (read-edn-file path)]
+         (do (write-edn-atomically! path (assoc manifest :pinned? true))
+             path)
+         (anomaly/anomaly :not-found
+                          (messages/t :checkpoint/pin-no-manifest {:run-id workflow-run-id})
+                          data))
+       (catch Exception e
+         (anomaly/exception-anomaly :unavailable
+                                    (messages/t :checkpoint/pin-failed
+                                                {:run-id workflow-run-id
+                                                 :error (or (ex-message e) (.getName (class e)))})
+                                    data
+                                    e))))))

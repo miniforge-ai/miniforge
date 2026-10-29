@@ -158,6 +158,8 @@
 
   ;; Checkpoint retention
   :checkpoint/gc-delete-failed "Could not delete checkpoint {path}: {error}"
+  :checkpoint/pin-no-manifest "Run {run-id} has no checkpoint manifest to pin."
+  :checkpoint/pin-failed     "Could not pin the checkpoint of run {run-id}: {error}"
   :warn/checkpoint-announce-failed "Warning: The checkpoint for phase {phase} was written, but announcing it failed: {error}"
 
   ;; Environment lifecycle

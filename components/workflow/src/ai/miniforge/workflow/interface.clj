@@ -259,6 +259,13 @@
    returns an `:unavailable` anomaly naming every unreadable file."
   checkpoints/load-checkpoint-data)
 
+(def ^{:stratum 0} pin-checkpoint!
+  "Pin a run's checkpoint: `:pinned? true` in its manifest, which the
+   checkpoint GC never collects and later checkpoints keep. Args:
+   [workflow-run-id] or [workflow-run-id opts]. Returns the manifest path,
+   or an anomaly (:not-found without a manifest, :unavailable on I/O)."
+  checkpoints/pin-checkpoint!)
+
 (def ^{:stratum 0} run-chain
   "Run a sequence of workflows, feeding each step's output into the next.
    Args: [chain-def chain-input opts]. Invalid definitions return an anomaly before execution.
