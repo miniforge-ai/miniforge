@@ -528,6 +528,28 @@
       (finally
         (delete-dir! dir)))))
 
+(deftest ^{:stratum 1} test-unlistable-directory-leaves-the-index-for-a-later-recovery
+  (let [dir (temp-dir)
+        adir (.toPath (io/file (artifacts-path dir)))]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "a1"))
+        (p/close s))
+      (truncate-to-half! (impl/index-file-path (artifacts-path dir)))
+      (when (contains? (.supportedFileAttributeViews (.getFileSystem adir)) "posix")
+        ;; Write and search but no read: files open by name, listing fails.
+        (Files/setPosixFilePermissions adir (PosixFilePermissions/fromString "-wx------"))
+        (try
+          (p/close (open-store dir))
+          (finally
+            (Files/setPosixFilePermissions adir (PosixFilePermissions/fromString "rwx------"))))
+        (let [s (open-store dir)]
+          (testing "a later open still recovers the artifact"
+            (is (= #{"a1"} (set (map :artifact/id (p/query s {}))))))
+          (p/close s)))
+      (finally
+        (delete-dir! dir)))))
+
 (deftest ^{:stratum 1} test-close-reports-failed-writes-and-queued-changes
   (let [dir (temp-dir)
         write impl/write-transit]

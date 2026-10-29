@@ -247,28 +247,31 @@
 
 (defn ^{:stratum 1} rebuild-index
   "Rebuild the metadata index from the per-artifact files in
-   artifacts-dir. Returns {:index m :skipped [file-name ...]}. A file
-   that cannot be read, or whose :artifact/id does not map back to that
-   same file (compared as canonical paths, so an id such as \"../a\"
-   cannot claim a.transit.json), is skipped."
+   artifacts-dir. Returns {:index m :skipped [file-name ...]}, or an
+   :unavailable anomaly when the directory cannot be listed. A file that
+   cannot be read, or whose :artifact/id does not map back to that same
+   file (compared as canonical paths, so an id such as \"../a\" cannot
+   claim a.transit.json), is skipped."
   [artifacts-dir]
   (let [index-name (.getName (io/file (index-file-path artifacts-dir)))
-        files (->> (.listFiles (io/file artifacts-dir))
-                   (filter (fn [^File f]
-                             (and (.isFile f)
-                                  (str/ends-with? (.getName f) ".transit.json")
-                                  (not= index-name (.getName f))))))]
-    (reduce
-     (fn [acc ^File f]
-       (let [artifact (try (read-transit (.getPath f)) (catch Exception _ nil))
-             expected (when (and (map? artifact) (some? (:artifact/id artifact)))
-                        (.getCanonicalPath (io/file (artifact-file-path artifacts-dir
-                                                                        (:artifact/id artifact)))))]
-         (if (= expected (.getCanonicalPath f))
-           (update acc :index add-to-index artifact)
-           (update acc :skipped conj (.getName f)))))
-     {:index {} :skipped []}
-     files)))
+        listing (.listFiles (io/file artifacts-dir))]
+    (if (nil? listing)
+      (anomaly/anomaly :unavailable (messages/t :index/unlistable) {:artifacts-dir artifacts-dir})
+      (reduce
+       (fn [acc ^File f]
+         (let [artifact (try (read-transit (.getPath f)) (catch Exception _ nil))
+               expected (when (and (map? artifact) (some? (:artifact/id artifact)))
+                          (.getCanonicalPath (io/file (artifact-file-path artifacts-dir
+                                                                          (:artifact/id artifact)))))]
+           (if (= expected (.getCanonicalPath f))
+             (update acc :index add-to-index artifact)
+             (update acc :skipped conj (.getName f)))))
+       {:index {} :skipped []}
+       (filter (fn [^File f]
+                 (and (.isFile f)
+                      (str/ends-with? (.getName f) ".transit.json")
+                      (not= index-name (.getName f))))
+               listing)))))
 
 (defn ^{:stratum 1} load-artifact-from-disk
   "Load an artifact from disk.
@@ -341,27 +344,34 @@
             pairs)))
 
 (defn ^{:stratum 2} quarantine-index!
-  "With the index lock held and the index unreadable: copy it aside to
-   index.transit.json.corrupt-<millis>, rebuild the index from the
-   per-artifact files, write the rebuilt index over the live path and
-   log :artifact/index-rebuilt. Only that atomic write replaces the live
-   file, so no reader sees a missing index. Returns the rebuilt index."
+  "With the index lock held and the index unreadable: rebuild the index
+   from the per-artifact files, copy the unreadable index aside to
+   index.transit.json.corrupt-<millis>, write the rebuilt index over the
+   live path and log :artifact/index-rebuilt. Only that atomic write
+   replaces the live file, so no reader sees a missing index. Returns
+   the rebuilt index. When the directory cannot be listed, logs
+   :artifact/index-rebuild-failed, leaves the index file for a later
+   recovery, and returns the anomaly."
   [artifacts-dir logger unreadable]
-  (let [path (index-file-path artifacts-dir)
-        copied-to (str path ".corrupt-" (System/currentTimeMillis))
-        {rebuilt :index skipped :skipped} (rebuild-index artifacts-dir)]
-    (Files/copy (.toPath (io/file path)) (.toPath (io/file copied-to))
-                ^"[Ljava.nio.file.CopyOption;"
-                (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING
-                                        StandardCopyOption/COPY_ATTRIBUTES]))
-    (write-transit path rebuilt)
-    (log/warn logger :system :artifact/index-rebuilt
-              {:message (messages/t :index/rebuilt)
-               :data {:copied-to copied-to
-                      :cause (:anomaly/data unreadable)
-                      :artifact-count (count rebuilt)
-                      :skipped skipped}})
-    rebuilt))
+  (let [rebuilt (rebuild-index artifacts-dir)]
+    (if (anomaly? rebuilt)
+      (do (log/error logger :system :artifact/index-rebuild-failed
+                     {:message (:anomaly/message rebuilt) :data (:anomaly/data rebuilt)})
+          rebuilt)
+      (let [path (index-file-path artifacts-dir)
+            copied-to (str path ".corrupt-" (System/currentTimeMillis))]
+        (Files/copy (.toPath (io/file path)) (.toPath (io/file copied-to))
+                    ^"[Ljava.nio.file.CopyOption;"
+                    (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING
+                                            StandardCopyOption/COPY_ATTRIBUTES]))
+        (write-transit path (:index rebuilt))
+        (log/warn logger :system :artifact/index-rebuilt
+                  {:message (messages/t :index/rebuilt)
+                   :data {:copied-to copied-to
+                          :cause (:anomaly/data unreadable)
+                          :artifact-count (count (:index rebuilt))
+                          :skipped (:skipped rebuilt)}})
+        (:index rebuilt)))))
 
 (defn ^{:stratum 2} load-artifact-impl
   "Load artifact implementation."
@@ -437,12 +447,13 @@
                  (when (seq ids)
                    (let [on-disk (read-index artifacts-dir)
                          disk-index (if (anomaly? on-disk) (quarantine-index! artifacts-dir logger on-disk) on-disk)]
-                     (write-transit (index-file-path artifacts-dir)
-                                    (reduce add-to-index disk-index
-                                            (keep #(try (load-artifact-from-disk artifacts-dir %)
-                                                        (catch Exception _ nil))
-                                                  ids)))
-                     (vswap! next-state assoc :unindexed #{})))))))))
+                     (when-not (anomaly? disk-index)
+                       (write-transit (index-file-path artifacts-dir)
+                                      (reduce add-to-index disk-index
+                                              (keep #(try (load-artifact-from-disk artifacts-dir %)
+                                                          (catch Exception _ nil))
+                                                    ids)))
+                       (vswap! next-state assoc :unindexed #{}))))))))))
       (catch Exception e
         (log/error logger :system :artifact/index-save-failed
                    {:message (.getMessage e)
@@ -467,12 +478,13 @@
   "Load the artifact metadata index; {} when there is none.
    An unreadable index is copied aside and rebuilt from the per-artifact
    files (see recover-index!) instead of failing store creation, which
-   would leave every later run without persistence."
+   would leave every later run without persistence. If the directory
+   cannot be listed, the store opens with an empty in-memory index and
+   the index file is left for the next open to recover."
   [artifacts-dir logger]
-  (let [index (read-index artifacts-dir)]
-    (if (anomaly? index)
-      (recover-index! artifacts-dir logger)
-      index)))
+  (let [index (read-index artifacts-dir)
+        recovered (if (anomaly? index) (recover-index! artifacts-dir logger) index)]
+    (if (anomaly? recovered) {} recovered)))
 
 (defn ^{:stratum 4} save-artifact
   "Save artifact implementation. Under the writer's monitor, carries the
