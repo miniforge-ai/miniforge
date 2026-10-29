@@ -98,21 +98,58 @@
                 (true? (:pinned? content)) :pinned))
         (catch Exception _ :unreadable)))))
 
-(defn- ^{:stratum 0} delete-run!
-  "Delete one run's checkpoint directory: its id, or an anomaly naming it."
-  [dir id]
-  (try+
-    (fs/delete-tree dir)
-    id
-    (catch Exception e
-      (anomaly/exception-anomaly :unavailable
-                                 (messages/t :checkpoint/gc-delete-failed
-                                             {:path (str dir)
-                                              :error (or (ex-message e) (.getName (class e)))})
-                                 {:workflow/run-id id :checkpoint/path (str dir)}
-                                 e))))
+(defn- ^{:stratum 0} delete-failure [dir id e]
+  (anomaly/exception-anomaly :unavailable
+                             (messages/t :checkpoint/gc-delete-failed
+                                         {:path (str dir)
+                                          :error (or (ex-message e) (.getName (class e)))})
+                             {:workflow/run-id id :checkpoint/path (str dir)}
+                             e))
+
+(defn- ^{:stratum 0} pinned-dir?
+  [dir]
+  (fs/exists? (fs/file dir checkpoint-paths/pin-marker-filename)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} delete-run!
+  "Delete one run's checkpoint directory without racing a pin, and without
+   a lock. The directory is first renamed aside, atomically, so a pin
+   writing into it by path either lands before the rename (and moves with
+   it) or fails. Then a pin marker in the moved directory sends it back;
+   otherwise it is deleted. Returns the run id when deleted,
+   `{:pinned id}` when moved back, or an anomaly."
+  [dir id]
+  (let [aside (fs/path (fs/parent dir)
+                       (str checkpoint-paths/deleting-prefix id "-" (random-uuid)))]
+    (try+
+      (fs/move dir aside {:atomic-move true})
+      (if (pinned-dir? aside)
+        (do (fs/move aside dir {:atomic-move true})
+            {:pinned id})
+        (do (fs/delete-tree aside)
+            id))
+      (catch Exception e
+        (delete-failure dir id e)))))
+
+(defn- ^{:stratum 1} finish-aside!
+  "Finish what a GC that died mid-delete left beside the runs: a moved-aside
+   directory holding a pin marker goes back under its run id (when nothing
+   took that name meanwhile), any other is deleted."
+  [root]
+  (doseq [dir (fs/list-dir root)
+          :let [name (str (fs/file-name dir))
+                id-start (count checkpoint-paths/deleting-prefix)]
+          :when (and (str/starts-with? name checkpoint-paths/deleting-prefix)
+                     (>= (count name) (+ id-start 36))
+                     (fs/directory? dir {:nofollow-links true}))
+          :let [run-dir (fs/path root (subs name id-start (+ id-start 36)))]]
+    (try+
+      (cond
+        (not (pinned-dir? dir)) (fs/delete-tree dir)
+        (not (fs/exists? run-dir)) (fs/move dir run-dir {:atomic-move true})
+        :else nil)
+      (catch Exception _ nil))))
 
 (defmethod ^{:stratum 1} es/retention-hold ::checkpoint
   [_hold workflow-id events-dir]
@@ -158,15 +195,18 @@
         days (get opts :max-age-days default-retention-days)
         cutoff-ms (- (get opts :now-ms (System/currentTimeMillis)) (* days day-ms))
         events-dir (get opts :events-dir (es/default-events-dir))
+        _ (when (fs/directory? root) (finish-aside! root))
         runs (when (fs/directory? root)
                (filter #(fs/directory? % {:nofollow-links true}) (fs/list-dir root)))
         by-disposition (group-by #(disposition % cutoff-ms events-dir) runs)
-        results (mapv #(delete-run! % (run-id %)) (get by-disposition :expired))]
+        results (mapv #(delete-run! % (run-id %)) (get by-disposition :expired))
+        pinned-late (keep :pinned (filter map? (remove anomaly/anomaly? results)))]
     {:checkpoint/root root
      :deleted (filterv uuid? results)
-     :kept (into {}
-                 (map (fn [[k dirs]] [k (mapv run-id dirs)]))
-                 (dissoc by-disposition :expired nil))
+     :kept (cond-> (into {}
+                         (map (fn [[k dirs]] [k (mapv run-id dirs)]))
+                         (dissoc by-disposition :expired nil))
+             (seq pinned-late) (update :pinned (fnil into []) pinned-late))
      :failures (filterv anomaly/anomaly? results)}))
 
 (comment

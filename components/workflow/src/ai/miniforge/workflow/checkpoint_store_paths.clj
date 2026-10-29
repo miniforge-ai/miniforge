@@ -52,6 +52,13 @@
    pinning never shares a read-modify-write with a checkpoint write."
   "pinned")
 
+(def ^{:stratum 0} deleting-prefix
+  "The checkpoint GC first renames a run directory to
+   `<deleting-prefix><run-id>-<nonce>` beside it, then decides between
+   deleting it and moving it back. A directory left with this prefix is a
+   delete that did not finish."
+  ".deleting-")
+
 (def ^{:stratum 0} phase-checkpoints-directory-name
   "Directory name for per-phase checkpoint files."
   "phases")
