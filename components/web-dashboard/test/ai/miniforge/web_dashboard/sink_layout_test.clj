@@ -215,6 +215,24 @@
                   (sort-by :event/sequence-number)
                   (mapv :event/type)))))))
 
+(deftest ^{:stratum 1} watcher-publishes-a-run-the-file-sink-writes
+  (let [events-dir (temp-events-dir)
+        stream     (file-sink-stream events-dir)
+        wf-id      (random-uuid)
+        published  (atom [])
+        stop!      (watcher/start-watcher! (str events-dir) #(swap! published conj %))]
+    (try
+      (es/publish! stream (wf-event :workflow/started wf-id :workflow/spec {:name "Live run"}))
+      (write-temp-file! events-dir wf-id (wf-event :workflow/failed wf-id))
+      (es/publish! stream (wf-event :workflow/phase-started wf-id :workflow/phase :plan))
+      (is (await-count published 2) "the watcher publishes events written under live/")
+      (Thread/sleep 1200)
+      (is (= #{:workflow/started :workflow/phase-started}
+             (set (map :event/type @published))))
+      (is (= 2 (count @published)) "each event once; the temp file is not read")
+      (is (= wf-id (:workflow/id (first @published))) "ids come back as UUIDs")
+      (finally (stop!)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} archive-scan-lists-live-archived-and-edn-workflows
@@ -305,21 +323,3 @@
     (is (= 3 (count (state-archive/get-archived-workflow-events
                      (atom {:archived-workflows (atom @found)}) ":canonical-sdlc")))
         "the URL's string id finds the summary; its keyword id finds canonical-sdlc/")))
-
-(deftest ^{:stratum 1} watcher-publishes-a-run-the-file-sink-writes
-  (let [events-dir (temp-events-dir)
-        stream     (file-sink-stream events-dir)
-        wf-id      (random-uuid)
-        published  (atom [])
-        stop!      (watcher/start-watcher! (str events-dir) #(swap! published conj %))]
-    (try
-      (es/publish! stream (wf-event :workflow/started wf-id :workflow/spec {:name "Live run"}))
-      (write-temp-file! events-dir wf-id (wf-event :workflow/failed wf-id))
-      (es/publish! stream (wf-event :workflow/phase-started wf-id :workflow/phase :plan))
-      (is (await-count published 2) "the watcher publishes events written under live/")
-      (Thread/sleep 1200)
-      (is (= #{:workflow/started :workflow/phase-started}
-             (set (map :event/type @published))))
-      (is (= 2 (count @published)) "each event once; the temp file is not read")
-      (is (= wf-id (:workflow/id (first @published))) "ids come back as UUIDs")
-      (finally (stop!)))))
