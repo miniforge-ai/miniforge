@@ -22,6 +22,8 @@
   (:require
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.web-dashboard.watcher :as watcher]
    [ai.miniforge.web-dashboard.server :as server]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]]
@@ -84,3 +86,22 @@
               (Thread/sleep 1500)
               (is (= 2 (file-count run-dir))))
             (finally (server/stop-server! handle))))))))
+
+(deftest ^{:stratum 1} supervisory-state-takes-in-a-replayed-run
+  (let [events-dir (io/file (temp-home) "events")
+        stream     (file-sink-stream events-dir)
+        component  (supervisory/ensure-attached! stream)
+        cli-stream (file-sink-stream events-dir)
+        wf-id      (random-uuid)
+        stop!      (watcher/start-watcher! (str events-dir) (partial es/replay! stream))]
+    (try
+      (es/publish! cli-stream (envelope cli-stream :workflow/started wf-id))
+      (is (await-true #(some (comp #{wf-id} :workflow-run/id) (supervisory/workflows component)))
+          "the attached supervisory view takes in the replayed run")
+      (is (instance? java.util.Date
+                     (->> (es/get-events stream)
+                          (filter #(= :workflow/started (:event/type %)))
+                          first
+                          :event/timestamp))
+          "a replayed event's timestamp is a Date, as a live one's is")
+      (finally (stop!)))))

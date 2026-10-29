@@ -16,26 +16,13 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.web-dashboard.watcher
-  "File-based event watcher for the dashboard.
-
-   The CLI's event-stream file sink writes one transit-JSON file per event
-   under `{events-dir}/live/<workflow-id>/`; a JVM run's archive moves the
-   directory to `{events-dir}/archived/<workflow-id>/`. The watcher polls
-   those directories and publishes each new event, decoded by the
-   event-stream reader, to the dashboard's in-memory event stream.
-
-   It polls rather than registering a watch per directory: it runs under
-   babashka, and an events dir holds a directory for every run. A poll
-   reads only the active directories (modified within the stale
-   threshold). The active set is recomputed when a root's mtime changes
-   (a workflow directory created or moved), at most every
-   `relist-min-ms`, and every `sweep-ms`, which also picks up an old
-   directory written to again.
-
-   Directories already active at startup are read in full, so a run in
-   progress arrives with its start event. In other directories, files
-   modified before startup are skipped; the archive scan and
-   `historical-events` read those."
+  "Polls the file sink's live/ and archived/ workflow directories and
+   publishes each new event (see `event-files`). Polling, not a watch per
+   directory: it runs under babashka, with a directory per run ever made.
+   A poll reads only directories modified within the stale threshold; the
+   set is recomputed when a root's mtime changes (at most every
+   `relist-min-ms`) and every `sweep-ms`. Runs active at startup are read
+   in full; older files are left to the archive scan and history."
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.web-dashboard.config :as dashboard-config]
@@ -95,23 +82,30 @@
                         dropped))))
 
 (defn ^{:stratum 0} tail-dir
-  "Publish the unseen events of directory `dir`, named `wf-name`, in
-   creation order. Returns `state` with the directory's file tracking,
-   which keeps as many names as the dashboard's retention keeps events
-   per workflow. When a file turns up among those already passed, every
-   file is published again; the views dedupe repeats by event id. A
-   failing publish skips that event only."
+  "Publish the unseen events of directory `dir` (workflow `wf-name`) in
+   creation order. Tracking is bounded like the dashboard's retention; a
+   file that turns up below it republishes the directory, which the
+   views dedupe by event id. Tracking never moves back: a directory gone
+   when listed keeps it, and a file gone before decoding is left to the
+   archived path."
   [publish-fn state wf-name dir]
-  (let [[tracked files] (event-files/unseen-files
-                         dir
-                         (get-in state [:seen wf-name])
+  (let [seen            (get-in state [:seen wf-name])
+        [tracked files] (event-files/unseen-files
+                         dir seen
                          (:max-events-per-workflow es/bounded-retention)
-                         (get-in state [:since wf-name] (:since-ms state)))]
-    (doseq [event (event-files/read-ordered files)]
+                         (get-in state [:since wf-name] (:since-ms state)))
+        events          (event-files/read-ordered files)
+        decoded         (into #{} (map event-files/source-file) events)
+        moved?          (or (and (:floor seen) (nil? (:floor tracked)))
+                            (some #(not (or (decoded %) (.exists ^java.io.File %))) files))]
+    (doseq [event events]
       (try+
         (publish-fn event)
         (catch Exception _ nil)))
-    (assoc-in state [:seen wf-name] tracked)))
+    (assoc-in state [:seen wf-name]
+              (if moved?
+                (update seen :names (fnil into #{}) (map event-files/file-name) decoded)
+                tracked))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

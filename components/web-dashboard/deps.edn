@@ -12,5 +12,6 @@
         cheshire/cheshire {:mvn/version "5.13.0"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {ai.miniforge/evidence-bundle {:local/root "../evidence-bundle"}
+                               ai.miniforge/supervisory-state {:local/root "../supervisory-state"}
                                io.github.cognitect-labs/test-runner
                                {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}}}
