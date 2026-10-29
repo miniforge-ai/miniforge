@@ -120,5 +120,27 @@
       (announce-write! context written))
     written))
 
+(defn ^{:stratum 2} report!
+  "The second half of `checkpoint!`, for a write made earlier: report
+   `written` (the store's result) if it is a failure, else announce it.
+   The run's start checkpoint is written before `:workflow/started` and
+   reported after it, so started stays the run's first event. Returns
+   `written`."
+  [context written]
+  (if (anomaly/anomaly? written)
+    (report-write-failure! context written)
+    (announce-write! context written))
+  written)
+
+(defn ^{:stratum 2} persist!
+  "`checkpoint!` without the announcement, for the terminal checkpoint,
+   written once the run's events are closed. A write failure is reported
+   and returned, never thrown."
+  [context]
+  (let [written (checkpoint-store/persist-execution-state! context)]
+    (when (anomaly/anomaly? written)
+      (report-write-failure! context written))
+    written))
+
 (comment
   (checkpoint! {}))
