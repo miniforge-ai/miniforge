@@ -245,12 +245,12 @@
 
 (defn- ^{:stratum 0} completed-run?
   "True when the newest workflow lifecycle event in `dir` is a successful
-   :workflow/completed. A started, resumed, failed or cancelled run is
-   not: resume can still write to it. Reads event files newest-first, one
-   mtime at a time, and stops at the first mtime that holds a lifecycle
-   event, after reading every file with that mtime: notifications written
-   after completion, or files sharing an mtime, cannot hide the event.
-   Reads the transit-JSON this namespace writes."
+   :workflow/completed, the newest by event timestamp then sequence
+   number across all of its event files. A started, resumed, failed or
+   cancelled run is not: resume can still write to it. File mtimes play
+   no part here (a touched or restored file must not reorder events);
+   only the idle check reads them. Reads the transit-JSON this namespace
+   writes."
   [^java.io.File dir]
   (let [parse (fn [^java.io.File f]
                 (try+ (json/parse-string (slurp f :encoding "UTF-8"))
@@ -259,14 +259,10 @@
                        (get e "~:event/sequence-number" 0)])
         lifecycle #{"~:workflow/started" "~:workflow/resumed" "~:workflow/completed"
                     "~:workflow/failed" "~:workflow/cancelled"}
-        lifecycle-events (fn [files]
-                           (seq (filter #(lifecycle (get % "~:event/type")) (keep parse files))))
-        mtime (fn [^java.io.File f] (.lastModified f))
         newest (->> (.listFiles dir)
                     (filter #(str/ends-with? (.getName ^java.io.File %) ".json"))
-                    (sort-by mtime >)
-                    (partition-by mtime)
-                    (some lifecycle-events)
+                    (keep parse)
+                    (filter #(lifecycle (get % "~:event/type")))
                     (sort-by order #(compare %2 %1))
                     first)]
     (and (= "~:workflow/completed" (get newest "~:event/type"))

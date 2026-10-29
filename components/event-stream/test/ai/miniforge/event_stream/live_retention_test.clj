@@ -124,6 +124,20 @@
     (testing "every file sharing one mtime"
       (is (.isDirectory (archived dir tied))))))
 
+(deftest ^{:stratum 1} file-mtimes-do-not-reorder-events
+  (let [dir     (temp-events-dir)
+        wf-id   (write-run! dir :workflow/started :workflow/completed)
+        run     (live dir wf-id)
+        started (first (filter #(= "~:workflow/started"
+                                   (get (json/parse-string (slurp %)) "~:event/type"))
+                               (.listFiles run)))]
+    (age-tree! run)
+    ;; The start's file touched after the completion's (restored, say),
+    ;; still past the TTL: mtime order and event order disagree.
+    (.setLastModified started (- (System/currentTimeMillis) (* 20 24 60 60 1000)))
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (is (.isDirectory (archived dir wf-id)) "the completion is still the newest event")))
+
 (deftest ^{:stratum 1} a-directory-named-like-the-marker-keeps-the-run
   (let [dir       (temp-events-dir)
         no-events (io/file dir "live" "no-events")
