@@ -34,7 +34,7 @@ finds in `MINIFORGE_GIT_TOKEN`, `GH_TOKEN`, or `gh auth token`, so
 |----------|---------|-------------|
 | `MINIFORGE_HOME` | `~/.miniforge` | Directory for the user config file and artifacts |
 | `MINIFORGE_LLM_BACKEND` | `opencode` | LLM backend; `mf config backends` lists them |
-| `MINIFORGE_LLM_MODEL` | not set | Model for the execution roles, and for the planner where miniforge has no default |
+| `MINIFORGE_LLM_MODEL` | not set | Model for every role the next two leave unset |
 | `MINIFORGE_AGENT_THINKING_MODEL` | not set | Model for the planner and architect |
 | `MINIFORGE_AGENT_EXECUTION_MODEL` | not set | Model for every other role |
 | `MINIFORGE_GIT_TOKEN`, `GH_TOKEN` | — | Token for PR creation |

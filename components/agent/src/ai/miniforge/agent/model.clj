@@ -84,25 +84,19 @@
    1. The tier in the user config, [:agents :default-models :thinking] or
       [:agents :default-models :execution] (MINIFORGE_AGENT_THINKING_MODEL,
       MINIFORGE_AGENT_EXECUTION_MODEL).
-   2. Execution tier: llm.model (MINIFORGE_LLM_MODEL), then miniforge's
-      model for the tier on `backend` (`backend-role-models`).
-      Thinking tier: miniforge's model for the tier on `backend`, then
-      llm.model, so a planner keeps its thinking model where miniforge has
-      one and gets llm.model on a backend it has none for.
+   2. llm.model (MINIFORGE_LLM_MODEL).
+   3. Miniforge's model for the tier on `backend` (`backend-role-models`).
 
-   The shipped default config sets neither llm.model nor any tier, so
-   anything found there is the user's own setting."
+   The shipped default config sets neither 1 nor 2, so anything found there
+   is the user's own setting."
   ([role] (default-model-for-role role nil))
   ([role backend]
-   (let [cfg            (config/load-merged-config)
-         tier           (if (thinking-roles role) :thinking :execution)
-         llm-model      (get-in cfg [:llm :model])
-         backend-model  (get-in backend-role-models
-                                [(or backend (get-in cfg [:llm :backend])) tier])]
+   (let [cfg  (config/load-merged-config)
+         tier (if (thinking-roles role) :thinking :execution)]
      (or (get-in cfg [:agents :default-models tier])
-         (if (= :thinking tier)
-           (or backend-model llm-model)
-           (or llm-model backend-model))))))
+         (get-in cfg [:llm :model])
+         (get-in backend-role-models
+                 [(or backend (get-in cfg [:llm :backend])) tier])))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -65,25 +65,26 @@ the execution tier. A role's model is the first of these that is set:
 1. The tier's own setting: `[:agents :default-models :thinking]` or
    `[:agents :default-models :execution]` (`MINIFORGE_AGENT_THINKING_MODEL`,
    `MINIFORGE_AGENT_EXECUTION_MODEL`).
-2. For the execution tier, `llm.model` (`MINIFORGE_LLM_MODEL`).
+2. `llm.model` (`MINIFORGE_LLM_MODEL`), for both tiers.
 3. Miniforge's default for the backend: Claude Opus 4.6 for the thinking
    tier and Claude Sonnet 4.6 for the execution tier, on `opencode` (as
    `anthropic/...` ids), `claude` and `anthropic-api`.
-4. For the thinking tier, `llm.model`.
-5. None: the backend's own default. The `codex` and `cursor` CLIs use the
+4. None: the backend's own default. The `codex` and `cursor` CLIs use the
    model they are configured with and `ollama` uses `codellama`. The
    `openai-api`, `gemini-api`, `openrouter` and `openai-compat` backends
    need a model, so set `llm.model` for them.
 
-So `llm.model` sets every role's model on a backend miniforge has no
-defaults for, and the execution roles' model on the others. The shipped
-defaults set no model. An environment variable overrides the config file
-key it maps to. `claude` and `anthropic-api` take an `anthropic/...` id
-without the prefix.
+The shipped defaults set no model. An environment variable overrides the
+config file key it maps to. `claude` and `anthropic-api` take an
+`anthropic/...` id without the prefix.
+
+A config file that an older `mf config init`, `set`, `backend` or `edit`
+created may carry `:llm {:model "anthropic/claude-sonnet-4-5"}`, which
+applies to every role. Remove it to get the defaults above.
 
 ```bash
 mf config backend codex                # roles use the codex CLI's model
-mf config set llm.model gpt-5.4        # every role on codex uses gpt-5.4
+mf config set llm.model gpt-5.4        # every role uses gpt-5.4
 MINIFORGE_AGENT_THINKING_MODEL=gpt-5.4-pro mf run spec.edn  # planner only
 ```
 

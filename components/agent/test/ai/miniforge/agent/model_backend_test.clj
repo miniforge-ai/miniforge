@@ -106,19 +106,13 @@
 
 ;; An explicit model is the user's choice over any default
 (deftest ^{:stratum 1} llm-model-beats-the-defaults-test
-  (testing "llm.model (MINIFORGE_LLM_MODEL) sets the execution roles' model"
-    (let [cfg (over-shipped-defaults {:llm {:backend :claude :model "claude-sonnet-4-5"}})]
-      (with-redefs [config/load-merged-config (constantly cfg)]
-        (is (= "claude-sonnet-4-5" (model/default-model-for-role :implementer)))
-        (is (= "claude-sonnet-4-5" (model/default-model-for-role :tester)))
-        (is (= "claude-opus-4-6" (model/default-model-for-role :planner))
-            "the planner keeps the thinking model miniforge has for the backend"))))
-  (testing "on a backend miniforge has no models for, llm.model sets every role's"
-    (let [cfg (over-shipped-defaults {:llm {:backend :ollama :model "qwen3:32b"}})]
-      (doseq [role [:planner :implementer :tester]]
-        (is (= "qwen3:32b" (with-redefs [config/load-merged-config (constantly cfg)]
-                             (model/default-model-for-role role)))
-            (str role " must use the configured llm.model")))))
+  (testing "llm.model (MINIFORGE_LLM_MODEL) sets every role's model"
+    (doseq [[backend llm-model] [[:claude "claude-sonnet-4-5"] [:ollama "qwen3:32b"]]
+            :let [cfg (over-shipped-defaults {:llm {:backend backend :model llm-model}})]
+            role [:planner :implementer :tester]]
+      (is (= llm-model (with-redefs [config/load-merged-config (constantly cfg)]
+                         (model/default-model-for-role role)))
+          (str role " on " backend " must use the configured llm.model"))))
   (testing "an anthropic/ llm.model reaches the claude CLI as the bare id"
     ;; `mf config set|init|backend` used to write this value into new files.
     (is (= [:claude "claude-sonnet-4-5"]
