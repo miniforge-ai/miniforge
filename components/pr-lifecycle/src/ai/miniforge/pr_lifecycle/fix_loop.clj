@@ -165,14 +165,14 @@
   "Apply a fix artifact to the git worktree.
 
    Each `:path` comes from the LLM, so every one is resolved before
-   anything touches disk: writes must stay inside the worktree once
-   symlinks are followed, and a `:delete` must name an entry inside it
-   (the policy-eval.fs guards). Neither may reach the worktree's git
-   dir, where a planted hook or config would run on the commit that
-   follows. One escaping path rejects the whole
-   artifact with `:fix-path-traversal`, so a hostile fix writes nothing.
-   Each path is resolved again just before its own op, since an earlier
-   op in the same artifact can change what it points at.
+   anything touches disk: writes must stay inside the worktree, and a
+   `:delete` must name an entry inside it (the policy-eval.fs guards).
+   Neither may pass through a symlink (a fix never needs to) or reach the
+   worktree's git dir, where a planted hook or config would run on the
+   commit that follows. One refused path rejects the whole artifact with
+   `:fix-path-traversal`, so a hostile fix writes nothing. Each path is
+   resolved again just before its own op, since an earlier op in the
+   same artifact changes the tree the later ones are checked against.
 
    Arguments:
    - worktree-path: Path to git worktree
@@ -194,20 +194,21 @@
         escaped      (into [] (comp (remove resolve-path) (map :path)) files)
         traversal    (fn [paths]
                        (dag/err :fix-path-traversal
-                                (str "Fix paths escape the worktree or reach its git dir: "
+                                (str "Fix paths escape the worktree, pass through a symlink "
+                                     "(fixes never need to write through one), "
+                                     "or reach its git dir: "
                                      (str/join ", " paths))
                                 {:paths paths}))]
     (if (seq escaped)
       (do
         (when logger
           (log/error logger :pr-lifecycle :fix/path-traversal
-                     {:message "Rejected fix with paths outside the worktree or in its git dir"
+                     {:message "Rejected fix with paths outside the worktree, through a symlink, or in its git dir"
                       :data {:worktree-path worktree-path :paths escaped}}))
         (traversal escaped))
       (try
-        ;; Resolve again right before each op: an earlier delete in the same
-        ;; artifact can change where a later path lands. Deleting link.txt and
-        ;; then creating it must write a new file, not the link's old target.
+        ;; Resolve again right before each op: an earlier op in the same
+        ;; artifact changes the tree a later path is checked against.
         (or (reduce (fn [_ {:keys [path content action] :as file}]
                       (if-let [full-path (resolve-path file)]
                         (do (if (= :delete action)

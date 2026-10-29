@@ -16,31 +16,35 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.pr-lifecycle.policy-eval.git-dir
-  "Recognise paths that reach a worktree's git metadata.
+  "Recognise paths a fix must not write: ones that pass through a symbolic
+   link, and ones that reach a worktree's git metadata.
 
    A fix that writes `.git/hooks/pre-commit`, `.git/config`, or a file in
    the directory `core.hooksPath` names gets code run by a later git
    command. `policy-eval.fs/safe-worktree-path` and
-   `safe-worktree-entry-path` refuse any path this namespace places in
-   that metadata.
+   `safe-worktree-entry-path` refuse any path this namespace flags.
+
+   Symlinks are refused outright: a path any existing component of which,
+   the last included, is a symbolic link (dangling or not). An
+   LLM-proposed fix has no need to write through a link, and every
+   symlink alias into the metadata is closed at once.
 
    Git has several ways to locate its metadata (a `.git` directory, a
    `gitdir:` file, a linked worktree's `commondir`, `core.hooksPath`), so
    this namespace does not re-implement them. It asks git, run in the
    worktree, for its git dir, common dir and hooks dir. A symlink directly
-   inside one of those that points back into the worktree (a symlinked
-   `.git/config` or `.git/refs`, a hook linked to a script) protects its
-   target and everything below it, except a path git's index holds
+   inside one of those (a symlinked `.git/config` or `.git/refs`, a hook
+   linked to a script) also protects where it finally points, dangling or
+   chained, and everything below that, except a path git's index holds
    exactly: a tracked file shows in the PR diff and stays editable, and
-   the fix loop runs git with hooks disabled (`hooks-disabled-args`). A
-   tracked file inside such a directory does not make its untracked
-   neighbours editable. When git cannot answer, every path is refused.
+   the fix loop runs git with hooks disabled (`hooks-disabled-args`). When
+   git cannot answer, every path is refused.
 
    Paths are compared as java.nio components, never by splitting strings:
    a whitespace-only name is a name, and on POSIX a backslash is part of
-   one. A component named `.git` in any case is refused without asking git:
-   git will not track such a path, and a case-insensitive file system maps
-   `.GIT` onto `.git`."
+   one. A component named `.git` in any case is refused before any of
+   this: git will not track such a path, and a case-insensitive file
+   system maps `.GIT` onto `.git`."
   (:require
    [babashka.process :as process]
    [clojure.java.io :as io]
@@ -75,6 +79,20 @@
   [path]
   (let [p (java.nio.file.Paths/get (str path) (make-array String 0))]
     (mapv #(str (.getName p %)) (range (.getNameCount p)))))
+
+(defn ^{:stratum 0} symlink-on-path?
+  "True when any existing component of `relative-path` under
+   `worktree-root`, the last included, is a symbolic link, dangling or
+   not. Each prefix is checked with `Files/isSymbolicLink`, which reads
+   the entry's own attributes (NOFOLLOW_LINKS). A path java.nio cannot
+   represent counts as one."
+  [worktree-root relative-path]
+  (try+
+   (let [root (java.nio.file.Paths/get (str worktree-root) (make-array String 0))
+         rel  (java.nio.file.Paths/get (str relative-path) (make-array String 0))]
+     (boolean (some #(java.nio.file.Files/isSymbolicLink (.resolve root (.subpath rel 0 %)))
+                    (range 1 (inc (.getNameCount rel))))))
+   (catch IllegalArgumentException _ true)))
 
 (defn ^{:stratum 0} under?
   "True when absolute `path` is `dir` or below it, component by component."
