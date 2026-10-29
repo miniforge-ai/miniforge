@@ -155,6 +155,31 @@
         (testing "and is escalated"
           (is (some #(= :pr-monitor/escalated (:event/type %)) (:events @bus))))))))
 
+(deftest ^{:stratum 1} two-monitors-share-one-budget-test
+  (let [fixes     (atom 0)
+        change    {:category :change-request :comment (review-comment 9 "2026-10-01T00:00:00Z")}
+        monitor-a (monitor-for "acme/app" {:generate-fn (constantly "patch")})
+        monitor-b (monitor-for "acme/app")
+        saved-42  #(budget/load-budget "acme/app" 42)]
+    (state/get-or-create-budget monitor-a 42)
+    (state/get-or-create-budget monitor-a 43)
+    (state/update-budget! monitor-b 42 (reduce budget/record-fix-attempt
+                                               (state/get-or-create-budget monitor-b 42)
+                                               (range 1 11)))
+    (state/update-budget! monitor-b 43 (nth (iterate budget/record-fix-pushed
+                                                     (state/get-or-create-budget monitor-b 43))
+                                            4))
+    (with-redefs [fix-loop/run-fix-loop (fn [& _] (swap! fixes inc) {:success? true :commit-sha "abc123"})
+                  poller/post-comment   (fn [& _] (dag/ok {:comment-posted true}))]
+      (testing "a monitor whose cached budget is stale does not start a fix once another spent it"
+        (is (= :budget-exhausted (:reason (handlers/handle-change-request monitor-a {:pr/number 42} change))))
+        (is (zero? @fixes))
+        (is (= 10 (:total-attempts (saved-42)))))
+      (testing "a pushed fix is counted on top of what the other monitor saved"
+        (handlers/handle-change-request monitor-a {:pr/number 43} change)
+        (is (= 1 @fixes))
+        (is (= 5 (:fixes-pushed (budget/load-budget "acme/app" 43))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} damaged-budget-file-keeps-the-hard-stop-test

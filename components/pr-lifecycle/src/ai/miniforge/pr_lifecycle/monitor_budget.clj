@@ -201,28 +201,43 @@
                                                             loaded
                                                             (invalid-budget file pr-number)))))))
 
-(defn ^{:stratum 2} save-budget!
-  "Merge `budget` into the copy saved for its PR in repo `repo-slug` (see
-   `merge-budgets`) under the file lock, and write it atomically. Returns the
-   budget now on disk, or an anomaly with nothing written for a stand-in from
-   `exhausted-budget`, a slug that is not owner/name, or a file that does not
-   hold this PR's budget."
-  [repo-slug budget]
+(defn ^{:stratum 2} change-saved-budget!
+  "Under the budget file's lock, apply `f` to the copy saved for `budget`'s
+   PR in repo `repo-slug` merged with `budget` (see `merge-budgets`), so `f`
+   sees what other monitors saved, and write the result atomically. `f`
+   returns the new budget, or an anomaly to refuse, and then nothing changes
+   on disk. Returns the budget written, or an anomaly: `f`'s refusal, a
+   stand-in from `exhausted-budget`, a slug that is not owner/name, a file
+   that does not hold this PR's budget, a busy lock or a failed write."
+  [repo-slug budget f]
   (let [pr-number (:pr-number budget)
         file      (store/repo-file repo-slug (budget-file-name pr-number))
+        refusal   (volatile! nil)
+        apply-f   (fn [on-disk]
+                    (if (or (nil? on-disk) (valid-budget? on-disk pr-number))
+                      (let [changed (f (merge-budgets on-disk budget))]
+                        (if (anomaly/anomaly? changed)
+                          (do (vreset! refusal changed) on-disk)
+                          changed))
+                      on-disk))
         saved     (cond
                     (:load-error budget) (anomaly/anomaly :conflict
                                                           (msg/system-t :monitor-state/budget-held {:pr-number pr-number})
                                                           {:pr-number pr-number})
                     (nil? file)          (store/no-repo repo-slug)
-                    :else                (store/update-file! file #(if (or (nil? %) (valid-budget? % pr-number))
-                                                                     (merge-budgets % budget)
-                                                                     %)))]
-    (if (or (anomaly/anomaly? saved) (valid-budget? saved pr-number))
-      saved
-      (invalid-budget file pr-number))))
+                    :else                (store/update-file! file apply-f))]
+    (cond
+      @refusal                                                      @refusal
+      (or (anomaly/anomaly? saved) (valid-budget? saved pr-number)) saved
+      :else                                                         (invalid-budget file pr-number))))
 
 ;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} save-budget!
+  "Merge `budget` into the copy saved for its PR (see
+   `change-saved-budget!`). The budget now on disk, or an anomaly."
+  [repo-slug budget]
+  (change-saved-budget! repo-slug budget identity))
 
 (defn ^{:stratum 3} any-budget-exhausted?
   "Check if any budget dimension is exhausted.
