@@ -121,8 +121,12 @@
 (defn ^{:stratum 1} print-success [msg]
   (println (style msg :green)))
 
-(defn ^{:stratum 1} print-error [msg]
-  (println (style (messages/t :config/error-prefix {:message msg}) :red)))
+(defn ^{:stratum 1} print-error
+  "Print `msg` as an error on stderr, so stdout carries only the command's
+   output (`config get` values, pipes)."
+  [msg]
+  (binding [*out* *err*]
+    (println (style (messages/t :config/error-prefix {:message msg}) :red))))
 
 (defn ^{:stratum 1} print-info [msg]
   (println (style msg :cyan)))
@@ -225,7 +229,8 @@
       (do
         (print-error (messages/t :config/set-missing-args))
         (println (messages/t :config/set-usage {:command (app-config/command-string "config set <key> <value>")}))
-        (println (messages/t :config/set-example {:command (app-config/command-string "config set llm.backend opencode")})))
+        (println (messages/t :config/set-example {:command (app-config/command-string "config set llm.backend opencode")}))
+        (shared/exit! shared/usage-exit-code))
       (let [key-path (parse-config-key key-str)
             value (coerce-config-value key-path (parse-config-value value-str))
             result (config-file/update-config! config-path #(assoc-in (or % default-config) key-path value))]
@@ -303,7 +308,8 @@
         (doseq [backend (keys backend-config/backend-specs)]
           (println (messages/t :config/backend-item {:name (name backend)})))
         (println)
-        (println (messages/t :config/backend-detail-hint {:command (app-config/command-string "config backends")})))
+        (println (messages/t :config/backend-detail-hint {:command (app-config/command-string "config backends")}))
+        (shared/exit! shared/usage-exit-code))
       (let [backend-kw (keyword backend-str)
             validation (backend-status/validate-backend backend-kw)]
         (if (:valid? validation)
@@ -323,7 +329,9 @@
             (println (messages/t :config/backend-change-model-hint {:command (app-config/command-string "config set llm.model <model-name>")}))
             (println))
           ;; Backend not available, show helpful error
-          (backends/print-backend-error backend-kw))))))
+          (do (binding [*out* *err*]
+                (backends/print-backend-error backend-kw))
+              (shared/exit! 1)))))))
 
 (defn ^{:stratum 2} cmd-validate
   "Validate configuration file."
@@ -377,13 +385,16 @@
       (do
         (print-error (messages/t :config/get-missing-key))
         (println (messages/t :config/get-usage {:command (app-config/command-string "config get <key>")}))
-        (println (messages/t :config/get-example {:command (app-config/command-string "config get llm.backend")})))
+        (println (messages/t :config/get-example {:command (app-config/command-string "config get llm.backend")}))
+        (shared/exit! shared/usage-exit-code))
       (let [config (load-merged-config config-path)
             key-path (parse-config-key key-str)
             value (get-in config key-path)]
-        (if value
+        ;; some?, not truthiness: a key set to false is found.
+        (if (some? value)
           (println (pr-str value))
-          (print-error (messages/t :config/get-not-found {:key key-str})))))))
+          (do (print-error (messages/t :config/get-not-found {:key key-str}))
+              (shared/exit! 1)))))))
 
 (defn ^{:stratum 3} cmd-backends
   "List available backends with status."
