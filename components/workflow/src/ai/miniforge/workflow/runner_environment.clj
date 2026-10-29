@@ -25,6 +25,7 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.phase.interface.task-base :as task-base]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.boundary.environment :as boundary]
    [ai.miniforge.workflow.context :as context]
@@ -176,15 +177,6 @@
       (some #(= :no-secrets (:gate %)) (:phase/gate-failures result)) :secrets-detected
       (seq (:phase/gate-errors result)) :gate-denied)))
 
-(defn- ^{:stratum 0} task-base-refs
-  "The implement phase's resume-aware base refs: carried in the context,
-   or, after a resume, recorded on its phase result."
-  [phase-ctx]
-  (or (get phase-ctx :execution/task-base-refs)
-      (some (fn [result] (or (get-in result [:artifact :code/base-refs])
-                             (get-in result [:result :output :code/base-refs])))
-            (vals (get phase-ctx :execution/phase-results)))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} restore-local-workspace-checkpoint!
@@ -254,7 +246,7 @@
         ;; run only when the persist would otherwise go ahead.
         scan     (delay (gate/outgoing-secrets (assoc context
                                                       :execution/worktree-path workdir
-                                                      :execution/task-base-refs (task-base-refs phase-ctx))))
+                                                      :execution/task-base-refs (task-base/recorded-refs phase-ctx))))
         found?   (fn [error-type] (some #(= error-type (:type %)) (:errors @scan)))
         ;; Governed mode pushes to a remote via the capsule, so it persists with
         ;; or without a host worktree. LOCAL mode archives a git bundle of the

@@ -83,6 +83,7 @@
    :execution/environment-id
    :execution/environment-metadata
    :execution/worktree-path
+   :execution/task-base-refs
    :execution/mode
    :execution/completed-with-warnings?])
 
