@@ -62,6 +62,36 @@
           (is (not (fs/exists? (checkpoint-lock/lock-file root gone))))
           (is (fs/exists? (checkpoint-lock/lock-file root kept))))))))
 
+(deftest ^{:stratum 0} only-lock-files-really-removed-are-counted
+  (fs/with-temp-dir [root {:prefix "pin-lock-"}]
+    (fs/with-temp-dir [events-dir {:prefix "pin-lock-events-"}]
+      (let [root (str root)]
+        (checkpoint-lock/with-run-lock root (random-uuid) (constantly nil))
+        (with-redefs [checkpoint-lock/remove-lock-file! (constantly false)]
+          (is (zero? (:locks-pruned (workflow/gc-checkpoints! {:checkpoint/root root
+                                                               :events-dir (fs/file events-dir)})))))))))
+
+(deftest ^{:stratum 0} a-symlinked-lock-file-or-directory-is-refused
+  (fs/with-temp-dir [root {:prefix "pin-lock-"}]
+    (fs/with-temp-dir [outside {:prefix "pin-lock-outside-"}]
+      (let [root (str root)
+            target (fs/path outside "target")
+            id (random-uuid)]
+        (spit (str target) "keep")
+        (testing "a lock file that is a link: refused, the target untouched"
+          (fs/create-dirs (fs/path root ".locks"))
+          (fs/create-sym-link (checkpoint-lock/lock-file root id) target)
+          (let [result (checkpoint-lock/with-run-lock root id (constantly :entered))]
+            (is (anomaly/anomaly? result))
+            (is (= "keep" (slurp (str target))))))
+        (testing "a lock directory that is a link: refused, nothing made there"
+          (fs/delete-tree (fs/path root ".locks"))
+          (fs/create-sym-link (fs/path root ".locks") outside)
+          (let [other (random-uuid)
+                result (checkpoint-lock/with-run-lock root other (constantly :entered))]
+            (is (anomaly/anomaly? result))
+            (is (not (fs/exists? (fs/path outside (str other ".lock")))))))))))
+
 (deftest ^{:stratum 0} a-run-started-pinned-pins-under-the-lock
   ;; The marker a pinned run's first checkpoint writes goes through the
   ;; locked pin: with the lock held elsewhere, the pin times out and the

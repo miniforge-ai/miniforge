@@ -10,16 +10,21 @@
    Another process may be waiting on that file, and then lock it after it
    is gone, while a newcomer locks a new file at the same path; so every
    acquirer checks that the file it locked is still the one the path
-   names (`holds-path?`) and starts over when it is not."
+   names, by file identity (`file-key`), and starts over when it is not.
+
+   Nothing opens a second descriptor on a locked file: POSIX record locks
+   belong to the process, and closing any descriptor of the file releases
+   them. A lock file or lock directory that is a symbolic link is refused,
+   so a lock never writes outside its root."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.workflow.messages :as messages]
    [babashka.fs :as fs]
    [slingshot.slingshot :refer [try+]])
   (:import
-   (java.nio ByteBuffer)
    (java.nio.channels FileChannel)
-   (java.nio.file OpenOption StandardOpenOption)
+   (java.nio.file Files LinkOption OpenOption StandardOpenOption)
+   (java.nio.file.attribute BasicFileAttributes)
    (java.util.concurrent TimeUnit)
    (java.util.concurrent.locks ReentrantLock)))
 
@@ -38,20 +43,36 @@
 
 (defonce ^{:stratum 0} ^:private process-locks (atom {}))
 
-(defn- ^{:stratum 0} holds-path?
-  "True when `channel`, whose lock this process holds, is the file `path`
-   names now: a fresh token written through the channel reads back by
-   path. False when the file was unlinked or the path replaced."
-  [^FileChannel channel path]
-  (let [token (str (random-uuid))]
-    (.truncate channel 0)
-    (.write channel (ByteBuffer/wrap (.getBytes token "UTF-8")) 0)
-    (= token (try+ (slurp (str path)) (catch Exception _ nil)))))
+(defn- ^{:stratum 0} same-file?
+  "True when the lock taken on the file `path` named at `opened` (its key
+   just after opening; `before` just before) is on the file the path names
+   `now`. False when the file was unlinked or the path replaced, or when
+   the path changed around the open."
+  [before opened now]
+  (and (not= :absent now)
+       (= opened now)
+       (or (= :absent before) (= before opened))))
+
+(defn- ^{:stratum 0} symlinked [workflow-run-id path]
+  (anomaly/anomaly :unavailable
+                   (messages/t :checkpoint/lock-symlink {:run-id workflow-run-id :path (str path)})
+                   {:workflow/run-id workflow-run-id :checkpoint/lock (str path)}))
 
 (defn- ^{:stratum 0} busy [workflow-run-id path]
   (anomaly/anomaly :unavailable
                    (messages/t :checkpoint/lock-busy {:run-id workflow-run-id})
                    {:workflow/run-id workflow-run-id :checkpoint/lock (str path)}))
+
+(defn- ^{:stratum 0} file-key
+  "`path`'s file identity (device and inode on Unix), not following a
+   link: `:absent` when nothing is there, nil where the platform has no
+   file keys. Reads attributes only, opening nothing."
+  [path]
+  (let [no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])]
+    (if (Files/exists path no-follow)
+      (try+ (.fileKey (Files/readAttributes path BasicFileAttributes ^"[Ljava.nio.file.LinkOption;" no-follow))
+            (catch Exception _ :absent))
+      :absent)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -75,15 +96,22 @@
   "Open run `workflow-run-id`'s lock file and take its lock by `deadline`
    (nanoTime), starting over while the locked file is no longer the one
    the path names. Returns `{:channel :lock}`, or an `:unavailable`
-   anomaly: busy past the deadline, or an I/O error making the lock
-   directory, opening the file or locking it."
+   anomaly: busy past the deadline, a symlinked lock file or directory,
+   or an I/O error making the lock directory, opening the file or locking
+   it."
   [path deadline workflow-run-id]
   (try+
     (loop []
-      (fs/create-dirs (fs/parent path))
-      (let [channel (FileChannel/open path (into-array OpenOption [StandardOpenOption/CREATE
-                                                                   StandardOpenOption/WRITE]))
-            outcome (try+
+      (if (or (fs/sym-link? (fs/parent path)) (fs/sym-link? path))
+        (symlinked workflow-run-id path)
+        (let [_ (fs/create-dirs (fs/parent path))
+              before (file-key path)
+              ;; NOFOLLOW_LINKS: a link swapped in after the check fails here.
+              channel (FileChannel/open path (into-array OpenOption [StandardOpenOption/CREATE
+                                                                     StandardOpenOption/WRITE
+                                                                     LinkOption/NOFOLLOW_LINKS]))
+              opened (file-key path)
+              outcome (try+
                       ;; Hinted AutoCloseable: babashka does not expose FileLock.
                       (let [^java.lang.AutoCloseable held (loop []
                                                             (or (.tryLock channel)
@@ -92,7 +120,7 @@
                                                                   (recur))))]
                         (cond
                           (nil? held) (do (.close channel) (busy workflow-run-id path))
-                          (holds-path? channel path) {:channel channel :lock held}
+                          (same-file? before opened (file-key path)) {:channel channel :lock held}
                           :else (do (.close held) (.close channel)
                                     (if (pos? (- deadline (System/nanoTime)))
                                       ::stale
@@ -100,7 +128,7 @@
                       (catch Exception e
                         (.close channel)
                         (throw e)))]
-        (if (= ::stale outcome) (recur) outcome)))
+          (if (= ::stale outcome) (recur) outcome))))
     (catch Exception e
       (anomaly/exception-anomaly :unavailable
                                  (messages/t :checkpoint/lock-failed
@@ -110,6 +138,15 @@
                                  e))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} remove-lock-file!
+  "Delete run `workflow-run-id`'s lock file. Call it only while holding
+   that run's lock, from `with-run-lock`'s `f`. True when this call
+   deleted it; false when it was not there or could not be deleted."
+  [checkpoint-root workflow-run-id]
+  (try+
+    (boolean (fs/delete-if-exists (lock-file checkpoint-root workflow-run-id)))
+    (catch Exception _ false)))
 
 (defn ^{:stratum 2} with-run-lock
   "`(f)` while holding run `workflow-run-id`'s lock under `checkpoint-root`:
@@ -134,16 +171,6 @@
                    (finally (.close ^java.lang.AutoCloseable lock)
                             (.close ^java.lang.AutoCloseable channel))))))
         (finally (.unlock in-process))))))
-
-(defn ^{:stratum 2} remove-lock-file!
-  "Delete run `workflow-run-id`'s lock file. Call it only while holding
-   that run's lock, from `with-run-lock`'s `f`. Best effort: nil whether
-   or not the file went."
-  [checkpoint-root workflow-run-id]
-  (try+
-    (fs/delete-if-exists (lock-file checkpoint-root workflow-run-id))
-    nil
-    (catch Exception _ nil)))
 
 (comment
   (with-run-lock "/tmp/checkpoints" (random-uuid) (constantly :held)))

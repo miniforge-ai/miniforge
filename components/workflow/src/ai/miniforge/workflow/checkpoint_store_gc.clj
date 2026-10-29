@@ -121,7 +121,7 @@
 (defn- ^{:stratum 0} prune-lock-files!
   "Delete the lock files under `root` whose run directory is gone, each
    under its own lock and only if the run is still gone then. Returns how
-   many went; 0 when the lock directory does not list."
+   many this call deleted; 0 when the lock directory does not list."
   [root]
   (let [locks (fs/path root checkpoint-lock/locks-directory-name)
         run-gone? #(not (fs/exists? (fs/path root %) {:nofollow-links true}))]
@@ -135,8 +135,8 @@
            (map (fn [id]
                   (checkpoint-lock/with-run-lock
                    root id
-                   (fn [] (when (run-gone? id)
-                            (checkpoint-lock/remove-lock-file! root id)
+                   (fn [] (when (and (run-gone? id)
+                                     (checkpoint-lock/remove-lock-file! root id))
                             id)))))
            (filter string?)
            count)
