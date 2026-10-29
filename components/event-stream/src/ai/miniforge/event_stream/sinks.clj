@@ -640,36 +640,42 @@
 
    Returns: Sink function (fn [event] -> nil)"
   [& [opts]]
-  ;; Non-blocking cleanup on sink creation
-  (future (try (cleanup-stale-events! opts) (catch Exception _ nil)))
-  (fn [event]
-    (try
-      (let [base-dir (or (:base-dir opts) (default-events-dir))
-            file-path (if-let [workflow-id (:workflow/id event)]
-                        (event-file-path base-dir workflow-id event)
-                        (operator-event-file-path base-dir event))
-            f   (io/file file-path)
-            dir (or (.getParentFile f) (io/file "."))
-            _   (.mkdirs dir)
-            tmp (java.io.File/createTempFile ".es-" ".transit.tmp" dir)]
-        (try
-          ;; Explicit UTF-8: payload strings can carry non-ASCII and these
-          ;; files are a cross-language contract surface — platform default
-          ;; encoding must never decide the on-disk bytes.
-          (spit tmp (event->transit-json event) :encoding "UTF-8")
-          (Files/move (.toPath tmp) (.toPath f)
-                      (into-array StandardCopyOption
-                                  [StandardCopyOption/ATOMIC_MOVE
-                                   StandardCopyOption/REPLACE_EXISTING]))
-          (catch Throwable e
-            (try (Files/deleteIfExists (.toPath tmp))
-                 (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
-            (throw e))))
-      (catch Exception e
-        ;; Log to stderr so failures are visible without breaking the event stream
-        (binding [*out* *err*]
-          (println (str "WARNING: Event sink write failed: " (ex-message e))))
-        nil))))
+  ;; The directory is resolved once, at creation (an explicit nil
+  ;; :base-dir included): the background cleanup and every write use the
+  ;; one the sink was created for, never one resolved later (a test
+  ;; pointing the default at a temp dir while it creates the sink keeps
+  ;; the cleanup there too).
+  (let [base-dir (or (:base-dir opts) (default-events-dir))]
+    ;; Non-blocking cleanup on sink creation
+    (future (try (cleanup-stale-events! (update opts :events-dir #(or % base-dir)))
+                 (catch Exception _ nil)))
+    (fn [event]
+      (try
+        (let [file-path (if-let [workflow-id (:workflow/id event)]
+                          (event-file-path base-dir workflow-id event)
+                          (operator-event-file-path base-dir event))
+              f   (io/file file-path)
+              dir (or (.getParentFile f) (io/file "."))
+              _   (.mkdirs dir)
+              tmp (java.io.File/createTempFile ".es-" ".transit.tmp" dir)]
+          (try
+            ;; Explicit UTF-8: payload strings can carry non-ASCII and these
+            ;; files are a cross-language contract surface — platform default
+            ;; encoding must never decide the on-disk bytes.
+            (spit tmp (event->transit-json event) :encoding "UTF-8")
+            (Files/move (.toPath tmp) (.toPath f)
+                        (into-array StandardCopyOption
+                                    [StandardCopyOption/ATOMIC_MOVE
+                                     StandardCopyOption/REPLACE_EXISTING]))
+            (catch Throwable e
+              (try (Files/deleteIfExists (.toPath tmp))
+                   (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
+              (throw e))))
+        (catch Exception e
+          ;; Log to stderr so failures are visible without breaking the event stream
+          (binding [*out* *err*]
+            (println (str "WARNING: Event sink write failed: " (ex-message e))))
+          nil)))))
 
 ;------------------------------------------------------------------------------ Layer 5
 

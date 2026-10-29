@@ -479,6 +479,12 @@
   visualize/machine->mermaid)
 
 ;; Checkpoint retention
+(def ^{:stratum 0} checkpoint-usage
+  "Read-only summary of the checkpoint root for `mf doctor`: {:checkpoint/root
+   :runs :older :oldest-days :max-age-days}, ages from run directory mtimes.
+   Args: [opts], as `gc-checkpoints!`. Deletes nothing."
+  checkpoint-gc/checkpoint-usage)
+
 (def ^{:stratum 0} gc-checkpoints!
   "Delete checkpoint directories unchanged for the retention period
    (default 30 days), keeping pinned runs, runs whose manifest does not
