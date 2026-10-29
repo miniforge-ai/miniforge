@@ -199,12 +199,15 @@
    matches."
   #"GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)")
 
-(def ^{:stratum 0} refused-env-names
-  "Container env names a launch refuses whatever its trust level.
-   DOCKER_CUSTOM_HEADERS is a docker CLI variable (registry :cli-env-names),
-   so `env-arg` would put it inline on argv, where `ps` shows the headers
-   it carries; passed by name instead, it would set the CLI's own headers."
-  #{"DOCKER_CUSTOM_HEADERS"})
+(defn- ^{:stratum 0} refused-env-name?
+  "True for a container env name no launch or exec passes, whatever the
+   trust level: a non-identifier, which Podman's `-e NAME` reads as a
+   pattern over its own environment, or DOCKER_CUSTOM_HEADERS, a docker CLI
+   variable `env-arg` would put inline on argv for `ps` to show (by name,
+   it would set the CLI's own headers)."
+  [n]
+  (or (= "DOCKER_CUSTOM_HEADERS" n)
+      (not (re-find execution-plan/env-name-pattern n))))
 
 (def ^{:stratum 0} proxy-env-pattern
   "Proxy variables curl and git read. Their URL can carry `user:password@`."
@@ -1094,19 +1097,16 @@
    the immutable image reference, the plan itself as create-container's
    :execution-plan.
 
-   A plan env name that is not a plain identifier, or is in
-   `refused-env-names`, is a hard-stop at every trust level: such a name
-   is not one env-file assignment, and Podman reads `*` or a trailing `*`
-   in `-e NAME` as a pattern that copies every matching variable of its
-   own environment into the container."
+   A plan env name `refused-env-name?` flags is a hard-stop at every
+   trust level: such a name is not one env-file assignment, and Podman
+   reads `*` or a trailing `*` in `-e NAME` as a pattern that copies every
+   matching variable of its own environment into the container."
   [descriptor image env-config digest-fn]
   (let [plan            (build-launch-plan (digest-fn descriptor image) env-config)
         security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
                          :rootless-action     plan-security/default-rootless-action}
         decision        (plan-security/check-plan-security plan descriptor security-config)
-        bad-names       (filter #(or (contains? refused-env-names %)
-                                     (not (re-find execution-plan/env-name-pattern %)))
-                                (keys (:env plan)))]
+        bad-names       (filter refused-env-name? (keys (:env plan)))]
     (cond
       (response/anomaly-map? decision)
       (result/err :security-policy-violation
