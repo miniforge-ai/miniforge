@@ -600,8 +600,30 @@
            (.toPath link)
            (.toPath real)
            (into-array java.nio.file.attribute.FileAttribute []))
-          (is (= 1 (sinks/cleanup-stale-events! {:events-dir link})))
-          (is (not (.exists orphan))))))))
+          (age! 8 (write-file! (io/file real "archived" "wf-old" "archived.marker") ""))
+          (is (= 2 (sinks/cleanup-stale-events! {:events-dir link})))
+          (is (not (.exists orphan)))
+          (is (not (.exists (io/file real "archived" "wf-old"))))))))
+
+  (testing "a symlinked archived/ or operator/ is not followed out of the events tree"
+    (with-temp-dir
+      (fn [dir]
+        (let [events (io/file dir "events")
+              outside (io/file dir "outside")
+              notes (write-file! (io/file outside "wf-x" "notes.txt") "keep")
+              marker (write-file! (io/file outside "wf-x" "archived.marker") "")
+              op-file (write-file! (io/file outside "20200101T000000Z-abc.json") "{}")]
+          (.mkdirs events)
+          (age! 8 marker op-file)
+          (doseq [sub ["archived" "operator"]]
+            (java.nio.file.Files/createSymbolicLink
+             (.toPath (io/file events sub))
+             (.toPath outside)
+             (into-array java.nio.file.attribute.FileAttribute [])))
+          (is (= 0 (sinks/cleanup-stale-events! {:events-dir events})))
+          (is (.exists notes))
+          (is (.exists marker))
+          (is (.exists op-file)))))))
 
 (deftest ^{:stratum 1} cleanup-legacy-and-operator-files-test
   (testing "a legacy directory with one recent file keeps its old files too"

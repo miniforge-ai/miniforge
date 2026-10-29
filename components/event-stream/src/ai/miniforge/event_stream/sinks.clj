@@ -368,7 +368,9 @@
 
    Anywhere in the tree, `.transit.tmp` files older than the TTL go too:
    a writer killed between its temp write and the rename leaves one, and
-   no reader ever picks it up. Symlinked directories are not followed.
+   no reader ever picks it up. No symlink below the events directory is
+   followed, a symlinked archived/ or operator/ included; the events
+   directory itself may be a symlink.
 
    Arguments:
      opts - Map with optional:
@@ -387,16 +389,25 @@
                       (< (.lastModified f) cutoff)))]
     (if (.isDirectory events-dir)
       (let [reserved #{(layout/live-subdir) (layout/archived-subdir) (layout/operator-subdir)}
-            archives (->> (child-dirs (io/file events-dir (layout/archived-subdir)))
-                          (filter #(archive-expired? % cutoff)))
+            ;; A symlinked archived/ or operator/ points outside the
+            ;; events tree: never list or delete through it.
+            real-subdir (fn [subdir]
+                          (let [d (io/file events-dir subdir)]
+                            (when-not (Files/isSymbolicLink (.toPath d)) d)))
+            archived-root (real-subdir (layout/archived-subdir))
+            operator-root (real-subdir (layout/operator-subdir))
+            archives (when archived-root
+                       (filter #(archive-expired? % cutoff) (child-dirs archived-root)))
             legacy (->> (child-dirs events-dir)
                         (remove #(contains? reserved (.getName ^java.io.File %)))
                         (filter #(legacy-workflow-expired? % cutoff manifest-filename)))
             pruned (reduce + 0 (map #(delete-all! (reverse (walk-tree %)))
                                     (concat archives legacy)))
-            operator (->> (walk-tree (io/file events-dir (layout/operator-subdir)))
-                          (filter #(stale? % ".json"))
-                          delete-all!)
+            operator (if operator-root
+                       (->> (walk-tree operator-root)
+                            (filter #(stale? % ".json"))
+                            delete-all!)
+                       0)
             temps (->> (walk-tree events-dir)
                        (filter #(stale? % ".transit.tmp"))
                        delete-all!)]
