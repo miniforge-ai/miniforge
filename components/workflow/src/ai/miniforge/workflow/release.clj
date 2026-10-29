@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.release
   "Release phase executor for writing code artifacts to git worktree.
    
@@ -36,16 +35,15 @@
    [babashka.process :as process]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Result predicates
 
-(defn succeeded?
+;; Result predicates
+(defn ^{:stratum 0} succeeded?
   "Check if a result map indicates success."
   [result]
   (boolean (:success? result)))
 
 ;; File operation helpers
-
-(defn ensure-parent-dir!
+(defn ^{:stratum 0} ensure-parent-dir!
   "Create parent directories for a file path if they don't exist.
    Returns the parent directory path."
   [file-path]
@@ -54,15 +52,7 @@
       (fs/create-dirs parent))
     parent))
 
-(defn write-file!
-  "Write content to a file, creating parent directories as needed.
-   Returns the file path on success."
-  [file-path content]
-  (ensure-parent-dir! file-path)
-  (spit (str file-path) content)
-  file-path)
-
-(defn delete-file!
+(defn ^{:stratum 0} delete-file!
   "Delete a file if it exists. Returns true if deleted, false if file didn't exist."
   [file-path]
   (if (fs/exists? file-path)
@@ -76,9 +66,12 @@
   Both the worktree root and the target are resolved with NIO toRealPath, which
   follows symlinks exactly as the kernel does. For not-yet-existing paths, walks
   up to the deepest existing ancestor, resolves that physically, and reattaches
-  the remaining suffix (normalised to collapse any '..' escapes). Does NOT
-  pre-normalise: pre-normalisation would collapse symlink hops like link/../x
-  before resolution, allowing bypass. Fails closed on IO errors."
+  the remaining suffix. A suffix containing '..' is rejected outright: the
+  kernel resolves it one component at a time against directories that write
+  creates and symlinks that already exist (missing/../jump/../x), which no
+  lexical normalisation reproduces. Does NOT pre-normalise: that would collapse
+  symlink hops like link/../x before resolution, allowing bypass. Fails closed
+  on IO errors."
   [worktree-path file-path]
   (try
     (let [root     (.toRealPath
@@ -100,17 +93,16 @@
                         false
                         (try
                           (let [phys (.toRealPath candidate (into-array java.nio.file.LinkOption []))]
-                            (within? (.normalize (.resolve phys suffix))))
+                            (and (not-any? #(= ".." (str %)) suffix)
+                                 (within? (.resolve phys suffix))))
                           (catch java.nio.file.NoSuchFileException _
                             (walk (.getParent candidate)
                                   (.resolve (.getFileName candidate) suffix))))))]
               (walk (.getParent nio-abs) (.getFileName nio-abs)))))))
     (catch Exception _ false)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Git operations
-
-(defn stage-files!
+(defn ^{:stratum 0} stage-files!
   "Stage files in git worktree using git add.
    
    Arguments:
@@ -137,17 +129,44 @@
        :output ""
        :error (.getMessage e)})))
 
-;------------------------------------------------------------------------------ Layer 2
-;; File action processing
+;; Code artifact extraction
+(defn ^{:stratum 0} extract-code-artifacts
+  "Extract code artifacts from workflow artifacts.
+   Handles both old and new artifact formats.
+   
+   Returns a sequence of code artifact contents."
+  [workflow-artifacts]
+  (->> workflow-artifacts
+       (filter #(or (= :code (:type %))
+                    (= :code (:artifact/type %))))
+       (map (fn [artifact]
+              (or
+               ;; New standard format
+               (:artifact/content artifact)
+               ;; Old format
+               (:content artifact))))))
 
-(defmulti process-file-action
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} write-file!
+  "Write content to a file, creating parent directories as needed.
+   Returns the file path on success."
+  [file-path content]
+  (ensure-parent-dir! file-path)
+  (spit (str file-path) content)
+  file-path)
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; File action processing
+(defmulti ^{:stratum 2} process-file-action
   "Process a file action based on its :action keyword.
    
    Dispatches on the :action field of the file map.
    Returns a result map with :success?, :action, :path, and optional :error."
   (fn [_worktree-path file-spec _logger] (:action file-spec)))
 
-(defmethod process-file-action :create
+(defmethod ^{:stratum 2} process-file-action :create
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
@@ -174,7 +193,7 @@
        :path path
        :error (.getMessage e)})))
 
-(defmethod process-file-action :modify
+(defmethod ^{:stratum 2} process-file-action :modify
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
@@ -201,7 +220,7 @@
        :path path
        :error (.getMessage e)})))
 
-(defmethod process-file-action :delete
+(defmethod ^{:stratum 2} process-file-action :delete
   [worktree-path {:keys [path]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
@@ -228,7 +247,7 @@
        :path path
        :error (.getMessage e)})))
 
-(defmethod process-file-action :default
+(defmethod ^{:stratum 2} process-file-action :default
   [_worktree-path {:keys [path action]} logger]
   (when logger
     (log/warn logger :workflow :release/unknown-action
@@ -239,28 +258,9 @@
    :error (str "Unknown action: " action)})
 
 ;------------------------------------------------------------------------------ Layer 3
-;; Code artifact extraction
 
-(defn extract-code-artifacts
-  "Extract code artifacts from workflow artifacts.
-   Handles both old and new artifact formats.
-   
-   Returns a sequence of code artifact contents."
-  [workflow-artifacts]
-  (->> workflow-artifacts
-       (filter #(or (= :code (:type %))
-                    (= :code (:artifact/type %))))
-       (map (fn [artifact]
-              (or
-               ;; New standard format
-               (:artifact/content artifact)
-               ;; Old format
-               (:content artifact))))))
-
-;------------------------------------------------------------------------------ Layer 4
 ;; ReleasePhaseExecutor implementation
-
-(defrecord ReleasePhaseExecutor []
+(defrecord ^{:stratum 3} ReleasePhaseExecutor []
   p/PhaseExecutor
 
   (execute-phase [_this workflow-state context]

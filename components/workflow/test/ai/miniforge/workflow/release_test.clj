@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.release-test
   "Unit tests for release helpers that do not require git."
   (:require
@@ -23,15 +22,19 @@
    [ai.miniforge.workflow.release :as release]
    [babashka.fs :as fs]))
 
-(def ^:dynamic *temp-dirs* (atom []))
+;------------------------------------------------------------------------------ Layer 0
 
-(defn create-temp-dir
+(def ^{:stratum 0} ^:dynamic *temp-dirs* (atom []))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-temp-dir
   []
   (let [dir (fs/create-temp-dir {:prefix "release-unit-"})]
     (swap! *temp-dirs* conj dir)
     dir))
 
-(defn cleanup-temp-dirs
+(defn ^{:stratum 1} cleanup-temp-dirs
   [f]
   (reset! *temp-dirs* [])
   (try
@@ -41,16 +44,16 @@
         (when (fs/exists? dir)
           (fs/delete-tree dir))))))
 
-(use-fixtures :each cleanup-temp-dirs)
+;------------------------------------------------------------------------------ Layer 2
 
-(deftest ensure-parent-dir-test
+(deftest ^{:stratum 2} ensure-parent-dir-test
   (testing "ensure-parent-dir! creates nested directories"
     (let [temp-dir (create-temp-dir)
           test-path (fs/path temp-dir "foo" "bar" "baz.clj")]
       (release/ensure-parent-dir! test-path)
       (is (fs/exists? (fs/path temp-dir "foo" "bar"))))))
 
-(deftest write-file-test
+(deftest ^{:stratum 2} write-file-test
   (testing "write-file! creates parent directories"
     (let [temp-dir (create-temp-dir)
           file-path (fs/path temp-dir "src" "example.clj")
@@ -59,7 +62,7 @@
       (is (fs/exists? file-path))
       (is (= content (slurp (str file-path)))))))
 
-(deftest delete-file-test
+(deftest ^{:stratum 2} delete-file-test
   (testing "delete-file! removes existing files"
     (let [temp-dir (create-temp-dir)
           file-path (fs/path temp-dir "delete-me.clj")]
@@ -72,7 +75,7 @@
           file-path (fs/path temp-dir "missing.clj")]
       (is (false? (release/delete-file! file-path))))))
 
-(deftest process-file-action-path-traversal-test
+(deftest ^{:stratum 2} process-file-action-path-traversal-test
   (testing "create rejects a path with .. segments that escape the worktree"
     (let [worktree (create-temp-dir)
           result   (release/process-file-action worktree
@@ -111,7 +114,7 @@
                                                 nil)]
       (is (true? (:success? result))))))
 
-(deftest process-file-action-symlink-traversal-test
+(deftest ^{:stratum 2} process-file-action-symlink-traversal-test
   (testing "create rejects a dangling symlink pointing outside the worktree"
     (let [worktree (create-temp-dir)
           outside  (create-temp-dir)
@@ -142,7 +145,7 @@
         (is (re-find #"(?i)traversal" (:error result)))
         (is (= "original" (slurp (str target))))))))
 
-(deftest process-file-action-symlink-ancestor-test
+(deftest ^{:stratum 2} process-file-action-symlink-ancestor-test
   (testing "create allows a file inside a symlinked worktree root"
     (let [actual-wt   (create-temp-dir)
           link-parent (create-temp-dir)
@@ -183,3 +186,52 @@
                                                 nil)]
         (is (false? (:success? result)))
         (is (false? (fs/exists? (fs/path outside "new.txt"))))))))
+
+(deftest ^{:stratum 2} process-file-action-dotdot-in-unresolved-suffix-test
+  (testing "modify rejects '..' through a missing directory that re-enters via a symlink"
+    ;; jump -> outside/subdir. The kernel resolves
+    ;; missing/../jump/../missing/victim.txt to outside/missing/victim.txt
+    ;; once write creates worktree/missing; normalising the suffix does not.
+    (let [worktree (create-temp-dir)
+          outside  (create-temp-dir)
+          victim   (fs/path outside "missing" "victim.txt")]
+      (fs/create-dirs (fs/path outside "subdir"))
+      (fs/create-dirs (fs/parent victim))
+      (spit (str victim) "original")
+      (fs/create-sym-link (fs/path worktree "jump") (fs/path outside "subdir"))
+      (let [result (release/process-file-action worktree
+                                                {:action  :modify
+                                                 :path    "missing/../jump/../missing/victim.txt"
+                                                 :content "overwritten"}
+                                                nil)]
+        (is (false? (:success? result)))
+        (is (re-find #"(?i)traversal" (:error result)))
+        (is (= "original" (slurp (str victim))) "the outside file is unchanged")
+        (is (false? (fs/exists? (fs/path worktree "missing")))
+            "no directory is created for a rejected path"))))
+
+  (testing "create rejects '..' that would place a new directory outside"
+    (let [worktree (create-temp-dir)
+          outside  (create-temp-dir)]
+      (fs/create-sym-link (fs/path worktree "jump") outside)
+      (let [result (release/process-file-action worktree
+                                                {:action  :create
+                                                 :path    "missing/../jump/newdir/evil.txt"
+                                                 :content "bad"}
+                                                nil)]
+        (is (false? (:success? result)))
+        (is (false? (fs/exists? (fs/path outside "newdir")))
+            "no directory is created outside the worktree"))))
+
+  (testing "'..' within an existing directory still resolves normally"
+    (let [worktree (create-temp-dir)]
+      (fs/create-dirs (fs/path worktree "src"))
+      (let [result (release/process-file-action worktree
+                                                {:action  :create
+                                                 :path    "src/../README.md"
+                                                 :content "ok"}
+                                                nil)]
+        (is (true? (:success? result)))
+        (is (= "ok" (slurp (str (fs/path worktree "README.md")))))))))
+
+(use-fixtures :each cleanup-temp-dirs)
