@@ -133,6 +133,9 @@ gate never checks.
 8. **D8.** No single rule resolution. Delivery concatenates packs without override-by-id, so a duplicate id yields
    two entries. The always-inject branch skips `:rule/enabled?`. Delivery honors `:disabled-pack-ids` and the gate
    does not. The standards pack id is a string, while the documented config uses keywords.
+9. **D9.** The semantic judge skips files. The batched judge drops any changed file of 50,000 bytes or more without
+   a call. The gate still reports the rule `:passed`, because it counts glob applicability, not judged files.
+   Fixing that report belongs to the gate (open question 8).
 
 ---
 
@@ -233,17 +236,18 @@ Every query takes and returns data. The same inputs, graph digest and ledger sna
  :scope-paths  [string]                         ; intent scope, files-in-scope, explore results
  :repo-paths   [string]                         ; tracked files, passed in by the caller
  :failed-rules [keyword]                        ; ids failed by the prior attempt's gate or review
- :enforcement  {:gate-checks {keyword {:check keyword :rule/digest string}} ; per rule the gates check
+ :enforcement  {:gate-checks {keyword {:check keyword :rule/digest string :paths [string]}}
                 :reviewer?   boolean}           ; an LLM reviewer runs for this changeset
  :budget       {:behavior-tokens int :manifest-tokens int}}
 ```
 
 `:enforcement` is a snapshot of the enforcement context. The caller builds `:gate-checks` from the pack set the
-policy gates load, with the §7.2 predicates. Each entry gives the check kind (`:acting` or `:non-acting`) and the
-content digest of the rule definition the gates evaluate. Classification MUST credit a check only when that digest
-equals the digest of the resolved rule (§4.6). A missing entry or a digest mismatch means no check. A repo override
-under the same id therefore never inherits the shipped rule's gate. The snapshot keeps both queries pure while their
-output depends on gate coverage and reviewer availability.
+policy gates load, with the §7.2 predicates. Each entry gives the check kind, `:acting` or `:non-acting`. It also
+gives the content digest of the rule definition the gates evaluate, and the changed paths the check covered.
+Classification MUST credit a check only when that digest equals the digest of the resolved rule (§4.6). A missing
+entry or a digest mismatch means no check. A repo override under the same id therefore never inherits the shipped
+rule's gate. The snapshot keeps both queries pure while their output depends on gate coverage and reviewer
+availability.
 
 At review and release, `:changeset` MUST come from the artifact resolution the policy gates use. It MUST NOT come
 from `:files-in-scope`, which describes intended scope rather than the change. An empty resolved changeset stays
@@ -381,7 +385,9 @@ reviewer availability from the `:enforcement` snapshot (§5.1).
    resolved definition differs from the one the gates check is also `:judged` at best (§5.1).
 3. A rule is applicable when it applies to the changeset at any phase of the run. A `:checked` or `:judged` rule
    whose phases exclude `:review` has no reviewer, so it is `:unenforced`. `:std/standards` is an example.
-4. A `:checked` rule's detector often covers one pattern of a longer rule. `:std/clojure` is an example. The rest of
+4. A rule is `:gated` or `:checked` only for the paths its check covered. If the check skipped an applicable changed
+   path, as the judge does for large files (D9), the rule is `:judged` for that changeset.
+5. A `:checked` rule's detector often covers one pattern of a longer rule. `:std/clojure` is an example. The rest of
    such a rule is enforced only through the reviewer.
 
 The classes describe what the gate does today, including semantic rules gated by an LLM judge. N13 §8 describes
@@ -529,6 +535,7 @@ These extend N13 §10:
 5. Plan-phase scope when the intent names no paths. All tracked files may be too broad.
 6. A release-phase check for branch, commit and PR rules (§6.3).
 7. Whether the gates should load the same pack set as delivery (D8, §4.6). That change belongs to N4.
+8. Whether the gate should report a file the judge skipped instead of `:passed` (D9). That change belongs to N4.
 
 ---
 
@@ -572,6 +579,8 @@ Each obligation names the stage from which it applies.
 10. Stage 1. A shipped graph edited to drop a rule is not used; the load-time rebuild is, and a fact is emitted.
 11. Stage 1. A repo override of a gated rule id with a non-acting detector is not classed `:gated`.
 12. Stage 1. An empty review changeset selects no file-scoped rule and reports no file-scoped rule `:unenforced`.
+13. Stage 1. A semantic `:hard-halt` rule whose only changed file exceeds the judge's size limit is `:judged` and
+    reaches review delivery.
 
 ---
 
