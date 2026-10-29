@@ -25,6 +25,7 @@
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
    [ai.miniforge.dag-executor.result :as result]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -38,6 +39,24 @@
 (def ^{:stratum 0} ^:private base-env {:workdir "/workspace" :mounts []})
 
 (defn- ^{:stratum 0} err-rules [r] (set (map :security/rule (get-in r [:error :data :security/findings]))))
+
+(deftest ^{:stratum 0} release-keeps-git-remote-until-removed-test
+  (testing "the recorded remote survives a release whose container removal
+            failed, so the capsule's work can still be persisted, and goes
+            once removal succeeds"
+    (let [remote   {:repo-url "https://github.com/o/r.git"
+                    :https-url "https://github.com/o/r.git" :host-kind :github}
+          executor (oci-cli/map->OciCliExecutor
+                    {:descriptor  {:runtime/kind :docker}
+                     :git-remotes (atom {"c1" remote})})
+          removed? (atom false)]
+      (with-redefs [oci-cli/stop-container   (fn [& _] {:exit 0})
+                    oci-cli/remove-container (fn [& _] (result/ok {:released? @removed?}))]
+        (proto/release-environment! executor "c1")
+        (is (= {"c1" remote} @(:git-remotes executor)))
+        (reset! removed? true)
+        (proto/release-environment! executor "c1")
+        (is (= {} @(:git-remotes executor)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -138,7 +157,31 @@
                   {:repo-url  "git@github.com:o/r.git"
                    :https-url "https://github.com/o/r.git"
                    :host-kind :github}}
-                 @(:git-remotes executor))))))))
+                 @(:git-remotes executor)))))
+      (testing "the environment record returned to the caller carries the
+                repo URL without the user:password@ it was given"
+        (with-redefs [oci-cli/image-exists?          (fn [_ _] true)
+                      oci-cli/resolve-image-digest!  (fn [_ _] valid-digest)
+                      oci-cli/create-container       (fn [_d container-name & _]
+                                                       (result/ok {:container-name container-name}))
+                      oci-cli/bootstrap-workspace!   (fn [& _] (result/ok {:base-branch "main"}))
+                      oci-cli/container-image-digest (fn [_ _] valid-digest)]
+          (let [r (proto/acquire-environment! executor "abcd1234efgh"
+                                              {:workdir "/workspace"
+                                               :repo-url "https://bob:s3cret@github.com/o/r.git"})]
+            (is (= "https://github.com/o/r.git" (get-in r [:data :repo-url])))
+            (is (not (str/includes? (pr-str r) "s3cret")))))))))
+
+(deftest ^{:stratum 1} build-launch-plan-drops-git-config-tuples-test
+  (testing "an :untrusted plan drops a whole GIT_CONFIG_* tuple, whose
+            VALUE_n can hold an Authorization header, not just its KEY_n"
+    (is (= {"LANG" "C.UTF-8"}
+           (:env (oci-cli/build-launch-plan
+                  valid-digest
+                  {:env {"GIT_CONFIG_COUNT"   "1"
+                         "GIT_CONFIG_KEY_0"   "http.https://github.com/.extraheader"
+                         "GIT_CONFIG_VALUE_0" "Authorization: Basic eDp0b2s="
+                         "LANG"               "C.UTF-8"}}))))))
 
 (deftest ^{:stratum 1} acquire-launches-from-checked-plan-test
   (testing "acquire-environment! creates the container from the gate-checked
