@@ -34,10 +34,13 @@ finds in `MINIFORGE_GIT_TOKEN`, `GH_TOKEN`, or `gh auth token`, so
 |----------|---------|-------------|
 | `MINIFORGE_HOME` | `~/.miniforge` | Directory for the user config file and artifacts |
 | `MINIFORGE_LLM_BACKEND` | `opencode` | LLM backend; `mf config backends` lists them |
-| `MINIFORGE_AGENT_THINKING_MODEL` | from config | Default model for the planner and architect |
-| `MINIFORGE_AGENT_EXECUTION_MODEL` | from config | Default model for every other role |
+| `MINIFORGE_LLM_MODEL` | not set | Model for the execution roles, and for the planner where miniforge has no default |
+| `MINIFORGE_AGENT_THINKING_MODEL` | not set | Model for the planner and architect |
+| `MINIFORGE_AGENT_EXECUTION_MODEL` | not set | Model for every other role |
 | `MINIFORGE_GIT_TOKEN`, `GH_TOKEN` | — | Token for PR creation |
 
+With no model set, each role uses miniforge's default for the backend, or
+the backend's own; [Models](../configuration.md#models) gives the order.
 [Configuration Management](../configuration.md) lists the rest.
 
 ## Timeouts and Budgets
@@ -64,6 +67,8 @@ with `mf config init`, view it with `mf config list`.
 
 ```clojure
 {:llm {:backend :opencode}
+ ;; Optional: models per role tier. Without them each role uses its
+ ;; default for the backend.
  :agents {:default-models {:thinking  "anthropic/claude-opus-4-6"
                            :execution "anthropic/claude-sonnet-4-6"}}}
 ```

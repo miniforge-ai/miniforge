@@ -38,8 +38,9 @@ mf config init | edit | reset | validate
   say, which default to `~/.miniforge/checkpoints` and `~/.miniforge/worktrees`.
 - `MINIFORGE_LLM_BACKEND` - LLM backend for the run (default: `opencode`). Run
   `mf config backends` for the list.
-- `MINIFORGE_AGENT_THINKING_MODEL` - Default model for the planner and architect roles.
-- `MINIFORGE_AGENT_EXECUTION_MODEL` - Default model for every other role.
+- `MINIFORGE_LLM_MODEL` - Model for every role; sets `llm.model`. See [Models](#models).
+- `MINIFORGE_AGENT_THINKING_MODEL` - Model for the planner and architect roles.
+- `MINIFORGE_AGENT_EXECUTION_MODEL` - Model for every other role.
 - `MINIFORGE_GIT_TOKEN`, `GH_TOKEN` - Token the release phase uses to open the
   PR, checked in that order before `gh auth token`.
 - `MINIFORGE_RUNTIME` - Container runtime; see [Container runtime](#container-runtime).
@@ -50,6 +51,41 @@ mf config init | edit | reset | validate
   to use (`ANTHROPIC_BASE_URL`, the Bedrock and Vertex settings, or
   `OPENAI_BASE_URL`; otherwise the provider's API host) and follows
   `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` the way the agent CLI does.
+
+## Models
+
+Every role runs on the run's backend: `llm.backend`, unless the run
+chooses another (the spec's `:spec/llm-backend`, for one). Choosing a
+model never moves a role to another backend; a model the backend cannot
+serve fails the call.
+
+The planner and architect use the thinking tier; every other role uses
+the execution tier. A role's model is the first of these that is set:
+
+1. The tier's own setting: `[:agents :default-models :thinking]` or
+   `[:agents :default-models :execution]` (`MINIFORGE_AGENT_THINKING_MODEL`,
+   `MINIFORGE_AGENT_EXECUTION_MODEL`).
+2. For the execution tier, `llm.model` (`MINIFORGE_LLM_MODEL`).
+3. Miniforge's default for the backend: Claude Opus 4.6 for the thinking
+   tier and Claude Sonnet 4.6 for the execution tier, on `opencode` (as
+   `anthropic/...` ids), `claude` and `anthropic-api`.
+4. For the thinking tier, `llm.model`.
+5. None: the backend's own default. The `codex` and `cursor` CLIs use the
+   model they are configured with and `ollama` uses `codellama`. The
+   `openai-api`, `gemini-api`, `openrouter` and `openai-compat` backends
+   need a model, so set `llm.model` for them.
+
+So `llm.model` sets every role's model on a backend miniforge has no
+defaults for, and the execution roles' model on the others. The shipped
+defaults set no model. An environment variable overrides the config file
+key it maps to. `claude` and `anthropic-api` take an `anthropic/...` id
+without the prefix.
+
+```bash
+mf config backend codex                # roles use the codex CLI's model
+mf config set llm.model gpt-5.4        # every role on codex uses gpt-5.4
+MINIFORGE_AGENT_THINKING_MODEL=gpt-5.4-pro mf run spec.edn  # planner only
+```
 
 ## Timeouts and budgets
 

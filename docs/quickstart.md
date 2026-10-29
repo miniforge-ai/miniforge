@@ -100,9 +100,11 @@ opencode models
 Then select the backend in your miniforge config:
 
 ```edn
-{:llm {:backend :opencode
-       :model "anthropic/claude-sonnet-4-5"}}
+{:llm {:backend :opencode}}
 ```
+
+Leave `:model` out to use miniforge's per-role defaults for the backend;
+see [Models](configuration.md#models) for how to set one.
 
 Claude Code and Codex remain supported direct CLI backends for users who
 already have those CLIs configured. Provider API keys for miniforge agent
