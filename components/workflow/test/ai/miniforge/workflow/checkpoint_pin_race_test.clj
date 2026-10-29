@@ -2,10 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.checkpoint-pin-race-test
-  "A pin racing the checkpoint GC ends one of two ways: pinned and kept, or
-   the pin refused and the run deleted. Never a successful pin on a deleted
-   run. Pin and GC share one lock per run; the interleavings are forced
-   with latches, the pin running on its own thread."
+  "A pin racing the checkpoint GC ends pinned and kept, or refused with the
+   run deleted; never pinned and deleted. Latches force each interleaving."
   (:require [ai.miniforge.event-stream.interface :as es]
             [ai.miniforge.workflow.checkpoint-store :as store]
             [ai.miniforge.workflow.checkpoint-store-gc :as gc]
@@ -19,8 +17,6 @@
   (:import (java.util.concurrent CountDownLatch TimeUnit)))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} ^:private day-ms (* 24 60 60 1000))
 
 (defn- ^{:stratum 0} pin-on-another-thread!
   "Pin run `id` on its own thread and wait for it; returns what pinning
@@ -38,77 +34,7 @@
         (str "pin " (if pin-ok? "succeeded" "failed") ", run "
              (if present? "kept" "deleted")))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} expired-run!
-  "A run checkpoint under `root` last changed 90 days ago. Returns its id."
-  [root]
-  (let [id (random-uuid)
-        dir (io/file root (str id))]
-    (.mkdirs dir)
-    (spit (io/file dir "manifest.edn") "{:workflow/id 1}")
-    (doseq [f (reverse (file-seq dir))]
-      (.setLastModified ^java.io.File f (- (System/currentTimeMillis) (* 90 day-ms))))
-    id))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(deftest ^{:stratum 2} a-pin-just-before-the-delete-keeps-the-run
-  (fs/with-temp-dir [root {:prefix "pin-race-"}]
-    (let [root (str root)
-          id (expired-run! root)
-          pin-result (atom ::not-run)
-          delete-run! @#'gc/delete-run!]
-      (with-redefs-fn {#'gc/delete-run! (fn [& args]
-                                          (reset! pin-result (pin-on-another-thread! root id))
-                                          (apply delete-run! args))}
-        #(workflow/gc-checkpoints! {:checkpoint/root root}))
-      (assert-consistent root id @pin-result)
-      (is (string? @pin-result))
-      (is (.isDirectory (io/file root (str id)))))))
-
-(deftest ^{:stratum 2} a-pin-just-after-the-delete-is-refused
-  (fs/with-temp-dir [root {:prefix "pin-race-"}]
-    (let [root (str root)
-          id (expired-run! root)
-          pin-result (atom ::not-run)
-          delete-run! @#'gc/delete-run!]
-      (with-redefs-fn {#'gc/delete-run! (fn [& args]
-                                          (let [deleted (apply delete-run! args)]
-                                            (reset! pin-result (pin-on-another-thread! root id))
-                                            deleted))}
-        #(workflow/gc-checkpoints! {:checkpoint/root root}))
-      (assert-consistent root id @pin-result)
-      (is (not (string? @pin-result))))))
-
-(deftest ^{:stratum 2} gc-waits-for-a-pin-mid-write-and-then-keeps-the-run
-  (fs/with-temp-dir [root {:prefix "pin-race-"}]
-    (let [root (str root)
-          id (expired-run! root)
-          inside (CountDownLatch. 1)
-          release (CountDownLatch. 1)
-          write spit]
-      (with-redefs [spit (fn [f & args]
-                           (when (str/ends-with? (str f) "pinned.tmp")
-                             (.countDown inside)
-                             (.await release 10 TimeUnit/SECONDS))
-                           (apply write f args))]
-        (let [pin (future (workflow/pin-checkpoint! id {:checkpoint/root root}))
-              _ (.await inside 10 TimeUnit/SECONDS)
-              gc-run (future (workflow/gc-checkpoints! {:checkpoint/root root}))]
-          (Thread/sleep 300)
-          (testing "the GC waits while the pin holds the run's lock"
-            (is (not (realized? gc-run))))
-          (.countDown release)
-          (let [pinned @pin
-                result (deref gc-run 10000 ::timed-out)]
-            (assert-consistent root id pinned)
-            (testing "then sees the pin and keeps the run"
-              (is (string? pinned))
-              (is (empty? (:deleted result)))
-              (is (= [id] (get-in result [:kept :pinned]))))))))))
-
-(deftest ^{:stratum 2} a-run-the-gc-is-deciding-on-stays-held
+(deftest ^{:stratum 0} a-run-the-gc-is-deciding-on-stays-held
   ;; The event cleanup's retention hold probes the run while the GC is
   ;; deciding whether to delete it (a pin landed after it classified the
   ;; run). Whatever the GC does next between the hold's probes, a run that
@@ -116,7 +42,7 @@
   (fixture/call-with-temp-checkpoint-root
    (fn [root]
      (fs/with-temp-dir [events-dir {:prefix "pin-race-events-"}]
-       (let [id (expired-run! root)
+       (let [id (fixture/expired-run! root)
              at-check (CountDownLatch. 1)
              go-on (CountDownLatch. 1)
              decided (CountDownLatch. 1)
@@ -154,5 +80,62 @@
                (.countDown go-on)
                (let [result (deref gc-run 10000 ::timed-out)]
                  (is (= [id] (get-in result [:kept :pinned]))))))))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} a-pin-just-before-the-delete-keeps-the-run
+  (fs/with-temp-dir [root {:prefix "pin-race-"}]
+    (let [root (str root)
+          id (fixture/expired-run! root)
+          pin-result (atom ::not-run)
+          delete-run! @#'gc/delete-run!]
+      (with-redefs-fn {#'gc/delete-run! (fn [& args]
+                                          (reset! pin-result (pin-on-another-thread! root id))
+                                          (apply delete-run! args))}
+        #(workflow/gc-checkpoints! {:checkpoint/root root}))
+      (assert-consistent root id @pin-result)
+      (is (string? @pin-result))
+      (is (.isDirectory (io/file root (str id)))))))
+
+(deftest ^{:stratum 1} a-pin-just-after-the-delete-is-refused
+  (fs/with-temp-dir [root {:prefix "pin-race-"}]
+    (let [root (str root)
+          id (fixture/expired-run! root)
+          pin-result (atom ::not-run)
+          delete-run! @#'gc/delete-run!]
+      (with-redefs-fn {#'gc/delete-run! (fn [& args]
+                                          (let [deleted (apply delete-run! args)]
+                                            (reset! pin-result (pin-on-another-thread! root id))
+                                            deleted))}
+        #(workflow/gc-checkpoints! {:checkpoint/root root}))
+      (assert-consistent root id @pin-result)
+      (is (not (string? @pin-result))))))
+
+(deftest ^{:stratum 1} gc-waits-for-a-pin-mid-write-and-then-keeps-the-run
+  (fs/with-temp-dir [root {:prefix "pin-race-"}]
+    (let [root (str root)
+          id (fixture/expired-run! root)
+          inside (CountDownLatch. 1)
+          release (CountDownLatch. 1)
+          write spit]
+      (with-redefs [spit (fn [f & args]
+                           (when (str/ends-with? (str f) "pinned.tmp")
+                             (.countDown inside)
+                             (.await release 10 TimeUnit/SECONDS))
+                           (apply write f args))]
+        (let [pin (future (workflow/pin-checkpoint! id {:checkpoint/root root}))
+              _ (.await inside 10 TimeUnit/SECONDS)
+              gc-run (future (workflow/gc-checkpoints! {:checkpoint/root root}))]
+          (Thread/sleep 300)
+          (testing "the GC waits while the pin holds the run's lock"
+            (is (not (realized? gc-run))))
+          (.countDown release)
+          (let [pinned @pin
+                result (deref gc-run 10000 ::timed-out)]
+            (assert-consistent root id pinned)
+            (testing "then sees the pin and keeps the run"
+              (is (string? pinned))
+              (is (empty? (:deleted result)))
+              (is (= [id] (get-in result [:kept :pinned]))))))))))
 
 (comment ::checkpoint-pin-race)

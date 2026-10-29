@@ -43,7 +43,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} a-pin-set-on-the-manifest-survives-later-checkpoints
+(deftest ^{:stratum 1} a-legacy-manifest-pin-survives-and-holds
   (fixture/call-with-temp-checkpoint-root
    (fn [root]
      (let [ctx (run-ctx root {})
@@ -51,7 +51,10 @@
        (store/persist-execution-state! ctx)
        (spit path (pr-str (assoc (manifest root ctx) :pinned? true)))
        (store/persist-execution-state! (assoc ctx :execution/redirect-count 1))
-       (is (true? (:pinned? (manifest root ctx))))))))
+       (is (true? (:pinned? (manifest root ctx))))
+       (age-run! root ctx 90)
+       (is (= [(:execution/id ctx)]
+              (get-in (workflow/gc-checkpoints! {:checkpoint/root root}) [:kept :pinned])))))))
 
 (deftest ^{:stratum 1} pin-checkpoint-pins-and-gc-keeps-the-run
   (fixture/call-with-temp-checkpoint-root
@@ -90,18 +93,6 @@
                            (workflow/pin-checkpoint! (:execution/id ctx) opts))
                          built))]
          (store/persist-execution-state! (assoc ctx :execution/redirect-count 1)))
-       (age-run! root ctx 90)
-       (is (= [(:execution/id ctx)]
-              (get-in (workflow/gc-checkpoints! opts) [:kept :pinned])))))))
-
-(deftest ^{:stratum 1} a-manifest-pinned-before-markers-still-holds
-  (fixture/call-with-temp-checkpoint-root
-   (fn [root]
-     (let [ctx (run-ctx root {})
-           opts {:checkpoint/root root}
-           path (paths/manifest-path root (:execution/id ctx))]
-       (store/persist-execution-state! ctx)
-       (spit path (pr-str (assoc (manifest root ctx) :pinned? true)))
        (age-run! root ctx 90)
        (is (= [(:execution/id ctx)]
               (get-in (workflow/gc-checkpoints! opts) [:kept :pinned])))))))
