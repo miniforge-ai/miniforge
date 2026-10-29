@@ -191,6 +191,14 @@
     (testing "the legitimate inside file still wrote fine"
       (is (= "ok" (str/trim (read-file "src/inside.clj")))))))
 
+(deftest ^{:stratum 2} apply-single-line-replacement-rejects-the-git-dir
+  (testing "a suggested fix cannot rewrite a line of the worktree's git config"
+    (write-file! ".git/config" "[core]\n\tbare = false\n")
+    (let [r (sut/apply-single-line-replacement!
+             *worktree* ".git/config" 2 "\thooksPath = tools/hooks")]
+      (is (= :policy-eval/path-traversal (get-in r [:error :code])))
+      (is (= "[core]\n\tbare = false\n" (read-file ".git/config"))))))
+
 (deftest ^{:stratum 2} apply-single-line-replacement-no-op-when-already-applied
   (testing "before == replacement → :already-applied, no file rewrite, no spurious diff"
     (write-file! "src/idem.clj" "(ns idem)\n(def x 1)\n")

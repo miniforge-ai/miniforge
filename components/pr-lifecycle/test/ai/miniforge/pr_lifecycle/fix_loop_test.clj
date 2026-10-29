@@ -41,6 +41,16 @@
      :worktree (str (fs/create-dirs (fs/path base "worktree")))
      :outside  (str (fs/create-dirs (fs/path base "outside")))}))
 
+(defn- ^{:stratum 0} refused?
+  "Apply a one-file fix writing (or deleting) `path` and return true when
+   it is rejected as a path traversal."
+  [worktree path action]
+  (let [result (fix/apply-fix-to-worktree
+                worktree {:code/files [{:path path :action action
+                                        :content "#!/bin/sh\necho planted\n"}]} nil)]
+    (and (dag/err? result)
+         (= :fix-path-traversal (get-in result [:error :code])))))
+
 (def ^{:stratum 0} test-task
   {:task/id (random-uuid)
    :task/title "Implement feature X"
@@ -309,4 +319,57 @@
           (is (= "new" (slurp (str (fs/path worktree "src" "a.clj")))))
           (is (= "b" (slurp (str (fs/path worktree "src" "b.clj")))))
           (is (not (fs/exists? (fs/path worktree "gone.txt")))))
+        (finally (fs/delete-tree base))))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-refuses-the-git-dir-test
+  (let [{:keys [base worktree]} (temp-layout)
+        hook   (fs/path worktree ".git" "hooks" "pre-commit")
+        config (str (fs/path worktree ".git" "config"))]
+    (try
+      (fs/create-dirs (fs/path worktree ".git" "hooks"))
+      (fs/create-dirs (fs/path worktree ".github"))
+      (spit config "[core]\n")
+      (testing "a direct write into .git/hooks is refused"
+        (is (refused? worktree ".git/hooks/pre-commit" :create))
+        (is (not (fs/exists? hook))))
+      (testing "a ./x/../.git path is refused"
+        (is (refused? worktree "./x/../.git/hooks/pre-commit" :create))
+        (is (not (fs/exists? hook))))
+      (testing "a ./.git path is refused"
+        (is (refused? worktree "./.git/config" :modify))
+        (is (= "[core]\n" (slurp config))))
+      (testing "a write through a symlinked directory that points at .git is refused"
+        (fs/create-sym-link (fs/path worktree "tools") (fs/path worktree ".git"))
+        (is (refused? worktree "tools/hooks/pre-commit" :create))
+        (is (not (fs/exists? hook))))
+      (testing "a .GIT segment is refused, as case-insensitive file systems map it onto .git"
+        (is (refused? worktree ".GIT/hooks/pre-commit" :create))
+        (is (not (fs/exists? hook))))
+      (testing "deleting .git or a file inside it is refused"
+        (is (refused? worktree ".git/config" :delete))
+        (is (refused? worktree ".git" :delete))
+        (is (fs/exists? config)))
+      (testing ".gitignore and .github paths still apply"
+        (is (dag/ok? (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path ".gitignore" :content "target\n" :action :create}
+                                             {:path ".github/CODEOWNERS" :content "* @o\n"
+                                              :action :create}]} nil))))
+      (finally (fs/delete-tree base)))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-refuses-a-linked-worktree-gitdir-test
+  (testing "a .git gitdir file and the directory it names are both refused"
+    (let [{:keys [base worktree]} (temp-layout)
+          dot-git (str (fs/path worktree ".git"))
+          hook    (fs/path worktree "modules" "sub" "hooks" "pre-commit")]
+      (try
+        (fs/create-dirs (fs/path worktree "modules" "sub" "hooks"))
+        (spit dot-git "gitdir: modules/sub\n")
+        (is (refused? worktree "modules/sub/hooks/pre-commit" :create))
+        (is (not (fs/exists? hook)))
+        (is (refused? worktree ".git" :modify))
+        (is (refused? worktree ".git" :delete))
+        (is (= "gitdir: modules/sub\n" (slurp dot-git)))
+        (is (dag/ok? (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "modules/readme.md" :content "x"
+                                              :action :create}]} nil)))
         (finally (fs/delete-tree base))))))

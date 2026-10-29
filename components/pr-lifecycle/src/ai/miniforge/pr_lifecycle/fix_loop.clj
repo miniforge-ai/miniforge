@@ -166,7 +166,9 @@
    Each `:path` comes from the LLM, so every one is resolved before
    anything touches disk: writes must stay inside the worktree once
    symlinks are followed, and a `:delete` must name an entry inside it
-   (the policy-eval.fs guards). One escaping path rejects the whole
+   (the policy-eval.fs guards). Neither may reach the worktree's git
+   dir, where a planted hook or config would run on the commit that
+   follows. One escaping path rejects the whole
    artifact with `:fix-path-traversal`, so a hostile fix writes nothing.
    Each path is resolved again just before its own op, since an earlier
    op in the same artifact can change what it points at.
@@ -191,13 +193,14 @@
         escaped      (into [] (comp (remove resolve-path) (map :path)) files)
         traversal    (fn [paths]
                        (dag/err :fix-path-traversal
-                                (str "Fix paths escape the worktree: " (str/join ", " paths))
+                                (str "Fix paths escape the worktree or reach its git dir: "
+                                     (str/join ", " paths))
                                 {:paths paths}))]
     (if (seq escaped)
       (do
         (when logger
           (log/error logger :pr-lifecycle :fix/path-traversal
-                     {:message "Rejected fix with paths outside the worktree"
+                     {:message "Rejected fix with paths outside the worktree or in its git dir"
                       :data {:worktree-path worktree-path :paths escaped}}))
         (traversal escaped))
       (try
