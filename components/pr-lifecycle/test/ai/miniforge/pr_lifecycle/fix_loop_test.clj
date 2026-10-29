@@ -507,6 +507,7 @@
           ref (str (fs/path worktree "refs" "heads" "work"))]
       (try
         (doseq [args [["config" "user.email" "t@example.com"] ["config" "user.name" "t"]
+                      ["config" "commit.gpgsign" "false"]
                       ["checkout" "-q" "-b" "work"]]]
           (apply git! worktree args))
         (fs/move (fs/path worktree ".git" "refs") (fs/path worktree "refs"))
@@ -556,6 +557,7 @@
       (try
         (git! base "init" "-q" "--bare" remote)
         (doseq [args [["config" "user.email" "t@example.com"] ["config" "user.name" "t"]
+                      ["config" "commit.gpgsign" "false"]
                       ["remote" "add" "origin" remote] ["checkout" "-q" "-b" "fix/x"]]]
           (apply git! worktree args))
         (spit (str (fs/path worktree "a.txt")) "1\n")

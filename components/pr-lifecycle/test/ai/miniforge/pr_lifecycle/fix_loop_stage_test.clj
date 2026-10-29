@@ -59,6 +59,7 @@
     (git! dir "init" "-q")
     (git! dir "config" "user.email" "t@example.com")
     (git! dir "config" "user.name" "t")
+    (git! dir "config" "commit.gpgsign" "false")
     (doseq [f ["a.txt" "c.txt" "d.txt"]]
       (spit (str (fs/path dir f)) (str f "\n")))
     (git! dir "add" "a.txt" "c.txt" "d.txt")
@@ -73,6 +74,7 @@
         (git! dir "init" "-q")
         (git! dir "config" "user.email" "t@example.com")
         (git! dir "config" "user.name" "t")
+        (git! dir "config" "commit.gpgsign" "false")
         (spit (str (fs/path dir "a.txt")) "a\n")
         (git! dir "add" "a.txt")
         (git! dir "commit" "-q" "-m" "init")

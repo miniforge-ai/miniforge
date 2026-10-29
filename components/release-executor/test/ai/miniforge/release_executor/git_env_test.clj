@@ -46,6 +46,7 @@
   (git! dir "init" "-q")
   (git! dir "config" "user.email" "t@example.com")
   (git! dir "config" "user.name" "t")
+  (git! dir "config" "commit.gpgsign" "false")
   (spit (str (fs/path dir "a.txt")) (str message "\n"))
   (git! dir "add" "a.txt")
   (git! dir "commit" "-q" "-m" message)
