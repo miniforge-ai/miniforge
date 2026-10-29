@@ -187,12 +187,16 @@
 (defn ^{:stratum 0} commit-changes!
   "Commit staged changes with the given message.
 
+   Secrets in `commit-message` are replaced with the redaction marker
+   (components/redaction) before git records it: a commit is pushed and
+   kept in history, so the message is written once, redacted.
+
    Returns {:success? bool :commit-sha string :error string}"
   [worktree-path commit-message]
   (try
     (let [commit-r (process/shell
                     {:dir (str worktree-path) :out :string :err :string :continue true}
-                    "git" "commit" "-m" commit-message)]
+                    "git" "commit" "-m" (redaction/redact commit-message))]
       (if (zero? (:exit commit-r))
         (let [sha-r (process/shell
                      {:dir (str worktree-path) :out :string :err :string :continue true}
