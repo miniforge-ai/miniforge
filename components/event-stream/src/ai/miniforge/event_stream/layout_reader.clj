@@ -113,11 +113,14 @@
        (sort-by (juxt file-ms file-name))))
 
 (defn ^{:stratum 1} workflow-dirs
-  "The workflow directories under the live and archived roots, live first."
+  "The workflow directories under the live and archived roots, live
+   first; nil when a root that exists cannot be listed (an absent root
+   holds none)."
   [events-dir]
-  (mapcat #(remove (fn [^File d] (str/starts-with? (.getName d) "."))
-                   (.listFiles ^File %))
-          (roots events-dir)))
+  (let [listings (map (fn [^File root] (if (.exists root) (.listFiles root) (make-array File 0)))
+                      (roots events-dir))]
+    (when (every? some? listings)
+      (mapcat #(remove (fn [^File d] (str/starts-with? (.getName d) ".")) %) listings))))
 
 (defn ^{:stratum 1} root-mtimes
   "Last-modified times of the roots; one changes when a workflow
@@ -187,9 +190,9 @@
 
 (defn ^{:stratum 2} active-dirs
   "{name dir} of the workflow directories modified at or after
-   `since-ms`. A name under both roots maps to its archived directory."
+   `since-ms`, or nil when a root cannot be listed. A name under both
+   roots maps to its archived directory."
   [events-dir since-ms]
-  (into {}
-        (comp (filter #(>= (mtime %) since-ms))
-              (map (juxt file-name identity)))
-        (workflow-dirs events-dir)))
+  (some->> (workflow-dirs events-dir)
+           (into {} (comp (filter #(>= (mtime %) since-ms))
+                          (map (juxt file-name identity))))))
