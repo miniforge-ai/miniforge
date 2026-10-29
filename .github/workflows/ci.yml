@@ -44,11 +44,16 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      # Exact toolchain versions live in .github/tool-versions.json.
+      - name: Read pinned tool versions
+        id: tools
+        run: jq -r 'to_entries[] | "\(.key)=\(.value)"' .github/tool-versions.json >> "$GITHUB_OUTPUT"
+
       - name: Install Clojure
         uses: DeLaGuardo/setup-clojure@12.5
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ steps.tools.outputs.clojure-cli }}
+          bb: ${{ steps.tools.outputs.babashka }}
 
       - name: Cache Clojure dependencies
         uses: actions/cache@v4
@@ -89,16 +94,23 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      # Exact toolchain versions live in .github/tool-versions.json.
+      - name: Read pinned tool versions
+        id: tools
+        run: jq -r 'to_entries[] | "\(.key)=\(.value)"' .github/tool-versions.json >> "$GITHUB_OUTPUT"
+
       - name: Install Clojure
         uses: DeLaGuardo/setup-clojure@12.5
         with:
-          cli: latest
-          bb: latest
-          clj-kondo: latest
+          cli: ${{ steps.tools.outputs.clojure-cli }}
+          bb: ${{ steps.tools.outputs.babashka }}
+          clj-kondo: ${{ steps.tools.outputs.clj-kondo }}
 
       - name: Install markdownlint
+        env:
+          MARKDOWNLINT_CLI_VERSION: ${{ steps.tools.outputs.markdownlint-cli }}
         run: |
-          npm install -g markdownlint-cli
+          npm install -g "markdownlint-cli@${MARKDOWNLINT_CLI_VERSION}"
 
       - name: Cache Clojure dependencies
         uses: actions/cache@v4
@@ -180,11 +192,16 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      # Exact toolchain versions live in .github/tool-versions.json.
+      - name: Read pinned tool versions
+        id: tools
+        run: jq -r 'to_entries[] | "\(.key)=\(.value)"' .github/tool-versions.json >> "$GITHUB_OUTPUT"
+
       - name: Install Clojure
         uses: DeLaGuardo/setup-clojure@12.5
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ steps.tools.outputs.clojure-cli }}
+          bb: ${{ steps.tools.outputs.babashka }}
 
       - name: Cache Clojure dependencies
         uses: actions/cache@v4
@@ -317,10 +334,18 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      # Exact toolchain versions live in .github/tool-versions.json.
+      - name: Read pinned tool versions
+        id: tools
+        shell: pwsh
+        run: |
+          (Get-Content -Raw .github/tool-versions.json | ConvertFrom-Json).PSObject.Properties |
+            ForEach-Object { "$($_.Name)=$($_.Value)" } >> $env:GITHUB_OUTPUT
+
       - name: Install bb (Windows)
         uses: DeLaGuardo/setup-clojure@12.5
         with:
-          bb: latest
+          bb: ${{ steps.tools.outputs.babashka }}
 
       - name: Cache Clojure dependencies
         uses: actions/cache@v4
@@ -404,11 +429,16 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
+      # Exact toolchain versions live in .github/tool-versions.json.
+      - name: Read pinned tool versions
+        id: tools
+        run: jq -r 'to_entries[] | "\(.key)=\(.value)"' .github/tool-versions.json >> "$GITHUB_OUTPUT"
+
       - name: Install Clojure
         uses: DeLaGuardo/setup-clojure@12.5
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ steps.tools.outputs.clojure-cli }}
+          bb: ${{ steps.tools.outputs.babashka }}
 
       - name: Cache Clojure dependencies
         uses: actions/cache@v4
