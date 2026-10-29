@@ -667,7 +667,8 @@
                            [:data :persisted?])))
         (let [[push & more] (filter (fn [[_ opts]] (:env opts)) @calls)]
           (is (empty? more))
-          (is (= ["git" "-c" "core.hooksPath=/dev/null" "push" "origin" "HEAD:task/x" "--force"]
+          (is (= ["git" "-c" "core.hooksPath=/dev/null" "push"
+                  "--force-with-lease=task/x:sha" "origin" "HEAD:task/x"]
                  (first push)))
           (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
                  (get-in push [1 :env "GIT_CONFIG_VALUE_0"]))))
