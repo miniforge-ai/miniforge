@@ -128,7 +128,7 @@
                 (state/emit! monitor (mevents/reply-posted pr-number comment-id
                                                            :question-reply))
                 (state/change-budget! monitor pr-number (state/get-or-create-budget monitor pr-number)
-                                      budget/record-question-answered)
+                                      budget/record-question-answered :retry)
                 (swap! monitor update-in [:evidence :questions-answered] conj
                        {:comment-id comment-id :at (java.util.Date.)})
                 (swap! monitor update-in [:evidence :comments-addressed] inc)
@@ -231,7 +231,7 @@
                               :auto-resolve-comments true)]
               (if (succeeded? fix-result)
                 (let [commit-sha (:commit-sha fix-result)]
-                  (state/change-budget! monitor pr-number reserved budget/record-fix-pushed)
+                  (state/change-budget! monitor pr-number reserved budget/record-fix-pushed :retry)
                   (state/emit! monitor (mevents/fix-pushed pr-number comment-id commit-sha))
                   (let [reply-body (str "Addressed in commit " commit-sha
                                         ".\n\n---\n*Fixed by miniforge's autonomous PR monitor.*")]

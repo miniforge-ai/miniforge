@@ -112,13 +112,16 @@
      :load-error load-error}))
 
 (defn ^{:stratum 0} merge-budgets
-  "`mine` with every counter at least its value in `on-disk`, and the earlier
-   start time, so a monitor saving a stale copy cannot lower what another
-   saved. Attempts made at once by two monitors on one PR are not summed."
+  "`mine` with every counter at least its value in `on-disk`, each limit at
+   most its value there, and the earlier start time. The merge only moves
+   toward exhaustion: a monitor holding a stale copy or other limits cannot
+   lower what another saved or reopen a budget exhausted on disk. Attempts
+   made at once by two monitors on one PR are not summed."
   [on-disk mine]
   (if-not on-disk
     mine
     (-> (merge-with max (select-keys on-disk [:total-attempts :questions-answered :fixes-pushed]) mine)
+        (update :limits #(merge-with min (:limits on-disk) %))
         (update :comment-attempts #(merge-with max (:comment-attempts on-disk) %))
         (update :started-at #(if (neg? (compare (:started-at on-disk) %)) (:started-at on-disk) %)))))
 

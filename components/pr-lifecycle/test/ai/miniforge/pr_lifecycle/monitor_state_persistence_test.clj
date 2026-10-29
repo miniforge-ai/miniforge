@@ -180,6 +180,35 @@
         (is (= 1 @fixes))
         (is (= 5 (:fixes-pushed (budget/load-budget "acme/app" 43))))))))
 
+(deftest ^{:stratum 1} lower-limit-saved-by-another-monitor-holds-test
+  (let [fixes     (atom 0)
+        monitor-a (monitor-for "acme/app" {:generate-fn (constantly "patch")})
+        monitor-b (monitor-for "acme/app" {:max-total-fix-attempts-per-pr 2})]
+    (state/get-or-create-budget monitor-a 42)
+    (state/update-budget! monitor-b 42 (reduce budget/record-fix-attempt
+                                               (state/get-or-create-budget monitor-b 42) [1 2]))
+    (with-redefs [fix-loop/run-fix-loop (fn [& _] (swap! fixes inc) {:success? true :commit-sha "abc123"})
+                  poller/post-comment   (fn [& _] (dag/ok {:comment-posted true}))]
+      (testing "a budget exhausted under another monitor's lower limit stays exhausted"
+        (is (= :budget-exhausted
+               (:reason (handlers/handle-change-request
+                         monitor-a {:pr/number 42}
+                         {:category :change-request :comment (review-comment 9 "2026-10-01T00:00:00Z")}))))
+        (is (zero? @fixes))))))
+
+(deftest ^{:stratum 1} answer-counted-after-a-failed-save-test
+  (let [monitor  (monitor-for "acme/app" {:generate-fn (constantly "An answer")})
+        question {:category :question :comment (review-comment 9 "2026-10-01T00:00:00Z")}
+        file     (str (store/repo-file "acme/app" "budget-42.edn"))]
+    (state/update-budget! monitor 42 (state/get-or-create-budget monitor 42))
+    (with-redefs [poller/post-comment (fn [& _] (dag/ok {:comment-posted true}))]
+      (spit file "[]")
+      (handlers/handle-question monitor {:pr/number 42} question)
+      (fs/delete file)
+      (handlers/handle-question monitor {:pr/number 42} question))
+    (testing "an answer whose save failed is counted by the next save"
+      (is (= 2 (:questions-answered (budget/load-budget "acme/app" 42)))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} damaged-budget-file-keeps-the-hard-stop-test
