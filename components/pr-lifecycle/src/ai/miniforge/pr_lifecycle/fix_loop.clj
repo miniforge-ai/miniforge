@@ -29,8 +29,10 @@
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.release-executor.interface :as release]
+   [babashka.process :as process]
    [clojure.java.io :as io]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -223,15 +225,23 @@
           (dag/err :fix-apply-failed (.getMessage e)))))))
 
 (defn ^{:stratum 0} commit-fix
-  "Commit fix changes and push to the PR branch.
+  "Stage the files the fix wrote or deleted, commit them, and push to the
+   PR branch.
+
+   Only `files` are staged, never the whole tree: the worktree can hold
+   changes the fix did not make. Pathspecs are literal, so a name with
+   glob characters stages only itself. A deleted path is unstaged from
+   the index (`git rm --cached --ignore-unmatch`), a no-op when git never
+   tracked it.
 
    Arguments:
    - worktree-path: Path to git worktree
    - fix-context: Fix context for commit message
    - branch: Branch name to push to
+   - files: The applied artifact's `:code/files` (`:path`, `:action`)
 
    Returns result with commit SHA."
-  [worktree-path fix-context branch logger]
+  [worktree-path fix-context branch logger files]
   (let [fix-type (:fix/type fix-context)
         commit-msg (str "fix: " (case fix-type
                                   :ci-failure "resolve CI failures"
@@ -247,15 +257,29 @@
                 {:message "Committing fix"
                  :data {:branch branch :fix-type fix-type}}))
 
-    ;; Stage and commit changes
-    (let [stage-result (release/commit-changes! worktree-path commit-msg)]
-      (if (:success? stage-result)
-        (let [push-result (release/push-branch! worktree-path branch)]
-          (if (:success? push-result)
-            (dag/ok {:commit-sha (:commit-sha stage-result)
-                     :branch branch})
-            (dag/err :push-failed (:error push-result))))
-        (dag/err :commit-failed (:error stage-result))))))
+    (let [stage-error (try+
+                       (some (fn [{:keys [path action]}]
+                               (let [args (if (= :delete action)
+                                            ["rm" "--cached" "--quiet" "--ignore-unmatch" "--" path]
+                                            ["add" "--" path])
+                                     r    (apply process/shell
+                                                 {:dir (str worktree-path) :continue true
+                                                  :out :string :err :string}
+                                                 "git" "--literal-pathspecs" args)]
+                                 (when-not (zero? (:exit r))
+                                   (str path ": " (str/trim (str (:err r)))))))
+                             files)
+                       (catch Exception e (.getMessage e)))]
+      (if stage-error
+        (dag/err :stage-failed stage-error)
+        (let [stage-result (release/commit-changes! worktree-path commit-msg)]
+          (if (:success? stage-result)
+            (let [push-result (release/push-branch! worktree-path branch)]
+              (if (:success? push-result)
+                (dag/ok {:commit-sha (:commit-sha stage-result)
+                         :branch branch})
+                (dag/err :push-failed (:error push-result))))
+            (dag/err :commit-failed (:error stage-result))))))))
 
 ;; Conversation follow-up
 (defn ^{:stratum 0} resolve-comment-thread
@@ -390,7 +414,8 @@
 
               (if (dag/ok? apply-result)
                 ;; Commit and push
-                (let [commit-result (commit-fix worktree-path fix-context branch logger)]
+                (let [commit-result (commit-fix worktree-path fix-context branch logger
+                                                (:code/files artifact))]
                   (if (dag/ok? commit-result)
                     (do
                       (when logger
