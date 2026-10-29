@@ -59,13 +59,13 @@
   :behavioral/description
   "Validates harness telemetry event stream against policy packs (phase: observe)"
 
-  ;; Behavioral gate — no-packs warning
+  ;; Behavioral gate — fail-closed no-packs error
   :behavioral/no-policy-packs
-  "No policy packs loaded — behavioral check skipped"
+  "No policy packs loaded — behavioral gate fails closed"
 
-  ;; Behavioral gate — check-error warning prefix
+  ;; Behavioral gate — fail-closed check-error prefix
   :behavioral/check-error-prefix
-  "Behavioral check failed, skipping: "
+  "Behavioral check could not run: "
 
   ;; Behavioral gate — repair-required result message
   :behavioral/repair-required
