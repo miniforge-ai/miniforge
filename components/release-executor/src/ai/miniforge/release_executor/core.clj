@@ -223,6 +223,18 @@
         (str/blank? body)
         (= (str/trim body) (str/trim (str (:release/pr-title release-meta)))))))
 
+(defn ^{:stratum 0} prepared-release
+  "What publish-release needs from a prepared pipeline state, as plain
+   data: no runtime handles or credentials, and code artifacts without
+   file content (publish renders paths only)."
+  [state]
+  (let [strip-content (fn [artifact]
+                        (update artifact :code/files
+                                (fn [files] (mapv #(dissoc % :content) files))))]
+    (-> (select-keys state [:branch :base-branch :commit-sha :release-meta
+                            :write-metrics :workflow-data])
+        (assoc :code-artifacts (mapv strip-content (:code-artifacts state))))))
+
 (defn ^{:stratum 0} pipeline->result
   "Convert pipeline state to phase result. The §7.7.2 answer-channel
    keys (:codex-answers / :codex-answer-log, placed on state by
@@ -260,6 +272,44 @@
                   :branch     branch})))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} prepare->result
+  "Result of a prepared (branched and committed, not pushed) pipeline
+   state: no release artifact yet, and on success `:prepared`, the input
+   publish-release takes."
+  [state]
+  (let [result (pipeline->result (dissoc state :logger))]
+    (cond-> result
+      (:success? result)
+      (-> (assoc :artifacts [] :prepared (prepared-release state))
+          (update :metrics dissoc :pr-number :pr-url)))))
+
+(defn ^{:stratum 1} release-state
+  "Initial pipeline state from the workflow state, the execution context
+   and the options (see execute-release-phase)."
+  [workflow-state context opts]
+  (let [workflow-artifacts (:workflow/artifacts workflow-state)]
+    (cond-> {:logger         (:logger context)
+             :worktree-path  (:worktree-path context)
+             :artifact-store (:artifact-store context)
+             :context        context
+             :create-pr?     (get context :create-pr? true)
+             ;; Explicit PR base override (a dependency-chained
+             ;; DAG task's parent branch).  When present it wins
+             ;; over the branch-creation default so the PR
+             ;; stacks on the parent.
+             :base-branch-override (:base-branch context)
+             ;; PR provenance ({:workflow :spec :task}) rendered
+             ;; as YAML frontmatter on the PR body.
+             :provenance     (:provenance context)
+             :releaser       (:releaser opts)
+             :task-description (get-in workflow-state [:workflow/spec :spec/description])
+             :code-artifacts (extract-code-artifacts workflow-artifacts)
+             :workflow-data  (extract-workflow-data workflow-artifacts)
+             :executor       (:executor context)
+             :environment-id (:environment-id context)
+             :github-token   (:github-token context)}
+      (:release-meta opts) (assoc :release-meta (:release-meta opts)))))
 
 (defn- ^{:stratum 1} yaml-scalar
   "Render `v` as a safe YAML scalar for a `key: value` frontmatter line.
@@ -676,6 +726,30 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} prepare-release
+  "First half of the release: generate metadata, create the branch and
+   commit. Nothing leaves the worktree; the push and the PR are
+   publish-release's, which the release phase runs only after its gates
+   pass. Arguments as execute-release-phase.
+
+   Returns {:success? bool :artifacts [] :errors [] :metrics {...}} and, on
+   success, :prepared (see prepared-release)."
+  [workflow-state context opts]
+  (let [state (release-state workflow-state context opts)]
+    (when-let [logger (:logger state)]
+      (log/info logger :release-executor :phase-started
+                {:data {:worktree-path (:worktree-path state)
+                        :create-pr?    (:create-pr? state)}}))
+    (-> state
+        step-validate-inputs
+        step-check-gh-auth
+        step-generate-metadata
+        step-create-branch
+        step-stage-dirty-files
+        step-validate-diff
+        step-commit
+        prepare->result)))
+
 (defn ^{:stratum 2} provenance-frontmatter
   "YAML frontmatter mapping a PR back to its workflow run + spec. Built from
    state's :provenance ({:workflow :spec :task}) + :commit-sha. Always emits
@@ -848,7 +922,8 @@
 
 ;; Main execute function
 (defn ^{:stratum 5} execute-release-phase
-  "Execute the release phase.
+  "Execute the release phase: prepare-release's steps, then
+   publish-release's, with no gate between them.
 
    Accepts two backends transparently:
 
@@ -870,31 +945,8 @@
     :errors []
     :metrics {...}}"
   [workflow-state context opts]
-  (let [logger         (:logger context)
-        executor       (:executor context)
-        environment-id (:environment-id context)
-        workflow-artifacts (:workflow/artifacts workflow-state)
-        initial-state  (cond-> {:logger         logger
-                                :worktree-path  (:worktree-path context)
-                                :artifact-store (:artifact-store context)
-                                :context        context
-                                :create-pr?     (get context :create-pr? true)
-                                ;; Explicit PR base override (a dependency-chained
-                                ;; DAG task's parent branch).  When present it wins
-                                ;; over the branch-creation default so the PR
-                                ;; stacks on the parent.
-                                :base-branch-override (:base-branch context)
-                                ;; PR provenance ({:workflow :spec :task}) rendered
-                                ;; as YAML frontmatter on the PR body.
-                                :provenance     (:provenance context)
-                                :releaser       (:releaser opts)
-                                :task-description (get-in workflow-state [:workflow/spec :spec/description])
-                                :code-artifacts (extract-code-artifacts workflow-artifacts)
-                                :workflow-data  (extract-workflow-data workflow-artifacts)
-                                :executor       executor
-                                :environment-id environment-id
-                                :github-token   (:github-token context)}
-                       (:release-meta opts) (assoc :release-meta (:release-meta opts)))]
+  (let [logger        (:logger context)
+        initial-state (release-state workflow-state context opts)]
 
     (when logger
       (log/info logger :release-executor :phase-started
@@ -916,3 +968,19 @@
         step-build-artifact
         step-save-artifact
         pipeline->result)))
+
+(defn ^{:stratum 5} publish-release
+  "Second half of the release: push the branch prepare-release made, open
+   the PR (when :create-pr?), and build and save the release artifact.
+   `prepared` is a prepare-release result's :prepared; `context` is as for
+   execute-release-phase. Returns a result as execute-release-phase."
+  [prepared context]
+  (-> (merge (release-state {} context {}) prepared)
+      step-validate-inputs
+      step-push
+      step-create-pr
+      step-generate-pr-doc
+      step-update-pr-body
+      step-build-artifact
+      step-save-artifact
+      pipeline->result))
