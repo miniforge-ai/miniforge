@@ -102,6 +102,29 @@
            (mapv :event/type (state-archive/get-archived-workflow-events
                               (atom {:archived-workflows (atom @found)}) wf-id))))))
 
+(deftest ^{:stratum 1} the-archive-wide-history-keeps-a-bounded-window-per-workflow
+  (let [events-dir (temp-events-dir)
+        stream     (file-sink-stream events-dir)
+        dashboard  (core/create-state {:event-stream (es/create-event-stream {:sinks []})})
+        wf-id      (random-uuid)
+        chunk!     #(es/publish! stream (envelope stream :agent/chunk wf-id :chunk/delta %))
+        disk-events #(filter (comp #{wf-id} :workflow/id) (workflows/get-events dashboard {:limit 1000}))]
+    (es/publish! stream (envelope stream :workflow/started wf-id :workflow/spec {:name "Long run"}))
+    (es/publish! stream (envelope stream :workflow/phase-started wf-id :workflow/phase :implement))
+    (run! chunk! (map str (range 20)))
+    (es/publish! stream (envelope stream :workflow/completed wf-id :workflow/status :success))
+    (with-redefs [workflows/events-dir-path (str events-dir)
+                  workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
+      (let [events (disk-events)]
+        (is (= 8 (count events)) "3 lifecycle events and the newest 5 others")
+        (is (= #{"15" "16" "17" "18" "19"} (set (keep :chunk/delta events)))))
+      (chunk! "20")
+      (is (contains? (set (keep :chunk/delta (disk-events))) "20") "a later file is still read")
+      (is (<= (count (get-in @@#'workflows/recent-dir-reads
+                             [(str (es/workflow-dir (str events-dir) wf-id)) :tracked :names]))
+              5)
+          "file tracking is bounded too"))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} archive-scan-lists-live-archived-and-edn-workflows

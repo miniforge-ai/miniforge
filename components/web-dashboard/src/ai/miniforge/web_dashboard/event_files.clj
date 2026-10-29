@@ -74,6 +74,12 @@
   [events-dir]
   [(es/live-dir events-dir) (es/archived-dir events-dir)])
 
+(defn ^{:stratum 0} unread?
+  "True when file name `n` is not covered by `tracked` (see `unseen-files`)."
+  [{:keys [names floor]} n]
+  (and (not (contains? names n))
+       (or (nil? floor) (pos? (compare n floor)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} event-files
@@ -89,11 +95,6 @@
   [events-dir]
   (mapcat #(remove hidden? (.listFiles ^File %)) (roots events-dir)))
 
-(defn ^{:stratum 1} unseen
-  "The files of `files` whose names are not in `seen`."
-  [files seen]
-  (remove (comp seen file-name) files))
-
 (defn ^{:stratum 1} read-ordered
   "Decode `files` and return their events in creation order: by name and,
    among legacy names from the same millisecond, by :event/sequence-number."
@@ -105,15 +106,19 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} read-unseen
-  "Read the events in `dir` whose file names are not in `seen`. Returns
-   [names events]: the names of every event file now in `dir`, and the
-   new events in creation order. The sink names each file after its
-   event, so a name read once need not be read again."
-  [dir seen]
-  (let [files (event-files dir)]
-    [(into #{} (map file-name) files)
-     (read-ordered (unseen files seen))]))
+(defn ^{:stratum 2} unseen-files
+  "[tracked files] for workflow directory `dir`: its event files not
+   covered by `tracked`, in name order, and the tracking state after them.
+   Tracking keeps the newest `keep-names` names and counts every name
+   sorting below them as read, so it stays bounded for a long run: a file
+   appears moments after the name it sorts by, long before that many newer
+   ones."
+  [dir tracked keep-names]
+  (let [files (event-files dir)
+        kept  (take-last keep-names files)]
+    [{:names (into #{} (map file-name) kept)
+      :floor (some-> (first kept) file-name)}
+     (filterv #(unread? tracked (file-name %)) files)]))
 
 (defn ^{:stratum 2} workflow-events
   "Every event of `workflow-id` in the sink layout (its archived, live or
