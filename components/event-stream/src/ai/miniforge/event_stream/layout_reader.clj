@@ -21,7 +21,8 @@
    to `archived/<id>/` by an archive. Event files are the names
    `sinks/event-file-ms` parses, ordered by that time, then
    :event/sequence-number; :event/id and :workflow/id come back as UUIDs,
-   as a live event carries them."
+   as a live event carries them. Also what a reader tracks of a run: a
+   watermark and the names read above it (`track`)."
   (:require
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.sinks :as sinks]
@@ -78,6 +79,26 @@
   [events-dir]
   [(sinks/live-dir events-dir) (sinks/archived-dir events-dir)])
 
+(def ^{:stratum 0} name-window-ms
+  "How far behind the newest file read a run's tracking keeps names. A
+   file recorded further back that has not been read by then (written
+   that late, or failing to decode that long) is given up."
+  60000)
+
+(defn ^{:stratum 0} current-dir
+  "Workflow `wf-name`'s directory now: under archived/ once the run has
+   moved there, else `dir`."
+  ^File [events-dir wf-name dir]
+  (let [archived (io/file (sinks/archived-dir events-dir) wf-name)]
+    (if (.isDirectory archived) archived (io/file dir))))
+
+(defn ^{:stratum 0} retire
+  "Tracking for a run leaving the active set, after its last read: the
+   watermark moves past the newest name read, and the names go."
+  [{:keys [watermark names]}]
+  {:watermark (reduce max watermark (map inc (vals names)))
+   :names     {}})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} event-files
@@ -110,19 +131,29 @@
        (sort-by (fn [[ms event]] [ms (get event :event/sequence-number 0)]))
        (mapv second)))
 
+(defn ^{:stratum 1} track
+  "Tracking `{:watermark ms :names {name ms}}` after `files` were read:
+   their names join, and the watermark rises to `name-window-ms` before
+   the newest name, dropping the names below it. A run's tracking holds
+   about a minute of names however long it goes on."
+  [{:keys [watermark names] :as tracked} files]
+  (if (empty? files)
+    tracked
+    (let [names (into names (map (juxt file-name file-ms)) files)
+          mark  (reduce max watermark (map #(- % name-window-ms) (vals names)))]
+      {:watermark mark
+       :names     (into {} (filter #(>= (val %) mark)) names)})))
+
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} unseen-files
-  "[names files]: the names of all event files in `dir`, and those files
-   whose names are not in `seen`; with no names yet (`seen` nil), those
-   modified at or after `since-ms`. A file name always holds one event."
-  [dir seen since-ms]
-  (let [files (event-files dir)]
-    [(into #{} (map file-name) files)
-     (if seen
-       (filterv #(not (contains? seen (file-name %))) files)
-       ;; mtime 0: gone since the listing (moved); a caller retries it.
-       (filterv #(let [m (mtime %)] (or (>= m since-ms) (zero? m))) files))]))
+(defn ^{:stratum 2} unread-files
+  "The event files in `dir` that `tracked` does not cover: recorded at or
+   after its watermark, and not among its names. A file name always
+   holds one event."
+  [dir {:keys [watermark names]}]
+  (filterv #(and (>= (file-ms %) watermark)
+                 (not (contains? names (file-name %))))
+           (event-files dir)))
 
 (defn ^{:stratum 2} active-dirs
   "{name dir} of the workflow directories modified at or after

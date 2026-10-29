@@ -27,9 +27,16 @@
    most every `relist-min-ms`, and every `sweep-ms`, which also picks up
    an old directory written to again.
 
+   Each run is tracked by a watermark and the names read above it
+   (`layout/track`). Only a decoded file counts as read: one that failed
+   to decode, or vanished in a move to archived/, is read on a later
+   poll, from archived/ under the same name. A directory leaving the
+   active set is read once more first, so a pause in polling loses
+   nothing; then only its watermark is kept.
+
    Directories already active at startup are read in full, so a run in
    progress arrives with its start event. In other directories, files
-   modified before startup are skipped."
+   recorded before startup are skipped."
   (:require
    [ai.miniforge.event-stream.layout-reader :as layout]
    [slingshot.slingshot :refer [try+]]))
@@ -50,69 +57,60 @@
   10000)
 
 (def ^{:stratum 0} mtime-slack-ms
-  "Some file systems keep mtimes to the second, so a file written just
-   after startup can carry an earlier mtime, and two changes to a root in
-   one tick look like one. Times this close count as new."
+  "Some file systems keep mtimes to the second, and some file names
+   record only the second, so a file written just after startup can
+   carry an earlier time, and two changes to a root in one tick look
+   like one. Times this close count as new."
   1000)
 
 (defn ^{:stratum 0} relist
-  "`state` with its active directories recomputed at `now`. A directory no
-   longer active has had nothing written for the window and was listed
-   after its last write, so its seen names are replaced by the time
-   `now - window`: should it become active again, the files modified from
-   then on are the new ones."
-  [{:keys [window-ms] :as state} events-dir roots now]
-  (let [active  (layout/active-dirs events-dir (- now window-ms))
-        dropped (remove (set (keys active)) (keys (:seen state)))]
+  "`state` with its active directories recomputed at `now`; those
+   leaving the set go under :leaving."
+  [{:keys [window-ms active] :as state} events-dir roots now]
+  (let [listed (layout/active-dirs events-dir (- now window-ms))]
     (assoc state
-           :active active
+           :active listed
+           :leaving (apply dissoc active (keys listed))
            :roots roots
-           :listed-at now
-           :seen (select-keys (:seen state) (keys active))
-           :since (into (get state :since {})
-                        (map #(vector % (- now window-ms)))
-                        dropped))))
+           :listed-at now)))
 
 (defn ^{:stratum 0} tail-dir
-  "Hand the unseen events of directory `dir` (workflow `wf-name`) to
-   `on-event` in creation order. Seen names (a file is named after its
-   event, under either root) only grow, and a file gone before decoding
-   is not counted, so a move to archived/ neither skips nor repeats
-   events. A failing `on-event` skips that event only."
-  [on-event state wf-name dir]
-  (let [seen          (get-in state [:seen wf-name])
-        [names files] (layout/unseen-files
-                       dir seen (get-in state [:since wf-name] (:since-ms state)))
-        events        (layout/read-ordered files)
-        decoded       (into #{} (map layout/source-file) events)
-        vanished      (into #{}
-                            (comp (remove decoded)
-                                  (remove #(.exists ^java.io.File %))
-                                  (map layout/file-name))
-                            files)]
+  "Hand the unread events of workflow `wf-name` (directory `dir`, or its
+   archived/ directory once the run has moved) to `on-event` in creation
+   order, and track the files decoded. A failing `on-event` skips that
+   event only."
+  [on-event events-dir state wf-name dir]
+  (let [tracked (get-in state [:tracked wf-name] {:watermark (:since-ms state) :names {}})
+        events  (layout/read-ordered
+                 (layout/unread-files (layout/current-dir events-dir wf-name dir) tracked))]
     (doseq [event events]
       (try+
         (on-event event)
         (catch Exception _ nil)))
-    (assoc-in state [:seen wf-name] (into (or seen #{}) (remove vanished) names))))
+    (assoc-in state [:tracked wf-name] (layout/track tracked (map layout/source-file events)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} initial-state
   "Tail state at `now`: the directories active now are read in full on
-   the first poll; elsewhere, files modified before `now` (less
+   the first poll; elsewhere, files recorded before `now` (less
    `mtime-slack-ms`) are skipped. Roots are read before the directories,
    so a directory created in between still changes them."
   [events-dir now window-ms]
-  (let [roots (layout/root-mtimes events-dir)
-        state (relist {:since-ms (- now mtime-slack-ms) :seen {} :window-ms window-ms}
-                      events-dir roots now)]
-    (assoc state :seen (zipmap (keys (:active state)) (repeat #{})))))
+  (let [roots  (layout/root-mtimes events-dir)
+        active (layout/active-dirs events-dir (- now window-ms))]
+    {:since-ms  (- now mtime-slack-ms)
+     :window-ms window-ms
+     :roots     roots
+     :listed-at now
+     :active    active
+     :tracked   (zipmap (keys active) (repeat {:watermark 0 :names {}}))}))
 
 (defn ^{:stratum 1} poll-once!
   "One poll at `now`: relist when a sweep is due or a root may have
    changed since the last listing, then hand on the new events of every
-   active directory. Returns the new state."
+   active directory and of each one leaving the set, which then keeps
+   only its watermark. Returns the new state."
   [state events-dir on-event now]
   (let [{:keys [listed-at]} state
         roots    (layout/root-mtimes events-dir)
@@ -121,8 +119,12 @@
                      (some #(>= % (- listed-at mtime-slack-ms)) roots))
         relist?  (or (>= elapsed sweep-ms)
                      (and changed? (>= elapsed relist-min-ms)))
-        state    (if relist? (relist state events-dir roots now) state)]
-    (reduce-kv (partial tail-dir on-event) state (:active state))))
+        state    (if relist? (relist state events-dir roots now) state)
+        leaving  (:leaving state)
+        state    (reduce-kv (partial tail-dir on-event events-dir)
+                            (dissoc state :leaving)
+                            (merge leaving (:active state)))]
+    (reduce #(update-in %1 [:tracked %2] layout/retire) state (keys leaving))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

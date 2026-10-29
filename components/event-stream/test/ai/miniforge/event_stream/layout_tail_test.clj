@@ -48,13 +48,20 @@
           :workflow/id     wf-id}
          extra))
 
-(defn- ^{:stratum 0} age-dir!
-  "Set the mtime of the workflow's live directory and its files an hour back."
-  [events-dir wf-id]
-  (let [dir (es/workflow-dir (str events-dir) wf-id)
-        hour-ago (- (System/currentTimeMillis) (* 60 60 1000))]
-    (doseq [f (.listFiles dir)] (.setLastModified f hour-ago))
-    (.setLastModified dir hour-ago)))
+(defn- ^{:stratum 0} write-event-file!
+  "Write `event` into the workflow's live directory under a legacy file
+   name recording `ms`, the file and directory last modified then, as a
+   run writing it at `ms` leaves them."
+  [events-dir wf-id event ms]
+  (let [dir  (doto (io/file events-dir "live" (str wf-id)) .mkdirs)
+        at   (java.time.LocalDateTime/ofInstant (java.time.Instant/ofEpochMilli ms)
+                                                java.time.ZoneOffset/UTC)
+        name (str (.format (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd'T'HHmmssSSS'Z'") at)
+                  "-" (random-uuid) ".json")
+        f    (io/file dir name)]
+    (spit f (es/serialize-event event))
+    (.setLastModified f ms)
+    (.setLastModified dir ms)))
 
 (defn- ^{:stratum 0} archive!
   "Move the workflow's live directory to archived/, as the archive does."
@@ -73,8 +80,8 @@
         active-id  (random-uuid)
         published  (atom [])
         publish    #(swap! published conj %)]
-    (es/publish! stream (wf-event :workflow/started old-id))
-    (age-dir! events-dir old-id)
+    (write-event-file! events-dir old-id (wf-event :workflow/started old-id)
+                       (- (System/currentTimeMillis) (* 60 60 1000)))
     (es/publish! stream (wf-event :workflow/started active-id))
     (Thread/sleep 5)
     (es/publish! stream (wf-event :workflow/phase-started active-id))
@@ -124,7 +131,7 @@
     (es/publish! stream (wf-event :workflow/started wf-id))
     (let [t0 (System/currentTimeMillis)
           s1 (sut/poll-once! (sut/initial-state base t0 window-ms) base publish (+ t0 500))
-          seen (get-in s1 [:seen (str wf-id)])
+          seen (get-in s1 [:tracked (str wf-id) :names])
           ;; Nothing written for the whole window: the sweep drops the directory.
           t1 (+ t0 window-ms 1000)
           s2 (sut/poll-once! s1 base publish t1)]
