@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.checkpoint-lock-test
   "A run's checkpoint lock held past the timeout makes the GC report a
-   failure for that run and leave it alone."
+   failure for that run and leave it alone. The GC deletes the lock file
+   of a run it deletes, and lock files of runs already gone."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.checkpoint-store :as store]
             [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
@@ -34,13 +35,32 @@
         (is (empty? (:deleted result)))
         (is (.isDirectory (io/file root (str id))))))))
 
-(deftest ^{:stratum 0} lock-files-stay-after-the-run-is-deleted
+(deftest ^{:stratum 0} the-lock-file-goes-with-the-deleted-run
   (fs/with-temp-dir [root {:prefix "pin-lock-"}]
-    (let [root (str root)
-          id (fixture/expired-run! root)]
-      (is (= [id] (:deleted (workflow/gc-checkpoints! {:checkpoint/root root}))))
-      (is (fs/exists? (checkpoint-lock/lock-file root id))
-          "unlinking it would let a new caller lock a fresh file while a waiter holds the old one"))))
+    (fs/with-temp-dir [events-dir {:prefix "pin-lock-events-"}]
+      (let [root (str root)
+            id (fixture/expired-run! root)]
+        (is (= [id] (:deleted (workflow/gc-checkpoints! {:checkpoint/root root
+                                                         :events-dir (fs/file events-dir)}))))
+        (is (not (fs/exists? (checkpoint-lock/lock-file root id))))))))
+
+(deftest ^{:stratum 0} lock-files-of-runs-already-gone-are-pruned
+  (fs/with-temp-dir [root {:prefix "pin-lock-"}]
+    (fs/with-temp-dir [events-dir {:prefix "pin-lock-events-"}]
+      (let [root (str root)
+            gone (random-uuid)
+            kept (random-uuid)]
+        ;; A lock file left by an earlier GC or a pin of a missing run,
+        ;; and the lock file of a run that is still there.
+        (checkpoint-lock/with-run-lock root gone (constantly nil))
+        (fs/create-dirs (fs/path root (str kept)))
+        (spit (str (fs/path root (str kept) "manifest.edn")) "{:workflow/id 1}")
+        (checkpoint-lock/with-run-lock root kept (constantly nil))
+        (let [result (workflow/gc-checkpoints! {:checkpoint/root root
+                                                :events-dir (fs/file events-dir)})]
+          (is (= 1 (:locks-pruned result)))
+          (is (not (fs/exists? (checkpoint-lock/lock-file root gone))))
+          (is (fs/exists? (checkpoint-lock/lock-file root kept))))))))
 
 (deftest ^{:stratum 0} a-run-started-pinned-pins-under-the-lock
   ;; The marker a pinned run's first checkpoint writes goes through the

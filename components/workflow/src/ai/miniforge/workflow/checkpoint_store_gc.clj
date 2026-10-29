@@ -118,14 +118,39 @@
   [dir]
   (fs/exists? (fs/file dir checkpoint-paths/pin-marker-filename)))
 
+(defn- ^{:stratum 0} prune-lock-files!
+  "Delete the lock files under `root` whose run directory is gone, each
+   under its own lock and only if the run is still gone then. Returns how
+   many went; 0 when the lock directory does not list."
+  [root]
+  (let [locks (fs/path root checkpoint-lock/locks-directory-name)
+        run-gone? #(not (fs/exists? (fs/path root %) {:nofollow-links true}))]
+    (try+
+      (->> (when (fs/directory? locks) (fs/list-dir locks))
+           (keep (fn [file]
+                   (let [n (str (fs/file-name file))]
+                     (when (str/ends-with? n ".lock")
+                       (subs n 0 (- (count n) (count ".lock")))))))
+           (filter run-gone?)
+           (map (fn [id]
+                  (checkpoint-lock/with-run-lock
+                   root id
+                   (fn [] (when (run-gone? id)
+                            (checkpoint-lock/remove-lock-file! root id)
+                            id)))))
+           (filter string?)
+           count)
+      (catch Exception _ 0))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} delete-run!
   "Delete one run's checkpoint directory under the run's lock, which a pin
    takes too. The pin marker is checked again under it, so a pin that
    landed after the run was classified keeps the run, and a pin that comes
-   later finds the run gone and fails. Returns the run id when deleted,
-   `{:pinned id}` when a pin arrived first, or an anomaly (lock busy, I/O)."
+   later finds the run gone and fails. The run's lock file goes too,
+   still under the lock. Returns the run id when deleted, `{:pinned id}`
+   when a pin arrived first, or an anomaly (lock busy, I/O)."
   [root dir id]
   (checkpoint-lock/with-run-lock
    root id
@@ -134,8 +159,8 @@
        (if (pinned-dir? dir)
          {:pinned id}
          (do (fs/delete-tree dir)
-             ;; The lock file stays: unlinking it would let a new caller
-             ;; lock a fresh file while a waiter holds the old one.
+             ;; Waiters that locked this file start over on the path.
+             (checkpoint-lock/remove-lock-file! root id)
              id))
        (catch Exception e
          (delete-failure dir id e))))))
@@ -233,8 +258,9 @@
    - `:now-ms`          — clock, for tests
 
    Returns `{:checkpoint/root :deleted [run-id] :kept {disposition [run-id]}
-   :failures [anomaly]}`. Only directories named by a run id are
-   considered; a symlinked one is never followed."
+   :failures [anomaly] :locks-pruned n}`. Only directories named by a run
+   id are considered; a symlinked one is never followed. Lock files of
+   runs that no longer exist are deleted (`:locks-pruned`)."
   [opts]
   (let [root (checkpoint-paths/resolve-checkpoint-root opts)
         days (get opts :max-age-days default-retention-days)
@@ -244,14 +270,16 @@
                (filter #(fs/directory? % {:nofollow-links true}) (fs/list-dir root)))
         by-disposition (group-by #(disposition % cutoff-ms events-dir) runs)
         results (mapv #(delete-run! root % (run-id %)) (get by-disposition :expired))
-        pinned-late (keep :pinned (filter map? (remove anomaly/anomaly? results)))]
+        pinned-late (keep :pinned (filter map? (remove anomaly/anomaly? results)))
+        locks-pruned (prune-lock-files! root)]
     {:checkpoint/root root
      :deleted (filterv uuid? results)
      :kept (cond-> (into {}
                          (map (fn [[k dirs]] [k (mapv run-id dirs)]))
                          (dissoc by-disposition :expired nil))
              (seq pinned-late) (update :pinned (fnil into []) pinned-late))
-     :failures (filterv anomaly/anomaly? results)}))
+     :failures (filterv anomaly/anomaly? results)
+     :locks-pruned locks-pruned}))
 
 (comment
   (gc-checkpoints! {:max-age-days 30}))
