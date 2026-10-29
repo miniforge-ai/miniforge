@@ -44,6 +44,11 @@
         recorded (get-in reconstructed [:checkpoint-manifest :workflow/phases-completed])]
     (vec (concat (filter unreadable recorded) (remove (set recorded) unreadable)))))
 
+(defn- ^{:stratum 0} position
+  "Index of `x` in `coll`, nil when absent."
+  [coll x]
+  (first (keep-indexed (fn [i y] (when (= x y) i)) coll)))
+
 (defn ^{:stratum 0} checkpointed-results
   "The run's phase results that a phase can build on, nil when it has
    none. `reconstruct-context` reads them from the run's checkpoint when
@@ -58,15 +63,23 @@
 
 (defn ^{:stratum 1} unreadable-phase
   "The phase a resume from the FSM snapshot must rewind to, nil when none:
-   the earliest whose checkpointed result did not read. The snapshot is
-   parked after it, and restoring it as is would run later phases
-   without that phase's output. Without a snapshot there is nothing to
-   rewind from, and a completed run has nothing left to run: it is not
-   rewound (and re-executed) for a lost file; only an explicit rewind
-   does that."
+   the earliest whose checkpointed result did not read, or the phase the
+   snapshot is parked in when that comes first. Restoring the snapshot as
+   is would run later phases without the lost output; rewinding past the
+   parked phase would skip it (a review that redirected back to
+   implement leaves implement parked with an earlier result on record,
+   and an unreadable review.edn must not mark it done). Without a
+   snapshot there is nothing to rewind from, and a completed run has
+   nothing left to run: it is not rewound (and re-executed) for a lost
+   file; only an explicit rewind does that."
   [reconstructed]
   (when (and (:machine-snapshot reconstructed) (not (:completed? reconstructed)))
-    (first (unreadable-phases reconstructed))))
+    (when-let [lost (first (unreadable-phases reconstructed))]
+      (let [recorded (get-in reconstructed [:checkpoint-manifest :workflow/phases-completed])
+            parked (get-in reconstructed [:machine-snapshot :execution/current-phase])
+            parked-at (position recorded parked)
+            lost-at (position recorded lost)]
+        (if (and parked-at lost-at (< parked-at lost-at)) parked lost)))))
 
 (defn ^{:stratum 1} refusal
   "Why a rewind to `phase` cannot run, nil when it can. It is refused
