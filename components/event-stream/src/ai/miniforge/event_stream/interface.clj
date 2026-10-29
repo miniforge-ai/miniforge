@@ -30,6 +30,7 @@
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.digest :as digest]
    [ai.miniforge.event-stream.boundary.heartbeat :as heartbeat]
+   [ai.miniforge.event-stream.layout-tail :as layout-tail]
    [ai.miniforge.event-stream.operator-requests :as operator-requests]
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.sinks :as sinks]
@@ -1064,6 +1065,16 @@
    workflow. Unreadable files are skipped; their paths are in the
    vector's metadata under `:event-stream/unreadable-files`."
   reader/read-workflow-events-by-id)
+
+(def ^{:stratum 0} start-layout-tail!
+  "`(start-layout-tail! events-dir on-event & [opts])`: follow the runs
+   other processes write under `events-dir` (live/ and archived/
+   workflow directories) on a daemon thread, calling `on-event` with each
+   new event in creation order, with UUID ids. Runs active at start are
+   read in full; older history is skipped. Opts: :poll-ms (500),
+   :window-ms (600000, how recently a directory was written to count as
+   active), :thread-name. Returns a function that stops it."
+  layout-tail/start!)
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event timeline renderer
