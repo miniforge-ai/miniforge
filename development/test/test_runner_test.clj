@@ -48,13 +48,16 @@
    "ai.miniforge.workflow.partial-terminal-receipt-integration-test"])
 
 (defn ^{:stratum 0} test-files-under
-  "Namespace names of every *_test.clj file under `dir`."
+  "Namespace names of every *_test.clj file under `dir`, built from each
+   relative path's segments (Path iteration, so either separator)."
   [dir]
   (->> (fs/glob dir "**_test.clj")
-       (map #(-> (str (fs/relativize dir %))
-                 (str/replace #"\.clj$" "")
-                 (str/replace "/" ".")
-                 (str/replace "_" "-")))
+       (map #(->> (fs/components (fs/relativize dir %))
+                  (map (fn [segment]
+                         (-> (str segment)
+                             (str/replace #"\.clj$" "")
+                             (str/replace "_" "-"))))
+                  (str/join ".")))
        set))
 
 (defn ^{:stratum 0} project-deps
