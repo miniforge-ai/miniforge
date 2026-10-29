@@ -29,6 +29,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
    [clojure.java.io :as io]
+   [ai.miniforge.tui-views.msg :as msg]
    [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.tui-views.subscription :as subscription]))
 
@@ -80,25 +81,25 @@
         (when-let [msg (subscription/translate-event event)]
           (dispatch-fn msg))))))
 
-(defn ^{:stratum 0} dispatch-event!
-  "Translate one event-stream event and dispatch the message, if any. A
-   run's row comes from its :workflow/started event. When the first
-   event this subscription sees of a run is another one (the run sat
-   idle past the tail's window at startup, so its start was skipped), or
-   the event is a :workflow/resumed, the row is first (re)built from the
-   start event on disk under `events-dir`, so the run shows as running.
-   `known` holds the workflow ids seen so far."
-  [dispatch-fn events-dir known event]
-  (let [wf-id (:workflow/id event)
-        type  (:event/type event)]
-    (when (and wf-id
-               (not= :workflow/started type)
-               (or (= :workflow/resumed type) (not (contains? @known wf-id))))
-      (some-> (es/read-layout-start-event events-dir wf-id)
-              subscription/translate-event
-              dispatch-fn))
-    (when wf-id (swap! known conj wf-id))
-    (some-> (subscription/translate-event event) dispatch-fn)))
+(def ^{:stratum 0} max-bootstrap-attempts
+  "Polls a run's events wait for its start event on disk before its row
+   is made from its id alone."
+  10)
+
+(defn ^{:stratum 0} start-row
+  "The row message for run `wf-id` from its :workflow/started event on
+   disk under `events-dir`; nil while that cannot be read."
+  [events-dir wf-id]
+  (some-> (es/read-layout-start-event events-dir wf-id) subscription/translate-event))
+
+(defn ^{:stratum 0} release!
+  "Dispatch run `wf-id`'s `row`, then the events waiting on it in `runs`,
+   and mark the run known."
+  [dispatch-fn runs wf-id row]
+  (dispatch-fn row)
+  (doseq [event (get-in @runs [:waiting wf-id :events])]
+    (some-> (subscription/translate-event event) dispatch-fn))
+  (swap! runs #(-> % (update :known conj wf-id) (update :waiting dissoc wf-id))))
 
 (defn ^{:stratum 0} tail-logger
   "A logger for the layout tail's warnings that appends EDN lines to
@@ -131,6 +132,44 @@
       (let [lines (read-new-lines f pos)]
         (parse-and-dispatch! lines dispatch-fn)))))
 
+(defn ^{:stratum 1} dispatch-event!
+  "Translate one event-stream event and dispatch the message, if any.
+
+   A run's row comes from its :workflow/started event. When another event
+   is the first this subscription sees of a run (it sat idle past the
+   tail's window at startup, so its start was skipped as history), the
+   row is built from the start event on disk first. Until that works, the
+   run's events wait in `runs` and `retry-bootstraps!` tries again each
+   poll; the run is known only once its row is out. A :workflow/resumed
+   rebuilds a known run's row the same way, so it shows as running."
+  [dispatch-fn events-dir runs event]
+  (locking runs
+    (let [wf-id (:workflow/id event)
+          type  (:event/type event)
+          m     (subscription/translate-event event)]
+      (cond
+        (nil? wf-id)                      (some-> m dispatch-fn)
+        (= :workflow/started type)        (release! dispatch-fn runs wf-id m)
+        (contains? (:known @runs) wf-id)  (do (when (= :workflow/resumed type)
+                                                (some-> (start-row events-dir wf-id) dispatch-fn))
+                                              (some-> m dispatch-fn))
+        :else (do (swap! runs update-in [:waiting wf-id :events] (fnil conj []) event)
+                  (some->> (start-row events-dir wf-id) (release! dispatch-fn runs wf-id)))))))
+
+(defn ^{:stratum 1} retry-bootstraps!
+  "Try the start event on disk again for each run whose events wait on
+   its row (see `dispatch-event!`). After `max-bootstrap-attempts` polls
+   the row is made from the run's id alone, so its events are not held
+   forever."
+  [dispatch-fn events-dir runs]
+  (locking runs
+    (doseq [[wf-id {:keys [tries] :or {tries 0}}] (:waiting @runs)]
+      (if-let [row (or (start-row events-dir wf-id)
+                       (when (>= (inc tries) max-bootstrap-attempts)
+                         (msg/workflow-added wf-id nil nil)))]
+        (release! dispatch-fn runs wf-id row)
+        (swap! runs assoc-in [:waiting wf-id :tries] (inc tries))))))
+
 (defn ^{:stratum 1} poll-tracked-files!
   "Read new lines from all tracked files and dispatch them."
   [tracked dispatch-fn]
@@ -156,13 +195,14 @@
   "Polling loop body for the file-subscription daemon thread.
    Polls tracked files every poll-ms, scans for new files every scan-ms.
    Catches exceptions per-iteration so a single failure doesn't kill the thread."
-  [running? tracked dispatch-fn dir poll-ms scan-ms]
+  [running? tracked dispatch-fn dir poll-ms scan-ms & [on-poll]]
   (let [scan-counter (atom 0)]
     (while @running?
       (try
         (Thread/sleep poll-ms)
         (when @running?
           (poll-tracked-files! tracked dispatch-fn)
+          (when on-poll (on-poll))
           (swap! scan-counter + poll-ms)
           (when (>= @scan-counter scan-ms)
             (reset! scan-counter 0)
@@ -196,13 +236,15 @@
         dir       (events-dir)
         tracked   (atom {})
         running?  (atom true)
+        runs      (atom {:known #{} :waiting {}})
         _         (doseq [f (scan-event-files dir)]
                     (track-file! tracked dispatch-fn f {:hydrate? hydrate-existing?}))
-        thread    (doto (Thread. #(poll-loop running? tracked dispatch-fn dir poll-ms scan-ms))
+        thread    (doto (Thread. #(poll-loop running? tracked dispatch-fn dir poll-ms scan-ms
+                                             (partial retry-bootstraps! dispatch-fn dir runs)))
                     (.setDaemon true)
                     (.setName "tui-file-subscription")
                     (.start))
-        stop-tail (es/start-layout-tail! dir (partial dispatch-event! dispatch-fn dir (atom #{}))
+        stop-tail (es/start-layout-tail! dir (partial dispatch-event! dispatch-fn dir runs)
                                          {:poll-ms     poll-ms
                                           :thread-name "tui-layout-tail"
                                           :logger      (tail-logger)})]

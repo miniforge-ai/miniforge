@@ -37,26 +37,19 @@
       (> (System/currentTimeMillis) deadline) false
       :else (do (Thread/sleep 50) (recur deadline)))))
 
-(deftest ^{:stratum 0} a-run-first-seen-after-its-start-gets-its-row-from-disk
-  (let [dir       (doto (io/file (System/getProperty "java.io.tmpdir") (str "tui-layout-" (random-uuid)))
-                    .mkdirs)
-        wf-id     (random-uuid)
-        msgs      (atom [])
-        dispatch! (partial file-sub/dispatch-event! #(swap! msgs conj %) dir (atom #{}))]
-    ;; Started long ago: the tail skipped it as history.
+(defn- ^{:stratum 0} write-old-start!
+  "A temp events dir holding run `wf-id`'s start event, written long ago
+   (the tail skipped it as history)."
+  [wf-id]
+  (let [dir (doto (io/file (System/getProperty "java.io.tmpdir") (str "tui-layout-" (random-uuid)))
+              .mkdirs)]
     (spit (doto (io/file dir "live" (str wf-id) "20260101T000000000Z-start.json") io/make-parents)
           (es/serialize-event {:event/type :workflow/started :event/id (random-uuid)
                                :event/timestamp (java.util.Date.) :workflow/id wf-id
                                :workflow/spec {:name "Old run"}}))
-    (dispatch! {:event/type :workflow/phase-started :workflow/id wf-id :workflow/phase :implement})
-    (is (= [:msg/workflow-added :msg/phase-changed] (map first @msgs)))
-    (is (= "Old run" (:name (second (first @msgs)))) "the row, from the start event on disk")
-    (reset! msgs [])
-    (dispatch! {:event/type :workflow/phase-started :workflow/id wf-id :workflow/phase :verify})
-    (is (= [:msg/phase-changed] (map first @msgs)) "built once")
-    (reset! msgs [])
-    (dispatch! {:event/type :workflow/resumed :workflow/id wf-id})
-    (is (= [:msg/workflow-added] (map first @msgs)) "a resume shows the run as running again")))
+    dir))
+
+(defn- ^{:stratum 0} new-runs [] (atom {:known #{} :waiting {}}))
 
 (deftest ^{:stratum 0} tail-warnings-go-to-a-log-file-not-the-screen
   (let [home (doto (io/file (System/getProperty "java.io.tmpdir") (str "tui-home-" (random-uuid))) .mkdirs)
@@ -67,6 +60,21 @@
     (is (re-find #":event-tail/gap" (slurp (io/file home "logs" "tui.log"))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} a-run-first-seen-after-its-start-gets-its-row-from-disk
+  (let [wf-id     (random-uuid)
+        dir       (write-old-start! wf-id)
+        msgs      (atom [])
+        dispatch! (partial file-sub/dispatch-event! #(swap! msgs conj %) dir (new-runs))]
+    (dispatch! {:event/type :workflow/phase-started :workflow/id wf-id :workflow/phase :implement})
+    (is (= [:msg/workflow-added :msg/phase-changed] (map first @msgs)))
+    (is (= "Old run" (:name (second (first @msgs)))) "the row, from the start event on disk")
+    (reset! msgs [])
+    (dispatch! {:event/type :workflow/phase-started :workflow/id wf-id :workflow/phase :verify})
+    (is (= [:msg/phase-changed] (map first @msgs)) "built once")
+    (reset! msgs [])
+    (dispatch! {:event/type :workflow/resumed :workflow/id wf-id})
+    (is (= [:msg/workflow-added] (map first @msgs)) "a resume shows the run as running again")))
 
 (deftest ^{:stratum 1} a-run-the-file-sink-writes-reaches-the-tui
   (let [dir    (doto (io/file (System/getProperty "java.io.tmpdir") (str "tui-layout-" (random-uuid)))
@@ -86,3 +94,35 @@
                                        %))
               "the TUI hears of the run, with its UUID id and name")
           (finally (stop!)))))))
+
+(deftest ^{:stratum 1} a-failed-start-lookup-holds-the-runs-events-for-the-next-poll
+  (let [wf-id  (random-uuid)
+        dir    (write-old-start! wf-id)
+        msgs   (atom [])
+        send!  #(swap! msgs conj %)
+        runs   (new-runs)
+        fail?  (atom true)
+        lookup es/read-layout-start-event]
+    (with-redefs [es/read-layout-start-event #(when-not @fail? (lookup %1 %2))]
+      (file-sub/dispatch-event! send! dir runs {:event/type :workflow/phase-started :workflow/id wf-id
+                                                :workflow/phase :implement})
+      (file-sub/retry-bootstraps! send! dir runs)
+      (is (= [] @msgs) "the event waits while the start cannot be read")
+      (is (not (contains? (:known @runs) wf-id)))
+      (reset! fail? false)
+      (file-sub/retry-bootstraps! send! dir runs)
+      (is (= [:msg/workflow-added :msg/phase-changed] (map first @msgs)) "row first, then the event")
+      (is (contains? (:known @runs) wf-id)))))
+
+(deftest ^{:stratum 1} a-run-whose-start-never-reads-gets-a-bare-row
+  (let [wf-id (random-uuid)
+        msgs  (atom [])
+        send! #(swap! msgs conj %)
+        runs  (new-runs)
+        dir   (doto (io/file (System/getProperty "java.io.tmpdir") (str "tui-layout-" (random-uuid))) .mkdirs)]
+    (file-sub/dispatch-event! send! dir runs {:event/type :workflow/phase-started :workflow/id wf-id
+                                              :workflow/phase :implement})
+    (dotimes [_ file-sub/max-bootstrap-attempts] (file-sub/retry-bootstraps! send! dir runs))
+    (is (= [[:msg/workflow-added {:workflow-id wf-id :name nil :spec nil}] :msg/phase-changed]
+           [(first @msgs) (first (second @msgs))])
+        "its events are not held forever")))
