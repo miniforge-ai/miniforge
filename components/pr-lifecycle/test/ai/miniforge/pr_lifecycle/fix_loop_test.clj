@@ -18,9 +18,11 @@
 (ns ai.miniforge.pr-lifecycle.fix-loop-test
   "Unit tests for fix loop context building and prompt generation.
 
-   Tests fix context creation, prompt building for each failure type, and
-   conversation follow-up routing. Does not execute generation or git operations."
+   Tests fix context creation, prompt building for each failure type,
+   conversation follow-up routing, and worktree containment when a fix is
+   applied to disk. Does not execute generation or git operations."
   (:require
+   [babashka.fs :as fs]
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.dag-executor.interface :as dag]
@@ -30,6 +32,15 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;------------------------------------------------------------------------------ Test Data
+(defn- ^{:stratum 0} temp-layout
+  "Create sibling `worktree` and `outside` dirs under a fresh temp dir.
+   Returns their paths as strings, plus `:base` for cleanup."
+  []
+  (let [base (fs/create-temp-dir {:prefix "fix-loop-apply-"})]
+    {:base     (str base)
+     :worktree (str (fs/create-dirs (fs/path base "worktree")))
+     :outside  (str (fs/create-dirs (fs/path base "outside")))}))
+
 (def ^{:stratum 0} test-task
   {:task/id (random-uuid)
    :task/title "Implement feature X"
@@ -191,3 +202,111 @@
           (is (:success? result))
           (is (= [:auto-resolve false]
                  (take-last 2 @follow-up-call))))))))
+
+;------------------------------------------------------------------------------ Fix Application
+(deftest ^{:stratum 1} apply-fix-to-worktree-rejects-escaping-paths-test
+  (let [{:keys [base worktree outside]} (temp-layout)
+        victim (str (fs/path outside "victim.txt"))]
+    (try
+      (spit victim "keep")
+      (testing "a ../ write is rejected and nothing lands outside"
+        (let [result (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "../outside/pwned.txt"
+                                              :content "x" :action :create}]} nil)]
+          (is (dag/err? result))
+          (is (= :fix-path-traversal (get-in result [:error :code])))
+          (is (not (fs/exists? (fs/path outside "pwned.txt"))))))
+      (testing "a write through an in-tree symlink to an outside dir is rejected"
+        (fs/create-sym-link (fs/path worktree "link") outside)
+        (let [result (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "link/pwned.txt"
+                                              :content "x" :action :modify}]} nil)]
+          (is (dag/err? result))
+          (is (not (fs/exists? (fs/path outside "pwned.txt"))))))
+      (testing "a write through a dangling in-tree symlink is rejected"
+        (fs/create-sym-link (fs/path worktree "dangling") (fs/path outside "created.txt"))
+        (let [result (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "dangling"
+                                              :content "x" :action :modify}]} nil)]
+          (is (dag/err? result))
+          (is (not (fs/exists? (fs/path outside "created.txt"))))))
+      (testing "a ../ delete is rejected and the outside file survives"
+        (let [result (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "../outside/victim.txt"
+                                              :action :delete}]} nil)]
+          (is (dag/err? result))
+          (is (fs/exists? victim))))
+      (testing "a delete validates the entry it removes, not a final symlink's target"
+        ;; worktree/link -> outside, and outside/back -> worktree/target.
+        ;; Following the leaf resolves inside; the entry removed is outside/back.
+        (spit (str (fs/path worktree "target.txt")) "in")
+        (fs/create-sym-link (fs/path outside "back") (fs/path worktree "target.txt"))
+        (let [result (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "link/back" :action :delete}]} nil)]
+          (is (dag/err? result))
+          (is (fs/exists? (fs/path outside "back") {:nofollow-links true}))))
+      (finally (fs/delete-tree base)))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-is-all-or-nothing-test
+  (testing "one escaping path rejects the whole artifact before any write"
+    (let [{:keys [base worktree outside]} (temp-layout)]
+      (try
+        (let [result (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "ok.txt" :content "x" :action :create}
+                                             {:path "../outside/pwned.txt"
+                                              :content "x" :action :create}]} nil)]
+          (is (dag/err? result))
+          (is (= ["../outside/pwned.txt"] (get-in result [:error :data :paths])))
+          (is (not (fs/exists? (fs/path worktree "ok.txt"))))
+          (is (not (fs/exists? (fs/path outside "pwned.txt")))))
+        (finally (fs/delete-tree base))))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-resolves-each-op-in-order-test
+  (testing "deleting a symlink and recreating its name writes a new file, not the old target"
+    (let [{:keys [base worktree]} (temp-layout)
+          target (str (fs/path worktree "target.txt"))
+          link   (fs/path worktree "link.txt")]
+      (try
+        (spit target "orig")
+        (fs/create-sym-link link target)
+        (let [result (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "link.txt" :action :delete}
+                                             {:path "link.txt" :content "new" :action :create}]} nil)]
+          (is (dag/ok? result))
+          (is (= "orig" (slurp target)))
+          (is (not (fs/sym-link? link)))
+          (is (= "new" (slurp (str link)))))
+        (finally (fs/delete-tree base))))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-deletes-under-a-root-parent-test
+  (testing "a delete whose parent resolves to the worktree root itself applies"
+    (let [{:keys [base worktree]} (temp-layout)]
+      (try
+        (spit (str (fs/path worktree "a.txt")) "a")
+        (spit (str (fs/path worktree "b.txt")) "b")
+        (fs/create-sym-link (fs/path worktree "self") worktree)
+        (let [result (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "self/a.txt" :action :delete}
+                                             {:path "././b.txt" :action :delete}]} nil)]
+          (is (dag/ok? result))
+          (is (not (fs/exists? (fs/path worktree "a.txt"))))
+          (is (not (fs/exists? (fs/path worktree "b.txt")))))
+        (finally (fs/delete-tree base))))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-in-tree-changes-test
+  (testing "create, modify and delete inside the worktree still apply"
+    (let [{:keys [base worktree]} (temp-layout)]
+      (try
+        (fs/create-dirs (fs/path worktree "src"))
+        (spit (str (fs/path worktree "src" "a.clj")) "old")
+        (spit (str (fs/path worktree "gone.txt")) "bye")
+        (let [result (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "src/a.clj" :content "new" :action :modify}
+                                             {:path "src/b.clj" :content "b" :action :create}
+                                             {:path "gone.txt" :action :delete}]} nil)]
+          (is (dag/ok? result))
+          (is (= 3 (get-in result [:data :files-modified])))
+          (is (= "new" (slurp (str (fs/path worktree "src" "a.clj")))))
+          (is (= "b" (slurp (str (fs/path worktree "src" "b.clj")))))
+          (is (not (fs/exists? (fs/path worktree "gone.txt")))))
+        (finally (fs/delete-tree base))))))
