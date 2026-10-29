@@ -41,7 +41,8 @@
   "Malli `[:map ...]` schema for raw user spec input in :spec/* format,
    before normalization. Required keys :spec/title and :spec/description;
    all other :spec/* keys plus :workflow/type and :workflow/version are
-   optional. Pass to malli.core fns or `valid-spec-input?`."
+   optional (:spec/workflow-type / :spec/workflow-version win over them).
+   Pass to malli.core fns or `valid-spec-input?`."
   schema/SpecInput)
 
 (def ^{:stratum 0} SpecIntent
@@ -101,7 +102,8 @@
 ;; Normalization
 (defn ^{:stratum 0} normalize-spec
   "Normalize a parsed spec map to canonical :spec/* format.
-   Applies defaults for missing optional fields."
+   Applies defaults for missing optional fields. :spec/workflow-type comes
+   from :spec/workflow-type, then :workflow/type, then :canonical-sdlc."
   [spec]
   (core/normalize-spec spec))
 

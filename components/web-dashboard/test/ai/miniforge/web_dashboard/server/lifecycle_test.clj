@@ -36,6 +36,16 @@
     (is (= 1 (handler {})))
     (control-identity/release! dashboard-state)))
 
+(deftest ^{:stratum 0} dashboard-local-stream-bounds-its-history
+  (let [given (events/create-event-stream {:sinks []})]
+    (is (identical? given (server/dashboard-stream given)) "a supplied stream is used as is"))
+  (let [stream (server/dashboard-stream nil)
+        wf-id  (random-uuid)]
+    (dotimes [_ 1200]
+      (events/publish! stream {:event/type :agent/chunk :event/id (random-uuid) :workflow/id wf-id}))
+    (is (< (count (events/get-events stream)) 1200)
+        "the stream the dashboard creates for itself has a bounded history")))
+
 (deftest ^{:stratum 0} rollback-preserves-the-original-failure
   (doseq [same? [true false]]
     (let [failure (ex-info "Startup failure" {})
