@@ -21,6 +21,7 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.agent.artifact-session :as artifact-session]
+   [ai.miniforge.agent.context-budget :as context-budget]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.reviewer :as reviewer]
    [ai.miniforge.agent.reviewer.artifact :as r-artifact]
@@ -482,6 +483,32 @@
 
       (is (= 0 (get-in result [:metrics :tokens]))
           "Should use 0 tokens - no LLM calls"))))
+
+(deftest ^{:stratum 1} test-reviewer-budgets-against-the-client-model
+  ;; The agent config's :model may name another backend's model; a codex
+  ;; client that sends no model must not be budgeted against it.
+  (doseq [[label client expected]
+          [["a codex client with no model" (llm/create-client {:backend :codex}) nil]
+           ["a client that names its model"
+            (llm/create-client {:backend :claude :model "claude-sonnet-4-6"})
+            "claude-sonnet-4-6"]]]
+    (testing label
+      (let [budget-models (atom [])
+            original      context-budget/assemble-within-budget]
+        (with-redefs [context-budget/assemble-within-budget
+                      (fn [opts]
+                        (swap! budget-models conj (:model opts))
+                        (original opts))
+                      model/resolve-llm-client-for-role (fn [_role c] c)
+                      llm/chat (fn [_client _prompt _opts]
+                                 (mock-llm-response "not valid edn" :tokens 1))
+                      llm/success? :success?
+                      llm/get-content :content]
+          (core/invoke (reviewer/create-reviewer {:llm-backend client
+                                                  :config {:model "claude-opus-4-6"}
+                                                  :gates []})
+                       {} sample-artifact)
+          (is (= [expected] @budget-models)))))))
 
 (deftest ^{:stratum 1} test-reviewer-rejects-unparseable-llm-output
   (testing "successful LLM calls that cannot be parsed fail closed"

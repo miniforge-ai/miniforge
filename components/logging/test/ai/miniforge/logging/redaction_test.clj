@@ -118,3 +118,25 @@
       (is (= [] (leaked (pr-str @entries))))
       (is (= [] (leaked (pr-str returned))))
       (is (= (redaction/marker) (get-in returned [:data :github-token]))))))
+
+(deftest ^{:stratum 2} exception-in-data-is-redacted-test
+  (testing "an ex-info in :data loses the secrets in its message and ex-data, not its stack trace"
+    (let [[gh-token _ _ url-password] (:secrets fixture)
+          cause  (ex-info (str "auth failed for x-access-token:" gh-token)
+                          {:remote (str "https://bot:" url-password "@github.com/o/r.git")})
+          thrown (ex-info (str "push failed with GH_TOKEN=" gh-token)
+                          {:github-token "opaque-value-only-its-key-names"}
+                          cause)
+          [logger entries] (log/collecting-logger)
+          returned (log/error logger :release :release/push-failed {:data {:error thrown}})
+          text   (with-out-str
+                   (log/error (log/create-logger {:output :edn}) :release :release/push-failed
+                              {:data {:error thrown}}))
+          error  (get-in returned [:data :error])]
+      (is (= [] (leaked (pr-str @entries))))
+      (is (= [] (leaked text)))
+      (is (map? error) "the exception is logged as data")
+      (is (seq (:trace error)) "the stack trace is kept")
+      (is (= 2 (count (:via error))) "every cause is kept")
+      (is (= (redaction/marker) (get-in error [:via 0 :data :github-token])))
+      (is (str/starts-with? (get-in error [:via 0 :message]) "push failed with GH_TOKEN=")))))

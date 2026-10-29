@@ -34,6 +34,7 @@
    [ai.miniforge.release-executor.push-auth :as push-auth]
    [ai.miniforge.release-executor.result :as result]
    [ai.miniforge.release-executor.shell :as shell]
+   [babashka.fs :as fs]
    [babashka.process :as process]
    [clojure.string :as str]))
 
@@ -85,13 +86,16 @@
    the pipeline resolved — parity with sandbox's gh-exec-opts :env injection.
    `worktree-path` may be nil (e.g. `gh auth status` needs no cwd). When no
    token is supplied the call inherits the ambient environment. `extra-env`
-   (the push fallback's `push-auth/retry-plan` env) is merged in."
+   (the push fallback's `push-auth/retry-plan` env) is merged in. A call
+   carrying a token runs with git's tracing variables removed
+   (`shell/trace-env-var?`), so a trace cannot log the credential."
   ([worktree-path github-token] (gh-shell-opts worktree-path github-token nil))
   ([worktree-path github-token extra-env]
    (let [env (merge (when github-token {"GH_TOKEN" github-token}) extra-env)]
      (cond-> {}
        worktree-path (assoc :dir (str worktree-path))
-       (seq env)     (assoc :extra-env env)))))
+       (seq env)     (assoc :extra-env env)
+       github-token  (assoc :no-trace? true)))))
 
 (defn- ^{:stratum 0} branch-refspec
   "Full refspec pushing local `branch` to the same-named branch on the
@@ -189,6 +193,10 @@
    global git options placed before `commit`, such as
    `[\"-c\" \"core.hooksPath=/dev/null\"]` to keep every hook from running.
 
+   Secrets in `commit-message` are replaced with the redaction marker
+   (components/redaction) before git records it: a commit is pushed and
+   kept in history, so the message is written once, redacted.
+
    Returns {:success? bool :commit-sha string :error string}"
   ([worktree-path commit-message]
    (commit-changes! worktree-path commit-message nil))
@@ -196,7 +204,7 @@
    (try
      (let [commit-r (apply process/shell
                            {:dir (str worktree-path) :out :string :err :string :continue true}
-                           "git" (concat git-args ["commit" "-m" commit-message]))]
+                           "git" (concat git-args ["commit" "-m" (redaction/redact commit-message)]))]
        (if (zero? (:exit commit-r))
          (let [sha-r (process/shell
                       {:dir (str worktree-path) :out :string :err :string :continue true}
@@ -257,24 +265,23 @@
   ([] (check-gh-auth! nil))
   ([github-token]
    (try
-    (let [which-r (process/shell
-                   {:out :string :err :string :continue true}
-                   "which" "gh")]
-      (if-not (zero? (:exit which-r))
-        (gh-unavailable "gh CLI not found. Install with: brew install gh")
-        (let [auth-r (shell/run-bounded ["gh" "auth" "status"]
-                                        (gh-shell-opts nil github-token))]
-          (if (zero? (:exit auth-r))
-            (let [output (get auth-r :out "")
-                  user-match (re-find #"Logged in to [^\s]+ account (\S+)" output)]
-              (gh-authenticated (or (second user-match) "unknown")))
-            ;; A timeout is not an auth failure: report its own message and
-            ;; carry :timed-out? / :anomaly like the other bounded calls.
-            (merge (gh-available-unauthenticated
-                    (if (:timed-out? auth-r)
-                      (get auth-r :err "")
-                      (str "gh not authenticated. Run: gh auth login\n" (get auth-r :err ""))))
-                   (timeout-data auth-r))))))
+    ;; fs/which, not the `which` binary: Windows has none, so shelling out
+    ;; to it reported gh missing on every Windows host.
+    (if-not (fs/which "gh")
+      (gh-unavailable "gh CLI not found. Install with: brew install gh")
+      (let [auth-r (shell/run-bounded ["gh" "auth" "status"]
+                                      (gh-shell-opts nil github-token))]
+        (if (zero? (:exit auth-r))
+          (let [output (get auth-r :out "")
+                user-match (re-find #"Logged in to [^\s]+ account (\S+)" output)]
+            (gh-authenticated (or (second user-match) "unknown")))
+          ;; A timeout is not an auth failure: report its own message and
+          ;; carry :timed-out? / :anomaly like the other bounded calls.
+          (merge (gh-available-unauthenticated
+                  (if (:timed-out? auth-r)
+                    (get auth-r :err "")
+                    (str "gh not authenticated. Run: gh auth login\n" (get auth-r :err ""))))
+                 (timeout-data auth-r)))))
     (catch Exception e
       (gh-unavailable (.getMessage e))))))
 
@@ -436,7 +443,7 @@
               :effective   (lines ["git" "remote" "get-url" "--push" "--all" "origin"])
               :pushurl?    (boolean (seq pushurls))
               :config      (lines ["git" "config" "--list"])
-              :env-config? (push-auth/inherited-env-config?)}
+              :env-config? (push-auth/inherited-env-config? (shell/parent-env))}
              github-token)]
         (if env
           (push! env)
