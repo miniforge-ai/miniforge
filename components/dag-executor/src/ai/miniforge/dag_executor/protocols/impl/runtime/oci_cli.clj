@@ -388,6 +388,19 @@
   [s]
   (java.net.URLDecoder/decode (str/replace s "+" "%2B") "UTF-8"))
 
+(defn- ^{:stratum 0} credential-git-check
+  "`version-result`, from `git --version` in the capsule, or an error when
+   that git predates 2.31: it ignores GIT_CONFIG_COUNT, which carries the
+   credential, so a private clone would fail without saying why. Output
+   it cannot parse passes."
+  [version-result]
+  (let [out (get-in version-result [:data :stdout] "")]
+    (if-let [[_ major minor] (re-find #"git version (\d+)\.(\d+)" out)]
+      (if (neg? (compare [(parse-long major) (parse-long minor)] [2 31]))
+        (result/err :git-too-old (messages/t :oci/git-too-old {:version (str/trim out)}))
+        version-result)
+      version-result)))
+
 (defn- ^{:stratum 0} git-network-command?
   "True for the git commands persist/restore send to the remote."
   [cmd]
@@ -629,11 +642,12 @@
    two Authorization headers.
    Env-supplied config is never written to .git/config, and exec passes the
    values in an env file, so the token lands in neither the capsule's repo
-   state nor the runtime argv (N11 §2.2). Empty without a token or for a
-   URL that is not http(s)."
+   state nor the runtime argv (N11 §2.2). An http origin also allows the
+   http transport. Empty without a token or for a URL that is not http(s)."
   [https-url {:keys [user token]}]
-  (if-let [[_ origin] (when token (re-find #"^(https?://[^/]+)(?:/|$)" https-url))]
-    (merge (git-config-env (conj git-credential-config
+  (if-let [[_ origin scheme] (when token (re-find #"^((https?)://[^/]+)(?:/|$)" https-url))]
+    (merge (git-config-env (conj (cond-> git-credential-config
+                                   (= "http" scheme) (conj ["protocol.http.allow" "always"]))
                                  [(str "http." origin "/.extraheader") ""]
                                  [(str "http." origin "/.extraheader")
                                   (basic-auth-header user token)]))
@@ -1108,9 +1122,11 @@
    Returns a result map with bootstrap metadata. No-op success when
    repo-url is nil (local mode / pre-existing workspace).
    Uses config-based token resolution (profile + env fallback) rather than
-   URL-guessing. With a credential, clones the plain HTTPS URL and hands the
-   credential to the clone command alone (`git-credential-env`): origin's
-   URL in the capsule carries none, and no push URL is set."
+   URL-guessing. With a credential, checks the image's git can take it
+   (`credential-git-check`), clones the plain URL and hands the credential
+   to the clone command alone (`git-credential-env`): origin's URL in the
+   capsule carries none, and no push URL is set. Clones every branch, so
+   release can compare against a base other than the checked-out branch."
   [descriptor container-name workdir env-config]
   (if-let [{:keys [repo-url https-url] :as remote} (git-remote env-config)]
     (let [branch    (get env-config :branch "main")
@@ -1120,8 +1136,9 @@
                                     :error-on-failure? true
                                     :error-prefix (messages/t :oci/bootstrap-failed)
                                     :sanitize? true)
-          clone-cmd ["git" "clone" "--branch" (str branch) "--single-branch" "--" clone-url workdir]
-          result (-> (exec! clone-cmd (git-credential-env https-url auth))
+          clone-cmd ["git" "clone" "--branch" (str branch) "--" clone-url workdir]
+          result (-> (if auth (credential-git-check (exec! ["git" "--version"])) (result/ok nil))
+                     (chain-container-command #(exec! clone-cmd (git-credential-env https-url auth)))
                      ;; Use --local (not --global) since container rootfs is read-only
                      (chain-container-command
                       #(exec! ["git" "-C" workdir "config" "user.email" "miniforge@miniforge.ai"]))
@@ -1247,7 +1264,10 @@
                                   container-name (descriptor/kind descriptor) task-id workdir
                                   (cond-> (assoc env-config :metadata metadata)
                                     remote (assoc :repo-url (:repo-url remote))))))
-                    bootstrap-result))
+                    ;; The caller gets no environment id to release, so
+                    ;; remove the container that started.
+                    (do (remove-container descriptor container-name)
+                        bootstrap-result)))
                 create-result)))))))
 
   (execute! [_this environment-id command opts]

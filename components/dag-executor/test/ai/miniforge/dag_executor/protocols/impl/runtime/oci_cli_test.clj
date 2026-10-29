@@ -363,9 +363,11 @@
       (is (= (str "Authorization: Basic " (basic-auth "x-access-token" "tok"))
              (get (git-config-of (cred-env "https://git.example.com" auth))
                   "http.https://git.example.com/.extraheader"))))
-    (testing "an http remote gets its header too"
+    (testing "an http remote gets its header too, and the http transport"
       (is (some #{(str "Authorization: Basic " (basic-auth "x-access-token" "tok"))}
-                (vals (cred-env "http://git.example.com/r.git" auth)))))
+                (vals (cred-env "http://git.example.com/r.git" auth))))
+      (is (= "always" (get (git-config-of (cred-env "http://git.example.com/r.git" auth))
+                           "protocol.http.allow"))))
     (testing "no token, or a URL that is not http(s), yields no credential"
       (is (= {} (cred-env "https://github.com/o/r.git" nil)))
       (is (= {} (cred-env "git@github.com:o/r.git" auth))))))
@@ -695,12 +697,26 @@
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)
                     oci-cli/exec-in-container (fn [_d _c cmd opts]
                                                 (swap! envs conj [cmd (:env opts)])
-                                                {:data {:exit-code 0 :stdout ""}})]
+                                                (result/ok {:exit-code 0 :stdout ""}))]
         ((private-fn 'bootstrap-workspace!) (docker-descriptor) "c1" "/workspace"
                                             {:repo-url "http://bob:pw@git.example.com/r.git"})
         (let [[cmd env] (first (filter #(some #{"clone"} (first %)) @envs))]
           (is (some #{"http://git.example.com/r.git"} cmd))
           (is (some #{(str "Authorization: Basic " (basic-auth "bob" "pw"))} (vals env))))))))
+
+(deftest ^{:stratum 1} bootstrap-workspace-refuses-git-older-than-2-31-test
+  (testing "an image whose git ignores GIT_CONFIG_COUNT fails with a clear
+            error before any clone"
+    (let [cmds (atom [])]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] "tok")
+                    oci-cli/exec-in-container (fn [_d _c cmd _opts]
+                                                (swap! cmds conj cmd)
+                                                (result/ok {:exit-code 0 :stdout "git version 2.30.2\n"}))]
+        (let [r ((private-fn 'bootstrap-workspace!) (docker-descriptor) "c1" "/workspace"
+                                                    {:repo-url "https://github.com/o/r.git"})]
+          (is (= :git-too-old (get-in r [:error :code])))
+          (is (clojure.string/includes? (get-in r [:error :message]) "2.30.2"))
+          (is (= [["git" "--version"]] @cmds)))))))
 
 (deftest ^{:stratum 1} persist-workspace-authenticates-push-only-test
   (testing "with a recorded remote, only the push gets the credential, and
@@ -909,9 +925,13 @@
                         descriptor "c1" "/workspace"
                         {:repo-url "git@github.com:o/r.git" :branch "main"})
                 all    (calls)
-                [clone & later] all]
+                [version clone & later] all]
             (is (result/ok? result))
+            (is (some #{"--version"} (:argv version)))
+            (is (empty? (:env-file version)))
             (is (some #{"clone"} (:argv clone)))
+            (is (not-any? #{"--single-branch"} (:argv clone))
+                "every branch is cloned, so release can compare against its base")
             (is (not-any? token-in? (mapcat :argv all)))
             (is (some #{"https://github.com/o/r.git"} (:argv clone)))
             (is (not-any? #(some #{"set-url"} (:argv %)) all))
@@ -929,7 +949,7 @@
           ((private-fn 'bootstrap-workspace!)
            descriptor "c1" "/workspace"
            {:repo-url (str "https://bob:" fake-token "@github.com/o/r.git")})
-          (let [[clone :as all] (calls)]
+          (let [[_version clone :as all] (calls)]
             (is (not-any? token-in? (mapcat :argv all)))
             (is (some #{"https://github.com/o/r.git"} (:argv clone)))
             (is (= (str "Authorization: Basic " (basic-auth "bob" fake-token))

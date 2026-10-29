@@ -183,6 +183,23 @@
             (is (= "https://github.com/o/r.git" (get-in r [:data :repo-url])))
             (is (not (str/includes? (pr-str r) "s3cret")))))))))
 
+(deftest ^{:stratum 1} acquire-removes-container-when-bootstrap-fails-test
+  (testing "a container whose workspace bootstrap failed is removed, since
+            the caller gets no environment id to release it with"
+    (let [removed  (atom [])
+          executor (oci-cli/map->OciCliExecutor
+                    {:descriptor {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                     :image      "task-runner:latest"})]
+      (with-redefs [oci-cli/image-exists?         (fn [_ _] true)
+                    oci-cli/resolve-image-digest! (fn [_ _] valid-digest)
+                    oci-cli/create-container      (fn [_d container-name & _]
+                                                    (result/ok {:container-name container-name}))
+                    oci-cli/bootstrap-workspace!  (fn [& _] (result/err :container-command-failed "no branch"))
+                    oci-cli/remove-container      (fn [_d id] (swap! removed conj id) (result/ok {}))]
+        (is (result/err? (proto/acquire-environment! executor "abcd1234efgh"
+                                                     {:repo-url "https://github.com/o/r.git"})))
+        (is (= ["miniforge-task-abcd1234"] @removed))))))
+
 (deftest ^{:stratum 1} build-launch-plan-drops-git-config-tuples-test
   (testing "an :untrusted plan drops a whole GIT_CONFIG_* tuple, whose
             VALUE_n can hold an Authorization header, not just its KEY_n"

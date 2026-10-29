@@ -78,7 +78,11 @@
 (defn- ^{:stratum 1} gh-cli-token
   "Attempt to get a GitHub token from the gh CLI (`cmd`, by default
    `gh auth token`), giving up after `timeout-ms`.
-   Returns the token string or nil."
+   Returns the token string or nil. At the timeout it kills gh and every
+   process gh started (a credential helper, or the real gh behind a
+   wrapper): descendants are listed while gh is alive and killed leaf
+   first, then gh, as the llm and dag-executor `destroy-process-tree!`
+   helpers do. config sits below both components, so it cannot call them."
   ([] (gh-cli-token ["gh" "auth" "token"] gh-token-timeout-ms))
   ([cmd timeout-ms]
    (try
@@ -88,7 +92,10 @@
          (when (zero? (.exitValue p))
            (let [token (str/trim (slurp (.getInputStream p)))]
              (when (seq token) token)))
-         (do (.destroyForcibly p) nil)))
+         (do (doseq [^java.lang.ProcessHandle child (rseq (vec (.toArray (.descendants p))))]
+               (.destroyForcibly child))
+             (.destroyForcibly p)
+             nil)))
      (catch Exception _ nil))))
 
 ;; Load and validate

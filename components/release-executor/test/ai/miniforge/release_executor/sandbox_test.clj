@@ -147,6 +147,16 @@
       (is (not (:success? r)))
       (is (= 1 (count (filter (fn [[cmd _]] (clojure.string/includes? cmd "git push")) @calls)))))))
 
+(deftest ^{:stratum 1} push-branch-token-retry-reads-github-host-like-git-test
+  (testing "github.com in another case or with its default port is still
+            github.com, so those origins get the retry"
+    (doseq [origin ["https://GITHUB.COM/org/repo.git" "https://github.com:443/org/repo.git"]]
+      (let [calls (atom [])]
+        (is (:success? (sandbox/push-branch! (push-recording-executor origin calls)
+                                             "env-1" "feat/test" {:env {"GH_TOKEN" "tok123"}}))
+            origin)))
+    (is (nil? (#'sandbox/token-auth-env "https://github.com:8443/org/repo.git" "tok")))))
+
 (defn ^{:stratum 1} create-mock-executor
   "Create a mock executor that records commands and returns configurable results.
 

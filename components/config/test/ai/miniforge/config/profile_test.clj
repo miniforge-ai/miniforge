@@ -18,6 +18,7 @@
 (ns ai.miniforge.config.profile-test
   "Tests for user profile loading and token resolution."
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.config.profile :as profile]))
 
@@ -99,6 +100,19 @@
           started      (System/currentTimeMillis)]
       (is (nil? (gh-cli-token ["sleep" "10"] 200)))
       (is (< (- (System/currentTimeMillis) started) 5000)))))
+
+(deftest ^{:stratum 0} gh-cli-token-timeout-kills-the-process-tree-test
+  (testing "a child the stalled gh started is killed too, not left orphaned"
+    (let [pid-file (java.io.File/createTempFile "gh-child" ".pid")
+          _        (#'profile/gh-cli-token
+                    ["sh" "-c" (str "sleep 30 & echo $! > " pid-file "; wait")] 500)
+          child    (java.lang.ProcessHandle/of (parse-long (str/trim (slurp pid-file))))
+          deadline (+ (System/currentTimeMillis) 5000)]
+      (while (and (some-> child (.orElse nil) .isAlive)
+                  (< (System/currentTimeMillis) deadline))
+        (Thread/sleep 50))
+      (is (not (some-> child (.orElse nil) .isAlive)))
+      (.delete pid-file))))
 
 (deftest ^{:stratum 0} gh-cli-token-reads-the-token-test
   (testing "a gh that answers in time yields its trimmed output"
