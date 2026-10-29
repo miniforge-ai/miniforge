@@ -34,12 +34,8 @@
    also needs the path, to pass as `:checkpoint/root` or to read back.
 
    The override is a `with-redefs` on the single resolution point, below
-   config. Nothing above it works from inside a test: `MINIFORGE_HOME`
-   is process environment a running JVM cannot change, and it would not
-   move the root anyway — the default config resource
-   (`config/default-user-config-fallback.edn`) sets
-   `[:workflow :checkpoint-root]` to `~/.miniforge/checkpoints`, so the
-   merged config carries that value even under an empty home."
+   config: `MINIFORGE_HOME` is process environment a running JVM cannot
+   change, and a user's own config.edn may name a root of its own."
   (:require
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.context :as context]
