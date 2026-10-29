@@ -154,12 +154,12 @@ Override with environment variables:
 $ miniforge config get llm.backend
 :codex
 
-$ miniforge config set llm.model gpt-4
-✅ Set llm.model to "gpt-4"
+$ miniforge config set llm.backend claude
+✅ Set llm.backend to :claude
    Saved to: /Users/you/.miniforge/config.edn
 
-$ miniforge config get llm.model
-"gpt-4"
+$ miniforge config get llm.backend
+:claude
 ```
 
 ## Configuration Precedence
@@ -168,7 +168,9 @@ Configuration is merged from three sources (in order of precedence):
 
 1. **Environment variables** (highest priority)
    - `MINIFORGE_LLM_BACKEND`
-   - `MINIFORGE_LLM_MODEL`
+   - `MINIFORGE_LLM_MODEL`: the model for roles with no tier model set.
+     It takes effect once #2175 is merged; until then the shipped
+     `[:agents :default-models]` mask it.
    - `MINIFORGE_AGENT_THINKING_MODEL`
    - `MINIFORGE_AGENT_EXECUTION_MODEL`
 

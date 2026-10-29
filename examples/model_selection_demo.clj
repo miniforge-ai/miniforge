@@ -289,9 +289,17 @@
 
 (println)
 
-(println "Set cost limit per task, require local models:")
+(println "Filter by price tier, prefer local models:")
 
 (println "  (llm/select-model classification {} {:cost-limit 0.05 :require-local true})")
+
+(println "  Neither is a hard limit. :cost-limit filters models by price tier;")
+
+(println "  it does not cap spend. :require-local falls back to a cloud model")
+
+(println "  (Sonnet 4.6) for task types that list no local model, so it does")
+
+(println "  not keep data on the machine.")
 
 (println)
 

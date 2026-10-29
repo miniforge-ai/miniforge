@@ -109,6 +109,17 @@ block; nothing read them, and miniforge no longer accepts the variables.
 (create-agent :implementer {:model "claude-opus-4-6"})
 ```
 
+Neither constraint is a hard limit:
+
+1. `:require-local` (`:privacy-required` on `create-agent`) does not keep data on the machine. Only the `:automatic`
+   strategy reads it. When the task type lists no local model (the `:large-context` and `:cost-optimized` types list
+   none), selection falls back to Claude Sonnet 4.6, a cloud model. The `:cost-optimized` and `:speed` strategies
+   ignore it.
+   Do not use it to protect sensitive code.
+2. `:cost-limit` filters models by price tier: a model's `:cost` level (`:economical`, `:moderate`, `:expensive`) is
+   compared with fixed thresholds. It does not cap what a task spends. When no model passes, `:automatic` takes the
+   first available model and the final fallback is Claude Sonnet 4.6.
+
 ## Model Registry
 
 ### Anthropic Claude
@@ -355,7 +366,7 @@ Task Type?
 
 1. **Trust the defaults**: Automatic selection is optimized for quality and cost
 2. **Use cost-optimized for batch operations**: When running many workflows
-3. **Use privacy mode for sensitive code**: Financial, healthcare, proprietary
+3. **Do not rely on `:require-local` for sensitive code**: it can fall back to a cloud model (see Configuration)
 4. **Override only when necessary**: Let the system optimize
 5. **Monitor costs**: Check logs for model selection and costs
 6. **Local models for development**: Fast, free, no API calls
