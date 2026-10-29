@@ -25,6 +25,7 @@
    [cheshire.core :as json]
    [ai.miniforge.web-dashboard.config :as dashboard-config]
    [ai.miniforge.web-dashboard.control-identity :as control-identity]
+   [ai.miniforge.web-dashboard.messages :as messages]
    [ai.miniforge.web-dashboard.state :as state]
    [ai.miniforge.web-dashboard.views :as views]
    [ai.miniforge.web-dashboard.server.auth :as auth]
@@ -45,6 +46,15 @@
 
 ;; Configuration defaults
 (def ^{:stratum 0} ^:private defaults dashboard-config/defaults)
+
+(defn ^{:stratum 0} loopback-host?
+  "True for a host string that only this machine can reach. Matched on the
+   string rather than resolved, so no DNS lookup or reflection is needed."
+  [host]
+  (let [h (str/lower-case (str host))]
+    (or (= "localhost" h)
+        (str/starts-with? h "127.")
+        (contains? #{"::1" "[::1]" "0:0:0:0:0:0:0:1"} h))))
 
 ;; Discovery file
 (defn ^{:stratum 0} write-discovery-file!
@@ -381,17 +391,25 @@
 
    Options:
    - :port - Port to listen on (default 7878)
+   - :host - Address to bind (default MINIFORGE_WEB_HOST, else 127.0.0.1).
+             Any non-loopback address requires dashboard login, since
+             event ingest and the event websocket are unauthenticated.
    - :event-stream - Event stream atom for subscribing to workflow events
    - :pr-train-manager - PR train manager instance
    - :repo-dag-manager - Repo DAG manager instance
    - :auth - Optional dashboard auth config"
-  [{:keys [port event-stream pr-train-manager repo-dag-manager auth]
+  [{:keys [port host event-stream pr-train-manager repo-dag-manager auth]
     :or {port (:port defaults)}} resources]
-  (let [;; Create dashboard-local event stream with NO file sinks to prevent write-back loop.
+  (let [host (or host (System/getenv "MINIFORGE_WEB_HOST") (:host defaults))
+        auth-state (auth/build-auth-state auth)
+        _ (when-not (or (loopback-host? host) (auth/enabled? auth-state))
+            (throw (ex-info (messages/t :server/public-bind-without-auth {:host host})
+                            {:host host})))
+        ;; Create dashboard-local event stream with NO file sinks to prevent write-back loop.
         ;; The watcher reads from ~/.miniforge/events/ and publishes to this in-memory-only stream.
         dashboard-event-stream (or event-stream (es/create-event-stream {:sinks []}))
         state (state/create-state {:event-stream dashboard-event-stream
-                                   :auth (auth/build-auth-state auth)
+                                   :auth auth-state
                                    :pr-train-manager pr-train-manager
                                    :repo-dag-manager repo-dag-manager
                                    :start-time (System/currentTimeMillis)})
@@ -400,7 +418,7 @@
                  {:registry (cp/create-registry)
                   :decision-manager (cp/create-decision-manager)})
         handler (control-identity/ready-handler state (create-handler state))
-        server (http/run-server handler {:port port :legacy-return-value? false})
+        server (http/run-server handler {:ip host :port port :legacy-return-value? false})
         _ (swap! resources assoc :server server :state state)
         actual-port (http/server-port server)
         ;; Start file watcher to tail-follow event files
