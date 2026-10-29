@@ -161,8 +161,8 @@
   "Start Podman or Docker, or set MINIFORGE_RUNTIME to a runtime that is installed and running"
 
   ;; Checkpoint retention
-  :checkpoint/gc-delete-failed "Could not delete checkpoint {path}: {error}"
   :checkpoint/usage-failed   "Could not read the checkpoint root {root}: {error}"
+  :checkpoint/gc-delete-failed "Could not delete checkpoint {path}: {error}"
   :warn/checkpoint-announce-failed "Warning: The checkpoint for phase {phase} was written, but announcing it failed: {error}"
 
   ;; Environment lifecycle
