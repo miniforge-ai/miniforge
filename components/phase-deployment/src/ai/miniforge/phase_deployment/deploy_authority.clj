@@ -58,11 +58,13 @@
   {:rule-id :deploy/provision-preview-required
    :message (msg/t :policy/provision-preview-required)})
 
-(defn- ^{:stratum 0} manifest-findings
+(defn ^{:stratum 0} manifest-findings
   "The deployment pack's :deploy-scoped rules (for example
    :deploy/no-secrets-in-manifests) evaluated against the rendered manifests,
    as {:blocking :require-approval :warnings :audits} entries. No pack fails
-   closed, as the provision gate does."
+   closed, as the provision gate does. The governed transaction checks this
+   right after rendering, before the server dry run sends the manifests to
+   the cluster API; authority evaluates it again for its decision record."
   [rendered-yaml]
   (let [packs (policy/deployment-policy-packs)]
     (cond

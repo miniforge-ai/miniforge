@@ -41,13 +41,17 @@
 
 (defn- ^{:stratum 0} deploy-operations
   "The governed transaction's provider boundary with no cluster behind it.
-   `applied` counts apply calls."
-  [rendered applied]
+   `calls` counts the server dry runs and applies that reach the cluster API."
+  [rendered calls]
   {:target! (fn [config] (schema/success :target (assoc config :context "gke-prod")))
    :render! (fn [_target] (schema/success :rendered-yaml rendered))
-   :server-dry-run! (fn [_target _rendered] (schema/success :stdout "configured (server dry run)"))
+   :server-dry-run! (fn [_target _rendered]
+                      (swap! calls update :dry-run inc)
+                      (schema/success :stdout "configured (server dry run)"))
    :rollback-info! (fn [_target] (schema/success :rollback-info {:revision "4" :image "api@sha256:abc" :replicas 1}))
-   :apply-rendered! (fn [_target _rendered] (swap! applied inc) (schema/success :stdout "applied"))
+   :apply-rendered! (fn [_target _rendered]
+                      (swap! calls update :apply inc)
+                      (schema/success :stdout "applied"))
    :observe! (fn [_target]
                {:provider/matched? true
                 :provider/observed {:deployment/ready? true
@@ -74,12 +78,19 @@
        "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: api-config\n"
        "data:\n  password: \"correct-horse-battery-staple\"\n"))
 
+(def ^{:stratum 1} manifest-with-plain-secret
+  "The same secret as a YAML plain scalar, with reference keys that are not secrets."
+  (str clean-manifest
+       "---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: api-db\n"
+       "stringData:\n  passwordRef: db-credentials\n  secretName: api-tls\n"
+       "  password: correct-horse-battery-staple\n"))
+
 (defn- ^{:stratum 1} deploy
   "Run the real deploy interceptor through the real lifecycle and gates with
-   `rendered` as the kustomize output. Returns [phase-result apply-calls]."
+   `rendered` as the kustomize output. Returns [phase-result cluster-calls]."
   [rendered]
   (fs/with-temp-dir [dir {:prefix "deploy-policy-"}]
-    (let [applied (atom 0)
+    (let [calls (atom {:dry-run 0 :apply 0})
           ctx {:execution/id (random-uuid)
                :event-stream (events/create-event-stream {:sinks []})
                :execution/current-phase :deploy
@@ -90,10 +101,10 @@
                :grant-breach-dir (str (fs/path dir "breaches"))
                :execution/metrics {} :execution/errors []
                :execution/response-chain (response/create :deploy-policy)}]
-      (with-redefs [deploy-operations/operations (constantly (deploy-operations rendered applied))]
+      (with-redefs [deploy-operations/operations (constantly (deploy-operations rendered calls))]
         (let [[_ result] (lifecycle/execute-phase-lifecycle
                           (phase/get-phase-interceptor {:phase :deploy}) ctx)]
-          [result @applied])))))
+          [result @calls])))))
 
 (defn- ^{:stratum 1} provision
   "Run the real provision interceptor through the real lifecycle and gates
@@ -152,14 +163,15 @@
     (is (zero? applied) "pulumi up never runs")))
 
 (deftest ^{:stratum 2} deploy-never-applies-manifests-with-a-secret
-  (testing "a clean manifest is applied and the deploy passes its gates"
-    (let [[result applied] (deploy clean-manifest)]
-      (is (= 1 applied))
+  (testing "a clean manifest is dry-run, applied and passes its gates"
+    (let [[result calls] (deploy clean-manifest)]
+      (is (= {:dry-run 1 :apply 1} calls))
       (is (= :completed (:status result)))
       (is (= :allow (get-in result [:phase/decision-envelope :envelope/decision])))))
-  (testing "a manifest with a plaintext secret is refused before it is applied"
-    (let [[result applied] (deploy manifest-with-secret)]
-      (is (zero? applied) "kubectl apply never runs")
-      (is (= :failed (:status result)))
-      (is (= :authority (get-in result [:result :stage])))
-      (is (= :deny (get-in result [:phase/decision-envelope :envelope/decision]))))))
+  (doseq [[label manifest] {"quoted" manifest-with-secret "plain scalar" manifest-with-plain-secret}]
+    (testing (str "a manifest with a " label " plaintext secret never reaches the cluster API")
+      (let [[result calls] (deploy manifest)]
+        (is (= {:dry-run 0 :apply 0} calls) "no server dry run, no apply")
+        (is (= :failed (:status result)))
+        (is (= :authority (get-in result [:result :stage])))
+        (is (= :deny (get-in result [:phase/decision-envelope :envelope/decision])))))))
