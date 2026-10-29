@@ -24,12 +24,13 @@
    - In-memory cache (atom) for fast access during execution
    - Transit JSON files for persistence (~/.miniforge/artifacts/)
    - Lazy loading: load from disk only when not in memory
-   - Async writes: one writer agent per store persists files in order
-     without blocking callers; close waits for it (bounded by
+   - Async writes: save and link queue changes; one writer agent per
+     store applies them in order under a cross-process lock (see
+     impl/drain-action); close waits for it (bounded by
      :close-timeout-ms, default impl/default-close-timeout-ms)
-   - Atomic files: temp file + rename; the index is merged with the
-     on-disk copy under a lock, and rebuilt from the artifact files if
-     it is unreadable
+   - The artifact files are the source of truth; the index is a
+     projection of them, rebuilt from them if it is unreadable. Files
+     are written via temp file + rename
 
    File structure:
      ~/.miniforge/artifacts/
@@ -50,7 +51,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defrecord ^{:stratum 0} TransitArtifactStore [artifacts-dir cache index logger
-                                               writer close-timeout-ms changed]
+                                               writer close-timeout-ms pending]
   p/ArtifactStore
 
   (save [this artifact]
@@ -90,10 +91,8 @@
         (atom {})           ; Empty cache initially
         (atom index)        ; Load existing index
         logger
-        ;; State: the index value last written (see
-        ;; impl/persist-index-action). Every action catches its own
-        ;; failures; :continue keeps one that slips through from
-        ;; blocking every later write.
+        ;; Every action catches its own failures; :continue keeps one
+        ;; that slips through from blocking every later write.
         (agent nil :error-mode :continue)
         (or close-timeout-ms impl/default-close-timeout-ms)
-        (atom {}))))))  ; ids changed since the last index write -> change count
+        (atom []))))))   ; changes queued for impl/drain-action
