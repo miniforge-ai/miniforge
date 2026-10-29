@@ -98,8 +98,11 @@
         expr (str "(require 'clojure.test" require-expr ") "
                   "(let [r (clojure.test/run-tests" run-expr ")] "
                   "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")]
+    ;; :dir makes the project's deps.edn the CLI's project config. No
+    ;; -Sdeps: CLI 1.12.x reads an -Sdeps value that does not start with
+    ;; `{` as a file path, and this deps.edn opens with a comment.
     (run-stream! {:dir (str "projects/" project)}
-                 clojure-cmd "-Sdeps" deps test-mode "-e" expr)))
+                 clojure-cmd test-mode "-e" expr)))
 
 (defn ^{:stratum 1} conformance []
   (println "🧪 Running N1 conformance tests...")
