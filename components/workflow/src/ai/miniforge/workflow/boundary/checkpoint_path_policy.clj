@@ -42,13 +42,15 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} check! [directory]
-  (loop [pending [[(fs/absolutize directory) true]] seen #{}]
-    (when-let [[current leaf?] (peek pending)]
-      (let [links (remove #(contains? seen (str (first %))) (checked-links current leaf?))
-            visited (into seen (map (comp str first)) links)]
-        (when (> (count visited) maximum-link-hops)
-          (policy/refuse! directory))
-        (recur (into (pop pending) (map target-entry) links) visited)))))
+(defn ^{:stratum 2} check!
+  ([directory] (check! directory true))
+  ([directory leaf?]
+   (loop [pending [[(fs/absolutize directory) leaf?]] seen #{}]
+     (when-let [[current current-leaf?] (peek pending)]
+       (let [links (remove #(contains? seen (str (first %))) (checked-links current current-leaf?))
+             visited (into seen (map (comp str first)) links)]
+         (when (> (count visited) maximum-link-hops)
+           (policy/refuse! directory))
+         (recur (into (pop pending) (map target-entry) links) visited))))))
 
 (comment ::trusted-original-directory-path)
