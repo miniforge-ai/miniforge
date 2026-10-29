@@ -126,8 +126,9 @@
     (let [edits (:result result)]
       (when (seq edits)
         ;; Replace the real file, not a symlink pointing at it, and give
-        ;; the temp file the original's mode: a new file gets the umask
-        ;; default, which would drop an exec bit or widen a 0600 file.
+        ;; the temp file the original's mode before writing to it: a new
+        ;; file gets the umask default, which would drop an exec bit or
+        ;; leave a 0600 file's contents readable while the write runs.
         (let [content   (slurp file)
               formatted (apply-text-edits content edits)
               ^Path target (.toRealPath (.toPath (io/file file))
@@ -135,17 +136,17 @@
               tmp       (java.io.File/createTempFile ".fmt-" ".tmp"
                                                      (.toFile (.getParent target)))]
           (try
-            (spit tmp formatted)
             (when (.supportsFileAttributeView (Files/getFileStore target) "posix")
               (Files/setPosixFilePermissions
                (.toPath tmp)
                (Files/getPosixFilePermissions target (make-array LinkOption 0))))
+            (spit tmp formatted)
             (Files/move (.toPath tmp) target
                         (into-array StandardCopyOption
                                     [StandardCopyOption/ATOMIC_MOVE
                                      StandardCopyOption/REPLACE_EXISTING]))
             (catch Throwable e
-              (try (Files/delete (.toPath tmp))
+              (try (Files/deleteIfExists (.toPath tmp))
                    (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
               (throw e)))))
       true)))

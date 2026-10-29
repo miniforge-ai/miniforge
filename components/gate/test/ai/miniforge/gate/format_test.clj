@@ -31,6 +31,7 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.tool-registry.interface :as tool-registry]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -112,6 +113,12 @@
     (.mkdirs (io/file root "src"))
     root))
 
+(defn- ^{:stratum 0} fmt-temp-files
+  [^java.io.File dir]
+  (->> (.listFiles dir)
+       (map #(.getName ^java.io.File %))
+       (filter #(str/starts-with? % ".fmt-"))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} repair-format-keeps-the-file-mode
@@ -140,3 +147,41 @@
       (is (response/success? (repair-with-edit! root "src/link.clj")))
       (is (java.nio.file.Files/isSymbolicLink (.toPath link)) "the link is not replaced by a regular file")
       (is (= "(defn x []\n  2)\n" (slurp real))))))
+
+(deftest ^{:stratum 1} repair-format-partial-write-keeps-the-original
+  (testing "a write that fails part-way leaves the source as it was"
+    (let [root (temp-src-dir)
+          file (io/file root "src" "foo.clj")
+          real-spit spit]
+      (spit file "(defn x []\n  1)\n")
+      (with-redefs [spit (fn [f content & opts]
+                           ;; Half the bytes reach the temp file, then the disk fills.
+                           (apply real-spit f (subs content 0 (quot (count content) 2)) opts)
+                           (throw (java.io.IOException. "No space left on device")))]
+        (let [result (repair-with-edit! root "src/foo.clj")]
+          (is (response/success? result))
+          (is (empty? (get-in result [:output :formatted]))
+              "a file whose write failed is not reported as formatted")))
+      (is (= "(defn x []\n  1)\n" (slurp file)) "the original bytes are intact")
+      (is (empty? (fmt-temp-files (io/file root "src"))) "no temp file is left behind"))))
+
+(deftest ^{:stratum 1} repair-format-writes-under-the-original-mode
+  (testing "the temp file already has a 0600 source's mode when the content is written"
+    (let [root (temp-src-dir)
+          file (io/file root "src" "secret.clj")
+          path (.toPath file)
+          owner-only (java.nio.file.attribute.PosixFilePermissions/fromString "rw-------")
+          mode-at-write (atom nil)
+          real-spit spit]
+      (spit file "(defn x []\n  1)\n")
+      (when (.supportsFileAttributeView (java.nio.file.Files/getFileStore path) "posix")
+        (java.nio.file.Files/setPosixFilePermissions path owner-only)
+        (with-redefs [spit (fn [f & args]
+                             (reset! mode-at-write
+                                     (java.nio.file.Files/getPosixFilePermissions
+                                      (.toPath (io/file f)) (make-array java.nio.file.LinkOption 0)))
+                             (apply real-spit f args))]
+          (is (response/success? (repair-with-edit! root "src/secret.clj"))))
+        (is (= owner-only @mode-at-write))
+        (is (= owner-only (java.nio.file.Files/getPosixFilePermissions
+                           path (make-array java.nio.file.LinkOption 0))))))))
