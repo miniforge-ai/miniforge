@@ -518,6 +518,7 @@
   :pr/entry "  #{number} [{state}] {title} ({author})"
   :pr/list-failed "Failed to list PRs: {error}"
   :pr/query-failed "Failed to query GitHub: {error}"
+  :pr/gh-missing "GitHub CLI (gh) not found on PATH. Install it from https://cli.github.com, then run 'gh auth login'."
   :pr/review-usage "Usage: {command}"
   :pr/reviewing "Reviewing: {url}"
   :pr/respond-usage "Usage: {command}"
