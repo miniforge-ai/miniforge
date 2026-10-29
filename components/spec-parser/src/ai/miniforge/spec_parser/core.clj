@@ -110,8 +110,9 @@
    namespaced ones.
 
    Both hyphenated (:acceptance-criteria) and underscore (:acceptance_criteria)
-   forms are listed because the YAML parser regex only captures \\w+ (no hyphens),
-   so frontmatter authors must use underscores for multi-word keys."
+   forms are listed: the YAML parser keeps hyphens, but its line-parser
+   fallback (frontmatter that is not valid YAML) only captures \\w+ keys,
+   so existing specs use underscores for multi-word keys."
   {:title                "spec"
    :description          "spec"
    :intent               "spec"
@@ -143,6 +144,14 @@
   [body]
   (str/trim (str/replace-first body #"(?m)^#[^\n]*\n?" "")))
 
+(defn- ^{:stratum 0} keywordize-intent-type
+  "YAML frontmatter yields `intent: {type: bugfix}` as {:type \"bugfix\"};
+   SpecIntent requires a keyword :type."
+  [intent]
+  (if (and (map? intent) (string? (:type intent)))
+    (update intent :type keyword)
+    intent))
+
 ;; Spec normalization — canonical :spec/* only
 (defn- ^{:stratum 0} spec-shape-anomaly
   "Return an `:invalid-input` anomaly when `spec` violates the minimum
@@ -167,19 +176,26 @@
 (defn- ^{:stratum 0} assemble-normalized-spec
   "Build the normalized :spec/* payload. Caller is responsible for running
    [[spec-shape-anomaly]] first; reaching this fn with a malformed spec is
-   a programmer error."
+   a programmer error.
+
+   The workflow comes from :spec/workflow-type, then :workflow/type (the
+   key Markdown frontmatter `type:` maps to), then :canonical-sdlc — the
+   same precedence the CLI's workflow selection reads. The version follows
+   the same order: :spec/workflow-version, :workflow/version, \"latest\"."
   [spec]
   (let [{:spec/keys [title description intent constraints tags
                      acceptance-criteria code-artifact
-                     repo-url branch llm-backend sandbox plan-tasks]
+                     repo-url branch llm-backend sandbox plan-tasks
+                     workflow-type workflow-version]
          :workflow/keys [type version]} spec]
     (cond-> {:spec/title            title
              :spec/description      description
              :spec/intent           (or intent {:type :general})
              :spec/constraints      (or constraints [])
              :spec/tags             (or tags [])
-             :spec/workflow-type    (or (some-> type keyword) :canonical-sdlc)
-             :spec/workflow-version (or version "latest")
+             :spec/workflow-type    (or (some-> (or workflow-type type) keyword)
+                                        :canonical-sdlc)
+             :spec/workflow-version (or workflow-version version "latest")
              :spec/raw-data         spec}
       acceptance-criteria (assoc :spec/acceptance-criteria acceptance-criteria)
       code-artifact       (assoc :spec/code-artifact code-artifact)
@@ -227,8 +243,8 @@
 
 (defn- ^{:stratum 1} namespace-frontmatter-keys
   "Remap plain YAML keys to :spec/* / :workflow/* namespaces for normalize-spec.
-   Underscore key names (from YAML parser limitation) are normalized to hyphens
-   so :acceptance_criteria becomes :spec/acceptance-criteria."
+   Underscore key names are normalized to hyphens so :acceptance_criteria
+   becomes :spec/acceptance-criteria."
   [m]
   (reduce-kv (fn [acc k v]
                (if-let [ns (get spec-key->ns k)]
@@ -277,9 +293,12 @@
           fm     (namespace-frontmatter-keys raw-fm)
           body   (:body parsed)]
       (cond-> fm
+        (:spec/intent fm)
+        (update :spec/intent keywordize-intent-type)
+
         (and body (not (str/blank? body)))
         (update :spec/description
-                #(str/trim (str (or % "") "\n\n" (str/trim body))))))
+                #(str/trim (str (str/trim (str %)) "\n\n" (str/trim body))))))
     ;; No frontmatter — synthesize spec metadata from document structure
     (decorate-from-body content)))
 

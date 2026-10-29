@@ -20,6 +20,7 @@
    Public API groups live under ai.miniforge.workflow.interface.* namespaces,
    while this namespace remains the Polylith entrypoint."
   (:require
+   [ai.miniforge.workflow.checkpoint-store-gc :as checkpoint-gc]
    [ai.miniforge.workflow.fsm :as fsm]
    [ai.miniforge.workflow.interface.checkpoints :as checkpoints]
    [ai.miniforge.workflow.interface.configurable :as configurable]
@@ -244,14 +245,18 @@
   "True when anything is stored under a run's checkpoint directory,
    including phase checkpoints with no snapshot yet and files that do not
    load. Args: [workflow-run-id] or [workflow-run-id opts]. The check that
-   a run id is free: `load-checkpoint-data` answers nil for all of those."
+   a run id is free: `load-checkpoint-data` answers nil or an anomaly for
+   those."
   checkpoints/checkpoint-present?)
 
 (def ^{:stratum 0} load-checkpoint-data
   "Load durable checkpoint data for a run and validate it at the boundary.
    Args: [workflow-run-id] or [workflow-run-id opts]. Returns the validated
    checkpoint-data map, or nil when no checkpoint exists; throws ex-info
-   when a found checkpoint fails schema validation."
+   when a found checkpoint fails schema validation. A phase checkpoint
+   that does not read is left out and named, as an anomaly, under
+   `:checkpoint/read-failures`; an unreadable snapshot or manifest
+   returns an `:unavailable` anomaly naming every unreadable file."
   checkpoints/load-checkpoint-data)
 
 (def ^{:stratum 0} run-chain
@@ -470,3 +475,12 @@
   "Render a compiled execution machine as a Mermaid stateDiagram-v2
    block — Phase 6 visual-audit export."
   visualize/machine->mermaid)
+
+;; Checkpoint retention
+(def ^{:stratum 0} gc-checkpoints!
+  "Delete checkpoint directories unchanged for the retention period
+   (default 30 days), keeping pinned runs, runs whose manifest does not
+   read, and runs whose events are still live. Args: [opts] with optional
+   :checkpoint/root, :max-age-days, :events-dir. Returns {:checkpoint/root
+   :deleted [run-id] :kept {reason [run-id]} :failures [anomaly]}."
+  checkpoint-gc/gc-checkpoints!)
