@@ -79,11 +79,6 @@
         (string? (:event/timestamp event))     (update :event/timestamp as-date)
         (sequential? (:phase/artifacts event)) (update :phase/artifacts (partial mapv artifact))))))
 
-(defn ^{:stratum 0} source-file
-  "The file `read-ordered` decoded `event` from."
-  [event]
-  (::file (meta event)))
-
 (defn ^{:stratum 0} order-key
   "An event's place in creation order: the ms its file's name records,
    then its :event/sequence-number."
@@ -121,12 +116,6 @@
   [events-dir]
   (mapcat #(remove hidden? (.listFiles ^File %)) (roots events-dir)))
 
-(defn ^{:stratum 1} root-mtimes
-  "Last-modified times of the roots; one changes when a workflow
-   directory is created, moved or removed."
-  [events-dir]
-  (mapv mtime (roots events-dir)))
-
 (defn ^{:stratum 1} count-before
   "How many of `files` (in creation order) were recorded before `ms`."
   [files ms]
@@ -143,7 +132,7 @@
 (defn ^{:stratum 1} read-ordered
   "Decode `files` and return their events in creation order: by recorded
    ms, then :event/sequence-number (files from one millisecond). Each
-   event knows its file (`source-file`)."
+   event carries its file as `::file` metadata (see `order-key`)."
   [files]
   (->> files
        (keep (fn [f] (some-> (read-event f) (vary-meta assoc ::file f))))
@@ -177,15 +166,6 @@
         ;; mtime 0: gone since the listing (moved); a caller retries it.
         :else    (filterv #(let [m (mtime %)] (or (>= m since-ms) (zero? m))) files))
       rebuild?])))
-
-(defn ^{:stratum 2} active-dirs
-  "{name dir} of the workflow directories modified at or after
-   `since-ms`. A name under both roots maps to its archived directory."
-  [events-dir since-ms]
-  (into {}
-        (comp (filter #(>= (mtime %) since-ms))
-              (map (juxt file-name identity)))
-        (workflow-dirs events-dir)))
 
 (defn ^{:stratum 2} workflow-events
   "Every event of `workflow-id` in the sink layout (its archived, live or

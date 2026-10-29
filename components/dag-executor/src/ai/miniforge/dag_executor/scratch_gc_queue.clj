@@ -419,7 +419,9 @@
      result/err `:scratch-gc-queue/no-repo` when the path is not in a git repository
      result/err `:scratch-gc-queue/corrupt` when the queue was unreadable (quarantined)
      result/err `:scratch-gc-queue/run-failed` on unexpected failure
-     result/err `:scratch-gc-queue/locked` when the lock is contended"
+     result/err `:scratch-gc-queue/locked` when the lock is contended
+     result/err `:scratch-gc-queue/outside-home` when MINIFORGE_HOME is set
+                and the queue resolves outside it (nothing is touched)"
   ([parent-repo-path]
    (run-deferred-gc! parent-repo-path default-max-age-days))
   ([parent-repo-path max-age-days]
@@ -427,9 +429,15 @@
      (result/and-then
       (repo-key parent-repo-path)
       (fn [repo]
-        (let [path (gc-queue-path)]
-          (with-queue-lock! path
-            (fn [] (prune-stale-queue-entries! path repo max-age-days))))))
+        (let [path (gc-queue-path)
+              home (mf-config/miniforge-home-override)]
+          (if (and home (mf-config/path-outside? home path))
+            (result/err :scratch-gc-queue/outside-home
+                        (str "refusing scratch GC: its queue " path
+                             " is outside MINIFORGE_HOME " home)
+                        {:queue-path path :miniforge/home home})
+            (with-queue-lock! path
+              (fn [] (prune-stale-queue-entries! path repo max-age-days)))))))
      (catch Exception e
        (result/err :scratch-gc-queue/run-failed
                    (str "deferred GC pass failed: " (.getMessage e))

@@ -36,6 +36,7 @@
    transaction rechecks the grant against that durable scope before the
    provider command can run."
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.effect-transaction.interface :as fx]
    [cheshire.core :as json])
   (:import
@@ -50,7 +51,7 @@
    Deliberately an explicit path under the miniforge home rather than a
    relative one: a durability record written to whatever directory the
    process happened to start in is an audit trail nobody can find."
-  ".miniforge/effects")
+  "effects")
 
 (defn ^{:stratum 0} merged-state?
   "True when GitHub reports the PR as merged. GitHub is the authority on
@@ -95,7 +96,7 @@
    miniforge home. Never relative to the process working directory."
   [context]
   (or (:effect-store-dir context)
-      (str (System/getProperty "user.home") "/" default-store-dir-property)))
+      (str (config/miniforge-home) "/" default-store-dir-property)))
 
 (defn ^{:stratum 1} probe
   "Ask GitHub what actually happened to this PR. `run-gh` is injected so

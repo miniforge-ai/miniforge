@@ -1,0 +1,87 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+;; The keys `mf config set` and `mf config validate` accept in config.edn,
+;; with the type of each value: the keys of the shipped defaults (the
+;; runtime's default-user-config.edn and the CLI's user-defaults.edn) and
+;; the documented keys those leave unset (the model keys), and the keys
+;; other code reads from or writes to the user config: fleet commands and
+;; the dashboard keep [:fleet :repos]; policy-pack's trust_roots_config
+;; reads [:policy-pack :trust-roots] (and validates its entries itself);
+;; tenancy's resolver reads [:tenancy :operator-name]; the event and log
+;; fleet sinks take the [:observability :fleet] map as their options.
+;; config-schema-test scans src for literal get-in / assoc-in / update-in
+;; paths on the user config, and lists the reads that are not literal
+;; paths, and checks that each is here.
+;;
+;; Types: :keyword :string :boolean :integer :number :vector, :map (any
+;; sub-key, any value), :backend (a known backend keyword) and :port (an
+;; integer from 1 to 65535). nil is accepted for every key: it clears it.
+{:config/keys
+ {[:llm :backend]                                   :backend
+  [:llm :model]                                     :string
+  [:agents :default-models :thinking]               :string
+  [:agents :default-models :execution]              :string
+
+  [:workflow :checkpoint-root]                      :string
+  [:workflow/worktree-root]                         :string
+
+  [:dashboard :port]                                :port
+  [:dashboard :auto-open]                           :boolean
+  [:artifacts :dir]                                 :string
+
+  [:model-selection :enabled]                       :boolean
+  [:model-selection :strategy]                      :keyword
+  [:model-selection :cost-limit-per-task]           :number
+  [:model-selection :prefer-speed]                  :boolean
+  [:model-selection :allow-downgrade]               :boolean
+  [:model-selection :require-local]                 :boolean
+
+  [:self-healing :enabled]                          :boolean
+  [:self-healing :workaround-auto-apply]            :boolean
+  [:self-healing :backend-auto-switch]              :boolean
+  [:self-healing :backend-health-threshold]         :number
+  [:self-healing :backend-switch-cooldown-ms]       :integer
+  [:self-healing :allowed-failover-backends]        :vector
+  [:self-healing :max-cost-per-workflow]            :number
+  [:self-healing :agent/stream-gap-threshold-ms]    :integer
+  [:self-healing :agent/per-backend-gap-thresholds] :map
+
+  [:governance :readiness]                          :map
+  [:governance :risk]                               :map
+  [:governance :tiers]                              :map
+  [:governance :knowledge-safety]                   :map
+
+  [:policy-packs :extra-search-paths]               :vector
+  [:policy-packs :disabled-pack-ids]                :vector
+  [:policy-pack :trust-roots]                       :map
+
+  [:fleet :repos]                                   :vector
+
+  [:tenancy :operator-name]                         :string
+
+  [:observability :event-sinks]                     :vector
+  [:observability :log-sinks]                       :vector
+  [:observability :alerts]                          :vector
+  [:observability :rotation :max-size-mb]           :integer
+  [:observability :rotation :retention-days]        :integer
+  [:observability :fleet :url]                      :string
+  [:observability :fleet :api-key]                  :string
+  [:observability :fleet :batch-size]               :integer
+  [:observability :fleet :flush-interval-ms]        :integer
+  [:observability :fleet :timeout-ms]               :integer}}

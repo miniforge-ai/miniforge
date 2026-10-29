@@ -123,7 +123,10 @@ The limits that do apply live in shipped resources:
 ## Container runtime
 
 Per [N11-delta](../specs/normative/N11-delta-runtime-adapter.md),
-miniforge runs each task inside an OCI container. Two layers configure
+miniforge runs each task inside an OCI container in governed mode
+(`--execution-mode governed`). The default, local mode, runs each task
+in a git worktree on the host, with the operator's privileges and no
+isolation. Two layers configure
 the runtime today; the third (file config) is a documented follow-up.
 
 ### Today: env var + descriptor config map

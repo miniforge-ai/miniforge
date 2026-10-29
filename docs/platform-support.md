@@ -30,7 +30,9 @@ but isn't yet a release blocker — please report issues.
 
 ## Container Runtime Matrix
 
-Miniforge runs each task inside an OCI container. Any OCI-compatible
+In governed mode (`--execution-mode governed`) miniforge runs each task
+inside an OCI container; the default local mode runs it in a host git
+worktree, without isolation. Any OCI-compatible
 local runtime works; Podman is the recommended default per N11-delta §3.
 
 | Runtime    | macOS arm64 | macOS x86_64 | Linux x86_64 | Linux arm64 | Windows |
@@ -162,8 +164,11 @@ bb test
   read-only; `java.nio.file.Files.delete` does not clear the read-only
   flag before unlinking. Workaround in test code:
   `setWritable(true)` recursively before deleting, or use
-  `babashka.fs/delete-tree` (which handles this). The `test-windows`
-  CI job is `continue-on-error: true` until this is fixed.
+  `babashka.fs/delete-tree` (which handles this). Until this is fixed,
+  the `test-windows` CI job runs only the bb-platform and bb-proc unit
+  tests, not the integration suite. The job is not `continue-on-error`:
+  a failure fails the CI run, and on `main` the `main-status` alert
+  counts it.
 
 ## Windows — WSL2 or Git Bash (Works Today)
 

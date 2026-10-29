@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/effect-transaction {:local/root "../effect-transaction"}
+ :deps {ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/effect-transaction {:local/root "../effect-transaction"}
         ai.miniforge/execution-grant {:local/root "../execution-grant"}
         ai.miniforge/anomaly {:local/root "../anomaly"}
         ai.miniforge/messages {:local/root "../messages"}
