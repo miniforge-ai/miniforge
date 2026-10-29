@@ -24,7 +24,10 @@
    diffed (`git diff -U0`) against its content at that base -- the
    on-disk version and the artifact's version both, so a stale artifact
    cannot hide what is on disk -- and only added lines are scanned, so
-   an added copy of an existing line still counts.
+   an added copy of an existing line still counts. Each commit between
+   the base and HEAD is also scanned on its own: a credential committed
+   and later removed is still found, since pushing the branch publishes
+   that commit.
 
    The base is the first of the artifact's :code/base-refs (stamped by
    the implement phase: the refs its artifact collector diffs against),
@@ -96,11 +99,13 @@
   (map-indexed (fn [i line] [(inc i) line]) (str/split-lines (str text))))
 
 (defn- ^{:stratum 0} findings
-  "{:file :line} for each numbered line that carries a secret-shaped value."
-  [path numbered-lines]
-  (for [[n line] numbered-lines
-        :when (redaction/pattern-secret-string? line)]
-    {:file path :line n}))
+  "{:file :line} (and :commit, when given) for each numbered line that
+   carries a secret-shaped value."
+  ([path numbered-lines] (findings path numbered-lines nil))
+  ([path numbered-lines commit]
+   (for [[n line] numbered-lines
+         :when (redaction/pattern-secret-string? line)]
+     (cond-> {:file path :line n} commit (assoc :commit commit)))))
 
 (defn- ^{:stratum 0} base-candidates
   "Refs to try, in order, for the commit the change is measured from."
@@ -120,6 +125,12 @@
                     {} (:code/files artifact))
       (some? content) (update (:artifact/path artifact) (fnil conj [])
                               (if (string? content) content (pr-str content))))))
+
+(defn- ^{:stratum 0} location-text
+  "file:line, with the commit's short id for a line found in history."
+  [{:keys [file line commit]}]
+  (str (or file (msg/t :no-secrets/artifact-content)) ":" line
+       (when commit (str " (" (subs commit 0 (min 12 (count commit))) ")"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -173,23 +184,44 @@
                        "--" (str old) (str new)])]
     (if (#{0 1} (:exit r)) (added-lines (:out r)) (all-lines text))))
 
+(defn- ^{:stratum 1} history-findings
+  "Findings in each commit between BASE and HEAD, scanned on its own, or
+   nil when the history cannot be read."
+  [ctx base]
+  (let [revs (run ctx ["git" "rev-list" "--reverse" (str base "..HEAD")])]
+    (when (zero? (get revs :exit 1))
+      (reduce (fn [acc sha]
+                (let [files (run ctx ["git" "-c" "core.quotePath=false" "diff-tree" "-z" "-r"
+                                      "--no-commit-id" "--name-only" "--no-renames" sha])]
+                  (if-not (zero? (get files :exit 1))
+                    (reduced nil)
+                    (into acc (mapcat (fn [path]
+                                        (let [r (run ctx ["git" "show" "--text" "-U0" "--format="
+                                                          "--no-color" "--no-ext-diff" "--no-renames"
+                                                          sha "--" path])]
+                                          (findings path (added-lines (:out r)) sha))))
+                          (nul-split (:out files))))))
+              []
+              (remove str/blank? (str/split-lines (:out revs)))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} check-no-secrets
-  "Gate check (see ns docstring). Findings carry file and line, never the
-   matched value: the result is logged and shown to the agent, so
-   quoting the secret would copy it into both."
+  "Gate check (see ns docstring). Findings carry file and line (and the
+   commit, for history), never the matched value: the result is logged
+   and shown to the agent, so quoting the secret would copy it into both."
   [artifact ctx]
   (let [dir      (get ctx :execution/worktree-path)
         versions (artifact-versions artifact)
         base     (when dir (resolve-base ctx (base-candidates artifact ctx)))
         listed   (when base (changed-paths ctx base))
+        history  (when listed (history-findings ctx base))
         scanned
         (cond
           (nil? dir)
           (vec (distinct (for [[path texts] versions, text texts, f (findings path (all-lines text))] f)))
 
-          (nil? listed) nil
+          (nil? history) nil
 
           :else
           (let [tmp (scratch-dir)]
@@ -202,7 +234,8 @@
                 ;; A changed file whose lines could not be read leaves the
                 ;; change unchecked: that is a failure, not a pass.
                 (when (every? (comp some? second) disk)
-                  (vec (distinct (mapcat (fn [[p ls]] (findings p ls)) (concat disk arts))))))
+                  (vec (distinct (concat (mapcat (fn [[p ls]] (findings p ls)) (concat disk arts))
+                                         history)))))
               (finally
                 (fs/delete-tree tmp)))))]
     (cond
@@ -217,12 +250,10 @@
       :else
       {:passed? false
        :errors [{:type      :secrets-detected
-                 :message   (msg/t :no-secrets/detected
-                                   {:locations (str/join ", "
-                                                         (map (fn [{:keys [file line]}]
-                                                                (str (or file (msg/t :no-secrets/artifact-content))
-                                                                     ":" line))
-                                                              scanned))})
+                 :message   (str (msg/t :no-secrets/detected
+                                        {:locations (str/join ", " (map location-text scanned))})
+                                 (when (some :commit scanned)
+                                   (str " " (msg/t :no-secrets/in-history))))
                  :locations scanned}]})))
 
 ;------------------------------------------------------------------------------ Rich Comment

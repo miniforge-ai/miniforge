@@ -193,6 +193,19 @@
   (testing "with no worktree supplied, the artifact alone is checked"
     (is (:passed? (check {:code/files [{:path "a.py" :content "x = 1\n"}]} {})))))
 
+(deftest ^{:stratum 1} a-credential-committed-then-removed-is-found-test
+  (testing "the final tree is clean, but the commit that held the credential would be pushed"
+    (let [dir  (temp-git-repo {"src/app.py" "import os\n"})
+          base (str/trim (:out (sh! dir "rev-parse" "HEAD")))]
+      (spit (str dir "/src/app.py") (str "import os\npassword = \"" opaque "\"\n"))
+      (sh! dir "commit" "-qam" "add")
+      (let [leaky (str/trim (:out (sh! dir "rev-parse" "HEAD")))]
+        (spit (str dir "/src/app.py") "import os\n")
+        (sh! dir "commit" "-qam" "remove")
+        (let [result (check {:code/files [] :code/base-refs [base]} {:execution/worktree-path dir})]
+          (is (= [{:file "src/app.py" :line 2 :commit leaky}] (-> result :errors first :locations)))
+          (is (str/includes? (-> result :errors first :message) (subs leaky 0 12))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} an-added-copy-of-an-existing-line-counts-test
@@ -214,12 +227,13 @@
         base (str/trim (:out (sh! dir "rev-parse" "HEAD")))]
     (spit (str dir "/src/app.py") (str "import os\npassword = \"" opaque "\"\n"))
     (sh! dir "commit" "-qam" "task checkpoint")
-    (testing "a credential committed after the task base is still found"
-      (is (= #{{:file "src/app.py" :line 2}}
+    (let [head (str/trim (:out (sh! dir "rev-parse" "HEAD")))]
+    (testing "a credential committed after the task base is still found, in the file and its commit"
+      (is (= #{{:file "src/app.py" :line 2} {:file "src/app.py" :line 2 :commit head}}
              (locations {:code/files [] :code/base-refs [base]} dir))))
     (testing "a resumed workspace's A...HEAD range resolves to the merge base"
-      (is (= #{{:file "src/app.py" :line 2}}
-             (locations {:code/files [] :code/base-refs [(str base "...HEAD")]} dir))))
+      (is (= #{{:file "src/app.py" :line 2} {:file "src/app.py" :line 2 :commit head}}
+             (locations {:code/files [] :code/base-refs [(str base "...HEAD")]} dir)))))
     (testing "with no task base the gate falls back to HEAD, which already holds it"
       (is (= #{} (locations {:code/files []} dir))))))
 
