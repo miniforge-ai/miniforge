@@ -120,7 +120,9 @@
    :llm-backend    — LLM backend configuration
    :artifact-store — Artifact persistence store
    :knowledge-store — Knowledge base store
-   :event-stream   — Event stream for telemetry"
+   :event-stream   — Event stream for telemetry and gate decisions
+   :policy-packs   — Policy packs the pack gates evaluate
+   (the full list is execution-passthrough-option-keys)"
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.response.interface :as response]
@@ -139,6 +141,10 @@
    :executor :environment-id :sandbox-workdir
    :on-chunk :event-stream :worktree-path
    :source-root
+   ;; An embedder's policy packs. The pack gates read ctx :policy-packs, and
+   ;; :policy-verify / :policy-review fall back to the shipped standards
+   ;; pack only when it is absent, so it must reach the context.
+   :policy-packs
    ;; Threaded by run-chain so every step of one ETL invocation shares
    ;; it; lifecycle events read it from the context (see runner-events).
    :workflow-run/correlation-id])
