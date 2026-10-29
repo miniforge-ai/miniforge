@@ -328,4 +328,6 @@
  ;; consolidated shared keys (deduped)
  :filter/add-pane-title "Add pane-local filter"
  :pr/count              "{count} PRs"
- :phase/label           "Phase: {phase}"}}
+ :phase/label           "Phase: {phase}"
+ :server/public-bind-without-auth
+ "Refusing to serve the dashboard on {host} without login: anyone who can reach that address could read every workflow's events. Set MINIFORGE_WEB_USERNAME and MINIFORGE_WEB_PASSWORD, or bind 127.0.0.1."}}
