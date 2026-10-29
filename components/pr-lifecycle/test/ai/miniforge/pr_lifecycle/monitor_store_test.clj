@@ -62,6 +62,13 @@
         (is (= 4 (:total-attempts (budget/merge-budgets legacy later))
                (:total-attempts (budget/merge-budgets later later))))))))
 
+(deftest ^{:stratum 0} replayed-change-is-counted-once-test
+  (let [b (budget/create-budget 42)]
+    (dotimes [_ 2]
+      (budget/change-saved-budget! "acme/app" b #(budget/record-question-answered % 9))
+      (budget/change-saved-budget! "acme/app" b #(budget/record-fix-attempt % 9 "attempt-1")))
+    (is (= [1 1] ((juxt :questions-answered :total-attempts) (budget/load-budget "acme/app" 42))))))
+
 (deftest ^{:stratum 0} save-budget-refusals-test
   (testing "a stand-in for an unreadable budget is never written"
     (let [held (budget/exhausted-budget 42 "unreadable")]

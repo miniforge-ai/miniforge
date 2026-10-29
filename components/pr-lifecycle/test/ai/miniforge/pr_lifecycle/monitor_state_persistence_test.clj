@@ -197,13 +197,7 @@
                          {:category :change-request :comment (review-comment 9 "2026-10-01T00:00:00Z")}))))
         (is (zero? @fixes))))))
 
-(defn- ^{:stratum 1} question
-  [comment-id]
-  {:category :question :comment (review-comment comment-id "2026-10-01T00:00:00Z")})
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} answer!
+(defn- ^{:stratum 1} answer!
   "Answer question `comment-id` on PR #42; with `save-outcome` :lost the
    budget save fails, with :published it is written and then reported failed
    (the config writer's rename landed, its directory sync did not)."
@@ -217,7 +211,38 @@
                                            :lost      (anomaly/anomaly :unavailable "lock busy" {})
                                            :published (do (update-file! file f)
                                                           (anomaly/anomaly :fault "not synced" {}))))]
-       (handlers/handle-question monitor {:pr/number 42} (question comment-id))))))
+       (handlers/handle-question monitor {:pr/number 42}
+                                 {:category :question
+                                  :comment (review-comment comment-id "2026-10-01T00:00:00Z")})))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} answer-counted-after-a-failed-save-test
+  (let [monitor (monitor-for "acme/app" {:generate-fn (constantly "An answer")})]
+    (answer! monitor 9 :lost)
+    (answer! monitor 10)
+    (testing "an answer whose save failed is counted by the next save"
+      (is (= 2 (:questions-answered (budget/load-budget "acme/app" 42)))))))
+
+(deftest ^{:stratum 2} save-reported-failed-after-it-landed-is-not-counted-twice-test
+  (let [monitor (monitor-for "acme/app" {:generate-fn (constantly "An answer")})]
+    (answer! monitor 9 :published)
+    (answer! monitor 10)
+    (is (= 2 (:questions-answered (budget/load-budget "acme/app" 42))))))
+
+(deftest ^{:stratum 2} interleaved-monitors-count-the-union-test
+  (let [monitor-a (monitor-for "acme/app" {:generate-fn (constantly "An answer")})
+        monitor-b (monitor-for "acme/app" {:generate-fn (constantly "An answer")})]
+    (answer! monitor-a 1)
+    (answer! monitor-b 2)
+    (answer! monitor-a 3 :published)
+    (answer! monitor-b 4)
+    (answer! monitor-a 5 :lost)
+    (answer! monitor-b 6)
+    (answer! monitor-a 7)
+    (testing "every answer is counted once, whichever monitor saved it and however its save ended"
+      (is (= #{1 2 3 4 5 6 7} (:answered (budget/load-budget "acme/app" 42))))
+      (is (= 7 (:questions-answered (budget/load-budget "acme/app" 42)))))))
 
 (deftest ^{:stratum 2} damaged-budget-file-keeps-the-hard-stop-test
   (doseq [damage ["{:pr-number 42 :total-attempts" "{:pr-number 42}" "[]"]]
@@ -246,14 +271,5 @@
       (is (empty? routed)))
     (testing "the stop names the unreadable state"
       (is (re-find #"watermarks\.edn" (str (:load-error (first exhausted-events))))))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(deftest ^{:stratum 3} answer-counted-after-a-failed-save-test
-  (let [monitor (monitor-for "acme/app" {:generate-fn (constantly "An answer")})]
-    (answer! monitor 9 :lost)
-    (answer! monitor 10)
-    (testing "an answer whose save failed is counted by the next save"
-      (is (= 2 (:questions-answered (budget/load-budget "acme/app" 42)))))))
 
 (use-fixtures :each isolated-home)
