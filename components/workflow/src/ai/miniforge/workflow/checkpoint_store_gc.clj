@@ -7,9 +7,10 @@
 
    `gc-checkpoints!` deletes a run's checkpoint directory once nothing in
    it has changed for the retention period (30 days by default, per the
-   checkpoint spec), unless the run is pinned (`:pinned? true` in its
-   manifest), its manifest cannot be read (so whether it is pinned is
-   unknown), or its events are still live (in flight or paused).
+   checkpoint spec), unless the run is pinned (a pin marker, or a legacy
+   `:pinned? true` in its manifest), its manifest cannot be read (so
+   whether it is pinned is unknown), or its events are still live (in
+   flight or paused).
 
    Event retention is shorter (archived events go 7 days after archiving),
    so without a hold a failed run resumed after a week would find its
@@ -28,7 +29,8 @@
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.string :as str]
-   [slingshot.slingshot :refer [try+]]))
+   [slingshot.slingshot :refer [try+]])
+  (:import [java.nio.file.attribute BasicFileAttributes]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -73,13 +75,18 @@
 (defn- ^{:stratum 0} last-change-ms
   "When anything in `dir` last changed: the newest mtime in its own tree.
    The walk does not follow links, and a link's own mtime is left out, so
-   a link to a fresh tree elsewhere cannot keep an expired run recent."
+   a link to a fresh tree elsewhere cannot keep an expired run recent.
+
+   Times come from the attributes the walk read when it listed each entry,
+   never a second stat: a file renamed or deleted in between (a checkpoint
+   or pin write landing) cannot fail the scan, and one gone before the walk
+   reads it is skipped (the walk's default). Pin marker temp files are
+   skipped too; their rename changes the directory's own mtime anyway."
   [dir]
   (let [newest (volatile! 0)
-        see! (fn [path _attrs]
-               (when-not (fs/sym-link? path)
-                 (vswap! newest max (fs/file-time->millis
-                                     (fs/last-modified-time path {:nofollow-links true}))))
+        see! (fn [path ^BasicFileAttributes attrs]
+               (when-not (or (.isSymbolicLink attrs) (checkpoint-paths/pin-marker-temp? path))
+                 (vswap! newest max (.toMillis (.lastModifiedTime attrs))))
                :continue)]
     (fs/walk-file-tree dir {:pre-visit-dir see! :visit-file see!})
     @newest))

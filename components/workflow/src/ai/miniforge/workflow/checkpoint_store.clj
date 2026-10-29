@@ -231,7 +231,9 @@
                            data)
           ;; Into the run directory by path, never creating it.
           (try+
-            (let [temp (str path temp-file-suffix)]
+            (let [temp (str (fs/path (fs/parent path)
+                                     (str checkpoint-paths/pin-marker-temp-prefix
+                                          (random-uuid) temp-file-suffix)))]
               (spit temp (pr-str {:pinned-at (str (java.time.Instant/now))}))
               (Files/move (fs/path temp) (fs/path path)
                           (into-array java.nio.file.CopyOption

@@ -12,7 +12,6 @@
             [ai.miniforge.workflow.interface :as workflow]
             [babashka.fs :as fs]
             [clojure.java.io :as io]
-            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]])
   (:import (java.util.concurrent CountDownLatch TimeUnit)))
 
@@ -119,7 +118,7 @@
           release (CountDownLatch. 1)
           write spit]
       (with-redefs [spit (fn [f & args]
-                           (when (str/ends-with? (str f) "pinned.tmp")
+                           (when (paths/pin-marker-temp? f)
                              (.countDown inside)
                              (.await release 10 TimeUnit/SECONDS))
                            (apply write f args))]

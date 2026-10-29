@@ -29,7 +29,8 @@
    `checkpoint-store` does the writing."
   (:require
    [ai.miniforge.config.interface :as config]
-   [babashka.fs :as fs]))
+   [babashka.fs :as fs]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -52,6 +53,12 @@
    pinning never shares a read-modify-write with a checkpoint write."
   "pinned")
 
+(def ^{:stratum 0} pin-marker-temp-prefix
+  "Name prefix of a pin marker's temporary file, written and then renamed
+   onto the marker. The checkpoint GC's scan skips files named this way:
+   they appear and vanish while it runs."
+  ".pinned-")
+
 (def ^{:stratum 0} phase-checkpoints-directory-name
   "Directory name for per-phase checkpoint files."
   "phases")
@@ -66,6 +73,11 @@
   (str (fs/path checkpoint-root (str workflow-run-id))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} pin-marker-temp?
+  "True when `path` names a pin marker's temporary file."
+  [path]
+  (str/starts-with? (str (fs/file-name path)) pin-marker-temp-prefix))
 
 ;; Per-run paths and the configured default root
 (defn ^{:stratum 1} default-checkpoint-root
