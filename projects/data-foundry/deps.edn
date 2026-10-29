@@ -46,6 +46,7 @@
         ai.miniforge/file-durability           {:local/root "../../components/file-durability"}
         ai.miniforge/resource-cleanup          {:local/root "../../components/resource-cleanup"}
         ai.miniforge/knowledge                 {:local/root "../../components/knowledge"}
+        ai.miniforge/llm                       {:local/root "../../components/llm"}
         ai.miniforge/logging                   {:local/root "../../components/logging"}
         ai.miniforge/messages                  {:local/root "../../components/messages"}
         ai.miniforge/phase                     {:local/root "../../components/phase"}

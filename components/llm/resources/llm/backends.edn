@@ -30,11 +30,16 @@
 ;; the region in :region-env; when it yields nothing the static
 ;; :probe-endpoint is used. Bedrock and Vertex come first because the
 ;; Claude CLI does not use ANTHROPIC_BASE_URL when either is on.
+;;
+;; :credential-env names the env vars a CLI backend reads its credential
+;; from, which a default-trust task capsule keeps for the agent (see
+;; `backend-credential-env` in the llm interface).
 {:claude {:cmd "claude"
           :streaming? true
           :description "Claude via Anthropic CLI"
           :provider "Anthropic"
           :requires-cli? true
+          :credential-env ["ANTHROPIC_API_KEY"]
           ;; Prompt delivery: stdin. The planner path's system-prompt +
           ;; spec text + existing-files context regularly pushes argv
           ;; past POSIX ARG_MAX. Claude CLI supports --input-format text
@@ -58,6 +63,7 @@
          :description "Codex via Codex CLI"
          :provider "Codex"
          :requires-cli? true
+         :credential-env ["OPENAI_API_KEY"]
          ;; Prompt delivery: stdin. Codex supports `-` as the prompt
          ;; placeholder; this keeps large synthesis prompts off argv.
          :prompt-via :stdin
@@ -148,6 +154,7 @@
           :description "Cursor AI via CLI"
           :provider "Cursor"
           :requires-cli? true
+          :credential-env ["CURSOR_API_KEY"]
           :prompt-via :argv
           :probe-endpoint "https://api2.cursor.sh/"}
 
@@ -156,6 +163,7 @@
             :description "OpenCode CLI provider wrapper"
             :provider "OpenCode"
             :requires-cli? true
+            :credential-env ["ANTHROPIC_API_KEY" "OPENAI_API_KEY"]
             :prompt-via :argv
             ;; OpenCode's typical default provider; tunable per-deployment.
             :probe-endpoint "https://api.anthropic.com/"}
