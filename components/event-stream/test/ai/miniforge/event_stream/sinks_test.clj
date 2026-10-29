@@ -59,6 +59,20 @@
   (when (.isDirectory dir)
     (vec (.listFiles dir))))
 
+(defn ^{:stratum 0} write-file!
+  "Create `f` and its parent directories with `content`; return `f`."
+  ^java.io.File [^java.io.File f content]
+  (io/make-parents f)
+  (spit f content)
+  f)
+
+(defn ^{:stratum 0} age!
+  "Set the mtime of each of `files` to `days` days ago."
+  [days & files]
+  (let [t (- (System/currentTimeMillis) (* days 24 60 60 1000))]
+    (doseq [^java.io.File f files]
+      (.setLastModified f t))))
+
 ;; create-sink factory
 (deftest ^{:stratum 0} create-sink-keyword-test
   (testing ":file produces a function"
@@ -463,7 +477,7 @@
       (fn [dir]
         (is (= 0 (sinks/cleanup-stale-events! {:ttl-ms 0 :events-dir dir}))))))
 
-  (testing "deletes old event files and preserves recent ones"
+  (testing "removes a legacy workflow directory untouched for the TTL and keeps a recent one"
     (with-temp-dir
       (fn [dir]
         (let [old-dir (io/file dir "workflow-old")
@@ -475,9 +489,10 @@
             (spit (str old-file) "{}")
             (spit (str new-file) "{}")
             (.setLastModified old-file (- (System/currentTimeMillis) (* 8 24 60 60 1000)))
+            (.setLastModified old-dir (- (System/currentTimeMillis) (* 8 24 60 60 1000)))
             (let [deleted (sinks/cleanup-stale-events! {:events-dir dir})]
               (is (= 1 deleted))
-              (is (not (.exists old-file)))
+              (is (not (.exists old-dir)) "the directory goes with its files")
               (is (.exists new-file))))))))
 
   (testing "removes temp files a killed writer left behind, once they are stale"
@@ -497,6 +512,161 @@
   (testing "returns 0 when directory does not exist"
     (is (= 0 (sinks/cleanup-stale-events!
               {:events-dir (io/file "/tmp/nonexistent-miniforge-test-dir")})))))
+
+(deftest ^{:stratum 1} cleanup-keeps-live-workflows-test
+  (testing "a paused live workflow keeps its events and manifest however old they are"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "live" "wf-paused")
+              started (write-file! (io/file wf "0000000000000001__000000000000.transit.json") "{}")
+              legacy-name (write-file! (io/file wf "20200101T000000Z-abc.json") "{}")
+              manifest (write-file! (io/file wf "manifest.json") "{}")]
+          (age! 30 started legacy-name manifest wf)
+          (is (= 0 (sinks/cleanup-stale-events! {:events-dir dir})))
+          (is (.exists started) "resume replays :workflow/started from here")
+          (is (.exists legacy-name))
+          (is (.exists manifest)))))))
+
+(deftest ^{:stratum 1} cleanup-prunes-archives-by-archive-time-test
+  (testing "an archive older than the TTL goes whole: events, manifest, marker, directory"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "archived" "wf-old")
+              ev (write-file! (io/file wf "0000000000000001__000000000000.transit.json") "{}")
+              manifest (write-file! (io/file wf "manifest.json") "{}")
+              marker (write-file! (io/file wf "archived.marker") "")]
+          (age! 8 ev manifest marker)
+          (is (= 3 (sinks/cleanup-stale-events! {:events-dir dir})))
+          (is (not (.exists wf)))
+          (is (.isDirectory (io/file dir "archived")) "only the workflow's directory goes")))))
+
+  (testing "a recent archive keeps event files older than the TTL"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "archived" "wf-recent")
+              ev (write-file! (io/file wf "0000000000000001__000000000000.transit.json") "{}")
+              manifest (write-file! (io/file wf "manifest.json") "{}")]
+          (write-file! (io/file wf "archived.marker") "")
+          (age! 30 ev manifest)
+          (is (= 0 (sinks/cleanup-stale-events! {:events-dir dir})))
+          (is (.exists ev))
+          (is (.exists manifest))))))
+
+  (testing "an archive still missing its marker is left for archive recovery"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "archived" "wf-half")
+              ev (write-file! (io/file wf "0000000000000001__000000000000.transit.json") "{}")
+              manifest (write-file! (io/file wf "manifest.json") "{}")]
+          (age! 30 ev manifest wf)
+          (is (= 0 (sinks/cleanup-stale-events! {:events-dir dir})))
+          (is (.exists ev))
+          (is (.exists manifest))))))
+
+  (testing ":ttl-ms sets how long an archive is kept"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "archived" "wf-2d")]
+          (write-file! (io/file wf "0000000000000001__000000000000.transit.json") "{}")
+          (age! 2 (write-file! (io/file wf "archived.marker") ""))
+          (is (= 0 (sinks/cleanup-stale-events! {:events-dir dir})) "kept under the 7-day default")
+          (is (.exists wf))
+          (is (= 2 (sinks/cleanup-stale-events! {:events-dir dir :ttl-ms (* 24 60 60 1000)})))
+          (is (not (.exists wf)))))))
+
+  (testing "removing an archive does not follow a symlink out of it"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "archived" "wf-linked")
+              target (io/file dir "live" "wf-other")
+              kept (write-file! (io/file target "0000000000000002__000000000000.transit.json") "{}")]
+          (age! 8 (write-file! (io/file wf "archived.marker") ""))
+          (java.nio.file.Files/createSymbolicLink
+           (.toPath (io/file wf "events"))
+           (.toPath target)
+           (into-array java.nio.file.attribute.FileAttribute []))
+          (sinks/cleanup-stale-events! {:events-dir dir})
+          (is (not (.exists wf)))
+          (is (.exists kept) "the link goes, not what it points at")))))
+
+  (testing "an events directory that is itself a symlink is still swept"
+    (with-temp-dir
+      (fn [dir]
+        (let [real (io/file dir "real-events")
+              orphan (write-file! (io/file real "live" "wf-1" ".es-1.transit.tmp") "{")
+              link (io/file dir "events-link")]
+          (age! 8 orphan)
+          (java.nio.file.Files/createSymbolicLink
+           (.toPath link)
+           (.toPath real)
+           (into-array java.nio.file.attribute.FileAttribute []))
+          (age! 8 (write-file! (io/file real "archived" "wf-old" "archived.marker") ""))
+          (is (= 2 (sinks/cleanup-stale-events! {:events-dir link})))
+          (is (not (.exists orphan)))
+          (is (not (.exists (io/file real "archived" "wf-old"))))))))
+
+  (testing "a symlinked archived/ or operator/ is not followed out of the events tree"
+    (with-temp-dir
+      (fn [dir]
+        (let [events (io/file dir "events")
+              outside (io/file dir "outside")
+              notes (write-file! (io/file outside "wf-x" "notes.txt") "keep")
+              marker (write-file! (io/file outside "wf-x" "archived.marker") "")
+              op-file (write-file! (io/file outside "20200101T000000Z-abc.json") "{}")]
+          (.mkdirs events)
+          (age! 8 marker op-file)
+          (doseq [sub ["archived" "operator"]]
+            (java.nio.file.Files/createSymbolicLink
+             (.toPath (io/file events sub))
+             (.toPath outside)
+             (into-array java.nio.file.attribute.FileAttribute [])))
+          (is (= 0 (sinks/cleanup-stale-events! {:events-dir events})))
+          (is (.exists notes))
+          (is (.exists marker))
+          (is (.exists op-file)))))))
+
+(deftest ^{:stratum 1} cleanup-legacy-and-operator-files-test
+  (testing "a legacy directory with one recent file keeps its old files too"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "wf-legacy")
+              old (write-file! (io/file wf "20200101T000000Z-abc.json") "{}")]
+          (write-file! (io/file wf "20260411T000000Z-def.json") "{}")
+          (age! 30 old wf)
+          (is (= 0 (sinks/cleanup-stale-events! {:events-dir dir})))
+          (is (.exists old) "a workflow's history is pruned whole or not at all")))))
+
+  (testing "an empty legacy directory left by earlier cleanup goes once old"
+    (with-temp-dir
+      (fn [dir]
+        (let [empty-dir (io/file dir "wf-emptied")]
+          (.mkdirs empty-dir)
+          (age! 30 empty-dir)
+          (sinks/cleanup-stale-events! {:events-dir dir})
+          (is (not (.exists empty-dir)))))))
+
+  (testing "directories holding anything but event files, or hidden ones, are left alone"
+    (with-temp-dir
+      (fn [dir]
+        (let [tui (io/file dir "archive")
+              tui-file (write-file! (io/file tui "wf.edn") "{}")
+              workers (io/file dir ".workers")
+              lease (write-file! (io/file workers "0.lease") "{}")]
+          (age! 30 tui-file tui lease workers)
+          (is (= 0 (sinks/cleanup-stale-events! {:events-dir dir})))
+          (is (.exists tui-file))
+          (is (.exists lease))))))
+
+  (testing "operator events still go one file at a time"
+    (with-temp-dir
+      (fn [dir]
+        (let [op (io/file dir "operator")
+              old (write-file! (io/file op "20200101T000000Z-abc.json") "{}")
+              fresh (write-file! (io/file op "20260411T000000Z-def.json") "{}")]
+          (age! 8 old)
+          (is (= 1 (sinks/cleanup-stale-events! {:events-dir dir})))
+          (is (not (.exists old)))
+          (is (.exists fresh)))))))
 
 (deftest ^{:stratum 1} file-sink-keeps-hostile-ids-inside-the-events-dir-test
   (testing "a workflow id with .. or separators cannot place files outside base-dir"

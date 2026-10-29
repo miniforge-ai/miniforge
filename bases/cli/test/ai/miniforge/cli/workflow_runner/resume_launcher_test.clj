@@ -128,7 +128,9 @@
         run-id (random-uuid)
         plan {:resume/workflow-id "wf-1" :resume/intervention-id intervention-id :resume/from-phase :implement}
         resumed (atom nil)]
-    (with-redefs [cmd-resume/resume-workflow (fn [workflow-id opts] (reset! resumed [workflow-id opts]))]
+    (with-redefs [cmd-resume/resume-workflow (fn [workflow-id opts]
+                                               (reset! resumed [workflow-id opts])
+                                               {:execution/status :completed})]
       (apply main/-main (rest (sut/resume-argv ["mf"] plan run-id))))
     (is (= "wf-1" (first @resumed)))
     (is (= {:from-phase :implement :run-id (str run-id) :correlation-id (str intervention-id)}

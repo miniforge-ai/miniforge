@@ -139,11 +139,13 @@
     (is (nil? (#'cmd-pr-monitor/parse-poll-interval nil test-bounds))))
   (testing "Out-of-bounds interval returns nil with error message"
     (let [output (with-out-str
-                   (is (nil? (#'cmd-pr-monitor/parse-poll-interval "1" test-bounds))))]
+                   (binding [*err* *out*]
+                     (is (nil? (#'cmd-pr-monitor/parse-poll-interval "1" test-bounds)))))]
       (is (re-find #"5-3600" output))))
   (testing "Non-numeric interval returns nil with error message"
     (let [output (with-out-str
-                   (is (nil? (#'cmd-pr-monitor/parse-poll-interval "abc" test-bounds))))]
+                   (binding [*err* *out*]
+                     (is (nil? (#'cmd-pr-monitor/parse-poll-interval "abc" test-bounds)))))]
       (is (re-find #"Invalid" output)))))
 
 ;------------------------------------------------------------------------------ Layer 2

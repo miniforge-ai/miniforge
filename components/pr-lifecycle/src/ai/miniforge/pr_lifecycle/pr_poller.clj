@@ -1,4 +1,8 @@
-;; Copyright 2025 miniforge.ai
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;;
 ;; Licensed under the Apache License, Version 2.0 (the "License");
 ;; you may not use this file except in compliance with the License.
@@ -53,6 +57,7 @@
    [:comment/id int?]
    [:comment/body {:optional true} [:maybe :string]]
    [:comment/author {:optional true} [:maybe :string]]
+   [:comment/author-association {:optional true} [:maybe :string]]
    [:comment/created-at :string]
    [:comment/type keyword?]
    [:comment/path {:optional true} [:maybe :string]]
@@ -150,6 +155,9 @@
    (cond-> {:comment/id (:id comment)
             :comment/body (:body comment)
             :comment/author (get-in comment [:user :login])
+            ;; OWNER / MEMBER / COLLABORATOR / CONTRIBUTOR / NONE ... —
+            ;; the classifier's trust gate reads it.
+            :comment/author-association (:author_association comment)
             :comment/created-at (:created_at comment)
             :comment/type comment-type}
      (:path comment)
@@ -269,6 +277,7 @@
 
    Returns DAG result with :comments vector of normalized comment maps:
    [{:comment/id int :comment/body string :comment/author string
+     :comment/author-association string
      :comment/created-at string :comment/type keyword
      :comment/path string :comment/line int}]"
   [worktree-path pr-number]
