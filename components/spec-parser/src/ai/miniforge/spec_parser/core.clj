@@ -110,8 +110,9 @@
    namespaced ones.
 
    Both hyphenated (:acceptance-criteria) and underscore (:acceptance_criteria)
-   forms are listed because the YAML parser regex only captures \\w+ (no hyphens),
-   so frontmatter authors must use underscores for multi-word keys."
+   forms are listed: the YAML parser keeps hyphens, but its line-parser
+   fallback (frontmatter that is not valid YAML) only captures \\w+ keys,
+   so existing specs use underscores for multi-word keys."
   {:title                "spec"
    :description          "spec"
    :intent               "spec"
@@ -142,6 +143,14 @@
   "Remove the first H1 heading line from a markdown body."
   [body]
   (str/trim (str/replace-first body #"(?m)^#[^\n]*\n?" "")))
+
+(defn- ^{:stratum 0} keywordize-intent-type
+  "YAML frontmatter yields `intent: {type: bugfix}` as {:type \"bugfix\"};
+   SpecIntent requires a keyword :type."
+  [intent]
+  (if (and (map? intent) (string? (:type intent)))
+    (update intent :type keyword)
+    intent))
 
 ;; Spec normalization — canonical :spec/* only
 (defn- ^{:stratum 0} spec-shape-anomaly
@@ -227,8 +236,8 @@
 
 (defn- ^{:stratum 1} namespace-frontmatter-keys
   "Remap plain YAML keys to :spec/* / :workflow/* namespaces for normalize-spec.
-   Underscore key names (from YAML parser limitation) are normalized to hyphens
-   so :acceptance_criteria becomes :spec/acceptance-criteria."
+   Underscore key names are normalized to hyphens so :acceptance_criteria
+   becomes :spec/acceptance-criteria."
   [m]
   (reduce-kv (fn [acc k v]
                (if-let [ns (get spec-key->ns k)]
@@ -277,9 +286,12 @@
           fm     (namespace-frontmatter-keys raw-fm)
           body   (:body parsed)]
       (cond-> fm
+        (:spec/intent fm)
+        (update :spec/intent keywordize-intent-type)
+
         (and body (not (str/blank? body)))
         (update :spec/description
-                #(str/trim (str (or % "") "\n\n" (str/trim body))))))
+                #(str/trim (str (str/trim (str %)) "\n\n" (str/trim body))))))
     ;; No frontmatter — synthesize spec metadata from document structure
     (decorate-from-body content)))
 

@@ -102,13 +102,15 @@
               (when-not (fs/windows?)
                 (let [confirmed (durability/confirm! (fs/file target))]
                   (when (anomaly/anomaly? confirmed)
-                    (anomaly/anomaly :fault (t :config-file/not-synced {:path path :error (:anomaly/message confirmed)})
-                                     {:config/path (str path) :config/cause confirmed})))))))
+                    (anomaly/sub-anomaly :fault :anomalies.config/not-synced
+                                         (t :config-file/not-synced {:path path :error (:anomaly/message confirmed)})
+                                         {:config/path (str path) :config/cause confirmed})))))))
       (finally
         (fs/delete-if-exists tmp)))))
 
 (defn ^{:stratum 1} parse-config
-  "nil for blank text or a lone nil, the map for one EDN map, else an anomaly."
+  "nil for blank or comment-only text, the map for one EDN map, else an anomaly
+   (a lone `nil` included: it is a form, and not a map)."
   [path text]
   (let [unreadable #(anomaly/anomaly :invalid-input
                                      (t :config-file/unreadable {:path path :error %})
@@ -116,34 +118,39 @@
     (try+
       (let [[form :as forms] (read-forms text)]
         (cond
-          (next forms)                 (unreadable (t :config-file/extra-forms {:count (count forms)}))
-          (or (nil? form) (map? form)) form
-          :else                        (unreadable (t :config-file/not-a-map {:found (.getName (class form))}))))
+          (empty? forms) nil
+          (next forms)   (unreadable (t :config-file/extra-forms {:count (count forms)}))
+          (map? form)    form
+          :else          (unreadable (t :config-file/not-a-map {:found (pr-str (type form))}))))
       (catch Exception e
         (unreadable (ex-text e))))))
 
 (defn ^{:stratum 1} call-with-lock
-  "`(thunk)` under the config lock for `path`, held on `<target>.lock`; an anomaly
-   when the lock stays busy past `lock-timeout-ms` or the thunk throws."
-  [path target thunk]
-  (let [lock-file (Paths/get (str target lock-file-suffix) (make-array String 0))
-        failure   #(anomaly/anomaly :fault (t :config-file/write-failed {:path path :error (ex-text %)})
-                                    {:config/path (str path)})]
+  "`(thunk target)` under the config lock for `path`, held on `<target>.lock`, where
+   target is `(publish-target path)`; an anomaly when resolving the target fails,
+   the lock stays busy past `lock-timeout-ms`, or the thunk throws."
+  [path thunk]
+  (let [failure #(anomaly/anomaly :fault (t :config-file/write-failed {:path path :error (ex-text %)})
+                                  {:config/path (str path)})]
     (try+
-      (locking process-lock
-        (fs/create-dirs (fs/parent (fs/absolutize lock-file)))
-        (with-open [channel (FileChannel/open lock-file (into-array OpenOption [StandardOpenOption/CREATE
-                                                                                StandardOpenOption/WRITE]))]
-          (let [deadline (+ (System/currentTimeMillis) lock-timeout-ms)
-                ;; Hinted AutoCloseable: babashka does not expose FileLock.
-                ^java.lang.AutoCloseable held (loop []
-                                                (or (.tryLock channel)
-                                                    (when (< (System/currentTimeMillis) deadline)
-                                                      (Thread/sleep lock-poll-ms)
-                                                      (recur))))]
-            (if held
-              (try (thunk) (finally (.close held)))
-              (anomaly/anomaly :unavailable (t :config-file/locked {:path path}) {:config/path (str path)})))))
+      ;; Resolved once, inside the handler, so the lock, the read and the write all
+      ;; name the same file, and a file that vanishes mid-resolution is an anomaly.
+      (let [target    (publish-target path)
+            lock-file (Paths/get (str target lock-file-suffix) (make-array String 0))]
+        (locking process-lock
+          (fs/create-dirs (fs/parent (fs/absolutize lock-file)))
+          (with-open [channel (FileChannel/open lock-file (into-array OpenOption [StandardOpenOption/CREATE
+                                                                                  StandardOpenOption/WRITE]))]
+            (let [deadline (+ (System/currentTimeMillis) lock-timeout-ms)
+                  ;; Hinted AutoCloseable: babashka does not expose FileLock.
+                  ^java.lang.AutoCloseable held (loop []
+                                                  (or (.tryLock channel)
+                                                      (when (< (System/currentTimeMillis) deadline)
+                                                        (Thread/sleep lock-poll-ms)
+                                                        (recur))))]
+              (if held
+                (try (thunk target) (finally (.close held)))
+                (anomaly/anomaly :unavailable (t :config-file/locked {:path path}) {:config/path (str path)}))))))
       (catch InterruptedException e
         (.interrupt (Thread/currentThread))
         (failure e))
@@ -155,20 +162,16 @@
 (defn ^{:stratum 2} update-config!
   "See `ai.miniforge.config.interface.file/update-config!`."
   [path f]
-  ;; Resolved once, so the lock, the read and the write all name the same file
-  ;; even if a symlink at `path` is repointed meanwhile.
-  (let [target (publish-target path)]
-    (call-with-lock path target
-                    (fn []
-                      (let [before (when (fs/exists? target) (parse-config path (slurp (fs/file target))))]
-                        (if (anomaly/anomaly? before)
-                          before
-                          (let [after (f before)]
-                            (or (when (not= before after) (write-atomically! path target (render after)))
-                                {:before before :after after}))))))))
+  (call-with-lock path
+                  (fn [target]
+                    (let [before (when (fs/exists? target) (parse-config path (slurp (fs/file target))))]
+                      (if (anomaly/anomaly? before)
+                        before
+                        (let [after (f before)]
+                          (or (when (not= before after) (write-atomically! path target (render after)))
+                              {:before before :after after})))))))
 
 (defn ^{:stratum 2} write-config!
   "See `ai.miniforge.config.interface.file/write-config!`."
   [path config]
-  (let [target (publish-target path)]
-    (call-with-lock path target #(or (write-atomically! path target (render config)) config))))
+  (call-with-lock path #(or (write-atomically! path % (render config)) config)))
