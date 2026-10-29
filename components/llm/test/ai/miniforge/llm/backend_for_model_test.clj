@@ -18,7 +18,8 @@
 (ns ai.miniforge.llm.backend-for-model-test
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.llm.interface :as llm]))
+   [ai.miniforge.llm.interface :as llm]
+   [ai.miniforge.llm.model-registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -31,3 +32,13 @@
   (testing "an unlisted id returns the caller's not-found value"
     (is (nil? (llm/backend-for-model "anthropic/claude-sonnet-4-6" nil)))
     (is (= :opencode (llm/backend-for-model "qwen3:32b" :opencode)))))
+
+(deftest ^{:stratum 0} catalog-backends-are-registered-test
+  (testing "every catalog model names a backend create-client accepts"
+    (doseq [[model-key {:keys [backend]}] registry/model-registry]
+      (is (contains? llm/backends backend)
+          (str model-key " names unregistered backend " backend))))
+  (testing "a gemini catalog model gets a Gemini API client"
+    (is (= :gemini-api (llm/backend-for-model "gemini-2.5-pro" nil)))
+    (is (= :gemini-api (llm/client-backend
+                        (llm/create-client-for-model "gemini-2.5-flash"))))))

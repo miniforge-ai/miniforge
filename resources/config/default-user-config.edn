@@ -1,7 +1,15 @@
 {:description "Default user configuration for MiniForge Core"
  :config
- {:llm {:backend :opencode
-        :model "anthropic/claude-sonnet-4-5"}
+ ;; OpenCode is the default provider/auth wrapper for agent runs. Provider
+ ;; credentials live in OpenCode auth/config, not in miniforge environment
+ ;; variables.
+ ;;
+ ;; No :llm :model and no :agents :default-models here: a model in the
+ ;; defaults would reach every backend, and an anthropic/ id is valid only
+ ;; on opencode. Each role's model follows the backend instead (see
+ ;; ai.miniforge.agent.model/default-model-for-role); setting either key in
+ ;; ~/.miniforge/config.edn overrides that.
+ {:llm {:backend :opencode}
   :workflow {:checkpoint-root "~/.miniforge/checkpoints"}
   ;; Base directory under which git worktrees are created. Persists across
   ;; reboots — the 2026-04-17 gates workflow lost 8+ min of working code when
@@ -12,14 +20,6 @@
   ;; worktree-creation time if the legacy /tmp/miniforge-worktrees directory
   ;; still has entries — safe to ignore if intentional.
   :workflow/worktree-root "~/.miniforge/worktrees"
-  ;; OpenCode is the default provider/auth wrapper for agent runs. Provider
-  ;; credentials live in OpenCode auth/config, not in miniforge environment
-  ;; variables. These role defaults are passed through to OpenCode as model
-  ;; selections; override per-role in user config if your OpenCode setup uses
-  ;; different aliases.
-  :agents {:default-models {:thinking   "anthropic/claude-opus-4-6"
-                            :execution  "anthropic/claude-sonnet-4-6"
-                            :escalation "anthropic/claude-opus-4-7"}}
   :model-selection {:enabled true
                     :strategy :automatic
                     :cost-limit-per-task 0.10

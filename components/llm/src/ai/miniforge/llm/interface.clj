@@ -89,7 +89,8 @@
 
 (defn ^{:stratum 0} backend-for-model
   "Look up the backend keyword for a model-id string.
-   Returns :claude, :codex, :gemini, :ollama, etc. based on the model catalog.
+   Returns :claude, :codex, :gemini-api, :ollama, etc. based on the model
+   catalog; every catalog backend is one `create-client` accepts.
    For a model-id the catalog does not list, returns `not-found`, which
    defaults to :codex. Pass nil as `not-found` to tell an unlisted model
    apart from a listed one."
@@ -109,6 +110,15 @@
     (-> client
         p/get-config
         :backend)))
+
+(defn ^{:stratum 0} client-model
+  "Return the model id an LLM client sends, or nil when it names none (the
+   backend's default applies) or `client` is not an LLMClient."
+  [client]
+  (when (satisfies? p/LLMClient client)
+    (-> client
+        p/get-config
+        :model)))
 
 (defn ^{:stratum 0} mock-client
   "Create a mock client for testing.

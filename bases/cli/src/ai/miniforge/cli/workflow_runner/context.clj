@@ -22,7 +22,9 @@
    [clojure.edn :as edn]
    [babashka.fs :as fs]
    [cheshire.core :as json]
+   [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.config :as config]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.worktree :as worktree]
    [ai.miniforge.cli.workflow-runner.context-git :as git]
    [ai.miniforge.cli.workflow-runner.display :as display]
@@ -30,7 +32,9 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.response.interface :as response]
-   [ai.miniforge.tenancy.interface :as tenancy]))
+   [ai.miniforge.tenancy.interface :as tenancy]
+   [clojure.string :as str]
+   [slingshot.slingshot :refer [throw+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -162,20 +166,27 @@
       :else nil)))
 
 (defn ^{:stratum 0} create-llm-client
+  "LLM client for the run's backend: the override, else the workflow's or the
+   spec's, else config.edn's. An unknown backend throws an :invalid-input anomaly
+   naming it and the known ones, so the run stops here rather than going on with
+   no client and failing later in the planner."
   ([workflow spec quiet] (create-llm-client workflow spec quiet nil))
-  ([workflow spec quiet backend-override]
-   (try
-     (let [cfg (config/load-config)
-           llm-backend (config/get-llm-backend
-                        cfg
-                            (or backend-override
-                                (get-in workflow [:workflow/config :llm-backend])
-                                (:spec/llm-backend spec)))]
-       (llm/create-client {:backend llm-backend}))
-     (catch Exception e
-       (when-not quiet
-         (println (display/colorize :yellow (str "Warning: Could not create LLM client (" (ex-message e) "), agents will use fallback mode"))))
-       nil))))
+  ([workflow spec _quiet backend-override]
+   (let [cfg (config/load-config)
+         llm-backend (config/get-llm-backend
+                      cfg
+                      (or backend-override
+                          (get-in workflow [:workflow/config :llm-backend])
+                          (:spec/llm-backend spec)))]
+     (if (contains? llm/backends llm-backend)
+       (llm/create-client {:backend llm-backend})
+       (let [unknown (anomaly/anomaly :invalid-input
+                                      (messages/t :workflow-runner/unknown-backend
+                                                  {:backend (pr-str llm-backend)
+                                                   :available (str/join ", " (sort (map name (keys llm/backends))))
+                                                   :command (app-config/command-string "config backend <name>")})
+                                      {:backend llm-backend})]
+         (throw+ unknown (:anomaly/message unknown)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

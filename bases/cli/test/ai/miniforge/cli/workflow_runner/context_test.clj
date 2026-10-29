@@ -22,7 +22,9 @@
    [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.workflow-runner.context :as sut]
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.tenancy.interface :as tenancy]))
+   [ai.miniforge.llm.interface :as llm]
+   [ai.miniforge.tenancy.interface :as tenancy]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -97,6 +99,19 @@
                       :workflow-version "1.0.0"
                       :acting supplied})]
         (is (= supplied (:acting context)))))))
+
+(deftest ^{:stratum 0} an-unknown-backend-stops-the-run-test
+  (testing "a mistyped --backend throws, naming it and the known backends, instead of returning no client"
+    (let [error (try (sut/create-llm-client nil nil true :opnecode) nil
+                     (catch Exception e e))]
+      (is (some? error))
+      (is (str/includes? (ex-message error) ":opnecode"))
+      (is (str/includes? (ex-message error) "opencode")))))
+
+(deftest ^{:stratum 0} a-backend-symbol-in-config-still-resolves-test
+  (testing "llm.backend written as a symbol by an older `config set` still selects that backend"
+    (with-redefs [config/load-config (constantly {:llm {:backend 'opencode}})]
+      (is (= :opencode (llm/client-backend (sut/create-llm-client nil nil true)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
