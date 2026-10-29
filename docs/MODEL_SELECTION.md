@@ -19,15 +19,17 @@ config block, which nothing read.
          '[ai.miniforge.llm.interface :as llm])
 
 ;; Task map -> classification {:type :thinking-heavy :confidence 0.9 :reason "..."}
-(agent/classify-task {:phase :plan :description "Design distributed architecture"})
+(def classification
+  (agent/classify-task {:phase :plan :description "Design distributed architecture"}))
 
 ;; Classification -> selection map (here with ANTHROPIC_API_KEY set)
-(llm/select-model classification)
+(def selection (llm/select-model classification))
 ;; => {:model :opus-4.7 :model-id "claude-opus-4-7" :provider :anthropic
 ;;     :backend :claude :task-type :thinking-heavy :confidence 0.9
 ;;     :strategy :automatic :rationale "..." :fallback-used false}
 
-;; Optional config and constraints
+;; Optional config and constraints. When the model it would return fails a
+;; constraint, the result is a :not-found anomaly instead of a selection.
 (llm/select-model classification
                   {:strategy :cost-optimized}     ; :automatic (default), :cost-optimized, :speed
                   {:context-size 500000           ; tokens
@@ -44,22 +46,26 @@ config block, which nothing read.
 (agent/create-agent :implementer {:privacy-required true :cost-limit 0.05})
 ```
 
+When nothing qualifies, `select-model` returns Claude Sonnet 4.6 with `:fallback-used true`. With `:require-local`,
+it returns an anomaly rather than a model that is not local.
+
+**Selection routes nothing.** A selection is a model id, not a client. `create-agent` stores the id in the agent's
+config, but the agent's `invoke` sends the task to the `:llm-backend` client in the invocation context, with that
+client's backend and model; it does not read the selection. `:require-local` / `:privacy-required` therefore does
+not keep data on the machine by itself: to do that, pass a local backend (an `:ollama` client, say) as
+`:llm-backend` and verify it yourself.
+
 The models, their profiles and the recommendation tiers per task type are in
 [model-catalog.edn](../components/llm/resources/llm/model-catalog.edn). How a strategy walks those tiers is in
 [model_selector.clj](../components/llm/src/ai/miniforge/llm/model_selector.clj); this page does not restate it.
 
 ## Known limitations
 
-1. When no strategy picks a model, `select-model` throws IllegalArgumentException ("No implementation of method:
-   :log*") instead of returning its Claude Sonnet 4.6 fallback. `create-agent` catches it and keeps the role's
-   configured model. Fixed in #2198.
-2. `:require-local` is not a hard constraint: a call can return a cloud model. #2198 makes `select-model` return
-   an anomaly instead.
-3. `:automatic` can return a model that fails `:context-size` or `:cost-limit` while reporting
+1. `:automatic` can return a model that fails `:context-size` or `:cost-limit` while reporting
    `:fallback-used false`. With `:require-local` it reads only `-local` tier keys, which `:large-context` and
    `:cost-optimized` do not define. Fixed in #2203. Until then, check the selected model's context window.
-4. `:cost-limit` filters models by price tier; it does not cap what a task spends.
-5. A cloud model counts as available only when its provider's API-key variable is set (`ANTHROPIC_API_KEY`,
+2. `:cost-limit` filters models by price tier; it does not cap what a task spends.
+3. A cloud model counts as available only when its provider's API-key variable is set (`ANTHROPIC_API_KEY`,
    `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `GROQ_API_KEY`; see `:provider-env-vars` in
    `components/llm/resources/llm/model-selector.edn`). The selector only checks that the variable is set.
-6. `explain-selection` ends with a line naming `:spec/model-override`; nothing reads that key.
+4. `explain-selection` ends with a line naming `:spec/model-override`; nothing reads that key.

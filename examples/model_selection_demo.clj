@@ -295,11 +295,11 @@
 
 (println "  :cost-limit filters models by price tier; it does not cap spend.")
 
-(println "  Today select-model throws when it selects nothing, and can return a")
+(println "  :require-local returns an anomaly rather than a cloud model, but")
 
-(println "  cloud model under :require-local (#2198), or a model that fails")
+(println "  selection routes nothing: the agent calls the :llm-backend you pass.")
 
-(println "  :context-size or :cost-limit (#2203). See docs/MODEL_SELECTION.md.")
+(println "  See docs/MODEL_SELECTION.md for the known limitations.")
 
 (println)
 
