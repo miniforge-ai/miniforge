@@ -68,11 +68,6 @@
         (string? (:event/timestamp event))     (update :event/timestamp as-date)
         (sequential? (:phase/artifacts event)) (update :phase/artifacts (partial mapv artifact))))))
 
-(defn ^{:stratum 0} source-file
-  "The file `read-ordered` decoded `event` from."
-  [event]
-  (::file (meta event)))
-
 (defn ^{:stratum 0} roots
   "The per-workflow roots under `events-dir`, live first: a directory
    moving to archived/ is then seen in at least one of them."
@@ -81,9 +76,14 @@
 
 (def ^{:stratum 0} name-window-ms
   "How far behind the newest file read a run's tracking keeps names. A
-   file recorded further back that has not been read by then (written
-   that late, or failing to decode that long) is given up."
+   file recorded further back that is not there by then (written that
+   late) is never read."
   60000)
+
+(def ^{:stratum 0} max-read-attempts
+  "Failed reads of an event file, one per poll, before `read-unread`
+   gives it up as corrupt."
+  10)
 
 (defn ^{:stratum 0} current-dir
   "Workflow `wf-name`'s directory now: under archived/ once the run has
@@ -121,16 +121,6 @@
   [events-dir]
   (mapv mtime (roots events-dir)))
 
-(defn ^{:stratum 1} read-ordered
-  "Decode `files` and return their events by recorded ms, then
-   :event/sequence-number. Each event knows its file (`source-file`)."
-  [files]
-  (->> files
-       (keep (fn [f] (when-let [event (read-event f)]
-                       [(file-ms f) (vary-meta event assoc ::file f)])))
-       (sort-by (fn [[ms event]] [ms (get event :event/sequence-number 0)]))
-       (mapv second)))
-
 (defn ^{:stratum 1} track
   "Tracking `{:watermark ms :names {name ms}}` after `files` were read:
    their names join, and the watermark rises to `name-window-ms` before
@@ -141,8 +131,9 @@
     tracked
     (let [names (into names (map (juxt file-name file-ms)) files)
           mark  (reduce max watermark (map #(- % name-window-ms) (vals names)))]
-      {:watermark mark
-       :names     (into {} (filter #(>= (val %) mark)) names)})))
+      (assoc tracked
+             :watermark mark
+             :names     (into {} (filter #(>= (val %) mark)) names)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -154,6 +145,42 @@
   (filterv #(and (>= (file-ms %) watermark)
                  (not (contains? names (file-name %))))
            (event-files dir)))
+
+(defn ^{:stratum 2} read-unread
+  "[events tracked gaps]: the events of a run's unread `files` (from
+   `unread-files`) in creation order (recorded ms, then
+   :event/sequence-number), its tracking after them, and the files given
+   up.
+
+   A run's events are handed on in order. A file that fails to decode
+   holds back itself and every file from its millisecond on: tracking
+   marks the run :pending?, counts the failure, and the next read tries
+   again. A file gone before decoding (the run moved to archived/) is
+   retried without counting. After `max-read-attempts` failed reads of a
+   file still there, it is given up as corrupt: it counts as read, the
+   caller reports the gap, and the files behind it go on."
+  [files tracked]
+  (let [done (fn [read gaps failures pending?]
+               [(->> read
+                     (sort-by (fn [[f e]] [(file-ms f) (get e :event/sequence-number 0)]))
+                     (mapv second))
+                (-> (track tracked (concat (map first read) gaps))
+                    (assoc :failures failures :pending? pending?))
+                gaps])]
+    (loop [[f & more] files, read [], gaps [], failures (get tracked :failures {})]
+      (if-not f
+        (done read gaps failures false)
+        (let [event (read-event f)
+              n     (file-name f)
+              tries (inc (get failures n 0))
+              there (.exists ^File f)]
+          (cond
+            event (recur more (conj read [f event]) gaps (dissoc failures n))
+            (and there (>= tries max-read-attempts)) (recur more read (conj gaps f) (dissoc failures n))
+            :else (done (filterv #(< (file-ms (first %)) (file-ms f)) read)
+                        gaps
+                        (cond-> failures there (assoc n tries))
+                        true)))))))
 
 (defn ^{:stratum 2} active-dirs
   "{name dir} of the workflow directories modified at or after
