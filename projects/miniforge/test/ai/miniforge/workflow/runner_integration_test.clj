@@ -19,6 +19,10 @@
   "Integration tests for the workflow runner that execute real phase pipelines."
   (:require
    [ai.miniforge.event-stream.interface :as events]
+   [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase-opsv.lifecycle-result :as opsv-result]
+   [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
    [ai.miniforge.workflow.isolation-support :as isolation]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.workflow.checkpoint-root-support :as checkpoint-root-support]
@@ -81,6 +85,14 @@
     {:rejected? true :reason :fixture/decision-refused :event-type (:event/type event)}
     (publish stream event)))
 
+(defn ^{:stratum 0} finished-phase-enter
+  "An :enter that finished its own work successfully. Its output carries no
+   review decision, so a :review-approved gate denies it."
+  [phase-kw ctx]
+  (assoc ctx :phase {:name phase-kw :status :completed
+                     :started-at (System/currentTimeMillis)
+                     :result {:status :success :output {:finished phase-kw}}}))
+
 (defn ^{:stratum 0} events-of [history event-type]
   (filterv #(= event-type (:event/type %)) history))
 
@@ -134,6 +146,29 @@
       (is (= :failed (get-in result [:execution/phase-results :plan :status])))
       (is (= :failed (:execution/status result)))
       (is (not (contains? (:execution/phase-results result) :implement))))))
+
+(deftest ^{:stratum 1} configured-denying-gate-is-never-completed-test
+  (testing "one phase from each packaged family whose :leave did its own completed
+            bookkeeping: observe, done, OPSV, compliance-scanner (security-compliance
+            is in no project; its leave is covered in its component tests)"
+    (doseq [phase-kw [:observe :done :opsv/plan :compliance-scan]]
+      (testing (str phase-kw)
+        (let [interceptor (assoc (phase/get-phase-interceptor {:phase phase-kw :gates [:review-approved]})
+                                 :enter (partial finished-phase-enter phase-kw))
+              ctx {:execution/id (random-uuid)
+                   :event-stream (events/create-event-stream {:sinks []})
+                   :execution/current-phase phase-kw
+                   :execution/metrics {} :execution/errors []
+                   :execution/response-chain (response/create :gate-families)}
+              published (atom 0)
+              [left result] (with-redefs [opsv-result/after-publication
+                                          (fn [_ctx _phase result] (swap! published inc) result)]
+                              (lifecycle/execute-phase-lifecycle interceptor ctx))]
+          (is (= [:review-approved] (get-in interceptor [:config :gates])))
+          (is (zero? @published) "no OPSV success publication or finalization")
+          (is (= :deny (get-in result [:phase/decision-envelope :envelope/decision])))
+          (is (= :failed (:status result)))
+          (is (not (some #{phase-kw} (get-in left [:execution :phases-completed])))))))))
 
 ;; Every pipeline this namespace runs acquires its worktree from a
 ;; throwaway host repository and checkpoints into a throwaway root — never

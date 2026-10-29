@@ -30,6 +30,7 @@
      Subsequent phases read from prior phase results at the same path."
   (:require
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.interface.gate :as phase-gate]
    [ai.miniforge.workflow-security-compliance.config :as config]
    [ai.miniforge.workflow-security-compliance.core :as core]))
 
@@ -71,10 +72,10 @@
     (-> ctx
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
-        (assoc-in [:phase :status] :completed)
+        (assoc-in [:phase :status] (phase-gate/completed-status (:phase ctx)))
         (assoc-in [:phase :metrics] phase-metrics)
         (assoc-in [:execution/phase-results phase-kw :result] phase-result)
-        (update-in [:execution :phases-completed] (fnil conj []) phase-kw)
+        (phase-gate/count-completed phase-kw)
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
 (defn- ^{:stratum 0} fail-phase

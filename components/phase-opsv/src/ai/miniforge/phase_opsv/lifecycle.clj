@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.interface.gate :as phase-gate]
    [ai.miniforge.phase-opsv.artifact-boundary :as artifacts]
    [ai.miniforge.phase-opsv.artifact-model :as artifact-model]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
@@ -59,12 +60,18 @@
                          (:budget config) start-time (lifecycle-result/phase-result published))))
 
 (defn- ^{:stratum 0} leave-phase
+  "A phase its gates failed publishes no success events, is not finalized and
+   completes as failed."
   [ctx]
   (let [phase-key (get-in ctx [:phase :name])
-        published (lifecycle-result/after-publication ctx phase-key (get-in ctx [:phase :result]))
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))
+        raw-result (get-in ctx [:phase :result])
+        published (if gate-failed?
+                    raw-result
+                    (lifecycle-result/after-publication ctx phase-key raw-result))
         result (terminal/complete-failure! ctx phase-key published)
         completed-ctx (assoc-in ctx [:phase :result] result)
-        success? (phase/result-succeeded? result)
+        success? (and (not gate-failed?) (phase/result-succeeded? result))
         end-time (System/currentTimeMillis)
         duration-ms (- end-time (get-in ctx [:phase :started-at]))]
     (lifecycle-result/complete-phase completed-ctx phase-key success? end-time

@@ -26,6 +26,7 @@
             [ai.miniforge.config.interface :as config]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate]
             [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
@@ -128,7 +129,8 @@
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
         (assoc-in [:metrics :observe :duration-ms] duration-ms)
-        (update-in [:execution :phases-completed] (fnil conj []) :observe)
+        (cond-> (phase-gate/gate-failed? (:phase ctx)) (assoc-in [:phase :status] :failed))
+        (phase-gate/count-completed :observe)
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
 (defn ^{:stratum 0} error-observe
