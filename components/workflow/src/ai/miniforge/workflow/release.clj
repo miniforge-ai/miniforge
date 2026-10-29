@@ -55,7 +55,7 @@
 (defn ^{:stratum 0} delete-file!
   "Delete a file if it exists. Returns true if deleted, false if file didn't exist."
   [file-path]
-  (if (fs/exists? file-path)
+  (if (fs/exists? file-path {:nofollow-links true})
     (do
       (fs/delete file-path)
       true)
@@ -146,7 +146,28 @@
                ;; Old format
                (:content artifact))))))
 
+(defn- ^{:stratum 0} plain-entry-name?
+  "True when `path`'s last component names an entry: not absent, `.` or `..`."
+  [path]
+  (let [leaf (some-> (java.nio.file.Paths/get (str path) (into-array String []))
+                     .getFileName
+                     str)]
+    (boolean (and leaf (not (#{"." ".."} leaf))))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} entry-inside-worktree?
+  "True when deleting the directory entry at file-path removes something
+   inside worktree-path. Deletion removes the last component itself and
+   does not follow it, so only the parent is resolved physically and the
+   last component must be a plain name. inside-worktree? follows a final
+   symlink and would validate where it points rather than the entry
+   being removed."
+  [worktree-path file-path]
+  (let [parent (fs/parent file-path)]
+    (and (plain-entry-name? file-path)
+         (some? parent)
+         (inside-worktree? worktree-path parent))))
 
 (defn ^{:stratum 1} write-file!
   "Write content to a file, creating parent directories as needed.
@@ -224,7 +245,7 @@
   [worktree-path {:keys [path]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
-      (if-not (inside-worktree? worktree-path full-path)
+      (if-not (entry-inside-worktree? worktree-path full-path)
         {:success? false
          :action :delete
          :path path

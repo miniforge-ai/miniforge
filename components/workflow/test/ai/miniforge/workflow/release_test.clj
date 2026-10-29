@@ -234,4 +234,45 @@
         (is (true? (:success? result)))
         (is (= "ok" (slurp (str (fs/path worktree "README.md")))))))))
 
+(deftest ^{:stratum 2} process-file-action-delete-removes-only-entries-inside-test
+  (testing "delete rejects an entry whose parent resolves outside, even if it links back in"
+    ;; inner -> outside/dir, and outside/dir/link -> worktree/keep.txt.
+    ;; Following the leaf lands inside the worktree, but deletion removes
+    ;; the entry itself: outside/dir/link.
+    (let [worktree (create-temp-dir)
+          outside  (create-temp-dir)
+          out-dir  (fs/path outside "dir")
+          keep     (fs/path worktree "keep.txt")
+          link     (fs/path out-dir "link")]
+      (fs/create-dirs out-dir)
+      (spit (str keep) "keep")
+      (fs/create-sym-link link keep)
+      (fs/create-sym-link (fs/path worktree "inner") out-dir)
+      (let [result (release/process-file-action worktree
+                                                {:action :delete :path "inner/link"}
+                                                nil)]
+        (is (false? (:success? result)))
+        (is (re-find #"(?i)traversal" (:error result)))
+        (is (fs/exists? link {:nofollow-links true}) "the outside entry is still there"))))
+
+  (testing "delete removes a symlink inside the worktree without touching its target"
+    (let [worktree (create-temp-dir)
+          outside  (create-temp-dir)
+          target   (fs/path outside "target.txt")]
+      (spit (str target) "outside")
+      (fs/create-sym-link (fs/path worktree "link.txt") target)
+      (let [result (release/process-file-action worktree
+                                                {:action :delete :path "link.txt"}
+                                                nil)]
+        (is (true? (:success? result)))
+        (is (false? (fs/exists? (fs/path worktree "link.txt") {:nofollow-links true})))
+        (is (= "outside" (slurp (str target))) "the link's target is untouched"))))
+
+  (testing "delete refuses the worktree root itself"
+    (let [worktree (create-temp-dir)]
+      (is (false? (:success? (release/process-file-action worktree
+                                                          {:action :delete :path "."}
+                                                          nil))))
+      (is (fs/exists? worktree)))))
+
 (use-fixtures :each cleanup-temp-dirs)
