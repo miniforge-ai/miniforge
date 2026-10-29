@@ -195,7 +195,8 @@
             ;; Projected before :leave runs, the same way as a denial, so leave
             ;; handlers finalize a failed phase instead of publishing success.
             (anomaly/any-anomaly? receipt)
-            (-> (assoc :phase/status :failed :phase/decision-unacknowledged receipt)
+            (-> (assoc :status :failed :phase/status :failed
+                       :phase/decision-unacknowledged receipt)
                 (update :phase/gate-errors (fnil conj [])
                         {:code :gate/decision-unacknowledged
                          :message (messages/t :gate/decision-unacknowledged)}))))

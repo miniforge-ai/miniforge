@@ -5,6 +5,7 @@
   "Advance a selected phase only after its boundary callbacks accept the operation
    and its gate decision, when it has one, was acknowledged."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.phase.interface.gate :as phase-gate]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.execution-dag :as dag]
             [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
@@ -27,12 +28,14 @@
     context))
 
 (defn- ^{:stratum 0} recorded-result
-  "A phase whose gate decision was not acknowledged is recorded as failed, so a
-   resume re-runs it, even when its :leave recomputed :status from the agent
-   result. Its output and decision envelope are kept."
+  "A phase its gates failed (denied, or the decision was not acknowledged) is
+   never recorded or advanced as a success, even when its :leave recomputed
+   :status from the agent result; a resume re-runs it. Its output and decision
+   envelope are kept."
   [result]
   (cond-> result
-    (:phase/decision-unacknowledged result) (assoc :status :failed)))
+    (and (phase-gate/gate-failed? result) (transition/phase-succeeded? result))
+    (assoc :status :failed)))
 
 (defn- ^{:stratum 0} refused [context boundary failure fail]
   (let [message (:message (response/anomaly->event-data failure))

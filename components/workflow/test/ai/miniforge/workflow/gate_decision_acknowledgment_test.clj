@@ -21,6 +21,16 @@
 (defn- ^{:stratum 0} other-envelope [_stream event]
   (assoc event :envelope/id (random-uuid)))
 
+(defn- ^{:stratum 0} enter-rejected [ctx]
+  (assoc ctx :phase {:name :review :status :running :started-at 0
+                     :result {:status :success :output {:review/decision :rejected}}}))
+
+(defn- ^{:stratum 0} completing-leave
+  "A :leave that recomputes :status from the agent result alone, as leave
+   handlers did before they read the gate outcome."
+  [ctx]
+  (assoc-in ctx [:phase :status] :completed))
+
 (defn- ^{:stratum 0} assert-refused [[result calls] scenario]
   (let [error (last (:execution/errors result))
         recorded (get-in result [:execution/phase-results :review])]
@@ -86,6 +96,17 @@
     (is (empty? (:execution/errors result)))
     (is (not (contains? (get-in result [:execution/phase-results :review])
                         :phase/decision-unacknowledged)))))
+
+(deftest ^{:stratum 1} acknowledged-denial-is-never-recorded-as-success
+  (let [denying {:config {:phase :review :gates [:review-approved]}
+                 :enter enter-rejected :leave completing-leave}
+        stream (support/legacy-stream)
+        [result calls] (support/execute denying (support/context stream) false)
+        recorded (get-in result [:execution/phase-results :review])]
+    (is (= :deny (get-in recorded [:phase/decision-envelope :envelope/decision])))
+    (is (= :failed (:status recorded)) "a :leave cannot turn a denied phase back to :completed")
+    (is (= [:dag :transition] calls))
+    (is (empty? (:execution/errors result)) "a denial is a phase failure, not a refusal")))
 
 ;------------------------------------------------------------------------------ Layer 2
 

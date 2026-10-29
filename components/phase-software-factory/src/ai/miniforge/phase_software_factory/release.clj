@@ -32,6 +32,7 @@
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate]
             [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
             [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [ai.miniforge.phase-software-factory.messages :as messages]
@@ -429,7 +430,7 @@
                        (get-in result [:error :data :type]))
         ;; A gate denial (projected onto :phase/status by the workflow's
         ;; gate validation) fails the release whatever the agent returned.
-        gate-failed? (= :failed (get-in ctx [:phase :phase/status]))
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))
         phase-status (if (or zero-files? gate-failed?)
                        :failed
                        (phase/determine-phase-status

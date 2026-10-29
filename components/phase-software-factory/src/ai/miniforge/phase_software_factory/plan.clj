@@ -22,6 +22,7 @@
    Agent: :planner
    Default gates: [:plan-complete]"
   (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
             [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
@@ -171,7 +172,7 @@
         ;; :phase/status. A denied plan fails whatever the planner returned;
         ;; recomputing the status from the agent result alone let a denied
         ;; plan leave as :completed and advance.
-        gate-failed? (= :failed (get-in ctx [:phase :phase/status]))
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))
         ;; already-satisfied is a NEUTRAL success outcome, not a failure.
         succeeded-or-done? (and (not gate-failed?) (or success? already-satisfied?))
         phase-status (cond gate-failed?       :failed
