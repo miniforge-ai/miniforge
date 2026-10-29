@@ -25,12 +25,16 @@
 (defn ^{:stratum 0} update-config!
   "Write `(f current)` to `path` under the config lock; `f` gets nil for an
    absent or blank file. {:before :after}, or an anomaly naming the file, with
-   nothing written, when it is not one EDN map, the lock is busy or the write fails."
+   nothing written, when it is not one EDN map, the lock is busy or the write fails.
+   One exception: subtype :anomalies.config/not-synced means the new content was
+   renamed into place but flushing it to disk failed, so the write did land; do
+   not retry a non-idempotent `f` on it."
   [path f]
   (file/update-config! path f))
 
 (defn ^{:stratum 0} write-config!
   "Write `config` to `path` under the config lock, whatever the file held.
-   `config` or an anomaly."
+   `config` or an anomaly; :anomalies.config/not-synced means it was written but
+   not flushed to disk."
   [path config]
   (file/write-config! path config))

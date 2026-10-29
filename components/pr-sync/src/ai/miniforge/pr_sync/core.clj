@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-sync.core
   "PR fleet synchronization: fleet config I/O and provider CLI interaction.
 
@@ -41,24 +40,24 @@
    [java.nio.file Paths StandardOpenOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants
 
-(def default-fleet-config-path
+;; Constants
+(def ^{:stratum 0} default-fleet-config-path
   (str (config/miniforge-home) "/config.edn"))
 
-(def github-repo-slug-pattern
+(def ^{:stratum 0} github-repo-slug-pattern
   #"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
-(def gitlab-repo-slug-pattern
+(def ^{:stratum 0} gitlab-repo-slug-pattern
   #"^gitlab:[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+$")
 
-(def ^:private config-lock-timeout-ms
+(def ^{:stratum 0} ^:private config-lock-timeout-ms
   "Upper bound (ms) on how long `with-config-lock!` polls for the advisory
    file lock before giving up.  Bounded so a contended lock never stalls a CLI
    command for more than half a second."
   500)
 
-(def ^:private config-lock-poll-ms
+(def ^{:stratum 0} ^:private config-lock-poll-ms
   "Backoff (ms) between `.tryLock` attempts while waiting for the config lock.
    Small relative to `config-lock-timeout-ms` so contention resolves promptly
    without busy-spinning."
@@ -66,46 +65,32 @@
 
 ;------------------------------------------------------------------------------ Layer 0b
 ;; Pure helpers
-
-(defn normalize-repo-slug
+(defn ^{:stratum 0} normalize-repo-slug
   [repo]
   (-> (str repo)
       str/trim
       str/lower-case))
 
-(defn valid-repo-slug?
-  [repo]
-  (boolean
-   (or (re-matches github-repo-slug-pattern repo)
-       (re-matches gitlab-repo-slug-pattern repo))))
-
-(defn repo-provider
+(defn ^{:stratum 0} repo-provider
   [repo]
   (if (str/starts-with? (or repo "") "gitlab:")
     :gitlab
     :github))
 
-(defn provider-repo-slug
-  "Strip provider prefix for downstream CLI calls."
-  [repo]
-  (if (= :gitlab (repo-provider repo))
-    (subs repo (count "gitlab:"))
-    repo))
-
-(defn url-encode
+(defn ^{:stratum 0} url-encode
   [s]
   (java.net.URLEncoder/encode (str s) "UTF-8"))
 
-(defn succeeded?
+(defn ^{:stratum 0} succeeded?
   "Check if a result map indicates success."
   [result]
   (boolean (:success? result)))
 
-(defn result-success
+(defn ^{:stratum 0} result-success
   [data]
   (merge {:success? true} data))
 
-(defn result-failure
+(defn ^{:stratum 0} result-failure
   ([message]
    (result-failure message nil))
   ([message data]
@@ -113,34 +98,155 @@
                                       (messages/t :error/default))}
           data)))
 
-(defn gh-error-message
+(defn ^{:stratum 0} gh-error-message
   [out err]
   (let [msg (str/trim (or (if (str/blank? err) out err) ""))]
     (when-not (str/blank? msg) msg)))
 
-(defn ex-msg
+(defn ^{:stratum 0} ex-msg
   [^Exception e]
   (or (.getMessage e)
       (some-> e class .getName)
       "unknown exception"))
 
-(defn normalized-limit
+(defn ^{:stratum 0} normalized-limit
   [limit default]
   (let [n (if (integer? limit) limit default)]
     (if (pos? n) n default)))
 
-(defn normalized-repos
-  "Extract, normalize, and validate repo slugs from a fleet config map."
-  [cfg]
-  (->> (get-in cfg [:fleet :repos] [])
-       (map normalize-repo-slug)
-       (filter valid-repo-slug?)
-       vec))
+;; Provider CLI interaction (I/O)
+(defn ^{:stratum 0} run-gh
+  "Execute a `gh` CLI command. Returns {:success? bool :out str :err str}."
+  [& args]
+  (try
+    (let [{:keys [exit out err]} (apply shell/sh "gh" args)]
+      {:success? (zero? exit)
+       :out (or out "")
+       :err (or err "")})
+    (catch Exception e
+      {:success? false
+       :out ""
+       :err (.getMessage e)})))
+
+(defn ^{:stratum 0} gitlab-state-param
+  "Map canonical state keyword to GitLab API state parameter."
+  [state]
+  (case state
+    :open   "opened"
+    :closed "closed"
+    :merged "merged"
+    :all    "all"
+    "opened"))
+
+(defn- ^{:stratum 0} mr-graphql-fragment
+  "Build a GraphQL fragment for a single MR iid."
+  [iid]
+  (str "mr" iid ": mergeRequest(iid: \"" iid "\") "
+       "{ diffStatsSummary { additions deletions fileCount } }"))
+
+(defn- ^{:stratum 0} extract-mr-diff-stats
+  "Extract diff stats for an iid from a parsed GraphQL project map.
+   Returns [iid stats-map] or nil when stats are absent."
+  [project iid]
+  (let [k (keyword (str "mr" iid))
+        stats (get-in project [k :diffStatsSummary])]
+    (when stats
+      [iid {:additions  (:additions stats 0)
+            :deletions  (:deletions stats 0)
+            :file-count (:fileCount stats 0)}])))
+
+(defn ^{:stratum 0} classify-error
+  "Classify a provider error message into a category keyword."
+  [error-msg]
+  (let [msg (str/lower-case (or error-msg ""))]
+    (cond
+      (or (str/includes? msg "401") (str/includes? msg "403")
+          (str/includes? msg "bad credentials") (str/includes? msg "forbidden"))
+      :auth-failure
+
+      (or (str/includes? msg "rate limit") (str/includes? msg "rate_limit"))
+      :rate-limited
+
+      (or (str/includes? msg "404") (str/includes? msg "not found"))
+      :not-found
+
+      (or (str/includes? msg "econnrefused") (str/includes? msg "connection")
+          (str/includes? msg "timeout") (str/includes? msg "network"))
+      :network-error
+
+      (or (str/includes? msg "parse") (str/includes? msg "json")
+          (str/includes? msg "unexpected"))
+      :parse-error
+
+      :else :unknown)))
+
+;; Error category → message key mapping for localized hints.
+(def ^{:stratum 0} ^:private error-hint-keys
+  {:auth-failure  :hint/auth-failure
+   :rate-limited  :hint/rate-limited
+   :not-found     :hint/not-found
+   :network-error :hint/network-error
+   :parse-error   :hint/parse-error
+   :unknown       :hint/unknown})
+
+(defn ^{:stratum 0} build-sync-summary
+  "Build a summary map from a sequence of repo sync statuses."
+  [sync-statuses]
+  (let [total  (count sync-statuses)
+        ok     (count (filter #(= :ok (:status %)) sync-statuses))
+        errors (- total ok)]
+    {:total    total
+     :ok       ok
+     :errors   errors
+     :all-ok?  (zero? errors)
+     :partial? (and (pos? ok) (pos? errors))
+     :none-ok? (and (pos? total) (zero? ok))}))
+
+(def ^{:stratum 0} viewer-repos-graphql-query
+  "query($perPage:Int!,$after:String){
+     viewer {
+       repositories(
+         first:$perPage,
+         after:$after,
+         affiliations:[OWNER,COLLABORATOR,ORGANIZATION_MEMBER],
+         orderBy:{field:UPDATED_AT,direction:DESC}
+       ) {
+         nodes { nameWithOwner }
+         pageInfo { hasNextPage endCursor }
+       }
+     }
+   }")
+
+(defn ^{:stratum 0} run-glab
+  "Execute a `glab` CLI command. Returns {:success? bool :out str :err str}."
+  [& args]
+  (try
+    (let [{:keys [exit out err]} (apply shell/sh "glab" args)]
+      {:success? (zero? exit)
+       :out (or out "")
+       :err (or err "")})
+    (catch Exception e
+      {:success? false
+       :out ""
+       :err (.getMessage e)})))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Fleet config I/O
 
-(defn- with-config-lock!
+(defn ^{:stratum 1} valid-repo-slug?
+  [repo]
+  (boolean
+   (or (re-matches github-repo-slug-pattern repo)
+       (re-matches gitlab-repo-slug-pattern repo))))
+
+(defn ^{:stratum 1} provider-repo-slug
+  "Strip provider prefix for downstream CLI calls."
+  [repo]
+  (if (= :gitlab (repo-provider repo))
+    (subs repo (count "gitlab:"))
+    repo))
+
+;; Fleet config I/O
+(defn- ^{:stratum 1} with-config-lock!
   "Acquire an exclusive advisory JVM file lock on `path`, call `thunk`, release.
 
    Polls for up to `config-lock-timeout-ms` (500 ms) in `config-lock-poll-ms`
@@ -197,7 +303,7 @@
           (result-failure (messages/t :config-lock/acquire-failed {:error (ex-msg e)})
                           {:path path}))))))
 
-(defn load-fleet-config
+(defn ^{:stratum 1} load-fleet-config
   "Load fleet configuration from ~/.miniforge/config.edn.
    Returns {:fleet {:repos [...]}} or default empty config."
   ([] (load-fleet-config default-fleet-config-path))
@@ -212,7 +318,7 @@
      (catch Exception _
        {:fleet {:repos []}}))))
 
-(defn save-fleet-config!
+(defn ^{:stratum 1} save-fleet-config!
   "Write fleet configuration to disk."
   ([config] (save-fleet-config! config default-fleet-config-path))
   ([config path]
@@ -220,13 +326,179 @@
      (.mkdirs (.getParentFile file))
      (spit file (pr-str config)))))
 
-(defn get-configured-repos
+(defn ^{:stratum 1} fetch-gitlab-diff-stats-batch
+  "Fetch diff stats for multiple MRs in a single GraphQL query.
+   Returns {iid {:additions N :deletions N :file-count N}} or empty map on failure."
+  [repo* iids]
+  (when (seq iids)
+    (try
+      (let [;; Build aliased GraphQL query: mr26: mergeRequest(iid: \"26\") { ... }
+            mr-fragments (str/join " " (map mr-graphql-fragment iids))
+            query (str "{ project(fullPath: \"" repo* "\") { " mr-fragments " } }")
+            {:keys [success? out]} (run-glab "api" "graphql" "-f" (str "query=" query))]
+        (if-not success?
+          {}
+          (let [data (json/parse-string out true)
+                project (get-in data [:data :project])]
+            (into {}
+              (keep (partial extract-mr-diff-stats project))
+              iids))))
+      (catch Exception _ {}))))
+
+(defn ^{:stratum 1} error-hint
+  "Return a human-readable hint for a given error category."
+  [category]
+  (messages/t (get error-hint-keys category :hint/unknown)))
+
+(defn- ^{:stratum 1} extract-sync-error-message
+  "Extract the most relevant error message from a failed sync result."
+  [result]
+  (or (:error result)
+      (gh-error-message (:out result) (:err result))
+      (messages/t :error/unknown)))
+
+(defn ^{:stratum 1} viewer-repos-gh-args
+  "Build `gh api graphql` arguments for a page of viewer repositories."
+  [limit acc after]
+  (let [remaining (- limit (count acc))
+        per-page (max 1 (min 100 remaining))]
+    (cond-> ["api" "graphql"
+             "-f" (str "query=" viewer-repos-graphql-query)
+             "-F" (str "perPage=" per-page)]
+      after (conj "-F" (str "after=" after)))))
+
+(defn ^{:stratum 1} list-github-viewer-orgs
+  []
+  (let [result (run-gh "api" "user/orgs?per_page=100")]
+    (if-not (succeeded? result)
+      (result-failure (gh-error-message (:out result) (:err result))
+                      {:provider :github :error-source :orgs})
+      (try
+        (let [orgs (->> (json/parse-string (:out result) true)
+                        (keep :login)
+                        (map str/lower-case)
+                        distinct
+                        vec)]
+          (result-success {:provider :github :orgs orgs}))
+        (catch Exception e
+          (result-failure "Failed to parse organization list."
+                          {:provider :github :error-source :orgs :error (ex-msg e)}))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} normalized-repos
+  "Extract, normalize, and validate repo slugs from a fleet config map."
+  [cfg]
+  (->> (get-in cfg [:fleet :repos] [])
+       (map normalize-repo-slug)
+       (filter valid-repo-slug?)
+       vec))
+
+(defn ^{:stratum 2} fetch-github-prs
+  "Fetch GitHub PRs by state (:open, :closed, :merged, :all)."
+  [repo state]
+  (let [repo*  (provider-repo-slug repo)
+        gh-state (case state
+                   :merged "merged" :closed "closed" :all "all" "open")
+        {:keys [success? out err]} (run-gh "pr" "list"
+                                           "--repo" repo*
+                                           "--state" gh-state
+                                           "--json" "number,title,url,state,mergedAt,headRefName,isDraft,reviewDecision,statusCheckRollup,mergeStateStatus,additions,deletions,changedFiles,author")]
+    (if-not success?
+      (result-failure (gh-error-message out err) {:repo repo :provider :github})
+      (try
+        (let [rows (json/parse-string out true)]
+          (result-success
+           {:repo repo
+            :provider :github
+            :prs (->> rows
+                      (map #(status/provider-pr->train-pr % repo))
+                      (sort-by :pr/number)
+                      vec)}))
+        (catch Exception e
+          (result-failure (messages/t :error/parse-pr {:repo repo})
+                          {:repo repo :provider :github :parse-error (.getMessage e)}))))))
+
+(defn ^{:stratum 2} enrich-gitlab-mrs-with-diff-stats
+  "Enrich GitLab MR maps with diff stats via a single batched GraphQL query.
+   Only enriches open/draft MRs (skip closed/merged)."
+  [repo* mrs]
+  (let [open-mrs (filter #(= "opened" (some-> (:state %) str str/lower-case)) mrs)
+        iids (mapv :iid open-mrs)]
+    (if (empty? iids)
+      mrs
+      (let [stats (fetch-gitlab-diff-stats-batch repo* iids)]
+        (mapv (fn [mr]
+                (if-let [s (get stats (:iid mr))]
+                  (assoc mr
+                         :additions (:additions s 0)
+                         :deletions (:deletions s 0)
+                         :changes_count (or (:file-count s) (:changes_count mr)))
+                  mr))
+              mrs)))))
+
+(defn ^{:stratum 2} classify-sync-error
+  "Classify an error message and return a map with :error-category and :hint."
+  [error-msg]
+  (let [category (classify-error error-msg)]
+    {:error-category category
+     :hint           (error-hint category)}))
+
+(defn- ^{:stratum 2} repo-sync-error
+  "Build a classified sync error result for a repo."
+  [repo err-msg]
+  (let [category (classify-error err-msg)]
+    (result-failure err-msg
+                    {:status         :error
+                     :repo           repo
+                     :error-category category
+                     :hint           (error-hint category)})))
+
+(defn ^{:stratum 2} parse-gh-full-name-repos
+  [out limit]
+  (->> (json/parse-string out true)
+       (keep :full_name)
+       (map normalize-repo-slug)
+       (filter valid-repo-slug?)
+       distinct
+       (take limit)
+       vec))
+
+(defn ^{:stratum 2} parse-viewer-repos-page
+  "Extract normalized repo slugs and pagination info from a GraphQL viewer response."
+  [parsed]
+  (let [nodes (or (get-in parsed [:data :viewer :repositories :nodes] []) [])
+        page-info (or (get-in parsed [:data :viewer :repositories :pageInfo] {}) {})
+        repos (->> nodes
+                   (keep :nameWithOwner)
+                   (map normalize-repo-slug)
+                   (filter valid-repo-slug?)
+                   distinct
+                   vec)]
+    {:repos repos
+     :has-next? (boolean (:hasNextPage page-info))
+     :cursor (:endCursor page-info)}))
+
+(defn ^{:stratum 2} parse-glab-project-repos
+  [out limit]
+  (->> (json/parse-string out true)
+       (keep :path_with_namespace)
+       (map (fn [path]
+              (str "gitlab:" (normalize-repo-slug path))))
+       (filter valid-repo-slug?)
+       distinct
+       (take limit)
+       vec))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} get-configured-repos
   "Get configured fleet repositories as normalized slugs."
   ([] (get-configured-repos default-fleet-config-path))
   ([path]
    (-> (load-fleet-config path) normalized-repos distinct vec)))
 
-(defn add-repo!
+(defn ^{:stratum 3} add-repo!
   "Add a repository slug to fleet configuration.
    Accepted formats:
    - GitHub: owner/name
@@ -256,7 +528,7 @@
                                      :repo repo
                                      :repos (get-in next-cfg [:fleet :repos])})))))))))
 
-(defn remove-repo!
+(defn ^{:stratum 3} remove-repo!
   "Remove a repository slug from fleet configuration.
    Returns {:success? bool :removed? bool :repo str :repos [...]}."
   ([repo-slug] (remove-repo! repo-slug default-fleet-config-path))
@@ -277,121 +549,14 @@
                                      :repo repo
                                      :repos next-repos})))))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Provider CLI interaction (I/O)
-
-(defn run-gh
-  "Execute a `gh` CLI command. Returns {:success? bool :out str :err str}."
-  [& args]
-  (try
-    (let [{:keys [exit out err]} (apply shell/sh "gh" args)]
-      {:success? (zero? exit)
-       :out (or out "")
-       :err (or err "")})
-    (catch Exception e
-      {:success? false
-       :out ""
-       :err (.getMessage e)})))
-
-(declare run-glab)
-
-(defn fetch-github-prs
-  "Fetch GitHub PRs by state (:open, :closed, :merged, :all)."
-  [repo state]
-  (let [repo*  (provider-repo-slug repo)
-        gh-state (case state
-                   :merged "merged" :closed "closed" :all "all" "open")
-        {:keys [success? out err]} (run-gh "pr" "list"
-                                           "--repo" repo*
-                                           "--state" gh-state
-                                           "--json" "number,title,url,state,mergedAt,headRefName,isDraft,reviewDecision,statusCheckRollup,mergeStateStatus,additions,deletions,changedFiles,author")]
-    (if-not success?
-      (result-failure (gh-error-message out err) {:repo repo :provider :github})
-      (try
-        (let [rows (json/parse-string out true)]
-          (result-success
-           {:repo repo
-            :provider :github
-            :prs (->> rows
-                      (map #(status/provider-pr->train-pr % repo))
-                      (sort-by :pr/number)
-                      vec)}))
-        (catch Exception e
-          (result-failure (messages/t :error/parse-pr {:repo repo})
-                          {:repo repo :provider :github :parse-error (.getMessage e)}))))))
-
-(defn fetch-open-github-prs
+(defn ^{:stratum 3} fetch-open-github-prs
   [repo]
   (let [result (fetch-github-prs repo :open)]
     (if (succeeded? result)
       (update result :prs (fn [prs] (vec (remove #(#{:closed :merged} (:pr/status %)) prs))))
       result)))
 
-(defn gitlab-state-param
-  "Map canonical state keyword to GitLab API state parameter."
-  [state]
-  (case state
-    :open   "opened"
-    :closed "closed"
-    :merged "merged"
-    :all    "all"
-    "opened"))
-
-(defn- mr-graphql-fragment
-  "Build a GraphQL fragment for a single MR iid."
-  [iid]
-  (str "mr" iid ": mergeRequest(iid: \"" iid "\") "
-       "{ diffStatsSummary { additions deletions fileCount } }"))
-
-(defn- extract-mr-diff-stats
-  "Extract diff stats for an iid from a parsed GraphQL project map.
-   Returns [iid stats-map] or nil when stats are absent."
-  [project iid]
-  (let [k (keyword (str "mr" iid))
-        stats (get-in project [k :diffStatsSummary])]
-    (when stats
-      [iid {:additions  (:additions stats 0)
-            :deletions  (:deletions stats 0)
-            :file-count (:fileCount stats 0)}])))
-
-(defn fetch-gitlab-diff-stats-batch
-  "Fetch diff stats for multiple MRs in a single GraphQL query.
-   Returns {iid {:additions N :deletions N :file-count N}} or empty map on failure."
-  [repo* iids]
-  (when (seq iids)
-    (try
-      (let [;; Build aliased GraphQL query: mr26: mergeRequest(iid: \"26\") { ... }
-            mr-fragments (str/join " " (map mr-graphql-fragment iids))
-            query (str "{ project(fullPath: \"" repo* "\") { " mr-fragments " } }")
-            {:keys [success? out]} (run-glab "api" "graphql" "-f" (str "query=" query))]
-        (if-not success?
-          {}
-          (let [data (json/parse-string out true)
-                project (get-in data [:data :project])]
-            (into {}
-              (keep (partial extract-mr-diff-stats project))
-              iids))))
-      (catch Exception _ {}))))
-
-(defn enrich-gitlab-mrs-with-diff-stats
-  "Enrich GitLab MR maps with diff stats via a single batched GraphQL query.
-   Only enriches open/draft MRs (skip closed/merged)."
-  [repo* mrs]
-  (let [open-mrs (filter #(= "opened" (some-> (:state %) str str/lower-case)) mrs)
-        iids (mapv :iid open-mrs)]
-    (if (empty? iids)
-      mrs
-      (let [stats (fetch-gitlab-diff-stats-batch repo* iids)]
-        (mapv (fn [mr]
-                (if-let [s (get stats (:iid mr))]
-                  (assoc mr
-                         :additions (:additions s 0)
-                         :deletions (:deletions s 0)
-                         :changes_count (or (:file-count s) (:changes_count mr)))
-                  mr))
-              mrs)))))
-
-(defn fetch-gitlab-mrs-by-state
+(defn ^{:stratum 3} fetch-gitlab-mrs-by-state
   "Fetch GitLab merge requests by state (:open, :closed, :merged, :all).
    Enriches open MRs with diff stats (additions/deletions) via per-MR API calls."
   [repo state]
@@ -431,162 +596,7 @@
           (result-failure (messages/t :error/parse-mr {:repo repo})
                           {:repo repo :provider :gitlab :parse-error (.getMessage e)}))))))
 
-(defn fetch-open-gitlab-mrs
-  [repo]
-  (fetch-gitlab-mrs-by-state repo :open))
-
-(defn fetch-open-prs
-  "Fetch open PR/MR items for a single configured repository.
-   GitHub repos use `gh pr list`; GitLab repos use `glab api`.
-   Returns {:success? bool :repo str :prs [TrainPR ...]}."
-  [repo]
-  (case (repo-provider repo)
-    :gitlab (fetch-open-gitlab-mrs repo)
-    (fetch-open-github-prs repo)))
-
-(defn fetch-prs-by-state
-  "Fetch PRs for a single repo by state (:open, :closed, :merged, :all).
-   Returns {:success? bool :repo str :prs [TrainPR ...]}."
-  [repo state]
-  (case (repo-provider repo)
-    :gitlab (fetch-gitlab-mrs-by-state repo state)
-    (fetch-github-prs repo state)))
-
-(defn classify-error
-  "Classify a provider error message into a category keyword."
-  [error-msg]
-  (let [msg (str/lower-case (or error-msg ""))]
-    (cond
-      (or (str/includes? msg "401") (str/includes? msg "403")
-          (str/includes? msg "bad credentials") (str/includes? msg "forbidden"))
-      :auth-failure
-
-      (or (str/includes? msg "rate limit") (str/includes? msg "rate_limit"))
-      :rate-limited
-
-      (or (str/includes? msg "404") (str/includes? msg "not found"))
-      :not-found
-
-      (or (str/includes? msg "econnrefused") (str/includes? msg "connection")
-          (str/includes? msg "timeout") (str/includes? msg "network"))
-      :network-error
-
-      (or (str/includes? msg "parse") (str/includes? msg "json")
-          (str/includes? msg "unexpected"))
-      :parse-error
-
-      :else :unknown)))
-
-;; Error category → message key mapping for localized hints.
-(def ^:private error-hint-keys
-  {:auth-failure  :hint/auth-failure
-   :rate-limited  :hint/rate-limited
-   :not-found     :hint/not-found
-   :network-error :hint/network-error
-   :parse-error   :hint/parse-error
-   :unknown       :hint/unknown})
-
-(defn error-hint
-  "Return a human-readable hint for a given error category."
-  [category]
-  (messages/t (get error-hint-keys category :hint/unknown)))
-
-(defn classify-sync-error
-  "Classify an error message and return a map with :error-category and :hint."
-  [error-msg]
-  (let [category (classify-error error-msg)]
-    {:error-category category
-     :hint           (error-hint category)}))
-
-(defn- repo-sync-error
-  "Build a classified sync error result for a repo."
-  [repo err-msg]
-  (let [category (classify-error err-msg)]
-    (result-failure err-msg
-                    {:status         :error
-                     :repo           repo
-                     :error-category category
-                     :hint           (error-hint category)})))
-
-(defn- extract-sync-error-message
-  "Extract the most relevant error message from a failed sync result."
-  [result]
-  (or (:error result)
-      (gh-error-message (:out result) (:err result))
-      (messages/t :error/unknown)))
-
-(defn fetch-repo-with-status
-  "Fetch open PRs for a single repo and return a status map.
-   Returns {:status :ok/:error, :repo str, :prs [...], :pr-count N,
-            :error-category kw, :error str, :hint str}."
-  [repo]
-  (try
-    (let [result (fetch-open-prs repo)]
-      (if (succeeded? result)
-        (result-success {:status   :ok
-                         :repo     repo
-                         :prs      (vec (:prs result))
-                         :pr-count (count (:prs result))})
-        (repo-sync-error repo
-                         (extract-sync-error-message result))))
-    (catch Exception e
-      (repo-sync-error repo (ex-msg e)))))
-
-(defn build-sync-summary
-  "Build a summary map from a sequence of repo sync statuses."
-  [sync-statuses]
-  (let [total  (count sync-statuses)
-        ok     (count (filter #(= :ok (:status %)) sync-statuses))
-        errors (- total ok)]
-    {:total    total
-     :ok       ok
-     :errors   errors
-     :all-ok?  (zero? errors)
-     :partial? (and (pos? ok) (pos? errors))
-     :none-ok? (and (pos? total) (zero? ok))}))
-
-(defn fetch-fleet-with-status
-  "Fetch open PRs for all configured fleet repos, returning structured results.
-   Returns {:prs [...], :sync-statuses [...], :summary {...}}.
-
-   Options:
-   - :config-path  - Override config file path (for testing)
-   - :parallel?    - Use parallel fetching (default false)"
-  [& [{:keys [config-path parallel?] :or {parallel? false}}]]
-  (let [repos (get-configured-repos (or config-path default-fleet-config-path))]
-    (if (empty? repos)
-      {:prs           []
-       :sync-statuses []
-       :summary       (build-sync-summary [])}
-      (let [map-fn       (if parallel? pmap map)
-            statuses     (vec (map-fn fetch-repo-with-status repos))
-            all-prs      (->> statuses
-                              (filter #(= :ok (:status %)))
-                              (mapcat :prs)
-                              vec)]
-        {:prs           all-prs
-         :sync-statuses statuses
-         :summary       (build-sync-summary statuses)}))))
-
-(defn fetch-all-fleet-prs
-  "Fetch open PRs for all configured fleet repositories.
-   Returns flat vector of TrainPR maps with :pr/repo set.
-
-   Options:
-   - :config-path - Override config file path (for testing)
-   - :state       - :open (default), :closed, :merged, :all"
-  [& [{:keys [config-path state] :or {state :open}}]]
-  (let [repos (get-configured-repos (or config-path default-fleet-config-path))
-        fetch-fn (if (= :open state) fetch-open-prs #(fetch-prs-by-state % state))]
-    (if (empty? repos)
-      []
-      (->> repos
-           (pmap fetch-fn)
-           (filter succeeded?)
-           (mapcat :prs)
-           vec))))
-
-(defn discover-repos!
+(defn ^{:stratum 3} discover-repos!
   "Discover repositories from a GitHub org/user and add them to fleet config.
 
    Options:
@@ -632,70 +642,7 @@
           (result-failure "Failed to parse repository list."
                           {:error (ex-msg e)}))))))
 
-(def viewer-repos-graphql-query
-  "query($perPage:Int!,$after:String){
-     viewer {
-       repositories(
-         first:$perPage,
-         after:$after,
-         affiliations:[OWNER,COLLABORATOR,ORGANIZATION_MEMBER],
-         orderBy:{field:UPDATED_AT,direction:DESC}
-       ) {
-         nodes { nameWithOwner }
-         pageInfo { hasNextPage endCursor }
-       }
-     }
-   }")
-
-(defn run-glab
-  "Execute a `glab` CLI command. Returns {:success? bool :out str :err str}."
-  [& args]
-  (try
-    (let [{:keys [exit out err]} (apply shell/sh "glab" args)]
-      {:success? (zero? exit)
-       :out (or out "")
-       :err (or err "")})
-    (catch Exception e
-      {:success? false
-       :out ""
-       :err (.getMessage e)})))
-
-(defn parse-gh-full-name-repos
-  [out limit]
-  (->> (json/parse-string out true)
-       (keep :full_name)
-       (map normalize-repo-slug)
-       (filter valid-repo-slug?)
-       distinct
-       (take limit)
-       vec))
-
-(defn viewer-repos-gh-args
-  "Build `gh api graphql` arguments for a page of viewer repositories."
-  [limit acc after]
-  (let [remaining (- limit (count acc))
-        per-page (max 1 (min 100 remaining))]
-    (cond-> ["api" "graphql"
-             "-f" (str "query=" viewer-repos-graphql-query)
-             "-F" (str "perPage=" per-page)]
-      after (conj "-F" (str "after=" after)))))
-
-(defn parse-viewer-repos-page
-  "Extract normalized repo slugs and pagination info from a GraphQL viewer response."
-  [parsed]
-  (let [nodes (or (get-in parsed [:data :viewer :repositories :nodes] []) [])
-        page-info (or (get-in parsed [:data :viewer :repositories :pageInfo] {}) {})
-        repos (->> nodes
-                   (keep :nameWithOwner)
-                   (map normalize-repo-slug)
-                   (filter valid-repo-slug?)
-                   distinct
-                   vec)]
-    {:repos repos
-     :has-next? (boolean (:hasNextPage page-info))
-     :cursor (:endCursor page-info)}))
-
-(defn list-viewer-repos
+(defn ^{:stratum 3} list-viewer-repos
   "List repos visible to the authenticated user across affiliations."
   [limit]
   (try
@@ -720,7 +667,7 @@
       (result-failure "Failed to list accessible repositories."
                       {:error (ex-msg e)}))))
 
-(defn list-github-owner-repos
+(defn ^{:stratum 3} list-github-owner-repos
   [owner limit]
   (let [owner* (some-> owner str str/trim not-empty)
         org-endpoint (str "orgs/" owner* "/repos?per_page=100&type=all&sort=updated")
@@ -741,24 +688,7 @@
           (result-failure "Failed to parse repository list."
                           {:owner owner* :provider :github :error (ex-msg e)}))))))
 
-(defn list-github-viewer-orgs
-  []
-  (let [result (run-gh "api" "user/orgs?per_page=100")]
-    (if-not (succeeded? result)
-      (result-failure (gh-error-message (:out result) (:err result))
-                      {:provider :github :error-source :orgs})
-      (try
-        (let [orgs (->> (json/parse-string (:out result) true)
-                        (keep :login)
-                        (map str/lower-case)
-                        distinct
-                        vec)]
-          (result-success {:provider :github :orgs orgs}))
-        (catch Exception e
-          (result-failure "Failed to parse organization list."
-                          {:provider :github :error-source :orgs :error (ex-msg e)}))))))
-
-(defn list-github-user-repos-fallback
+(defn ^{:stratum 3} list-github-user-repos-fallback
   [limit]
   (let [result (run-gh "api" "user/repos?per_page=100&sort=updated")]
     (if-not (succeeded? result)
@@ -772,7 +702,40 @@
           (result-failure "Failed to parse repository list."
                           {:owner nil :provider :github :error-source :rest :error (ex-msg e)}))))))
 
-(defn list-github-accessible-repos
+(defn ^{:stratum 3} list-gitlab-repos
+  [{:keys [owner limit]}]
+  (let [owner* (some-> owner str str/trim not-empty)
+        endpoint (if owner*
+                   (str "groups/" (url-encode owner*)
+                        "/projects?include_subgroups=true&archived=false&per_page=100&simple=true&order_by=last_activity_at&sort=desc")
+                   "projects?membership=true&archived=false&per_page=100&simple=true&order_by=last_activity_at&sort=desc")
+        result (run-glab "api" endpoint)]
+    (if-not (succeeded? result)
+      (result-failure (gh-error-message (:out result) (:err result))
+                      {:owner owner* :provider :gitlab})
+      (try
+        (result-success {:owner owner*
+                         :provider :gitlab
+                         :repos (parse-glab-project-repos (:out result) limit)})
+        (catch Exception e
+          (result-failure "Failed to parse GitLab repository list."
+                          {:owner owner* :provider :gitlab :error (ex-msg e)}))))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} fetch-open-gitlab-mrs
+  [repo]
+  (fetch-gitlab-mrs-by-state repo :open))
+
+(defn ^{:stratum 4} fetch-prs-by-state
+  "Fetch PRs for a single repo by state (:open, :closed, :merged, :all).
+   Returns {:success? bool :repo str :prs [TrainPR ...]}."
+  [repo state]
+  (case (repo-provider repo)
+    :gitlab (fetch-gitlab-mrs-by-state repo state)
+    (fetch-github-prs repo state)))
+
+(defn ^{:stratum 4} list-github-accessible-repos
   [limit]
   (let [viewer (list-viewer-repos limit)
         orgs-result (list-github-viewer-orgs)
@@ -811,37 +774,18 @@
                               "Failed to list accessible repositories.")
                           {:owner nil :provider :github :error-source :rest}))))))
 
-(defn parse-glab-project-repos
-  [out limit]
-  (->> (json/parse-string out true)
-       (keep :path_with_namespace)
-       (map (fn [path]
-              (str "gitlab:" (normalize-repo-slug path))))
-       (filter valid-repo-slug?)
-       distinct
-       (take limit)
-       vec))
+;------------------------------------------------------------------------------ Layer 5
 
-(defn list-gitlab-repos
-  [{:keys [owner limit]}]
-  (let [owner* (some-> owner str str/trim not-empty)
-        endpoint (if owner*
-                   (str "groups/" (url-encode owner*)
-                        "/projects?include_subgroups=true&archived=false&per_page=100&simple=true&order_by=last_activity_at&sort=desc")
-                   "projects?membership=true&archived=false&per_page=100&simple=true&order_by=last_activity_at&sort=desc")
-        result (run-glab "api" endpoint)]
-    (if-not (succeeded? result)
-      (result-failure (gh-error-message (:out result) (:err result))
-                      {:owner owner* :provider :gitlab})
-      (try
-        (result-success {:owner owner*
-                         :provider :gitlab
-                         :repos (parse-glab-project-repos (:out result) limit)})
-        (catch Exception e
-          (result-failure "Failed to parse GitLab repository list."
-                          {:owner owner* :provider :gitlab :error (ex-msg e)}))))))
+(defn ^{:stratum 5} fetch-open-prs
+  "Fetch open PR/MR items for a single configured repository.
+   GitHub repos use `gh pr list`; GitLab repos use `glab api`.
+   Returns {:success? bool :repo str :prs [TrainPR ...]}."
+  [repo]
+  (case (repo-provider repo)
+    :gitlab (fetch-open-gitlab-mrs repo)
+    (fetch-open-github-prs repo)))
 
-(defn list-org-repos
+(defn ^{:stratum 5} list-org-repos
   "List repository slugs from configured providers (read-only browse).
 
    Options:
@@ -889,6 +833,68 @@
 
       (result-failure (str "Unknown provider: " provider*)
                       {:owner owner* :provider provider*}))))
+
+;------------------------------------------------------------------------------ Layer 6
+
+(defn ^{:stratum 6} fetch-repo-with-status
+  "Fetch open PRs for a single repo and return a status map.
+   Returns {:status :ok/:error, :repo str, :prs [...], :pr-count N,
+            :error-category kw, :error str, :hint str}."
+  [repo]
+  (try
+    (let [result (fetch-open-prs repo)]
+      (if (succeeded? result)
+        (result-success {:status   :ok
+                         :repo     repo
+                         :prs      (vec (:prs result))
+                         :pr-count (count (:prs result))})
+        (repo-sync-error repo
+                         (extract-sync-error-message result))))
+    (catch Exception e
+      (repo-sync-error repo (ex-msg e)))))
+
+(defn ^{:stratum 6} fetch-all-fleet-prs
+  "Fetch open PRs for all configured fleet repositories.
+   Returns flat vector of TrainPR maps with :pr/repo set.
+
+   Options:
+   - :config-path - Override config file path (for testing)
+   - :state       - :open (default), :closed, :merged, :all"
+  [& [{:keys [config-path state] :or {state :open}}]]
+  (let [repos (get-configured-repos (or config-path default-fleet-config-path))
+        fetch-fn (if (= :open state) fetch-open-prs #(fetch-prs-by-state % state))]
+    (if (empty? repos)
+      []
+      (->> repos
+           (pmap fetch-fn)
+           (filter succeeded?)
+           (mapcat :prs)
+           vec))))
+
+;------------------------------------------------------------------------------ Layer 7
+
+(defn ^{:stratum 7} fetch-fleet-with-status
+  "Fetch open PRs for all configured fleet repos, returning structured results.
+   Returns {:prs [...], :sync-statuses [...], :summary {...}}.
+
+   Options:
+   - :config-path  - Override config file path (for testing)
+   - :parallel?    - Use parallel fetching (default false)"
+  [& [{:keys [config-path parallel?] :or {parallel? false}}]]
+  (let [repos (get-configured-repos (or config-path default-fleet-config-path))]
+    (if (empty? repos)
+      {:prs           []
+       :sync-statuses []
+       :summary       (build-sync-summary [])}
+      (let [map-fn       (if parallel? pmap map)
+            statuses     (vec (map-fn fetch-repo-with-status repos))
+            all-prs      (->> statuses
+                              (filter #(= :ok (:status %)))
+                              (mapcat :prs)
+                              vec)]
+        {:prs           all-prs
+         :sync-statuses statuses
+         :summary       (build-sync-summary statuses)}))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
