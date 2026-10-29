@@ -32,15 +32,20 @@
 
 (defn- ^{:stratum 0} restore-gate-failed-phase
   "Rebuild the failed :opsv/actuate phase from the post-actuation snapshot and
-   the gate-failure record, for a run whose terminal snapshot was not kept."
+   the gate-failure record, for a run whose terminal snapshot was not kept.
+   Both failures are restored: the phase error is the publication error when
+   one came first (as in the live run), and the gate failure rides beside it."
   [ctx]
   (let [restored (post-actuation/restore ctx)]
     (if (anomaly/any-anomaly? restored)
       restored
-      (let [failure (post-actuation/gate-failure ctx)
+      (let [record (post-actuation/gate-failure-record ctx)
+            failure (post-actuation/phase-failure record)
             output (:opsv/recovered-actuation-output restored)
-            phase-failure (anomaly/anomaly (:anomaly/type failure) (:anomaly/message failure)
-                                           {:opsv/phase-output output})]
+            data (cond-> {:opsv/phase-output output :opsv/gate-failure (:failure record)}
+                   (:publication-failure record)
+                   (assoc :opsv/publication-failure (:publication-failure record)))
+            phase-failure (anomaly/anomaly (:anomaly/type failure) (:anomaly/message failure) data)]
         (-> restored
             (dissoc :opsv/recovered-actuation-output)
             (assoc :phase {:name :opsv/actuate :status :failed

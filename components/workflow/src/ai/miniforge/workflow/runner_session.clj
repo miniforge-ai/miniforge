@@ -38,7 +38,7 @@
   (let [pipeline ((:session/build-pipeline session) workflow)
         max-phases (get opts :max-phases (defaults/max-phases))
         control (control-state opts)
-        ctx (initial-context workflow input opts recurse)
+        ctx (initial-context workflow (preparation/admit-input pipeline input opts) opts recurse)
         stream (:event-stream opts)
         skip? (:skip-lifecycle-events opts)
         started (start/admit! stream ctx skip?)

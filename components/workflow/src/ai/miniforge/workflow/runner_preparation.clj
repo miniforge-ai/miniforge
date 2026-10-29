@@ -55,6 +55,17 @@
                   (merge opts {:branch branch} acquired)
                   opts)])))
 
+(defn ^{:stratum 0} admit-input
+  "Caller input as a fresh run admits it, once: without the input keys a
+   pipeline phase's lifecycle owns (its interceptor's :owned-input-keys).
+   Only that lifecycle writes them, so a caller's value is never trusted. A
+   resume is not admitted: it continues the checkpointed run's input whole,
+   lifecycle-owned keys included."
+  [pipeline input opts]
+  (if (or (not (map? input)) (:resume-machine-snapshot opts) (:resume-phase-results opts))
+    input
+    (apply dissoc input (mapcat :owned-input-keys pipeline))))
+
 (defn- ^{:stratum 0} governed-capsule? [opts]
   (boolean (and (= :governed (:execution-mode opts))
                 (:executor opts) (:environment-id opts))))
