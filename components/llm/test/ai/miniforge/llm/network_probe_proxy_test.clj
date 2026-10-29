@@ -94,6 +94,14 @@
     (catch java.io.IOException _
       nil)))
 
+(def ^{:stratum 0} ^:private gateway-url
+  "A base URL the CLI is pointed at instead of the provider."
+  "https://llm-gateway.corp.example/anthropic")
+
+(def ^{:stratum 0} ^:private ignored-url
+  "A base URL the active route must not pick."
+  "https://ignored.example/")
+
 (def ^{:stratum 0} ^:private failed-connect-status-lines
   "Answers a proxy gives to CONNECT when it cannot reach the provider."
   ["502 Bad Gateway" "503 Service Unavailable" "504 Gateway Timeout"])
@@ -111,6 +119,13 @@
   "Environment that routes https probes through the proxy on `server`."
   [^java.net.ServerSocket server]
   {"HTTPS_PROXY" (str "http://127.0.0.1:" (.getLocalPort server))})
+
+(defn- ^{:stratum 0} probe-endpoint-with-env
+  "`probe-endpoint-for` `backend-key` when the environment is exactly
+   `env`."
+  [backend-key env]
+  (with-redefs [impl/getenv-value (fn [k] (get env k))]
+    (impl/probe-endpoint-for backend-key)))
 
 (defn- ^{:stratum 0} probe-request
   "The request map `network-healthy?` sends for `url` under environment
@@ -227,6 +242,50 @@
     (let [request (probe-request anthropic-probe-url {})]
       (is (= anthropic-probe-url (:url request)))
       (is (not (contains? request :proxy-url))))))
+
+(deftest ^{:stratum 1} probe-endpoint-follows-cli-endpoint-settings-test
+  (testing "ANTHROPIC_BASE_URL moves the :claude probe to that gateway"
+    (is (= gateway-url (probe-endpoint-with-env :claude {"ANTHROPIC_BASE_URL" gateway-url}))))
+
+  (testing "OPENAI_BASE_URL moves the :codex probe"
+    (is (= gateway-url (probe-endpoint-with-env :codex {"OPENAI_BASE_URL" gateway-url}))))
+
+  (testing "Bedrock: its own base URL, else the regional endpoint; ANTHROPIC_BASE_URL does not apply"
+    (is (= gateway-url
+           (probe-endpoint-with-env :claude {"CLAUDE_CODE_USE_BEDROCK" "1"
+                                             "ANTHROPIC_BEDROCK_BASE_URL" gateway-url
+                                             "ANTHROPIC_BASE_URL" ignored-url})))
+    (is (= "https://bedrock-runtime.eu-west-1.amazonaws.com/"
+           (probe-endpoint-with-env :claude {"CLAUDE_CODE_USE_BEDROCK" "1"
+                                             "AWS_REGION" "eu-west-1"
+                                             "ANTHROPIC_BASE_URL" ignored-url}))))
+
+  (testing "Vertex: its own base URL, else the global or regional endpoint"
+    (is (= gateway-url
+           (probe-endpoint-with-env :claude {"CLAUDE_CODE_USE_VERTEX" "1"
+                                             "ANTHROPIC_VERTEX_BASE_URL" gateway-url})))
+    (is (= "https://aiplatform.googleapis.com/"
+           (probe-endpoint-with-env :claude {"CLAUDE_CODE_USE_VERTEX" "1"
+                                             "CLOUD_ML_REGION" "global"})))
+    (is (= "https://us-east5-aiplatform.googleapis.com/"
+           (probe-endpoint-with-env :claude {"CLAUDE_CODE_USE_VERTEX" "1"
+                                             "CLOUD_ML_REGION" "us-east5"}))))
+
+  (testing "a provider switch that reads as off does not apply"
+    (is (= gateway-url
+           (probe-endpoint-with-env :claude {"CLAUDE_CODE_USE_BEDROCK" "0"
+                                             "AWS_REGION" "eu-west-1"
+                                             "ANTHROPIC_BASE_URL" gateway-url}))))
+
+  (testing "the static endpoint when the route yields nothing usable"
+    (is (= anthropic-probe-url
+           (probe-endpoint-with-env :claude {"CLAUDE_CODE_USE_BEDROCK" "1"}))
+        "Bedrock on, no base URL or region")
+    (is (= anthropic-probe-url
+           (probe-endpoint-with-env :claude {"ANTHROPIC_BASE_URL" "gateway.corp.example:8080"}))
+        "not an http(s) URL")
+    (is (= anthropic-probe-url (probe-endpoint-with-env :claude {}))
+        "nothing set")))
 
 ;------------------------------------------------------------------------------ Layer 2
 
