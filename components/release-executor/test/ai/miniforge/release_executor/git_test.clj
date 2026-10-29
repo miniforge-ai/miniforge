@@ -152,50 +152,41 @@
                          ["force-push!" #(git/force-push! "/tmp/wt" "tok")]]]
     (testing (str label ": a failed push with a token retries once over HTTPS, with
                   the token only in the retry's environment")
-      (let [pushes   (atom [])
-            shells   (atom [])
-            r        (with-redefs [shell/run-bounded
-                                   (fn [args opts]
-                                     (swap! pushes conj {:args args :opts opts})
-                                     (if (= 1 (count @pushes))
-                                       {:exit 1 :out "" :err "ssh: permission denied (publickey)"}
-                                       {:exit 0 :out "pushed" :err ""}))
-                                   process/shell
-                                   (fn [_opts & args]
-                                     (swap! shells conj (vec args))
-                                     {:exit 0 :out "git@github.com:o/r.git\n" :err ""})]
-                       (push!))
+      (let [pushes (atom [])
+            shells (atom [])
+            r      (with-redefs [shell/run-bounded
+                                 (fn [args opts]
+                                   (swap! pushes conj {:args args :opts opts})
+                                   (if (= 1 (count @pushes))
+                                     {:exit 1 :out "" :err "ssh: permission denied (publickey)"}
+                                     {:exit 0 :out "pushed" :err ""}))
+                                 process/shell
+                                 (fn [_opts & args]
+                                   (swap! shells conj (vec args))
+                                   (if (= "remote.origin.pushurl" (last args))
+                                     {:exit 1 :out "" :err ""}
+                                     {:exit 0 :out "git@github.com:o/r.git\n" :err ""}))]
+                     (push!))
             [first-push retry] @pushes
-            env      (get-in retry [:opts :extra-env])
-            expected (str "Authorization: Basic "
-                          (.encodeToString (java.util.Base64/getEncoder)
-                                           (.getBytes "x-access-token:tok" "UTF-8")))
-            real-git (fn [& args]
-                       (str/trim (:out (apply process/shell
-                                              {:extra-env env :out :string :continue true}
-                                              "git" args))))]
+            env    (get-in retry [:opts :extra-env])
+            h      "https://github.com/o/r.git"]
         (is (:success? r))
         (is (= 2 (count @pushes)))
         (is (nil? (get-in first-push [:opts :extra-env "GIT_CONFIG_COUNT"])))
         (is (= "tok" (get env "GH_TOKEN")))
         (is (= {"GIT_CONFIG_COUNT"   "3"
-                "GIT_CONFIG_KEY_0"   "http.https://github.com/.extraHeader"
+                "GIT_CONFIG_KEY_0"   (str "http." h ".extraHeader")
                 "GIT_CONFIG_VALUE_0" ""
-                "GIT_CONFIG_KEY_1"   "http.https://github.com/.extraHeader"
-                "GIT_CONFIG_VALUE_1" expected
-                "GIT_CONFIG_KEY_2"   "url.https://github.com/.insteadOf"
-                "GIT_CONFIG_VALUE_2" "git@github.com:"}
+                "GIT_CONFIG_KEY_1"   (str "http." h ".extraHeader")
+                "GIT_CONFIG_VALUE_1" (str "Authorization: Basic "
+                                          (.encodeToString (java.util.Base64/getEncoder)
+                                                           (.getBytes "x-access-token:tok" "UTF-8")))
+                "GIT_CONFIG_KEY_2"   (str "url." h ".pushInsteadOf")
+                "GIT_CONFIG_VALUE_2" "git@github.com:o/r.git"}
                (dissoc env "GH_TOKEN")))
-        (is (= [["git" "remote" "get-url" "origin"]] @shells)
-            "origin is read, never rewritten")
+        (is (not-any? #(some #{"set-url"} %) @shells) "origin is read, never rewritten")
         (is (not-any? #(str/includes? (str/join " " (:args %)) "tok") @pushes)
-            "the token is never in argv")
-        (testing "and real git applies that environment"
-          (is (= "https://github.com/o/r.git"
-                 (real-git "ls-remote" "--get-url" "git@github.com:o/r.git")))
-          (is (= expected
-                 (real-git "config" "--get-urlmatch" "http.extraHeader"
-                           "https://github.com/o/r.git"))))))))
+            "the token is never in argv")))))
 
 (deftest ^{:stratum 0} push-https-fallback-origin-kinds-test
   (let [retry-env (fn [origin token]
@@ -203,16 +194,18 @@
                       (with-redefs [shell/run-bounded (fn [_args opts]
                                                         (swap! pushes conj opts)
                                                         {:exit 1 :out "" :err "denied"})
-                                    process/shell (fn [& _] {:exit 0 :out origin :err ""})]
+                                    process/shell (fn [_opts & args]
+                                                    (if (= "remote.origin.pushurl" (last args))
+                                                      {:exit 1 :out "" :err ""}
+                                                      {:exit 0 :out origin :err ""}))]
                         (git/push-branch! "/tmp/wt" "b" token))
                       {:pushes (count @pushes)
                        :env    (get-in (second @pushes) [:extra-env])}))]
-    (testing "an HTTPS origin gets the header but no URL rewrite"
+    (testing "an HTTPS origin gets the header at its full URL"
       (let [{:keys [pushes env]} (retry-env "https://github.com/o/r.git" "tok")]
         (is (= 2 pushes))
-        (is (= "2" (get env "GIT_CONFIG_COUNT")))
-        (is (= "http.https://github.com/.extraHeader" (get env "GIT_CONFIG_KEY_1")))))
-    (testing "an origin that is neither scp-style SSH nor HTTPS is not retried"
+        (is (= "http.https://github.com/o/r.git.extraHeader" (get env "GIT_CONFIG_KEY_1")))))
+    (testing "an origin with no HTTPS form (a local path) is not retried"
       (is (= 1 (:pushes (retry-env "/srv/git/r.git" "tok")))))
     (testing "no token, no retry"
       (is (= 1 (:pushes (retry-env "git@github.com:o/r.git" nil)))))))

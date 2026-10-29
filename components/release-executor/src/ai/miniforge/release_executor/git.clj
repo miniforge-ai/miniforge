@@ -31,6 +31,7 @@
   (:require
    [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.release-executor.messages :as msg]
+   [ai.miniforge.release-executor.push-auth :as push-auth]
    [ai.miniforge.release-executor.result :as result]
    [ai.miniforge.release-executor.shell :as shell]
    [babashka.process :as process]
@@ -84,7 +85,7 @@
    the pipeline resolved — parity with sandbox's gh-exec-opts :env injection.
    `worktree-path` may be nil (e.g. `gh auth status` needs no cwd). When no
    token is supplied the call inherits the ambient environment. `extra-env`
-   (the push fallback's `token-auth-env`) is merged in."
+   (the push fallback's `push-auth/token-env`) is merged in."
   ([worktree-path github-token] (gh-shell-opts worktree-path github-token nil))
   ([worktree-path github-token extra-env]
    (let [env (merge (when github-token {"GH_TOKEN" github-token}) extra-env)]
@@ -199,37 +200,6 @@
         (result/shell-failure (get commit-r :err "") {:commit-sha nil})))
     (catch Exception e
       (result/shell-failure (.getMessage e) {:commit-sha nil}))))
-
-(defn- ^{:stratum 0} token-auth-env
-  "Environment for one push that authenticates to `remote-url` over HTTPS
-   with `token`, or nil when the URL is neither scp-style SSH (git@host:path)
-   nor HTTPS — the same URLs sandbox/ssh->https-with-token converts.
-
-   The settings travel as GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n /
-   GIT_CONFIG_VALUE_n (git 2.31+), so the token is never written to
-   .git/config and never appears in argv. A push that hangs, times out or
-   is killed leaves nothing to scrub.
-   - url.https://<host>/.insteadOf sends an SSH origin over HTTPS for this
-     command only;
-   - an empty http.https://<host>/.extraHeader drops headers set by other
-     config (actions/checkout persists one), then the token goes as Basic
-     x-access-token:<token>, the form GitHub accepts."
-  [remote-url token]
-  (let [url        (str remote-url)
-        ssh-host   (second (re-matches #"git@([^:/]+):.+" url))
-        https-host (second (re-matches #"https://(?:[^@/]*@)?([^/]+)/.+" url))]
-    (when-let [host (or ssh-host https-host)]
-      (let [base    (str "https://" host "/")
-            header  (str "Authorization: Basic "
-                         (.encodeToString (java.util.Base64/getEncoder)
-                                          (.getBytes (str "x-access-token:" token) "UTF-8")))
-            entries (cond-> [[(str "http." base ".extraHeader") ""]
-                             [(str "http." base ".extraHeader") header]]
-                      ssh-host (conj [(str "url." base ".insteadOf") (str "git@" host ":")]))]
-        (reduce-kv (fn [env i [k v]]
-                     (assoc env (str "GIT_CONFIG_KEY_" i) k (str "GIT_CONFIG_VALUE_" i) v))
-                   {"GIT_CONFIG_COUNT" (str (count entries))}
-                   entries)))))
 
 (defn- ^{:stratum 0} inside-worktree?
   "True when `file` resolves inside `worktree-path` after canonicalization
@@ -412,7 +382,7 @@
 
 (defn- ^{:stratum 1} raw-push!
   "One `git push -u origin <branch>` with GH_TOKEN and `auth-env` (nil, or
-   the fallback's `token-auth-env`) injected. Returns a shell-result."
+   the fallback's `push-auth/token-env`) injected. Returns a shell-result."
   [worktree-path branch-name github-token auth-env]
   (try
     (let [r (shell/run-bounded ["git" "push" "-u" "origin" branch-name]
@@ -426,25 +396,36 @@
 (defn- ^{:stratum 1} with-https-token-fallback!
   "Run `push!` (a 1-arg fn: extra env map or nil -> shell-result) with no
    extra env. On failure with a token present, retry once with
-   `token-auth-env` for origin's URL, so an SSH `origin` that GH_TOKEN alone
-   can't authenticate still pushes over HTTPS. The token exists only in
-   that retry's environment: origin and .git/config are never modified, so
-   a retry that hangs, times out or is killed leaves no credential behind.
-   Shared by push-branch! and force-push!."
+   `push-auth/token-env` for origin's push targets, so an SSH `origin` that
+   GH_TOKEN alone can't authenticate still pushes over HTTPS. The targets
+   are read both as configured and as git resolves them for a push
+   (`get-url --push` applies insteadOf aliases, pushInsteadOf and
+   pushurl), so the retry reaches the URL git would really push to. The
+   token exists only in that retry's environment: origin and .git/config
+   are never modified, so a retry that hangs, times out or is killed leaves
+   no credential behind. Shared by push-branch! and force-push!."
   [worktree-path github-token push!]
   (let [result (push! nil)]
     (if (or (result/succeeded? result) (not github-token))
       result
-      (let [url-r    (exec! worktree-path ["git" "remote" "get-url" "origin"])
-            auth-env (when (result/succeeded? url-r)
-                       (token-auth-env (:output url-r) github-token))]
+      (let [lines    (fn [args]
+                       (let [r (exec! worktree-path args)]
+                         (when (result/succeeded? r)
+                           (remove str/blank? (str/split-lines (:output r))))))
+            pushurls (lines ["git" "config" "--get-all" "remote.origin.pushurl"])
+            auth-env (push-auth/token-env
+                      {:raw       (or (seq pushurls)
+                                      (lines ["git" "config" "--get-all" "remote.origin.url"]))
+                       :effective (lines ["git" "remote" "get-url" "--push" "--all" "origin"])
+                       :pushurl?  (boolean (seq pushurls))}
+                      github-token)]
         (if auth-env
           (push! auth-env)
           result)))))
 
 (defn- ^{:stratum 1} raw-force-push!
   "One `git push --force-with-lease` with GH_TOKEN and `auth-env` (nil, or
-   the fallback's `token-auth-env`) injected. Returns a shell-result."
+   the fallback's `push-auth/token-env`) injected. Returns a shell-result."
   [worktree-path github-token auth-env]
   (try
     (let [r (shell/run-bounded ["git" "push" "--force-with-lease"]
@@ -525,7 +506,7 @@
   "Push the current branch to origin. Injects `github-token` as GH_TOKEN for
    gh's git credential helper. If the initial push fails and a token is
    present, retries over HTTPS with the token passed in that push's
-   environment only (see `token-auth-env`) — so a token-only environment
+   environment only (see `push-auth/token-env`) — so a token-only environment
    whose `origin` is an SSH remote can still push, matching
    sandbox/push-branch!.
 
