@@ -55,3 +55,23 @@
       (spit (io/file blocker "keep") "x")
       (is (nil? (storage/save-index root {:tree-sha "abc123"})))
       (is (empty? (temp-files root)) "no orphaned temp file after the failed move"))))
+
+(deftest ^{:stratum 1} save-index-preserves-existing-on-write-failure-test
+  (testing "a write failure during second save leaves the first index intact"
+    ;; with-redefs intercepts spit so it writes corrupt bytes then throws,
+    ;; mimicking an out-of-disk-space scenario mid-write.
+    ;; With the atomic impl, spit targets the temp file — destination is
+    ;; untouched — so the first index is still readable after the failure.
+    (let [root       (temp-repo-root)
+          first-idx  {:tree-sha "abc" :files [{:path "src/first.clj"}]}
+          second-idx {:tree-sha "abc" :files [{:path "src/second.clj"}]}
+          orig-spit  clojure.core/spit]
+      (is (some? (storage/save-index root first-idx)))
+      (with-redefs [clojure.core/spit
+                    (fn [f _content]
+                      (orig-spit f "{:partial true" :append false)
+                      (throw (java.io.IOException. "simulated disk-full")))]
+        (is (nil? (storage/save-index root second-idx))))
+      (is (= first-idx (storage/load-index root "abc"))
+          "first index survives the failed second write")
+      (is (empty? (temp-files root)) "no orphaned temp file after the failure"))))
