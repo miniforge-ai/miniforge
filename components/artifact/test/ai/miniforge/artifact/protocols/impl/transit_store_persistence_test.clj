@@ -471,7 +471,13 @@
         (testing "a replaced owner-only file stays owner-only"
           (is (= "rw-------" (PosixFilePermissions/toString
                               (Files/getPosixFilePermissions file (make-array LinkOption 0)))))
-          (is (= {:version 2} (read-or-unreadable path)))))
+          (is (= {:version 2} (read-or-unreadable path))))
+        (Files/setPosixFilePermissions file (PosixFilePermissions/fromString "r--------"))
+        (impl/write-transit path {:version 3})
+        (testing "a read-only file can still be replaced, and stays read-only"
+          (is (= "r--------" (PosixFilePermissions/toString
+                              (Files/getPosixFilePermissions file (make-array LinkOption 0)))))
+          (is (= {:version 3} (read-or-unreadable path)))))
       (finally
         (delete-dir! dir)))))
 

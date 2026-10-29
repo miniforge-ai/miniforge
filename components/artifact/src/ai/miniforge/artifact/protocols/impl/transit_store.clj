@@ -49,7 +49,7 @@
    [java.io File]
    [java.nio.channels FileChannel]
    [java.nio.file CopyOption Files LinkOption OpenOption StandardCopyOption StandardOpenOption]
-   [java.nio.file.attribute FileAttribute]))
+   [java.nio.file.attribute FileAttribute PosixFilePermissions]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -102,22 +102,27 @@
    Writes a sibling temp file, then renames it over the target, so the
    file holds either its old content or the new content, never a
    truncated mix. When the target exists on a POSIX file system, the
-   temp file gets its permissions before any content is written, so a
-   private (e.g. 0600) file is never replaced by a more readable one;
-   new files get the default mode."
+   temp file is created owner-only (0600), written, and given the
+   target's permissions just before the rename: a private file is never
+   replaced by a more readable one, and a read-only target (e.g. 0400)
+   does not block the write. New files get the default mode."
   [file-path data]
   (let [target (io/file file-path)
         tmp (io/file (.getParentFile target)
-                     (str (.getName target) "." (random-uuid) ".tmp"))]
+                     (str (.getName target) "." (random-uuid) ".tmp"))
+        mode (when (and (.exists target)
+                        (contains? (.supportedFileAttributeViews (.getFileSystem (.toPath target))) "posix"))
+               (Files/getPosixFilePermissions (.toPath target) (make-array LinkOption 0)))]
     (try
-      (Files/createFile (.toPath tmp) (make-array FileAttribute 0))
-      (when (and (.exists target)
-                 (contains? (.supportedFileAttributeViews (.getFileSystem (.toPath target))) "posix"))
-        (Files/setPosixFilePermissions (.toPath tmp)
-                                       (Files/getPosixFilePermissions (.toPath target)
-                                                                      (make-array LinkOption 0))))
+      (Files/createFile (.toPath tmp)
+                        (if mode
+                          (into-array FileAttribute [(PosixFilePermissions/asFileAttribute
+                                                      (PosixFilePermissions/fromString "rw-------"))])
+                          (make-array FileAttribute 0)))
       (with-open [out (io/output-stream tmp)]
         (transit/write (transit/writer out :json) data))
+      (when mode
+        (Files/setPosixFilePermissions (.toPath tmp) mode))
       (Files/move (.toPath tmp) (.toPath target)
                   (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
                                           StandardCopyOption/REPLACE_EXISTING]))
