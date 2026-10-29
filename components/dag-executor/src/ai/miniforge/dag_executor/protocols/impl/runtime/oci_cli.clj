@@ -900,16 +900,29 @@
    A passing result also carries the checked `:launch-plan`;
    `acquire-environment!` creates the container FROM that plan — its digest as
    the immutable image reference, the plan itself as create-container's
-   :execution-plan."
+   :execution-plan.
+
+   A plan env name that is not a plain identifier is a hard-stop at every
+   trust level: the launch passes each name as `-e NAME`, and Podman reads
+   `*` or a trailing `*` there as a pattern that copies every matching
+   variable of its own environment into the container."
   [descriptor image env-config digest-fn]
   (let [plan            (build-launch-plan (digest-fn descriptor image) env-config)
         security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
                          :rootless-action     plan-security/default-rootless-action}
-        decision        (plan-security/check-plan-security plan descriptor security-config)]
-    (if (response/anomaly-map? decision)
+        decision        (plan-security/check-plan-security plan descriptor security-config)
+        bad-names       (remove #(re-matches #"[A-Za-z_][A-Za-z0-9_]*" %) (keys (:env plan)))]
+    (cond
+      (response/anomaly-map? decision)
       (result/err :security-policy-violation
                   (:anomaly/message decision)
                   {:security/findings (:security/findings decision)})
+
+      (seq bad-names)
+      (result/err :security-policy-violation
+                  (messages/t :oci/env-name-refused {:names (str/join ", " (map pr-str bad-names))}))
+
+      :else
       (result/ok (assoc (:output decision) :launch-plan plan)))))
 
 ;------------------------------------------------------------------------------ Layer 4
