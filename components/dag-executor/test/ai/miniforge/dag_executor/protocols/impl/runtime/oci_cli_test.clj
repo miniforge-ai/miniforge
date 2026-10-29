@@ -283,6 +283,34 @@
         (is (= 130 (:exit result)))
         (is (clojure.string/includes? (:err result) "interrupted"))))))
 
+(defn- ^{:stratum 0} recorded-remote-executor
+  "An executor that bootstrapped `c1` from https://github.com/o/r.git."
+  []
+  (doto (oci-cli/create-docker-executor {:image "test:latest"})
+    (-> :git-remotes (reset! {"c1" {:repo-url  "https://github.com/o/r.git"
+                                    :https-url "https://github.com/o/r.git"
+                                    :host-kind :github}}))))
+
+(defn- ^{:stratum 0} credentialed-calls
+  "The [cmd opts] in `calls` that carried an env."
+  [calls]
+  (filter (fn [[_ opts]] (:env opts)) calls))
+
+(deftest ^{:stratum 0} exec-never-passes-a-refused-env-name-test
+  (testing "an exec env name the launch gate refuses (DOCKER_CUSTOM_HEADERS
+            or *) never reaches the runtime argv or the CLI's environment"
+    (let [calls (atom [])]
+      (with-redefs [oci-cli/run-runtime-process-timed
+                    (fn [_ms _d args & {:as opts}]
+                      (swap! calls conj [args (:env opts)])
+                      {:exit 0 :out "" :err "" :out-bytes (byte-array 0) :err-bytes (byte-array 0)})]
+        (doseq [n ["DOCKER_CUSTOM_HEADERS" "*"]]
+          (proto/execute! (oci-cli/create-docker-executor {:image "test:latest"}) "c1" ["true"]
+                          {:env {n "Authorization=Bearer x"}}))
+        (doseq [[args env] @calls]
+          (is (not-any? #(or (= "*" %) (clojure.string/includes? % "Bearer x")) args))
+          (is (not-any? #{"DOCKER_CUSTOM_HEADERS" "*"} (keys env))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} token-in? [s]
@@ -340,22 +368,66 @@
 ;; git-credential-env — per-command git auth (N11 §2.2)
 ;; ============================================================================
 (deftest ^{:stratum 1} git-credential-env-test
-  (let [cred-env (private-fn 'git-credential-env)]
+  (let [cred-env (private-fn 'git-credential-env)
+        auth     {:user "x-access-token" :token "tok"}]
     (testing "an Authorization header scoped to the remote's host"
       (is (= {"GIT_CONFIG_COUNT"    "1"
               "GIT_CONFIG_KEY_0"    "http.https://github.com/.extraheader"
               "GIT_CONFIG_VALUE_0"  (str "Authorization: Basic "
                                          (basic-auth "x-access-token" "tok"))
               "GIT_TERMINAL_PROMPT" "0"}
-             (cred-env "https://github.com/o/r.git" "tok" :github))))
-    (testing "GitLab pairs the token with oauth2"
-      (is (= (str "Authorization: Basic " (basic-auth "oauth2" "tok"))
-             (get (cred-env "https://gitlab.com/g/p.git" "tok" :gitlab)
-                  "GIT_CONFIG_VALUE_0"))))
-    (testing "no token, or a URL that is not https, yields no credential"
-      (is (= {} (cred-env "https://github.com/o/r.git" nil :github)))
-      (is (= {} (cred-env "http://github.com/o/r.git" "tok" :github)))
-      (is (= {} (cred-env "git@github.com:o/r.git" "tok" :github))))))
+             (cred-env "https://github.com/o/r.git" auth))))
+    (testing "an http remote gets its header too"
+      (is (some #{(str "Authorization: Basic " (basic-auth "x-access-token" "tok"))}
+                (vals (cred-env "http://git.example.com/r.git" auth)))))
+    (testing "no token, or a URL that is not http(s), yields no credential"
+      (is (= {} (cred-env "https://github.com/o/r.git" nil)))
+      (is (= {} (cred-env "git@github.com:o/r.git" auth))))))
+
+(deftest ^{:stratum 1} git-remote-test
+  (let [git-remote (private-fn 'git-remote)]
+    (testing "an explicit nil :host-kind is inferred, like an absent one"
+      (is (= :github (:host-kind (git-remote {:repo-url "https://github.com/o/r.git"
+                                              :host-kind nil})))))
+    (testing "userinfo is stripped from both URLs and kept as the credential"
+      (is (= {:repo-url  "https://github.com/o/r.git"
+              :https-url "https://github.com/o/r.git"
+              :host-kind :github
+              :url-auth  {:user "bob" :token "s3cr%t"}}
+             (git-remote {:repo-url "https://bob:s3cr%25t@github.com/o/r.git"}))))
+    (testing "a username alone is stripped and carries no credential"
+      (is (= "https://github.com/o/r.git"
+             (:https-url (git-remote {:repo-url "https://bob@github.com/o/r.git"}))))
+      (is (nil? (:url-auth (git-remote {:repo-url "https://bob@github.com/o/r.git"})))))
+    (testing "a mixed-case scheme is lowercased, with or without userinfo,
+              so the credential env still matches the URL"
+      (doseq [[given url auth k]
+              [["HTTPS://bob:pw@git.example.com/r.git" "https://git.example.com/r.git"
+                {:user "bob" :token "pw"} "http.https://git.example.com/.extraheader"]
+               ["Http://bob:pw@git.example.com/r.git" "http://git.example.com/r.git"
+                {:user "bob" :token "pw"} "http.http://git.example.com/.extraheader"]
+               ["HTTPS://git.example.com/r.git" "https://git.example.com/r.git"
+                nil "http.https://git.example.com/.extraheader"]]]
+        (let [remote (git-remote {:repo-url given})]
+          (is (= url (:repo-url remote) (:https-url remote)))
+          (is (= auth (:url-auth remote)))
+          (is (= k (get ((private-fn 'git-credential-env) (:https-url remote) {:user "u" :token "t"})
+                        "GIT_CONFIG_KEY_0"))))))))
+
+(deftest ^{:stratum 1} git-auth-test
+  (let [git-auth (private-fn 'git-auth)]
+    (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] "tok")]
+      (testing "GitLab pairs a resolved token with oauth2, others with x-access-token"
+        (is (= {:user "oauth2" :token "tok"} (git-auth {:host-kind :gitlab})))
+        (is (= {:user "x-access-token" :token "tok"} (git-auth {:host-kind :github}))))
+      (testing "a credential from the URL wins over the resolved token"
+        (is (= {:user "bob" :token "pw"}
+               (git-auth {:host-kind :github :url-auth {:user "bob" :token "pw"}})))))
+    (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] "tok")]
+      (testing "a resolved token is not sent over plain http"
+        (is (nil? (git-auth {:host-kind :generic :https-url "http://git.example.com/r.git"})))))
+    (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)]
+      (is (nil? (git-auth {:host-kind :github}))))))
 
 ;; ============================================================================
 ;; image-exists? (public)
@@ -646,15 +718,27 @@
           (is (clojure.string/includes? (get-in result [:error :data :stderr])
                                         "could not read password")))))))
 
-(deftest ^{:stratum 1} persist-workspace-authenticates-push-only-test
-  (testing "a recorded remote's credential goes to push alone, with hooks
-            off; add/commit (which run workspace hooks) never see it"
-    (let [executor (oci-cli/create-docker-executor {:image "test:latest"})
+(deftest ^{:stratum 1} bootstrap-workspace-authenticates-http-userinfo-test
+  (testing "an http URL's user:password@ is stripped from the clone URL and
+            still authenticates the clone"
+    (let [envs (atom [])]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)
+                    oci-cli/exec-in-container (fn [_d _c cmd opts]
+                                                (swap! envs conj [cmd (:env opts)])
+                                                {:data {:exit-code 0 :stdout ""}})]
+        ((private-fn 'bootstrap-workspace!) (docker-descriptor) "c1" "/workspace"
+                                            {:repo-url "http://bob:pw@git.example.com/r.git"})
+        (let [[cmd env] (first (filter #(some #{"clone"} (first %)) @envs))]
+          (is (some #{"http://git.example.com/r.git"} cmd))
+          (is (some #{(str "Authorization: Basic " (basic-auth "bob" "pw"))} (vals env))))))))
+
+(deftest ^{:stratum 1} persist-workspace-authenticates-remote-calls-only-test
+  (testing "with a recorded remote, only ls-remote and push get the
+            credential, with hooks off, and both target the recorded URL
+            rather than the capsule's origin; add/commit (which run
+            workspace hooks) never see it"
+    (let [executor (recorded-remote-executor)
           calls    (atom [])]
-      (reset! (:git-remotes executor)
-              {"c1" {:repo-url  "https://github.com/o/r.git"
-                     :https-url "https://github.com/o/r.git"
-                     :host-kind :github}})
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
                     oci-cli/stop-container    (fn [& _] {:exit 0})
                     oci-cli/remove-container  (fn [& _] (result/ok {:released? true}))
@@ -665,14 +749,49 @@
                               :stdout (if (= cmd "git status --porcelain") " M f" "sha")}})]
         (is (true? (get-in (proto/persist-workspace! executor "c1" {:branch "task/x"})
                            [:data :persisted?])))
-        (let [[push & more] (filter (fn [[_ opts]] (:env opts)) @calls)]
-          (is (empty? more))
-          (is (= ["git" "-c" "core.hooksPath=/dev/null" "push" "origin" "HEAD:task/x" "--force"]
-                 (first push)))
-          (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
-                 (get-in push [1 :env "GIT_CONFIG_VALUE_0"]))))
+        (let [authed (credentialed-calls @calls)]
+          (is (= [["git" "-c" "core.hooksPath=/dev/null" "ls-remote" "https://github.com/o/r.git"
+                   "refs/heads/task/x"]
+                  ["git" "-c" "core.hooksPath=/dev/null" "push" "--force-with-lease=task/x:sha"
+                   "https://github.com/o/r.git" "HEAD:task/x"]]
+                 (map first authed)))
+          (is (every? #(= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
+                          (get-in (second %) [:env "GIT_CONFIG_VALUE_0"]))
+                      authed)))
         (proto/release-environment! executor "c1")
         (is (= {} @(:git-remotes executor)))))))
+
+(deftest ^{:stratum 1} restore-workspace-fetches-recorded-url-test
+  (testing "with a recorded remote, restore fetches the recorded URL into
+            origin's tracking ref, with the credential on the fetch alone"
+    (let [calls (atom [])]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-cli/exec-in-container
+                    (fn [_d _id cmd opts]
+                      (swap! calls conj [cmd opts])
+                      {:data {:exit-code 0 :stdout "sha"}})]
+        (is (true? (get-in (proto/restore-workspace! (recorded-remote-executor) "c1"
+                                                     {:branch "task/x"})
+                           [:data :restored?])))
+        (is (= [["git" "-c" "core.hooksPath=/dev/null" "fetch" "https://github.com/o/r.git"
+                 "+refs/heads/task/x:refs/remotes/origin/task/x"]]
+               (map first (credentialed-calls @calls))))))))
+
+(deftest ^{:stratum 1} execute-git-credentials-test
+  (testing ":git-credentials? adds the recorded remote's credential to the
+            caller's env; without it the command gets only the caller's env"
+    (let [seen (atom [])]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-cli/exec-in-container (fn [_d _id _cmd opts] (swap! seen conj opts)
+                                                (result/ok {:exit-code 0}))]
+        (let [executor (recorded-remote-executor)]
+          (proto/execute! executor "c1" ["git" "push"] {:git-credentials? true
+                                                        :env {"GH_TOKEN" "t"}})
+          (proto/execute! executor "c1" ["git" "push"] {:env {"GH_TOKEN" "t"}}))
+        (let [[with-creds without] @seen]
+          (is (= "t" (get-in with-creds [:env "GH_TOKEN"])))
+          (is (contains? (:env with-creds) "GIT_CONFIG_VALUE_0"))
+          (is (= {"GH_TOKEN" "t"} (:env without))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -681,7 +800,8 @@
             never holds it"
     (let [dir (.toFile (java.nio.file.Files/createTempDirectory
                         "cred-env" (make-array java.nio.file.attribute.FileAttribute 0)))
-          env ((private-fn 'git-credential-env) "https://github.com/o/r.git" fake-token :github)
+          env ((private-fn 'git-credential-env) "https://github.com/o/r.git"
+                                                {:user "x-access-token" :token fake-token})
           git (fn [& args]
                 (apply shell/sh "git" "-C" (str dir)
                        (concat args [:env (merge (into {} (System/getenv)) env)])))]
@@ -752,6 +872,34 @@
             ;; The fake runtime inherits this process's env, so a host
             ;; GIT_CONFIG_VALUE_0 may show up; the credential must not.
             (is (not-any? #(token-in? (str (get-in % [:env "GIT_CONFIG_VALUE_0"]))) later))))))))
+
+(deftest ^{:stratum 2} bootstrap-workspace-strips-url-credentials-test
+  (testing "a repo URL carrying user:password@ is cloned without it; the
+            password authenticates the clone through its environment"
+    (with-fake-runtime :docker ["GIT_CONFIG_VALUE_0"]
+      (fn [descriptor calls]
+        (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)]
+          ((private-fn 'bootstrap-workspace!)
+           descriptor "c1" "/workspace"
+           {:repo-url (str "https://bob:" fake-token "@github.com/o/r.git")})
+          (let [[clone :as all] (calls)]
+            (is (not-any? token-in? (mapcat :argv all)))
+            (is (some #{"https://github.com/o/r.git"} (:argv clone)))
+            (is (= (str "Authorization: Basic " (basic-auth "bob" fake-token))
+                   (get-in clone [:env "GIT_CONFIG_VALUE_0"])))))))))
+
+(deftest ^{:stratum 2} container-env-leaves-runtime-cli-variables-alone-test
+  (testing "a container's DOCKER_DEFAULT_PLATFORM reaches the container but
+            not the docker CLI's own environment, where it would change the
+            platform `docker run` pulls and starts"
+    (with-fake-runtime :docker ["DOCKER_DEFAULT_PLATFORM"]
+      (fn [descriptor calls]
+        (oci-cli/create-container descriptor "c" "img" "/w" nil nil nil
+                                  :execution-plan {:env {"DOCKER_DEFAULT_PLATFORM" "linux/s390x"}})
+        (let [{:keys [argv env env-file]} (first (calls))]
+          (is (not= "linux/s390x" (get env "DOCKER_DEFAULT_PLATFORM")))
+          (is (or (some #{"DOCKER_DEFAULT_PLATFORM=linux/s390x"} argv)
+                  (= "linux/s390x" (get env-file "DOCKER_DEFAULT_PLATFORM")))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

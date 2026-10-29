@@ -21,6 +21,7 @@
    resolver is injected, so these exercise the gate decision (block / warn /
    review / pass) without a container runtime."
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.execution-plan :as execution-plan]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
@@ -39,6 +40,24 @@
 (def ^{:stratum 0} ^:private base-env {:workdir "/workspace" :mounts []})
 
 (defn- ^{:stratum 0} err-rules [r] (set (map :security/rule (get-in r [:error :data :security/findings]))))
+
+(deftest ^{:stratum 0} release-keeps-git-remote-until-removed-test
+  (testing "the recorded remote survives a release whose container removal
+            failed, so the capsule's work can still be persisted, and goes
+            once removal succeeds"
+    (let [remote   {:repo-url "https://github.com/o/r.git"
+                    :https-url "https://github.com/o/r.git" :host-kind :github}
+          executor (oci-cli/map->OciCliExecutor
+                    {:descriptor  {:runtime/kind :docker}
+                     :git-remotes (atom {"c1" remote})})
+          removed? (atom false)]
+      (with-redefs [oci-cli/stop-container   (fn [& _] {:exit 0})
+                    oci-cli/remove-container (fn [& _] (result/ok {:released? @removed?}))]
+        (proto/release-environment! executor "c1")
+        (is (= {"c1" remote} @(:git-remotes executor)))
+        (reset! removed? true)
+        (proto/release-environment! executor "c1")
+        (is (= {} @(:git-remotes executor)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -98,14 +117,35 @@
 
 (deftest ^{:stratum 1} build-launch-plan-drops-secrets-for-untrusted-test
   (testing "an :untrusted plan (the default) launches without secret-named
-            env, so no process in the capsule inherits them; :trusted keeps
-            them"
+            env such as GH_TOKEN, so no process in the capsule inherits it,
+            but keeps the agent's ANTHROPIC_API_KEY (N11 §8.1); :trusted
+            keeps everything"
     (let [env {:GH_TOKEN "t" :ANTHROPIC_API_KEY "k" :LANG "C.UTF-8"}]
-      (is (= {"LANG" "C.UTF-8"}
+      (is (= {"ANTHROPIC_API_KEY" "k" "LANG" "C.UTF-8"}
              (:env (oci-cli/build-launch-plan valid-digest {:env env}))))
       (is (= {"GH_TOKEN" "t" "ANTHROPIC_API_KEY" "k" "LANG" "C.UTF-8"}
              (:env (oci-cli/build-launch-plan valid-digest
                                               {:env env :trust-level :trusted})))))))
+
+(deftest ^{:stratum 1} build-launch-plan-keeps-agent-backend-credentials-test
+  (testing "an :untrusted plan keeps the credential the agent backend reads,
+            named by :agent-backend or else the configured [:llm :backend]"
+    (let [env {:OPENAI_API_KEY "o" :CURSOR_API_KEY "c" :GH_TOKEN "t"}]
+      (is (= {"OPENAI_API_KEY" "o"}
+             (:env (oci-cli/build-launch-plan valid-digest {:env env :agent-backend :codex}))))
+      (with-redefs [config/load-merged-config (constantly {:llm {:backend :cursor}})]
+        (is (= {"CURSOR_API_KEY" "c"}
+               (:env (oci-cli/build-launch-plan valid-digest {:env env}))))))))
+
+(deftest ^{:stratum 1} build-launch-plan-treats-unknown-trust-as-untrusted-test
+  (testing "a nil or unknown :trust-level launches as :untrusted: secrets
+            are dropped and the plan records :untrusted"
+    (doseq [trust-level [nil :unknown "trusted"]]
+      (let [plan (oci-cli/build-launch-plan valid-digest {:env {:GH_TOKEN "t"}
+                                                          :trust-level trust-level})]
+        (is (= {} (:env plan)) (str "trust level " (pr-str trust-level)))
+        (is (= :untrusted (:trust-level plan)))
+        (is (= {:valid? true} (execution-plan/validate-plan plan)))))))
 
 (deftest ^{:stratum 1} acquire-records-git-remote-for-persist-test
   (testing "a bootstrapped acquire records the caller's remote (not one read
@@ -128,7 +168,44 @@
                   {:repo-url  "git@github.com:o/r.git"
                    :https-url "https://github.com/o/r.git"
                    :host-kind :github}}
-                 @(:git-remotes executor))))))))
+                 @(:git-remotes executor)))))
+      (testing "the environment record returned to the caller carries the
+                repo URL without the user:password@ it was given"
+        (with-redefs [oci-cli/image-exists?          (fn [_ _] true)
+                      oci-cli/resolve-image-digest!  (fn [_ _] valid-digest)
+                      oci-cli/create-container       (fn [_d container-name & _]
+                                                       (result/ok {:container-name container-name}))
+                      oci-cli/bootstrap-workspace!   (fn [& _] (result/ok {:base-branch "main"}))
+                      oci-cli/container-image-digest (fn [_ _] valid-digest)]
+          (let [r (proto/acquire-environment! executor "abcd1234efgh"
+                                              {:workdir "/workspace"
+                                               :repo-url "https://bob:s3cret@github.com/o/r.git"})]
+            (is (= "https://github.com/o/r.git" (get-in r [:data :repo-url])))
+            (is (not (str/includes? (pr-str r) "s3cret")))))))))
+
+(deftest ^{:stratum 1} build-launch-plan-drops-git-config-tuples-test
+  (testing "an :untrusted plan drops a whole GIT_CONFIG_* tuple, whose
+            VALUE_n can hold an Authorization header, not just its KEY_n"
+    (is (= {"LANG" "C.UTF-8"}
+           (:env (oci-cli/build-launch-plan
+                  valid-digest
+                  {:env {"GIT_CONFIG_COUNT"   "1"
+                         "GIT_CONFIG_KEY_0"   "http.https://github.com/.extraheader"
+                         "GIT_CONFIG_VALUE_0" "Authorization: Basic eDp0b2s="
+                         "LANG"               "C.UTF-8"}}))))))
+
+(deftest ^{:stratum 1} build-launch-plan-strips-proxy-and-git-c-credentials-test
+  (testing "an :untrusted plan keeps proxy addresses without user:password@
+            and drops GIT_CONFIG_PARAMETERS, which can carry an extraheader"
+    (is (= {"HTTPS_PROXY" "http://proxy:3128" "http_proxy" "proxy:8080"
+            "ALL_PROXY" "socks5://proxy:1080" "NO_PROXY" "localhost"}
+           (:env (oci-cli/build-launch-plan
+                  valid-digest
+                  {:env {"HTTPS_PROXY" "http://u:pw@proxy:3128"
+                         "http_proxy" "u:pw@proxy:8080"
+                         "ALL_PROXY" "socks5://proxy:1080"
+                         "NO_PROXY" "localhost"
+                         "GIT_CONFIG_PARAMETERS" "'http.extraheader=Authorization: Basic eDp0b2s='"}}))))))
 
 (deftest ^{:stratum 1} acquire-launches-from-checked-plan-test
   (testing "acquire-environment! creates the container from the gate-checked
@@ -209,8 +286,9 @@
 
 (deftest ^{:stratum 2} non-identifier-env-name-hard-stops-test
   (testing "an env name such as * or GH_*, which Podman's `-e NAME` reads as
-            a pattern over its own environment, stops the launch"
-    (doseq [n ["*" "GH_*" "A B"]]
+            a pattern over its own environment, stops the launch, as does
+            DOCKER_CUSTOM_HEADERS, which would go inline on argv"
+    (doseq [n ["*" "GH_*" "A B" "DOCKER_CUSTOM_HEADERS"]]
       (let [env (assoc base-env :env {n "x"} :trust-level :trusted)
             r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
         (is (= :security-policy-violation (get-in r [:error :code])) (pr-str n))

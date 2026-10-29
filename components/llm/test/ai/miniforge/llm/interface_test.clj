@@ -32,6 +32,12 @@
 ;; Test fixtures
 (def ^{:stratum 0} mock-response "This is a mock response")
 
+(deftest ^{:stratum 0} backend-credential-env-test
+  (testing "CLI backends name the env their CLI reads, HTTP backends their :api-key-env"
+    (is (= #{"ANTHROPIC_API_KEY" "OPENAI_API_KEY"} (llm/backend-credential-env :opencode)))
+    (is (= #{"OPENAI_API_KEY"} (llm/backend-credential-env :openai-api)))
+    (is (= #{} (llm/backend-credential-env nil)))))
+
 ;; Client creation tests
 (deftest ^{:stratum 0} create-client-test
   (testing "creates client with default backend"

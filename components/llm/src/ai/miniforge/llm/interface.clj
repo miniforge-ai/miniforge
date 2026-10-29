@@ -415,6 +415,15 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} backend-credential-env
+  "Env var names `backend` (a `backends` key) reads its credential from: a
+   CLI backend's :credential-env and an HTTP backend's :api-key-env. A nil
+   or unknown backend has none."
+  [backend]
+  (let [{:keys [credential-env api-key-env]} (get backends backend)]
+    (cond-> (set credential-env)
+      api-key-env (conj api-key-env))))
+
 (defn ^{:stratum 1} backend-serves-model?
   "False when `backend` serves one catalog family (its :catalog-backend in
    backends.edn) and `model-id` belongs to another
