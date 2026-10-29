@@ -41,6 +41,29 @@
    surfaces the misconfiguration loudly."
   "resources/precommit-smoke-tests.edn")
 
+(def ^{:stratum 0} ^:private project-test-roots
+  "Directories, relative to projects/<name>, whose *_test.clj files
+   `bb test:integration` runs. Discovered on disk rather than listed by
+   hand: a hand list silently left new integration tests unrun.
+   projects/miniforge/e2e is left out on purpose — it needs a real claude
+   CLI or Docker (see its README)."
+  {"miniforge"      ["test" "integration"]
+   "miniforge-core" ["test"]})
+
+(def ^{:stratum 0} known-failing-project-tests
+  "Discovered project test namespaces that fail on main, skipped by name
+   until fixed. `integration` prints each skip and its reason on every
+   run, so the gap stays visible in CI logs."
+  {"ai.miniforge.workflow.meta-agent-test"
+   (str "its mock LLM is a bare IFn reify; agent model resolution now calls "
+        "the LLMClient protocol (get-config), so every workflow fails at :plan")})
+
+(defn- ^{:stratum 0} project-test-alias-flag
+  "The -M flag selecting whichever of the project's test aliases exist."
+  [deps-edn]
+  (let [aliases (:aliases deps-edn)]
+    (apply str "-M" (filter #(contains? aliases %) [:test :integration]))))
+
 (defn- ^{:stratum 0} valid-namespace-token?
   "Conservative check: namespace entries in the EDN must look like
    period-separated, dash-segmented symbol tokens. Rejects strings with
@@ -54,10 +77,21 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} discovered-project-tests
+  "Every *_test.clj namespace under `project`'s test roots, as sorted
+   strings. Known-failing namespaces are included; the caller skips them."
+  [project]
+  (->> (get project-test-roots project)
+       (map #(str "projects/" project "/" %))
+       bb-test-runner/discover-test-namespaces
+       (map (comp str :ns))
+       sort
+       vec))
+
 (defn- ^{:stratum 1} run-project-tests!
   [project test-nses]
   (let [deps (slurp (str "projects/" project "/deps.edn"))
-        test-mode (if (get-in (edn/read-string deps) [:aliases :test]) "-M:test" "-M")
+        test-mode (project-test-alias-flag (edn/read-string deps))
         clojure-cmd (proc/clojure-command)
         require-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
         run-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
@@ -117,62 +151,28 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} integration []
+(defn ^{:stratum 2} integration
+  "Run every discovered project integration test (see
+   `project-test-roots`), skipping only `known-failing-project-tests`,
+   each named with its reason."
+  []
   (println "🧪 Running project integration tests...")
-  (let [miniforge-tests ["ai.miniforge.workflow.release-integration-test"
-                         "ai.miniforge.workflow.loader-integration-test"
-                         "ai.miniforge.workflow.configurable-integration-test"
-                         "ai.miniforge.workflow.runner-integration-test"
-                         "ai.miniforge.workflow.financial-etl-test"
-                         "ai.miniforge.workflow.dag-orchestrator-test"
-                         "ai.miniforge.workflow.artifact-persistence-test"
-                         "ai.miniforge.dag-executor.executor-test"
-                         "ai.miniforge.orchestrator.interface-test"
-                         "ai.miniforge.llm.progress-monitor-test"
-                         "ai.miniforge.llm.interface-integration-test"
-                         "ai.miniforge.phase.handoff-test"
-                         "ai.miniforge.tool-registry.integration-test"
-                         "ai.miniforge.self-healing.backend-health-test"
-                         "ai.miniforge.tui-views.subscription-integration-test"
-                         "ai.miniforge.tui-engine.core-test"
-                         "ai.miniforge.web-dashboard.interface-test"
-                         "ai.miniforge.tui-views.pr-views-test"
-                         "ai.miniforge.tui-views.view-test"
-                         "ai.miniforge.tui-views.persistence-test"
-                         "ai.miniforge.knowledge.interface-test"
-                         "ai.miniforge.gate.pipeline-test"
-                         "ai.miniforge.evidence-bundle.interface-test"
-                         "ai.miniforge.artifact.interface-integration-test"
-                         "ai.miniforge.loop.interface-integration-test"
-                         "ai.miniforge.observer.interface-integration-test"
-                         "ai.miniforge.observer.heartbeat-journal-integration-test"
-                         "ai.miniforge.task.interface-integration-test"
-                         "ai.miniforge.release-executor.artifact-validation-integration-test"
-                         "ai.miniforge.web-dashboard.fleet-onboarding-integration-test"
-                         "ai.miniforge.self-healing.integration-test"
-                         "ai.miniforge.workflow.opsv-lifecycle-integration-test"
-                         "ai.miniforge.workflow.opsv-finalization-integration-test"
-                         "ai.miniforge.phase-opsv.finalization-integration-test"
-                         "ai.miniforge.phase-opsv.current-finalization-integration-test"
-                         "ai.miniforge.phase-opsv.post-actuation-recovery-integration-test"
-                         "ai.miniforge.phase-opsv.terminal-evidence-integration-test"
-                         "ai.miniforge.phase-opsv.current-terminal-integration-test"
-                         "ai.miniforge.phase-opsv.terminal-boundary-integration-test"
-                         "ai.miniforge.workflow.opsv-terminal-integration-test"
-                         "ai.miniforge.workflow.opsv-checkpoint-integration-test"
-                         "ai.miniforge.event-stream.gate-contract-integration-test"
-                         "ai.miniforge.event-stream.heartbeat-runtime-integration-test"
-                         "ai.miniforge.event-stream.heartbeat-stop-integration-test"
-                         "ai.miniforge.governance.e2e-test"]
-        kernel-tests ["ai.miniforge.workflow.kernel-loader-integration-test"]
-        miniforge-exit (run-project-tests! "miniforge" miniforge-tests)]
-    (when-not (zero? miniforge-exit)
-      (println "❌ Integration tests failed in project: miniforge")
-      (System/exit miniforge-exit))
-    (let [kernel-exit (run-project-tests! "miniforge-core" kernel-tests)]
-      (when-not (zero? kernel-exit)
-        (println "❌ Integration tests failed in project: miniforge-core")
-        (System/exit kernel-exit)))))
+  (doseq [project ["miniforge" "miniforge-core"]]
+    (let [all-nses  (discovered-project-tests project)
+          skipped   (filter #(contains? known-failing-project-tests %) all-nses)
+          test-nses (remove #(contains? known-failing-project-tests %) all-nses)]
+      (doseq [ns-name skipped]
+        (println (str "⚠️  Skipping known-failing " ns-name ": "
+                      (get known-failing-project-tests ns-name))))
+      (when (empty? test-nses)
+        (println "❌ No integration tests discovered in project:" project)
+        (System/exit 1))
+      (println (format "Running %d integration test namespaces in project %s"
+                       (count test-nses) project))
+      (let [exit (run-project-tests! project test-nses)]
+        (when-not (zero? exit)
+          (println "❌ Integration tests failed in project:" project)
+          (System/exit exit))))))
 
 (defn ^{:stratum 2} precommit-smoke
   "Run the hand-curated pre-commit smoke set.
