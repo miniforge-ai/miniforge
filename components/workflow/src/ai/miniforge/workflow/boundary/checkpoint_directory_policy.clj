@@ -19,13 +19,13 @@
 (def ^{:stratum 0} ^:private other-writes
   #{PosixFilePermission/GROUP_WRITE PosixFilePermission/OTHERS_WRITE})
 
-(defn- ^{:stratum 0} refuse! [path]
+(defn ^{:stratum 0} refuse! [path]
   (throw (IOException. (messages/system :checkpoint/unsafe-directory {:path (str path)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} trusted-owner? [owner]
-  (contains? #{root-owner (System/getProperty "user.name")} (str owner)))
+  (contains? (hash-set root-owner (System/getProperty "user.name")) (str owner)))
 
 (defn- ^{:stratum 1} writable-by-others? [attributes]
   (some other-writes (:permissions attributes)))
