@@ -16,9 +16,12 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.agent.core-test
-  (:require [clojure.test :as test :refer [deftest testing is]]
+  (:require [clojure.test :as test :refer [deftest testing is use-fixtures]]
+            [ai.miniforge.agent.self-healing-home-test-support :as self-healing-home]
             [ai.miniforge.agent.core :as core]
             [ai.miniforge.agent.protocol :as proto]))
+
+(use-fixtures :each self-healing-home/with-temp-home)
 
 ;------------------------------------------------------------------------------ Layer 0
 
