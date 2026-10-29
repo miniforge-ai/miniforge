@@ -256,6 +256,18 @@ jobs:
           bb test:dev 2>&1 | tee dev-test-output.log
           echo "::endgroup::"
 
+      # Loads the miniforge CLI's bricks under Babashka, the CLI's runtime,
+      # and runs the bb-only checks in tests/graalvm_compatibility_test.clj.
+      # Only the pre-commit hook ran this, and bootstrap skips that hook for
+      # outside contributors; #2212 fixed a break that showed only under bb.
+      - name: Babashka compatibility
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          echo "::group::Babashka compatibility"
+          bb test:graalvm 2>&1 | tee graalvm-output.log
+          echo "::endgroup::"
+
       # Keep provider boundary and durable reconciliation coverage explicit.
       - name: OPSV provider contracts and durable reconciliation
         run: |
@@ -280,6 +292,7 @@ jobs:
             test-output.log
             integration-output.log
             dev-test-output.log
+            graalvm-output.log
           retention-days: 7
 
   # Windows fidelity job. Validates the bb-platform / bb-proc unit tests
