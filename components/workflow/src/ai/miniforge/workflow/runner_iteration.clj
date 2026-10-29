@@ -40,12 +40,16 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} await-resume!
-  "Block while the control state is paused."
+  "Block while the control state is paused and not stopped. A cancel sets
+   :stopped without clearing :paused, so :stopped is re-read on every poll:
+   a run paused and then cancelled leaves the wait and takes the stop path
+   instead of waiting for a resume that may never come."
   [control-state]
   (when (:paused @control-state)
     (log/debug runner-logger :system :workflow/execution-paused
                {:message (messages/t :status/paused)})
-    (while (:paused @control-state)
+    (while (let [{:keys [paused stopped]} @control-state]
+             (and paused (not stopped)))
       (Thread/sleep (defaults/pause-poll-interval-ms)))))
 
 (defn- ^{:stratum 1} check-stopped
