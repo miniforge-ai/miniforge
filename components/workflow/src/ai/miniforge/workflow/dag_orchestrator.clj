@@ -391,7 +391,21 @@
             ;; the run's actual state.
             (emit-failed-checkpoints! other-failed-ids results event-stream workflow-id)
 
-            (if (seq rate-limited-ids)
+            (cond
+              ;; Cancelled while this batch ran: rate-limit recovery would
+              ;; only delay the cancel (a cooldown sleep) or mask it (a
+              ;; :paused? checkpoint that invites auto-resume). Leave the
+              ;; rate-limited tasks undone, keep their spend, and let the
+              ;; next iteration return the cancelled result.
+              (and (seq rate-limited-ids) (some-> control-state deref :stopped))
+              (recur new-completed
+                     new-failed
+                     (merge all-results results)
+                     (into sub-workflow-ids batch-sub-ids)
+                     current-backend
+                     (inc iteration))
+
+              (seq rate-limited-ids)
               (let [decision (dag-rate-limit/handle-rate-limit-in-batch
                               context rate-limited-ids new-completed new-failed
                               all-results results event-stream workflow-id logger)]
@@ -403,6 +417,8 @@
                          (:new-backend decision)
                          (inc iteration))
                   (:result decision)))
+
+              :else
               (recur new-completed
                      (into failed-ids failed)
                      (merge all-results results)

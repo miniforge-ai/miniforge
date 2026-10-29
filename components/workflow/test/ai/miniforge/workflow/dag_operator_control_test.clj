@@ -77,16 +77,16 @@
 
 (defn- ^{:stratum 0} stopping-task-fn
   "Stand-in for `execute-single-task` where the operator cancels while
-   the task runs and its sub-workflow, sharing the parent's control
-   state, stops at its next phase boundary: the task comes back failed
-   with the runner's stop message."
-  [launched control]
+   the task runs and the task comes back failed with `message`: the
+   runner's stop message when its sub-workflow, sharing the parent's
+   control state, stops at its next phase boundary, or a provider's
+   rate-limit error."
+  [launched control message]
   (fn [task-def _context]
     (let [task-id (:task/id task-def)]
       (swap! launched conj task-id)
       (es/cancel! control)
-      (dag/err :task-execution-failed (messages/t :status/stopped-control)
-               {:task-id task-id}))))
+      (dag/err :task-execution-failed message {:task-id task-id}))))
 
 (defn- ^{:stratum 0} logged?
   [entries event]
@@ -164,7 +164,9 @@
     (let [control (es/create-control-state)
           launched (atom [])
           [logger _] (log/collecting-logger)
-          result (with-redefs [dag-orch/execute-single-task (stopping-task-fn launched control)]
+          result (with-redefs [dag-orch/execute-single-task
+                               (stopping-task-fn launched control
+                                                 (messages/t :status/stopped-control))]
                    (dag-orch/execute-plan-as-dag chain-plan {:logger logger :control-state control}))]
       (is (= [root-id] @launched))
       (is (true? (:cancelled? result)))
@@ -172,6 +174,23 @@
       (is (= 0 (:tasks-completed result)))
       (is (= 2 (:tasks-failed result))
           "root failed on the stop; left is failed by dependency, as in any run")
+      (is (= :anomalies.dashboard/stop (anomaly/subtype (:error result)))))))
+
+(deftest ^{:stratum 2} cancel-during-a-rate-limited-batch-is-reported-as-a-cancel-test
+  (testing "root hits a rate limit while the operator cancels. Rate-limit
+            recovery must not run: its checkpoint result is :paused?
+            (inviting auto-resume) and carries no cancellation."
+    (let [control (es/create-control-state)
+          launched (atom [])
+          [logger _] (log/collecting-logger)
+          result (with-redefs [dag-orch/execute-single-task
+                               (stopping-task-fn launched control "429 Too Many Requests")]
+                   (dag-orch/execute-plan-as-dag fan-out-plan {:logger logger :control-state control}))]
+      (is (= [root-id] @launched) "root is not retried and nothing else launches")
+      (is (true? (:cancelled? result)))
+      (is (not (:paused? result)))
+      (is (= 0 (:tasks-failed result)) "a rate limit is not a task failure")
+      (is (= 3 (:tasks-unreached result)))
       (is (= :anomalies.dashboard/stop (anomaly/subtype (:error result)))))))
 
 (deftest ^{:stratum 2} cancel-after-every-task-completed-reports-the-completed-run-test
