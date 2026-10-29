@@ -20,11 +20,13 @@
    config/agent/tool-policy.edn lists for it, and a missing or unknown role
    gets none."
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.agent.implementer :as implementer]
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.reviewer :as reviewer]
    [ai.miniforge.agent.tester :as tester]
+   [ai.miniforge.agent.tool-policy :as policy]
    [ai.miniforge.agent.tool-supervisor :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -63,6 +65,16 @@
   ["bb test" "clojure -M:test" "git status" "git diff --stat"
    "git add -A && git commit -m \"push the fix through\"" "ls -la src"
    "npm install" "ssh-keygen -lf key.pub" "env FOO=1 bb test"])
+
+(deftest ^{:stratum 0} policy-file-is-checked-against-its-schema-test
+  (testing "the shipped policy passes"
+    (is (map? (policy/read-tool-policy (slurp (io/resource "config/agent/tool-policy.edn"))))))
+  (testing "a misspelt key, a vector where a set belongs, or a keyword tool name throws"
+    (doseq [text ["{:common #{} :roles {} :bash/deny-patterns [] :comon #{}}"
+                  "{:common [\"Read\"] :roles {} :bash/deny-patterns []}"
+                  "{:common #{} :roles {:implementer #{:Bash}} :bash/deny-patterns []}"
+                  "{:common #{} :roles {} }"]]
+      (is (thrown? clojure.lang.ExceptionInfo (policy/read-tool-policy text)) text))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

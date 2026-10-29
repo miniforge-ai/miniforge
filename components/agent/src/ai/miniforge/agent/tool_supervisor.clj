@@ -34,8 +34,8 @@
                         stdin, evaluates, writes decision to stdout"
   (:require
    [cheshire.core :as json]
-   [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [ai.miniforge.agent.tool-policy :as tool-policy]
    [ai.miniforge.event-stream.interface :as events]
    [slingshot.slingshot :refer [try+]])
   (:import
@@ -46,13 +46,13 @@
 ;; Policy data
 (def ^{:stratum 0} tool-policy
   "The tool policy, read from the classpath resource
-   config/agent/tool-policy.edn on first use, with its
-   :bash/deny-patterns compiled to regexes. A missing or unreadable
-   resource throws there, and the hook then refuses the tool call."
+   config/agent/tool-policy.edn on first use by
+   `tool-policy/read-tool-policy`, which checks it against its schema. A
+   missing, unreadable or malformed resource throws there, and the hook
+   then refuses the tool call."
   (delay (-> (io/resource "config/agent/tool-policy.edn")
              slurp
-             edn/read-string
-             (update :bash/deny-patterns #(mapv re-pattern %)))))
+             tool-policy/read-tool-policy)))
 
 (defn ^{:stratum 0} role-tools
   "The tools `policy` lets `role` call: its :common set plus the role's
