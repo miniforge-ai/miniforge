@@ -22,6 +22,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.event-stream.layout-reader :as layout]
    [ai.miniforge.event-stream.layout-tail :as sut]
+   [ai.miniforge.logging.interface :as log]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]]))
 
@@ -155,6 +156,31 @@
       (sut/poll-once! s1 base publish (+ t0 1000))
       (is (= [:workflow/started :workflow/completed] (mapv :event/type @published))))))
 
+(deftest ^{:stratum 1} a-corrupt-file-is-given-up-after-retries-with-a-logged-gap
+  (let [events-dir (temp-events-dir)
+        base       (str events-dir)
+        stream     (file-sink-stream events-dir)
+        wf-id      (random-uuid)
+        published  (atom [])
+        publish    #(swap! published conj %)
+        [logger entries] (log/collecting-logger)]
+    (es/publish! stream (wf-event :workflow/started wf-id))
+    (Thread/sleep 2)
+    (spit (io/file (es/workflow-dir base wf-id) (str (.format (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd'T'HHmmssSSS'Z'")
+                                                              (java.time.LocalDateTime/now java.time.ZoneOffset/UTC))
+                                                     "-corrupt.json"))
+          "{not transit")
+    (Thread/sleep 2)
+    (es/publish! stream (wf-event :workflow/completed wf-id :workflow/status :success))
+    (let [t0    (System/currentTimeMillis)
+          polls (iterate #(sut/poll-once! % base publish (+ t0 500))
+                         (assoc (sut/initial-state base t0 window-ms) :logger logger))]
+      (nth polls (dec layout/max-read-attempts))
+      (is (= [:workflow/started] (mapv :event/type @published)) "held while it is retried")
+      (nth polls layout/max-read-attempts)
+      (is (= [:workflow/started :workflow/completed] (mapv :event/type @published)))
+      (is (= [:event-tail/gap] (map :log/event @entries))))))
+
 (deftest ^{:stratum 1} tracking-keeps-a-window-of-names-and-finds-late-files-in-it
   (let [events-dir (temp-events-dir)
         base       (str events-dir)
@@ -241,6 +267,28 @@
         (sut/poll-once! s3 base publish (+ t1 sut/sweep-ms 2000))
         (is (= [:workflow/started :workflow/resumed] (mapv :event/type @published))
             "the event read before the idle gap is not read again")))))
+
+(deftest ^{:stratum 1} a-run-whose-last-read-fails-is-read-again-before-it-retires
+  (let [events-dir (temp-events-dir)
+        base       (str events-dir)
+        stream     (file-sink-stream events-dir)
+        wf-id      (random-uuid)
+        published  (atom [])
+        publish    #(swap! published conj %)
+        read-event layout/read-event]
+    (es/publish! stream (wf-event :workflow/started wf-id))
+    (let [t0 (System/currentTimeMillis)
+          s1 (sut/poll-once! (sut/initial-state base t0 window-ms) base publish (+ t0 500))
+          t1 (+ t0 window-ms sut/sweep-ms)]
+      (es/publish! stream (wf-event :workflow/completed wf-id :workflow/status :success))
+      ;; Polling paused past the window, and the leaving read of the completion fails.
+      (let [s2 (with-redefs [layout/read-event #(when (= :workflow/started (:event/type (read-event %)))
+                                                  (read-event %))]
+                 (sut/poll-once! s1 base publish t1))
+            s3 (sut/poll-once! s2 base publish (+ t1 500))]
+        (is (contains? (:retrying s2) (str wf-id)) "kept for another read, not retired")
+        (is (= [:workflow/started :workflow/completed] (mapv :event/type @published)))
+        (is (empty? (:retrying s3)) "retired once its read succeeded")))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
