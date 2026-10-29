@@ -18,11 +18,16 @@ Host and capsule process execution remain in the existing lifecycle namespace fo
 
 ## Verification
 
-The existing verify suites pass 32 tests and 104 assertions.
+The verify suites pass 37 tests and 116 assertions, including interruption,
+callback registration timing, config overrides, and the public parser seam.
+All affected phase-software-factory consumers pass serially in 54 seconds.
 A one-time comparison against the original parser and summary functions passes 120 cases and 360 assertions.
 Cases cover Clojure totals, rollup lines, bounded failure blocks, Cargo, missing summaries, preview truncation, and
 timeout summaries.
-Run affected consumers, normal hooks, standards, review, and CI before merging.
+This is pure restructuring; existing output contracts and verdicts are unchanged.
+The adversarial pass traces default configuration, registration order, failing
+summaries, bounded evidence, and public Var seams. Normal hooks, standards,
+fresh-head review, and CI remain required before merging.
 
 ## Deployment
 

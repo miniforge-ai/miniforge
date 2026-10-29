@@ -34,7 +34,7 @@
         listed (str/join ", " shown)]
     (if (pos? extra)
       (messages/t :verify/more-failing-tests {:tests listed
-                                             :count extra})
+                                            :count extra})
       listed)))
 
 (defn- ^{:stratum 0} bounded-output-preview
@@ -74,14 +74,14 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} parse-clojure [output exit-code]
-      (let [failures (sum-groups config/namespace-summary-pattern 1 output)
-            errors (sum-groups config/namespace-summary-pattern 2 output)
-            passed? (and (zero? failures) (zero? errors) (zero? exit-code))
-            blocks (if passed? [] (failure-blocks output))
-            tests (sum-groups config/ran-tests-pattern 1 output)
-            assertions (sum-groups config/ran-tests-pattern 2 output)
-            checked-errors (synthesized-error-count failures errors exit-code)]
-        (assoc (result/summary passed? tests assertions failures checked-errors output) :failures blocks)))
+  (let [failures (sum-groups config/namespace-summary-pattern 1 output)
+        errors (sum-groups config/namespace-summary-pattern 2 output)
+        passed? (and (zero? failures) (zero? errors) (zero? exit-code))
+        blocks (if passed? [] (failure-blocks output))
+        tests (sum-groups config/ran-tests-pattern 1 output)
+        assertions (sum-groups config/ran-tests-pattern 2 output)
+        checked-errors (synthesized-error-count failures errors exit-code)]
+    (assoc (result/summary passed? tests assertions failures checked-errors output) :failures blocks)))
 
 (defn- ^{:stratum 1} parse-error-message [results]
   (let [preview (not-empty (bounded-output-preview (:output results)))]
@@ -90,7 +90,7 @@
 (defn- ^{:stratum 1} failure-count-message [results failures errors]
   (let [names (map :test (:failures results))
         counts (messages/t :verify/tests-failed {:fail-count failures
-                                                :error-count errors})]
+                                               :error-count errors})]
     (cond-> counts
       (seq names) (str " " (messages/t :verify/failing-tests {:tests (failing-test-list names)})))))
 
