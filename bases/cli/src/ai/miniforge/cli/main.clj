@@ -387,6 +387,7 @@
   [{:cmds ["version"] :fn version-cmd}
    {:cmds ["doctor"]
     :fn doctor-cmd
+    :restrict true
     :spec {:backend        {:coerce :keyword :alias :b}
            :execution-mode {:coerce :keyword :alias :m}}}
    {:cmds ["help"]    :fn help-cmd}

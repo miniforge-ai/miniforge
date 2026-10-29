@@ -218,3 +218,12 @@ esac")
                                          "--execution-mode" "governed")]
       (is (= 1 exit))
       (is (str/includes? out "no usable container runtime")))))
+
+(deftest ^{:stratum 2} unknown-option-is-refused-test
+  (testing "a misspelled option exits 2 with usage instead of being ignored"
+    (let [{:keys [exit err]} (run-doctor {:tools   healthy-tools
+                                          :cfg     {:llm {:backend :opencode}}
+                                          :runtime runtime-found}
+                                         "--bakend" "claude")]
+      (is (= 2 exit))
+      (is (str/includes? err "--bakend")))))
