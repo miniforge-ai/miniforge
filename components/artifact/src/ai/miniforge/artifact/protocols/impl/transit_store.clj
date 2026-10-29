@@ -251,7 +251,9 @@
    :unavailable anomaly when the directory cannot be listed. A file that
    cannot be read, or whose :artifact/id does not map back to that same
    file (compared as canonical paths, so an id such as \"../a\" cannot
-   claim a.transit.json), is skipped."
+   claim a.transit.json), is skipped; so is a file whose id cannot be
+   turned into a path at all (e.g. one containing NUL), without stopping
+   the rebuild of the others."
   [artifacts-dir]
   (let [index-name (.getName (io/file (index-file-path artifacts-dir)))
         listing (.listFiles (io/file artifacts-dir))]
@@ -260,10 +262,14 @@
       (reduce
        (fn [acc ^File f]
          (let [artifact (try (read-transit (.getPath f)) (catch Exception _ nil))
-               expected (when (and (map? artifact) (some? (:artifact/id artifact)))
-                          (.getCanonicalPath (io/file (artifact-file-path artifacts-dir
-                                                                          (:artifact/id artifact)))))]
-           (if (= expected (.getCanonicalPath f))
+               maps-back? (try
+                            (and (map? artifact)
+                                 (some? (:artifact/id artifact))
+                                 (= (.getCanonicalPath (io/file (artifact-file-path artifacts-dir
+                                                                                    (:artifact/id artifact))))
+                                    (.getCanonicalPath f)))
+                            (catch Exception _ false))]
+           (if maps-back?
              (update acc :index add-to-index artifact)
              (update acc :skipped conj (.getName f)))))
        {:index {} :skipped []}

@@ -574,3 +574,19 @@
           (is (false? (p/close s)))))
       (finally
         (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-rebuild-skips-an-id-that-is-not-a-valid-path
+  (let [dir (temp-dir)
+        adir (artifacts-path dir)]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "b"))
+        (p/close s))
+      (impl/write-transit (str adir "/x.transit.json") (artifact "a\u0000b"))
+      (truncate-to-half! (impl/index-file-path adir))
+      (let [s (open-store dir)]
+        (testing "an id with NUL is skipped and the rest is still recovered"
+          (is (= #{"b"} (set (keys @(:index s))))))
+        (p/close s))
+      (finally
+        (delete-dir! dir)))))
