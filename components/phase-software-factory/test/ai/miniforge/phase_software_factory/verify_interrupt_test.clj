@@ -71,10 +71,16 @@
     []))
 
 (defn- ^{:stratum 0} alive?
+  "True when `pid` is a running process. A killed process nobody has
+   reaped yet (a zombie: its shell died first and the container's PID 1
+   does not reap) still reports alive on Linux but has no command, so it
+   does not count, as in verify_test's `descendant-sleeps`."
   [pid]
   (let [handle (java.lang.ProcessHandle/of pid)]
     (and (.isPresent handle)
-         (.isAlive ^java.lang.ProcessHandle (.get handle)))))
+         (let [^java.lang.ProcessHandle process (.get handle)]
+           (and (.isAlive process)
+                (.isPresent (.command (.info process))))))))
 
 (defn- ^{:stratum 0} kill-pids!
   "Test cleanup, so a failing run does not leave 10-minute sleeps behind."
