@@ -214,3 +214,17 @@
     (is (= [[:msg/workflow-added {:workflow-id wf-id :name "Late start" :spec {:name "Late start"}}]] @msgs)
         "a slow lookup finds the start and the row appears")
     (is (contains? (:known @runs) wf-id))))
+
+(deftest ^{:stratum 1} a-run-first-seen-through-a-cancellation-shows-cancelled
+  (doseq [[label start?] [["its start on disk" true] ["no start that reads" false]]]
+    (let [wf-id (random-uuid)
+          dir   (if start?
+                  (write-old-start! wf-id)
+                  (doto (io/file (System/getProperty "java.io.tmpdir") (str "tui-layout-" (random-uuid))) .mkdirs))
+          msgs  (atom [])
+          send! #(swap! msgs conj %)
+          runs  (new-runs)]
+      (file-sub/dispatch-event! send! dir runs {:event/type :workflow/cancelled :workflow/id wf-id
+                                                :cancel/requested-by "operator" :workflow/duration-ms 5})
+      (dotimes [_ file-sub/max-bootstrap-attempts] (file-sub/retry-bootstraps! send! dir runs))
+      (is (= :cancelled (row-status @msgs)) label))))

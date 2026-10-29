@@ -166,6 +166,11 @@
     :workflow/resumed
     (msg/workflow-resumed (workflow-id event))
 
+    :workflow/cancelled
+    (msg/workflow-done (workflow-id event) :cancelled
+                       (cond-> {}
+                         (:workflow/duration-ms event) (assoc :duration-ms (:workflow/duration-ms event))))
+
     :workflow/failed
     (msg/workflow-failed (workflow-id event)
                          (or (:workflow/error-details event)
