@@ -22,12 +22,17 @@
 
    This follows git's protocol for writing an index: create
    `<gitdir>/index.lock` exclusively (another git process holding it
-   makes the fix fail), copy the index into it, stage exactly the fix's
-   files and commit with GIT_INDEX_FILE pointing at the lock file, then
-   rename the lock file over the index on success or delete it on any
-   failure. Other git commands see the lock and wait or fail, as they do
-   for git itself. A retry therefore never commits what an earlier
-   attempt staged.
+   makes the fix fail), fill it from HEAD (`git read-tree HEAD`), stage
+   exactly the fix's files and commit with GIT_INDEX_FILE pointing at the
+   lock file, then rename the lock file over the index on success or
+   delete it on any failure. Other git commands see the lock and wait or
+   fail, as they do for git itself. A retry therefore never commits what
+   an earlier attempt staged.
+
+   The commit holds HEAD plus the fix's files and nothing else. When the
+   index already differs from HEAD (someone staged changes in the
+   worktree), the fix is refused rather than committing or discarding
+   them.
 
    The git dir comes from `git rev-parse --absolute-git-dir`, so a relative
    worktree path and a linked worktree both resolve to the right index.
@@ -94,9 +99,9 @@
      (.getMessage e))))
 
 (defn ^{:stratum 1} stage-files!
-  "Take git's index lock in `worktree-path`, copy the index into it, and
-   stage `files` (an artifact's `:code/files`: `:path`, `:action`) into the
-   lock file. Returns `{:index :lock}` with the lock held, for the commit
+  "Take git's index lock in `worktree-path`, fill it from HEAD, and stage
+   `files` (an artifact's `:code/files`: `:path`, `:action`) into the lock
+   file. Refuses when the index already has staged changes. Returns `{:index :lock}` with the lock held, for the commit
    (GIT_INDEX_FILE = `:lock`) and then `install-index!` or
    `discard-index!`; or `{:error msg}` with the lock released, or never
    taken when another process holds it. The index itself is not written."
@@ -115,11 +120,30 @@
 
        :else
        (try+
-        (io/copy (io/file index) (io/file lock))
-        (if-let [error (some #(stage-file! worktree-path lock %) files)]
-          (do (discard-index! paths)
-              {:error error})
-          paths)
+        (let [opts  {:dir (str worktree-path) :continue true :out :string :err :string}
+              diff  (:exit (apply process/shell opts
+                                  "git" (concat git-dir/hooks-disabled-args
+                                                ["diff-index" "--cached" "--quiet" "HEAD" "--"])))
+              error (cond
+                      (= 1 diff)
+                      (str "the index already has staged changes; the fix loop commits only"
+                           " its own files and will not include or discard them")
+
+                      (not (zero? diff))
+                      "git cannot compare the index with HEAD"
+
+                      (not (zero? (:exit (apply process/shell
+                                                (assoc opts :extra-env {"GIT_INDEX_FILE" lock})
+                                                "git" (concat git-dir/hooks-disabled-args
+                                                              ["read-tree" "HEAD"])))))
+                      "git cannot read HEAD into the index lock"
+
+                      :else
+                      (some #(stage-file! worktree-path lock %) files))]
+          (if error
+            (do (discard-index! paths)
+                {:error error})
+            paths))
         (catch Exception e
           (discard-index! paths)
           {:error (.getMessage e)})))

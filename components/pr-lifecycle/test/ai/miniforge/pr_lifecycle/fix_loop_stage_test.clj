@@ -99,11 +99,10 @@
         (finally (fs/delete-tree dir))))))
 
 (deftest ^{:stratum 2} commit-fix-leaves-the-index-untouched-when-staging-fails-test
-  (testing "when the second file cannot be staged, the real index keeps what it had and nothing more"
+  (testing "when the second file cannot be staged, the index keeps what it had and nothing more"
     (let [dir (repo-with-unrelated-change)]
       (try
         (spit (str (fs/path dir ".gitignore")) "ignored.txt\n")
-        (git! dir "add" "d.txt")
         (spit (str (fs/path dir "a.txt")) "a2\n")
         (spit (str (fs/path dir "ignored.txt")) "x\n")
         (let [head   (git! dir "rev-parse" "HEAD")
@@ -113,7 +112,7 @@
                                       {:path "ignored.txt" :action :create}])]
           (is (= :stage-failed (get-in result [:error :code])))
           (is (= before (git! dir "ls-files" "--stage")))
-          (is (= "d.txt" (git! dir "diff" "--cached" "--name-only")))
+          (is (= "" (git! dir "diff" "--cached" "--name-only")))
           (is (= head (git! dir "rev-parse" "HEAD")))
           (is (not (fs/exists? (fs/path dir ".git" "index.lock")))))
         (finally (fs/delete-tree dir))))))
@@ -179,3 +178,21 @@
               (is (= "M\ta.txt" (git! dir "show" "--name-status" "--format=" "HEAD")))
               (is (not (fs/exists? (fs/path dir ".git" "index.lock")))))))
         (finally (fs/delete-tree base))))))
+
+(deftest ^{:stratum 2} commit-fix-refuses-when-changes-are-already-staged-test
+  (testing "an unrelated pre-staged file makes the fix fail; it is neither committed nor unstaged"
+    (let [dir (repo-with-unrelated-change)]
+      (try
+        (git! dir "add" "d.txt")
+        (spit (str (fs/path dir "a.txt")) "a2\n")
+        (let [head   (git! dir "rev-parse" "HEAD")
+              before (vec (fs/read-all-bytes (fs/path dir ".git" "index")))
+              result (fix/commit-fix dir {:fix/type :review-changes} "fix/x" nil
+                                     [{:path "a.txt" :action :modify}])]
+          (is (= :stage-failed (get-in result [:error :code])))
+          (is (re-find #"already has staged changes" (str (get-in result [:error :message]))))
+          (is (= before (vec (fs/read-all-bytes (fs/path dir ".git" "index")))))
+          (is (= "d.txt" (git! dir "diff" "--cached" "--name-only")))
+          (is (= head (git! dir "rev-parse" "HEAD")))
+          (is (not (fs/exists? (fs/path dir ".git" "index.lock")))))
+        (finally (fs/delete-tree dir))))))
