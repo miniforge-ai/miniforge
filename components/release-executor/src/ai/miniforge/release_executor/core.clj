@@ -419,13 +419,19 @@
           (fail state :metadata-generation-failed (msg/t :step/metadata-generation-failed)))))))
 
 (defn ^{:stratum 1} step-create-branch
-  "Create the release branch.  Dispatches git backend based on :host-mode?."
+  "Create the release branch.  Dispatches git backend based on :host-mode?.
+
+   With a run id in :provenance the branch is the run's fixed one
+   (metadata/release-branch-name), not the releaser's choice, so a retry
+   or resume reuses the branch and its PR."
   [state]
   (if (failed? state)
     state
     (let [{:keys [release-meta host-mode? worktree-path executor environment-id
-                  base-branch-override logger]} state
-          branch-name (:release/branch-name release-meta)
+                  base-branch-override logger provenance task-description]} state
+          branch-name (if-let [run-id (:workflow provenance)]
+                        (metadata/release-branch-name run-id (:task provenance) task-description)
+                        (:release/branch-name release-meta))
           result (if host-mode?
                    (git/create-branch! worktree-path branch-name)
                    (sandbox/create-branch! executor environment-id branch-name))]
@@ -448,7 +454,9 @@
             (log/warn logger :release-executor :base-branch-fetch-degraded
                       {:message (str "Could not fetch base branch " base-branch-override
                                      "; PR targets " detected " instead of stacking.")}))
-          (assoc state :branch (:branch result) :base-branch base))))))
+          (-> state
+              (assoc :branch (:branch result) :base-branch base)
+              (assoc-in [:release-meta :release/branch-name] (:branch result))))))))
 
 (defn ^{:stratum 1} step-stage-dirty-files
   "Stage all dirty files.  Dispatches git backend based on :host-mode?.
@@ -861,29 +869,52 @@
 ;------------------------------------------------------------------------------ Layer 4
 
 (defn ^{:stratum 4} step-create-pr
-  "Create the pull request.  Dispatches git backend based on :host-mode?.
+  "Create the pull request, unless the branch already has one.  Dispatches
+   git backend based on :host-mode?.
 
-   git/create-pr! carries the same duplicate-PR reuse logic as
-   sandbox/create-pr! — retry-safe on both backends."
+   Looks the branch's PR up first, in any state: an open or merged PR is
+   reused (a retried or resumed release), a closed one fails the release
+   rather than opening another, and a failed lookup fails it too, since
+   creating blind could duplicate. git/create-pr! and sandbox/create-pr!
+   also reuse a PR that gh reports as already existing."
   [state]
   (cond
     (failed? state)           state
     (not (:create-pr? state)) state
     :else
     (let [{:keys [release-meta base-branch host-mode? worktree-path
-                  executor environment-id]} state
-          pr-opts {:title       (:release/pr-title release-meta)
-                   :body        (with-provenance (:release/pr-body release-meta) state)
-                   :base-branch base-branch}
-          result (if host-mode?
-                   (git/create-pr! worktree-path pr-opts (:github-token state))
-                   (sandbox/create-pr! executor environment-id pr-opts
-                                       (gh-exec-opts state)))]
-      (if (result/succeeded? result)
+                  executor environment-id branch]} state
+          found    (if host-mode?
+                     (git/find-pr! worktree-path branch (:github-token state))
+                     (sandbox/find-pr! executor environment-id branch (gh-exec-opts state)))
+          existing (:pr found)]
+      (cond
+        (not (result/succeeded? found))
+        (fail state :pr-lookup-failed (msg/t :pr/lookup-failed {:branch branch
+                                                                :error  (:error found)}))
+
+        (= "CLOSED" (:pr-state existing))
+        (fail state :pr-closed (msg/t :pr/closed {:branch branch :pr-url (:pr-url existing)}))
+
+        existing
         (assoc state
-               :pr-number (:pr-number result)
-               :pr-url    (:pr-url result))
-        (fail state :pr-create-failed (:error result))))))
+               :pr-number  (:pr-number existing)
+               :pr-url     (:pr-url existing)
+               :pr-reused? true)
+
+        :else
+        (let [pr-opts {:title       (:release/pr-title release-meta)
+                       :body        (with-provenance (:release/pr-body release-meta) state)
+                       :base-branch base-branch}
+              result (if host-mode?
+                       (git/create-pr! worktree-path pr-opts (:github-token state))
+                       (sandbox/create-pr! executor environment-id pr-opts
+                                           (gh-exec-opts state)))]
+          (if (result/succeeded? result)
+            (assoc state
+                   :pr-number (:pr-number result)
+                   :pr-url    (:pr-url result))
+            (fail state :pr-create-failed (:error result))))))))
 
 (defn ^{:stratum 4} step-update-pr-body
   "Update the GitHub PR body when the initial body was missing or degraded.

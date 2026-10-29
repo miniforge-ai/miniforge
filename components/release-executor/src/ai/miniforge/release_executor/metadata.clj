@@ -21,7 +21,10 @@
   (:require
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.release-executor.messages :as msg]
-   [clojure.string :as str]))
+   [clojure.string :as str])
+  (:import
+   [java.nio.charset StandardCharsets]
+   [java.util UUID]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -147,6 +150,18 @@
     ""))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} release-branch-name
+  "The release branch of one run (and DAG task), the same on every attempt:
+   mf/<task slug>-<8 hex digits of a name-based UUID of the run and task
+   ids>. A retried or resumed release computes the same name, so it finds
+   its branch and PR again instead of making new ones."
+  [run-id task-id task-description]
+  (let [title (first-sentence (or task-description (default-task-description)) 70)
+        id    (UUID/nameUUIDFromBytes
+               (.getBytes (pr-str [:release/branch (str run-id) (some-> task-id str)])
+                          StandardCharsets/UTF_8))]
+    (str "mf/" (slugify title) "-" (subs (str id) 0 8))))
 
 (defn- ^{:stratum 1} known-issue-text
   "Markdown text for one known issue. A structured warning is a map with
