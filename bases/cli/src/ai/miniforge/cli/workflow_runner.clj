@@ -107,12 +107,13 @@
     (binding [*out* (if json? *err* *out*)]
       (try
         (let [{:keys [load-workflow run-pipeline]} (setup/resolve-workflow-interface)
-              ;; Create event stream if not provided (dashboard-url takes precedence)
+              ;; Create an event stream if none is provided. A --dashboard-url
+              ;; run keeps it too: gates record each phase decision on it, and
+              ;; without one every gated phase fails closed.
               stream (or event-stream
-                     (when-not dashboard-url
-                       (try
-                         (es/create-event-stream)
-                         (catch Exception _ nil))))]
+                         (try
+                           (es/create-event-stream)
+                           (catch Exception _ nil)))]
           (display/print-workflow-header workflow-id version quiet)
           (let [workflow-input (context/resolve-input opts)
                 workflow (setup/load-and-validate-workflow load-workflow workflow-id version)

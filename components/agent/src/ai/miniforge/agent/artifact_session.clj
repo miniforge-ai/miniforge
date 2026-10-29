@@ -458,6 +458,17 @@
     (some #{:recorded} logs)   :recorded
     :else                      :absent))
 
+(defn ^{:stratum 0} pre-tool-use-settings
+  "Claude Code settings that run `hook-cmd` before every tool call. Each
+   PreToolUse entry is a matcher group, {\"matcher\" ... \"hooks\" [handler]},
+   as https://code.claude.com/docs/en/hooks and the settings JSON schema
+   require (the group's \"hooks\" key is required, and no other keys are
+   allowed); \"*\" matches every tool. A handler placed directly in the
+   PreToolUse array is not a valid entry, so Claude never runs it."
+  [hook-cmd]
+  {"hooks" {"PreToolUse" [{"matcher" "*"
+                           "hooks"   [{"type" "command" "command" hook-cmd}]}]}})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} split-answers-segment
@@ -750,9 +761,7 @@
                                                "args"    (:args srv-cmd)}}}
                      {:pretty true})
         hook-cmd    "bb miniforge hook-eval"
-        settings    (json/generate-string
-                     {"hooks" {"PreToolUse" [{"type" "command" "command" hook-cmd}]}}
-                     {:pretty true})]
+        settings    (json/generate-string (pre-tool-use-settings hook-cmd) {:pretty true})]
     ;; Write configs inside capsule
     (exec! executor env-id (str "cat > " (file-artifacts/shell-quote (:mcp-config-path session)) " << 'MCPEOF'\n" mcp-config "\nMCPEOF")
            {:workdir (:workdir session)})
@@ -864,12 +873,8 @@
   [session-dir]
   (let [[cmd & args] (resolve-miniforge-command)
         hook-command (str/join " " (concat [cmd] args ["hook-eval"]))
-        settings {"hooks"
-                  {"PreToolUse"
-                   [{"type" "command"
-                     "command" hook-command}]}}
         path (str session-dir "/claude-settings.json")]
-    (spit path (json/generate-string settings {:pretty true}))
+    (spit path (json/generate-string (pre-tool-use-settings hook-command) {:pretty true}))
     path))
 
 ;; High-level session helpers

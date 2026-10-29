@@ -1987,21 +1987,37 @@
          TimeUnit/MILLISECONDS))
 
 (defn- ^{:stratum 4} stop-capture-process!
+  "Wait up to `timeout-ms` for the capture subprocess to exit and collect
+   its output. On timeout the process tree is destroyed, not just the CLI
+   (its MCP servers and tool children would otherwise keep running), and
+   the call waits again briefly. If the waiting thread is interrupted or
+   anything else throws, the tree is destroyed before the throwable
+   propagates; on interrupt the flag the exception cleared is restored
+   first."
   [{:keys [^Process process stdin-thread stdout-thread stderr-thread stdout stderr]}
    timeout-ms]
-  (let [initial-result (wait-for-stream-process process timeout-ms)
-        timed-out? (= -1 (:exit initial-result))
-        result (if timed-out?
-                 (do
-                   (try (.destroyForcibly process) (catch Exception _ nil))
-                   (wait-for-stream-process process (post-kill-join-timeout-ms)))
-                 initial-result)]
-    (doseq [thread [stdin-thread stdout-thread stderr-thread]
-            :when thread]
-      (.join ^Thread thread stream-reader-join-timeout-ms))
-    {:out (or @stdout "")
-     :err (or (not-empty (:err result)) @stderr "")
-     :exit (:exit result)}))
+  (try+
+    (let [initial-result (wait-for-stream-process process timeout-ms)
+          timed-out? (= -1 (:exit initial-result))
+          result (if timed-out?
+                   (do
+                     (destroy-process-tree! process)
+                     (wait-for-stream-process process (post-kill-join-timeout-ms)))
+                   initial-result)]
+      (doseq [thread [stdin-thread stdout-thread stderr-thread]
+              :when thread]
+        (.join ^Thread thread stream-reader-join-timeout-ms))
+      {:out (or @stdout "")
+       :err (or (not-empty (:err result)) @stderr "")
+       :exit (:exit result)})
+    (catch InterruptedException _
+      (destroy-process-tree! process)
+      (.interrupt (Thread/currentThread))
+      (throw+))
+    ;; `Object` also matches ex-info, which a `Throwable` selector misses.
+    (catch Object _
+      (destroy-process-tree! process)
+      (throw+))))
 
 (defn- ^{:stratum 4} keepalive-interval-ms
   "Refresh interval for the stream-side keepalive thread.
