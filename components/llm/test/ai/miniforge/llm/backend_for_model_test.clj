@@ -42,3 +42,18 @@
     (is (= :gemini-api (llm/backend-for-model "gemini-2.5-pro" nil)))
     (is (= :gemini-api (llm/client-backend
                         (llm/create-client-for-model "gemini-2.5-flash"))))))
+
+(deftest ^{:stratum 0} backend-serves-model-test
+  (testing "the catalog family of a model, through a provider prefix"
+    (is (= :claude (llm/catalog-backend-for-model "claude-sonnet-4-6")))
+    (is (= :claude (llm/catalog-backend-for-model "anthropic/claude-sonnet-4-5")))
+    (is (= :codex (llm/catalog-backend-for-model "openai/gpt-5.4")))
+    (is (nil? (llm/catalog-backend-for-model "qwen3:32b"))))
+  (testing "single-provider backends serve their family only"
+    (is (llm/backend-serves-model? :anthropic-api "claude-sonnet-4-6"))
+    (is (not (llm/backend-serves-model? :codex "anthropic/claude-sonnet-4-5")))
+    (is (not (llm/backend-serves-model? :claude "gpt-5.4")))
+    (is (not (llm/backend-serves-model? :gemini-api "claude-sonnet-4-6"))))
+  (testing "routing backends and models the catalog does not know pass"
+    (is (llm/backend-serves-model? :opencode "anthropic/claude-sonnet-4-6"))
+    (is (llm/backend-serves-model? :codex "gpt-6-preview"))))

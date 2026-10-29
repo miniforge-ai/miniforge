@@ -24,6 +24,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.interface.gate :as phase-gate]
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
    [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
@@ -543,7 +544,7 @@
         ;; underlying `:timeout :type` is mutually exclusive.
         backend-timeout? (and (= :error agent-status)
                               (backend-timeout-in-result? result))
-        gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))
         ;; Curator's empty-diff verdict: the implementer wrote no files to the
         ;; environment. Retrying with the same prompt won't change that — the
         ;; next attempt would just burn another 10+ minutes producing nothing.

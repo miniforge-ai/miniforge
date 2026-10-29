@@ -28,7 +28,8 @@
    [babashka.fs :as fs]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase-software-factory.release]
-   [ai.miniforge.phase.interface :as phase]))
+   [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.release-executor.interface :as release-executor]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -69,6 +70,22 @@
   [_executor _env-id command {:keys [workdir]}]
   (let [{:keys [exit out err]} (shell/sh "sh" "-c" command :dir workdir)]
     {:ok? true :data {:exit-code exit :stdout out :stderr err}}))
+
+(def ^{:stratum 0} names-git-quotes
+  "File names `git status` without -z prints in C-style quotes."
+  ["a b.clj" "\u00e9t\u00e9.clj"])
+
+(defn ^{:stratum 0} with-repo-holding
+  "Call `f` with a fresh git repository whose working tree holds an
+   untracked `<name>` file (content `content of <name>`) per name."
+  [names f]
+  (let [dir (str (fs/create-temp-dir {:prefix "release-scan-repo-"}))]
+    (try
+      (shell/sh "git" "init" "-q" :dir dir)
+      (doseq [n names] (spit (io/file dir n) (str "content of " n)))
+      (f dir)
+      (finally
+        (fs/delete-tree dir)))))
 
 (defn ^{:stratum 0} release-interceptor []
   (phase/get-phase-interceptor {:phase :release}))
@@ -184,6 +201,30 @@
                  (set result))))
         (finally
           (fs/delete-tree dir))))))
+
+(deftest ^{:stratum 1} local-scan-reads-names-git-quotes-test
+  (testing "a path with a space or non-ASCII characters is listed with its content"
+    (with-repo-holding (conj names-git-quotes "plain.clj")
+      (fn [dir]
+        (is (= (set (map (fn [n] {:path n :content (str "content of " n) :action :create})
+                         (conj names-git-quotes "plain.clj")))
+               (set (scan-local dir))))))))
+
+(deftest ^{:stratum 1} local-release-includes-names-git-quotes-test
+  (testing "files whose names git quotes reach the release executor"
+    (with-repo-holding names-git-quotes
+      (fn [dir]
+        (let [seen (atom nil)]
+          (with-redefs [release-executor/execute-release-phase
+                        (fn [workflow-state _exec-context _opts]
+                          (reset! seen workflow-state)
+                          {:success? true :artifacts [] :metrics {:files-written 0}})]
+            ((:enter (release-interceptor)) (release-ctx dir :success)))
+          (is (= (set names-git-quotes)
+                 (->> (:workflow/artifacts @seen)
+                      (mapcat (comp :code/files :artifact/content))
+                      (map :path)
+                      set))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

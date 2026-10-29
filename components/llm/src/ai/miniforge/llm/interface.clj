@@ -103,6 +103,21 @@
             :backend)
        not-found)))
 
+(defn ^{:stratum 0} catalog-backend-for-model
+  "The catalog backend whose models `model-id` belongs to, read through a
+   provider prefix: the catalog backend of the id, or of the id after its
+   prefix, else of the catalog models whose :provider is the prefix
+   (\"anthropic/claude-sonnet-4-5\" is :claude). nil when the catalog knows
+   neither the model nor its provider."
+  [model-id]
+  (let [[_ prefix bare-id] (re-matches #"([^/]+)/(.+)" (str model-id))
+        models             (vals registry/model-registry)
+        backend-where      (fn [k v] (:backend (first (filter #(= v (k %)) models))))]
+    (or (backend-where :model-id (str model-id))
+        (when bare-id
+          (or (backend-where :model-id bare-id)
+              (backend-where :provider (keyword prefix)))))))
+
 (defn ^{:stratum 0} client-backend
   "Return the backend keyword configured for an LLM client."
   [client]
@@ -110,6 +125,15 @@
     (-> client
         p/get-config
         :backend)))
+
+(defn ^{:stratum 0} client-model
+  "Return the model id an LLM client sends, or nil when it names none (the
+   backend's default applies) or `client` is not an LLMClient."
+  [client]
+  (when (satisfies? p/LLMClient client)
+    (-> client
+        p/get-config
+        :model)))
 
 (defn ^{:stratum 0} mock-client
   "Create a mock client for testing.
@@ -390,6 +414,18 @@
   cost/pricing-for-model)
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} backend-serves-model?
+  "False when `backend` serves one catalog family (its :catalog-backend in
+   backends.edn) and `model-id` belongs to another
+   (`catalog-backend-for-model`): gpt-5.4 on :claude, an anthropic/ id on
+   :codex. True otherwise. A routing backend (opencode, openrouter,
+   openai-compat, cursor) takes any model, and a model the catalog does not
+   know may be newer than the catalog."
+  [backend model-id]
+  (let [served (get-in backends [backend :catalog-backend])
+        family (catalog-backend-for-model model-id)]
+    (or (nil? served) (nil? family) (= served family))))
 
 (defn ^{:stratum 1} create-client-for-model
   "Create a new LLM client using the appropriate backend for a model-id.
