@@ -18,7 +18,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} run!
+(defn- ^{:stratum 1} checkpointed-run!
   "A checkpoint directory for a fresh run id under `root`, last changed
    `days` ago, with `manifest` (EDN text) as its manifest. Returns the id."
   [root days manifest]
@@ -38,11 +38,11 @@
   (fixture/call-with-temp-checkpoint-root
    (fn [root]
      (fs/with-temp-dir [events-dir {:prefix "gc-events-"}]
-       (let [expired (run! root 31 "{:workflow/id 1}")
-             recent (run! root 2 "{:workflow/id 1}")
-             pinned (run! root 90 "{:pinned? true}")
-             unreadable (run! root 90 "{:workflow/id")
-             live (run! root 90 "{:workflow/id 1}")
+       (let [expired (checkpointed-run! root 31 "{:workflow/id 1}")
+             recent (checkpointed-run! root 2 "{:workflow/id 1}")
+             pinned (checkpointed-run! root 90 "{:pinned? true}")
+             unreadable (checkpointed-run! root 90 "{:workflow/id")
+             live (checkpointed-run! root 90 "{:workflow/id 1}")
              _ (fs/create-dirs (es/workflow-dir (fs/file events-dir) live))
              other (doto (io/file root "not-a-run") (.mkdirs)
                      (.setLastModified (- (System/currentTimeMillis) (* 90 day-ms))))
@@ -60,7 +60,7 @@
 (deftest ^{:stratum 2} retention-is-configurable
   (fixture/call-with-temp-checkpoint-root
    (fn [root]
-     (let [week-old (run! root 8 "{:workflow/id 1}")]
+     (let [week-old (checkpointed-run! root 8 "{:workflow/id 1}")]
        (is (empty? (:deleted (workflow/gc-checkpoints! {:checkpoint/root root}))))
        (is (= [week-old] (:deleted (workflow/gc-checkpoints! {:checkpoint/root root
                                                               :max-age-days 7}))))))))
@@ -68,7 +68,7 @@
 (deftest ^{:stratum 2} a-checkpoint-holds-its-runs-events
   (fixture/call-with-temp-checkpoint-root
    (fn [root]
-     (let [id (run! root 31 "{:workflow/id 1}")]
+     (let [id (checkpointed-run! root 31 "{:workflow/id 1}")]
        (testing "while the checkpoint exists the event cleanup keeps the run's events"
          (is (true? (es/retention-hold ::gc/checkpoint (str id)))))
        (workflow/gc-checkpoints! {:checkpoint/root root})

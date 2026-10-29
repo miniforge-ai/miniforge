@@ -503,6 +503,9 @@
   :workflow-cmd/gc-scratch-no-repo "gc-scratch: not inside a git repository (no .git found)"
   :workflow-cmd/gc-scratch-success "Scratch-ref GC: pruned {pruned} queue entries, deleted {deleted} git refs, {remaining} queue entries remain."
   :workflow-cmd/gc-scratch-failed "gc-scratch failed: {error}"
+  :workflow-cmd/gc-checkpoints-success "Checkpoint GC under {root}: deleted {deleted}, kept {kept}."
+  :workflow-cmd/gc-checkpoints-unreadable "Kept checkpoint {run-id}: its manifest does not read, so whether it is pinned is unknown."
+  :workflow-cmd/gc-checkpoints-bad-age "gc-checkpoints: --max-age-days must be 0 or more (got {days})."
 
   ;; ── PR ────────────────────────────────────────────────────────────────
   :pr/no-repos "No repositories specified."
@@ -768,6 +771,8 @@
   "Cancel a running workflow by ID."
   :workflow-runner.help/workflow-gc-scratch-summary
   "Garbage-collect stale workflow scratch git refs from the deferred GC queue."
+  :workflow-runner.help/workflow-gc-checkpoints-summary
+  "Delete checkpoints unchanged for --max-age-days (default 30); pinned runs and runs with live events are kept."
   :workflow-runner.help/chain-run-summary
   "Execute a chain (multi-workflow) by ID."
   :workflow-runner.help/chain-list-summary
