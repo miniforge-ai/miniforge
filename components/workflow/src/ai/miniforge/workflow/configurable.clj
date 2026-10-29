@@ -147,6 +147,19 @@
   [exec-metrics phase-metrics]
   (context/merge-metrics exec-metrics (or phase-metrics zero-metrics)))
 
+(defn- ^{:stratum 1} dag-failure-error
+  "The :execution/errors entry for a failed DAG run. An operator cancel is
+   recorded as :dashboard-stop with the stop anomaly's message and data, the
+   entry `execution-dag` and the runner write for the same cancel."
+  [dag-result]
+  (if (:cancelled? dag-result)
+    (let [stop (:error dag-result)]
+      (execution-error :dashboard-stop
+                       (:anomaly/message stop)
+                       {:data (:anomaly/data stop)}))
+    (execution-error :dag-execution-failed
+                     (dag-execution-failed-message))))
+
 ;; Phase execution
 (defn ^{:stratum 1} execute-handler-phase
   "Execute a phase using a caller-provided handler from :phase-handlers context."
@@ -311,12 +324,10 @@
         (on-phase-complete ctx-with-result phase-config phase-result))
       (if-let [plan (should-parallelize-plan? phase-id phase-result execution-context)]
         (let [ctx-with-dag (execute-dag-for-plan ctx-with-result plan execution-context callbacks)
-              dag-success? (true? (get-in ctx-with-dag [:execution/dag-result :success?]))]
-          (if dag-success?
+              dag-result (:execution/dag-result ctx-with-dag)]
+          (if (true? (:success? dag-result))
             (continue-after-dag ctx-with-dag)
-            (fail-execution ctx-with-dag
-                            (execution-error :dag-execution-failed
-                                             (dag-execution-failed-message)))))
+            (fail-execution ctx-with-dag (dag-failure-error dag-result))))
         (let [next-ctx (transition-phase-outcome ctx-with-result phase-result)]
           (if (terminal? next-ctx)
             next-ctx
