@@ -73,16 +73,24 @@
                    (msg/system-t :monitor-state/unreadable {:path (str file) :error error})
                    {:monitor-state/path (str file)}))
 
-(defn ^{:stratum 0} update-file!
-  "Replace `file` with `(f current)` under its lock; `f` gets nil when the
-   file is absent or blank. Returns the map now in the file, or an anomaly,
-   with nothing written, when the file holds something other than one EDN
-   map, the lock stays busy, or the write fails."
-  [file f]
-  (let [result (config-file/update-config! (str file) f)]
-    (if (anomaly/anomaly? result) result (:after result))))
-
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} update-file!
+  "Replace `file` with `(f current)` under its lock; `f` gets nil when the
+   file is absent. Returns the map now in the file, or an anomaly, with
+   nothing written, when the file holds something other than one EDN map
+   (blank, comment-only and `nil` included), the lock stays busy, or the
+   write fails."
+  [file f]
+  (let [;; The config writer hands `f` nil for a blank or comment-only file
+        ;; too. Checked again under the lock, such a file is left alone.
+        result (config-file/update-config! (str file)
+                                           #(when-not (and (nil? %) (.exists (io/file file)))
+                                              (f %)))]
+    (cond
+      (anomaly/anomaly? result) result
+      (nil? (:after result))    (unreadable file "blank, comment-only or nil")
+      :else                     (:after result))))
 
 (defn ^{:stratum 1} slug-segments
   "[owner name], lower-cased, for an owner/name repo slug, else nil. `.` and

@@ -79,6 +79,20 @@
         (is (anomaly/anomaly? (poller/save-watermarks! (wm 3 "2026-10-03"))))
         (is (= "{\"7\" :seen}" (slurp file)))))))
 
+(deftest ^{:stratum 0} file-emptied-after-load-is-not-overwritten-test
+  (doseq [damage ["" ";; truncated\n" "nil"]]
+    (testing (str "a state file holding " (pr-str damage))
+      (let [budget-file (str (sut/repo-file "acme/app" "budget-7.edn"))
+            wm-file     (str (sut/repo-file "acme/app" "watermarks.edn"))
+            watermarks  {:repo-slug "acme/app" :prs {1 {:last-seen-at "2026-10-01" :advanced-at "a"}}}]
+        (budget/save-budget! "acme/app" (budget/create-budget 7))
+        (poller/save-watermarks! watermarks)
+        (spit budget-file damage)
+        (spit wm-file damage)
+        (is (anomaly/anomaly? (budget/save-budget! "acme/app" (budget/create-budget 7))))
+        (is (anomaly/anomaly? (poller/save-watermarks! watermarks)))
+        (is (= [damage damage] [(slurp budget-file) (slurp wm-file)]))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} isolated-home
