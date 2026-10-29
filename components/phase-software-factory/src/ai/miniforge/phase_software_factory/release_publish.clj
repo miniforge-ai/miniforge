@@ -16,11 +16,17 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-software-factory.release-publish
-  "The release phase's publish half: the release executor context that
-   pushing the branch and opening the PR need.
+  "The release phase's publish half: push the branch enter-release
+   prepared and open its PR, from leave-release, after the gates ran.
 
    Split out of `release` (rule 210)."
-  (:require [ai.miniforge.workspace.interface :as workspace]
+  (:require [ai.miniforge.logging.interface :as log]
+            [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate]
+            [ai.miniforge.phase-software-factory.messages :as messages]
+            [ai.miniforge.release-executor.interface :as release-executor]
+            [ai.miniforge.response.interface :as response]
+            [ai.miniforge.workspace.interface :as workspace]
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
 
@@ -42,6 +48,36 @@
              (when (zero? (:exit r))
                (str/trim (:out r))))
            (catch Exception _ nil))))
+
+(defn- ^{:stratum 0} publish-prepared
+  "Publish what enter-release prepared through `publish-context`, folding
+   the outcome into the phase `result`: on success its output gains the
+   release artifacts and :workflow/pr-info. A result with no
+   :release/prepared fails rather than completing without a push."
+  [result publish-context logger]
+  (if-let [prepared (get-in result [:output :release/prepared])]
+    (try
+      (let [exec-result (release-executor/publish-release prepared publish-context)]
+        (if (:success? exec-result)
+          (let [content (:artifact/content (first (:artifacts exec-result)))]
+            (update result :output merge
+                    (cond-> {:release/status    :completed
+                             :release/artifacts (:artifacts exec-result)}
+                      (:pr-url content)
+                      (assoc :workflow/pr-info {:pr-number  (:pr-number content)
+                                                :pr-url     (:pr-url content)
+                                                :branch     (:branch content)
+                                                :commit-sha (:commit-sha content)}))))
+          (do (log/error logger :release :release/publish-failed
+                         {:data {:errors (:errors exec-result)}})
+              (response/failure (messages/t :release/publish-failed)
+                                {:data {:errors  (:errors exec-result)
+                                        :metrics (:metrics exec-result)}}))))
+      (catch Exception e
+        (log/error logger :release :release/publish-threw {:message (ex-message e)})
+        (response/failure e)))
+    (response/failure (messages/t :release/not-prepared)
+                      {:data {:type :release/not-prepared}})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -89,3 +125,33 @@
                 :task     (get-in ctx [:execution/input :task/id])}
    ;; Resolve and inject GitHub token for capsule gh CLI auth
    :github-token (resolve-github-token ctx)})
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} publish-when-allowed
+  "Publish (push and PR) what enter-release prepared, when the prepare
+   succeeded, did not skip, and no gate failed; otherwise return `ctx`
+   unchanged. Called by leave-release before it records the outcome."
+  [ctx]
+  (let [result   (get-in ctx [:phase :result])
+        publish? (and (phase/result-succeeded? result)
+                      (not (get-in result [:output :skipped]))
+                      (not= :release/zero-files (get-in result [:error :data :type]))
+                      (not (phase-gate/gate-failed? (:phase ctx))))]
+    (if-not publish?
+      ctx
+      (let [logger    (or (get-in ctx [:execution/logger])
+                          (log/create-logger {:min-level :debug :output :human}))
+            config    (phase/merge-with-defaults (get ctx :phase-config))
+            published (publish-prepared result (build-publish-context ctx config logger) logger)]
+        ;; Single derived projection of the canonical pr-info onto ctx-level
+        ;; :workflow/pr-info, which several consumers still read directly
+        ;; (runner_events completion event, CLI summary, evidence-bundle) until
+        ;; they migrate to response/release-pr-info. The projected value is
+        ;; derived from the authority via that accessor ({:result result} is the
+        ;; phase-result shape it expects), so this copy can never hold a value
+        ;; the authority doesn't — a derived cache of one reader, not a second
+        ;; source of truth.
+        (cond-> (assoc-in ctx [:phase :result] published)
+          (phase/result-succeeded? published)
+          (assoc :workflow/pr-info (response/release-pr-info {:result published})))))))

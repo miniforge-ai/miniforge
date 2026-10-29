@@ -460,7 +460,7 @@
   (testing "release phase writes files to temporary worktree"
     (with-test-worktree
       (fn [worktree]
-      (with-redefs [release-executor/execute-release-phase
+      (with-redefs [release-executor/prepare-release
                     (fn [workflow-state exec-context _opts]
                       ;; Write files directly to temp worktree (skip git staging)
                       (let [worktree (:worktree-path exec-context)
@@ -493,7 +493,7 @@
   (testing "release phase returns correct :files-written count"
     (with-test-worktree
       (fn [worktree]
-      (with-redefs [release-executor/execute-release-phase
+      (with-redefs [release-executor/prepare-release
                     (fn [workflow-state exec-context _opts]
                       (let [worktree (:worktree-path exec-context)
                             code-artifacts (map :artifact/content (:workflow/artifacts workflow-state))
@@ -520,7 +520,7 @@
    single :review artifact handed to the release executor (or nil)."
   [worktree review-output]
   (let [seen (atom nil)]
-    (with-redefs [release-executor/execute-release-phase
+    (with-redefs [release-executor/prepare-release
                   (fn [workflow-state _exec-context _opts]
                     (reset! seen workflow-state)
                     {:success? true :artifacts [] :metrics {:files-written 0}})]
@@ -536,7 +536,7 @@
     (with-test-worktree
       (fn [worktree]
         (let [seen (atom nil)]
-          (with-redefs [release-executor/execute-release-phase
+          (with-redefs [release-executor/prepare-release
                         (fn [workflow-state _exec-context _opts]
                           (reset! seen workflow-state)
                           {:success? true :artifacts [] :metrics {:files-written 0}})]
@@ -550,7 +550,7 @@
   (testing "release phase fails when file write operation fails"
     (with-test-worktree
       (fn [worktree]
-      (with-redefs [release-executor/execute-release-phase
+      (with-redefs [release-executor/prepare-release
                     (fn [_workflow-state _exec-context _opts]
                       {:success? false
                        :errors [{:type :file-write-failed
@@ -569,7 +569,7 @@
               "Executor :errors must surface in :phase :result :error :data so the next dogfood run can diagnose without staring at the snapshot")))))))
 
 (deftest ^{:stratum 3} release-surfaces-thrown-exception-in-result-test
-  (testing "release phase preserves the exception class+message+ex-data when execute-release-phase throws"
+  (testing "release phase preserves the exception class+message+ex-data when prepare-release throws"
     ;; Pre-2026-05-04 the (catch Exception e (response/failure e)) wrapped the
     ;; exception but emitted no log line, so the dogfood saw a 0ms phase fail
     ;; with no actionable detail. The diagnostic-logging change keeps the same
@@ -577,7 +577,7 @@
     ;; failure carries enough data on it for a post-mortem.
     (with-test-worktree
       (fn [worktree]
-        (with-redefs [release-executor/execute-release-phase
+        (with-redefs [release-executor/prepare-release
                       (fn [_ws _ec _opts]
                         (throw (ex-info "release-executor blew up"
                                         {:reason :gh-cli-missing
@@ -606,7 +606,7 @@
           (with-redefs [phase/load-and-filter-behaviors
                         (fn [phase-kw _ctx]
                           (when (= :release phase-kw) stub-addendum))
-                        release-executor/execute-release-phase
+                        release-executor/prepare-release
                         (fn [_ws ec _opts]
                           (reset! captured-context ec)
                           {:success? true
@@ -629,7 +629,7 @@
       (fn [worktree]
         (let [captured-context (atom nil)]
           (with-redefs [phase/load-and-filter-behaviors (fn [_phase _ctx] nil)
-                        release-executor/execute-release-phase
+                        release-executor/prepare-release
                         (fn [_ws ec _opts]
                           (reset! captured-context ec)
                           {:success? true
@@ -655,7 +655,7 @@
     (with-test-worktree
       (fn [worktree]
         (let [captured-context (atom nil)]
-          (with-redefs [release-executor/execute-release-phase
+          (with-redefs [release-executor/prepare-release
                         (fn [_ws ec _opts]
                           (reset! captured-context ec)
                           {:success? true
@@ -674,12 +674,12 @@
                   ":logger must be non-nil even though the workflow ctx had no :execution/logger"))))))))
 
 (deftest ^{:stratum 3} release-logs-executor-failure-test
-  (testing ":release/executor-failed log/error fires when execute-release-phase returns {:success? false}"
+  (testing ":release/executor-failed log/error fires when prepare-release returns {:success? false}"
     (with-test-worktree
       (fn [worktree]
         (let [entries (atom [])
               logger  (capturing-logger entries)]
-          (with-redefs [release-executor/execute-release-phase
+          (with-redefs [release-executor/prepare-release
                         (fn [_ws _ec _opts]
                           {:success? false
                            :errors [{:type :gh-auth-failed
@@ -700,12 +700,12 @@
                   "log/error :release/executor-failed must fire on the :success? false branch — guards the next dogfood post-mortem"))))))))
 
 (deftest ^{:stratum 3} release-logs-thrown-exception-test
-  (testing ":release/executor-threw log/error fires when execute-release-phase throws"
+  (testing ":release/executor-threw log/error fires when prepare-release throws"
     (with-test-worktree
       (fn [worktree]
         (let [entries (atom [])
               logger  (capturing-logger entries)]
-          (with-redefs [release-executor/execute-release-phase
+          (with-redefs [release-executor/prepare-release
                         (fn [_ws _ec _opts]
                           (throw (ex-info "release-executor blew up"
                                           {:reason :gh-cli-missing})))]
@@ -722,7 +722,7 @@
     (with-test-worktree
       (fn [worktree]
       (let [verification-performed (atom false)]
-        (with-redefs [release-executor/execute-release-phase
+        (with-redefs [release-executor/prepare-release
                       (fn [workflow-state exec-context _opts]
                         (let [worktree (:worktree-path exec-context)
                               code-artifacts (map :artifact/content (:workflow/artifacts workflow-state))
@@ -776,11 +776,13 @@
      :worktree-path worktree}))
 
 (deftest ^{:stratum 3} release-includes-pr-info-test
-  (testing "release phase includes PR info in result"
+  (testing "leave-release publishes the prepared branch and records the PR"
     (with-test-worktree
       (fn [worktree]
-      (with-redefs [release-executor/execute-release-phase
-                    (fn [_workflow-state _exec-context _opts]
+      (with-redefs [release-executor/prepare-release
+                    (constantly {:success? true :artifacts [] :prepared {} :metrics {}})
+                    release-executor/publish-release
+                    (fn [_prepared _exec-context]
                       {:success? true
                        :artifacts [{:artifact/id (random-uuid)
                                     :artifact/type :release
@@ -793,7 +795,7 @@
         (let [ctx (create-base-context worktree)
               ctx-with-config (assoc ctx :phase-config {:phase :release})
               interceptor (phase/get-phase-interceptor {:phase :release})
-              result ((:enter interceptor) ctx-with-config)]
+              result ((:leave interceptor) ((:enter interceptor) ctx-with-config))]
           (is (some? (get-in result [:workflow/pr-info]))
               "PR info should be available at top level")
           (let [pr-info (get-in result [:workflow/pr-info])]
@@ -809,7 +811,7 @@
     (with-test-worktree
       (fn [worktree]
       (let [stream (es/create-event-stream {:sinks []})]
-        (with-redefs [release-executor/execute-release-phase
+        (with-redefs [release-executor/prepare-release
                       (fn [_workflow-state exec-context _opts]
                         (is (fn? (:on-chunk exec-context))
                             "Release executor should receive an on-chunk callback")
@@ -834,13 +836,16 @@
   (testing "leave-release records duration and completion"
     (with-test-worktree
       (fn [worktree]
-      (with-redefs [release-executor/execute-release-phase
+      (with-redefs [release-executor/prepare-release
                     (fn [_workflow-state _exec-context _opts]
                       {:success? true
                        :artifacts [{:artifact/id (random-uuid)
                                     :artifact/type :release
                                     :artifact/content {:files-written 2}}]
-                       :metrics {:files-written 2 :tokens 300 :duration-ms 800}})]
+                       :prepared {}
+                       :metrics {:files-written 2 :tokens 300 :duration-ms 800}})
+                    release-executor/publish-release
+                    (constantly {:success? true :artifacts [] :metrics {}})]
         (let [ctx (create-base-context worktree)
               ctx-with-config (assoc ctx :phase-config {:phase :release})
               interceptor (phase/get-phase-interceptor {:phase :release})
@@ -899,7 +904,7 @@
               ;; it — checking just :phase :result :status would also
               ;; pass on a (broken) dirty-file fallback.
               captured-files (atom nil)]
-          (with-redefs [release-executor/execute-release-phase
+          (with-redefs [release-executor/prepare-release
                         (fn [workflow-state _exec-context _opts]
                           (let [files (->> (:workflow/artifacts workflow-state)
                                            (mapcat (comp :code/files :artifact/content))

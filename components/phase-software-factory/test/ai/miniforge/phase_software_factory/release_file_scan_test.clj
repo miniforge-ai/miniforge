@@ -215,7 +215,7 @@
     (with-repo-holding names-git-quotes
       (fn [dir]
         (let [seen (atom nil)]
-          (with-redefs [release-executor/execute-release-phase
+          (with-redefs [release-executor/prepare-release
                         (fn [workflow-state _exec-context _opts]
                           (reset! seen workflow-state)
                           {:success? true :artifacts [] :metrics {:files-written 0}})]

@@ -390,7 +390,8 @@
 (defn ^{:stratum 1} leave-release
   "Post-processing for release phase.
 
-   Records release metrics and PR info.
+   Publishes what enter-release prepared (push and PR) unless a gate
+   failed, then records release metrics and PR info.
 
    Phase 3b: attaches a `:phase/verdict` to the phase result so the
    FSM's verdict-driven guarded `:phase/fail` array picks the right
@@ -402,7 +403,8 @@
   ;; must never change the outcome it measures. Consultation provenance
   ;; was attached at enter, so it is visible here.
   (gap-wiring/record-phase-misses! ctx :release)
-  (let [start-time (get-in ctx [:phase :started-at])
+  (let [ctx (release-publish/publish-when-allowed ctx)
+        start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
         duration-ms (if start-time (- end-time start-time) 0)
         result (get-in ctx [:phase :result])
@@ -595,14 +597,16 @@
 ;------------------------------------------------------------------------------ Layer 4
 
 (defn ^{:stratum 4} enter-release
-  "Execute release phase.
+  "Prepare the release.
 
-   Uses the workflow release executor to:
+   Uses the release executor to:
    - Generate release metadata (branch name, commit message, PR title/body)
    - Create git branch
    - Write files and stage them
    - Commit changes
-   - Push branch and create PR (if enabled)"
+
+   and records release readiness. Pushing and creating the PR happen in
+   leave-release, after the gates."
   [ctx]
   (let [config (phase/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
@@ -652,28 +656,23 @@
                             :releaser-agent? (some? releaser-agent)
                             :artifact-count (count (:workflow/artifacts workflow-state))}})
 
+        ;; Prepare only (branch and commit). The push and the PR wait for
+        ;; leave-release, which runs after the gates.
         result (try
-                 (let [exec-result (release-executor/execute-release-phase
+                 (let [exec-result (release-executor/prepare-release
                                     workflow-state
                                     exec-context
                                     {:releaser releaser-agent})
                        r (if (:success? exec-result)
-                     (let [release-artifact (first (:artifacts exec-result))
-                           content (:artifact/content release-artifact)]
+                     (let [release-artifact (first (:artifacts exec-result))]
                        (response/success
-                        (merge
-                         {:release/id (get release-artifact :artifact/id (random-uuid))
-                          :release/status :completed
-                          :release/artifacts (:artifacts exec-result)
-                          ;; Read by the :release-ready gate.
-                          :release/readiness (release-readiness ctx)}
-                         ;; Include PR info for evidence bundle
-                         (when (:pr-url content)
-                           {:workflow/pr-info {:pr-number (:pr-number content)
-                                               :pr-url (:pr-url content)
-                                               :branch (:branch content)
-                                               :commit-sha (:commit-sha content)}})
-                         {:release/metrics (:metrics exec-result)})))
+                        {:release/id (get release-artifact :artifact/id (random-uuid))
+                         :release/status :prepared
+                         :release/artifacts (:artifacts exec-result)
+                         :release/prepared (:prepared exec-result)
+                         ;; Read by the :release-ready gate.
+                         :release/readiness (release-readiness ctx)
+                         :release/metrics (:metrics exec-result)}))
                      ;; Execution failed — surface the executor's :errors
                      ;; so the next dogfood run can diagnose root cause from
                      ;; the event log instead of staring at a generic
@@ -714,17 +713,7 @@
         ;; plan carry). Release has no recorded context-reads channel.
         result (attach-consultation result (:codex/outcome exec-context))]
 
-    (-> (phase/enter-context ctx :release :releaser gates budget start-time result)
-        ;; Single derived projection of the canonical pr-info onto ctx-level
-        ;; :workflow/pr-info, which several consumers still read directly
-        ;; (runner_events completion event, CLI summary, evidence-bundle) until
-        ;; they migrate to response/release-pr-info. The projected value is
-        ;; derived from the authority via that accessor ({:result result} is the
-        ;; phase-result shape it expects), so this copy can never hold a value
-        ;; the authority doesn't — a derived cache of one reader, not a second
-        ;; source of truth.
-        (cond-> (phase/result-succeeded? result)
-          (assoc :workflow/pr-info (response/release-pr-info {:result result}))))))))
+    (phase/enter-context ctx :release :releaser gates budget start-time result)))))
 
 ;------------------------------------------------------------------------------ Layer 5
 
