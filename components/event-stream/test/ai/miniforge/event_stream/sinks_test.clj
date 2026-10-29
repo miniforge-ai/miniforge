@@ -230,6 +230,29 @@
             (is (every? #(str/ends-with? % ".json") names)
                 "every file is a finished event; none is a .transit.tmp"))))))
 
+  (testing "no finished event file is visible while its content is being written"
+    ;; Look at the workflow directory once the bytes are written but
+    ;; before the sink returns. The old sink spat straight to the final
+    ;; .json path, so that file existed (and was readable part-written)
+    ;; at this point; now only the temp file does, until the rename.
+    (with-temp-dir
+      (fn [dir]
+        (let [sink (sinks/file-sink {:base-dir dir})
+              wf-id (random-uuid)
+              wf-dir (io/file dir "live" (str wf-id))
+              visible-mid-write (atom nil)
+              real-spit spit]
+          (with-redefs [spit (fn [f & args]
+                               (apply real-spit f args)
+                               (reset! visible-mid-write
+                                       (->> (list-files wf-dir)
+                                            (map #(.getName ^java.io.File %))
+                                            (filter #(str/ends-with? % ".json"))
+                                            vec)))]
+            (sink (sample-event {:workflow/id wf-id})))
+          (is (= [] @visible-mid-write))
+          (is (= 1 (count (list-files wf-dir))) "the event lands once the write completes")))))
+
   (testing "writes one file per event in the workflow subdirectory"
     (with-temp-dir
       (fn [dir]
