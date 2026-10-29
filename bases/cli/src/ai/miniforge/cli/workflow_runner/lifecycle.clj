@@ -180,7 +180,7 @@
   "Run the BD-2a shutdown sequence on `es`: quiesce publishers for
    `workflow-id`, then drain sinks. Returns the structured drain result
    for inclusion in the run result map, or `nil` when no event stream
-   exists (dashboard-url runs).
+   exists (its creation failed).
 
    On a non-OK drain in normal mode (best-effort off), throws an
    ex-info carrying the drain result so the caller's catch path renders
