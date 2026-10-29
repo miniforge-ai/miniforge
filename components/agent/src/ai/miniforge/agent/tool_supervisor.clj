@@ -230,8 +230,13 @@
       \"meta_eval\": {\"task_context\": \"...\", \"phase\": \"implement\"}}
 
    Writes Claude hook response to stdout:
-     {} for allow (empty object = no objection)
-     {\"decision\": \"block\", \"reason\": \"...\"} for deny
+     {} for allow (no decision: Claude's normal permission flow applies)
+     {\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\",
+                             \"permissionDecision\": \"deny\",
+                             \"permissionDecisionReason\": \"...\"}} for deny
+   The deny form is the current PreToolUse output
+   (https://code.claude.com/docs/en/hooks); the top-level
+   {\"decision\": \"block\"} it replaces is deprecated for this event.
 
   Returns exit code 0 always (non-zero would crash the hook)."
   []
@@ -256,8 +261,10 @@
           ;; Emit event (no-ops if no event stream bound)
           _ (emit-tool-use-event! tool-name result)]
       (if (= "deny" (:decision result))
-        (println (json/generate-string {:decision "block"
-                                        :reason (:reason result)}))
+        (println (json/generate-string
+                  {:hookSpecificOutput {:hookEventName "PreToolUse"
+                                        :permissionDecision "deny"
+                                        :permissionDecisionReason (:reason result)}}))
         ;; Empty object = allow (no objection from hook)
         (println (json/generate-string {}))))
     (catch Exception e
