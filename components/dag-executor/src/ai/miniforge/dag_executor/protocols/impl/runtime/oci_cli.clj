@@ -64,6 +64,16 @@
    test-side mock landed; the production-side guard lives here."
   120000)
 
+(defn- ^{:stratum 0} without-interrupt
+  "Call (f) with the thread's interrupt flag clear, then set it again if it
+   was set. A timed-out acquire's worker is interrupted; its bounded cleanup
+   must still finish, and an interrupt would end the cleanup's own wait and
+   kill the runtime command doing it."
+  [f]
+  (let [interrupted? (Thread/interrupted)]
+    (try (f)
+         (finally (when interrupted? (.interrupt (Thread/currentThread)))))))
+
 (defn- ^{:stratum 0} acquire-failed-result
   [throwable]
   (result/err :acquire-failed
@@ -1095,7 +1105,7 @@
                          :rootless-action     plan-security/default-rootless-action}
         decision        (plan-security/check-plan-security plan descriptor security-config)
         bad-names       (filter #(or (contains? refused-env-names %)
-                                     (not (re-matches #"[A-Za-z_][A-Za-z0-9_]*" %)))
+                                     (not (re-find execution-plan/env-name-pattern %)))
                                 (keys (:env plan)))]
     (cond
       (response/anomaly-map? decision)
@@ -1294,7 +1304,7 @@
                                     remote (assoc :repo-url (:repo-url remote))))))
                     ;; The caller gets no environment id to release, so
                     ;; remove the container that started.
-                    (do (remove-container descriptor container-name)
+                    (do (without-interrupt #(remove-container descriptor container-name))
                         bootstrap-result)))
                 create-result)))))))
 
