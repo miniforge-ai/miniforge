@@ -8,9 +8,10 @@
 
 **Experimental.** The model selector is a library API that picks a model from the model catalog for a classified
 task. No workflow, phase or CLI command calls it: a run gives each role the model its configuration names, as
-[Configuration Management](configuration.md) describes. No miniforge setting configures it: the
-`MINIFORGE_MODEL_SELECTION_*` variables and the `:model-selection` config block that earlier versions of this page
-listed were never read. It does read provider API-key variables (see Known limitations).
+[Configuration Management](configuration.md) describes. No user config key or environment variable configures it;
+its default strategy comes from the `llm/model-selector.edn` resource (`:default-config`, overridable on the
+classpath). The `MINIFORGE_MODEL_SELECTION_*` variables and the `:model-selection` config block that earlier versions
+of this page listed were never read. It does read provider API-key variables (see Known limitations).
 
 ## API
 
