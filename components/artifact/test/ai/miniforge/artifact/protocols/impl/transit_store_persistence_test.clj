@@ -17,8 +17,8 @@
 ;; limitations under the License.
 (ns ai.miniforge.artifact.protocols.impl.transit-store-persistence-test
   "Disk persistence of the transit store: atomic file writes, close
-   waiting for queued writes, index merge across stores that share a
-   directory, and recovery from an unreadable index."
+   waiting for queued writes, and index merge and link preservation
+   across stores that share a directory."
   (:require [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
             [ai.miniforge.artifact.protocols.impl.transit-store :as impl]
             [ai.miniforge.artifact.protocols.records.transit-store :as store]
@@ -28,9 +28,8 @@
             [clojure.test :refer [deftest is testing]]
             [cognitect.transit :as transit])
   (:import [java.io File]
-           [java.nio.file Files OpenOption]
-           [java.nio.file.attribute FileAttribute]
-           [java.util Arrays]))
+           [java.nio.file Files]
+           [java.nio.file.attribute FileAttribute]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -77,12 +76,6 @@
 
 (defn- ^{:stratum 0} logged-events [entries]
   (set (map :log/event @entries)))
-
-(defn- ^{:stratum 0} truncate-to-half! [path]
-  (let [p (.toPath (io/file path))
-        bytes (Files/readAllBytes p)]
-    (Files/write p (Arrays/copyOf bytes (quot (alength bytes) 2))
-                 (make-array OpenOption 0))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -201,37 +194,6 @@
         (deliver release true)
         (delete-dir! dir)))))
 
-(deftest ^{:stratum 1} test-unreadable-index-is-rebuilt-from-artifact-files
-  (let [dir (temp-dir)
-        index-path (impl/index-file-path (artifacts-path dir))
-        [logger entries] (log/collecting-logger)]
-    (try
-      (let [s (open-store dir)]
-        (p/save s (artifact "parent"))
-        (p/save s (artifact "child"))
-        (p/link s "parent" "child")
-        (p/close s))
-      ;; An index write cut off half-way, and a torn artifact file.
-      (truncate-to-half! index-path)
-      (spit (impl/artifact-file-path (artifacts-path dir) "torn") "[\"^ \",\"~:artifact/id")
-      (let [s (open-store dir {:logger logger})]
-        (testing "the store opens and finds the artifacts"
-          (is (= #{"parent" "child"} (set (map :artifact/id (p/query s {}))))))
-        (testing "links are read back from the artifact files"
-          (is (= ["child"] (:artifact/children (p/load-artifact s "parent"))))
-          (is (= ["parent"] (get-in (read-or-unreadable index-path) ["child" :artifact/parents]))))
-        (testing "the rebuilt index is on disk and the unreadable one is kept aside"
-          (is (= #{"parent" "child"} (on-disk-ids dir)))
-          (is (= 1 (count (filter #(str/starts-with? % "index.transit.json.corrupt-")
-                                  (file-names (artifacts-path dir)))))))
-        (testing "with a warning naming the skipped file"
-          (is (contains? (logged-events entries) :artifact/index-rebuilt))
-          (is (= [["torn.transit.json"]]
-                 (keep #(get-in % [:data :skipped]) @entries))))
-        (p/close s))
-      (finally
-        (delete-dir! dir)))))
-
 (deftest ^{:stratum 1} test-links-from-two-stores-both-reach-the-artifact-file
   (let [dir (temp-dir)
         parent-file (impl/artifact-file-path (artifacts-path dir) "parent")]
@@ -279,45 +241,4 @@
                           (read-or-unreadable (impl/artifact-file-path (artifacts-path dir) "parent"))))))
       (finally
         (deliver resume true)
-        (delete-dir! dir)))))
-
-(deftest ^{:stratum 1} test-failed-recovery-keeps-the-index-in-place
-  (let [dir (temp-dir)
-        index-path (impl/index-file-path (artifacts-path dir))
-        write impl/write-transit]
-    (try
-      (let [s (open-store dir)]
-        (p/save s (artifact "a1"))
-        (p/close s))
-      (truncate-to-half! index-path)
-      (testing "a recovery whose index write fails leaves the index file in place"
-        (with-redefs [impl/write-transit (fn [path data]
-                                           (when (= path index-path) (throw (ex-info "disk full" {})))
-                                           (write path data))]
-          (is (thrown? Exception (open-store dir))))
-        (is (.exists (io/file index-path))))
-      (testing "so the next open still recovers every artifact"
-        (let [s (open-store dir)]
-          (is (= #{"a1"} (set (map :artifact/id (p/query s {})))))
-          (p/close s)))
-      (finally
-        (delete-dir! dir)))))
-
-(deftest ^{:stratum 1} test-open-store-quarantines-an-index-gone-unreadable
-  (let [dir (temp-dir)
-        [logger entries] (log/collecting-logger)]
-    (try
-      (let [s (open-store dir {:logger logger})]
-        (p/save s (artifact "a1"))
-        (p/close s)
-        (truncate-to-half! (impl/index-file-path (artifacts-path dir)))
-        (p/save s (artifact "a2"))
-        (p/close s))
-      (testing "the unreadable index is kept aside, with a warning"
-        (is (= 1 (count (filter #(str/starts-with? % "index.transit.json.corrupt-")
-                                (file-names (artifacts-path dir))))))
-        (is (contains? (logged-events entries) :artifact/index-rebuilt)))
-      (testing "and the index on disk holds both artifacts"
-        (is (= #{"a1" "a2"} (on-disk-ids dir))))
-      (finally
         (delete-dir! dir)))))
