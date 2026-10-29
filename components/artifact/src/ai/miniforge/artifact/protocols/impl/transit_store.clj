@@ -307,32 +307,42 @@
    change queued so far, including changes queued while it runs (so a
    burst of saves costs one index write). Writes each change's artifact
    files (write-change!), then re-reads the on-disk index, sets the
-   entries of the written ids to their projection and writes it. Last,
-   under the writer's monitor, puts each written artifact in the cache
-   and index unless a later save or link has replaced the queued copy."
-  [state {:keys [artifacts-dir cache index logger pending writer] :as store}]
-  (try
-    (call-with-index-lock
-     artifacts-dir
-     (fn []
-       (loop [written []]
-         (let [[batch] (swap-vals! pending empty)]
-           (if (seq batch)
-             (recur (into written (mapcat (partial write-change! store)) batch))
-             (when (seq written)
-               (write-transit (index-file-path artifacts-dir)
-                              (reduce add-to-index (load-index artifacts-dir) (map second written)))
-               (locking writer
-                 (doseq [[queued artifact] written
-                         :let [id (:artifact/id artifact)]
-                         :when (identical? queued (get @cache id))]
-                   (swap! cache assoc id artifact)
-                   (swap! index add-to-index artifact)))))))))
-    (catch Exception e
-      (log/error logger :system :artifact/index-save-failed
-                 {:message (.getMessage e)
-                  :data {:artifacts-dir artifacts-dir}})))
-  state)
+   entries of the written ids to their projection from their files and
+   writes it. Last, under the writer's monitor, puts each written
+   artifact in the cache and index unless a later save or link has
+   replaced the queued copy. The writer's state is the set of ids whose
+   files were written but not yet indexed: a failed index write keeps
+   them, and the next drain re-projects them from their current files."
+  [unindexed {:keys [artifacts-dir cache index logger pending writer] :as store}]
+  (let [ids (volatile! unindexed)]
+    (try
+      (call-with-index-lock
+       artifacts-dir
+       (fn []
+         (loop [written []]
+           (let [[batch] (swap-vals! pending empty)]
+             (if (seq batch)
+               (recur (into written (mapcat (partial write-change! store)) batch))
+               (do
+                 (vswap! ids into (map (comp :artifact/id second)) written)
+                 (when (seq @ids)
+                   (write-transit (index-file-path artifacts-dir)
+                                  (reduce add-to-index (load-index artifacts-dir)
+                                          (keep #(try (load-artifact-from-disk artifacts-dir %)
+                                                      (catch Exception _ nil))
+                                                @ids))))
+                 (locking writer
+                   (doseq [[queued artifact] written
+                           :let [id (:artifact/id artifact)]
+                           :when (identical? queued (get @cache id))]
+                     (swap! cache assoc id artifact)
+                     (swap! index add-to-index artifact)))
+                 #{}))))))
+      (catch Exception e
+        (log/error logger :system :artifact/index-save-failed
+                   {:message (.getMessage e)
+                    :data {:artifacts-dir artifacts-dir}})
+        @ids))))
 
 (defn ^{:stratum 3} filter-by-criteria
   "Filter artifacts by criteria."
@@ -377,10 +387,15 @@
 
 (defn ^{:stratum 4} link-artifacts
   "Link artifacts, preserving the ArtifactStore boolean facade.
-   Missing link targets are represented as anomalies internally and logged."
+   Missing link targets and self-links are represented as anomalies
+   internally, logged, and return false."
   [{:keys [cache index logger pending writer] :as record} parent-id child-id]
   (let [parent-result (find-link-target record parent-id :parent)
-        child-result  (find-link-target record child-id  :child)]
+        ;; No caller links an artifact to itself; refuse it.
+        child-result  (if (= parent-id child-id)
+                        (anomaly/anomaly :invalid-input (messages/t :link/self)
+                                         {:artifact/id child-id :artifact/role :child})
+                        (find-link-target record child-id :child))]
     (if (or (anomaly? parent-result) (anomaly? child-result))
       (do
         (doseq [result [parent-result child-result]

@@ -345,3 +345,36 @@
         (p/close s))
       (finally
         (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-failed-index-write-is-retried-by-the-next-drain
+  (let [dir (temp-dir)
+        failed? (atom false)
+        write impl/write-transit]
+    (try
+      (let [s (open-store dir)]
+        (with-redefs [impl/write-transit (fn [path data]
+                                           (when (and (str/ends-with? path "/index.transit.json")
+                                                      (compare-and-set! failed? false true))
+                                             (throw (ex-info "disk full" {})))
+                                           (write path data))]
+          (p/save s (artifact "a1"))
+          (p/close s))
+        (p/save s (artifact "a2"))
+        (p/close s))
+      (let [s (open-store dir)]
+        (testing "a reopened store finds the artifact whose index write failed"
+          (is (= #{"a1" "a2"} (set (map :artifact/id (p/query s {}))))))
+        (p/close s))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-self-link-is-refused
+  (let [dir (temp-dir)]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "a"))
+        (is (false? (p/link s "a" "a")))
+        (p/close s))
+      (is (= [] (:artifact/parents (read-or-unreadable (impl/artifact-file-path (artifacts-path dir) "a")))))
+      (finally
+        (delete-dir! dir)))))
