@@ -50,6 +50,11 @@
           :workflow/id     wf-id}
          extra))
 
+(defn- ^{:stratum 0} envelope
+  "An event as `stream` builds it, with its per-workflow sequence number."
+  [stream event-type wf-id & {:as extra}]
+  (merge (es/create-envelope stream event-type wf-id (name event-type)) extra))
+
 (defn- ^{:stratum 0} write-temp-file!
   "Leave a sink temp file holding `event` in the workflow's live directory."
   [events-dir wf-id event]
@@ -66,14 +71,36 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} publish-run!
-  "Publish a started, phase-started and completed event for `wf-id`. The
-   sink names files by millisecond, so the pauses keep their order."
+  "Publish a started, phase-started and completed event for `wf-id`, with
+   no pause: files named in the same millisecond keep publish order by
+   sequence number."
   [stream wf-id run-name]
-  (doseq [event [(wf-event :workflow/started wf-id :workflow/spec {:name run-name})
-                 (wf-event :workflow/phase-started wf-id :workflow/phase :plan)
-                 (wf-event :workflow/completed wf-id :workflow/status :success)]]
-    (es/publish! stream event)
-    (Thread/sleep 5)))
+  (doseq [event [(envelope stream :workflow/started wf-id :workflow/spec {:name run-name})
+                 (envelope stream :workflow/phase-started wf-id :workflow/phase :plan)
+                 (envelope stream :workflow/completed wf-id :workflow/status :success)]]
+    (es/publish! stream event)))
+
+(deftest ^{:stratum 1} files-named-in-the-same-millisecond-keep-publish-order
+  (let [events-dir (temp-events-dir)
+        stream     (es/create-event-stream {:sinks []})
+        wf-id      (random-uuid)
+        dir        (doto (es/workflow-dir (str events-dir) wf-id) .mkdirs)
+        ;; One millisecond; the random-UUID parts sort against publish order.
+        names      ["20260101T000000000Z-ffffffff-ffff-4fff-bfff-ffffffffffff.json"
+                    "20260101T000000000Z-88888888-8888-4888-8888-888888888888.json"
+                    "20260101T000000000Z-00000000-0000-4000-8000-000000000000.json"]
+        events     [(envelope stream :workflow/started wf-id :workflow/spec {:name "Tied run"})
+                    (envelope stream :workflow/phase-started wf-id :workflow/phase :plan)
+                    (envelope stream :workflow/completed wf-id :workflow/status :success)]
+        found      (atom {})]
+    (doseq [[file-name event] (map vector names events)]
+      (spit (io/file dir file-name) (es/serialize-event event)))
+    (archive/scan-archive! (str events-dir) #(swap! found assoc (str (:id %)) %) (constantly nil))
+    (is (= {:name "Tied run" :status :completed :phase :plan}
+           (select-keys (get @found (str wf-id)) [:name :status :phase])))
+    (is (= [:workflow/completed :workflow/phase-started :workflow/started]
+           (mapv :event/type (state-archive/get-archived-workflow-events
+                              (atom {:archived-workflows (atom @found)}) wf-id))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -130,3 +157,27 @@
         (es/publish! stream (wf-event :agent/chunk wf-id :chunk/delta "more"))
         (is (= #{:workflow/started :workflow/phase-started :workflow/completed :agent/chunk}
                (types (workflows/get-events dashboard {}))))))))
+
+(deftest ^{:stratum 2} archived-events-follow-a-run-moved-after-the-scan
+  (let [events-dir (temp-events-dir)
+        stream     (file-sink-stream events-dir)
+        wf-id      (random-uuid)
+        found      (atom {})]
+    (publish-run! stream wf-id "Moved run")
+    (archive/scan-archive! (str events-dir) #(swap! found assoc (str (:id %)) %) (constantly nil))
+    (archive-dir! events-dir wf-id)
+    (is (= 3 (count (state-archive/get-archived-workflow-events
+                     (atom {:archived-workflows (atom @found)}) wf-id)))
+        "scanned under live/, read from archived/")))
+
+(deftest ^{:stratum 2} a-run-both-in-the-stream-and-on-disk-is-one-workflow
+  (let [events-dir (temp-events-dir)
+        stream     (file-sink-stream events-dir)
+        dashboard  (core/create-state {:event-stream stream})
+        wf-id      (random-uuid)]
+    (publish-run! stream wf-id "Persisted run")
+    (with-redefs [workflows/events-dir-path (str events-dir)]
+      (is (= 1 (count (filter #(= (str wf-id) (str (:id %))) (workflows/get-workflows dashboard))))
+          "one card, not one per source")
+      (is (= 3 (count (workflows/get-events dashboard {:workflow-id wf-id})))
+          "no event twice"))))

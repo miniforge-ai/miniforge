@@ -148,20 +148,23 @@
     (catch Exception _ nil)))
 
 (defn ^{:stratum 2} read-dir-summary
-  "Summary of a workflow directory written by the event-stream file sink,
-   from its first event file and its last `tail-file-count`. :file-path
-   is the directory; :file-size the bytes of its event files. nil when
-   it holds no readable event."
-  [dir]
-  (let [files (event-files/event-files dir)]
-    (when (seq files)
-      (derive-summary (some event-files/read-event (take 3 files))
-                      (->> (take-last tail-file-count files)
-                           (keep event-files/read-event)
-                           reverse
-                           vec)
-                      (str dir)
-                      (reduce + 0 (map #(.length ^File %) files))))))
+  "Summary of `workflow-id`'s directory in the event-stream file sink
+   layout under `events-dir`: the first event is the earliest of the
+   files named in the first millisecond (plus two more, should those not
+   read), the status comes from the last `tail-file-count` files. The
+   summary keeps `events-dir`, not the directory, since an archive moves
+   a live directory to archived/. :file-size is the bytes of its event
+   files. nil when it holds no readable event."
+  [events-dir workflow-id]
+  (when-let [dir (es/workflow-events-dir events-dir workflow-id)]
+    (let [files      (event-files/event-files dir)
+          first-tick (some-> (first files) event-files/file-tick)
+          head-count (+ 2 (count (take-while #(= first-tick (event-files/file-tick %)) files)))]
+      (some-> (derive-summary (first (event-files/read-ordered (take head-count files)))
+                              (vec (rseq (event-files/read-ordered (take-last tail-file-count files))))
+                              nil
+                              (reduce + 0 (map #(.length ^File %) files)))
+              (assoc :events-dir (str events-dir))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 
@@ -177,8 +180,7 @@
         (on-workflow! summary)))
     (doseq [workflow-id (es/stored-workflow-ids events-dir)
             :when (not (str/starts-with? workflow-id "."))]
-      (when-let [summary (some-> (es/workflow-events-dir events-dir workflow-id)
-                                 read-dir-summary)]
+      (when-let [summary (read-dir-summary events-dir workflow-id)]
         (on-workflow! summary)))
     (catch Exception _ nil))
   (on-complete!)

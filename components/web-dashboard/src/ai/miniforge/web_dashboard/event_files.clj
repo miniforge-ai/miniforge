@@ -48,10 +48,26 @@
 
 (defn ^{:stratum 0} read-event
   "Decode one event file. nil when it cannot be read or holds no
-   :event/type (the manifest, the snapshot)."
+   :event/type (the manifest, the snapshot). The reader returns UUIDs as
+   strings; :event/id and :workflow/id come back as UUIDs, the form a
+   live event carries, so events from both sources group and dedupe as
+   one."
   [f]
-  (let [event (es/read-event-file f)]
-    (when (:event/type event) event)))
+  (let [event (es/read-event-file f)
+        as-uuid #(or (when (string? %) (parse-uuid %)) %)]
+    (when (:event/type event)
+      (cond-> event
+        (contains? event :event/id)    (update :event/id as-uuid)
+        (contains? event :workflow/id) (update :workflow/id as-uuid)))))
+
+(defn ^{:stratum 0} file-tick
+  "What orders an event file by creation: the millisecond timestamp of a
+   legacy `{yyyyMMddTHHmmssSSSZ}-{uuid}.json` name (its random UUID part
+   does not order anything), else the whole name (a Snowflake name is
+   unique and sorts in creation order)."
+  [^File f]
+  (let [n (.getName f)]
+    (or (second (re-find #"^(\d{8}T\d{9}Z)-" n)) n)))
 
 (defn ^{:stratum 0} roots
   "The file sink's per-workflow roots under `events-dir`, live first."
@@ -59,11 +75,6 @@
   [(es/live-dir events-dir) (es/archived-dir events-dir)])
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} unseen
-  "The files of `files` whose names are not in `seen`."
-  [files seen]
-  (remove (comp seen file-name) files))
 
 (defn ^{:stratum 1} event-files
   "Event files directly in `dir`, sorted by name. Empty when `dir` does
@@ -78,24 +89,46 @@
   [events-dir]
   (mapcat #(remove hidden? (.listFiles ^File %)) (roots events-dir)))
 
+(defn ^{:stratum 1} unseen
+  "The files of `files` whose names are not in `seen`."
+  [files seen]
+  (remove (comp seen file-name) files))
+
+(defn ^{:stratum 1} read-ordered
+  "Decode `files` and return their events in creation order: by name and,
+   among legacy names from the same millisecond, by :event/sequence-number."
+  [files]
+  (->> files
+       (keep (fn [f] (some->> (read-event f) (vector (file-tick f)))))
+       (sort-by (fn [[tick event]] [tick (get event :event/sequence-number 0)]))
+       (mapv second)))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} read-unseen
   "Read the events in `dir` whose file names are not in `seen`. Returns
    [names events]: the names of every event file now in `dir`, and the
-   new events in file-name order. The sink names each file after its
+   new events in creation order. The sink names each file after its
    event, so a name read once need not be read again."
   [dir seen]
   (let [files (event-files dir)]
     [(into #{} (map file-name) files)
-     (into [] (keep read-event) (unseen files seen))]))
+     (read-ordered (unseen files seen))]))
 
 (defn ^{:stratum 2} workflow-events
   "Every event of `workflow-id` in the sink layout (its archived, live or
-   legacy flat directory), in file-name order. Empty when none exists."
+   legacy flat directory), in creation order. Empty when none exists."
   [events-dir workflow-id]
   (if-let [dir (es/workflow-events-dir events-dir workflow-id)]
-    (into [] (keep read-event) (event-files dir))
+    (read-ordered (event-files dir))
+    []))
+
+(defn ^{:stratum 2} newest-events
+  "The events of the newest `n` event files of `workflow-id`, newest
+   first, from wherever the layout holds the workflow now."
+  [events-dir workflow-id n]
+  (if-let [dir (es/workflow-events-dir events-dir workflow-id)]
+    (vec (rseq (read-ordered (take-last n (event-files dir)))))
     []))
 
 (defn ^{:stratum 2} recent-dirs

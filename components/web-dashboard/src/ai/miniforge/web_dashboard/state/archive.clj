@@ -53,28 +53,25 @@
 (defn ^{:stratum 0} get-archived-workflow-events
   "Read full events from an archived workflow's .edn file, or its event
    directory, on demand. Returns events vector (most recent first, limited
-   to 200)."
+   to 200). An event directory is looked up again under the summary's
+   events root, since an archive may have moved it since the scan."
   [state workflow-id]
   (let [archive-atom (:archived-workflows @state)
         summary      (when archive-atom (get @archive-atom (str workflow-id)))]
-    (if-let [file-path (:file-path summary)]
-      (try
-        (let [file (io/file file-path)]
-          (if (.isDirectory file)
-            (->> (event-files/event-files file)
-                 reverse
-                 (keep event-files/read-event)
-                 (take 200)
-                 vec)
+    (if-let [events-dir (:events-dir summary)]
+      (event-files/newest-events events-dir workflow-id 200)
+      (if-let [file-path (:file-path summary)]
+        (try
+          (let [file (io/file file-path)]
             (when (.exists file)
               (with-open [rdr (io/reader file)]
                 (->> (line-seq rdr)
                      (keep watcher/parse-edn-line)
                      reverse
                      (take 200)
-                     vec)))))
-        (catch Exception _ []))
-      [])))
+                     vec))))
+          (catch Exception _ []))
+        []))))
 
 ;; Mutations
 (defn ^{:stratum 0} delete-archived-workflow!
