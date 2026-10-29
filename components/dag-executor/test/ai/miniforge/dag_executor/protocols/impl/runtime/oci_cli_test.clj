@@ -70,15 +70,10 @@
   (.encodeToString (java.util.Base64/getEncoder)
                    (.getBytes (str user ":" token) "UTF-8")))
 
-(defn- ^{:stratum 0} parse-fake-runtime-log [lines]
-  (->> lines
-       (partition-by #(= "END" %))
-       (remove #(= ["END"] %))
-       (mapv (fn [call]
-               {:argv (vec (keep #(when (.startsWith ^String % "ARG ") (subs % 4)) call))
-                :env  (into {} (keep #(when (.startsWith ^String % "ENV ")
-                                        (clojure.string/split (subs % 4) #"=" 2)))
-                            call)}))))
+(defn- ^{:stratum 0} prefixed-entries [prefix call]
+  (into {} (keep #(when (.startsWith ^String % prefix)
+                    (clojure.string/split (subs % (count prefix)) #"=" 2)))
+        call))
 
 ;; ============================================================================
 ;; descriptor — basic construction
@@ -296,37 +291,23 @@
   [calls]
   (filter (fn [[_ opts]] (:env opts)) calls))
 
+(defn- ^{:stratum 0} env-file-path [argv]
+  (second (drop-while #(not= "--env-file" %) argv)))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} parse-fake-runtime-log [lines]
+  (->> lines
+       (partition-by #(= "END" %))
+       (remove #(= ["END"] %))
+       (mapv (fn [call]
+               {:argv     (vec (keep #(when (.startsWith ^String % "ARG ") (subs % 4)) call))
+                :env      (prefixed-entries "ENV " call)
+                :env-file (prefixed-entries "FILE " call)}))))
 
 (defn- ^{:stratum 1} token-in? [s]
   (or (clojure.string/includes? s fake-token)
       (clojure.string/includes? s (basic-auth "x-access-token" fake-token))))
-
-(defn- ^{:stratum 1} with-fake-runtime
-  "Run (f descriptor calls) against a stand-in runtime CLI for `kind`: a
-   script that logs each invocation's argv and the values of `env-names` in
-   its own environment, then prints a fake id. `calls` returns the
-   invocations as [{:argv [...] :env {name value}}] — what `ps` and the
-   CLI's environment would show."
-  [kind env-names f]
-  (let [dir    (.toFile (java.nio.file.Files/createTempDirectory
-                         "fake-runtime" (make-array java.nio.file.attribute.FileAttribute 0)))
-        log    (java.io.File. dir "calls.log")
-        script (java.io.File. dir "runtime")]
-    (try
-      (spit script
-            (str "#!/bin/sh\n"
-                 "log='" log "'\n"
-                 "for a in \"$@\"; do printf 'ARG %s\\n' \"$a\" >> \"$log\"; done\n"
-                 (apply str (for [n env-names]
-                              (str "[ -n \"${" n "+x}\" ] && printf 'ENV " n "=%s\\n' \"$" n "\" >> \"$log\"\n")))
-                 "echo END >> \"$log\"\n"
-                 "echo abc123\n"))
-      (.setExecutable script true)
-      (f (descriptor/make-descriptor {:runtime-kind kind :executable (str script)})
-         #(if (.exists log) (parse-fake-runtime-log (clojure.string/split-lines (slurp log))) []))
-      (finally
-        (run! #(.delete ^java.io.File %) (reverse (file-seq dir)))))))
 
 ;; ============================================================================
 ;; sanitize-token
@@ -457,17 +438,15 @@
     (let [captured (atom nil)
           run! (fn [plan]
                  (with-redefs [oci-cli/run-runtime-process
-                               (fn [_d args & {:keys [env]}]
-                                 (reset! captured {:args (vec args) :env env})
+                               (fn [_d args & _]
+                                 (reset! captured (slurp (env-file-path args)))
                                  {:exit 0 :out "cid\n" :err ""})]
                    (oci-cli/create-container
                     (docker-descriptor) "c" "img" "/w" {"SOURCE" "legacy"} nil nil
                     :execution-plan plan)
                    @captured))]
-      (let [{:keys [args env]} (run! {:env {"SOURCE" "plan"}})]
-        (is (some #{"SOURCE"} args))
-        (is (= {"SOURCE" "plan"} env)))
-      (is (= {"SOURCE" "legacy"} (:env (run! {})))))))
+      (is (= "SOURCE=plan\n" (run! {:env {"SOURCE" "plan"}})))
+      (is (= "SOURCE=legacy\n" (run! {}))))))
 
 (deftest ^{:stratum 1} create-container-runs-plan-command-test
   (testing "the container command comes from the plan's :command, defaulting
@@ -745,6 +724,39 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn- ^{:stratum 2} with-fake-runtime
+  "Run (f descriptor calls) against a stand-in runtime CLI for `kind`: a
+   script that logs each invocation's argv, the contents of any
+   `--env-file`, and the values of `env-names` in its own environment (line
+   breaks shown as |), then prints a fake id. `calls` returns the
+   invocations as [{:argv [...] :env {name value} :env-file {name value}}]:
+   what `ps`, the CLI's environment and the container would see."
+  [kind env-names f]
+  (let [dir    (.toFile (java.nio.file.Files/createTempDirectory
+                         "fake-runtime" (make-array java.nio.file.attribute.FileAttribute 0)))
+        log    (java.io.File. dir "calls.log")
+        script (java.io.File. dir "runtime")]
+    (try
+      (spit script
+            (str "#!/bin/sh\n"
+                 "log='" log "'\n"
+                 "prev=''\n"
+                 "for a in \"$@\"; do\n"
+                 "  printf 'ARG %s\\n' \"$a\" >> \"$log\"\n"
+                 "  [ \"$prev\" = --env-file ] && sed 's/^/FILE /' \"$a\" >> \"$log\"\n"
+                 "  prev=\"$a\"\n"
+                 "done\n"
+                 (apply str (for [n env-names]
+                              (str "[ -n \"${" n "+x}\" ] && printf 'ENV " n "=%s\\n' "
+                                   "\"$(printf '%s' \"$" n "\" | tr '\\n' '|')\" >> \"$log\"\n")))
+                 "echo END >> \"$log\"\n"
+                 "echo abc123\n"))
+      (.setExecutable script true)
+      (f (descriptor/make-descriptor {:runtime-kind kind :executable (str script)})
+         #(if (.exists log) (parse-fake-runtime-log (clojure.string/split-lines (slurp log))) []))
+      (finally
+        (run! #(.delete ^java.io.File %) (reverse (file-seq dir)))))))
+
 (deftest ^{:stratum 2} git-credential-env-is-read-by-git-test
   (testing "git takes the header from the env alone; the repo config file
             never holds it"
@@ -764,25 +776,29 @@
         (finally
           (run! #(.delete ^java.io.File %) (reverse (file-seq dir))))))))
 
+;------------------------------------------------------------------------------ Layer 3
+
 ;; ============================================================================
 ;; Credentials stay off the runtime argv and out of capsule git config
 ;; (N11 §2.2). These drive a stand-in runtime CLI, so they observe what the
 ;; real `docker` / `podman` process would receive.
 ;; ============================================================================
-(deftest ^{:stratum 2} create-container-passes-env-values-by-name-test
+(deftest ^{:stratum 3} create-container-passes-env-through-an-env-file-test
   (doseq [kind supported-kinds-under-test]
-    (testing (str "runtime " kind ": container env is `-e NAME` on argv, the
-                   value only in the runtime CLI's environment")
+    (testing (str "runtime " kind ": container env reaches the runtime in an
+                   env file, not on argv or in the runtime CLI's environment,
+                   and the file is gone afterwards")
       (with-fake-runtime kind ["GH_TOKEN"]
         (fn [descriptor calls]
           (oci-cli/create-container descriptor "c" "img" "/w" nil nil nil
                                     :execution-plan {:env {"GH_TOKEN" fake-token}})
-          (let [{:keys [argv env]} (first (calls))]
-            (is (some #{"GH_TOKEN"} argv))
+          (let [{:keys [argv env env-file]} (first (calls))]
             (is (not-any? token-in? argv))
-            (is (= fake-token (get env "GH_TOKEN")))))))))
+            (is (= {"GH_TOKEN" fake-token} env-file))
+            (is (not= fake-token (get env "GH_TOKEN")))
+            (is (some-> (env-file-path argv) java.io.File. .exists not))))))))
 
-(deftest ^{:stratum 2} exec-in-container-passes-env-values-by-name-test
+(deftest ^{:stratum 3} exec-in-container-passes-env-values-by-name-test
   (testing "per-command env (release's GH_TOKEN) stays off argv; a name the
             runtime CLI reads itself goes inline so it cannot reconfigure
             the CLI"
@@ -797,7 +813,7 @@
           (is (some #{"HOME=/capsule-home"} argv))
           (is (not= "/capsule-home" (get env "HOME"))))))))
 
-(deftest ^{:stratum 2} bootstrap-workspace-keeps-token-out-of-git-config-test
+(deftest ^{:stratum 3} bootstrap-workspace-keeps-token-out-of-git-config-test
   (testing "the clone gets the token through its environment: no runtime
             argv carries it, origin is the plain URL, no push URL is set,
             and no later command receives the credential"
@@ -821,7 +837,7 @@
             (is (seq later))
             (is (not-any? #(get-in % [:env "GIT_CONFIG_VALUE_0"]) later))))))))
 
-(deftest ^{:stratum 2} bootstrap-workspace-strips-url-credentials-test
+(deftest ^{:stratum 3} bootstrap-workspace-strips-url-credentials-test
   (testing "a repo URL carrying user:password@ is cloned without it; the
             password authenticates the clone through its environment"
     (with-fake-runtime :docker ["GIT_CONFIG_VALUE_0"]

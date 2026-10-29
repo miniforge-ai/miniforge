@@ -156,6 +156,31 @@
                 :when (not (contains? cli-names (name k)))]
             [(name k) (str v)]))))
 
+(defn- ^{:stratum 0} env-file-entry?
+  "True when an env entry fits an env file. Docker and Podman read one
+   NAME=value line at a time and take the value literally, so only a value
+   with a line break cannot go there."
+  [[_ v]]
+  (not (re-find #"[\r\n]" (str v))))
+
+(defn- ^{:stratum 0} write-env-file!
+  "Write `entries` as NAME=value lines to a new temp file for `--env-file`.
+   Files/createTempFile makes it owner-only (rw-------) on POSIX."
+  ^java.io.File [entries]
+  (let [path (java.nio.file.Files/createTempFile
+              "miniforge-env-" ".env"
+              (make-array java.nio.file.attribute.FileAttribute 0))]
+    (spit (.toFile path) (str/join (for [[k v] entries] (str (name k) "=" v "\n"))))
+    (.toFile path)))
+
+(defn- ^{:stratum 0} run-with-runtime-env
+  "Call (run-fn), then delete the env file `prepare-runtime-env!` wrote."
+  [{:keys [file]} run-fn]
+  (try
+    (run-fn)
+    (finally
+      (when file (.delete ^java.io.File file)))))
+
 (def ^{:stratum 0} secret-pattern
   "Regex matching env var names that carry sensitive values."
   #"(?i)(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)")
@@ -372,6 +397,22 @@
     opts))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} prepare-runtime-env!
+  "Deliver env-map to the container without putting its values on the
+   runtime argv (`ps` shows argv to every host user) or into the runtime
+   CLI's own environment (where LD_PRELOAD or DOCKER_DEFAULT_PLATFORM would
+   change the CLI itself). Entries go to an owner-only temp file passed as
+   `--env-file`; a value an env file cannot hold goes as `-e NAME`, read
+   from :child-env, the CLI's environment. Returns {:args :child-env :file};
+   the caller deletes :file with `run-with-runtime-env`."
+  [env-map]
+  (let [{file-entries true by-name false} (group-by env-file-entry? env-map)
+        file (when (seq file-entries) (write-env-file! file-entries))]
+    {:args      (concat (when file ["--env-file" (str file)])
+                        (mapcat (fn [[k _]] ["-e" (name k)]) by-name))
+     :child-env (into {} (for [[k v] by-name] [(name k) (str v)]))
+     :file      file}))
 
 (defn- ^{:stratum 1} split-userinfo
   "[url auth] for an http(s) URL: the URL without any `user[:password]@`,
@@ -774,7 +815,7 @@
                                (contains? execution-plan :env))
                         (:env execution-plan)
                         env-map)
-        env-args      (build-env-args descriptor effective-env)
+        env           (prepare-runtime-env! effective-env)
         resource-args (build-resource-args
                        descriptor resources
                        {:omit-memory? (some? (:memory-limit-mb execution-plan))})
@@ -799,11 +840,11 @@
                               security-args
                               runtime-fs-args
                               mount-args
-                              env-args
+                              (:args env)
                               resource-args
                               (into [image] (get execution-plan :command ["sleep" "infinity"])))
-        result        (run-runtime-process descriptor cmd-args
-                                           :env (build-child-env descriptor effective-env))]
+        result        (run-with-runtime-env
+                       env #(run-runtime-process descriptor cmd-args :env (:child-env env)))]
     (if (zero? (:exit result))
       (result/ok {:container-id (str/trim (:out result))
                   :container-name container-name})
