@@ -34,6 +34,13 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} default-close-timeout-ms
+  "Upper bound close-store waits for queued disk writes. Writes normally
+   finish in milliseconds; the bound only matters when one is stuck (for
+   example, another process holds the index lock) and keeps CLI exit from
+   hanging on it."
+  10000)
+
 ;; Pure functions for path handling
 (defn ^{:stratum 0} artifacts-dir
   "Get the artifacts directory path.
@@ -158,15 +165,6 @@
   [result]
   (get-in result [:anomaly/data :artifact/role]))
 
-(defn ^{:stratum 0} close-store
-  "Close store implementation."
-  [{:keys [cache logger]}]
-  ;; Ensure all pending writes complete
-  (Thread/sleep 100) ; Give futures time to complete
-  (when logger
-    (log/info logger :system :artifact/store-closed
-              {:data {:artifact-count (count @cache)}})))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Index management
@@ -182,7 +180,6 @@
   [artifacts-dir index]
   (write-transit (index-file-path artifacts-dir) index))
 
-;; Artifact persistence
 (defn ^{:stratum 1} persist-artifact!
   "Persist an artifact to disk in Transit format."
   [artifacts-dir artifact]
@@ -209,28 +206,45 @@
                    {:artifact/id artifact-id
                     :artifact/role role}))
 
+(defn ^{:stratum 1} close-store
+  "Close store implementation. Waits up to the store's close timeout
+   for queued disk writes; returns true when they all finished, false
+   (and logs a warning) when the timeout ran out first."
+  [{:keys [cache logger writer close-timeout-ms]}]
+  (let [timeout-ms (or close-timeout-ms default-close-timeout-ms)
+        flushed? (if writer (await-for timeout-ms writer) true)]
+    (if flushed?
+      (log/info logger :system :artifact/store-closed
+                {:data {:artifact-count (count @cache)}})
+      (log/warn logger :system :artifact/store-close-timeout
+                {:message (messages/t :store/close-timeout)
+                 :data {:timeout-ms timeout-ms}}))
+    flushed?))
+
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} save-artifact
-  "Save artifact implementation."
-  [{:keys [artifacts-dir cache index logger]} artifact]
+(defn ^{:stratum 2} persist-index-action
+  "Writer action: write the in-memory index to disk. Failures are
+   logged: an agent action is the outermost frame of the writer thread."
+  [state artifacts-dir index logger]
+  (try
+    (save-index! artifacts-dir @index)
+    (catch Exception e
+      (log/error logger :system :artifact/index-save-failed
+                 {:message (.getMessage e)
+                  :data {:artifacts-dir artifacts-dir}})))
+  state)
+
+(defn ^{:stratum 2} persist-artifact-action
+  "Writer action: persist one artifact file, logging the outcome."
+  [state artifacts-dir artifact logger]
   (let [id (:artifact/id artifact)]
-    ;; Store in memory cache
-    (swap! cache assoc id artifact)
-
-    ;; Update index
-    (let [new-index (add-to-index @index artifact)]
-      (reset! index new-index)
-      (future (save-index! artifacts-dir new-index)))
-
-    ;; Persist to disk asynchronously
-    (future
-      (try
-        (persist-artifact! artifacts-dir artifact)
-        (log-artifact-saved logger id artifact)
-        (catch Exception e
-          (log-artifact-save-failed logger id e))))
-    id))
+    (try
+      (persist-artifact! artifacts-dir artifact)
+      (log-artifact-saved logger id artifact)
+      (catch Exception e
+        (log-artifact-save-failed logger id e))))
+  state)
 
 (defn ^{:stratum 2} load-artifact-impl
   "Load artifact implementation."
@@ -253,22 +267,35 @@
     id))
 
 (defn ^{:stratum 2} persist-linked-artifacts
-  "Persist both linked artifacts to disk."
-  [record artifacts-dir parent-id child-id logger]
-  (future
-    (try
-      (when-let [parent (p/load-artifact record parent-id)]
-        (persist-artifact! artifacts-dir parent))
-      (when-let [child (p/load-artifact record child-id)]
-        (persist-artifact! artifacts-dir child))
-      (catch Exception e
-        (when logger
-          (log/error logger :system :artifact/link-persist-failed
-                     {:message (.getMessage e)
-                      :data {:parent-id parent-id
-                             :child-id child-id}}))))))
+  "Writer action: re-persist both linked artifacts to disk."
+  [state record artifacts-dir parent-id child-id logger]
+  (try
+    (when-let [parent (p/load-artifact record parent-id)]
+      (persist-artifact! artifacts-dir parent))
+    (when-let [child (p/load-artifact record child-id)]
+      (persist-artifact! artifacts-dir child))
+    (catch Exception e
+      (when logger
+        (log/error logger :system :artifact/link-persist-failed
+                   {:message (.getMessage e)
+                    :data {:parent-id parent-id
+                           :child-id child-id}}))))
+  state)
 
 ;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} save-artifact
+  "Save artifact implementation. Caches the artifact, adds it to the
+   in-memory index, and queues its file and an index write on the
+   writer. An index entry whose file never landed loads as nil, which
+   query skips."
+  [{:keys [artifacts-dir cache index logger writer]} artifact]
+  (let [id (:artifact/id artifact)]
+    (swap! cache assoc id artifact)
+    (swap! index add-to-index artifact)
+    (send-off writer persist-artifact-action artifacts-dir artifact logger)
+    (send-off writer persist-index-action artifacts-dir index logger)
+    id))
 
 (defn ^{:stratum 3} filter-by-criteria
   "Filter artifacts by criteria."
@@ -299,7 +326,7 @@
 (defn ^{:stratum 4} link-artifacts
   "Link artifacts, preserving the ArtifactStore boolean facade.
    Missing link targets are represented as anomalies internally and logged."
-  [{:keys [artifacts-dir cache index logger] :as record} parent-id child-id]
+  [{:keys [artifacts-dir cache index logger writer] :as record} parent-id child-id]
   (let [parent-result (find-link-target record parent-id :parent)
         child-result  (find-link-target record child-id  :child)]
     (if (or (anomaly? parent-result) (anomaly? child-result))
@@ -314,16 +341,14 @@
                                   :role      (link-target-role result)}})))
         false)
       (do
-        ;; Update index with links
-        (let [new-index (update-index-links @index parent-id child-id)]
-          (reset! index new-index)
-          (future (save-index! artifacts-dir new-index)))
+        (swap! index update-index-links parent-id child-id)
 
         ;; Update cached artifacts if present
         (update-cache-links cache parent-id child-id)
 
-        ;; Re-persist both artifacts to disk
-        (persist-linked-artifacts record artifacts-dir parent-id child-id logger)
+        ;; Re-persist both artifacts, then the index, on the writer
+        (send-off writer persist-linked-artifacts record artifacts-dir parent-id child-id logger)
+        (send-off writer persist-index-action artifacts-dir index logger)
 
         (when logger
           (log/debug logger :system :artifact/linked

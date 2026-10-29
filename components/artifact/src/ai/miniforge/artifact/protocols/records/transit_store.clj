@@ -24,7 +24,9 @@
    - In-memory cache (atom) for fast access during execution
    - Transit JSON files for persistence (~/.miniforge/artifacts/)
    - Lazy loading: load from disk only when not in memory
-   - Async writes: persist to disk without blocking
+   - Async writes: one writer agent per store persists files in order
+     without blocking callers; close waits for it (bounded by
+     :close-timeout-ms, default impl/default-close-timeout-ms)
 
    File structure:
      ~/.miniforge/artifacts/
@@ -44,7 +46,8 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defrecord ^{:stratum 0} TransitArtifactStore [artifacts-dir cache index logger]
+(defrecord ^{:stratum 0} TransitArtifactStore [artifacts-dir cache index logger
+                                               writer close-timeout-ms]
   p/ArtifactStore
 
   (save [this artifact]
@@ -66,7 +69,7 @@
 
 (defn ^{:stratum 1} create-transit-store
   ([] (create-transit-store {}))
-  ([{:keys [dir logger]}]
+  ([{:keys [dir logger close-timeout-ms]}]
    (let [artifacts-dir (impl/artifacts-dir dir)]
      ;; Ensure directory exists
      (impl/ensure-artifacts-dir! artifacts-dir)
@@ -83,4 +86,8 @@
         artifacts-dir
         (atom {})           ; Empty cache initially
         (atom index)        ; Load existing index
-        logger)))))
+        logger
+        ;; Every action catches its own failures; :continue keeps one
+        ;; that slips through from blocking every later write.
+        (agent nil :error-mode :continue)
+        (or close-timeout-ms impl/default-close-timeout-ms))))))

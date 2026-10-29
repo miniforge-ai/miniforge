@@ -16,8 +16,12 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.artifact.protocols.impl.transit-store-persistence-test
-  "Disk persistence of the transit store: atomic file writes."
-  (:require [ai.miniforge.artifact.protocols.impl.transit-store :as impl]
+  "Disk persistence of the transit store: atomic file writes and
+   close waiting for queued writes."
+  (:require [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
+            [ai.miniforge.artifact.protocols.impl.transit-store :as impl]
+            [ai.miniforge.artifact.protocols.records.transit-store :as store]
+            [ai.miniforge.logging.interface :as log]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [cognitect.transit :as transit])
@@ -36,6 +40,20 @@
     (doseq [f (reverse (file-seq (io/file dir)))]
       (io/delete-file f true))))
 
+(defn- ^{:stratum 0} artifact [id]
+  {:artifact/id id
+   :artifact/type :code
+   :artifact/version "1.0.0"
+   :artifact/parents []
+   :artifact/children []})
+
+(defn- ^{:stratum 0} open-store
+  ([dir] (open-store dir {}))
+  ([^File dir opts] (store/create-transit-store (assoc opts :dir (.getPath dir)))))
+
+(defn- ^{:stratum 0} artifacts-path [^File dir]
+  (impl/artifacts-dir (.getPath dir)))
+
 (defn- ^{:stratum 0} read-or-unreadable
   "Read a transit file; ::unreadable instead of throwing, so a corrupt
    file fails an assertion rather than erroring the test."
@@ -44,8 +62,18 @@
     (impl/read-transit path)
     (catch Exception _ ::unreadable)))
 
+(defn- ^{:stratum 0} on-disk-ids
+  "Artifact ids in the index file, or ::unreadable when it is corrupt."
+  [^File dir]
+  (try
+    (set (keys (impl/read-transit (impl/index-file-path (impl/artifacts-dir (.getPath dir))))))
+    (catch Exception _ ::unreadable)))
+
 (defn- ^{:stratum 0} file-names [dir]
   (set (map (fn [^File f] (.getName f)) (.listFiles (io/file dir)))))
+
+(defn- ^{:stratum 0} logged-events [entries]
+  (set (map :log/event @entries)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -62,4 +90,44 @@
       (testing "and leaves no temp file behind"
         (is (= #{"data.transit.json"} (file-names dir))))
       (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-close-waits-for-queued-writes
+  (let [dir (temp-dir)
+        write impl/write-transit]
+    (try
+      (with-redefs [impl/write-transit (fn [path data] (Thread/sleep 300) (write path data))]
+        (let [s (open-store dir)]
+          (p/save s (artifact "a1"))
+          (p/close s)))
+      (testing "once close returns, the artifact file and the index are on disk"
+        (is (= #{"a1"} (on-disk-ids dir)))
+        (is (= (artifact "a1")
+               (read-or-unreadable (impl/artifact-file-path (artifacts-path dir) "a1")))))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-close-gives-up-after-its-timeout
+  (let [dir (temp-dir)
+        release (promise)
+        write impl/write-transit
+        [logger entries] (log/collecting-logger)]
+    (try
+      (with-redefs [impl/write-transit (fn [path data] @release (write path data))]
+        (let [s (open-store dir {:logger logger :close-timeout-ms 200})
+              _ (p/save s (artifact "a1"))
+              started (System/nanoTime)
+              flushed? (p/close s)
+              elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+          (testing "close returns false near its timeout while a write is stuck"
+            (is (false? flushed?))
+            (is (< elapsed-ms 5000)))
+          (testing "and logs a warning"
+            (is (contains? (logged-events entries) :artifact/store-close-timeout)))
+          (deliver release true)
+          (testing "the queued writes still land once the write unblocks"
+            (is (true? (p/close s)))
+            (is (= #{"a1"} (on-disk-ids dir))))))
+      (finally
+        (deliver release true)
         (delete-dir! dir)))))
