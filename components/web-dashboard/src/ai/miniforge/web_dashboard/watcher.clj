@@ -21,9 +21,12 @@
    the standalone TUI uses too. Runs active at startup are read in full;
    older files are left to the archive scan and history."
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.logging.interface :as log]
    [ai.miniforge.web-dashboard.config :as dashboard-config]
-   [clojure.edn :as edn]))
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -40,6 +43,17 @@
   "A directory modified within this window is active."
   (:stale-threshold-ms dashboard-config/defaults))
 
+(defn ^{:stratum 0} tail-logger
+  "A logger for the layout tail's warnings that appends EDN lines to
+   ~/.miniforge/logs/web-dashboard.log."
+  []
+  (let [f (io/file (config/miniforge-home) "logs" "web-dashboard.log")]
+    (log/create-logger
+     {:min-level :warn
+      :output    (fn [entry]
+                   (io/make-parents f)
+                   (spit f (str (pr-str entry) "\n") :append true))})))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} start-watcher!
@@ -49,4 +63,5 @@
   [events-dir publish-fn]
   (es/start-layout-tail! events-dir publish-fn
                          {:window-ms   active-window-ms
-                          :thread-name "miniforge-event-watcher"}))
+                          :thread-name "miniforge-event-watcher"
+                          :logger      (tail-logger)}))
