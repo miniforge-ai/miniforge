@@ -20,6 +20,7 @@
         ai.miniforge/decision-envelope {:local/root "../../components/decision-envelope"}
         ai.miniforge/execution-grant {:local/root "../../components/execution-grant"}
         ai.miniforge/file-durability {:local/root "../../components/file-durability"}
+        ai.miniforge/resource-cleanup {:local/root "../../components/resource-cleanup"}
         ai.miniforge/tenancy {:local/root "../../components/tenancy"}
         ai.miniforge/effect-transaction {:local/root "../../components/effect-transaction"}
         ai.miniforge/config {:local/root "../../components/config"}
@@ -130,7 +131,9 @@
         ai.miniforge/evaluation {:local/root "../../components/evaluation"}}
 
  :aliases
- {:test {:extra-paths ["../../components/phase-opsv/test"
+ {:test {:extra-paths ["../../components/event-stream/test"
+                       "../../components/phase-opsv/test"
+                       "../../components/workflow/test"
                        "../../components/phase-opsv/test-resources"]}
   :uberjar
   {:main ai.miniforge.cli.main}}}

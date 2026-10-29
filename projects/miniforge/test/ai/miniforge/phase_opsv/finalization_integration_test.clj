@@ -43,6 +43,8 @@
     (is (= [] (:evidence/policy-checks bundle)))
     (is (= :finalized (:opsv.assembly/status assembly)))
     (is (= (:evidence-bundle/id assembly) (:opsv/evidence-artifact-id output)))
+    (is (= [(get-in output [:opsv/phase-artifact-ids :actuation]) (:opsv/evidence-artifact-id output)]
+           (get-in completed [:phase :result :artifacts])))
     (is (= bundle (:artifact/content (artifact/read-published directory (:evidence-bundle/id bundle)))))
     (is (= (hash/content-hash (dissoc bundle :evidence/content-hash)) (:evidence/content-hash bundle)))
     (is (= (:opsv/event-refs assembly) (set (get-in bundle [:evidence/opsv :opsv/event-refs]))))
@@ -124,10 +126,13 @@
         recovered (opsv/publish-finalized-evidence! restored)
         again (opsv/publish-finalized-evidence! restored)]
     (is (= :error (get-in completed [:phase :result :status])))
+    (is (= [(get-in failure [:anomaly/data :opsv/phase-output :opsv/phase-artifact-ids :actuation])]
+           (get-in completed [:phase :result :artifacts])))
     (is (map? (get-in failure [:anomaly/data :opsv/phase-output :opsv/actuation-record])))
     (is (= :finalized (:opsv.assembly/status assembly)))
     (is (= (:opsv.assembly/bundle assembly) (:opsv/evidence-bundle recovered)))
     (is (= recovered again))
+    (is (= [(:opsv/evidence-artifact-id recovered)] (:opsv/phase-produced-artifact-refs recovered)))
     (is (= (:opsv/evidence-bundle recovered)
            (:artifact/content (artifact/read-published directory (:opsv/evidence-artifact-id recovered)))))))
 

@@ -813,6 +813,7 @@
                  "components/redaction/resources"
                  "components/event-stream/src"
                  "components/event-stream/resources"
+                 "components/resource-cleanup/src"
                  "components/supervisory-state/src"
                  "components/supervisory-state/resources"
                  "components/policy-clause/src"

@@ -30,6 +30,7 @@
             [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
             [ai.miniforge.workflow.execution-dag-sync :as dag-sync]
             [ai.miniforge.workflow.execution-events :as exec-events]
+            [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
             [ai.miniforge.workflow.execution-result-summary :as result-summary]
             [ai.miniforge.workflow.execution-transition :as transition]
             [ai.miniforge.workflow.messages :as messages]))
@@ -173,7 +174,7 @@
                                                transition-to-failed-fn)]
         (if (phase/failed? ctx-after-plan)
           ctx-after-plan
-          (transition/apply-phase-transition ctx-after-plan
+          (transition/apply-phase-transition (lifecycle/begin-phase-attempt :implement ctx-after-plan)
                                              :phase/succeed
                                              pipeline
                                              transition-to-completed-fn

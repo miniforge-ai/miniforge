@@ -84,7 +84,7 @@
     (is (= bundle (:artifact/content (artifact/read-published
                                       (:opsv/artifact-directory options)
                                       (:opsv/evidence-artifact-id output)))))
-    (is (= output (retained-output (:phase again))))
+    (terminal/assert-bundle-republication output (retained-output (:phase again)))
     (is (= ["GET" "POST"] (mapv #(get-in % [:arguments 6]) @calls)))))
 
 ;------------------------------------------------------------------------------ Layer 2

@@ -47,6 +47,31 @@
 
  ;; ── Events with no browser handler ──────────────────────────────────────
 
+ {:constructor "checkpoint-written"
+  :event-type :workflow/checkpoint-written
+  :json-string "workflow/checkpoint-written"
+  :browser? false}
+ {:constructor "checkpoint-write-failed"
+  :event-type :workflow/checkpoint-write-failed
+  :json-string "workflow/checkpoint-write-failed"
+  :browser? false}
+ {:constructor "machine-snapshot-written"
+  :event-type :workflow/machine-snapshot-written
+  :json-string "workflow/machine-snapshot-written"
+  :browser? false}
+ {:constructor "machine-snapshot-write-failed"
+  :event-type :workflow/machine-snapshot-write-failed
+  :json-string "workflow/machine-snapshot-write-failed"
+  :browser? false}
+ {:constructor "workflow-resumed"
+  :event-type :workflow/resumed
+  :json-string "workflow/resumed"
+  :browser? false}
+ {:constructor "workflow-spec-hash-mismatch"
+  :event-type :workflow/spec-hash-mismatch
+  :json-string "workflow/spec-hash-mismatch"
+  :browser? false}
+
  {:constructor "agent-status"
   :event-type  :agent/status
   :json-string "agent/status"
@@ -327,7 +352,12 @@
  {:constructor "phase-heartbeat"
   :event-type  :workflow/phase-heartbeat
   :json-string "workflow/phase-heartbeat"
-  :browser?    false}
+  :browser? false
+  :scope :workflow
+  :retention-class :ephemeral
+  :minimum-retention-hours 24
+  :payload-version "2.0.0"
+  :note "Current writes use separate liveness/progress fields; legacy ticks are not progress."}
 
  ;; GROUP 1+4 / GROUP 2 agent stream-stall + session events
  {:constructor "agent-stream-stalled"

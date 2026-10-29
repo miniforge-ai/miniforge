@@ -161,7 +161,7 @@
     (is (false? (get-in (terminal-output recovered) [:opsv/evidence-bundle :evidence/outcome :outcome/success])))
     (is (= :finalized (get-in recovered [:execution/input :opsv/evidence-assembly :opsv.assembly/status])))
     (is (nil? (get-in recovered [:phase :result :output :anomaly/data :opsv/evidence-failure])))
-    (is (= (terminal-output recovered) (terminal-output again)))
+    (terminal/assert-bundle-republication (terminal-output recovered) (terminal-output again))
     (is (= 2 (count @calls)))))
 
 (defn- ^{:stratum 1} assert-checkpoint-recovery [ready directory calls]
@@ -187,7 +187,7 @@
            (:opsv/effect-transactions (terminal-output recovered))))
     (is (false? (get-in (terminal-output recovered) [:opsv/evidence-bundle :evidence/outcome :outcome/success])))
     (is (= :critical (get-in (terminal-output recovered) [:opsv/evidence-bundle :evidence/outcome :outcome/tier])))
-    (is (= (terminal-output recovered) (terminal-output again)))
+    (terminal/assert-bundle-republication (terminal-output recovered) (terminal-output again))
     (is (anomaly/anomaly? (opsv/recover-actuation-evidence! tampered)))
     (is (= 2 (count @calls)))))
 

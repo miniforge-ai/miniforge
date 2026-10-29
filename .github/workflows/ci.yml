@@ -225,6 +225,13 @@ jobs:
           (let [r (clojure.test/run-tests 'ai.miniforge.workflow.opsv-lifecycle-integration-test)]
           (System/exit (+ (:fail r) (:error r))))"
 
+      - name: Native deployment configuration and runner recovery
+        working-directory: projects/miniforge
+        run: >-
+          clojure -M:test -e "(require 'ai.miniforge.workflow.deployment-config-integration-test)
+          (let [r (clojure.test/run-tests 'ai.miniforge.workflow.deployment-config-integration-test)]
+          (System/exit (+ (:fail r) (:error r))))"
+
       - name: OPSV evidence finalization and recovery
         working-directory: projects/miniforge
         run: >-
@@ -261,6 +268,15 @@ jobs:
         run: >-
           clojure -M -e "(require 'ai.miniforge.event-stream.gate-contract-integration-test)
           (let [r (clojure.test/run-tests 'ai.miniforge.event-stream.gate-contract-integration-test)]
+          (System/exit (+ (:fail r) (:error r))))"
+
+      - name: Native and restored workflow failure publication
+        working-directory: projects/miniforge
+        run: >-
+          clojure -M:test -e "(require 'ai.miniforge.workflow.native-failure-publication-test
+          'ai.miniforge.workflow.restored-failure-test 'ai.miniforge.workflow.dag-terminal-checkpoint-test)
+          (let [r (clojure.test/run-tests 'ai.miniforge.workflow.native-failure-publication-test
+          'ai.miniforge.workflow.restored-failure-test 'ai.miniforge.workflow.dag-terminal-checkpoint-test)]
           (System/exit (+ (:fail r) (:error r))))"
 
       - name: Upload test logs

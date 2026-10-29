@@ -145,6 +145,7 @@
                          "ai.miniforge.artifact.interface-integration-test"
                          "ai.miniforge.loop.interface-integration-test"
                          "ai.miniforge.observer.interface-integration-test"
+                         "ai.miniforge.observer.heartbeat-journal-integration-test"
                          "ai.miniforge.task.interface-integration-test"
                          "ai.miniforge.release-executor.artifact-validation-integration-test"
                          "ai.miniforge.web-dashboard.fleet-onboarding-integration-test"
@@ -160,6 +161,8 @@
                          "ai.miniforge.workflow.opsv-terminal-integration-test"
                          "ai.miniforge.workflow.opsv-checkpoint-integration-test"
                          "ai.miniforge.event-stream.gate-contract-integration-test"
+                         "ai.miniforge.event-stream.heartbeat-runtime-integration-test"
+                         "ai.miniforge.event-stream.heartbeat-stop-integration-test"
                          "ai.miniforge.governance.e2e-test"]
         kernel-tests ["ai.miniforge.workflow.kernel-loader-integration-test"]
         miniforge-exit (run-project-tests! "miniforge" miniforge-tests)]
