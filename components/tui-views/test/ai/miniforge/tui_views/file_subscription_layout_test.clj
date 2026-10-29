@@ -228,3 +228,15 @@
                                                 :cancel/requested-by "operator" :workflow/duration-ms 5})
       (dotimes [_ file-sub/max-bootstrap-attempts] (file-sub/retry-bootstraps! send! dir runs))
       (is (= :cancelled (row-status @msgs)) label))))
+
+(deftest ^{:stratum 1} a-short-workflow-id-gets-its-fallback-row
+  (let [msgs  (atom [])
+        send! #(swap! msgs conj %)
+        runs  (new-runs)
+        dir   (doto (io/file (System/getProperty "java.io.tmpdir") (str "tui-layout-" (random-uuid))) .mkdirs)]
+    ;; A keyword workflow id, shorter than the 8 characters a nameless row's name takes.
+    (file-sub/dispatch-event! send! dir runs {:event/type :workflow/failed :workflow/id :sdlc})
+    (dotimes [_ file-sub/max-bootstrap-attempts] (file-sub/retry-bootstraps! send! dir runs))
+    (let [row (first (:workflows (reduce tui-update/update-model (model/init-model) @msgs)))]
+      (is (= :failed (:status row)))
+      (is (= "workflow-sdlc" (:name row))))))
