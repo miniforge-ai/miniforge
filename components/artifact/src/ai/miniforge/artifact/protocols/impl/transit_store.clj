@@ -21,14 +21,16 @@
    These functions implement the ArtifactStore protocol for the Transit-based store.
    They are used by the TransitArtifactStore record.
 
-   Disk writes run as actions on the store's writer agent, one at a time
-   and in submission order; close-store waits for them with a bounded
-   timeout. Every file is written to a sibling temp file and renamed over
-   the target, so a reader, or a process cut off mid-write, never sees a
-   partial file. Index writes also hold the index lock (a per-directory
-   monitor in this JVM plus an OS file lock across processes) and merge
-   with the index already on disk, so concurrent stores and processes do
-   not drop each other's entries.
+   The per-artifact files are the source of truth; the index is a
+   projection of them. save and link update the in-memory cache and index
+   at once and queue the change. The store's writer agent applies queued
+   changes in one critical section under the index lock (a per-directory
+   monitor in this JVM plus an OS file lock across processes): it
+   re-reads the artifact files, applies each change, writes the files,
+   sets the on-disk index entries of exactly those ids to their
+   projection, and writes the index. close-store waits for the writer
+   with a bounded timeout. Every file is written to a sibling temp file
+   and renamed over the target, so no reader sees a partial file.
 
    Plain `try` throughout: the artifact component has no slingshot
    dependency (rule 211, exemption 1)."
@@ -38,7 +40,6 @@
    [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [cognitect.transit :as transit]
-   [ai.miniforge.artifact.core :as core]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.logging.interface :as log])
   (:import
@@ -132,13 +133,6 @@
                   :artifact/children (:artifact/children artifact)}]
     (assoc index id metadata)))
 
-(defn ^{:stratum 0} update-index-links
-  "Update parent-child links in the index."
-  [index parent-id child-id]
-  (-> index
-      (update-in [parent-id :artifact/children] (fnil conj []) child-id)
-      (update-in [child-id :artifact/parents] (fnil conj []) parent-id)))
-
 (defn- ^{:stratum 0} carry-links
   "Return `entry` (an artifact or an index entry) with the parents and
    children of `previous` kept in front of its own. Links are
@@ -155,12 +149,6 @@
   "Add `id` to the `k` links of `artifact` unless it is already there."
   [artifact k id]
   (update artifact k (fn [links] (if (some #{id} links) (vec links) (conj (vec links) id)))))
-
-(defn- ^{:stratum 0} drop-written
-  "Remove from `changed` (id -> change count) the ids whose count is
-   still the one `written` recorded, i.e. not changed since that write."
-  [changed written]
-  (reduce-kv (fn [m id n] (if (= n (get m id)) (dissoc m id) m)) changed written))
 
 ;; Protocol implementations
 (defn ^{:stratum 0} log-artifact-saved
@@ -187,14 +175,6 @@
 (defn- ^{:stratum 0} load-indexed-artifact
   [record id]
   (p/load-artifact record id))
-
-(defn ^{:stratum 0} update-cache-links
-  "Update cached artifacts with new links."
-  [cache parent-id child-id]
-  (when-let [parent (get @cache parent-id)]
-    (swap! cache assoc parent-id (core/add-child parent child-id)))
-  (when-let [child (get @cache child-id)]
-    (swap! cache assoc child-id (core/add-parent child parent-id))))
 
 ;; Anomaly-returning helpers
 (defn- ^{:stratum 0} anomaly?
@@ -238,19 +218,6 @@
   (or (read-transit (index-file-path artifacts-dir))
       {}))
 
-(defn ^{:stratum 1} merge-indexes
-  "Merge the in-memory index into the on-disk one. Ids this store changed
-   since its last index write take the in-memory entry with the on-disk
-   links carried forward; other ids keep the on-disk entry, or the
-   in-memory one when the disk has none."
-  [disk-index memory-index changed-ids]
-  (reduce-kv (fn [merged id entry]
-               (cond (contains? changed-ids id) (assoc merged id (carry-links (get merged id) entry))
-                     (contains? merged id) merged
-                     :else (assoc merged id entry)))
-             disk-index
-             memory-index))
-
 (defn ^{:stratum 1} load-artifact-from-disk
   "Load an artifact from disk.
    Returns nil if not found."
@@ -286,70 +253,6 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} persist-artifact!
-  "Persist an artifact to disk in Transit format. Under the index lock,
-   links already in the file on disk are carried forward (carry-links):
-   another store may have linked this artifact since this one cached it."
-  [artifacts-dir artifact]
-  (let [id (:artifact/id artifact)
-        file-path (artifact-file-path artifacts-dir id)]
-    (call-with-index-lock
-     artifacts-dir
-     (fn []
-       (let [on-disk (try (read-transit file-path) (catch Exception _ nil))]
-         (write-transit file-path (carry-links (when (map? on-disk) on-disk) artifact)))))
-    id))
-
-(defn ^{:stratum 2} persist-index-action
-  "Writer action: under the index lock, merge the in-memory index with
-   the one on disk (other stores and processes write it too; see
-   merge-indexes), keep the result in memory and write it. `changed`
-   (id -> change count) names the ids this store changed; written ones
-   are dropped from it. The writer's state is the index last
-   written; if memory still holds it, an earlier queued write already
-   covered this one and it is skipped. Failures are logged and leave the
-   state alone, so the next queued write retries."
-  [last-written artifacts-dir index changed logger]
-  (if (identical? last-written @index)
-    last-written
-    (try
-      (call-with-index-lock
-       artifacts-dir
-       (fn []
-         (let [disk-index (load-index artifacts-dir)
-               seen (volatile! nil)
-               merged (swap! index (fn [memory]
-                                     (merge-indexes disk-index memory
-                                                    (set (keys (vreset! seen @changed))))))]
-           (write-transit (index-file-path artifacts-dir) merged)
-           (swap! changed drop-written @seen)
-           merged)))
-      (catch Exception e
-        (log/error logger :system :artifact/index-save-failed
-                   {:message (.getMessage e)
-                    :data {:artifacts-dir artifacts-dir}})
-        last-written))))
-
-(defn ^{:stratum 2} load-artifact-impl
-  "Load artifact implementation."
-  [{:keys [artifacts-dir cache logger]} id]
-  ;; Try memory cache first
-  (or (get @cache id)
-      ;; Fall back to loading from disk
-      (when-let [artifact (load-artifact-from-disk artifacts-dir id)]
-        ;; Cache in memory
-        (swap! cache assoc id artifact)
-        (when logger
-          (log/debug logger :system :artifact/loaded
-                     {:data {:artifact-id id
-                             :source :disk}}))
-        artifact)))
-
-(defn- ^{:stratum 2} matching-index-id
-  [criteria [id metadata]]
-  (when (metadata-match? criteria metadata)
-    id))
-
 (defn- ^{:stratum 2} write-change!
   "Apply one queued change to the artifact files on disk and write them.
    A save keeps the on-disk links and takes every other field from the
@@ -377,46 +280,27 @@
             []
             pairs)))
 
+(defn ^{:stratum 2} load-artifact-impl
+  "Load artifact implementation."
+  [{:keys [artifacts-dir cache logger]} id]
+  ;; Try memory cache first
+  (or (get @cache id)
+      ;; Fall back to loading from disk
+      (when-let [artifact (load-artifact-from-disk artifacts-dir id)]
+        ;; Cache in memory
+        (swap! cache assoc id artifact)
+        (when logger
+          (log/debug logger :system :artifact/loaded
+                     {:data {:artifact-id id
+                             :source :disk}}))
+        artifact)))
+
+(defn- ^{:stratum 2} matching-index-id
+  [criteria [id metadata]]
+  (when (metadata-match? criteria metadata)
+    id))
+
 ;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} persist-artifact-action
-  "Writer action: persist one artifact file, logging the outcome."
-  [state artifacts-dir artifact logger]
-  (let [id (:artifact/id artifact)]
-    (try
-      (persist-artifact! artifacts-dir artifact)
-      (log-artifact-saved logger id artifact)
-      (catch Exception e
-        (log-artifact-save-failed logger id e))))
-  state)
-
-(defn ^{:stratum 3} persist-linked-artifacts
-  "Writer action: re-persist both linked artifacts to disk."
-  [state record artifacts-dir parent-id child-id logger]
-  (try
-    (when-let [parent (p/load-artifact record parent-id)]
-      (persist-artifact! artifacts-dir parent))
-    (when-let [child (p/load-artifact record child-id)]
-      (persist-artifact! artifacts-dir child))
-    (catch Exception e
-      (when logger
-        (log/error logger :system :artifact/link-persist-failed
-                   {:message (.getMessage e)
-                    :data {:parent-id parent-id
-                           :child-id child-id}}))))
-  state)
-
-(defn ^{:stratum 3} filter-by-criteria
-  "Filter artifacts by criteria."
-  [index criteria]
-  (keep (partial matching-index-id criteria) index))
-
-(defn ^{:stratum 3} find-link-target
-  "Load an artifact for linking, or return a typed not-found anomaly."
-  [record artifact-id role]
-  (if-let [artifact (load-artifact-impl record artifact-id)]
-    artifact
-    (link-target-anomaly artifact-id role)))
 
 (defn ^{:stratum 3} drain-action
   "Writer action: one critical section under the index lock for every
@@ -449,6 +333,18 @@
                  {:message (.getMessage e)
                   :data {:artifacts-dir artifacts-dir}})))
   state)
+
+(defn ^{:stratum 3} filter-by-criteria
+  "Filter artifacts by criteria."
+  [index criteria]
+  (keep (partial matching-index-id criteria) index))
+
+(defn ^{:stratum 3} find-link-target
+  "Load an artifact for linking, or return a typed not-found anomaly."
+  [record artifact-id role]
+  (if-let [artifact (load-artifact-impl record artifact-id)]
+    artifact
+    (link-target-anomaly artifact-id role)))
 
 ;------------------------------------------------------------------------------ Layer 4
 
