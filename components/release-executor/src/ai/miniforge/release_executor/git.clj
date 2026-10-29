@@ -82,11 +82,14 @@
    caller's `github-token` as GH_TOKEN so host-mode uses the same credential
    the pipeline resolved — parity with sandbox's gh-exec-opts :env injection.
    `worktree-path` may be nil (e.g. `gh auth status` needs no cwd). When no
-   token is supplied the call inherits the ambient environment."
-  [worktree-path github-token]
-  (cond-> {}
-    worktree-path (assoc :dir (str worktree-path))
-    github-token  (assoc :extra-env {"GH_TOKEN" github-token})))
+   token is supplied the call inherits the ambient environment. `extra-env`
+   (the push fallback's `token-auth-env`) is merged in."
+  ([worktree-path github-token] (gh-shell-opts worktree-path github-token nil))
+  ([worktree-path github-token extra-env]
+   (let [env (merge (when github-token {"GH_TOKEN" github-token}) extra-env)]
+     (cond-> {}
+       worktree-path (assoc :dir (str worktree-path))
+       (seq env)     (assoc :extra-env env)))))
 
 (defn- ^{:stratum 0} timeout-data
   "The :timed-out? flag and :timeout anomaly of a shell/run-bounded result,
@@ -196,15 +199,36 @@
     (catch Exception e
       (result/shell-failure (.getMessage e) {:commit-sha nil}))))
 
-(defn- ^{:stratum 0} ssh->https-with-token
-  "Convert an SSH or HTTPS git remote URL to HTTPS with token auth embedded,
-   or nil when conversion is not possible. Mirrors sandbox/ssh->https-with-token."
+(defn- ^{:stratum 0} token-auth-env
+  "Environment for one push that authenticates to `remote-url` over HTTPS
+   with `token`, or nil when the URL is neither scp-style SSH (git@host:path)
+   nor HTTPS — the same URLs sandbox/ssh->https-with-token converts.
+
+   The settings travel as GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n /
+   GIT_CONFIG_VALUE_n (git 2.31+), so the token is never written to
+   .git/config and never appears in argv. A push that hangs, times out or
+   is killed leaves nothing to scrub.
+   - url.https://<host>/.insteadOf sends an SSH origin over HTTPS for this
+     command only;
+   - an empty http.https://<host>/.extraHeader drops headers set by other
+     config (actions/checkout persists one), then the token goes as Basic
+     x-access-token:<token>, the form GitHub accepts."
   [remote-url token]
-  (when remote-url
-    (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" remote-url)]
-      (str "https://x-access-token:" token "@" host "/" path)
-      (when (str/starts-with? (str remote-url) "https://")
-        (str/replace remote-url #"https://" (str "https://x-access-token:" token "@"))))))
+  (let [url        (str remote-url)
+        ssh-host   (second (re-matches #"git@([^:/]+):.+" url))
+        https-host (second (re-matches #"https://(?:[^@/]*@)?([^/]+)/.+" url))]
+    (when-let [host (or ssh-host https-host)]
+      (let [base    (str "https://" host "/")
+            header  (str "Authorization: Basic "
+                         (.encodeToString (java.util.Base64/getEncoder)
+                                          (.getBytes (str "x-access-token:" token) "UTF-8")))
+            entries (cond-> [[(str "http." base ".extraHeader") ""]
+                             [(str "http." base ".extraHeader") header]]
+                      ssh-host (conj [(str "url." base ".insteadOf") (str "git@" host ":")]))]
+        (reduce-kv (fn [env i [k v]]
+                     (assoc env (str "GIT_CONFIG_KEY_" i) k (str "GIT_CONFIG_VALUE_" i) v))
+                   {"GIT_CONFIG_COUNT" (str (count entries))}
+                   entries)))))
 
 (defn- ^{:stratum 0} inside-worktree?
   "True when `file` resolves inside `worktree-path` after canonicalization
@@ -386,12 +410,12 @@
       (catch Exception _ nil))))
 
 (defn- ^{:stratum 1} raw-push!
-  "One `git push -u origin <branch>` with GH_TOKEN injected. Returns a
-   shell-result."
-  [worktree-path branch-name github-token]
+  "One `git push -u origin <branch>` with GH_TOKEN and `auth-env` (nil, or
+   the fallback's `token-auth-env`) injected. Returns a shell-result."
+  [worktree-path branch-name github-token auth-env]
   (try
     (let [r (shell/run-bounded ["git" "push" "-u" "origin" branch-name]
-                               (gh-shell-opts worktree-path github-token))]
+                               (gh-shell-opts worktree-path github-token auth-env))]
       (if (zero? (:exit r))
         (result/shell-success {:output (get r :out "")})
         (result/shell-failure (get r :err "") (timeout-data r))))
@@ -399,68 +423,31 @@
       (result/shell-failure (.getMessage e)))))
 
 (defn- ^{:stratum 1} with-https-token-fallback!
-  "Run `push!` (a 0-arg thunk returning a shell-result). On failure with a
-   token present, retry once over HTTPS+token auth: rewrite origin to an https
-   URL embedding the token, re-run `push!`, then restore the original URL so
-   the token never persists in git config. If the restore itself fails, fail
-   loud — even when the push succeeded — with the scrub command and
-   :push-succeeded?, rather than report a clean success while a credential
-   lingers in git config. Covers an SSH `origin` that GH_TOKEN alone can't
-   authenticate. Shared by push-branch! and force-push!; mirrors
-   sandbox/push-branch!."
+  "Run `push!` (a 1-arg fn: extra env map or nil -> shell-result) with no
+   extra env. On failure with a token present, retry once with
+   `token-auth-env` for origin's URL, so an SSH `origin` that GH_TOKEN alone
+   can't authenticate still pushes over HTTPS. The token exists only in
+   that retry's environment: origin and .git/config are never modified, so
+   a retry that hangs, times out or is killed leaves no credential behind.
+   Shared by push-branch! and force-push!."
   [worktree-path github-token push!]
-  (let [result (push!)]
+  (let [result (push! nil)]
     (if (or (result/succeeded? result) (not github-token))
       result
-      (let [url-r      (exec! worktree-path ["git" "remote" "get-url" "origin"])
-            remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
-            https-url  (ssh->https-with-token remote-url github-token)]
-        (if https-url
-          (let [set-r (exec! worktree-path ["git" "remote" "set-url" "origin" https-url])]
-            (if-not (result/succeeded? set-r)
-              ;; Could not repoint origin at the token URL, so the fallback
-              ;; never applied — origin is unchanged (still the original URL,
-              ;; no token persisted, nothing to scrub). Report both the
-              ;; original push failure and the set-url error rather than
-              ;; pushing over the unchanged remote and masking the reason.
-              (result/shell-failure
-               (msg/t :push/https-fallback-setup-failed
-                      {:push-error    (:error result)
-                       :set-url-error (:error set-r)})
-               {:push-succeeded? false})
-              (let [retry     (push!)
-                    ;; Restore the original remote URL so the token never
-                    ;; persists in the worktree's git config.
-                    restore-r (exec! worktree-path
-                                     ["git" "remote" "set-url" "origin" remote-url])]
-                (if (result/succeeded? restore-r)
-                  retry
-                  ;; The restore failed — origin may still embed the token.
-                  ;; Fail loud (even when the push itself succeeded) with the
-                  ;; scrub command, rather than report a clean success while a
-                  ;; credential is persisted in git config. When the retry push
-                  ;; also failed, carry its error too so the root cause isn't
-                  ;; lost.
-                  (let [pushed? (result/succeeded? retry)]
-                    (result/shell-failure
-                     (if pushed?
-                       (msg/t :push/https-fallback-restore-failed
-                              {:remote-url    remote-url
-                               :restore-error (:error restore-r)})
-                       (msg/t :push/https-fallback-push-and-restore-failed
-                              {:remote-url    remote-url
-                               :push-error    (:error retry)
-                               :restore-error (:error restore-r)}))
-                     {:push-succeeded? pushed?}))))))
+      (let [url-r    (exec! worktree-path ["git" "remote" "get-url" "origin"])
+            auth-env (when (result/succeeded? url-r)
+                       (token-auth-env (:output url-r) github-token))]
+        (if auth-env
+          (push! auth-env)
           result)))))
 
 (defn- ^{:stratum 1} raw-force-push!
-  "One `git push --force-with-lease` with GH_TOKEN injected. Returns a
-   shell-result."
-  [worktree-path github-token]
+  "One `git push --force-with-lease` with GH_TOKEN and `auth-env` (nil, or
+   the fallback's `token-auth-env`) injected. Returns a shell-result."
+  [worktree-path github-token auth-env]
   (try
     (let [r (shell/run-bounded ["git" "push" "--force-with-lease"]
-                               (gh-shell-opts worktree-path github-token))]
+                               (gh-shell-opts worktree-path github-token auth-env))]
       (if (zero? (:exit r))
         (result/shell-success {:output (get r :out "")})
         (result/shell-failure (get r :err "") (timeout-data r))))
@@ -526,8 +513,8 @@
 (defn ^{:stratum 2} push-branch!
   "Push the current branch to origin. Injects `github-token` as GH_TOKEN for
    gh's git credential helper. If the initial push fails and a token is
-   present, retries over HTTPS with the token embedded in a temporary origin
-   URL (restoring the original afterwards) — so a token-only environment
+   present, retries over HTTPS with the token passed in that push's
+   environment only (see `token-auth-env`) — so a token-only environment
    whose `origin` is an SSH remote can still push, matching
    sandbox/push-branch!.
 
@@ -542,7 +529,7 @@
     (validate-safe-branch-name branch-name)
     (with-https-token-fallback!
      worktree-path github-token
-     #(raw-push! worktree-path branch-name github-token)))))
+     #(raw-push! worktree-path branch-name github-token %)))))
 
 (defn ^{:stratum 2} force-push!
   "Force-push the current branch with --force-with-lease, injecting
@@ -555,7 +542,7 @@
   [worktree-path github-token]
   (with-https-token-fallback!
    worktree-path github-token
-   #(raw-force-push! worktree-path github-token)))
+   #(raw-force-push! worktree-path github-token %)))
 
 (defn ^{:stratum 2} create-pr!
   "Create a pull request using gh CLI on the host.
