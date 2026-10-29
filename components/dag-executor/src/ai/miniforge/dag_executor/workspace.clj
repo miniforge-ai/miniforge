@@ -75,19 +75,20 @@
       (let [add-r (exec-fn "git add -A")
             status-r (when-not (failed-step add-r "") (exec-fn "git status --porcelain"))
             has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))
-            ;; With a clean worktree a push is still owed when the destination
-            ;; branch itself is not at HEAD: a commit an earlier :push? false
-            ;; call held back, or a branch never created. Ask the remote, not
-            ;; the remote-tracking refs: HEAD reachable from another branch
-            ;; (the base, a parent task) says nothing about this one.
-            remote-r (when (and push? (not has-changes?) (not (failed-step status-r "")))
+            ;; Before any push, ask the remote where the destination branch is
+            ;; (empty when it does not exist). A clean worktree still owes a
+            ;; push when that is not HEAD: a commit an earlier :push? false call
+            ;; held back, or a branch never created. The remote, not the
+            ;; remote-tracking refs: HEAD reachable from another branch (the
+            ;; base, a parent task) says nothing about this one.
+            remote-r (when (and push? (not (failed-step status-r "")))
                        (exec-fn ["git" "ls-remote" "origin" (str "refs/heads/" branch)]))
-            head-r (when (and remote-r (not (failed-step remote-r "")))
+            remote-sha (or (first (str/split (str/trim (get-in remote-r [:data :stdout] "")) #"\s+")) "")
+            head-r (when (and remote-r (not has-changes?) (not (failed-step remote-r "")))
                      (exec-fn "git rev-parse HEAD"))
             pending-r (or (when (failed-step remote-r "") remote-r) head-r)
             pending? (and head-r (not (failed-step head-r ""))
-                          (not= (first (str/split (str/trim (get-in remote-r [:data :stdout] "")) #"\s+"))
-                                (str/trim (get-in head-r [:data :stdout] ""))))]
+                          (not= remote-sha (str/trim (get-in head-r [:data :stdout] ""))))]
         (cond
           (failed-step add-r "") (result/err :persist-add-failed (failed-step add-r "git add failed"))
           (failed-step status-r "") (result/err :persist-status-failed (failed-step status-r "git status failed"))
@@ -100,8 +101,18 @@
           ;; operator's signing agent (see worktree tier commit-staged!).
           (let [commit-r (when has-changes?
                            (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)]))
+                ;; Only a fresh checkpoint commit may replace the remote branch
+                ;; (a re-acquired capsule re-clones from the base while an
+                ;; earlier attempt's branch exists), and only from the state
+                ;; just read: --force-with-lease on that SHA, empty meaning
+                ;; "must not exist". With nothing new to commit the push is
+                ;; plain: a missing branch or a local-ahead history goes up,
+                ;; while a remote that moved ahead or diverged rejects it.
                 push-r (when (and push? (not (failed-step commit-r "")))
-                         (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"]))
+                         (exec-fn (if has-changes?
+                                    ["git" "push" (str "--force-with-lease=" branch ":" remote-sha)
+                                     "origin" (str "HEAD:" branch)]
+                                    ["git" "push" "origin" (str "HEAD:" branch)])))
                 sha-r (when (and (not (failed-step commit-r ""))
                                  (or (not push?) (and push-r (not (failed-step push-r "")))))
                         (exec-fn "git rev-parse HEAD"))]
