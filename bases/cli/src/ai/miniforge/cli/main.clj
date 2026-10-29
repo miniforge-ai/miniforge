@@ -568,6 +568,7 @@
 
    {:cmds ["workflow" "gc-checkpoints"]
     :fn (wr-help/handler-with-help :workflow-gc-checkpoints cmd-workflow/workflow-gc-checkpoints-cmd)
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-gc-checkpoints)}
 
    ;; Chain parent — `mf chain --help` / `mf chain` lists the group's

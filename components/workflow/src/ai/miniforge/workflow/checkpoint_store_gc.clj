@@ -14,8 +14,9 @@
    Event retention is shorter (archived events go 7 days after archiving),
    so without a hold a failed run resumed after a week would find its
    checkpoint and no events. The `retention-hold` method below keeps a
-   run's archived events while its checkpoint exists; once the GC deletes
-   the checkpoint, the next event cleanup prunes them."
+   run's archived events while its checkpoint exists, under the default
+   root or the one its `:workflow/checkpoint-written` events name; once
+   the GC deletes the checkpoint, the next event cleanup prunes them."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
@@ -35,20 +36,38 @@
 
 (def ^{:stratum 0} ^:private day-ms (* 24 60 60 1000))
 
-(defmethod ^{:stratum 0} es/retention-hold ::checkpoint
-  [_hold workflow-id]
-  (checkpoint-store/checkpoint-present? workflow-id))
-
 (defn- ^{:stratum 0} run-id
   "The run id a checkpoint directory is named for, nil for anything that
    is not a run directory: the GC never touches what it did not write."
   [dir]
   (parse-uuid (str (fs/file-name dir))))
 
+(defn- ^{:stratum 0} recorded-root
+  "The checkpoint root a run's own events say it wrote to: the root above
+   the run directory of the phase file its last
+   `:workflow/checkpoint-written` names; nil when there is none."
+  [events-dir workflow-id]
+  (let [phase-path (some->> (es/read-workflow-events-by-id events-dir workflow-id)
+                            (filter #(= :workflow/checkpoint-written (:event/type %)))
+                            last
+                            :checkpoint/path)
+        run-dir (some-> phase-path fs/parent fs/parent)]
+    (when (and run-dir (= (str workflow-id) (str (fs/file-name run-dir))))
+      (str (fs/parent run-dir)))))
+
 (defn- ^{:stratum 0} last-change-ms
-  "When anything in `dir` last changed: the newest mtime in its tree."
+  "When anything in `dir` last changed: the newest mtime in its own tree.
+   The walk does not follow links, and a link's own mtime is left out, so
+   a link to a fresh tree elsewhere cannot keep an expired run recent."
   [dir]
-  (transduce (map #(.lastModified ^java.io.File %)) max 0 (file-seq (fs/file dir))))
+  (let [newest (volatile! 0)
+        see! (fn [path _attrs]
+               (when-not (fs/sym-link? path)
+                 (vswap! newest max (fs/file-time->millis
+                                     (fs/last-modified-time path {:nofollow-links true}))))
+               :continue)]
+    (fs/walk-file-tree dir {:pre-visit-dir see! :visit-file see!})
+    @newest))
 
 (defn- ^{:stratum 0} manifest-hold
   "`:pinned` when the run's manifest pins it, `:unreadable` when the
@@ -78,6 +97,13 @@
                                  e))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defmethod ^{:stratum 1} es/retention-hold ::checkpoint
+  [_hold workflow-id events-dir]
+  (or (checkpoint-store/checkpoint-present? workflow-id)
+      (boolean
+       (when-let [root (recorded-root events-dir workflow-id)]
+         (checkpoint-store/checkpoint-present? workflow-id {:checkpoint/root root})))))
 
 (defn- ^{:stratum 1} disposition
   "What the GC does with run directory `dir`: `:recent`, `:live`,

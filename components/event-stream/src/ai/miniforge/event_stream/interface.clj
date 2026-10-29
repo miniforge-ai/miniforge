@@ -164,10 +164,11 @@
   sinks/workflow-dir)
 
 (def ^{:stratum 0} retention-hold
-  "Multimethod `(retention-hold hold-key workflow-id)`: register a method
-   under your own hold key to keep a workflow's archived events past
-   their TTL while your store still needs them (the event cleanup asks
-   every registered hold). Workflow id is the events directory name."
+  "Multimethod `(retention-hold hold-key workflow-id events-dir)`: register
+   a method under your own hold key to keep a workflow's archived events
+   past their TTL while your store still needs them (the event cleanup
+   asks every registered hold). Workflow id is the events directory name;
+   events-dir is the events root being cleaned."
   sinks/retention-hold)
 
 (def ^{:stratum 0} default-events-dir

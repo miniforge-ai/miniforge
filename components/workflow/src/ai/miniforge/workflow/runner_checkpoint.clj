@@ -17,7 +17,8 @@
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
             [ai.miniforge.workflow.messages :as messages]
-            [ai.miniforge.workflow.runner-event-dispatch :as dispatch]))
+            [ai.miniforge.workflow.runner-event-dispatch :as dispatch]
+            [babashka.fs :as fs]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -32,6 +33,24 @@
     {:error/message message
      :failure/class (failure/classify {:exception/class (:anomaly/ex-class data)
                                        :error/message message})}))
+
+(defn- ^{:stratum 0} announce-write!
+  "Publish `:workflow/checkpoint-written` for the phase checkpoint just
+   written. The run's events then name its checkpoint root, which the
+   event cleanup's retention hold reads to keep those events while the
+   checkpoint exists, wherever the run wrote it. Needs a stateful stream
+   (see `report-write-failure!`); a refused publication is logged."
+  [context {:checkpoint/keys [phase phase-path]}]
+  (let [stream (get-in context [:execution/opts :event-stream])]
+    (when (and phase-path (dispatch/stateful-stream? stream))
+      (let [receipt (dispatch/publish-event!
+                     stream
+                     (es/checkpoint-written stream (:execution/id context) phase
+                                            (str phase-path) (fs/size phase-path)))]
+        (when (anomaly/any-anomaly? receipt)
+          (log/warn (:execution/logger context) :system :workflow/checkpoint-written
+                    {:message (messages/t :warn/publish-event
+                                          {:error (:anomaly/message receipt)})}))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -65,12 +84,14 @@
 
 (defn ^{:stratum 2} checkpoint!
   "Persist `context`'s checkpoint and return what the store returned. A
-   write failure is reported (warning plus event) and returned as the
+   written phase checkpoint is announced with `:workflow/checkpoint-written`.
+   A write failure is reported (warning plus event) and returned as the
    store's anomaly; it is never thrown, so the caller keeps running."
   [context]
   (let [written (checkpoint-store/persist-execution-state! context)]
-    (when (anomaly/anomaly? written)
-      (report-write-failure! context written))
+    (if (anomaly/anomaly? written)
+      (report-write-failure! context written)
+      (announce-write! context written))
     written))
 
 (comment

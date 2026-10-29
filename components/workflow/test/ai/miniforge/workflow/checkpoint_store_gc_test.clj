@@ -16,6 +16,16 @@
 
 (def ^{:stratum 0} ^:private day-ms (* 24 60 60 1000))
 
+(defn- ^{:stratum 0} archive-checkpoint-written!
+  "Archive, under `events-dir`, the `:workflow/checkpoint-written` event a
+   run under `root` publishes for its :plan checkpoint."
+  [events-dir root id]
+  (let [path (str (fs/path root (str id) "phases" "plan.edn"))
+        event (es/checkpoint-written (es/create-event-stream {:sinks []}) id :plan path 1)
+        file (io/file events-dir "archived" (str id) "0000000000000001__000000000000.transit.json")]
+    (io/make-parents file)
+    (spit file (es/serialize-event event))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} checkpointed-run!
@@ -65,14 +75,45 @@
        (is (= [week-old] (:deleted (workflow/gc-checkpoints! {:checkpoint/root root
                                                               :max-age-days 7}))))))))
 
+(deftest ^{:stratum 2} a-symlink-inside-a-run-does-not-make-it-recent
+  (fixture/call-with-temp-checkpoint-root
+   (fn [root]
+     (fs/with-temp-dir [outside {:prefix "gc-outside-"}]
+       (let [id (checkpointed-run! root 31 "{:workflow/id 1}")
+             run-dir (io/file root (str id))
+             fresh (doto (io/file (str outside) "fresh") (.mkdirs))
+             _ (spit (io/file fresh "new.txt") "x")
+             link (fs/create-sym-link (fs/path run-dir "linked") (fs/path fresh))]
+         (.setLastModified run-dir (- (System/currentTimeMillis) (* 31 day-ms)))
+         (is (= [id] (:deleted (workflow/gc-checkpoints! {:checkpoint/root root}))))
+         (is (not (fs/exists? link {:nofollow-links true})))
+         (is (fs/exists? (io/file fresh "new.txt")) "the link target is not deleted"))))))
+
 (deftest ^{:stratum 2} a-checkpoint-holds-its-runs-events
   (fixture/call-with-temp-checkpoint-root
    (fn [root]
-     (let [id (checkpointed-run! root 31 "{:workflow/id 1}")]
-       (testing "while the checkpoint exists the event cleanup keeps the run's events"
-         (is (true? (es/retention-hold ::gc/checkpoint (str id)))))
-       (workflow/gc-checkpoints! {:checkpoint/root root})
-       (testing "once the GC deletes it, they are released"
-         (is (false? (es/retention-hold ::gc/checkpoint (str id)))))))))
+     (fs/with-temp-dir [events-dir {:prefix "gc-events-"}]
+       (let [id (checkpointed-run! root 31 "{:workflow/id 1}")
+             held? #(es/retention-hold ::gc/checkpoint (str id) (fs/file events-dir))]
+         (testing "while the checkpoint exists the event cleanup keeps the run's events"
+           (is (true? (held?))))
+         (workflow/gc-checkpoints! {:checkpoint/root root})
+         (testing "once the GC deletes it, they are released"
+           (is (false? (held?)))))))))
+
+(deftest ^{:stratum 2} the-hold-finds-a-run-under-another-root-through-its-events
+  ;; The default root is not redefined: the run lives only under `alternate`.
+  (fs/with-temp-dir [alternate {:prefix "gc-alternate-root-"}]
+    (fs/with-temp-dir [events-dir {:prefix "gc-events-"}]
+      (let [id (checkpointed-run! (str alternate) 31 "{:workflow/id 1}")
+            held? #(es/retention-hold ::gc/checkpoint (str id) (fs/file events-dir))]
+        (testing "without the run's events naming the root, nothing holds"
+          (is (false? (held?))))
+        (archive-checkpoint-written! (fs/file events-dir) (str alternate) id)
+        (testing "its checkpoint-written event leads the hold to the root it used"
+          (is (true? (held?))))
+        (workflow/gc-checkpoints! {:checkpoint/root (str alternate)})
+        (testing "and releases once that checkpoint is gone"
+          (is (false? (held?))))))))
 
 (comment ::checkpoint-store-gc)

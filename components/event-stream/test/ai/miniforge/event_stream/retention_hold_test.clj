@@ -33,7 +33,7 @@
   "Register a hold answering from `held-ids` while `f` runs."
   [f]
   (.addMethod ^clojure.lang.MultiFn es/retention-hold ::test
-              (fn [_hold workflow-id]
+              (fn [_hold workflow-id _events-dir]
                 (when (contains? @held-ids ::throws)
                   (throw (ex-info "hold unavailable" {})))
                 (contains? @held-ids workflow-id)))

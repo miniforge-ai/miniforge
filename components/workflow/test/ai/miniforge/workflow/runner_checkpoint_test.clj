@@ -66,4 +66,22 @@
                         (= :workflow/checkpoint-write-failed (:log/event %)))
                   @entries))))))
 
+(deftest ^{:stratum 1} a-written-phase-checkpoint-is-announced
+  (fs/with-temp-dir [dir {:prefix "runner-checkpoint-"}]
+    (let [stream (journal-stream dir)
+          root (str (fs/create-dirs (fs/path dir "checkpoints")))]
+      (try+
+        (let [ctx (fixture/plan-completed-context root {:event-stream stream})
+              _ (with-redefs [monitoring/check-workflow-supervision halted]
+                  (runner/execute-single-iteration
+                   [] ctx {} 1 (atom {:paused false :stopped false})))
+              written (filter #(= :workflow/checkpoint-written (:event/type %))
+                              (es/get-events stream))]
+          (is (= 1 (count written)))
+          (is (= :plan (:phase/name (first written))))
+          (is (= (str (fs/path root (str (:execution/id ctx)) "phases" "plan.edn"))
+                 (:checkpoint/path (first written))))
+          (is (pos? (:checkpoint/size-bytes (first written)))))
+        (finally (es/close-current-event-stream! stream))))))
+
 (comment ::runner-checkpoint)

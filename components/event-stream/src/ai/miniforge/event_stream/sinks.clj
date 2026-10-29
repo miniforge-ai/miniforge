@@ -187,10 +187,11 @@
    find a checkpoint and no events). `cleanup-stale-events!` keeps an
    expired archived or legacy workflow directory when any registered hold
    answers true for its directory name. Args: hold key, workflow id
-   (the directory name, a string)."
-  (fn [hold _workflow-id] hold))
+   (the directory name, a string), and the events root being cleaned (so
+   a hold can read the workflow's own events)."
+  (fn [hold _workflow-id _events-dir] hold))
 
-(defmethod ^{:stratum 0} retention-hold :default [_hold _workflow-id] false)
+(defmethod ^{:stratum 0} retention-hold :default [_hold _workflow-id _events-dir] false)
 
 (defn- ^{:stratum 0} legacy-workflow-expired?
   "True when `dir`, a directory directly under the events root outside
@@ -411,7 +412,7 @@
         nonfatal? (fn [thrown] (not (instance? Error thrown)))
         held? (fn [^java.io.File dir]
                 (boolean (some (fn [hold]
-                                 (try+ (retention-hold hold (.getName dir))
+                                 (try+ (retention-hold hold (.getName dir) events-dir)
                                        (catch nonfatal? _ true)))
                                holds)))]
     (if (.isDirectory events-dir)

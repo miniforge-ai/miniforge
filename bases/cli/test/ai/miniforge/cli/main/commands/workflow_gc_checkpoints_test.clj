@@ -5,6 +5,7 @@
   "`mf workflow gc-checkpoints`: passes the age through, reports what was
    deleted and kept, and exits 1 on a bad age or a failed delete."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.cli.main :as main]
             [ai.miniforge.cli.main.commands.shared :as shared]
             [ai.miniforge.cli.main.commands.workflow-commands :as sut]
             [ai.miniforge.workflow.interface :as workflow]
@@ -22,6 +23,19 @@
                           shared/exit! (fn [code] (swap! seen assoc :exit code))]
               (with-out-str (sut/workflow-gc-checkpoints-cmd m)))]
     (assoc @seen :out out)))
+
+(deftest ^{:stratum 0} a-misspelt-option-is-refused-before-any-gc
+  (let [called? (atom false)
+        exit (atom nil)
+        err (java.io.StringWriter.)]
+    (binding [*err* err]
+      (with-out-str
+        (with-redefs [workflow/gc-checkpoints! (fn [_] (reset! called? true) {})
+                      shared/exit! (fn [code] (reset! exit code) nil)]
+          (main/-main "workflow" "gc-checkpoints" "--max-age-day" "365"))))
+    (is (= 2 @exit))
+    (is (false? @called?) "a typo must not run GC at the default age")
+    (is (str/includes? (str err) "--max-age-day"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
