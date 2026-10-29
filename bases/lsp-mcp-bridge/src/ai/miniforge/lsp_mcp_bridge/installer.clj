@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.lsp-mcp-bridge.installer
   "Auto-installation of LSP server binaries.
 
@@ -34,9 +33,9 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Platform detection
 
-(defn platform-key
+;; Platform detection
+(defn ^{:stratum 0} platform-key
   "Detect the current platform. Returns a string like 'macos-aarch64'."
   []
   (let [os-name (str/lower-case (System/getProperty "os.name"))
@@ -54,15 +53,13 @@
                os-arch)]
     (str os "-" arch)))
 
-(defn bin-dir
+(defn ^{:stratum 0} bin-dir
   "Get the miniforge binary directory."
   []
   (str (fs/home) "/.miniforge/bin"))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Binary resolution
-
-(defn which
+(defn ^{:stratum 0} which
   "Find a binary on PATH. Returns the path or nil."
   [binary]
   (try
@@ -71,19 +68,8 @@
         (str/trim (:out result))))
     (catch Exception _ nil)))
 
-(defn resolve-binary
-  "Find a binary, checking PATH first then ~/.miniforge/bin/.
-   Returns the full path to the binary or nil."
-  [binary]
-  (or (which binary)
-      (let [local-path (str (bin-dir) "/" binary)]
-        (when (fs/exists? local-path)
-          local-path))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Download and extraction
-
-(defn download-file
+(defn ^{:stratum 0} download-file
   "Download a file from a URL to a local path.
    Returns nil on success or a canonical anomaly map on curl failure."
   [url dest-path]
@@ -97,22 +83,55 @@
                               :lsp-installer/exit   (:exit result)
                               :lsp-installer/stderr (:err result)}))))
 
-(defn extract-zip
+(defn ^{:stratum 0} extract-zip
   "Extract a zip archive to a directory."
   [archive-path dest-dir]
   (bp/sh ["unzip" "-o" (str archive-path) "-d" (str dest-dir)]))
 
-(defn extract-tar-gz
+(defn ^{:stratum 0} extract-tar-gz
   "Extract a tar.gz archive to a directory."
   [archive-path dest-dir]
   (bp/sh ["tar" "xzf" (str archive-path) "-C" (str dest-dir)]))
 
-(defn extract-gzip
+(defn ^{:stratum 0} extract-gzip
   "Extract a gzip file (single file, not tar)."
   [archive-path dest-path]
   (bp/sh ["sh" "-c" (str "gunzip -c " archive-path " > " dest-path)]))
 
-(defn extract-archive
+(defn ^{:stratum 0} github-release-url
+  "Build a GitHub Releases download URL."
+  [github-repo version filename]
+  (str "https://github.com/" github-repo "/releases/download/" version "/" filename))
+
+;; Installation pipeline — GitHub releases
+(defn ^{:stratum 0} failed? [state] (contains? state :failure))
+
+(defn ^{:stratum 0} fail
+  "Mark pipeline as failed with anomaly."
+  [state message]
+  (assoc state :failure (response/make-anomaly :anomalies/fault message)))
+
+;; Installation orchestration
+(defn ^{:stratum 0} find-server-entry
+  "Find server entry in registry by tool-id."
+  [registry tool-id]
+  (->> (:servers registry)
+       vals
+       (filter #(= tool-id (:tool-id %)))
+       first))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} resolve-binary
+  "Find a binary, checking PATH first then ~/.miniforge/bin/.
+   Returns the full path to the binary or nil."
+  [binary]
+  (or (which binary)
+      (let [local-path (str (bin-dir) "/" binary)]
+        (when (fs/exists? local-path)
+          local-path))))
+
+(defn ^{:stratum 1} extract-archive
   "Extract an archive based on its type."
   [archive-path dest-dir extract-type binary-name]
   (case extract-type
@@ -125,22 +144,7 @@
             (fs/copy archive-path dest {:replace-existing true})
             (bp/sh ["chmod" "+x" dest]))))
 
-(defn github-release-url
-  "Build a GitHub Releases download URL."
-  [github-repo version filename]
-  (str "https://github.com/" github-repo "/releases/download/" version "/" filename))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Installation pipeline — GitHub releases
-
-(defn failed? [state] (contains? state :failure))
-
-(defn fail
-  "Mark pipeline as failed with anomaly."
-  [state message]
-  (assoc state :failure (response/make-anomaly :anomalies/fault message)))
-
-(defn step-resolve-asset
+(defn ^{:stratum 1} step-resolve-asset
   "Resolve the platform-specific asset from the server entry."
   [state]
   (if (failed? state) state
@@ -151,7 +155,7 @@
           (fail state (str "No binary available for platform: " platform))
           (assoc state :platform-asset platform-asset)))))
 
-(defn step-download
+(defn ^{:stratum 1} step-download
   "Download the asset archive to a temp directory."
   [state]
   (if (failed? state) state
@@ -174,18 +178,7 @@
             (fs/delete-tree temp-dir)
             (fail state (str "Download failed: " (.getMessage e))))))))
 
-(defn step-extract
-  "Extract the archive and place binary."
-  [state]
-  (if (failed? state) state
-      (let [{:keys [archive-path dest-dir platform-asset binary]} state]
-        (try
-          (extract-archive archive-path dest-dir (:extract platform-asset) binary)
-          state
-          (catch Exception e
-            (fail state (str "Extraction failed: " (.getMessage e))))))))
-
-(defn step-place-binary
+(defn ^{:stratum 1} step-place-binary
   "Handle nested binary location and set permissions."
   [state]
   (if (failed? state) state
@@ -204,24 +197,14 @@
             (fs/delete-tree temp-dir)
             (fail state (str "Binary placement failed: " (.getMessage e))))))))
 
-(defn install-pipeline->result
+(defn ^{:stratum 1} install-pipeline->result
   "Convert pipeline state to result."
   [state]
   (if (failed? state)
     (:failure state)
     {:installed (:installed state)}))
 
-(defn install-via-github
-  "Install an LSP binary from GitHub Releases."
-  [server-entry platform]
-  (-> {:server-entry server-entry :platform platform}
-      step-resolve-asset
-      step-download
-      step-extract
-      step-place-binary
-      install-pipeline->result))
-
-(defn install-via-npm
+(defn ^{:stratum 1} install-via-npm
   "Install an LSP binary via npm."
   [server-entry]
   (let [{:keys [npm-package also-requires binary]} server-entry
@@ -234,7 +217,7 @@
         (response/make-anomaly :anomalies/fault
                                (str "npm install failed: " (:err result)))))))
 
-(defn install-via-go
+(defn ^{:stratum 1} install-via-go
   "Install an LSP binary via go install."
   [server-entry]
   (let [{:keys [go-package binary]} server-entry]
@@ -246,18 +229,34 @@
         (response/make-anomaly :anomalies/fault
                                (str "go install failed: " (:err result)))))))
 
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} step-extract
+  "Extract the archive and place binary."
+  [state]
+  (if (failed? state) state
+      (let [{:keys [archive-path dest-dir platform-asset binary]} state]
+        (try
+          (extract-archive archive-path dest-dir (:extract platform-asset) binary)
+          state
+          (catch Exception e
+            (fail state (str "Extraction failed: " (.getMessage e))))))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} install-via-github
+  "Install an LSP binary from GitHub Releases."
+  [server-entry platform]
+  (-> {:server-entry server-entry :platform platform}
+      step-resolve-asset
+      step-download
+      step-extract
+      step-place-binary
+      install-pipeline->result))
+
 ;------------------------------------------------------------------------------ Layer 4
-;; Installation orchestration
 
-(defn find-server-entry
-  "Find server entry in registry by tool-id."
-  [registry tool-id]
-  (->> (:servers registry)
-       vals
-       (filter #(= tool-id (:tool-id %)))
-       first))
-
-(defn run-install
+(defn ^{:stratum 4} run-install
   "Run the appropriate install method for a server entry."
   [server-entry]
   (let [install-method (get server-entry :install-method :github)]
@@ -270,7 +269,9 @@
                    (str "Manual installation required. "
                         (:install-instructions server-entry))))))
 
-(defn ensure-installed
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} ensure-installed
   "Ensure an LSP binary is installed. Downloads if not found on PATH.
 
    Arguments:
