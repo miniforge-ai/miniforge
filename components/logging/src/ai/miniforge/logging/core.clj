@@ -24,7 +24,8 @@
    [ai.miniforge.logging.format :as log-format]
    [ai.miniforge.logging.sinks :as sinks]
    [ai.miniforge.redaction.interface :as redaction]
-   [clojure.java.io :as io]))
+   [clojure.java.io :as io]
+   [clojure.walk :as walk]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -41,6 +42,14 @@
     (cond-> base
       message (assoc :log/message message)
       data (assoc :data data))))
+
+(defn ^{:stratum 0} throwables->data
+  "Replace every Throwable reachable in X with its Throwable->map data:
+   :via (class, message and ex-data of each cause), :cause, :data and
+   the stack :trace. Redaction walks data, not exception objects, so an
+   exception left in place would print its message and ex-data as-is."
+  [x]
+  (walk/prewalk #(if (instance? Throwable %) (Throwable->map %) %) x))
 
 (defn ^{:stratum 0} merge-context
   "Merge context map into a log entry, preserving entry values on conflict."
@@ -164,9 +173,12 @@
       ;; Every sink (file, stdout, stderr, fleet, or a caller's own
       ;; output fn) receives the entry from here and nowhere else, so
       ;; this is the one place secrets are removed before a log line
-      ;; becomes durable. Message, :data and context are all covered.
+      ;; becomes durable. Message, :data and context are all covered;
+      ;; an exception in any of them is turned into data first, stack
+      ;; trace included, so its message and ex-data are redacted too.
       (let [entry (-> (apply make-entry level category event (mapcat identity opts))
                       (merge-context context)
+                      throwables->data
                       redaction/redact)]
         (output-fn entry)
         entry)))
