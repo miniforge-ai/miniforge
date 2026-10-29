@@ -497,3 +497,33 @@
             (is (contains? (logged-events entries) :artifact/store-close-unindexed)))))
       (finally
         (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-index-that-decodes-to-nil-is-recovered
+  (let [dir (temp-dir)]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "a1"))
+        (p/close s))
+      (impl/write-transit (impl/index-file-path (artifacts-path dir)) nil)
+      (let [s (open-store dir)]
+        (testing "an index file holding nil is recovered, not read as empty"
+          (is (= #{"a1"} (set (map :artifact/id (p/query s {}))))))
+        (p/close s))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-rebuild-skips-a-file-whose-id-points-elsewhere
+  (let [dir (temp-dir)
+        adir (artifacts-path dir)]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "b"))
+        (p/close s))
+      (impl/write-transit (str adir "/a.transit.json") (artifact "../a"))
+      (truncate-to-half! (impl/index-file-path adir))
+      (let [s (open-store dir)]
+        (testing "a.transit.json claiming id ../a is not indexed"
+          (is (= #{"b"} (set (keys @(:index s))))))
+        (p/close s))
+      (finally
+        (delete-dir! dir)))))

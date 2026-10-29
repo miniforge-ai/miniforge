@@ -229,24 +229,28 @@
         (f)))))
 
 (defn ^{:stratum 1} read-index
-  "Read the index on disk. Returns {} when there is none, or a :fault
-   anomaly when the file cannot be read as a map."
+  "Read the index on disk. Returns {} when there is no index file, or a
+   :fault anomaly when the file exists but does not decode to a map
+   (content that decodes to nil included)."
   [artifacts-dir]
   (let [path (index-file-path artifacts-dir)]
     (try
-      (let [data (read-transit path)]
-        (if (or (nil? data) (map? data))
-          (or data {})
-          (anomaly/anomaly :fault (messages/t :index/unreadable)
-                           {:path path :value-type (str (type data))})))
+      (if-not (.exists (io/file path))
+        {}
+        (let [data (read-transit path)]
+          (if (map? data)
+            data
+            (anomaly/anomaly :fault (messages/t :index/unreadable)
+                             {:path path :value-type (str (type data))}))))
       (catch Exception e
         (anomaly/exception-anomaly :fault (messages/t :index/unreadable) {:path path} e)))))
 
 (defn ^{:stratum 1} rebuild-index
   "Rebuild the metadata index from the per-artifact files in
-   artifacts-dir. Returns {:index m :skipped [file-name ...]}; a file
-   that cannot be read, or whose content is not the artifact its name
-   says, is skipped."
+   artifacts-dir. Returns {:index m :skipped [file-name ...]}. A file
+   that cannot be read, or whose :artifact/id does not map back to that
+   same file (compared as canonical paths, so an id such as \"../a\"
+   cannot claim a.transit.json), is skipped."
   [artifacts-dir]
   (let [index-name (.getName (io/file (index-file-path artifacts-dir)))
         files (->> (.listFiles (io/file artifacts-dir))
@@ -257,10 +261,10 @@
     (reduce
      (fn [acc ^File f]
        (let [artifact (try (read-transit (.getPath f)) (catch Exception _ nil))
-             expected-name (when (map? artifact)
-                             (.getName (io/file (artifact-file-path artifacts-dir
-                                                                    (:artifact/id artifact)))))]
-         (if (and (some? (:artifact/id artifact)) (= expected-name (.getName f)))
+             expected (when (and (map? artifact) (some? (:artifact/id artifact)))
+                        (.getCanonicalPath (io/file (artifact-file-path artifacts-dir
+                                                                        (:artifact/id artifact)))))]
+         (if (= expected (.getCanonicalPath f))
            (update acc :index add-to-index artifact)
            (update acc :skipped conj (.getName f)))))
      {:index {} :skipped []}
