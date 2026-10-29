@@ -5,8 +5,9 @@
   "The per-run checkpoint lock excludes another process, not only other
    threads: while a second process (bb) holds a run's lock file, a pin and
    the GC in this process wait, then the pin lands and the GC keeps the
-   run. The GC removes a legacy per-run lock file only under the run's
-   lock. Skipped when bb is not on PATH."
+   run. A process on the previous version, locking the run's legacy
+   lock file, keeps the GC off the run too. Skipped when bb is not on
+   PATH."
   (:require [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.interface :as workflow]
@@ -80,33 +81,32 @@
               (is (fs/exists? (fs/path root (str id))))))
           (finally (bp/destroy holder)))))))
 
-(deftest ^{:stratum 1} gc-cannot-remove-a-legacy-lock-file-while-its-run-is-locked
-  ;; Another process inside the run's lock (holding its slot file): the
-  ;; GC's removal of the run's legacy lock file waits for it.
+(deftest ^{:stratum 1} an-old-process-holding-the-legacy-lock-keeps-gc-off-the-run
+  ;; During an upgrade a process on the previous version pins under
+  ;; <run-id>.lock, not the slot: the GC must not delete that run.
   (if-not (fs/which "bb")
     (println "SKIP cross-process checkpoint lock test: bb is not on PATH")
     (fs/with-temp-dir [dir {:prefix "pin-lock-legacy-"}]
       (fs/with-temp-dir [events-dir {:prefix "pin-lock-legacy-events-"}]
         (let [root (str dir)
-              id (random-uuid)
-              legacy (checkpoint-lock/legacy-lock-file root id)
-              slot (str (checkpoint-lock/lock-file root id))
+              id (fixture/expired-run! root)
+              legacy (str (checkpoint-lock/legacy-lock-file root id))
               gc! #(workflow/gc-checkpoints! {:checkpoint/root root :events-dir (fs/file events-dir)})
               _ (fs/create-dirs (fs/parent legacy))
-              _ (spit (str legacy) "")
-              holder (bp/process ["bb" "-e" lock-holder-script slot]
+              holder (bp/process ["bb" "-e" lock-holder-script legacy]
                                  {:in :pipe :out :pipe :err :inherit})]
           (try
             (is (= "locked" (deref-bounded (future (.readLine ^java.io.BufferedReader
                                                               (io/reader (:out holder)))))))
-            (testing "while the other process holds the run's lock: kept"
-              (is (zero? (:locks-pruned (with-redefs [checkpoint-lock/lock-timeout-ms 300] (gc!)))))
-              (is (fs/exists? legacy)))
+            (testing "while the old process holds the legacy lock: kept"
+              (let [result (with-redefs [checkpoint-lock/lock-timeout-ms 300] (gc!))]
+                (is (empty? (:deleted result)))
+                (is (= 1 (count (:failures result)))))
+              (is (fs/exists? (fs/path root (str id)))))
             (send-line! holder)
             (deref-bounded (future (bp/check holder)))
-            (testing "once it lets go: removed"
-              (is (= 1 (:locks-pruned (gc!))))
-              (is (not (fs/exists? legacy))))
+            (testing "once it lets go: collected"
+              (is (= [id] (:deleted (gc!)))))
             (finally (bp/destroy holder))))))))
 
 ;------------------------------------------------------------------------------ Layer 2

@@ -16,9 +16,11 @@
    directory that is a symbolic link is refused, so a lock never writes
    outside its root.
 
-   `<run-id>.lock` files under `.locks/` were the previous design's, one
-   per run; `legacy-lock-file` names them so the GC can remove them under
-   the run's lock."
+   `<run-id>.lock` files under `.locks/` are the previous design's, one
+   per run, which a process still running an older version locks. When a
+   run's legacy file exists, the lock takes it too (never creating or
+   deleting it), so old and new processes exclude each other during an
+   upgrade."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.workflow.messages :as messages]
@@ -35,8 +37,6 @@
 (def ^{:stratum 0} lock-timeout-ms
   "How long to wait for another holder of a run's lock before giving up."
   10000)
-
-(def ^{:stratum 0} ^:private lock-poll-ms 25)
 
 (def ^{:stratum 0} locks-directory-name
   "Directory under the checkpoint root holding the lock slot files. Not a
@@ -72,7 +72,49 @@
                (fs/absolutize checkpoint-root))]
     (fs/path root ".locks")))
 
+(defn- ^{:stratum 0} poll-lock
+  "The lock on `channel` once `.tryLock` gets it, polling until `deadline`
+   (nanoTime); nil past it. Hinted AutoCloseable: babashka does not expose
+   FileLock."
+  ^java.lang.AutoCloseable [^FileChannel channel deadline]
+  (loop []
+    (or (.tryLock channel)
+        (when (pos? (- deadline (System/nanoTime)))
+          (Thread/sleep 25)
+          (recur)))))
+
+(defn- ^{:stratum 0} lock-failure [workflow-run-id path e]
+  (anomaly/exception-anomaly :unavailable
+                             (messages/t :checkpoint/lock-failed
+                                         {:run-id workflow-run-id
+                                          :error (or (ex-message e) (.getName (class e)))})
+                             {:workflow/run-id workflow-run-id :checkpoint/lock (str path)}
+                             e))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} acquire-legacy-lock!
+  "When run `workflow-run-id`'s legacy lock file `path` exists, open it
+   (never creating it) and take its lock by `deadline`. Returns
+   `{:channel :lock}`, nil when there is no such file, or an
+   `:unavailable` anomaly (busy past the deadline, a symlink, I/O)."
+  [path deadline workflow-run-id]
+  (try+
+    (cond
+      (fs/sym-link? path) (symlinked workflow-run-id path)
+      (not (fs/exists? path {:nofollow-links true})) nil
+      :else (let [channel (FileChannel/open path (into-array OpenOption [StandardOpenOption/WRITE
+                                                                         LinkOption/NOFOLLOW_LINKS]))]
+              (try+
+                (if-let [held (poll-lock channel deadline)]
+                  {:channel channel :lock held}
+                  (do (.close channel) (busy workflow-run-id path)))
+                (catch Exception e
+                  (.close channel)
+                  (throw e)))))
+    (catch java.nio.file.NoSuchFileException _ nil)
+    (catch Exception e
+      (lock-failure workflow-run-id path e))))
 
 (defn- ^{:stratum 1} acquire-file-lock!
   "Open slot file `path` and take its lock by `deadline` (nanoTime).
@@ -88,25 +130,14 @@
                                                                        StandardOpenOption/WRITE
                                                                        LinkOption/NOFOLLOW_LINKS]))]
             (try+
-              ;; Hinted AutoCloseable: babashka does not expose FileLock.
-              (let [^java.lang.AutoCloseable held (loop []
-                                                    (or (.tryLock channel)
-                                                        (when (pos? (- deadline (System/nanoTime)))
-                                                          (Thread/sleep lock-poll-ms)
-                                                          (recur))))]
-                (if held
-                  {:channel channel :lock held}
-                  (do (.close channel) (busy workflow-run-id path))))
+              (if-let [held (poll-lock channel deadline)]
+                {:channel channel :lock held}
+                (do (.close channel) (busy workflow-run-id path)))
               (catch Exception e
                 (.close channel)
                 (throw e))))))
     (catch Exception e
-      (anomaly/exception-anomaly :unavailable
-                                 (messages/t :checkpoint/lock-failed
-                                             {:run-id workflow-run-id
-                                              :error (or (ex-message e) (.getName (class e)))})
-                                 {:workflow/run-id workflow-run-id :checkpoint/lock (str path)}
-                                 e))))
+      (lock-failure workflow-run-id path e))))
 
 (defn- ^{:stratum 1} process-lock
   "The one in-process lock for slot file `lock-file`."
@@ -122,42 +153,42 @@
 
 (defn ^{:stratum 1} legacy-lock-file
   "Run `workflow-run-id`'s lock file from the previous, one-file-per-run
-   design."
+   design, which older processes still lock."
   [checkpoint-root workflow-run-id]
   (fs/path (locks-dir checkpoint-root) (str workflow-run-id ".lock")))
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} remove-legacy-lock-file!
-  "Delete run `workflow-run-id`'s legacy lock file. Call it only while
-   holding that run's lock, from `with-run-lock`'s `f`. True when this
-   call deleted it; false when it was not there or could not be deleted."
-  [checkpoint-root workflow-run-id]
-  (try+
-    (boolean (fs/delete-if-exists (legacy-lock-file checkpoint-root workflow-run-id)))
-    (catch Exception _ false)))
-
 (defn ^{:stratum 2} with-run-lock
   "`(f)` while holding run `workflow-run-id`'s lock under `checkpoint-root`:
-   the in-process lock, then the slot file's lock, both within one
-   deadline of `lock-timeout-ms`. Returns what `f` returns, or an
-   `:unavailable` anomaly when the lock stays busy past the deadline or
-   cannot be taken (an I/O error). Exceptions from `f` propagate after the
-   lock is released."
+   the in-process lock, then the slot file's lock, then the run's legacy
+   lock file's lock when that file exists, all within one deadline of
+   `lock-timeout-ms`. Returns what `f` returns, or an `:unavailable`
+   anomaly when a lock stays busy past the deadline or cannot be taken
+   (an I/O error). Exceptions from `f` propagate after the locks are
+   released."
   [checkpoint-root workflow-run-id f]
   (let [path (lock-file checkpoint-root workflow-run-id)
+        legacy (legacy-lock-file checkpoint-root workflow-run-id)
         deadline (+ (System/nanoTime) (* lock-timeout-ms 1000000))
-        in-process (process-lock path)]
+        in-process (process-lock path)
+        release! (fn [{:keys [channel lock]}]
+                   (.close ^java.lang.AutoCloseable lock)
+                   (.close ^java.lang.AutoCloseable channel))]
     (if-not (.tryLock in-process (max 0 (- deadline (System/nanoTime))) TimeUnit/NANOSECONDS)
       (busy workflow-run-id path)
       (try
-        (let [acquired (acquire-file-lock! path deadline workflow-run-id)]
-          (if (anomaly/anomaly? acquired)
-            acquired
-            (let [{:keys [channel lock]} acquired]
-              (try (f)
-                   (finally (.close ^java.lang.AutoCloseable lock)
-                            (.close ^java.lang.AutoCloseable channel))))))
+        (let [slot (acquire-file-lock! path deadline workflow-run-id)]
+          (if (anomaly/anomaly? slot)
+            slot
+            (try
+              ;; Coordinates with processes on the previous version.
+              (let [old (acquire-legacy-lock! legacy deadline workflow-run-id)]
+                (if (anomaly/anomaly? old)
+                  old
+                  (try (f)
+                       (finally (some-> old release!)))))
+              (finally (release! slot)))))
         (finally (.unlock in-process))))))
 
 (comment
