@@ -52,14 +52,16 @@
 
 (defn ^{:stratum 0} relist
   "`state` with its active directories recomputed at `now`; those
-   leaving the set go under :leaving."
+   leaving the set go under :leaving. A root that cannot be listed leaves
+   `state` as it was, so the next poll lists again."
   [{:keys [window-ms active] :as state} events-dir roots now]
-  (let [listed (layout/active-dirs events-dir (- now window-ms))]
+  (if-let [listed (layout/active-dirs events-dir (- now window-ms))]
     (assoc state
            :active listed
            :leaving (apply dissoc active (keys listed))
            :roots roots
-           :listed-at now)))
+           :listed-at now)
+    state))
 
 (defn ^{:stratum 0} tail-dir
   "Hand the unread events of workflow `wf-name` (directory `dir`, or its
@@ -93,16 +95,18 @@
   "Tail state at `now`: the directories active now are read in full on
    the first poll; elsewhere, files recorded before `now` (less
    `mtime-slack-ms`) are skipped. Roots are read before the directories,
-   so a directory created in between still changes them."
+   so a directory created in between still changes them. Nil when a root
+   cannot be listed: a startup without the runs active then is retried."
   [events-dir now window-ms]
   (let [roots  (layout/root-mtimes events-dir)
         active (layout/active-dirs events-dir (- now window-ms))]
-    {:since-ms  (- now mtime-slack-ms)
-     :window-ms window-ms
-     :roots     roots
-     :listed-at now
-     :active    active
-     :tracked   (zipmap (keys active) (repeat {:watermark 0 :names {}}))}))
+    (when active
+      {:since-ms  (- now mtime-slack-ms)
+       :window-ms window-ms
+       :roots     roots
+       :listed-at now
+       :active    active
+       :tracked   (zipmap (keys active) (repeat {:watermark 0 :names {}}))})))
 
 (defn ^{:stratum 1} poll-once!
   "One poll at `now`: relist when a sweep is due or a root may have
@@ -150,8 +154,8 @@
                          (let [now (System/currentTimeMillis)]
                            (reset! state (if-let [s @state]
                                            (poll-once! s events-dir on-event now)
-                                           (assoc (initial-state events-dir now window-ms)
-                                                  :logger logger))))
+                                           (some-> (initial-state events-dir now window-ms)
+                                                  (assoc :logger logger)))))
                          (Thread/sleep (long poll-ms))
                          (catch InterruptedException _
                            (reset! running false))
