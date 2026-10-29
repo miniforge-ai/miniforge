@@ -82,11 +82,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} write-atomically!
-  "Rename a forced sibling temp file holding `text` over `path`, through a
-   symlink to its target, keeping the old mode. nil, or an anomaly naming `path`."
-  [path ^String text]
-  (let [target (publish-target path)
-        tmp    (fs/create-temp-file {:dir (fs/parent target) :prefix ".config-" :suffix ".tmp"})
+  "Rename a forced sibling temp file holding `text` over `target` (the
+   `publish-target` of `path`), keeping its mode. nil, or an anomaly naming `path`."
+  [path target ^String text]
+  (let [tmp    (fs/create-temp-file {:dir (fs/parent target) :prefix ".config-" :suffix ".tmp"})
         failed #(anomaly/anomaly :fault (t :config-file/write-failed {:path path :error (:anomaly/message %)})
                                  {:config/path (str path) :config/cause %})]
     (try
@@ -124,10 +123,10 @@
         (unreadable (ex-text e))))))
 
 (defn ^{:stratum 1} call-with-lock
-  "`(thunk)` under the config lock for `path`; an anomaly
+  "`(thunk)` under the config lock for `path`, held on `<target>.lock`; an anomaly
    when the lock stays busy past `lock-timeout-ms` or the thunk throws."
-  [path thunk]
-  (let [lock-file (Paths/get (str (publish-target path) lock-file-suffix) (make-array String 0))
+  [path target thunk]
+  (let [lock-file (Paths/get (str target lock-file-suffix) (make-array String 0))
         failure   #(anomaly/anomaly :fault (t :config-file/write-failed {:path path :error (ex-text %)})
                                     {:config/path (str path)})]
     (try+
@@ -156,16 +155,20 @@
 (defn ^{:stratum 2} update-config!
   "See `ai.miniforge.config.interface.file/update-config!`."
   [path f]
-  (call-with-lock path
-                  (fn []
-                    (let [before (when (fs/exists? path) (parse-config path (slurp (fs/file path))))]
-                      (if (anomaly/anomaly? before)
-                        before
-                        (let [after (f before)]
-                          (or (when (not= before after) (write-atomically! path (render after)))
-                              {:before before :after after})))))))
+  ;; Resolved once, so the lock, the read and the write all name the same file
+  ;; even if a symlink at `path` is repointed meanwhile.
+  (let [target (publish-target path)]
+    (call-with-lock path target
+                    (fn []
+                      (let [before (when (fs/exists? target) (parse-config path (slurp (fs/file target))))]
+                        (if (anomaly/anomaly? before)
+                          before
+                          (let [after (f before)]
+                            (or (when (not= before after) (write-atomically! path target (render after)))
+                                {:before before :after after}))))))))
 
 (defn ^{:stratum 2} write-config!
   "See `ai.miniforge.config.interface.file/write-config!`."
   [path config]
-  (call-with-lock path #(or (write-atomically! path (render config)) config)))
+  (let [target (publish-target path)]
+    (call-with-lock path target #(or (write-atomically! path target (render config)) config))))
