@@ -23,6 +23,8 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.tui-views.file-subscription :as file-sub]
+   [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.update :as tui-update]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is]]))
 
@@ -49,7 +51,12 @@
                                :workflow/spec {:name "Old run"}}))
     dir))
 
-(defn- ^{:stratum 0} new-runs [] (atom {:known #{} :waiting {}}))
+(defn- ^{:stratum 0} new-runs [] (atom {:known #{} :waiting {} :refresh {}}))
+
+(defn- ^{:stratum 0} row-status
+  "The status of the one row `msgs` leave in a fresh TUI model."
+  [msgs]
+  (:status (first (:workflows (reduce tui-update/update-model (model/init-model) msgs)))))
 
 (deftest ^{:stratum 0} tail-warnings-go-to-a-log-file-not-the-screen
   (let [home (doto (io/file (System/getProperty "java.io.tmpdir") (str "tui-home-" (random-uuid))) .mkdirs)
@@ -74,7 +81,8 @@
     (is (= [:msg/phase-changed] (map first @msgs)) "built once")
     (reset! msgs [])
     (dispatch! {:event/type :workflow/resumed :workflow/id wf-id})
-    (is (= [:msg/workflow-added] (map first @msgs)) "a resume shows the run as running again")))
+    (is (= [:msg/workflow-resumed :msg/workflow-named] (map first @msgs))
+        "a resume sets the run running and refreshes its name")))
 
 (deftest ^{:stratum 1} a-run-the-file-sink-writes-reaches-the-tui
   (let [dir    (doto (io/file (System/getProperty "java.io.tmpdir") (str "tui-layout-" (random-uuid)))
@@ -126,3 +134,43 @@
     (is (= [[:msg/workflow-added {:workflow-id wf-id :name nil :spec nil}] :msg/phase-changed]
            [(first @msgs) (first (second @msgs))])
         "its events are not held forever")))
+
+(deftest ^{:stratum 1} a-resume-queued-behind-a-completion-leaves-the-row-running
+  (let [wf-id  (random-uuid)
+        dir    (write-old-start! wf-id)
+        msgs   (atom [])
+        send!  #(swap! msgs conj %)
+        runs   (new-runs)
+        fail?  (atom true)
+        lookup es/read-layout-start-event]
+    (with-redefs [es/read-layout-start-event #(when-not @fail? (lookup %1 %2))]
+      (doseq [t [:workflow/completed :workflow/resumed]]
+        (file-sub/dispatch-event! send! dir runs {:event/type t :workflow/id wf-id
+                                                  :workflow/status :success}))
+      (reset! fail? false)
+      (file-sub/retry-bootstraps! send! dir runs))
+    (is (= [:msg/workflow-added :msg/workflow-done :msg/workflow-resumed] (map first @msgs))
+        "the queue keeps the resume after the completion")
+    (is (= :running (row-status @msgs)))))
+
+(deftest ^{:stratum 1} a-resume-of-a-known-run-goes-through-while-its-name-waits
+  (let [wf-id  (random-uuid)
+        dir    (write-old-start! wf-id)
+        msgs   (atom [])
+        send!  #(swap! msgs conj %)
+        runs   (new-runs)
+        fail?  (atom true)
+        lookup es/read-layout-start-event]
+    (with-redefs [es/read-layout-start-event #(when-not @fail? (lookup %1 %2))]
+      (doseq [event [{:event/type :workflow/started :workflow/spec {:name "Old run"}}
+                     {:event/type :workflow/failed}
+                     {:event/type :workflow/resumed}]]
+        (file-sub/dispatch-event! send! dir runs (assoc event :workflow/id wf-id)))
+      (is (= [:msg/workflow-added :msg/workflow-failed :msg/workflow-resumed] (map first @msgs))
+          "the status change does not wait for the start event")
+      (is (= :running (row-status @msgs)))
+      (reset! fail? false)
+      (file-sub/retry-bootstraps! send! dir runs))
+    (is (= [:msg/workflow-named {:workflow-id wf-id :name "Old run"}] (last @msgs))
+        "the name refresh follows on a later poll")
+    (is (= :running (row-status @msgs)))))

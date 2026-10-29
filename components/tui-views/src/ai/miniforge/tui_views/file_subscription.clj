@@ -141,7 +141,10 @@
    row is built from the start event on disk first. Until that works, the
    run's events wait in `runs` and `retry-bootstraps!` tries again each
    poll; the run is known only once its row is out. A :workflow/resumed
-   rebuilds a known run's row the same way, so it shows as running."
+   is a status change of its own (the row goes back to running), in
+   order wherever it falls; for a known run the row's name is also
+   refreshed from the start event, now or, if that cannot be read, on a
+   later poll (:refresh), without holding the status change."
   [dispatch-fn events-dir runs event]
   (locking runs
     (let [wf-id (:workflow/id event)
@@ -150,17 +153,20 @@
       (cond
         (nil? wf-id)                      (some-> m dispatch-fn)
         (= :workflow/started type)        (release! dispatch-fn runs wf-id m)
-        (contains? (:known @runs) wf-id)  (do (when (= :workflow/resumed type)
-                                                (some-> (start-row events-dir wf-id) dispatch-fn))
-                                              (some-> m dispatch-fn))
+        (contains? (:known @runs) wf-id)  (do (some-> m dispatch-fn)
+                                              (when (= :workflow/resumed type)
+                                                (if-let [row (start-row events-dir wf-id)]
+                                                  (dispatch-fn (msg/workflow-named wf-id (:name (second row))))
+                                                  (swap! runs assoc-in [:refresh wf-id] 0))))
         :else (do (swap! runs update-in [:waiting wf-id :events] (fnil conj []) event)
                   (some->> (start-row events-dir wf-id) (release! dispatch-fn runs wf-id)))))))
 
 (defn ^{:stratum 1} retry-bootstraps!
   "Try the start event on disk again for each run whose events wait on
-   its row (see `dispatch-event!`). After `max-bootstrap-attempts` polls
-   the row is made from the run's id alone, so its events are not held
-   forever."
+   its row, or whose name a resume asked to refresh (see
+   `dispatch-event!`). After `max-bootstrap-attempts` polls a waiting
+   run's row is made from its id alone, so its events are not held
+   forever, and a refresh is given up."
   [dispatch-fn events-dir runs]
   (locking runs
     (doseq [[wf-id {:keys [tries] :or {tries 0}}] (:waiting @runs)]
@@ -168,7 +174,14 @@
                        (when (>= (inc tries) max-bootstrap-attempts)
                          (msg/workflow-added wf-id nil nil)))]
         (release! dispatch-fn runs wf-id row)
-        (swap! runs assoc-in [:waiting wf-id :tries] (inc tries))))))
+        (swap! runs assoc-in [:waiting wf-id :tries] (inc tries))))
+    (doseq [[wf-id tries] (:refresh @runs)]
+      (if-let [row (start-row events-dir wf-id)]
+        (do (dispatch-fn (msg/workflow-named wf-id (:name (second row))))
+            (swap! runs update :refresh dissoc wf-id))
+        (swap! runs (if (>= (inc tries) max-bootstrap-attempts)
+                      #(update % :refresh dissoc wf-id)
+                      #(assoc-in % [:refresh wf-id] (inc tries))))))))
 
 (defn ^{:stratum 1} poll-tracked-files!
   "Read new lines from all tracked files and dispatch them."
@@ -236,7 +249,7 @@
         dir       (events-dir)
         tracked   (atom {})
         running?  (atom true)
-        runs      (atom {:known #{} :waiting {}})
+        runs      (atom {:known #{} :waiting {} :refresh {}})
         _         (doseq [f (scan-event-files dir)]
                     (track-file! tracked dispatch-fn f {:hydrate? hydrate-existing?}))
         thread    (doto (Thread. #(poll-loop running? tracked dispatch-fn dir poll-ms scan-ms

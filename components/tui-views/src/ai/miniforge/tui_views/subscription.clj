@@ -163,6 +163,9 @@
                          (:workflow/cost-usd event) (assoc :cost-usd (:workflow/cost-usd event))
                          (:workflow/pr-info event) (assoc :pr-info (:workflow/pr-info event))))
 
+    :workflow/resumed
+    (msg/workflow-resumed (workflow-id event))
+
     :workflow/failed
     (msg/workflow-failed (workflow-id event)
                          (or (:workflow/error-details event)
