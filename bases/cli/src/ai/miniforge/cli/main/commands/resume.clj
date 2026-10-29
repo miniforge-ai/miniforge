@@ -203,6 +203,22 @@
         (flush))
       (display/print-error (messages/t :resume/failed {:error message})))))
 
+(defn- ^{:stratum 0} check-spec-drift!
+  "Refuse the resume when the spec file the run started from has changed
+   since its first checkpoint: its phases came from the old spec. With
+   --force the resume goes ahead after a warning."
+  [manifest force? workflow-id]
+  (when-let [drift (workflow/spec-drift manifest)]
+    (let [params {:workflow-id (str workflow-id)
+                  :path (:workflow/spec-path drift)
+                  :expected (:spec/expected-hash drift)
+                  :actual (or (:spec/actual-hash drift) (messages/t :resume/spec-unreadable))}]
+      (if force?
+        (display/print-info (messages/t :resume/spec-changed-forced params))
+        (response/throw-anomaly! :anomalies/conflict
+                                 (messages/t :resume/spec-changed params)
+                                 (assoc drift :workflow-id (str workflow-id)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} throw-resume-anomaly!
@@ -340,7 +356,8 @@
     (if (:completed? reconstructed)
       (do (display/print-info (messages/t :resume/already-completed)) nil)
 
-      (let [completed-phases (:completed-phases reconstructed)
+      (let [_ (check-spec-drift! (:checkpoint-manifest recorded) (:force opts) workflow-id)
+            completed-phases (:completed-phases reconstructed)
             _ (when-not quiet
                 (display/print-info
                   (messages/t :resume/completed-phases

@@ -481,7 +481,8 @@
            :quiet       {:coerce :boolean :alias :q}
            :run-id      {}
            :correlation-id {}
-           :from-phase  {:coerce :keyword}}}
+           :from-phase  {:coerce :keyword}
+           :force       {:coerce :boolean}}}
 
    ;; Status command
    {:cmds ["status"]
