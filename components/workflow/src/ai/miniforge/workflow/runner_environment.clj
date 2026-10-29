@@ -23,6 +23,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.boundary.environment :as boundary]
@@ -220,8 +221,10 @@
    the fidelity goal in N11 §7.4, local should match governed in not
    destroying work on failure.
 
-   A phase its gates denied is not published. When :no-secrets denied
-   it, nothing is committed at all: a commit would carry the secret into
+   A phase its gates denied is not published, and no phase publishes a
+   worktree whose outgoing changes carry a secret (gate/outgoing-secrets
+   runs before every commit or push). When :no-secrets denied it, or the
+   scan finds a secret, nothing is committed at all: a commit would carry the secret into
    history, and the next successful phase's push sends history. When
    another gate denied it, the work is committed but not pushed
    (`:push? false`), and repair runs on it."
@@ -248,7 +251,14 @@
                    (= :secrets-detected denial) :secrets-detected
                    (nil? executor) :no-executor
                    (nil? env-id) :no-environment-id
-                   (not (or (= :governed mode) workdir)) :no-worktree)]
+                   (not (or (= :governed mode) workdir)) :no-worktree
+                   ;; Whatever phase is persisting, a commit or push must not
+                   ;; carry a credential an earlier phase left in the worktree
+                   ;; (a redirect after a denial runs other phases over it).
+                   (some #(= :secrets-detected (:type %))
+                         (:errors (gate/outgoing-secrets
+                                   (assoc context :execution/worktree-path workdir))))
+                   :secrets-detected)]
     (if skip
       ;; A skipped persist is a silent loss of work unless it is said out
       ;; loud: trap-bench series 4/5 read an allowed implement whose fix
