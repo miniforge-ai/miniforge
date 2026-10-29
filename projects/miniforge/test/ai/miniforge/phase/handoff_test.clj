@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase.handoff-test
   "Integration test for artifact handoff between workflow phases.
 
@@ -33,7 +32,9 @@
    [babashka.fs :as fs]
    [babashka.process :as process]))
 
-(defn with-mocked-test-runner
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} with-mocked-test-runner
   "Run body-fn with run-tests! mocked to prevent subprocess spawning."
   [body-fn]
   (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
@@ -42,8 +43,7 @@
       body-fn)))
 
 ;------------------------------------------------------------------------------ Mock Data
-
-(def mock-plan-result
+(def ^{:stratum 0} mock-plan-result
   "Mock plan output from plan phase."
   {:plan/id (random-uuid)
    :plan/tasks [{:task "Implement feature X"
@@ -51,7 +51,7 @@
                  :approach "Add new function"}]
    :plan/estimated-effort :medium})
 
-(def mock-code-artifact
+(def ^{:stratum 0} mock-code-artifact
   "Mock code artifact from implement phase."
   {:code/id (random-uuid)
    :code/files [{:path "src/feature.clj"
@@ -62,7 +62,7 @@
                  :action :create}]
    :code/language "clojure"})
 
-(def mock-test-result
+(def ^{:stratum 0} mock-test-result
   "Mock test result from verify phase."
   {:test/id (random-uuid)
    :test/files [{:path "test/feature_test.clj"
@@ -74,9 +74,66 @@
    :test/cases-count 8
    :test/passed? true})
 
-;------------------------------------------------------------------------------ Mock Agents
+;------------------------------------------------------------------------------ Test Helpers
+(defn ^{:stratum 0} create-base-context
+  "Create minimal execution context for phase testing."
+  []
+  {:execution/id (random-uuid)
+   :execution/input {:description "Test feature implementation"
+                     :title "Add feature X"
+                     :intent "Implement new feature"}
+   :execution/metrics {:tokens 0 :duration-ms 0}
+   :execution/phase-results {}
+   :execution/worktree-path (System/getProperty "user.dir")
+   :execution/environment-id "test-env-001"})
 
-(defn mock-agent-invoke
+(defn ^{:stratum 0} with-test-worktree
+  "Execute body-fn with a temporary git repo containing a dirty file.
+   Passes the worktree path to body-fn."
+  [body-fn]
+  (let [dir (fs/create-temp-dir {:prefix "handoff-test-"})]
+    (process/shell {:dir (str dir)} "git init")
+    (process/shell {:dir (str dir)} "git config user.email" "test@example.com")
+    (process/shell {:dir (str dir)} "git config user.name" "Test User")
+    (process/shell {:dir (str dir)} "git config commit.gpgsign" "false")
+    (spit (str (fs/path dir "README.md")) "# Test")
+    (process/shell {:dir (str dir)} "git add README.md")
+    (process/shell {:dir (str dir)} "git commit -m" "initial")
+    ;; Add a dirty file so git-dirty-files finds something
+    (let [src-dir (io/file (str dir) "src")]
+      (.mkdirs src-dir)
+      (spit (str (fs/path dir "src" "feature.clj")) "(ns feature)\n(defn hello [] :world)"))
+    (try
+      (body-fn (str dir))
+      (finally
+        (fs/delete-tree dir)))))
+
+(defn ^{:stratum 0} execute-phase-enter
+  "Execute a phase's enter function and return updated context.
+
+  Simulates the workflow runner's phase execution."
+  [phase-name ctx]
+  (let [interceptor (phase/get-phase-interceptor {:phase phase-name})
+        enter-fn (:enter interceptor)]
+    (enter-fn ctx)))
+
+(defn ^{:stratum 0} execute-phase-leave
+  "Execute a phase's leave function and store result.
+
+  Simulates the workflow runner's phase completion and result storage."
+  [phase-name ctx]
+  (let [interceptor (phase/get-phase-interceptor {:phase phase-name})
+        leave-fn (:leave interceptor)
+        updated-ctx (leave-fn ctx)]
+    ;; Store entire phase map in execution context (mimics workflow runner)
+    ;; The real workflow runner stores the full :phase map via extract-phase-result
+    (assoc-in updated-ctx [:execution/phase-results phase-name]
+              (:phase updated-ctx))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;------------------------------------------------------------------------------ Mock Agents
+(defn ^{:stratum 1} mock-agent-invoke
   "Mock agent invocation that returns success with canned responses.
 
   Validates that the agent receives the correct artifacts from previous phases."
@@ -115,66 +172,19 @@
       ;; Default
       (response/success {:result :ok} {:tokens 0 :duration-ms 0}))))
 
-;------------------------------------------------------------------------------ Test Helpers
+(deftest ^{:stratum 1} handoff-with-missing-artifact-test
+  (testing "Verify phase fails fast when no execution environment is available"
+    ;; Create context WITHOUT execution environment — verify should throw
+    (let [ctx (dissoc (create-base-context) :execution/environment-id)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Verify phase has no execution environment"
+                            (execute-phase-enter :verify ctx))
+          "Verify phase should throw when no execution environment is available"))))
 
-(defn create-base-context
-  "Create minimal execution context for phase testing."
-  []
-  {:execution/id (random-uuid)
-   :execution/input {:description "Test feature implementation"
-                     :title "Add feature X"
-                     :intent "Implement new feature"}
-   :execution/metrics {:tokens 0 :duration-ms 0}
-   :execution/phase-results {}
-   :execution/worktree-path (System/getProperty "user.dir")
-   :execution/environment-id "test-env-001"})
-
-(defn with-test-worktree
-  "Execute body-fn with a temporary git repo containing a dirty file.
-   Passes the worktree path to body-fn."
-  [body-fn]
-  (let [dir (fs/create-temp-dir {:prefix "handoff-test-"})]
-    (process/shell {:dir (str dir)} "git init")
-    (process/shell {:dir (str dir)} "git config user.email" "test@example.com")
-    (process/shell {:dir (str dir)} "git config user.name" "Test User")
-    (process/shell {:dir (str dir)} "git config commit.gpgsign" "false")
-    (spit (str (fs/path dir "README.md")) "# Test")
-    (process/shell {:dir (str dir)} "git add README.md")
-    (process/shell {:dir (str dir)} "git commit -m" "initial")
-    ;; Add a dirty file so git-dirty-files finds something
-    (let [src-dir (io/file (str dir) "src")]
-      (.mkdirs src-dir)
-      (spit (str (fs/path dir "src" "feature.clj")) "(ns feature)\n(defn hello [] :world)"))
-    (try
-      (body-fn (str dir))
-      (finally
-        (fs/delete-tree dir)))))
-
-(defn execute-phase-enter
-  "Execute a phase's enter function and return updated context.
-
-  Simulates the workflow runner's phase execution."
-  [phase-name ctx]
-  (let [interceptor (phase/get-phase-interceptor {:phase phase-name})
-        enter-fn (:enter interceptor)]
-    (enter-fn ctx)))
-
-(defn execute-phase-leave
-  "Execute a phase's leave function and store result.
-
-  Simulates the workflow runner's phase completion and result storage."
-  [phase-name ctx]
-  (let [interceptor (phase/get-phase-interceptor {:phase phase-name})
-        leave-fn (:leave interceptor)
-        updated-ctx (leave-fn ctx)]
-    ;; Store entire phase map in execution context (mimics workflow runner)
-    ;; The real workflow runner stores the full :phase map via extract-phase-result
-    (assoc-in updated-ctx [:execution/phase-results phase-name]
-              (:phase updated-ctx))))
+;------------------------------------------------------------------------------ Layer 2
 
 ;------------------------------------------------------------------------------ Tests
-
-(deftest plan-to-implement-handoff-test
+(deftest ^{:stratum 2} plan-to-implement-handoff-test
   (testing "Plan phase result is correctly handed to implement phase"
     (with-redefs [agent/create-planner (fn [_] {:type :mock-planner})
                   agent/create-implementer (fn [_] {:type :mock-implementer})
@@ -201,7 +211,7 @@
             (is (= :success (get-in ctx3 [:phase :result :status]))
                 "Implement phase should succeed")))))))
 
-(deftest implement-to-verify-handoff-test
+(deftest ^{:stratum 2} implement-to-verify-handoff-test
   (testing "Implement phase result is available for verify phase"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (mock-agent-invoke :implementer nil)]
@@ -231,8 +241,7 @@
               (is (some? (get-in ctx3 [:phase :result :summary]))
                   "Verify phase should produce test summary"))))))))
 
-
-(deftest implement-to-release-handoff-test
+(deftest ^{:stratum 2} implement-to-release-handoff-test
   (testing "Implement phase result enables release phase to proceed"
     (with-test-worktree
       (fn [worktree-path]
@@ -274,7 +283,7 @@
             (is (some? (get-in ctx3 [:phase :result :output]))
                 "Release phase should produce release artifact")))))))
 
-(deftest full-pipeline-handoff-test
+(deftest ^{:stratum 2} full-pipeline-handoff-test
   (testing "Artifacts flow correctly through entire pipeline: plan → implement → verify → release"
     (with-test-worktree
       (fn [worktree-path]
@@ -337,12 +346,3 @@
 
                 (is (pos? (get-in ctx8 [:execution/metrics :tokens]))
                     "Should accumulate token metrics from all phases")))))))))
-
-(deftest handoff-with-missing-artifact-test
-  (testing "Verify phase fails fast when no execution environment is available"
-    ;; Create context WITHOUT execution environment — verify should throw
-    (let [ctx (dissoc (create-base-context) :execution/environment-id)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Verify phase has no execution environment"
-                            (execute-phase-enter :verify ctx))
-          "Verify phase should throw when no execution environment is available"))))
