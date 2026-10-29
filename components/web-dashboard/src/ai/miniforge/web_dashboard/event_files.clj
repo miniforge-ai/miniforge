@@ -22,7 +22,8 @@
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [clojure.java.io :as io]
-   [clojure.string :as str])
+   [clojure.string :as str]
+   [slingshot.slingshot :refer [try+]])
   (:import
    [java.io File]))
 
@@ -58,18 +59,34 @@
 
 (defn ^{:stratum 0} read-event
   "Decode one event file; nil when unreadable or not an event. The
-   reader returns UUIDs as strings; :event/id and :workflow/id come back
-   as UUIDs, as a live event carries them."
+   reader returns UUIDs and instants as strings; event, workflow and
+   artifact ids come back as UUIDs and :event/timestamp as a Date, as a
+   live event carries them."
   [f]
-  (let [event (es/read-event-file f)
-        as-uuid #(or (when (string? %) (parse-uuid %)) %)]
+  (let [event    (es/read-event-file f)
+        as-uuid  #(or (when (string? %) (parse-uuid %)) %)
+        as-date  (fn [s] (try+ (java.util.Date/from (java.time.Instant/parse s))
+                               (catch Exception _ s)))
+        artifact (fn [a] (if (map? a)
+                           (cond-> a
+                             (contains? a :artifact/id) (update :artifact/id as-uuid)
+                             (contains? a :id)          (update :id as-uuid))
+                           (as-uuid a)))]
     (when (:event/type event)
       (cond-> event
-        (contains? event :event/id)    (update :event/id as-uuid)
-        (contains? event :workflow/id) (update :workflow/id as-uuid)))))
+        (contains? event :event/id)            (update :event/id as-uuid)
+        (contains? event :workflow/id)         (update :workflow/id as-uuid)
+        (string? (:event/timestamp event))     (update :event/timestamp as-date)
+        (sequential? (:phase/artifacts event)) (update :phase/artifacts (partial mapv artifact))))))
+
+(defn ^{:stratum 0} source-file
+  "The file `read-ordered` decoded `event` from."
+  [event]
+  (::file (meta event)))
 
 (defn ^{:stratum 0} roots
-  "The file sink's per-workflow roots under `events-dir`, live first."
+  "The file sink's per-workflow roots under `events-dir`, live first: a
+   directory moving to archived/ is then seen in at least one of them."
   [events-dir]
   [(es/live-dir events-dir) (es/archived-dir events-dir)])
 
@@ -97,12 +114,20 @@
   [events-dir]
   (mapcat #(remove hidden? (.listFiles ^File %)) (roots events-dir)))
 
+(defn ^{:stratum 1} root-mtimes
+  "Last-modified times of the roots; one changes when a workflow
+   directory is created, moved or removed."
+  [events-dir]
+  (mapv mtime (roots events-dir)))
+
 (defn ^{:stratum 1} read-ordered
   "Decode `files` and return their events in creation order: by recorded
-   ms, then :event/sequence-number (files from one millisecond)."
+   ms, then :event/sequence-number (files from one millisecond). Each
+   event knows its file (`source-file`)."
   [files]
   (->> files
-       (keep (fn [f] (some->> (read-event f) (vector (file-ms f)))))
+       (keep (fn [f] (when-let [event (read-event f)]
+                       [(file-ms f) (vary-meta event assoc ::file f)])))
        (sort-by (fn [[ms event]] [ms (get event :event/sequence-number 0)]))
        (mapv second)))
 
@@ -110,11 +135,27 @@
 
 (defn ^{:stratum 2} unseen-files
   "[names files]: the names of all event files in `dir`, and those files
-   whose names are not in `seen`. A file name always holds one event."
-  [dir seen]
-  (let [files (event-files dir)]
-    [(into #{} (map file-name) files)
-     (filterv #(not (contains? seen (file-name %))) files)]))
+   whose names are not in `seen`. A file name always holds one event.
+   With no names yet (`seen` nil), the unseen files are those modified at
+   or after `since-ms`."
+  ([dir seen]
+   (unseen-files dir seen 0))
+  ([dir seen since-ms]
+   (let [files (event-files dir)]
+     [(into #{} (map file-name) files)
+      (if seen
+        (filterv #(not (contains? seen (file-name %))) files)
+        ;; mtime 0: gone since the listing (moved); a caller retries it.
+        (filterv #(let [m (mtime %)] (or (>= m since-ms) (zero? m))) files))])))
+
+(defn ^{:stratum 2} active-dirs
+  "{name dir} of the workflow directories modified at or after
+   `since-ms`. A name under both roots maps to its archived directory."
+  [events-dir since-ms]
+  (into {}
+        (comp (filter #(>= (mtime %) since-ms))
+              (map (juxt file-name identity)))
+        (workflow-dirs events-dir)))
 
 (defn ^{:stratum 2} workflow-events
   "Every event of `workflow-id` in the sink layout (its archived, live or

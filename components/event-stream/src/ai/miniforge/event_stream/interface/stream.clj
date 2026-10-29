@@ -104,6 +104,11 @@
    running sinks or subscribers."
   core/publish!)
 
+(def ^{:stratum 0} replay!
+  "Deliver a stored event to a legacy stream's log and subscribers
+   without its sinks. See `core/replay!`."
+  core/replay!)
+
 (def ^{:stratum 0} subscribe!
   "Register a callback for events. 3-arg form subscribes to all events;
    4-arg form takes a filter-fn (fn [event] -> bool) so only matching

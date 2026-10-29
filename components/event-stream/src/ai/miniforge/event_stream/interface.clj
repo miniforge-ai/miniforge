@@ -139,6 +139,12 @@
    running sinks or subscribers."
   stream/publish!)
 
+(def ^{:stratum 0} replay!
+  "Deliver an event another process already stored to a legacy stream's
+   log and subscribers without its sinks (also for publishes to this
+   stream meanwhile). A current stream returns an :unsupported anomaly."
+  stream/replay!)
+
 (def ^{:stratum 0} subscribe!
   "Register a callback for events. 3-arg form subscribes to all events;
    4-arg form takes a filter-fn (fn [event] -> bool) so only matching

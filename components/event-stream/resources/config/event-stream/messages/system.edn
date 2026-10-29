@@ -1,5 +1,6 @@
 {:event-stream/messages
  {:delivery/quiesced "publish! rejected: workflow quiesced"
+  :delivery/replay-unsupported "replay! delivers stored events to a legacy stream; a current stream restores them from its journal."
   :heartbeat/emission-failed "Current heartbeat publication failed."
   :heartbeat/invalid-options "Heartbeat identity, interval or progress sources are invalid."
   :heartbeat/invalid-handle "Current heartbeat handle or progress observation is invalid."
