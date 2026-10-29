@@ -5,11 +5,14 @@
   (:require [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase-deployment.interface]
+            [ai.miniforge.phase-deployment.deploy-operations :as deploy-operations]
             [ai.miniforge.phase-deployment.shell :as shell]
             [ai.miniforge.phase-deployment.shell.exec :as exec]
             [ai.miniforge.response.interface :as response]
+            [ai.miniforge.schema.interface :as schema]
             [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
             [ai.miniforge.workflow.phase-event-test-support :as support]
+            [babashka.fs :as fs]
             [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -31,6 +34,26 @@
        "\"inputs\":{\"name\":\"prod-db\"}}}],"
        "\"changeSummary\":{\"delete\":1},\"duration\":1200}"))
 
+(def ^{:stratum 0} clean-manifest
+  (str "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\n"
+       "spec:\n  template:\n    spec:\n      containers:\n"
+       "        - name: api\n          image: api@sha256:abc\n"))
+
+(defn- ^{:stratum 0} deploy-operations
+  "The governed transaction's provider boundary with no cluster behind it.
+   `applied` counts apply calls."
+  [rendered applied]
+  {:target! (fn [config] (schema/success :target (assoc config :context "gke-prod")))
+   :render! (fn [_target] (schema/success :rendered-yaml rendered))
+   :server-dry-run! (fn [_target _rendered] (schema/success :stdout "configured (server dry run)"))
+   :rollback-info! (fn [_target] (schema/success :rollback-info {:revision "4" :image "api@sha256:abc" :replicas 1}))
+   :apply-rendered! (fn [_target _rendered] (swap! applied inc) (schema/success :stdout "applied"))
+   :observe! (fn [_target]
+               {:provider/matched? true
+                :provider/observed {:deployment/ready? true
+                                    :deployment/pods {:pod-count 1 :ready-count 1
+                                                      :pods [{:ready? true}]}}})})
+
 (defn- ^{:stratum 0} provision-context [stream]
   {:execution/id (random-uuid)
    :event-stream stream
@@ -45,6 +68,32 @@
     (publish stream event)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} manifest-with-secret
+  (str clean-manifest
+       "---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: api-config\n"
+       "data:\n  password: \"correct-horse-battery-staple\"\n"))
+
+(defn- ^{:stratum 1} deploy
+  "Run the real deploy interceptor through the real lifecycle and gates with
+   `rendered` as the kustomize output. Returns [phase-result apply-calls]."
+  [rendered]
+  (fs/with-temp-dir [dir {:prefix "deploy-policy-"}]
+    (let [applied (atom 0)
+          ctx {:execution/id (random-uuid)
+               :event-stream (events/create-event-stream {:sinks []})
+               :execution/current-phase :deploy
+               :execution/input {:kustomize-dir "/repo/k8s/overlays/prod" :namespace "prod"
+                                 :app-label "api" :deployment-name "api"}
+               :execution/phase-results {:provision {:result {:output {:steps []}}}}
+               :effect-store-dir (str (fs/path dir "effects"))
+               :grant-breach-dir (str (fs/path dir "breaches"))
+               :execution/metrics {} :execution/errors []
+               :execution/response-chain (response/create :deploy-policy)}]
+      (with-redefs [deploy-operations/operations (constantly (deploy-operations rendered applied))]
+        (let [[_ result] (lifecycle/execute-phase-lifecycle
+                          (phase/get-phase-interceptor {:phase :deploy}) ctx)]
+          [result @applied])))))
 
 (defn- ^{:stratum 1} provision
   "Run the real provision interceptor through the real lifecycle and gates
@@ -101,3 +150,16 @@
     (is (some #(= :deploy/no-destroy-production (:code %)) gate-errors))
     (is (= :failed (:status result)))
     (is (zero? applied) "pulumi up never runs")))
+
+(deftest ^{:stratum 2} deploy-never-applies-manifests-with-a-secret
+  (testing "a clean manifest is applied and the deploy passes its gates"
+    (let [[result applied] (deploy clean-manifest)]
+      (is (= 1 applied))
+      (is (= :completed (:status result)))
+      (is (= :allow (get-in result [:phase/decision-envelope :envelope/decision])))))
+  (testing "a manifest with a plaintext secret is refused before it is applied"
+    (let [[result applied] (deploy manifest-with-secret)]
+      (is (zero? applied) "kubectl apply never runs")
+      (is (= :failed (:status result)))
+      (is (= :authority (get-in result [:result :stage])))
+      (is (= :deny (get-in result [:phase/decision-envelope :envelope/decision]))))))

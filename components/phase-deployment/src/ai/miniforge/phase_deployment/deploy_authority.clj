@@ -22,7 +22,8 @@
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.phase-deployment.messages :as msg]
-   [ai.miniforge.phase-deployment.policy :as policy])
+   [ai.miniforge.phase-deployment.policy :as policy]
+   [ai.miniforge.policy-pack.interface :as policy-pack])
   (:import
    [java.time Instant]))
 
@@ -40,7 +41,8 @@
 
 (def ^{:stratum 0} deployment-policy-pins
   {:pins/pack-revision nil
-   :pins/rule-ids [:deploy/resource-count-limit :deploy/gke-node-limit]
+   :pins/rule-ids [:deploy/resource-count-limit :deploy/gke-node-limit
+                   :deploy/no-secrets-in-manifests]
    :pins/event-watermark nil})
 
 (def ^{:stratum 0} default-breach-dir-relative-path
@@ -55,6 +57,33 @@
   []
   {:rule-id :deploy/provision-preview-required
    :message (msg/t :policy/provision-preview-required)})
+
+(defn- ^{:stratum 0} manifest-findings
+  "The deployment pack's :deploy-scoped rules (for example
+   :deploy/no-secrets-in-manifests) evaluated against the rendered manifests,
+   as {:blocking :require-approval :warnings :audits} entries. No pack fails
+   closed, as the provision gate does."
+  [rendered-yaml]
+  (let [packs (policy/deployment-policy-packs)]
+    (cond
+      (empty? packs)
+      {:blocking [{:rule-id :deploy/deployment-pack-missing
+                   :message (msg/t :policy/deployment-pack-missing)}]}
+
+      (empty? rendered-yaml)
+      {}
+
+      :else
+      (let [result (policy-pack/check-artifact
+                    packs
+                    {:artifact/content rendered-yaml
+                     :artifact/path "rendered-manifests.yaml"}
+                    {:phase :deploy :task-type :implement})]
+        (into {}
+              (map (fn [k]
+                     [k (mapv #(hash-map :rule-id (:code %) :message (:message %))
+                              (get result k))]))
+              [:blocking :require-approval :warnings :audits])))))
 
 (defn- ^{:stratum 0} canonical-input-anomaly
   [context target]
@@ -108,16 +137,21 @@
            default-breach-dir-relative-path)))
 
 (defn ^{:stratum 1} policy-classification
-  "Evaluate deployment policy against the Pulumi preview it was defined for."
-  [context target]
-  (if-some [preview (get-in context
-                            [:execution/phase-results :provision :result :output])]
-    (let [policy-context (:phase-config target)
-          violations (keep identity
-                           [(policy/check-resource-count preview policy-context)
-                            (policy/check-gke-node-limit preview policy-context)])]
-      (assoc empty-classification :blocking (mapv policy-blocker violations)))
-    (assoc empty-classification :blocking [(missing-preview-violation)])))
+  "Evaluate deployment policy before anything applies: resource limits against
+   the Pulumi preview they were defined for, and the deployment pack's :deploy
+   rules against the rendered manifests."
+  [context target preflight]
+  (let [manifests (manifest-findings (:rendered-yaml preflight))
+        preview-classification
+        (if-some [preview (get-in context
+                                  [:execution/phase-results :provision :result :output])]
+          (let [policy-context (:phase-config target)
+                violations (keep identity
+                                 [(policy/check-resource-count preview policy-context)
+                                  (policy/check-gke-node-limit preview policy-context)])]
+            (assoc empty-classification :blocking (mapv policy-blocker violations)))
+          (assoc empty-classification :blocking [(missing-preview-violation)]))]
+    (merge-with into preview-classification manifests)))
 
 (defn ^{:stratum 1} permitted?
   "True only when the grant check and the DecisionEnvelope both allow."
@@ -146,7 +180,7 @@
     invalid-input
     (let [preflight (if (map? preflight) preflight {})
           request (request context effect-id target)
-          classification (policy-classification context target)
+          classification (policy-classification context target preflight)
           policy-envelope (gate/decide classification deployment-policy-pins)
           policy-allowed? (gate/decision-allowed? policy-envelope)
           grant-record (when policy-allowed?

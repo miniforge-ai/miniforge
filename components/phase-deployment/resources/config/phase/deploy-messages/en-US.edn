@@ -68,6 +68,8 @@
   "Creating {node-pools} node pools (limit: {limit})"
   :policy/provision-preview-required
   "A successful Pulumi provision preview is required before deployment"
+  :policy/deployment-pack-missing
+  "The deployment-safety policy pack is not on the classpath; deployment is refused"
 
   :shell/command-timeout
   "Command timed out after {timeout-ms}ms"
