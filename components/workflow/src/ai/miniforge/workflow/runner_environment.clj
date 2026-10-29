@@ -61,6 +61,16 @@
                        {:docker {:image (defaults/default-docker-image)}}))
     {:worktree {}}))
 
+(defn ^{:stratum 0} with-runtime-config
+  "Merge the caller's container-runtime selection config (the CLI sets
+   :runtime-kind from MINIFORGE_RUNTIME) into the registry's :docker slot.
+   Without an explicit kind the dag-executor auto-probes the host runtime
+   (Podman first, then Docker)."
+  [registry-config runtime-config]
+  (cond-> registry-config
+    (and (:docker registry-config) (seq runtime-config))
+    (update :docker merge runtime-config)))
+
 (defn ^{:stratum 0} select-capsule-executor
   "Select executor for mode; rejects worktree fallback in governed mode (N11 §7.4)."
   [registry mode {:keys [select-exec executor-type]}]
@@ -237,11 +247,12 @@
    rely on try+ exception flow; prefer anomaly-returning helpers such as
    `check-executor-for-mode` for non-boundary branching."
   [workflow-id {:keys [repo-url branch repo-path execution-mode executor-config
-                       resume-workspace]}]
+                       runtime-config resume-workspace]}]
   (let [mode (get {:governed :governed} execution-mode :local)]
     (try
       (let [fns      (dag-executor-fns)
-            config   (registry-config-for-mode mode executor-config)
+            config   (with-runtime-config (registry-config-for-mode mode executor-config)
+                                          runtime-config)
             registry ((:create-registry fns) config)
             executor (select-capsule-executor registry mode fns)
             branch   (or (:branch resume-workspace) branch)
