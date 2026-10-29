@@ -31,9 +31,11 @@
    [ai.miniforge.cli.backends :as backends]
    [ai.miniforge.cli.backends.config :as backend-config]
    [ai.miniforge.cli.backends.status :as backend-status]
+   [ai.miniforge.cli.config-schema :as config-schema]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.cli.resource-config :as resource-config]))
+   [ai.miniforge.cli.resource-config :as resource-config]
+   [ai.miniforge.llm.interface :as llm]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -71,21 +73,6 @@
   (when key-str
     (mapv keyword (str/split key-str #"\."))))
 
-(def ^{:stratum 0} keyword-valued-keys
-  "Config keys whose values are keywords. `config set llm.backend opencode` must
-   store :opencode: as a string or symbol it names no backend. Only keys a run
-   reads belong here."
-  #{[:llm :backend]})
-
-(def ^{:stratum 0} string-valued-keys
-  "Config keys whose values are model ids, stored as strings whatever EDN
-   reads the value as: a model id reaches a CLI argv, which takes only
-   strings, so `config set llm.model 1.5` must not store a number. nil
-   stays nil, so `config set llm.model nil` clears the setting."
-  #{[:llm :model]
-    [:agents :default-models :thinking]
-    [:agents :default-models :execution]})
-
 (defn ^{:stratum 0} parse-config-value
   "Parse config value from string. A bare word, which EDN reads as a symbol,
    stays a string (`anthropic/claude-sonnet-4-5` is a model id, not a symbol)."
@@ -107,6 +94,44 @@
     (if (or (string? backend) (symbol? backend))
       (keyword (str backend))
       backend)))
+
+(defn ^{:stratum 0} coerce-config-value
+  "`value` as `config set` stores it under `key-path`, by the key's type in
+   the config schema: a bare word becomes a keyword for a :keyword or
+   :backend key (`config set llm.backend opencode` stores :opencode), and
+   any non-nil value becomes a string for a :string key (a model id
+   reaches a CLI argv, so `config set llm.model 1.5` stores \"1.5\"). nil
+   stays nil, so `config set llm.model nil` clears the setting."
+  [key-path value]
+  (let [type (config-schema/key-type config-schema/schema key-path)]
+    (cond
+      (and (#{:keyword :backend} type) (string? value))
+      (keyword value)
+
+      (and (= :string type) (some? value) (not (string? value)))
+      (str value)
+
+      :else value)))
+
+(defn ^{:stratum 0} config-problems
+  "Unknown keys and wrong-typed values in `config` (see config-schema),
+   checked against the backends a run accepts."
+  [config]
+  (config-schema/problems config-schema/schema (set (keys llm/backends)) config))
+
+(defn ^{:stratum 0} problem-message
+  "One line describing a config-schema problem."
+  [{:keys [path problem expected value]}]
+  (let [key-str (str/join "." (map #(subs (str %) 1) path))]
+    (case problem
+      :unknown-key (messages/t :config/unknown-key {:key key-str})
+      :wrong-type  (if (= :backend expected)
+                     (messages/t :config/unknown-backend
+                                 {:key key-str :value (pr-str value)
+                                  :available (str/join ", " (sort (map name (keys llm/backends))))})
+                     (messages/t :config/wrong-type
+                                 {:key key-str :value (pr-str value)
+                                  :expected (messages/t (keyword "config" (str "type-" (name expected))))})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -133,19 +158,6 @@
   (binding [*out* *err*]
     (println (style (messages/t :config/error-prefix {:message (:anomaly/message anomaly)}) :red)))
   (shared/exit! 1))
-
-(defn ^{:stratum 1} coerce-config-value
-  "`value` as `config set` stores it under `key-path`: a keyword for the
-   `keyword-valued-keys`, a string for the `string-valued-keys`."
-  [key-path value]
-  (cond
-    (and (contains? keyword-valued-keys key-path) (string? value))
-    (keyword value)
-
-    (and (contains? string-valued-keys key-path) (some? value) (not (string? value)))
-    (str value)
-
-    :else value))
 
 ;; Config file operations
 (defn ^{:stratum 1} read-config-file
@@ -227,14 +239,19 @@
         (println (messages/t :config/set-usage {:command (app-config/command-string "config set <key> <value>")}))
         (println (messages/t :config/set-example {:command (app-config/command-string "config set llm.backend opencode")})))
       (let [key-path (parse-config-key key-str)
-            value (coerce-config-value key-path (parse-config-value value-str))
-            result (config-file/update-config! config-path #(assoc-in (or % default-config) key-path value))]
-        (when (anomaly/anomaly? result)
-          (exit-with-anomaly! result))
-        (println)
-        (print-success (messages/t :config/set-success {:key key-str :value (pr-str value)}))
-        (println (messages/t :config/set-saved {:path config-path}))
-        (println)))))
+            value    (coerce-config-value key-path (parse-config-value value-str))
+            problems (config-problems (assoc-in {} key-path value))]
+        (if (seq problems)
+          ;; Nothing is written: a run would ignore or reject the setting.
+          (do (run! (comp print-error problem-message) problems)
+              (shared/exit! 1))
+          (let [result (config-file/update-config! config-path #(assoc-in (or % default-config) key-path value))]
+            (when (anomaly/anomaly? result)
+              (exit-with-anomaly! result))
+            (println)
+            (print-success (messages/t :config/set-success {:key key-str :value (pr-str value)}))
+            (println (messages/t :config/set-saved {:path config-path}))
+            (println)))))))
 
 (defn ^{:stratum 2} cmd-init
   "Initialize user config file."
@@ -334,9 +351,19 @@
       (do
         (print-error (messages/t :config/validate-no-file))
         (println (messages/t :config/validate-create-hint {:command (app-config/command-string "config init") :path config-path}))
-        (println))
-      (let [config (read-config-file config-path)]
-        (if config
+        (println)
+        (shared/exit! 1))
+      (let [config   (read-config-file config-path)
+            problems (when (map? config) (config-problems config))]
+        (cond
+          (seq problems)
+          (do
+            (run! (comp print-error problem-message) problems)
+            (println (messages/t :config/validate-location {:path config-path}))
+            (println)
+            (shared/exit! 1))
+
+          (map? config)
           (do
             (print-success (messages/t :config/validate-valid))
             (println (messages/t :config/validate-location {:path config-path}))
@@ -352,11 +379,13 @@
                   (println (messages/t :config/validate-backend-available
                                        {:backend (name backend)
                                         :status (style (:message validation) :yellow)}))))))
+          :else
           (do
             (print-error (messages/t :config/validate-invalid))
             (println (messages/t :config/validate-location {:path config-path}))
             (println)
-            (println (messages/t :config/validate-reset-hint {:command (app-config/command-string "config reset")}))))))))
+            (println (messages/t :config/validate-reset-hint {:command (app-config/command-string "config reset")}))
+            (shared/exit! 1)))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 
