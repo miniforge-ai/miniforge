@@ -41,15 +41,33 @@
 
 (deftest ^{:stratum 0} merge-budgets-test
   (let [earlier (java.util.Date. 1000)
-        on-disk (assoc (budget/create-budget 42) :comment-attempts {1 2 2 1} :total-attempts 3
-                       :questions-answered 4 :fixes-pushed 1 :started-at earlier)
-        merged  (budget/merge-budgets on-disk (assoc (budget/create-budget 42)
-                                                     :comment-attempts {1 1 3 1} :total-attempts 2))]
-    (testing "no counter goes below what is already on disk"
-      (is (= [{1 2 2 1 3 1} 3 4 1]
+        shared  (budget/record-fix-attempt (budget/create-budget 42) 1 "a1")
+        on-disk (-> (budget/record-fix-attempt shared 2 "a2")
+                    (budget/record-question-answered 7)
+                    (assoc :started-at earlier))
+        mine    (-> (budget/record-fix-attempt shared 1 "a3")
+                    (budget/record-question-answered 7)
+                    (budget/record-fix-pushed "a3"))
+        merged  (budget/merge-budgets on-disk mine)]
+    (testing "counts are the union of what both recorded, shared ids once"
+      (is (= [{1 2 2 1} 3 1 1]
              ((juxt :comment-attempts :total-attempts :questions-answered :fixes-pushed) merged))))
+    (testing "merging or replaying the same change again counts nothing more"
+      (is (= merged (budget/merge-budgets merged mine) (budget/record-question-answered merged 7))))
     (testing "the earlier start time is kept, so the time limit is not extended"
-      (is (= earlier (:started-at merged))))))
+      (is (= earlier (:started-at merged))))
+    (testing "counters saved before ids were recorded are a floor that new ids add to"
+      (let [legacy (-> on-disk (dissoc :attempts :answered :pushed) (assoc :total-attempts 3))
+            later  (budget/record-fix-attempt legacy 1 "a9")]
+        (is (= 4 (:total-attempts (budget/merge-budgets legacy later))
+               (:total-attempts (budget/merge-budgets later later))))))))
+
+(deftest ^{:stratum 0} replayed-change-is-counted-once-test
+  (let [b (budget/create-budget 42)]
+    (dotimes [_ 2]
+      (budget/change-saved-budget! "acme/app" b #(budget/record-question-answered % 9))
+      (budget/change-saved-budget! "acme/app" b #(budget/record-fix-attempt % 9 "attempt-1")))
+    (is (= [1 1] ((juxt :questions-answered :total-attempts) (budget/load-budget "acme/app" 42))))))
 
 (deftest ^{:stratum 0} save-budget-refusals-test
   (testing "a stand-in for an unreadable budget is never written"
@@ -92,6 +110,16 @@
         (is (anomaly/anomaly? (budget/save-budget! "acme/app" (budget/create-budget 7))))
         (is (anomaly/anomaly? (poller/save-watermarks! watermarks)))
         (is (= [damage damage] [(slurp budget-file) (slurp wm-file)]))))))
+
+(deftest ^{:stratum 0} invalid-floor-loads-as-exhausted-test
+  (let [file (sut/repo-file "acme/app" "budget-42.edn")]
+    (fs/create-dirs (fs/parent file))
+    (doseq [floor [{:total-attempts -5} {:comment-attempts {9 -1}} {:total-attempts "bad"}]]
+      (testing (str "a budget whose :floor is " (pr-str floor))
+        (spit file (pr-str (assoc (budget/create-budget 42) :floor floor)))
+        (let [loaded (budget/load-budget "acme/app" 42)]
+          (is (some? (:load-error loaded)))
+          (is (some? (budget/any-budget-exhausted? loaded 9))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

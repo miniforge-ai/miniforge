@@ -29,6 +29,7 @@
    propagating bad state down the pipeline."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.workflow.execution-transition :as transition]
    [ai.miniforge.workflow.fsm :as workflow-fsm]
@@ -174,7 +175,8 @@
   (testing "gates configured + approved verdict → pass attaches ONLY the
             :allow decision envelope (Ariadne 1d); nothing else changes"
     (let [pr  {:result {:output {:review/decision :approved}}}
-          out (transition/apply-gate-validation {:config {:gates [:review-approved]}} pr {})]
+          ctx {:execution/id (random-uuid) :event-stream (events/create-event-stream {:sinks []})}
+          out (transition/apply-gate-validation {:config {:gates [:review-approved]}} pr ctx)]
       (is (= pr (dissoc out :phase/decision-envelope)) "unchanged on pass, envelope aside")
       (is (= :allow (get-in out [:phase/decision-envelope :envelope/decision])))
       (is (not (contains? out :phase/status)))

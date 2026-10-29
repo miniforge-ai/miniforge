@@ -21,6 +21,7 @@
    monitor through create-monitor / run-cycle against a temporary miniforge
    home; GitHub and the comment handlers are stubbed."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.config.interface :as mf-config]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.events :as events]
@@ -166,9 +167,9 @@
     (state/update-budget! monitor-b 42 (reduce budget/record-fix-attempt
                                                (state/get-or-create-budget monitor-b 42)
                                                (range 1 11)))
-    (state/update-budget! monitor-b 43 (nth (iterate budget/record-fix-pushed
-                                                     (state/get-or-create-budget monitor-b 43))
-                                            4))
+    (state/update-budget! monitor-b 43 (reduce budget/record-fix-pushed
+                                               (state/get-or-create-budget monitor-b 43)
+                                               ["f1" "f2" "f3" "f4"]))
     (with-redefs [fix-loop/run-fix-loop (fn [& _] (swap! fixes inc) {:success? true :commit-sha "abc123"})
                   poller/post-comment   (fn [& _] (dag/ok {:comment-posted true}))]
       (testing "a monitor whose cached budget is stale does not start a fix once another spent it"
@@ -196,20 +197,52 @@
                          {:category :change-request :comment (review-comment 9 "2026-10-01T00:00:00Z")}))))
         (is (zero? @fixes))))))
 
-(deftest ^{:stratum 1} answer-counted-after-a-failed-save-test
-  (let [monitor  (monitor-for "acme/app" {:generate-fn (constantly "An answer")})
-        question {:category :question :comment (review-comment 9 "2026-10-01T00:00:00Z")}
-        file     (str (store/repo-file "acme/app" "budget-42.edn"))]
-    (state/update-budget! monitor 42 (state/get-or-create-budget monitor 42))
-    (with-redefs [poller/post-comment (fn [& _] (dag/ok {:comment-posted true}))]
-      (spit file "[]")
-      (handlers/handle-question monitor {:pr/number 42} question)
-      (fs/delete file)
-      (handlers/handle-question monitor {:pr/number 42} question))
+(defn- ^{:stratum 1} answer!
+  "Answer question `comment-id` on PR #42; with `save-outcome` :lost the
+   budget save fails, with :published it is written and then reported failed
+   (the config writer's rename landed, its directory sync did not)."
+  ([monitor comment-id] (answer! monitor comment-id :ok))
+  ([monitor comment-id save-outcome]
+   (let [update-file! store/update-file!]
+     (with-redefs [poller/post-comment (fn [& _] (dag/ok {:comment-posted true}))
+                   store/update-file!  (fn [file f]
+                                         (case save-outcome
+                                           :ok        (update-file! file f)
+                                           :lost      (anomaly/anomaly :unavailable "lock busy" {})
+                                           :published (do (update-file! file f)
+                                                          (anomaly/anomaly :fault "not synced" {}))))]
+       (handlers/handle-question monitor {:pr/number 42}
+                                 {:category :question
+                                  :comment (review-comment comment-id "2026-10-01T00:00:00Z")})))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} answer-counted-after-a-failed-save-test
+  (let [monitor (monitor-for "acme/app" {:generate-fn (constantly "An answer")})]
+    (answer! monitor 9 :lost)
+    (answer! monitor 10)
     (testing "an answer whose save failed is counted by the next save"
       (is (= 2 (:questions-answered (budget/load-budget "acme/app" 42)))))))
 
-;------------------------------------------------------------------------------ Layer 2
+(deftest ^{:stratum 2} save-reported-failed-after-it-landed-is-not-counted-twice-test
+  (let [monitor (monitor-for "acme/app" {:generate-fn (constantly "An answer")})]
+    (answer! monitor 9 :published)
+    (answer! monitor 10)
+    (is (= 2 (:questions-answered (budget/load-budget "acme/app" 42))))))
+
+(deftest ^{:stratum 2} interleaved-monitors-count-the-union-test
+  (let [monitor-a (monitor-for "acme/app" {:generate-fn (constantly "An answer")})
+        monitor-b (monitor-for "acme/app" {:generate-fn (constantly "An answer")})]
+    (answer! monitor-a 1)
+    (answer! monitor-b 2)
+    (answer! monitor-a 3 :published)
+    (answer! monitor-b 4)
+    (answer! monitor-a 5 :lost)
+    (answer! monitor-b 6)
+    (answer! monitor-a 7)
+    (testing "every answer is counted once, whichever monitor saved it and however its save ended"
+      (is (= #{1 2 3 4 5 6 7} (:answered (budget/load-budget "acme/app" 42))))
+      (is (= 7 (:questions-answered (budget/load-budget "acme/app" 42)))))))
 
 (deftest ^{:stratum 2} damaged-budget-file-keeps-the-hard-stop-test
   (doseq [damage ["{:pr-number 42 :total-attempts" "{:pr-number 42}" "[]"]]

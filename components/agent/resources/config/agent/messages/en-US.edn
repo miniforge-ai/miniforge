@@ -58,4 +58,10 @@
   ;; underlying invocation still flagged failure (used as a fallback when
   ;; no other error message and no inline :review/blocking-issues exist).
   :reviewer.llm-response/invocation-failed-post-parse
-  "Reviewer LLM invocation failed after producing a review artifact"}}
+  "Reviewer LLM invocation failed after producing a review artifact"
+
+  ;; Role model resolution — a configured model the backend does not
+  ;; serve (agent/model.clj default-model-for-role). Printed once per
+  ;; process on stderr; the next setting or the backend's default applies.
+  :model/backend-mismatch
+  "Ignoring {key} \"{model}\": the {backend} backend does not serve that model, so the next model setting or the {backend} default applies. Change or remove {key}."}}
