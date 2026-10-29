@@ -16,15 +16,26 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.workflow.release-test
-  "Unit tests for release helpers that do not require git."
+  "Unit tests for release helpers. Temp dirs are git repositories: the
+   file actions ask git where its metadata is and refuse every path when
+   git cannot answer."
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.workflow.release :as release]
-   [babashka.fs :as fs]))
+   [babashka.fs :as fs]
+   [babashka.process :as process]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ^:dynamic *temp-dirs* (atom []))
+
+(defn ^{:stratum 0} git!
+  "Run git in `dir` without the repository variables a git hook exports."
+  [dir & args]
+  (apply process/sh {:dir (str dir)
+                     :env (apply dissoc (into {} (System/getenv))
+                                 ["GIT_DIR" "GIT_WORK_TREE" "GIT_INDEX_FILE" "GIT_COMMON_DIR"])}
+         "git" args))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -32,6 +43,7 @@
   []
   (let [dir (fs/create-temp-dir {:prefix "release-unit-"})]
     (swap! *temp-dirs* conj dir)
+    (git! dir "init" "-q")
     dir))
 
 (defn ^{:stratum 1} cleanup-temp-dirs
@@ -274,5 +286,37 @@
                                                           {:action :delete :path "."}
                                                           nil))))
       (is (fs/exists? worktree)))))
+
+(deftest ^{:stratum 2} process-file-action-refuses-git-metadata-test
+  (let [worktree (create-temp-dir)
+        _        (git! worktree "config" "core.hooksPath" ".githooks")
+        config   (str (fs/path worktree ".git" "config"))
+        before   (slurp config)
+        refused? (fn [action path]
+                   (false? (:success? (release/process-file-action
+                                       worktree {:action action :path path
+                                                 :content "#!/bin/sh\necho planted\n"}
+                                       nil))))]
+    (fs/create-dirs (fs/path worktree ".githooks"))
+    (fs/create-sym-link (fs/path worktree "tools") (fs/path worktree ".git"))
+    (fs/create-sym-link (fs/path worktree " ") (fs/path worktree ".git"))
+    (testing "an agent-written path into git metadata is refused"
+      (doseq [[action path] [[:create ".git/hooks/pre-commit"]
+                             [:create "./x/../.git/hooks/pre-commit"]
+                             [:modify "./.git/config"]
+                             [:create "tools/hooks/pre-commit"]
+                             [:create ".GIT/hooks/pre-commit"]
+                             [:modify " /config"]
+                             [:create ".githooks/pre-commit"]
+                             [:delete ".git/config"]
+                             [:delete ".git"]]]
+        (is (refused? action path) (str action " " path)))
+      (is (= before (slurp config)))
+      (is (not (fs/exists? (fs/path worktree ".git" "hooks" "pre-commit"))))
+      (is (not (fs/exists? (fs/path worktree ".githooks" "pre-commit")))))
+    (testing "an ordinary write still applies"
+      (is (true? (:success? (release/process-file-action
+                             worktree {:action :create :path "src/a.clj" :content "(ns a)"}
+                             nil)))))))
 
 (use-fixtures :each cleanup-temp-dirs)

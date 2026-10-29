@@ -31,6 +31,7 @@
    [ai.miniforge.workflow.interface.protocols.phase-executor :as p]
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
    [babashka.fs :as fs]
    [babashka.process :as process]))
 
@@ -154,6 +155,20 @@
                      str)]
     (boolean (and leaf (not (#{"." ".."} leaf))))))
 
+(defn- ^{:stratum 0} metadata-rejection
+  "Error message when `action` on `full-path` would reach the worktree's git
+   metadata, or nil. An agent-written `.git/hooks/pre-commit`, or a file
+   in the `core.hooksPath` directory, runs on the host's next git
+   command. Reuses pr-lifecycle's worktree guard, which asks git where its
+   metadata is and refuses every path when git cannot answer. Runs after
+   the containment check, so `full-path` is inside `worktree-path`."
+  [worktree-path full-path action]
+  (let [relative (str (fs/relativize (fs/absolutize worktree-path) (fs/absolutize full-path)))]
+    (when-not (if (= :delete action)
+                (pr-lifecycle/safe-worktree-entry-path worktree-path relative)
+                (pr-lifecycle/safe-worktree-path worktree-path relative))
+      (str "Path rejected: " relative " reaches the worktree's git metadata"))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} entry-inside-worktree?
@@ -190,12 +205,15 @@
 (defmethod ^{:stratum 2} process-file-action :create
   [worktree-path {:keys [path content]} logger]
   (try
-    (let [full-path (fs/path worktree-path path)]
-      (if-not (inside-worktree? worktree-path full-path)
+    (let [full-path (fs/path worktree-path path)
+          rejection (if (inside-worktree? worktree-path full-path)
+                      (metadata-rejection worktree-path full-path :create)
+                      (str "Path traversal rejected: " path " escapes worktree root"))]
+      (if rejection
         {:success? false
          :action :create
          :path path
-         :error (str "Path traversal rejected: " path " escapes worktree root")}
+         :error rejection}
         (do
           (write-file! full-path content)
           (when logger
@@ -217,12 +235,15 @@
 (defmethod ^{:stratum 2} process-file-action :modify
   [worktree-path {:keys [path content]} logger]
   (try
-    (let [full-path (fs/path worktree-path path)]
-      (if-not (inside-worktree? worktree-path full-path)
+    (let [full-path (fs/path worktree-path path)
+          rejection (if (inside-worktree? worktree-path full-path)
+                      (metadata-rejection worktree-path full-path :modify)
+                      (str "Path traversal rejected: " path " escapes worktree root"))]
+      (if rejection
         {:success? false
          :action :modify
          :path path
-         :error (str "Path traversal rejected: " path " escapes worktree root")}
+         :error rejection}
         (do
           (write-file! full-path content)
           (when logger
@@ -244,12 +265,15 @@
 (defmethod ^{:stratum 2} process-file-action :delete
   [worktree-path {:keys [path]} logger]
   (try
-    (let [full-path (fs/path worktree-path path)]
-      (if-not (entry-inside-worktree? worktree-path full-path)
+    (let [full-path (fs/path worktree-path path)
+          rejection (if (entry-inside-worktree? worktree-path full-path)
+                      (metadata-rejection worktree-path full-path :delete)
+                      (str "Path traversal rejected: " path " escapes worktree root"))]
+      (if rejection
         {:success? false
          :action :delete
          :path path
-         :error (str "Path traversal rejected: " path " escapes worktree root")}
+         :error rejection}
         (let [deleted? (delete-file! full-path)]
           (when logger
             (log/debug logger :workflow :release/file-deleted
