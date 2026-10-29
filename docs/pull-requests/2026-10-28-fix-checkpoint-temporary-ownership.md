@@ -13,8 +13,7 @@ Shared temporary names let overlapping writes consume or overwrite another write
 
 ## Layer and dependencies
 
-Storage boundary, small follow-up to #2039. Based on its reviewed branch;
-wait for #2039 to merge before opening this dependent PR.
+Storage boundary, small follow-up to merged #2039. Aligned with main after its merge.
 Preserve all previous branches and normal signing, test, review, and CI gates.
 
 ## Verification plan
@@ -35,6 +34,9 @@ The adversarial pass traced relative-path resolution, temporary creation, write,
 rename, and cleanup. Temporary files use the platform's fresh-file permissions.
 The shared cleanup boundary preserves original failures and fatal priority.
 Namespaces have at most three inferred strata; no duplicated cleanup policy.
+Normal signed hooks pass; the standards scan reports no violations.
+The whole change has 91 reportable code lines. Parent alignment preserves the
+exact tested production and test tree.
 
 ## Limits and deployment
 
