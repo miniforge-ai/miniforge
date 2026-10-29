@@ -183,7 +183,9 @@
                                      :data (ex-data e)}
                                     opts))
             (when-not quiet
-              (println (display/colorize :red (messages/t :workflow-runner/run-error {:error (ex-message e)})))))
+              (println (display/colorize :red (messages/t :workflow-runner/run-error
+                                                          {:error (or (:anomaly/message (ex-data e))
+                                                                      (ex-message e))})))))
           (throw e))))))
 
 (defn ^{:stratum 1} run-workflow-from-spec! [spec {:keys [quiet] :or {quiet false} :as opts}]
