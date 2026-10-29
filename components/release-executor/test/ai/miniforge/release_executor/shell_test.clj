@@ -31,6 +31,13 @@
   (let [h (java.lang.ProcessHandle/of (long pid))]
     (and (.isPresent h) (.isAlive ^java.lang.ProcessHandle (.get h)))))
 
+(defn- ^{:stratum 0} kill-if-alive
+  "Test cleanup: forcibly kill `pid` if it is still running."
+  [pid]
+  (let [h (java.lang.ProcessHandle/of (long pid))]
+    (when (.isPresent h)
+      (.destroyForcibly ^java.lang.ProcessHandle (.get h)))))
+
 (deftest ^{:stratum 0} finished-command-test
   (testing "a command that exits returns its exit code and output"
     (let [r (shell/run-bounded ["sh" "-c" "echo out; echo err >&2; exit 3"] {})]
@@ -82,4 +89,24 @@
           (is (< elapsed 10000) "returns soon after the deadline, not after the sleep")
           (is (wait-until-dead (parse-long (str/trim (slurp child-pid))) 3000)
               "the grandchild sleep is killed, not orphaned"))
+        (finally (fs/delete-tree dir))))))
+
+(deftest ^{:stratum 2} reparented-helper-is-killed-test
+  (testing "a helper that outlives its parent while holding stdout is killed at
+            the deadline, and no output reader is left blocked"
+    (let [dir (fs/create-temp-dir {:prefix "shell-orphan-"})
+          pid (str (fs/path dir "helper.pid"))]
+      (try
+        ;; The inner sh starts a helper that inherits stdout, records its pid
+        ;; and exits, so the helper is reparented out of the tree. The outer
+        ;; sh then hangs like a stalled git.
+        (let [r      (shell/run-bounded
+                      ["sh" "-c" (str "sh -c 'sleep 30 & echo $! > " pid "; sleep 0.5'; sleep 30")]
+                      {:timeout-ms 2000})
+              helper (parse-long (str/trim (slurp pid)))]
+          (try
+            (is (:timed-out? r))
+            (is (true? (:readers-done? r)) "the stdout/stderr readers ended")
+            (is (wait-until-dead helper 3000) "the reparented helper is killed")
+            (finally (kill-if-alive helper))))
         (finally (fs/delete-tree dir))))))
