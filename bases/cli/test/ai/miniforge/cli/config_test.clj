@@ -68,7 +68,10 @@
 
 (deftest ^{:stratum 0} get-llm-backend-reads-words-as-keywords-test
   (is (= :opencode (config/get-llm-backend {:llm {:backend 'opencode}} nil)))
-  (is (= :claude (config/get-llm-backend {} "claude"))))
+  (is (= :claude (config/get-llm-backend {} "claude")))
+  (testing "a namespace is kept, so a symbol and a string with the same text resolve alike"
+    (is (= :vendor/opencode (config/get-llm-backend {:llm {:backend 'vendor/opencode}} nil)))
+    (is (= :vendor/opencode (config/get-llm-backend {:llm {:backend "vendor/opencode"}} nil)))))
 
 (deftest ^{:stratum 0} get-llm-timeout-test
   (testing "get-llm-timeout returns config value"

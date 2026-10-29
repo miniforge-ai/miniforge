@@ -87,13 +87,14 @@
 
 (defn ^{:stratum 0} get-llm-backend
   "Get LLM backend from config, with workflow override support. A string or
-   symbol (as an older `config set` wrote) is read as the keyword it names."
+   symbol (as an older `config set` wrote) is read as the keyword of its full
+   text, namespace included, so `vendor/opencode` stays unknown either way."
   [config workflow-override]
   (let [backend (or workflow-override
                     (get-in config [:llm :backend])
                     :opencode)]
     (if (or (string? backend) (symbol? backend))
-      (keyword (name backend))
+      (keyword (str backend))
       backend)))
 
 (defn ^{:stratum 0} get-llm-timeout
