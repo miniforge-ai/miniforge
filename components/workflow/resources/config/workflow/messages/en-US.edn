@@ -39,6 +39,7 @@
   :chain/retention-conflict "Chain recovery manifests conflict with the retained identity or composition."
   ;; Checkpoint reads
   :checkpoint/read-failed    "Checkpoint file {path} could not be read: {error}"
+  :checkpoint/no-record      "it holds no checkpoint record"
   :checkpoint/unreadable     "The checkpoint for run {run-id} cannot be restored; unreadable: {files}"
 
   ;; Event publishing warnings

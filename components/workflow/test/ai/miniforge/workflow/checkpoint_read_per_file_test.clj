@@ -52,7 +52,27 @@
        (testing "the unreadable phase is left out and named"
          (is (not (contains? (:phase-results loaded) :implement)))
          (is (every? anomaly/anomaly? (:checkpoint/read-failures loaded)))
-         (is (= [implement-path] (failed-paths (:checkpoint/read-failures loaded)))))))))
+         (is (= [implement-path] (failed-paths (:checkpoint/read-failures loaded))))
+         (is (= :implement (get-in (first (:checkpoint/read-failures loaded))
+                                   [:anomaly/data :phase/name]))))))))
+
+(deftest ^{:stratum 1} empty-checkpoint-files-are-read-failures-not-absent
+  (fixture/call-with-temp-checkpoint-root
+   (fn [root]
+     (let [run-id (checkpoint-two-phases! root)
+           opts {:checkpoint/root root}
+           implement-path (paths/phase-checkpoint-path root run-id :implement)
+           snapshot-path (paths/machine-snapshot-path root run-id)]
+       (testing "a whitespace-only phase file is named, not dropped"
+         (spit implement-path "  \n")
+         (is (= [implement-path]
+                (failed-paths (:checkpoint/read-failures (workflow/load-checkpoint-data run-id opts))))))
+       (testing "a zero-byte snapshot is an unreadable checkpoint, not no checkpoint"
+         (spit snapshot-path "")
+         (let [loaded (workflow/load-checkpoint-data run-id opts)]
+           (is (anomaly/anomaly? loaded))
+           (is (some #{snapshot-path}
+                     (failed-paths (get-in loaded [:anomaly/data :checkpoint/read-failures]))))))))))
 
 (deftest ^{:stratum 1} unreadable-snapshot-is-an-anomaly-naming-it
   (fixture/call-with-temp-checkpoint-root

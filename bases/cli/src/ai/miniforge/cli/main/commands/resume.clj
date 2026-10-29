@@ -90,6 +90,7 @@
    or its FSM snapshot parked on it."
   [reconstructed phase]
   (or (boolean (some #{phase} (:completed-phases reconstructed)))
+      (boolean (some #{phase} (get-in reconstructed [:checkpoint-manifest :workflow/phases-completed])))
       (contains? (:phase-results reconstructed) phase)
       (= phase (get-in reconstructed [:machine-snapshot :execution/current-phase]))))
 
@@ -292,7 +293,15 @@
         _ (doseq [failure (:checkpoint-read-failures recorded)]
             (display/print-info (messages/t :resume/checkpoint-unreadable
                                             {:error (:anomaly/message failure)})))
-        reconstructed (apply-from-phase recorded (:from-phase opts)
+        ;; A phase whose checkpointed result did not read is rewound to, as
+        ;; `--from-phase` would: the snapshot is parked after it, and
+        ;; restoring it would run later phases without that output.
+        unreadable-phase (wr/unreadable-checkpoint-phase recorded)
+        from-phase (or (:from-phase opts) unreadable-phase)
+        _ (when (and unreadable-phase (nil? (:from-phase opts)))
+            (display/print-info (messages/t :resume/rewinding-to-unreadable
+                                            {:phase (name unreadable-phase)})))
+        reconstructed (apply-from-phase recorded from-phase
                                         #(wr/extract-workspace-checkpoints (read-event-file workflow-id)))
         ;; Checked before a completed run is reported done: an invalid
         ;; request is refused, not answered "already completed".
@@ -370,7 +379,7 @@
             _ (when new-attempt?
                 (doseq [checkpoint (inherited-workspaces
                                     (wr/extract-workspace-checkpoints (read-event-file workflow-id))
-                                    (:from-phase opts)
+                                    from-phase
                                     (:completed-phases reconstructed))]
                   (es/publish! event-stream (es/workspace-persisted event-stream resume-run-id checkpoint))))]
 

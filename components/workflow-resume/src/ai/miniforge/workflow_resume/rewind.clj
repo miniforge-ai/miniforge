@@ -23,9 +23,26 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} kept-phases
-  "The completed phases a rewind to `phase` keeps: those before it."
+  "The completed phases a rewind to `phase` keeps: those before it. A
+   phase the run's manifest recorded at or after `phase` is not kept even
+   when `phase` itself is missing from the completed phases (its
+   checkpointed result did not read)."
   [reconstructed phase]
-  (vec (take-while (complement #{phase}) (:completed-phases reconstructed))))
+  (let [from-phase-on (set (drop-while (complement #{phase})
+                                       (get-in reconstructed [:checkpoint-manifest
+                                                              :workflow/phases-completed])))]
+    (vec (remove from-phase-on
+                 (take-while (complement #{phase}) (:completed-phases reconstructed))))))
+
+(defn ^{:stratum 0} unreadable-phases
+  "Phases whose checkpointed result exists but did not read, in the order
+   the run's manifest recorded them. What they produced is lost: no
+   phase after them can build on it."
+  [reconstructed]
+  (let [unreadable (set (keep #(get-in % [:anomaly/data :phase/name])
+                              (:checkpoint-read-failures reconstructed)))
+        recorded (get-in reconstructed [:checkpoint-manifest :workflow/phases-completed])]
+    (vec (concat (filter unreadable recorded) (remove (set recorded) unreadable)))))
 
 (defn ^{:stratum 0} checkpointed-results
   "The run's phase results that a phase can build on, nil when it has
@@ -39,13 +56,29 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} unreadable-phase
+  "The phase a resume from the FSM snapshot must rewind to, nil when none:
+   the earliest whose checkpointed result did not read. The snapshot is
+   parked after it, and restoring it as is would run later phases
+   without that phase's output. Without a snapshot there is nothing to
+   rewind from."
+  [reconstructed]
+  (when (:machine-snapshot reconstructed)
+    (first (unreadable-phases reconstructed))))
+
 (defn ^{:stratum 1} refusal
   "Why a rewind to `phase` cannot run, nil when it can. It is refused
-   when it would keep a phase with no checkpointed result: the re-run
-   would start without the output it builds on."
+   when it would keep a phase with no checkpointed result, or follow one
+   whose checkpointed result did not read: the re-run would start
+   without the output it builds on."
   [reconstructed phase]
   (let [recorded (set (keys (checkpointed-results reconstructed)))
-        missing (vec (remove recorded (kept-phases reconstructed phase)))]
+        manifest-before (set (take-while (complement #{phase})
+                                         (get-in reconstructed [:checkpoint-manifest
+                                                                :workflow/phases-completed])))
+        missing (vec (distinct
+                      (concat (remove recorded (kept-phases reconstructed phase))
+                              (filter manifest-before (unreadable-phases reconstructed)))))]
     (when (seq missing)
       {:resume/reason :phase-results-not-checkpointed
        :resume/phases missing})))

@@ -85,4 +85,15 @@
       (is (= [(:snapshot files)]
              (failed-paths (get-in result [:anomaly/data :checkpoint/read-failures])))))))
 
+(deftest ^{:stratum 1} an-empty-snapshot-is-the-error-not-missing-events
+  (fs/with-temp-dir [root {:prefix "resume-checkpoint-read-"}]
+    (let [run-id (random-uuid)
+          files (write-checkpoint! root run-id)
+          _ (spit (:snapshot files) "")
+          result (reconstruct-under root run-id)]
+      (is (anomaly/anomaly? result))
+      (is (= :unavailable (:anomaly/type result)))
+      (is (= [(:snapshot files)]
+             (failed-paths (get-in result [:anomaly/data :checkpoint/read-failures])))))))
+
 (comment ::checkpoint-read-failure)

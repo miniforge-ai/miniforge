@@ -95,11 +95,19 @@
 (defn- ^{:stratum 1} read-checkpoint-file
   "Read one checkpoint file: its content, nil when it does not exist, or
    — when it exists but cannot be read or parsed (truncated, unreadable,
-   not EDN) — an anomaly naming the file. One bad file then costs the
-   caller that file and nothing else."
+   not EDN) or holds no record (empty, whitespace, a bare value) — an
+   anomaly naming the file. One bad file then costs the caller that file
+   and nothing else."
   [path]
   (try+
-    (read-edn-file path)
+    (let [content (read-edn-file path)]
+      (if (or (map? content) (not (fs/exists? path)))
+        content
+        (anomaly/anomaly :unavailable
+                         (messages/t :checkpoint/read-failed
+                                     {:path (str path)
+                                      :error (messages/t :checkpoint/no-record)})
+                         {:checkpoint/path (str path)})))
     (catch Exception e
       (anomaly/exception-anomaly :unavailable
                                  (messages/t :checkpoint/read-failed
@@ -159,7 +167,8 @@
    data when the snapshot and manifest read; a phase checkpoint that
    does not read is left out of `:phase-results` and listed, as an
    anomaly naming the file, under `:checkpoint/read-failures` — the
-   snapshot and every other phase still load. When the snapshot or the
+   snapshot and every other phase still load; the anomaly carries the
+   phase's `:phase/name`, so a resume can rewind to it. When the snapshot or the
    manifest exists but does not read, nothing can be restored: the
    result is an `:unavailable` anomaly whose
    `:checkpoint/read-failures` names every file that failed."
@@ -175,7 +184,11 @@
                                (checkpoint-paths/machine-snapshot-path checkpoint-root
                                                                        workflow-run-id)))
          phase-checkpoints (into []
-                                 (map (fn [[phase-id path]] [phase-id (read-checkpoint-file path)]))
+                                 (map (fn [[phase-id path]]
+                                        (let [checkpoint (read-checkpoint-file path)]
+                                          [phase-id (cond-> checkpoint
+                                                      (anomaly/anomaly? checkpoint)
+                                                      (assoc-in [:anomaly/data :phase/name] phase-id))])))
                                  (:workflow/phase-checkpoints readable-manifest))
          read-failures (filterv anomaly/anomaly?
                                 (into [manifest machine-snapshot] (map second) phase-checkpoints))
