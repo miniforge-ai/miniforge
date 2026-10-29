@@ -50,6 +50,25 @@
                        (catch Exception e e))]
           {:out (str out) :thrown thrown})))))
 
+(defn- ^{:stratum 0} spec-run-output
+  "Run `run-workflow-from-spec!` with LLM client creation throwing an
+   unavailable anomaly. Returns {:out stdout :thrown exception-or-nil}."
+  []
+  (let [out (java.io.StringWriter.)]
+    (with-redefs [gc-hooks/run-gc-pass-best-effort! (fn [_repo-fn _gc-fn] nil)
+                  context/create-llm-client
+                  (fn [& _]
+                    (response/throw-anomaly! :anomalies/unavailable
+                                             "No LLM backend available: codex"
+                                             {:backend :codex}))]
+      (binding [*out* out
+                *err* (java.io.StringWriter.)]
+        (let [thrown (try
+                       (sut/run-workflow-from-spec! {:spec/title "t"} {})
+                       nil
+                       (catch Exception e e))]
+          {:out (str out) :thrown thrown})))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} run-error-prints-anomaly-message-test
@@ -57,5 +76,13 @@
     (let [{:keys [out thrown]} (run-output)]
       (is (some? thrown) "the failure still propagates to the command")
       (is (str/includes? out "Workflow not found: wf-missing"))
+      (is (not (str/includes? out "throw+")))
+      (is (not (str/includes? out ":anomaly/category"))))))
+
+(deftest ^{:stratum 1} spec-execution-error-prints-anomaly-message-test
+  (testing "the spec-execution-failed line carries the anomaly's message, not the raw map"
+    (let [{:keys [out thrown]} (spec-run-output)]
+      (is (some? thrown) "the failure still propagates to the command")
+      (is (str/includes? out "No LLM backend available: codex"))
       (is (not (str/includes? out "throw+")))
       (is (not (str/includes? out ":anomaly/category"))))))

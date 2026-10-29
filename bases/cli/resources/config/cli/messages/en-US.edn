@@ -298,7 +298,6 @@
   :run/detected-format "Detected {format} format: {path}"
   :run/unrecognized-format "Unrecognized file format in: {path}\nExpected :spec/title (spec), :dag-id (DAG), or :plan/id (plan)"
   :run/failed "Failed to run workflow: {error}"
-  :run/error-details "  Details: {details}"
 
   ;; ── Worktree ──────────────────────────────────────────────────────────
   :worktree/root-not-found "No git worktree found from: {path}"

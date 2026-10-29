@@ -65,6 +65,30 @@
         (sut/run-cmd {:resume "wf-1"})))
     {:exit @code :out (str out) :err (str err)}))
 
+(defn- ^{:stratum 0} throw-backend-anomaly!
+  [& _]
+  (response/throw-anomaly! :anomalies/unavailable
+                           "No LLM backend available: codex"
+                           {:backend :codex}))
+
+(defn- ^{:stratum 0} run-failure-output
+  "Run `mf run <spec>` with the spec workflow and the plan executor both
+   calling `throw!`, and the real error printers. Returns
+   {:exit first-exit-code :out stdout :err stderr}."
+  [spec throw!]
+  (let [codes  (atom [])
+        out    (java.io.StringWriter.)
+        err    (java.io.StringWriter.)]
+    (with-redefs [shared/exit! (fn [c] (swap! codes conj c) nil)
+                  spec-parser/parse-spec-file (fn [_] {:spec/title "t"})
+                  spec-parser/validate-spec (fn [_] {:valid? true})
+                  workflow-runner/run-workflow-from-spec! throw!
+                  plan-executor/execute-plan throw!]
+      (binding [*out* out
+                *err* err]
+        (sut/run-cmd {:spec spec})))
+    {:exit (first @codes) :out (str out) :err (str err)}))
+
 (defn- ^{:stratum 0} temp-file
   [suffix content]
   (let [f (str (fs/create-temp-file {:suffix suffix}))]
@@ -124,3 +148,21 @@
 
   (testing "a resume that throws a plain exception exits 1"
     (is (= 1 (:exit (resume-failure-output #(throw (ex-info "disk full" {}))))))))
+
+(deftest ^{:stratum 1} run-failure-prints-anomaly-message-test
+  (doseq [[label spec] [["markdown spec" (temp-file ".md" "---\ntitle: t\n---\nbody")]
+                        ["plan file" (temp-file ".edn" (pr-str {:plan/id "p" :plan/tasks []}))]]]
+    (testing (str label ": a thrown anomaly is reported by its message on stderr, exit 1")
+      (let [{:keys [exit out err]} (run-failure-output spec throw-backend-anomaly!)]
+        (is (= 1 exit) label)
+        (is (str/includes? err "Failed to run workflow: No LLM backend available: codex") label)
+        (is (not (str/includes? (str out err) "throw+")) label)
+        (is (not (str/includes? (str out err) ":anomaly/category")) label)
+        (is (not (str/includes? err "Task Code Error")) (str label ": no catch-all classification")))))
+  (testing "an error the classifier recognises is shown classified, on stderr"
+    (let [{:keys [exit out err]} (run-failure-output
+                                  (temp-file ".md" "---\ntitle: t\n---\nbody")
+                                  (fn [& _] (throw (ex-info "handoff failed for agent implementer" {}))))]
+      (is (= 1 exit))
+      (is (str/includes? err "Agent System Error"))
+      (is (not (str/includes? out "Agent System Error"))))))
