@@ -203,20 +203,21 @@
         (assoc-in [:error :data :quarantined] copy))))
 
 (defn- ^{:stratum 1} with-queue-lock!
-  "Acquire an exclusive advisory JVM file lock on `path`, execute `thunk`,
-   then release the lock.
+  "Acquire an exclusive advisory file lock on the queue at `path`, execute
+   `thunk`, then release the lock.
+
+   The lock is on a sidecar `<path>.lock`, never on the queue file that
+   `thunk` reads and writes: POSIX record locks belong to the process,
+   and closing any descriptor of the locked file (each slurp and spit
+   opens one) would release the lock while `thunk` still runs.
 
    Polls for up to 500 ms in 25 ms increments before giving up.  Returns
    `result/err :scratch-gc-queue/locked` when the lock cannot be acquired
-   — this is the expected no-op for concurrent best-effort GC callers.
-
-   The file is created at `path` if it does not already exist (needed so
-   the FileChannel can be opened before the queue contains any entries)."
+   — this is the expected no-op for concurrent best-effort GC callers."
   [path thunk]
-  (let [nio-path (Paths/get path (make-array String 0))
+  (let [nio-path (Paths/get (str path ".lock") (make-array String 0))
         opts     (into-array StandardOpenOption
-                             [StandardOpenOption/READ
-                              StandardOpenOption/WRITE
+                             [StandardOpenOption/WRITE
                               StandardOpenOption/CREATE])]
     (try
       (with-open [^FileChannel ch (FileChannel/open nio-path opts)]
