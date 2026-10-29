@@ -91,6 +91,17 @@
       (is (empty? (filter (test-files-under "projects/miniforge/e2e")
                           discovered))))))
 
+(deftest ^{:stratum 1} discovers-every-development-test-test
+  (let [discovered (set (sut/discovered-development-tests))]
+    (testing "every *_test.clj under development/test is discovered"
+      (is (= (test-files-under "development/test") discovered)))
+    (testing "including this namespace and the task tests CI never ran"
+      (doseq [ns-name ["test-runner-test" "build-test" "deps-resources-test"
+                       "ai.miniforge.dogfood-test"]]
+        (is (contains? discovered ns-name) ns-name)))
+    (testing "support namespaces are not run as tests"
+      (is (not (contains? discovered "ai.miniforge.test-harness"))))))
+
 (deftest ^{:stratum 1} project-test-code-is-not-on-paths-test
   (let [{:keys [paths aliases]} (project-deps "miniforge")]
     (testing "no test directory is a classpath root of the project's builds"

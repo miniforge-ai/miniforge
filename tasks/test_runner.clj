@@ -50,6 +50,12 @@
   {"miniforge"      ["test" "integration"]
    "miniforge-core" ["test"]})
 
+(def ^{:stratum 0} ^:private development-test-root
+  "Task and tooling tests (tests for tasks/*.clj, build.clj, the dev
+   harness). `poly test :all` skips the development project, so
+   `development` is their only runner."
+  "development/test")
+
 (def ^{:stratum 0} known-failing-project-tests
   "Discovered project test namespaces that fail on main, skipped by name
    until fixed. `integration` prints each skip and its reason on every
@@ -84,6 +90,14 @@
   (->> (get project-test-roots project)
        (map #(str "projects/" project "/" %))
        bb-test-runner/discover-test-namespaces
+       (map (comp str :ns))
+       sort
+       vec))
+
+(defn ^{:stratum 1} discovered-development-tests
+  "Every *_test.clj namespace under development/test, as sorted strings."
+  []
+  (->> (bb-test-runner/discover-test-namespaces [development-test-root])
        (map (comp str :ns))
        sort
        vec))
@@ -173,6 +187,29 @@
         (when-not (zero? exit)
           (println "❌ Integration tests failed in project:" project)
           (System/exit exit))))))
+
+(defn ^{:stratum 2} development
+  "Run every development/test namespace from the repo root on the
+   :dev:test:build classpath (:build because build-test loads build.clj,
+   which needs tools.build). Exits non-zero on any failure or error, or
+   when nothing is discovered."
+  []
+  (println "🧪 Running development tests...")
+  (let [nses (discovered-development-tests)
+        _ (when (empty? nses)
+            (println "❌ No development tests discovered under" development-test-root)
+            (System/exit 1))
+        ns-args (apply str (map (fn [n] (str " '" n)) nses))
+        expr (str "(require 'clojure.test" ns-args ") "
+                  "(let [r (clojure.test/run-tests" ns-args ")] "
+                  "  (shutdown-agents) "
+                  "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")
+        env  (bb-test-runner/sanitize-git-worktree-env (into {} (System/getenv)))
+        _ (println (format "Running %d development test namespaces" (count nses)))
+        exit (run-stream! {:env env} (proc/clojure-command) "-M:dev:test:build" "-e" expr)]
+    (when-not (zero? exit)
+      (println "❌ Development tests failed with exit code:" exit)
+      (System/exit exit))))
 
 (defn ^{:stratum 2} precommit-smoke
   "Run the hand-curated pre-commit smoke set.

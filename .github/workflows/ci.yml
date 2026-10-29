@@ -198,10 +198,11 @@ jobs:
 
       # Pull requests use stable-derived changed-and-affected scope. Main
       # pushes keep the full suite as the stable-tag authority (`bb test:all`
-      # is `bb test:poly` followed by `bb test:integration`, split here into
-      # two steps). GitHub Actions' default Linux shell is `bash -e {0}` — no
-      # pipefail; without `set -o pipefail`, `bb ... | tee` reports the exit
-      # code of `tee` instead of the test command.
+      # is `bb test:poly`, `bb test:integration` and `bb test:dev`, split
+      # here into three steps). GitHub Actions' default Linux shell is
+      # `bash -e {0}` — no pipefail; without `set -o pipefail`,
+      # `bb ... | tee` reports the exit code of `tee` instead of the test
+      # command.
       - name: Run tests
         run: |
           set -o pipefail
@@ -227,6 +228,17 @@ jobs:
           bb test:integration 2>&1 | tee integration-output.log
           echo "::endgroup::"
 
+      # Every *_test.clj under development/test: tests for tasks/*.clj,
+      # build.clj and the dev harness. `poly test :all` skips the
+      # development project, so this step is their only CI coverage.
+      - name: Development tests
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          echo "::group::Development tests"
+          bb test:dev 2>&1 | tee dev-test-output.log
+          echo "::endgroup::"
+
       # Keep provider boundary and durable reconciliation coverage explicit.
       - name: OPSV provider contracts and durable reconciliation
         run: |
@@ -250,6 +262,7 @@ jobs:
           path: |
             test-output.log
             integration-output.log
+            dev-test-output.log
           retention-days: 7
 
   # Windows fidelity job. Validates the bb-platform / bb-proc unit tests
