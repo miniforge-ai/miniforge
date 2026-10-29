@@ -245,14 +245,18 @@
   "True when anything is stored under a run's checkpoint directory,
    including phase checkpoints with no snapshot yet and files that do not
    load. Args: [workflow-run-id] or [workflow-run-id opts]. The check that
-   a run id is free: `load-checkpoint-data` answers nil for all of those."
+   a run id is free: `load-checkpoint-data` answers nil or an anomaly for
+   those."
   checkpoints/checkpoint-present?)
 
 (def ^{:stratum 0} load-checkpoint-data
   "Load durable checkpoint data for a run and validate it at the boundary.
    Args: [workflow-run-id] or [workflow-run-id opts]. Returns the validated
    checkpoint-data map, or nil when no checkpoint exists; throws ex-info
-   when a found checkpoint fails schema validation."
+   when a found checkpoint fails schema validation. A phase checkpoint
+   that does not read is left out and named, as an anomaly, under
+   `:checkpoint/read-failures`; an unreadable snapshot or manifest
+   returns an `:unavailable` anomaly naming every unreadable file."
   checkpoints/load-checkpoint-data)
 
 (def ^{:stratum 0} run-chain
