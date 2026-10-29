@@ -512,11 +512,12 @@
     :args->opts [:workflow-id]
     :restrict true}
 
-   ;; Monitoring commands
+   ;; Monitoring commands. `web` --port has no :default: a default here
+   ;; would hide the config's [:dashboard :port] from web-cmd.
    {:cmds ["web"]
     :fn web-cmd
     :restrict true
-    :spec {:port {:coerce :int :alias :p :default 7878}
+    :spec {:port {:coerce :int :alias :p}
            :open {:coerce :boolean :alias :o}}}
 
    {:cmds ["tui"]
