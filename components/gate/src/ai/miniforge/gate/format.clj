@@ -126,8 +126,8 @@
     (let [edits (:result result)]
       (when (seq edits)
         ;; Replace the real file, not a symlink pointing at it, and give
-        ;; the temp file the original's mode: createTempFile makes 0600,
-        ;; which would otherwise strip group/other read and the exec bit.
+        ;; the temp file the original's mode: a new file gets the umask
+        ;; default, which would drop an exec bit or widen a 0600 file.
         (let [content   (slurp file)
               formatted (apply-text-edits content edits)
               ^Path target (.toRealPath (.toPath (io/file file))
