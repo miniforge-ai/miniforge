@@ -200,6 +200,19 @@
       (is (= :invalid-branch (-> r :error :code)))
       (is (false? @exec-called) "exec-fn must not be invoked for an empty branch"))))
 
+(deftest ^{:stratum 1} git-persist!-creates-a-destination-branch-head-already-reaches-test
+  (testing "HEAD on another remote branch (here the base) is not the destination: the branch is created"
+    (let [clone   (single-branch-clone)
+          exec-fn (fn [cmd]
+                    (let [r (if (string? cmd)
+                              (shell/sh "sh" "-c" cmd :dir clone)
+                              (apply shell/sh (concat cmd [:dir clone])))]
+                      {:data {:exit-code (:exit r) :stdout (:out r) :stderr (:err r)}}))
+          r       (sut/git-persist! exec-fn {:branch "task/new"})]
+      (is (true? (:pushed? (result/unwrap r))) "a clean worktree still publishes a missing branch")
+      (is (str/includes? (:out (shell/sh "git" "-C" clone "ls-remote" "origin" "refs/heads/task/new"))
+                         (:commit-sha (result/unwrap r)))))))
+
 (deftest ^{:stratum 1} git-persist!-after-a-push-a-clean-persist-is-a-no-op-test
   (testing "--single-branch: the pushed task branch is not re-pushed by the next clean persist"
     (let [clone   (single-branch-clone)
@@ -216,10 +229,11 @@
 
 ;; git-persist!
 (deftest ^{:stratum 2} git-persist!-no-changes-test
-  (testing "Empty `git status --porcelain` ⇒ no commit, no push, ok with :no-changes? true"
+  (testing "Empty `git status --porcelain` and the branch already at HEAD ⇒ no commit, no push, :no-changes? true"
     (let [[exec-fn calls] (recording-exec-fn
-                           {"git status" (shell-result "")
-                            "rev-parse"  (shell-result head-sha)})
+                           {"git status"    (shell-result "")
+                            "git ls-remote" (shell-result (str head-sha "\trefs/heads/task/foo\n"))
+                            "rev-parse"     (shell-result head-sha)})
           r (sut/git-persist! exec-fn {:branch "task/foo" :message "checkpoint"})]
       (is (result/ok? r))
       (let [data (result/unwrap r)]
@@ -328,7 +342,7 @@
     (let [[held-exec held-calls] (recording-exec-fn {"git status"    (shell-result " M src/a.clj")
                                                      "git rev-parse" (shell-result head-sha)})
           [clean-exec calls]     (recording-exec-fn {"git status"    (shell-result "")
-                                                     "git rev-list"  (shell-result "1\n")
+                                                     "git ls-remote" (shell-result "abc\trefs/heads/task/x\n")
                                                      "git rev-parse" (shell-result head-sha)})
           held  (sut/git-persist! held-exec {:branch "task/x" :push? false})
           later (sut/git-persist! clean-exec {:branch "task/x"})]
@@ -339,15 +353,16 @@
       (is (some #(cmd-has? % "git push") @calls))
       (is (not-any? #(cmd-has? % "commit") @calls) "nothing new to commit")))
   (testing "a clean worktree with nothing pending is still a no-op"
-    (let [[exec-fn calls] (recording-exec-fn {"git status"   (shell-result "")
-                                              "git rev-list" (shell-result "0\n")})]
+    (let [[exec-fn calls] (recording-exec-fn {"git status"    (shell-result "")
+                                              "git ls-remote" (shell-result (str head-sha "\trefs/heads/task/x\n"))
+                                              "git rev-parse" (shell-result head-sha)})]
       (is (true? (:no-changes? (result/unwrap (sut/git-persist! exec-fn {:branch "task/x"})))))
       (is (not-any? #(cmd-has? % "push") @calls)))))
 
 (deftest ^{:stratum 2} git-persist!-pending-check-failure-is-an-error-test
-  (testing "a failed rev-list on a clean worktree is an error, not :no-changes?"
-    (let [[exec-fn calls] (recording-exec-fn {"git status"   (shell-result "")
-                                              "git rev-list" {:data {:exit-code 128 :stderr "bad"}}})
+  (testing "a failed ls-remote on a clean worktree is an error, not :no-changes?"
+    (let [[exec-fn calls] (recording-exec-fn {"git status"    (shell-result "")
+                                              "git ls-remote" {:data {:exit-code 128 :stderr "bad"}}})
           r (sut/git-persist! exec-fn {:branch "task/x"})]
       (is (= :persist-pending-failed (get-in r [:error :code])))
       (is (not-any? #(cmd-has? % "push") @calls)))))

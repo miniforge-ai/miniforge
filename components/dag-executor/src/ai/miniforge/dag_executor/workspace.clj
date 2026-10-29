@@ -60,8 +60,9 @@
               no shell — preferred for user-supplied values to avoid injection)
    - opts: {:branch string, :message string, :push? bool}
      :push? false commits without pushing (default true). A later call
-     with :push? true pushes such held commits even when the worktree is
-     clean.
+     with :push? true pushes whenever the remote's `refs/heads/<branch>`
+     is not HEAD -- a held commit, or a branch never created there --
+     even when the worktree is clean.
 
    Returns result monad with {:persisted? bool :pushed? bool :commit-sha
    string :branch string}.
@@ -74,18 +75,24 @@
       (let [add-r (exec-fn "git add -A")
             status-r (when-not (failed-step add-r "") (exec-fn "git status --porcelain"))
             has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))
-            ;; A commit an earlier :push? false call held back is still
-            ;; owed to the remote when the worktree is clean: count the
-            ;; commits no remote-tracking ref has yet.
-            pending-r (when (and push? (not has-changes?) (not (failed-step status-r "")))
-                        (exec-fn ["git" "rev-list" "--count" "HEAD" "--not" "--remotes"]))
-            pending? (and pending-r (not (failed-step pending-r ""))
-                          (pos? (or (parse-long (str/trim (get-in pending-r [:data :stdout] ""))) 0)))]
+            ;; With a clean worktree a push is still owed when the destination
+            ;; branch itself is not at HEAD: a commit an earlier :push? false
+            ;; call held back, or a branch never created. Ask the remote, not
+            ;; the remote-tracking refs: HEAD reachable from another branch
+            ;; (the base, a parent task) says nothing about this one.
+            remote-r (when (and push? (not has-changes?) (not (failed-step status-r "")))
+                       (exec-fn ["git" "ls-remote" "origin" (str "refs/heads/" branch)]))
+            head-r (when (and remote-r (not (failed-step remote-r "")))
+                     (exec-fn "git rev-parse HEAD"))
+            pending-r (or (when (failed-step remote-r "") remote-r) head-r)
+            pending? (and head-r (not (failed-step head-r ""))
+                          (not= (first (str/split (str/trim (get-in remote-r [:data :stdout] "")) #"\s+"))
+                                (str/trim (get-in head-r [:data :stdout] ""))))]
         (cond
           (failed-step add-r "") (result/err :persist-add-failed (failed-step add-r "git add failed"))
           (failed-step status-r "") (result/err :persist-status-failed (failed-step status-r "git status failed"))
           ;; Not knowing whether a held commit is owed is not "nothing to do".
-          (failed-step pending-r "") (result/err :persist-pending-failed (failed-step pending-r "git rev-list failed"))
+          (failed-step pending-r "") (result/err :persist-pending-failed (failed-step pending-r "git ls-remote failed"))
           (and (not has-changes?) (not pending?))
           (result/ok {:persisted? false :commit-sha nil :no-changes? true :branch branch})
           :else
@@ -95,18 +102,12 @@
                            (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)]))
                 push-r (when (and push? (not (failed-step commit-r "")))
                          (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"]))
-                ;; A --single-branch clone's fetch refspec never moves the
-                ;; task branch's tracking ref, so the pending count above
-                ;; would stay positive after every push: move it here.
-                track-r (when (and push-r (not (failed-step push-r "")))
-                          (exec-fn ["git" "update-ref" (str "refs/remotes/origin/" branch) "HEAD"]))
                 sha-r (when (and (not (failed-step commit-r ""))
-                                 (or (not push?) (and track-r (not (failed-step track-r "")))))
+                                 (or (not push?) (and push-r (not (failed-step push-r "")))))
                         (exec-fn "git rev-parse HEAD"))]
             (cond
               (failed-step commit-r "") (result/err :persist-commit-failed (failed-step commit-r "git commit failed"))
               (failed-step push-r "")   (result/err :persist-push-failed (failed-step push-r "git push failed"))
-              (failed-step track-r "")  (result/err :persist-tracking-failed (failed-step track-r "git update-ref failed"))
               (failed-step sha-r "")    (result/err :persist-sha-failed (failed-step sha-r "git rev-parse failed"))
               :else (result/ok {:persisted? true
                                 :pushed? (boolean push?)
