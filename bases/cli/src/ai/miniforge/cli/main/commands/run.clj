@@ -120,9 +120,10 @@
   (flush)
   (System/exit 1))
 
-(defn- ^{:stratum 1} finish!
+(defn ^{:stratum 1} finish!
   "Return `result` when the run succeeded; otherwise exit 1, so a script or
-   CI job running `run` sees the failure instead of a zero exit."
+   CI job running `run` sees the failure instead of a zero exit. Also used
+   by `mf resume`, `mf workflow run` and `mf chain run` in `cli.main`."
   [result]
   (if (run-succeeded? result)
     result
