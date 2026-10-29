@@ -35,22 +35,19 @@
       (clojure.string/lower-case)))
 
 (defn- ^{:stratum 0} write-atomically!
-  "Call `(write-fn tmp)` on a sibling temp file, then rename it over
-   `path` atomically, so a crash mid-write never leaves a partial file
-   visible to readers. The temp file sits beside the target so the
-   rename stays on one filesystem, and its name is unique so two writers
-   never share one. On failure it is removed and the original exception
-   rethrown.
-
-   When the target already exists its POSIX permissions are copied to
-   the temp file before the rename, so an overwrite does not widen the
-   file's mode. On non-POSIX filesystems the step is skipped silently."
+  "Create an empty sibling temp file, optionally narrow its permissions
+   to match the existing target's, call `(write-fn tmp)` to fill it,
+   then rename it over `path` atomically. The write therefore occurs
+   under the target's restricted mode rather than the process umask,
+   so the content is never transiently readable by other users. On
+   non-POSIX filesystems the permission step is skipped silently. On
+   failure the temp file is removed and the original exception rethrown."
   [path write-fn]
   (let [target (io/file path)
         tmp    (io/file (.getParentFile target)
                         (str "." (random-uuid) ".tmp"))]
     (try
-      (write-fn tmp)
+      (.createNewFile tmp)
       (try
         (Files/setPosixFilePermissions
          (.toPath tmp)
@@ -58,6 +55,7 @@
           (.toPath target) (make-array java.nio.file.LinkOption 0)))
         (catch java.nio.file.NoSuchFileException _)
         (catch UnsupportedOperationException _))
+      (write-fn tmp)
       (Files/move (.toPath tmp) (.toPath target)
                   (into-array StandardCopyOption
                               [StandardCopyOption/ATOMIC_MOVE
