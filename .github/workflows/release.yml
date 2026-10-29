@@ -24,11 +24,68 @@ env:
   MINIFORGE_CI_BOT_APP_ID: "3360143"
 
 jobs:
+  # Refuses to release a commit that is not on main, or whose newest
+  # ci.yml push run on main did not pass. Tag pushes and manual
+  # dispatches both release github.sha. `bb release` (tasks/release.clj)
+  # applies the same CI rule before it tags. No checkout or toolchain:
+  # `gh` is preinstalled on the runner.
+  gate:
+    name: Release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ github.sha }}
+    steps:
+      - name: Commit is on main
+        run: |
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$SHA" --jq .status)
+          case "$status" in
+            identical|behind) echo "$SHA is on main (compare status: $status)." ;;
+            *) echo "::error::$SHA is not on main (compare status: $status); refusing to release."
+               exit 1 ;;
+          esac
+
+      # Waits while CI is still running (a tag pushed right after a
+      # merge), up to 40 minutes; a commit with no CI run gets 3 minutes
+      # for the run to appear (only the tip of each push to main gets one).
+      - name: CI passed for this commit
+        run: |
+          start=$(date +%s)
+          while :; do
+            newest=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&branch=main&per_page=100" \
+              --jq 'if (.workflow_runs | length) == 0 then "none" else (.workflow_runs | sort_by(.id) | last | "\(.status) \(.conclusion) \(.html_url)") end')
+            echo "Newest ci.yml push run for $SHA: $newest"
+            elapsed=$(( $(date +%s) - start ))
+            case "$newest" in
+              "completed success "*)
+                exit 0 ;;
+              completed\ *)
+                echo "::error::ci.yml did not pass for $SHA; refusing to release."
+                exit 1 ;;
+              none)
+                if (( elapsed >= 180 )); then
+                  echo "::error::No ci.yml push run on main for $SHA; refusing to release."
+                  exit 1
+                fi ;;
+              *)
+                if (( elapsed >= 2400 )); then
+                  echo "::error::ci.yml still running for $SHA after 40 minutes; re-run this workflow once it passes."
+                  exit 1
+                fi ;;
+            esac
+            sleep 30
+          done
+
   # Resolves the release version once, before any build, so every
   # artifact is stamped with it (MINIFORGE_VERSION -> miniforge/version.edn
   # in the jar, read by `mf version`).
   version:
     name: Determine version
+    needs: gate
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -117,6 +174,18 @@ jobs:
         env:
           MINIFORGE_VERSION: ${{ needs.version.outputs.version }}
         run: bb build:cli
+
+      - name: Smoke-test the built jar
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          out=$(bb --jar dist/miniforge.jar -m ai.miniforge.cli.main version)
+          echo "$out"
+          first=$(head -n1 <<<"$out")
+          if [[ "$first" != *" $VERSION" ]]; then
+            echo "::error::Built jar reports '$first'; expected version $VERSION."
+            exit 1
+          fi
 
       - name: Create artifact name
         id: artifact
@@ -220,6 +289,18 @@ jobs:
         run: bb build:cli
         shell: pwsh
 
+      - name: Smoke-test the built jar
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $out = @(bb --jar dist/miniforge.jar -m ai.miniforge.cli.main version)
+          $out
+          if ($LASTEXITCODE -ne 0 -or -not $out[0].EndsWith(" $env:VERSION")) {
+            Write-Error "Built jar reports '$($out[0])'; expected version $env:VERSION."
+            exit 1
+          }
+
       - name: Package zip with mf.cmd launcher
         shell: pwsh
         run: |
@@ -283,6 +364,9 @@ jobs:
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v0.1.15
         with:
           tag_name: ${{ needs.version.outputs.release_tag }}
+          # A dispatch creates the tag; point it at the gated, built
+          # commit rather than wherever main is by now.
+          target_commitish: ${{ github.sha }}
           name: Release ${{ needs.version.outputs.version }}
           draft: false
           prerelease: false
