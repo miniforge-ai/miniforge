@@ -32,6 +32,36 @@
   [code]
   (System/exit code))
 
+(defn ^{:stratum 0} interactive?
+  "True when stdin is a terminal. `System/console` is nil unless stdin and
+   stdout are both terminals (babashka and JDK 21)."
+  []
+  (some? (System/console)))
+
+(defn ^{:stratum 0} open-browser!
+  "Open `url` in the default browser. Best-effort: a failure is ignored."
+  [url]
+  (try
+    (process/sh "open" url)
+    (catch Exception _e nil)))
+
+(defn ^{:stratum 0} offer-browser!
+  "Offer to open `url` with `open!`, only when `interactive?` (stdin is a
+   terminal): Enter opens it, end of input (Ctrl-D) does not. Run from a
+   script or an agent, `mf web` neither prompts nor opens a browser; it
+   only says how to stop. Returns true when the browser was opened."
+  [url interactive? open!]
+  (if interactive?
+    (do
+      (println (messages/t :web/press-enter))
+      (when (some? (read-line))
+        (println (messages/t :web/opening-browser))
+        (open! url)
+        true))
+    (do
+      (println (messages/t :web/press-ctrl-c))
+      false)))
+
 (def ^{:stratum 0} ^:dynamic *web-available?* false)
 
 (def ^{:stratum 0} ^:dynamic *start-web-dashboard!*
@@ -71,19 +101,10 @@
           (if open
             (do
               (println (messages/t :web/opening-browser))
-              (try
-                (process/sh "open" url)
-                (catch Exception _e nil))
-              (println (messages/t :web/press-ctrl-c))
-              @(promise))
-            (do
-              (println (messages/t :web/press-enter))
-              (read-line)
-              (println (messages/t :web/opening-browser))
-              (try
-                (process/sh "open" url)
-                (catch Exception _e nil))
-              @(promise))))  ; Block until interrupted
+              (open-browser! url)
+              (println (messages/t :web/press-ctrl-c)))
+            (offer-browser! url (interactive?) open-browser!))
+          @(promise))  ; Block until interrupted
         (catch java.net.BindException _e
           (display/print-error (messages/t :web/port-in-use {:port port}))
           (println)
