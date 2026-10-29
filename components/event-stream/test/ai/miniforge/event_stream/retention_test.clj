@@ -67,6 +67,14 @@
                     (health-event :openai :degraded) (event :agent/chunk nil) (event :agent/chunk nil)]]
         (is (= [(events 1) (events 2) (events 3) (events 4)]
                (retention/compact events policy)))))
+    (testing "the workflow-less bucket takes no workflow slot, whichever published last"
+      (let [health  (health-event :anthropic :unavailable)
+            started (event :workflow/started a)
+            other   (event :workflow/started b)]
+        (is (= [health started other] (retention/compact [health started other] policy))
+            "older health is not evicted by two newer workflows")
+        (is (= [started other health] (retention/compact [started other health] policy))
+            "newer health does not evict a workflow")))
     (testing "events without a workflow id share one capped bucket"
       (let [orphans (vec (repeatedly 3 (partial event :pr-train/updated nil)))]
         (is (= (subvec orphans 1) (retention/compact orphans policy)))))))

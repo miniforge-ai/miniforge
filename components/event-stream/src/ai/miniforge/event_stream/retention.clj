@@ -23,9 +23,12 @@
    whose type is in `:lifecycle-types`, the newest event of a
    `:latest-per-dependency-types` type for each dependency, and the newest
    `:max-events-per-workflow` other events. Older workflows leave the
-   in-memory history entirely. Events without a `:workflow/id` share one
-   bucket (dependency-health events are emitted without one). Retention shapes only what `get-events` returns: sinks and
-   subscribers still receive every event.
+   in-memory history entirely. Events without a `:workflow/id` (such as
+   dependency-health events) share one bucket with the same per-bucket
+   rules; it takes no workflow slot and is never evicted, so it neither
+   displaces a workflow nor loses the latest health per dependency.
+   Retention shapes only what `get-events` returns: sinks and subscribers
+   still receive every event.
 
    Compaction runs once the history grows `:max-events-per-workflow`
    events past its size after the previous compaction, so its cost is
@@ -51,22 +54,23 @@
 
 (defn- ^{:stratum 0} retain-step
   "Reduction step over events newest-first. Admits a workflow while fewer
-   than `max-workflows` are admitted, then keeps an admitted workflow's
-   lifecycle events, its newest dependency-health event per dependency
-   (keyed as the dashboard projects it), and its first
-   `max-events-per-workflow` others."
+   than `max-workflows` are admitted (the workflow-less bucket needs no
+   admission), then keeps an admitted bucket's lifecycle events, its
+   newest dependency-health event per dependency (keyed as the dashboard
+   projects it), and its first `max-events-per-workflow` others."
   [{:keys [max-workflows max-events-per-workflow lifecycle-types latest-per-dependency-types]}
    {:keys [workflows counts dependencies] :as acc} event]
   (let [workflow-id (:workflow/id event)
         workflows   (cond-> workflows
-                      (< (count workflows) max-workflows) (conj workflow-id))
+                      (and (some? workflow-id) (< (count workflows) max-workflows))
+                      (conj workflow-id))
         kept        (get counts workflow-id 0)
         dependency  (when (contains? latest-per-dependency-types (:event/type event))
                       [workflow-id (or (:dependency/id event) (:dependency/vendor event)
                                        (:dependency/source event))])
         acc         (assoc acc :workflows workflows)]
     (cond
-      (not (contains? workflows workflow-id))
+      (and (some? workflow-id) (not (contains? workflows workflow-id)))
       acc
 
       (contains? lifecycle-types (:event/type event))
