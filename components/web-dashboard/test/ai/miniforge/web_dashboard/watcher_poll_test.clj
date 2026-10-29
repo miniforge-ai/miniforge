@@ -113,7 +113,7 @@
     (es/publish! stream (wf-event :workflow/started wf-id))
     (let [t0 (System/currentTimeMillis)
           s1 (sut/poll-once! (sut/initial-state base t0) base publish (+ t0 500))
-          seen (get-in s1 [:seen (str wf-id) :names])
+          seen (get-in s1 [:seen (str wf-id)])
           ;; Nothing written for the whole window: the sweep drops the directory.
           t1 (+ t0 sut/active-window-ms 1000)
           s2 (sut/poll-once! s1 base publish t1)]

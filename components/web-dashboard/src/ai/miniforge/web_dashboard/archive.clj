@@ -158,8 +158,8 @@
   [events-dir workflow-id]
   (when-let [dir (es/workflow-events-dir events-dir workflow-id)]
     (let [files      (event-files/event-files dir)
-          first-tick (some-> (first files) event-files/file-tick)
-          head-count (+ 2 (count (take-while #(= first-tick (event-files/file-tick %)) files)))]
+          first-ms   (some-> (first files) event-files/file-ms)
+          head-count (+ 2 (count (take-while #(= first-ms (event-files/file-ms %)) files)))]
       (some-> (derive-summary (first (event-files/read-ordered (take head-count files)))
                               (->> (first (event-files/newest-batches files tail-file-count))
                                    (take-last tail-file-count)

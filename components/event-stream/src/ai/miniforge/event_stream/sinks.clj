@@ -50,7 +50,7 @@
    [java.io ByteArrayOutputStream]
    [java.net.http HttpClient HttpResponse$BodyHandlers]
    [java.nio.file Files StandardCopyOption]
-   [java.time Instant ZonedDateTime ZoneOffset]
+   [java.time Instant LocalDateTime ZonedDateTime ZoneOffset]
    [java.time.format DateTimeFormatter]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -288,6 +288,22 @@
         (catch Exception _e
           ;; Continue with other sinks even if one fails
           nil)))))
+
+(defn ^{:stratum 0} event-file-ms
+  "The epoch milliseconds an event file's name records, inverting the
+   `event-filename` grammar: the timestamp of a legacy
+   `{yyyyMMddTHHmmssSSSZ}-{uuid}.json` name, the timestamp bits of a
+   `{snowflake-hex16}__{seq12}.transit.json` name. Both record when the
+   event was made, so this orders a directory holding both grammars,
+   which their names alone do not. nil for any other name (the manifest,
+   the snapshot, a temp file), so it also tells event files apart."
+  [^String file-name]
+  (if-let [[_ ts] (re-matches #"(\d{8}T\d{9}Z)-[^/]+\.json" file-name)]
+    (.toEpochMilli (.toInstant (LocalDateTime/parse ts (DateTimeFormatter/ofPattern "yyyyMMdd'T'HHmmssSSS'Z'"))
+                               ZoneOffset/UTC))
+    (when-let [[_ hex] (re-matches #"([0-9a-f]{16})__\d{12}\.transit\.json" file-name)]
+      (+ snowflake/miniforge-epoch-ms
+         (bit-shift-right (Long/parseUnsignedLong hex 16) snowflake/ts-shift)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
