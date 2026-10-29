@@ -683,8 +683,12 @@
                   existing-files (:task/existing-files input)
                   effective-system (str @planner-system-prompt
                                         (get input :task/behavior-addendum ""))
+                  ;; Budget against the model the client sends; the agent
+                  ;; config's :model follows the configured backend, which
+                  ;; the run may have replaced.
                   budget (assemble-within-budget
-                          spec-text existing-files effective-system (:model config)
+                          spec-text existing-files effective-system
+                          (llm/client-model llm-client)
                           (get @planner-prompt-data :prompt/context-window-reserve-tokens 50000))
                   user-prompt (:user-prompt budget)]
               (emit-prompt-size! context budget)

@@ -23,6 +23,7 @@
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.artifact-session :as artifact-session]
+   [ai.miniforge.agent.context-budget :as context-budget]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.llm.interface :as llm]
@@ -610,6 +611,50 @@
           (catch Exception _))
         (is (some? @captured) "the planner must have called the LLM")
         (is (nil? (:model @captured)))))))
+
+(deftest ^{:stratum 0} planner-budgets-against-the-client-model-test
+  ;; The agent config's :model follows the configured backend (:claude
+  ;; here); the run's client is on codex and sends no model, so the prompt
+  ;; budget must not use Claude's window.
+  (doseq [[label client expected]
+          [["a codex client with no model" (llm/create-client {:backend :codex}) nil]
+           ["a client that names its model"
+            (llm/create-client {:backend :claude :model "claude-sonnet-4-6"})
+            "claude-sonnet-4-6"]]]
+    (testing label
+      (let [budget-models (atom [])
+            original      context-budget/assemble-within-budget
+            agent         (with-redefs [config/load-merged-config
+                                        (constantly (assoc-in config/default-config
+                                                              [:llm :backend] :claude))]
+                            (planner/create-planner {:llm-backend client}))]
+        (with-redefs [context-budget/assemble-within-budget
+                      (fn [opts]
+                        (swap! budget-models conj (:model opts))
+                        (original opts))
+                      llm/success? (constantly true)
+                      llm/get-content (constantly "")
+                      llm/chat (constantly {:status :success})
+                      llm/chat-stream (constantly {:status :success})
+                      model/resolve-llm-client-for-role (fn [_role provided] provided)
+                      artifact-session/with-session
+                      (fn [_context body-fn]
+                        {:llm-result (body-fn {:dir "/tmp/fake-session"
+                                               :workdir "/tmp/fake-workdir"
+                                               :mcp-config-path "/tmp/fake-session/mcp-config.json"
+                                               :mcp-allowed-tools []
+                                               :supervision {}
+                                               :pre-session-snapshot {}})
+                         :artifact nil
+                         :worktree-artifacts {}
+                         :context-misses nil
+                         :pre-session-snapshot {}
+                         :session-mode :host})]
+          (try
+            (core/invoke agent {:llm-backend client} {:description "Plan this"})
+            (catch Exception _))
+          (is (seq @budget-models) "the planner must have budgeted the prompt")
+          (is (every? #(= expected %) @budget-models)))))))
 
 ;; planner-submission-retry? — recovery trigger (incl. success-but-no-artifact)
 (def ^{:stratum 0} ^:private submission-retry? #'planner/planner-submission-retry?)
