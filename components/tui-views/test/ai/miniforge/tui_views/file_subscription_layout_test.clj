@@ -51,7 +51,7 @@
                                :workflow/spec {:name "Old run"}}))
     dir))
 
-(defn- ^{:stratum 0} new-runs [] (atom {:known #{} :waiting {} :refresh {} :ignored #{}}))
+(defn- ^{:stratum 0} new-runs [] (atom {:known #{} :waiting {} :refresh {} :ignored {}}))
 
 (defn- ^{:stratum 0} row-status
   "The status of the one row `msgs` leave in a fresh TUI model."
@@ -192,3 +192,25 @@
     (is (= [:msg/workflow-named {:workflow-id wf-id :name "Old run"}] (last @msgs))
         "the name refresh follows on a later poll")
     (is (= :running (row-status @msgs)))))
+
+(deftest ^{:stratum 1} a-set-aside-run-gets-its-row-once-its-start-reads
+  (let [wf-id (random-uuid)
+        msgs  (atom [])
+        send! #(swap! msgs conj %)
+        runs  (new-runs)
+        dir   (doto (io/file (System/getProperty "java.io.tmpdir") (str "tui-layout-" (random-uuid))) .mkdirs)
+        poll! #(dotimes [_ %] (file-sub/retry-bootstraps! send! dir runs))]
+    ;; An idle top-level run, first seen through a phase event, its start not readable yet.
+    (file-sub/dispatch-event! send! dir runs {:event/type :workflow/phase-started :workflow/id wf-id
+                                              :workflow/phase :implement})
+    (poll! file-sub/max-bootstrap-attempts)
+    (is (contains? (:ignored @runs) wf-id))
+    (is (= [] @msgs) "no row while its start cannot be read")
+    (spit (doto (io/file dir "live" (str wf-id) "20260101T000000000Z-start.json") io/make-parents)
+          (es/serialize-event {:event/type :workflow/started :event/id (random-uuid)
+                               :event/timestamp (java.util.Date.) :workflow/id wf-id
+                               :workflow/spec {:name "Late start"}}))
+    (poll! file-sub/slow-lookup-polls)
+    (is (= [[:msg/workflow-added {:workflow-id wf-id :name "Late start" :spec {:name "Late start"}}]] @msgs)
+        "a slow lookup finds the start and the row appears")
+    (is (contains? (:known @runs) wf-id))))

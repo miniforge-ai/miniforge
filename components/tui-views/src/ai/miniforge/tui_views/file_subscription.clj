@@ -86,6 +86,17 @@
    is made from its id alone, or the run is taken for a DAG child trace."
   10)
 
+(def ^{:stratum 0} slow-lookup-polls
+  "Polls between start lookups for a run set aside without lifecycle
+   events (`retry-bootstraps!`): this many at first, doubling up to
+   `max-slow-lookup-polls`."
+  20)
+
+(def ^{:stratum 0} max-slow-lookup-polls
+  "Longest gap, in polls, between start lookups for a set-aside run
+   (about ten minutes at the default poll interval)."
+  1200)
+
 (def ^{:stratum 0} lifecycle-types
   "Workflow lifecycle event types. A DAG task's sub-workflow trace has
    none by design (its parent owns the lifecycle), so a run without any
@@ -105,7 +116,7 @@
   (dispatch-fn row)
   (doseq [event (get-in @runs [:waiting wf-id :events])]
     (some-> (subscription/translate-event event) dispatch-fn))
-  (swap! runs #(-> % (update :known conj wf-id) (update :waiting dissoc wf-id) (update :ignored disj wf-id))))
+  (swap! runs #(-> % (update :known conj wf-id) (update :waiting dissoc wf-id) (update :ignored dissoc wf-id))))
 
 (defn ^{:stratum 0} tail-logger
   "A logger for the layout tail's warnings that appends EDN lines to
@@ -152,8 +163,9 @@
    refreshed from the start event, now or, if that cannot be read, on a
    later poll (:refresh), without holding the status change. Only a
    run's first event looks on disk at once; later ones wait for the next
-   poll. A run set aside as a DAG child trace (:ignored, see
-   `retry-bootstraps!`) drops its events until a lifecycle event comes."
+   poll. A run set aside without lifecycle events (:ignored, see
+   `retry-bootstraps!`) drops its events until a lifecycle event comes or
+   a slow lookup finds its start."
   [dispatch-fn events-dir runs event]
   (locking runs
     (let [wf-id (:workflow/id event)
@@ -170,7 +182,7 @@
         (and (contains? (:ignored @runs) wf-id)
              (not (lifecycle-types type)))  nil
         :else (let [first? (not (contains? (:waiting @runs) wf-id))]
-                (swap! runs #(-> % (update :ignored disj wf-id)
+                (swap! runs #(-> % (update :ignored dissoc wf-id)
                                  (update-in [:waiting wf-id :events] (fnil conj []) event)))
                 (when first?
                   (some->> (start-row events-dir wf-id) (release! dispatch-fn runs wf-id))))))))
@@ -180,12 +192,22 @@
    its row, or whose name a resume asked to refresh (see
    `dispatch-event!`). After `max-bootstrap-attempts` polls a waiting
    run with a lifecycle event gets a row made from its id alone, so its
-   events are not held forever; one without any is a DAG child trace, not
-   a workflow, and is set aside (:ignored) with its events. A refresh is
-   given up then too."
+   events are not held forever. One without any is set aside (:ignored)
+   and its events dropped: it may be a DAG task's sub-workflow trace,
+   which never gets a row, or an idle top-level run whose start could not
+   be read yet. Its start is looked up again every `slow-lookup-polls`,
+   the gap doubling up to `max-slow-lookup-polls`, and its row is made
+   once the start is found. A refresh is given up after the attempts."
   [dispatch-fn events-dir runs]
   (locking runs
-    (doseq [[wf-id {:keys [tries events] :or {tries 0}}] (:waiting @runs)]
+    (let [poll (:polls (swap! runs update :polls (fnil inc 0)))]
+      (doseq [[wf-id {:keys [next-poll interval]}] (:ignored @runs)
+              :when (>= poll next-poll)]
+        (if-let [row (start-row events-dir wf-id)]
+          (release! dispatch-fn runs wf-id row)
+          (let [interval (min (* 2 interval) max-slow-lookup-polls)]
+            (swap! runs assoc-in [:ignored wf-id] {:next-poll (+ poll interval) :interval interval}))))
+      (doseq [[wf-id {:keys [tries events] :or {tries 0}}] (:waiting @runs)]
       (if-let [row (start-row events-dir wf-id)]
         (release! dispatch-fn runs wf-id row)
         (cond
@@ -194,14 +216,16 @@
           (some (comp lifecycle-types :event/type) events)
           (release! dispatch-fn runs wf-id (msg/workflow-added wf-id nil nil))
           :else
-          (swap! runs #(-> % (update :waiting dissoc wf-id) (update :ignored (fnil conj #{}) wf-id))))))
-    (doseq [[wf-id tries] (:refresh @runs)]
-      (if-let [row (start-row events-dir wf-id)]
-        (do (dispatch-fn (msg/workflow-named wf-id (:name (second row))))
-            (swap! runs update :refresh dissoc wf-id))
-        (swap! runs (if (>= (inc tries) max-bootstrap-attempts)
-                      #(update % :refresh dissoc wf-id)
-                      #(assoc-in % [:refresh wf-id] (inc tries))))))))
+          (swap! runs #(-> % (update :waiting dissoc wf-id)
+                           (assoc-in [:ignored wf-id] {:next-poll (+ poll slow-lookup-polls)
+                                                       :interval  slow-lookup-polls}))))))
+      (doseq [[wf-id tries] (:refresh @runs)]
+        (if-let [row (start-row events-dir wf-id)]
+          (do (dispatch-fn (msg/workflow-named wf-id (:name (second row))))
+              (swap! runs update :refresh dissoc wf-id))
+          (swap! runs (if (>= (inc tries) max-bootstrap-attempts)
+                        #(update % :refresh dissoc wf-id)
+                        #(assoc-in % [:refresh wf-id] (inc tries)))))))))
 
 (defn ^{:stratum 1} poll-tracked-files!
   "Read new lines from all tracked files and dispatch them."
@@ -269,7 +293,7 @@
         dir       (events-dir)
         tracked   (atom {})
         running?  (atom true)
-        runs      (atom {:known #{} :waiting {} :refresh {} :ignored #{}})
+        runs      (atom {:known #{} :waiting {} :refresh {} :ignored {}})
         _         (doseq [f (scan-event-files dir)]
                     (track-file! tracked dispatch-fn f {:hydrate? hydrate-existing?}))
         thread    (doto (Thread. #(poll-loop running? tracked dispatch-fn dir poll-ms scan-ms
