@@ -91,6 +91,19 @@
                                   (response/failure "boom" {:tokens 99})))]
         (is (= 99 (get-in out [:execution/metrics :tokens])))))))
 
+(deftest ^{:stratum 1} leave-plan-keeps-a-gate-failure-test
+  (testing "a plan its gates failed (a denial, or a decision the stream did not
+            acknowledge) leaves :failed although the planner succeeded: it is not
+            counted as completed and its completion is not reported as success"
+    (let [emitted (atom nil)]
+      (with-redefs [phase/emit-phase-completed! (fn [_ctx _phase data] (reset! emitted data))]
+        (let [planned (response/success {:plan/id (random-uuid) :plan/tasks [{:task/id (random-uuid)}]}
+                                        {:tokens 100 :metrics {:tokens 100}})
+              out (plan/leave-plan (assoc-in (leave-plan-ctx planned) [:phase :phase/status] :failed))]
+          (is (= :failed (get-in out [:phase :status])))
+          (is (not (some #{:plan} (get-in out [:execution :phases-completed]))))
+          (is (not= :success (:outcome @emitted))))))))
+
 (deftest ^{:stratum 1} leave-plan-success-merges-tokens-test
   (testing "a successful plan merges tokens, marks :completed, and counts as completed"
     (with-redefs [phase/emit-phase-completed! (fn [_ctx _phase _data] nil)]

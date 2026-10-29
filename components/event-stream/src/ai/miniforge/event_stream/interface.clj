@@ -29,7 +29,7 @@
    [ai.miniforge.event-stream.interface.opsv :as opsv]
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.digest :as digest]
-   [ai.miniforge.event-stream.heartbeat :as heartbeat]
+   [ai.miniforge.event-stream.boundary.heartbeat :as heartbeat]
    [ai.miniforge.event-stream.operator-requests :as operator-requests]
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.sinks :as sinks]
@@ -95,8 +95,17 @@
    quiesce fence, in-flight counter, optional snowflake generator).
    Optional opts map: :logger, :sinks (vector of sink fns), :config
    (builds sinks from config), :snowflake-generator (BD-2b event-id
-   generator for lexically-sortable ids)."
+   generator for lexically-sortable ids), :retention (bound on the
+   in-memory history, e.g. `bounded-retention`; absent = unbounded)."
   stream/create-event-stream)
+
+(def ^{:stratum 0} bounded-retention
+  "Retention policy for a stream that lives for days (the web dashboard):
+   per workflow, every lifecycle event, the newest health event per
+   dependency and the newest 500 others, for the 100 most recently active
+   workflows. Pass as `:retention` to
+   `create-event-stream`; merge over it to change a limit."
+  stream/bounded-retention)
 
 (def ^{:stratum 0} prepare-current-publication
   "Prepare a supported current-write draft as [scope redacted-draft] or an anomaly.
@@ -163,6 +172,14 @@
    ~/.miniforge/events; (base-dir workflow-id)."
   sinks/workflow-dir)
 
+(def ^{:stratum 0} retention-hold
+  "Multimethod `(retention-hold hold-key workflow-id events-dir)`: register
+   a method under your own hold key to keep a workflow's archived events
+   past their TTL while your store still needs them (the event cleanup
+   asks every registered hold). Workflow id is the events directory name;
+   events-dir is the events root being cleaned."
+  sinks/retention-hold)
+
 (def ^{:stratum 0} default-events-dir
   "The default events root (`~/.miniforge/events`) as a java.io.File —
    the base every other path fn in this family defaults to. Exposed so
@@ -177,6 +194,21 @@
    side: the operator-event consumer (Phase D D-2). Arities: () defaults
    base-dir to ~/.miniforge/events; (base-dir)."
   sinks/operator-dir)
+
+(def ^{:stratum 0} live-dir
+  "`{base-dir}/live/`, one directory per in-flight workflow. Arities:
+   () for ~/.miniforge/events; (base-dir)."
+  sinks/live-dir)
+
+(def ^{:stratum 0} archived-dir
+  "`{base-dir}/archived/`, where the archive moves a terminal workflow's
+   directory. Arities: () for ~/.miniforge/events; (base-dir)."
+  sinks/archived-dir)
+
+(def ^{:stratum 0} event-file-ms
+  "`(event-file-ms file-name)`: the epoch ms an event file name records,
+   in any grammar the sink has used; nil for any other name."
+  sinks/event-file-ms)
 
 (def ^{:stratum 0} serialize-event
   "Serialize an event map to the canonical Transit-JSON wire string —
@@ -218,20 +250,29 @@
 
 ;; Phase heartbeat scheduler — start/stop liveness signalling for long-running phases.
 (def ^{:stratum 0} start-heartbeat!
-  "Start periodic :workflow/phase-heartbeat emission for a phase on a
-   daemon scheduled executor. Returns an opaque stop handle map
-   (:heartbeat/executor, :heartbeat/future, :heartbeat/phase-id,
-   :heartbeat/last-tick, :heartbeat/seq-num) to pass to stop-heartbeat!.
-   Throws ex-info when event-stream is not IDeref, or when :interval-ms
-   is not a positive integer. opts: {:interval-ms long} (default 30s)."
+  "Start profile-aware phase heartbeats; return an owned stop handle or anomaly.
+   Current opts: positive :interval-ms (default 30s), :progress-sources (default
+   :unknown). Declare sources only when substantive-work ports are instrumented
+   continuously from entry. Every start creates a fresh activation; no replay
+   inference. Legacy construction and invalid-interval exceptions are retained."
   heartbeat/start-heartbeat!)
 
 (def ^{:stratum 0} stop-heartbeat!
-  "Stop a heartbeat scheduler returned by start-heartbeat!. Nil-safe.
-   Cancels the periodic ScheduledFuture (does not interrupt an in-flight
-   tick unless opts :may-interrupt? is true) then shuts down the backing
-   executor. Returns nil."
+  "Stop an owned scheduler. Nil-safe. Current handles close admission and cancel
+   before waiting for an in-flight tick; successful stop leaves no running tick.
+   Optional :may-interrupt? defaults false. Returns nil or a current anomaly."
   heartbeat/stop-heartbeat!)
+
+(def ^{:stratum 0} observe-heartbeat-progress!
+  "Report substantive progress through a captured current activation handle.
+   Source must be declared at entry; position is positive, strictly increasing
+   per source and activation. Repeats, stale positions and stopped handles cannot
+   advance progress. Unknown coverage remains unknown. Returns nil or anomaly."
+  heartbeat/observe-heartbeat-progress!)
+
+(def ^{:stratum 0} heartbeat-dropped-count
+  "Return the current activation's failed ephemeral publication count or anomaly."
+  heartbeat/heartbeat-dropped-count)
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event constructors
@@ -274,6 +315,30 @@
 (def ^{:stratum 0} actuation-disposition
   "Construct an N3 governed OPSV effect disposition event."
   opsv/actuation-disposition)
+
+(def ^{:stratum 0} checkpoint-written
+  "Construct a checkpoint write fact: stream, workflow UUID, phase, path, byte size."
+  events/checkpoint-written)
+
+(def ^{:stratum 0} checkpoint-write-failed
+  "Construct a failed write fact: stream, workflow UUID, phase, error-message/class map."
+  events/checkpoint-write-failed)
+
+(def ^{:stratum 0} machine-snapshot-written
+  "Construct a snapshot write fact: stream, workflow UUID, state, path, byte size."
+  events/machine-snapshot-written)
+
+(def ^{:stratum 0} machine-snapshot-write-failed
+  "Construct a failed snapshot fact: stream, workflow UUID, state, error-message/class map."
+  events/machine-snapshot-write-failed)
+
+(def ^{:stratum 0} workflow-resumed
+  "Construct a resume fact: stream, original workflow UUID, state, phase, skipped phases."
+  events/workflow-resumed)
+
+(def ^{:stratum 0} workflow-spec-hash-mismatch
+  "Construct a drift fact: stream, workflow UUID, expected hash, actual hash."
+  events/workflow-spec-hash-mismatch)
 
 (def ^{:stratum 0} workflow-started
   "Build and return a :workflow/started event envelope map. Multi-arity
@@ -334,10 +399,9 @@
   events/tool-call-completed)
 
 (def ^{:stratum 0} phase-heartbeat
-  "Build and return a :workflow/phase-heartbeat event envelope map for
-   long-running phase liveness (:phase/active-since,
-   :phase/events-emitted, :phase/last-event-at,
-   :phase/gap-since-last-event-ms)."
+  "Build a heartbeat without publishing. Current streams require N3 §3.1.1
+   liveness and explicit progress coverage; legacy streams retain tick fields.
+   Current drafts acquire their journal sequence only on publication."
   events/phase-heartbeat)
 
 (def ^{:stratum 0} workflow-completed
@@ -979,7 +1043,8 @@
    timestamp-prefixed filename, parsed as transit-JSON and de-prefixed.
    Arg `dir` is a java.io.File or String path. Returns a vector of
    parsed event maps, or nil when the directory does not exist.
-   Unparseable files are silently dropped."
+   Unreadable files are skipped; their paths are in the vector's
+   metadata under `:event-stream/unreadable-files`."
   reader/read-workflow-events)
 
 (def ^{:stratum 0} stored-workflow-ids
@@ -996,7 +1061,8 @@
    archived → live → legacy layouts and reading the first that exists.
    Args: base-dir, workflow-id (UUID, keyword, or string). Returns a
    vector of parsed event maps, or nil when no layout contains the
-   workflow."
+   workflow. Unreadable files are skipped; their paths are in the
+   vector's metadata under `:event-stream/unreadable-files`."
   reader/read-workflow-events-by-id)
 
 ;; ────────────────────────────────────────────────────────────────────────────

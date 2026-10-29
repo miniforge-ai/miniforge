@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.25.1-draft
-**Date:** 2026-10-17
+**Version:** 0.26.0-draft
+**Date:** 2026-10-20
 **Status:** Living specification during OSS development
 
 ---
@@ -636,6 +636,12 @@ Normative specs are enforced by:
 ---
 
 ## Version History
+
+- **0.26.0-draft** (2026-10-20) - Product owner approved the N3 heartbeat
+  amendment: Workflow scope, ephemeral retention of at least 24 hours, and
+  separate scheduler liveness and substantive progress. N3 0.12.0 defines
+  payload 2.0.0, explicit unknown coverage and retained-history compatibility.
+  This is a contract decision, not a claim of runtime conformance or N7 completion.
 
 - **0.25.1-draft** (2026-10-17) - Approved N3 gate decision and rule-evidence
   registration, typed payloads, and fail-closed audit publication. N3 0.11.0→0.11.1.

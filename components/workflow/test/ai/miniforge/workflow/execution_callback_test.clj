@@ -22,7 +22,27 @@
     pipeline (context/create-context definition {} {}) callbacks context/merge-metrics
     context/transition-to-completed context/transition-to-failed))
 
+(defn- ^{:stratum 0} attach-progress [report ctx _interceptor]
+  (assoc ctx :execution/report-progress! report))
+
+(defn- ^{:stratum 0} capture-entry [seen enter ctx]
+  (reset! seen (:execution/report-progress! ctx))
+  (enter ctx))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} progress-port-reaches-the-real-phase-entry
+  (let [definition (workflow)
+        pipeline (preparation/build-pipeline definition)
+        seen (atom nil)
+        enter (partial capture-entry seen (:enter (first pipeline)))
+        prepared (assoc-in pipeline [0 :enter] enter)
+        report (constantly nil)
+        callbacks {:on-phase-start (constantly :legacy-observer-result)
+                   :phase-context (partial attach-progress report)}
+        result (execute definition prepared callbacks)]
+    (is (identical? report @seen))
+    (is (contains? (:execution/phase-results result) fixture/runner-test-plan))))
 
 (deftest ^{:stratum 1} public-executor-honors-refusal-with-real-phase-lifecycle
   (doseq [boundary [:on-phase-start :on-phase-complete]]

@@ -60,9 +60,11 @@
         (println (messages/t :web/requires-jvm))
         (exit! 1))
       (try
-        (let [url (str "http://localhost:" port)]
-          (display/print-info (messages/t :web/starting {:port port}))
-          (*start-web-dashboard!* {:port port})
+        (let [_      (display/print-info (messages/t :web/starting {:port port}))
+              handle (*start-web-dashboard!* {:port port})
+              ;; The dashboard reports the address it answers on, which is
+              ;; not localhost when MINIFORGE_WEB_HOST names an interface.
+              url    (get handle :url (str "http://localhost:" port))]
           (println)
           (println (str "  " url))
           (println)

@@ -24,6 +24,7 @@
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.event-stream.interface :as event-stream]
+   [ai.miniforge.web-dashboard.event-files :as event-files]
    [ai.miniforge.web-dashboard.server.responses :as responses]
    [ai.miniforge.web-dashboard.server.filters :as filters]
    [ai.miniforge.web-dashboard.server.handlers.support :as support]
@@ -278,8 +279,8 @@
     (let [wid (try (parse-uuid workflow-id) (catch Exception _ nil))
           evidence-state (state/get-evidence-state state)
           wf-evidence (->> (concat (:trains evidence-state) (:workflows evidence-state))
-                           (filter #(or (= (str (:workflow/id %)) workflow-id)
-                                        (= (str (:id %)) workflow-id)))
+                           (filter #(some #{(event-files/canonical-id workflow-id)}
+                                          (map event-files/canonical-id [(:workflow/id %) (:id %)])))
                            first)
           events (when wid (state/get-events state {:workflow-id wid :limit 500}))
           gate-events (filter #(#{:gate/started :gate/passed :gate/failed}

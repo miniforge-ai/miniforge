@@ -736,19 +736,23 @@
 ;; Comment classification (category-based, complements triage)
 (def ^{:stratum 0} categorize-comment
   "Classify a comment into a category: :change-request :question :approval
-   :bot-comment :noise.
+   :bot-comment :untrusted :noise. Humans without an OWNER, MEMBER or
+   COLLABORATOR author association (and not in :trusted-authors) are
+   :untrusted and never acted on.
 
    Arguments:
-   - comment: Map with :body, :author, :id, :path, :line keys
+   - comment: Map with :body, :author, :author-association, :id, :path, :line keys
 
    Options:
    - :generate-fn — LLM generation function for ambiguous comments
    - :self-author — Author login to filter self-comments (loop prevention)
+   - :trusted-authors — Logins acted on regardless of author association
 
    Returns {:category keyword :confidence keyword :method keyword :comment map}
 
    Example:
-     (categorize-comment {:body \"Please fix the null pointer\" :author \"alice\"})
+     (categorize-comment {:body \"Please fix the null pointer\" :author \"alice\"
+                          :author-association \"MEMBER\"})
      ; => {:category :change-request :confidence :medium :method :heuristic ...}"
   classifier/classify-comment)
 
@@ -756,11 +760,14 @@
   "Classify a batch of comments into categories.
 
    Returns {:change-requests [...] :questions [...] :approvals [...]
-            :bot-comments [...] :noise [...] :all [...] :stats {...}}
+            :bot-comments [...] :untrusted [...] :noise [...] :all [...]
+            :stats {...}}
 
    Example:
-     (categorize-comments [{:body \"Add tests\" :author \"alice\"}
-                           {:body \"LGTM!\" :author \"bob\"}]
+     (categorize-comments [{:body \"Add tests\" :author \"alice\"
+                            :author-association \"MEMBER\"}
+                           {:body \"LGTM!\" :author \"bob\"
+                            :author-association \"OWNER\"}]
                           :self-author \"miniforge[bot]\")"
   classifier/classify-comments)
 
@@ -786,11 +793,13 @@
   poller/post-comment)
 
 (def ^{:stratum 0} load-watermarks
-  "Load polling watermarks from persistent storage."
+  "Load the polling watermarks saved for a repo: (load-watermarks \"owner/name\")
+   → {:repo-slug :prs}, or an anomaly when the slug or the file is unusable."
   poller/load-watermarks)
 
 (def ^{:stratum 0} save-watermarks!
-  "Persist polling watermarks to disk."
+  "Merge watermarks (as load-watermarks returns them) into those saved for
+   their repo, under a file lock. The merged watermarks or an anomaly."
   poller/save-watermarks!)
 
 ;; PR Monitor Loop (autonomous comment resolution)
@@ -802,6 +811,8 @@
    - :self-author — miniforge's GitHub login
 
    Optional config keys:
+   - :repo-slug — owner/name keying the state on disk (default: resolved
+     from :worktree-path with gh)
    - :poll-interval-ms — polling interval (default 60000)
    - :event-bus — event bus for TUI visibility
    - :logger — structured logger
@@ -1004,12 +1015,14 @@
   ; => {:status :failure :passed [...] :failed [...] ...}
 
   ;; Comment classification example
-  (categorize-comment {:body "Please fix the null pointer" :author "alice"})
+  (categorize-comment {:body "Please fix the null pointer" :author "alice"
+                       :author-association "MEMBER"})
   ; => {:category :change-request :confidence :medium :method :heuristic ...}
 
-  (categorize-comments [{:body "Add tests" :author "alice"}
-                        {:body "LGTM!" :author "bob"}
-                        {:body "Why this approach?" :author "charlie"}
+  (categorize-comments [{:body "Add tests" :author "alice" :author-association "MEMBER"}
+                        {:body "LGTM!" :author "bob" :author-association "OWNER"}
+                        {:body "Why this approach?" :author "charlie"
+                         :author-association "COLLABORATOR"}
                         {:body "Security scan ok" :author "codeql[bot]"}])
   ; => {:change-requests [...] :questions [...] :approvals [...] ...}
 

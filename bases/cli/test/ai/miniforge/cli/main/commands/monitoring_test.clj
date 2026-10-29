@@ -17,6 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.cli.main.commands.monitoring-test
   (:require
+   [babashka.process :as process]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.config :as config]
@@ -48,6 +49,21 @@
           (sut/web-cmd {}))
         (is (= {:port 9191} @started))
         (is (= 1 @exit-code))))))
+
+(deftest ^{:stratum 0} web-cmd-opens-the-url-the-dashboard-reports-test
+  (testing "--open uses the dashboard's own URL, not a rebuilt localhost one"
+    (let [opened (atom nil)]
+      (binding [sut/*web-available?* true
+                sut/*start-web-dashboard!* (fn [_] {:port 9191 :url "http://192.168.1.5:9191"})]
+        (with-redefs [config/load-config (constantly {:dashboard {:port 9191}})
+                      messages/t (fn ([k] (name k)) ([k _] (name k)))
+                      display/print-info (fn [& _] nil)
+                      process/sh (fn [& args] (reset! opened (vec args)) {:exit 0})
+                      ;; web-cmd parks on @(promise) until interrupted.
+                      promise (fn [] (delay nil))]
+          (binding [*out* (java.io.StringWriter.)]
+            (sut/web-cmd {:open true}))))
+      (is (= ["open" "http://192.168.1.5:9191"] @opened)))))
 
 (deftest ^{:stratum 0} tui-cmd-uses-injected-launcher-test
   (testing "TUI startup uses the launcher composed by cli.main"

@@ -36,21 +36,39 @@
       (is (= [:caller-start :caller-complete] @calls)))
     ((:stop-phase-heartbeats! wrapped))))
 
-(defn- ^{:stratum 1} notifications [entry-receipt completion-receipt]
-  (let [calls (atom [])
-        ctx (context)
-        wrapped (callbacks/wrap-phase-callbacks nil (observer-options calls))]
-    (with-redefs [publishers/publish-phase-started! (partial observe calls :publish-start entry-receipt)
-                  publishers/publish-phase-completed! (partial observe calls :publish-complete completion-receipt)
-                  publishers/start-phase-heartbeat! (partial observe calls :heartbeat-start :handle)
-                  publishers/stop-phase-heartbeat! (partial observe calls :heartbeat-stop nil)]
-      (let [started ((:on-phase-start wrapped) ctx interceptor)
-            completed (when-not (anomaly/any-anomaly? started)
-                        ((:on-phase-complete wrapped) ctx interceptor phase-result))]
-        ((:stop-phase-heartbeats! wrapped))
-        {:start started :complete completed :calls @calls}))))
+(defn- ^{:stratum 1} notifications
+  ([entry-receipt completion-receipt]
+   (notifications entry-receipt completion-receipt :handle nil))
+  ([entry-receipt completion-receipt start-receipt stop-receipt]
+   (let [calls (atom [])
+         ctx (context)
+         wrapped (callbacks/wrap-phase-callbacks nil (observer-options calls))]
+     (with-redefs [publishers/publish-phase-started! (partial observe calls :publish-start entry-receipt)
+                   publishers/publish-phase-completed! (partial observe calls :publish-complete completion-receipt)
+                   publishers/start-phase-heartbeat! (partial observe calls :heartbeat-start start-receipt)
+                   publishers/stop-phase-heartbeat! (partial observe calls :heartbeat-stop stop-receipt)]
+       (let [started ((:on-phase-start wrapped) ctx interceptor)
+             completed (when-not (anomaly/any-anomaly? started)
+                         ((:on-phase-complete wrapped) ctx interceptor phase-result))]
+         ((:stop-phase-heartbeats! wrapped))
+         {:start started :complete completed :calls @calls})))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} heartbeat-start-refusal-prevents-caller-and-is-not-stopped-as-a-handle
+  (let [failure (anomaly/anomaly :unavailable "fixture heartbeat unavailable" {})
+        result (notifications nil nil failure nil)]
+    (is (identical? failure (:start result)))
+    (is (nil? (:complete result)))
+    (is (= [:publish-start :heartbeat-start] (:calls result)))))
+
+(deftest ^{:stratum 2} heartbeat-stop-refusal-prevents-completion-and-remains-owned-for-cleanup
+  (let [failure (anomaly/anomaly :unavailable "fixture heartbeat unavailable" {})
+        result (notifications nil nil :handle failure)]
+    (is (= :started (:start result)))
+    (is (identical? failure (:complete result)))
+    (is (= [:publish-start :heartbeat-start :caller-start :heartbeat-stop :heartbeat-stop]
+           (:calls result)))))
 
 (deftest ^{:stratum 2} returned-legacy-publication-anomalies-remain-observer-only
   (doseq [failure [(anomaly/anomaly :unavailable "journal unavailable" {})
@@ -81,3 +99,5 @@
       (is (= [:publish-start :heartbeat-start :caller-start
                :heartbeat-stop :publish-complete :caller-complete]
              (:calls result))))))
+
+(comment ::phase-callback-admission)

@@ -15,7 +15,8 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.tool-registry.interface :as tool-registry]
    [clojure.java.io :as io]
-   [clojure.string :as str]))
+   [clojure.string :as str])
+  (:import [java.nio.file Files LinkOption Path StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -124,8 +125,34 @@
   (when (:success? result)
     (let [edits (:result result)]
       (when (seq edits)
-        (let [content (slurp file)]
-          (spit file (apply-text-edits content edits))))
+        ;; Replace the real file, not a symlink pointing at it, and give
+        ;; the temp file the original's mode before writing to it: a new
+        ;; file gets the umask default, which would drop an exec bit or
+        ;; leave a 0600 file's contents readable while the write runs.
+        ;; A per-file ACL is not carried: babashka has no ACL attribute
+        ;; view, and Linux POSIX ACLs are invisible to NIO anyway. A git
+        ;; worktree's files only hold ACLs inherited from their directory,
+        ;; which the temp file, created there too, inherits the same way.
+        (let [content   (slurp file)
+              formatted (apply-text-edits content edits)
+              ^Path target (.toRealPath (.toPath (io/file file))
+                                        (make-array LinkOption 0))
+              tmp       (java.io.File/createTempFile ".fmt-" ".tmp"
+                                                     (.toFile (.getParent target)))]
+          (try
+            (when (.supportsFileAttributeView (Files/getFileStore target) "posix")
+              (Files/setPosixFilePermissions
+               (.toPath tmp)
+               (Files/getPosixFilePermissions target (make-array LinkOption 0))))
+            (spit tmp formatted)
+            (Files/move (.toPath tmp) target
+                        (into-array StandardCopyOption
+                                    [StandardCopyOption/ATOMIC_MOVE
+                                     StandardCopyOption/REPLACE_EXISTING]))
+            (catch Throwable e
+              (try (Files/deleteIfExists (.toPath tmp))
+                   (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
+              (throw e)))))
       true)))
 
 ;; Gate check/repair

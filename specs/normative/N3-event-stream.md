@@ -6,8 +6,8 @@
 
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.11.2-draft
-**Date:** 2026-10-18
+**Version:** 0.12.0-draft
+**Date:** 2026-10-20
 **Status:** Draft
 **Conformance:** MUST
 
@@ -333,6 +333,69 @@ Workflow entity, which retains its full enum.
 
  :message "Workflow failed: {reason}"}
 ```
+
+### 3.1.1 Workflow Phase Heartbeats
+
+`workflow/phase-heartbeat` reports scheduler liveness separately from actual work
+progress. It has Workflow scope, explicit `:scope/type :workflow`, payload
+version `2.0.0`, and `:ephemeral` retention (minimum 24 hours under §4.3.1).
+
+```clojure
+{:event/type :workflow/phase-heartbeat
+ :event/version "2.0.0"
+ :scope/type :workflow
+ :workflow/id uuid
+ :workflow/phase keyword
+ :phase/active-since inst
+ :heartbeat/activation-id uuid    ; Fresh for each phase entry, including re-entry
+ :heartbeat/sequence long         ; Positive attempt counter within this activation
+ :heartbeat/observed-at inst      ; Time this liveness observation was made
+ :heartbeat/interval-ms long      ; Configured positive emission interval
+ :heartbeat/elapsed-ms long       ; Non-negative elapsed time since phase entry
+ :phase/progress-status :observed ; :none | :observed | :unknown
+ :phase/progress-count long       ; Conditional, as defined below
+ :phase/last-progress-at inst     ; Conditional, as defined below
+ :phase/progress-gap-ms long      ; Conditional, as defined below
+ :message "Phase remains active"}
+```
+
+All shown fields other than the three conditional progress fields are REQUIRED.
+The status is a closed vocabulary; `nil` and omission are invalid:
+
+| Progress status | Count | Last progress instant | Progress gap |
+|-----------------|-------|-----------------------|--------------|
+| `:none` | REQUIRED, zero | MUST be absent | REQUIRED, non-negative elapsed time since entry |
+| `:observed` | REQUIRED, positive | REQUIRED | REQUIRED, non-negative elapsed time since the last substantive progress observation |
+| `:unknown` | MUST be absent | MUST be absent | MUST be absent |
+
+`:none` means progress instrumentation has covered this activation since entry
+but has observed no substantive work. `:unknown` means that coverage cannot be
+established; it MUST NOT be substituted with a fabricated zero count, current
+timestamp or healthy status. Producers MUST document their substantive progress
+sources and correlate observations to the exact workflow, phase and activation.
+Heartbeat ticks, repeated delivery of one observation, foreign activations and
+maintenance/status messages that merely assert liveness MUST NOT advance progress.
+
+Elapsed and gap durations MUST use a monotonic clock within the process. Wall
+clock adjustments MUST NOT make them negative or reset a stalled phase's gap.
+Instants are recorded wall-clock observations, not the source of elapsed duration.
+The attempt counter MAY have gaps when publication fails; it MUST NOT be used
+as the journal sequence or a count of work. The journal still assigns the §2
+scope sequence only on admitted publication. A resumed process or phase re-entry
+MUST create a fresh activation ID, never reconstruct monotonic durations from
+retained wall-clock instants.
+
+The phase lifecycle owner MUST start periodic observation at its configured
+positive interval after phase entry. It MUST stop observation when that activation
+leaves, including failure, cancellation and cleanup. A heartbeat MUST NOT reactivate a
+terminal phase. Publication failure follows the ephemeral policy in §9: count
+the drop, preserve progress state, and do not manufacture an acknowledgment.
+
+Consumers MUST evaluate liveness and progress separately. A received heartbeat
+is not evidence that work advanced. Stall detection MUST use the progress gap
+for `:none` or `:observed`, and MUST expose `:unknown` as unavailable progress
+information rather than a zero gap. Unsupported payload majors follow §7.3.
+This contract does not require any particular stall threshold or remediation.
 
 ### 3.2 Agent Lifecycle Events
 
@@ -2419,7 +2482,8 @@ NOT be converted into successful admission, authorization, or completion.
 
 Implementations MUST emit events at these points:
 
-1. **Workflow boundaries** - start, phase transitions, completion
+1. **Workflow boundaries** - start, phase transitions, completion; periodic phase liveness and progress observations
+  while an activation is active (§3.1.1)
 2. **Agent boundaries** - start, completion, failure
 3. **Agent activity** - status updates (≥1 per 5 seconds during active work)
 4. **Tool invocations** - all tool uses
@@ -2818,6 +2882,7 @@ exactly one scope, named by its `:scope/type` field.
 | § | Family | Scope | Retention | Event types |
 |---|--------|-------|-----------|-------------|
 | 3.1 | Workflow lifecycle | Workflow | durable | `workflow/started`, `workflow/phase-started`, `workflow/phase-completed`, `workflow/completed`, `workflow/failed` |
+| 3.1.1 | Phase heartbeat (payload 2.x) | Workflow | ephemeral | `workflow/phase-heartbeat` |
 | 3.2 | Agent lifecycle | Workflow | durable | `agent/started`, `agent/completed`, `agent/failed` |
 | 3.3 | Agent status | Workflow | ephemeral | `agent/status` |
 | 3.4 | Subagent | Workflow | operational | `subagent/spawned` |
@@ -3018,6 +3083,24 @@ migration MUST report the ambiguity. It MUST refuse authoritative replay of
 that range rather than fabricate identity, transitions, or evidence completeness.
 Registration of `supervisory/spec-upserted` uses payload version `1.0.0` and
 does not validate historical snapshots automatically; §3.19 still applies.
+
+---
+
+### 7.6 Heartbeat Compatibility
+
+The required liveness/progress fields in §3.1.1 use payload `2.0.0`. Retained
+legacy `1.x` heartbeat records MUST NOT be rewritten or inferred to satisfy that
+contract. In the legacy scheduler, `:phase/events-emitted` counted heartbeat
+ticks and `:phase/last-event-at` / `:phase/gap-since-last-event-ms` described the
+previous heartbeat, not substantive work. Those names MUST NOT be reinterpreted
+as progress, even under a new major version. Current writes MUST use the new
+fields and MUST NOT include those three retired fields.
+
+Readers MAY inspect retained legacy heartbeats as non-authoritative history;
+they MUST NOT derive current progress or authorization from them. This amendment
+does not retroactively make unregistered legacy emissions conformant. Deployments
+MUST document supported reader versions before cutting over; consumers that do
+not support 2.x must explicitly skip and record the event under §7.3.
 
 ---
 
@@ -3222,6 +3305,8 @@ withdrawn, not deleted.
 | N3.EM.9 | MUST | Deliver train changes to every prior or current member with distinct per-PR identities and ordered after-state membership (§3.16). |
 | N3.EM.10 | MUST | Preserve runtime phase decisions and resolved rule outcomes as acknowledged audit evidence (§3.9.1). |
 | N3.EM.11 | MUST | Identify an expected agent or explicit intentional absence (`:agent/none`) on phase start; reject missing/nil identity (§3.1). |
+| N3.EM.12 | MUST | Emit activation-scoped phase heartbeats with distinct liveness and progress fields; heartbeats never advance progress (§3.1.1). |
+| N3.EM.13 | MUST | Preserve progress gaps under wall-clock changes and represent unavailable coverage explicitly as `:unknown` (§3.1.1). |
 
 #### Storage and retention
 
@@ -3535,7 +3620,7 @@ are non-conformant emissions; each MUST either be added to §3 and §6 or
 withdrawn.
 
 `agent/chunk`, `agent/session-captured`, `agent/stream-stalled`,
-`workflow/phase-heartbeat`, `workspace/persisted`, `zettel/promoted`,
+`workspace/persisted`, `zettel/promoted`,
 `dependency/health-updated`, `dependency/recovered`, `pr/scored`,
 `self-healing/workaround-applied`, `self-healing/backend-switched`,
 `oci/container-started`, `oci/container-completed`,
@@ -3546,10 +3631,11 @@ Other unregistered supervisory types remain forbidden. As of 2026-10-04,
 `supervisory/spec-upserted` is specified by §3.19 and intervention facts by
 §3.22; implementing their validation and scope rules remains work.
 
-Several are plainly legitimate capabilities that were built without a
-corresponding spec amendment — `workflow/phase-heartbeat` and
-`agent/stream-stalled` in particular carry the stall-detection contract. The
-resolution is an N3 amendment per §6.1, not silent acceptance.
+The approved 2026-10-20 amendment registers `workflow/phase-heartbeat` with
+payload 2.0.0 in §3.1.1 and §6. Runtime migration and reader support remain
+implementation work; legacy tick counters do not become progress evidence.
+Other legitimate capabilities such as `agent/stream-stalled` still require an
+N3 amendment per §6.1, not silent acceptance.
 
 ### A.4 Structural
 
@@ -3574,6 +3660,12 @@ resolution is an N3 amendment per §6.1, not silent acceptance.
 
 **Version History:**
 
+- 0.12.0-draft (2026-10-20): Product owner approved registration of
+  `workflow/phase-heartbeat` with Workflow scope, ephemeral retention (24-hour
+  minimum), and separate liveness/progress. Payload 2.0.0 introduces explicit
+  activation and coverage semantics; §7.6 preserves historical meanings.
+- 0.11.2-draft (2026-10-18): Required explicit `:agent/none` for intentionally
+  agentless phase entry, rather than missing or nil expected-agent identity.
 - 0.11.1-draft (2026-10-17): Registered runtime gate decisions and per-rule
   evidence with typed payloads, Workflow scope, audit retention, and fail-closed
   publication. Product-owner approval is recorded in the specification index.

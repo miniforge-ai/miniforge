@@ -163,6 +163,8 @@
   [machine-snapshot workflow]
   (-> machine-snapshot
       (dissoc :execution/ended-at
+              :execution/phase-error-offset
+              :execution/attempt-phase
               :workflow/evidence-bundle-id
               :execution/output
               :execution/completed-with-warnings?)
@@ -185,8 +187,8 @@
     ctx'))
 
 (defn ^{:stratum 0} active-or-last-phase
-  "Return the active phase when present, otherwise the last completed phase in
-   workflow pipeline order."
+  "Prefer the active phase, then the latest attempted phase. Legacy contexts
+   without attempt identity fall back to the last recorded phase in pipeline order."
   [ctx]
   (let [phase-results (:execution/phase-results ctx)
         pipeline (:workflow/pipeline (:execution/workflow ctx))
@@ -194,7 +196,7 @@
                                      (map :phase)
                                      (filter #(contains? phase-results %))
                                      last)]
-    (if-some [current-phase (:execution/current-phase ctx)]
+    (if-some [current-phase (or (:execution/current-phase ctx) (:execution/attempt-phase ctx))]
       current-phase
       last-recorded-phase)))
 

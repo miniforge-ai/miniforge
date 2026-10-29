@@ -19,6 +19,7 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.web-dashboard.config :as dashboard-config]
+   [ai.miniforge.web-dashboard.event-files :as event-files]
    [ai.miniforge.web-dashboard.watcher :as watcher]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -29,6 +30,12 @@
 (def ^{:stratum 0} events-dir-path
   "Default event archive directory shared by the CLI and dashboard."
   (str (config/miniforge-home) "/events"))
+
+(def ^{:stratum 0} ^:private recent-dir-reads
+  "{dir-path {:names #{file-name} :events [event]}} for the workflow
+   directories `historical-events` read last, so a refresh reads only
+   the event files added since."
+  (atom {}))
 
 (def ^{:stratum 0} phase-lifecycle-types
   "Event types that carry phase classification data."
@@ -117,6 +124,15 @@
     (catch Exception _
       [])))
 
+(defn- ^{:stratum 0} read-dir
+  "[path read] for workflow directory `dir`: only the event files not
+   read before (per `reads`, see `recent-dir-reads`) are decoded."
+  [reads dir]
+  (let [path (str dir)
+        {:keys [names events] :or {events []}} (get reads path)
+        [names' files] (event-files/unseen-files dir names)]
+    [path {:names names' :events (into events (event-files/read-ordered files))}]))
+
 (defn ^{:stratum 0} wf-name-from-started
   "Extract a display name for a workflow from its started event."
   [started id]
@@ -203,10 +219,11 @@
     0))
 
 (defn ^{:stratum 1} workflow-id=
-  "String-normalized workflow-id equality so UUID/string forms match."
+  "Workflow-id equality through `event-files/canonical-id`, so UUID,
+   string and keyword forms match."
   [expected event]
-  (= (some-> expected str)
-     (some-> (wf-id event) str)))
+  (= (event-files/canonical-id expected)
+     (event-files/canonical-id (wf-id event))))
 
 (defn ^{:stratum 1} workflow-event-file
   "Resolve the event file for a specific workflow-id."
@@ -215,16 +232,18 @@
 
 (defn ^{:stratum 1} dedupe-events
   "Deduplicate live + historical events by event-id, falling back to a
-   composite key of stable fields when no id is present."
+   composite key of stable fields when no id is present. Ids compare in
+   their `event-files/canonical-id` form."
   [events]
   (->> events
        (reduce (fn [acc event]
-                 (let [event-key (get event :event/id
-                                      [(get event :event/type)
-                                       (some-> (wf-id event) str)
-                                       (event-ts event)
-                                       (get event :event/sequence-number)
-                                       (get event :message)])]
+                 (let [event-key (if-let [id (get event :event/id)]
+                                   (event-files/canonical-id id)
+                                   [(get event :event/type)
+                                    (event-files/canonical-id (wf-id event))
+                                    (event-ts event)
+                                    (get event :event/sequence-number)
+                                    (get event :message)])]
                    (assoc acc event-key event)))
                {})
        vals
@@ -357,18 +376,29 @@
        vec))
 
 (defn ^{:stratum 2} historical-events
-  "Read archived events from disk for one workflow or the full archive."
+  "Events from disk (legacy `<workflow-id>.edn` files and file sink
+   directories) for one workflow, or, without a workflow-id, for the
+   `max-recent-workflows` most recently modified live/ and archived/
+   directories: no more than the list shows; the archive scan covers the
+   rest."
   [workflow-id]
   (if workflow-id
-    (read-event-file (workflow-event-file workflow-id))
+    (into (or (read-event-file (workflow-event-file workflow-id)) [])
+          (event-files/workflow-events events-dir-path workflow-id))
     (let [edn-file? #(str/ends-with? (.getName ^java.io.File %) ".edn")
-          events-dir (io/file events-dir-path)]
+          events-dir (io/file events-dir-path)
+          reads (into {}
+                      (map (partial read-dir @recent-dir-reads))
+                      (event-files/recent-dirs events-dir-path max-recent-workflows))]
+      (reset! recent-dir-reads reads)
       (if (.isDirectory events-dir)
-        (->> events-dir
-             .listFiles
-             (filter edn-file?)
-             (mapcat read-event-file)
-             vec)
+        (into (->> events-dir
+                   .listFiles
+                   (filter edn-file?)
+                   (mapcat read-event-file)
+                   vec)
+              (mapcat :events)
+              (vals reads))
         []))))
 
 (defn- ^{:stratum 2} matches-workflow? [workflow-id event]
@@ -416,9 +446,9 @@
    keeps test isolation when callers use a non-default state."
   [state]
   (let [live-events (live-stream-events state)
-        live-wf-ids (into #{} (keep wf-id live-events))
+        live-wf-ids (into #{} (keep (comp event-files/canonical-id wf-id)) live-events)
         disk-events (->> (historical-events nil)
-                         (remove #(live-wf-ids (wf-id %))))]
+                         (remove #(live-wf-ids (event-files/canonical-id (wf-id %)))))]
     (into live-events disk-events)))
 
 ;------------------------------------------------------------------------------ Layer 4
@@ -475,7 +505,7 @@
   (try
     (let [grouped-events (->> (merged-events state)
                               (filter (comp some? wf-id))
-                              (group-by wf-id))]
+                              (group-by (comp event-files/canonical-id wf-id)))]
       (->> grouped-events
            (map (fn [[id wf-events]] (workflow-summary-from-events id wf-events)))
            (sort-by workflow-recency >)
@@ -508,7 +538,8 @@
   "Get workflow detail by string id."
   [state id]
   (let [workflows (get-workflows state)]
-    (or (first (filter #(= (str (:id %)) id) workflows))
+    (or (first (filter #(= (event-files/canonical-id (:id %)) (event-files/canonical-id id))
+                       workflows))
         {:error "Workflow not found"})))
 
 ;; Workflow command queue

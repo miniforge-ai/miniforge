@@ -20,7 +20,9 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.java.io :as io]
    [ai.miniforge.config.interface :as config]
-   [ai.miniforge.config.user :as user]))
+   [ai.miniforge.config.user :as user]
+   [clojure.set :as set]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -28,12 +30,11 @@
 (deftest ^{:stratum 0} default-config-prefers-opencode-test
   (let [cfg config/default-config]
     (testing "default llm backend routes provider auth through OpenCode"
-      (is (= :opencode (get-in cfg [:llm :backend])))
-      (is (= "anthropic/claude-sonnet-4-5" (get-in cfg [:llm :model]))))
+      (is (= :opencode (get-in cfg [:llm :backend]))))
 
-    (testing "default agent models are OpenCode provider/model selectors"
-      (is (= "anthropic/claude-opus-4-6" (get-in cfg [:agents :default-models :thinking])))
-      (is (= "anthropic/claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution]))))
+    (testing "defaults name no model, which would reach every backend"
+      (is (nil? (get-in cfg [:llm :model])))
+      (is (nil? (get-in cfg [:agents :default-models]))))
 
     (testing "default self-healing keeps failover inside OpenCode"
       (is (= [:opencode] (get-in cfg [:self-healing :allowed-failover-backends]))))
@@ -58,7 +59,8 @@
                                          nil))]
       (let [cfg (user/load-default-config)]
         (is (= :opencode (get-in cfg [:llm :backend])))
-        (is (= "anthropic/claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution])))
+        (is (nil? (get-in cfg [:llm :model])))
+        (is (nil? (get-in cfg [:agents :default-models])))
         (is (= "~/.miniforge/checkpoints"
                (get-in cfg [:workflow :checkpoint-root])))
         (is (= "~/.miniforge/worktrees"
@@ -103,3 +105,55 @@
         (finally
           (doseq [f (reverse (file-seq root))]
             (.delete ^java.io.File f)))))))
+
+(deftest ^{:stratum 0} unparseable-user-config-is-reported-test
+  (testing "a config.edn that does not parse is named on stderr, not silently replaced by defaults"
+    (let [tmp (java.io.File/createTempFile "unparseable-user-config" ".edn")
+          err (java.io.StringWriter.)]
+      (try
+        (spit tmp "{:llm {:backend :claude}")
+        (is (nil? (binding [*err* err] (config/load-user-config (.getPath tmp)))))
+        (is (str/includes? (str err) (.getPath tmp)))
+        (finally (.delete tmp))))))
+
+;; Variables that used to be mapped onto keys nothing reads. Setting one
+;; changed nothing, while the docs presented some of them as hard budget
+;; stops.
+(def ^{:stratum 0} ^:private unread-env-vars
+  #{"MINIFORGE_LLM_TIMEOUT" "MINIFORGE_LLM_LINE_TIMEOUT" "MINIFORGE_LLM_MAX_TOKENS"
+    "MINIFORGE_MAX_ITERATIONS" "MINIFORGE_MAX_TOKENS" "MINIFORGE_FAILURE_STRATEGY"
+    "MINIFORGE_ARTIFACTS_DIR"})
+
+(def ^{:stratum 0} ^:private unread-keys
+  [[:llm :timeout-ms] [:llm :line-timeout-ms] [:llm :max-tokens]
+   [:workflow :max-iterations] [:workflow :max-tokens] [:workflow :failure-strategy]
+   [:artifacts] [:meta-loop]])
+
+(defn- ^{:stratum 0} accepted-env-vars
+  "Every variable name apply-env-overrides looks up, found by answering each
+   lookup with a value and recording the name."
+  []
+  (let [asked (atom #{})]
+    (with-redefs [user/get-env-var (fn [var-name] (swap! asked conj var-name) "1")]
+      (user/apply-env-overrides {}))
+    @asked))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} env-overrides-accept-no-unread-variable-test
+  (testing "apply-env-overrides still maps the variables something reads"
+    (is (contains? (accepted-env-vars) "MINIFORGE_AGENT_EXECUTION_MODEL")))
+  (testing "apply-env-overrides maps no variable whose key nothing reads"
+    (is (empty? (set/intersection (accepted-env-vars) unread-env-vars)))))
+
+(deftest ^{:stratum 1} defaults-carry-no-unread-keys-test
+  (let [orig-resource io/resource
+        fallback (with-redefs [user/find-resource
+                               (fn [path]
+                                 (when (= path "config/default-user-config-fallback.edn")
+                                   (orig-resource path)))]
+                   (user/load-default-config))]
+    (doseq [[label cfg] [["default" config/default-config] ["fallback" fallback]]
+            path unread-keys]
+      (testing (str label " config does not carry " path)
+        (is (nil? (get-in cfg path)))))))

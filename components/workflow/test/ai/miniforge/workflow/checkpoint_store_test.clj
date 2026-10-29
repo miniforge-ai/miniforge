@@ -21,6 +21,7 @@
    [clojure.string :as str]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
@@ -80,7 +81,7 @@
           (is (nil? (workflow/load-checkpoint-data orphan opts)))
           (is (true? (workflow/checkpoint-present? orphan opts))))
         (testing "a snapshot the loader cannot read holds the id"
-          (is (nil? (workflow/load-checkpoint-data unreadable opts)))
+          (is (anomaly/anomaly? (workflow/load-checkpoint-data unreadable opts)))
           (is (true? (workflow/checkpoint-present? unreadable opts))))))))
 
 (deftest ^{:stratum 0} persist-execution-state-validates-before-saving-test
