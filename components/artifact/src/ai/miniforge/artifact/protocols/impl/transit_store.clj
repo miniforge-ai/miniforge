@@ -151,6 +151,11 @@
           entry
           [:artifact/parents :artifact/children]))
 
+(defn- ^{:stratum 0} add-link
+  "Add `id` to the `k` links of `artifact` unless it is already there."
+  [artifact k id]
+  (update artifact k (fn [links] (if (some #{id} links) (vec links) (conj (vec links) id)))))
+
 (defn- ^{:stratum 0} drop-written
   "Remove from `changed` (id -> change count) the ids whose count is
    still the one `written` recorded, i.e. not changed since that write."
@@ -345,6 +350,33 @@
   (when (metadata-match? criteria metadata)
     id))
 
+(defn- ^{:stratum 2} write-change!
+  "Apply one queued change to the artifact files on disk and write them.
+   A save keeps the on-disk links and takes every other field from the
+   save (carry-links); a link adds each side to the other's file. A
+   missing or unreadable file falls back to the queued copy. Returns the
+   [queued written] pairs written; failures are logged."
+  [{:keys [artifacts-dir logger]} [op a b]]
+  (let [on-disk (fn [artifact]
+                  (or (try (load-artifact-from-disk artifacts-dir (:artifact/id artifact))
+                           (catch Exception _ nil))
+                      artifact))
+        pairs (case op
+                :save [[a (carry-links (on-disk a) a)]]
+                :link [[a (add-link (on-disk a) :artifact/children (:artifact/id b))]
+                       [b (add-link (on-disk b) :artifact/parents (:artifact/id a))]])]
+    (reduce (fn [written [_ artifact :as pair]]
+              (let [id (:artifact/id artifact)]
+                (try
+                  (write-transit (artifact-file-path artifacts-dir id) artifact)
+                  (log-artifact-saved logger id artifact)
+                  (conj written pair)
+                  (catch Exception e
+                    (log-artifact-save-failed logger id e)
+                    written))))
+            []
+            pairs)))
+
 ;------------------------------------------------------------------------------ Layer 3
 
 (defn ^{:stratum 3} persist-artifact-action
@@ -385,6 +417,38 @@
   (if-let [artifact (load-artifact-impl record artifact-id)]
     artifact
     (link-target-anomaly artifact-id role)))
+
+(defn ^{:stratum 3} drain-action
+  "Writer action: one critical section under the index lock for every
+   change queued so far, including changes queued while it runs (so a
+   burst of saves costs one index write). Writes each change's artifact
+   files (write-change!), then re-reads the on-disk index, sets the
+   entries of the written ids to their projection and writes it. Last,
+   under the writer's monitor, puts each written artifact in the cache
+   and index unless a later save or link has replaced the queued copy."
+  [state {:keys [artifacts-dir cache index logger pending writer] :as store}]
+  (try
+    (call-with-index-lock
+     artifacts-dir
+     (fn []
+       (loop [written []]
+         (let [[batch] (swap-vals! pending empty)]
+           (if (seq batch)
+             (recur (into written (mapcat (partial write-change! store)) batch))
+             (when (seq written)
+               (write-transit (index-file-path artifacts-dir)
+                              (reduce add-to-index (load-index artifacts-dir) (map second written)))
+               (locking writer
+                 (doseq [[queued artifact] written
+                         :let [id (:artifact/id artifact)]
+                         :when (identical? queued (get @cache id))]
+                   (swap! cache assoc id artifact)
+                   (swap! index add-to-index artifact)))))))))
+    (catch Exception e
+      (log/error logger :system :artifact/index-save-failed
+                 {:message (.getMessage e)
+                  :data {:artifacts-dir artifacts-dir}})))
+  state)
 
 ;------------------------------------------------------------------------------ Layer 4
 
