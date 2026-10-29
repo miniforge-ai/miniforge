@@ -120,9 +120,12 @@
   (config-schema/problems config-schema/schema (set (keys llm/backends)) config))
 
 (defn ^{:stratum 0} problem-message
-  "One line describing a config-schema problem."
+  "One line describing a config-schema problem. A keyword key segment is
+   shown without its colon (llm.backend); any other key (a string, say,
+   from a hand-edited file) is shown as EDN, so `{\"llm\" 5}` reads
+   \"llm\", not lm."
   [{:keys [path problem expected value]}]
-  (let [key-str (str/join "." (map #(subs (str %) 1) path))]
+  (let [key-str (str/join "." (map #(if (keyword? %) (subs (str %) 1) (pr-str %)) path))]
     (case problem
       :unknown-key (messages/t :config/unknown-key {:key key-str})
       :wrong-type  (if (= :backend expected)

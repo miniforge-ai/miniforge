@@ -19,7 +19,11 @@
 ;; The keys `mf config set` and `mf config validate` accept in config.edn,
 ;; with the type of each value: the keys of the shipped defaults (the
 ;; runtime's default-user-config.edn and the CLI's user-defaults.edn) and
-;; the documented keys those leave unset (the model keys).
+;; the documented keys those leave unset (the model keys), and the keys
+;; other code reads from or writes to the user config: fleet commands and
+;; the dashboard keep [:fleet :repos]; policy-pack's trust_roots_config
+;; reads [:policy-pack :trust-roots] (and validates its entries itself).
+;; config-schema-test lists every reader's path and checks it is here.
 ;;
 ;; Types: :keyword :string :boolean :integer :number :vector, :map (any
 ;; sub-key, any value), :backend (a known backend keyword) and :port (an
@@ -61,6 +65,9 @@
 
   [:policy-packs :extra-search-paths]               :vector
   [:policy-packs :disabled-pack-ids]                :vector
+  [:policy-pack :trust-roots]                       :map
+
+  [:fleet :repos]                                   :vector
 
   [:observability :event-sinks]                     :vector
   [:observability :log-sinks]                       :vector

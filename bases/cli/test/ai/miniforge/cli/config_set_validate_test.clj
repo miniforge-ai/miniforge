@@ -97,3 +97,17 @@
           (is (str/includes? out "✅"))))))
   (testing "a config file that does not exist exits 1"
     (is (= [1] (:exits (run-recording #(config/cmd-validate {:config "/nonexistent/mf/config.edn"})))))))
+
+(deftest ^{:stratum 1} non-keyword-keys-are-named-whole-test
+  (testing "a string key is shown as EDN, not with its first character cut"
+    (is (str/includes? (config/problem-message {:path ["llm"] :problem :unknown-key}) "\"llm\""))
+    (is (str/includes? (config/problem-message {:path [:llm "model"] :problem :unknown-key}) "llm.\"model\""))
+    (is (str/includes? (config/problem-message {:path [""] :problem :unknown-key}) "\"\"")
+        "an empty string key does not throw"))
+  (testing "validate reports every string key in a hand-edited file and exits 1"
+    (with-config-file "{\"llm\" 5 \"\" 1}"
+      (fn [path]
+        (let [{:keys [exits out err]} (run-recording #(config/cmd-validate {:config path}))]
+          (is (= [1] exits))
+          (is (str/includes? (str out err) "\"llm\""))
+          (is (str/includes? (str out err) "Unknown config key: \"\"")))))))
