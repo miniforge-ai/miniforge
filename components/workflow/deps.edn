@@ -19,6 +19,7 @@
         ai.miniforge/heuristic {:local/root "../heuristic"} ; Workflow storage
         ai.miniforge/event-stream {:local/root "../event-stream"} ; N3 event emission
         ai.miniforge/resource-cleanup {:local/root "../resource-cleanup"}
+        ai.miniforge/file-durability {:local/root "../file-durability"}
         ai.miniforge/failure-classifier {:local/root "../failure-classifier"}
         ai.miniforge/supervisory-state {:local/root "../supervisory-state"} ; Supervisory snapshot emission
         ai.miniforge/tenancy {:local/root "../tenancy"}    ; Acting identity carried through the run

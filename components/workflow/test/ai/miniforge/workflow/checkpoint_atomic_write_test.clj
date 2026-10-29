@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.checkpoint-atomic-write-test
-  (:require [ai.miniforge.workflow.checkpoint-store :as store]
+  (:require [ai.miniforge.file-durability.interface :as durability]
+            [ai.miniforge.workflow.checkpoint-store :as store]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.context :as context]
             [ai.miniforge.workflow.interface :as workflow]
@@ -20,8 +21,9 @@
 
 (defn- ^{:stratum 0} discard-written-file! [write! path content]
   ;; Force the actual rename to fail after a complete temporary write.
-  (write! path content)
-  (fs/delete path))
+  (let [result (write! path content)]
+    (fs/delete path)
+    result))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -46,9 +48,9 @@
         run-id (:execution/id ctx)
         persisted (store/persist-execution-state! ctx)
         before (workflow/load-checkpoint-data run-id opts)
-        discard! (partial discard-written-file! spit)]
+        discard! (partial discard-written-file! durability/write-temporary-bytes!)]
     (is (map? persisted))
-    (with-redefs [spit discard!]
+    (with-redefs [durability/write-temporary-bytes! discard!]
       (is (nil? (store/persist-execution-state!
                  (assoc ctx :execution/redirect-count 1)))))
     (is (= before (workflow/load-checkpoint-data run-id opts)))

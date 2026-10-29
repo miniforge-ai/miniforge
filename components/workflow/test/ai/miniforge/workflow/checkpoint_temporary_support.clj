@@ -21,8 +21,9 @@
 
 (defn ^{:stratum 1} interleave! [write-original! entered target paths path content]
   (swap! paths conj path)
-  (write-original! path content)
-  (when (compare-and-set! entered false true)
-    (write! target :inner)))
+  (let [result (write-original! path content)]
+    (when (compare-and-set! entered false true)
+      (write! target :inner))
+    result))
 
 (comment ::checkpoint-write-fixtures)
