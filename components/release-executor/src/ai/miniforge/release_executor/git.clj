@@ -29,6 +29,7 @@
    stalled connection or a credential prompt fails the call instead of
    blocking the release phase. Local git calls use process/shell directly."
   (:require
+   [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.release-executor.messages :as msg]
    [ai.miniforge.release-executor.result :as result]
    [ai.miniforge.release-executor.shell :as shell]
@@ -486,9 +487,10 @@
         (catch Exception e
           (result/shell-failure (.getMessage e)))))))
 
-(defn ^{:stratum 1} edit-pr-body!
-  "Update the body of an existing PR using gh CLI on the host. Injects
-   `github-token` as GH_TOKEN.
+(defn- ^{:stratum 1} gh-edit-pr-body!
+  "Run `gh pr edit <n> --body <body>` on the host, injecting `github-token`
+   as GH_TOKEN. `body` is published as given; callers go through
+   edit-pr-body!, which redacts it first.
    Returns {:success? bool :output string :error string}."
   [worktree-path pr-number body github-token]
   (try
@@ -522,6 +524,15 @@
       (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil}))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} edit-pr-body!
+  "Update the body of an existing PR using gh CLI on the host. Secrets in
+   `body` are replaced with the redaction marker (components/redaction)
+   first: the body is LLM-written and the PR may be public. Injects
+   `github-token` as GH_TOKEN.
+   Returns {:success? bool :output string :error string}."
+  [worktree-path pr-number body github-token]
+  (gh-edit-pr-body! worktree-path pr-number (redaction/redact body) github-token))
 
 (defn ^{:stratum 2} push-branch!
   "Push the current branch to origin. Injects `github-token` as GH_TOKEN for
@@ -570,10 +581,17 @@
    credential path; the 2-arity keeps the historical public-interface
    signature and inherits the ambient environment.
 
+   Secrets in the title and body are replaced with the redaction marker
+   (components/redaction) before gh runs.
+
    Returns {:success? bool :pr-number int :pr-url string :error string}"
   ([worktree-path pr-opts] (create-pr! worktree-path pr-opts nil))
   ([worktree-path {:keys [title body base-branch]} github-token]
-   (let [base (or base-branch "main")]
+   (let [base  (or base-branch "main")
+         ;; Title and body are LLM-written and may quote a credential the
+         ;; agent saw; a PR is public, so strip secrets before gh sees them.
+         title (redaction/redact title)
+         body  (redaction/redact body)]
      (or
       (validate-safe-branch-name base)
       (try
