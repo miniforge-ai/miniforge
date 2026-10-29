@@ -33,12 +33,15 @@
    `persisted-execution-keys`, the allowlist deciding what survives a
    checkpoint."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.checkpoint-store-records :as checkpoint-records]
+   [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.schemas :as schemas]
    [babashka.fs :as fs]
-   [clojure.edn :as edn])
+   [clojure.edn :as edn]
+   [slingshot.slingshot :refer [try+]])
   (:import [java.nio.file Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -76,8 +79,9 @@
   "True when anything is stored under `workflow-run-id`'s checkpoint
    directory. `load-checkpoint-data` answers nil for a run with none, but
    also for phase checkpoints written before the machine snapshot (a run
-   that died between the two) and for files it cannot read or parse. An
-   id is free only when this is false."
+   that died between the two), and an anomaly when its snapshot or
+   manifest cannot be read or parsed. An id is free only when this is
+   false."
   ([workflow-run-id]
    (checkpoint-present? workflow-run-id {}))
   ([workflow-run-id opts]
@@ -87,6 +91,22 @@
      (boolean (and (fs/directory? dir) (seq (fs/list-dir dir)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} read-checkpoint-file
+  "Read one checkpoint file: its content, nil when it does not exist, or
+   — when it exists but cannot be read or parsed (truncated, unreadable,
+   not EDN) — an anomaly naming the file. One bad file then costs the
+   caller that file and nothing else."
+  [path]
+  (try+
+    (read-edn-file path)
+    (catch Exception e
+      (anomaly/exception-anomaly :unavailable
+                                 (messages/t :checkpoint/read-failed
+                                             {:path (str path)
+                                              :error (or (ex-message e) (.getName (class e)))})
+                                 {:checkpoint/path (str path)}
+                                 e))))
 
 (defn- ^{:stratum 1} write-edn-atomically!
   [target-path data]
@@ -100,33 +120,6 @@
                            [StandardCopyOption/ATOMIC_MOVE
                             StandardCopyOption/REPLACE_EXISTING]))
     target-path))
-
-(defn ^{:stratum 1} load-checkpoint-data
-  "Load durable checkpoint data for a workflow run, if present."
-  ([workflow-run-id]
-   (load-checkpoint-data workflow-run-id {}))
-  ([workflow-run-id opts]
-   (try
-     (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
-           manifest-path (checkpoint-paths/manifest-path checkpoint-root workflow-run-id)
-           manifest (read-edn-file manifest-path)
-           snapshot-path (or (:workflow/machine-snapshot-path manifest)
-                             (checkpoint-paths/machine-snapshot-path checkpoint-root
-                                                                     workflow-run-id))
-           machine-snapshot (read-edn-file snapshot-path)
-           phase-paths (or (:workflow/phase-checkpoints manifest) {})
-           phase-results (into {}
-                               (keep (fn [[phase-id path]]
-                                       (when-let [checkpoint (read-edn-file path)]
-                                         [phase-id (:phase/result checkpoint)])))
-                               phase-paths)]
-       (when machine-snapshot
-         {:checkpoint/root checkpoint-root
-          :manifest manifest
-          :machine-snapshot machine-snapshot
-          :phase-results phase-results}))
-     (catch Exception _
-       nil))))
 
 (defn- ^{:stratum 1} append-gate-history!
   "Append the phase's gate decision to the run's gate history when the
@@ -158,6 +151,60 @@
       (catch Exception _ nil))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} load-checkpoint-data
+  "Load durable checkpoint data for a workflow run, one file at a time.
+
+   Returns nil when the run has no machine snapshot. Returns the loaded
+   data when the snapshot and manifest read; a phase checkpoint that
+   does not read is left out of `:phase-results` and listed, as an
+   anomaly naming the file, under `:checkpoint/read-failures` — the
+   snapshot and every other phase still load. When the snapshot or the
+   manifest exists but does not read, nothing can be restored: the
+   result is an `:unavailable` anomaly whose
+   `:checkpoint/read-failures` names every file that failed."
+  ([workflow-run-id]
+   (load-checkpoint-data workflow-run-id {}))
+  ([workflow-run-id opts]
+   (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
+         manifest (read-checkpoint-file
+                   (checkpoint-paths/manifest-path checkpoint-root workflow-run-id))
+         readable-manifest (when-not (anomaly/anomaly? manifest) manifest)
+         machine-snapshot (read-checkpoint-file
+                           (or (:workflow/machine-snapshot-path readable-manifest)
+                               (checkpoint-paths/machine-snapshot-path checkpoint-root
+                                                                       workflow-run-id)))
+         phase-checkpoints (into []
+                                 (map (fn [[phase-id path]] [phase-id (read-checkpoint-file path)]))
+                                 (:workflow/phase-checkpoints readable-manifest))
+         read-failures (filterv anomaly/anomaly?
+                                (into [manifest machine-snapshot] (map second) phase-checkpoints))
+         phase-results (into {}
+                             (keep (fn [[phase-id checkpoint]]
+                                     (when (and checkpoint (not (anomaly/anomaly? checkpoint)))
+                                       [phase-id (:phase/result checkpoint)])))
+                             phase-checkpoints)]
+     (cond
+       (or (anomaly/anomaly? manifest) (anomaly/anomaly? machine-snapshot))
+       (anomaly/anomaly :unavailable
+                        (messages/t :checkpoint/unreadable
+                                    {:run-id workflow-run-id
+                                     :files (->> read-failures
+                                                 (map #(get-in % [:anomaly/data :checkpoint/path]))
+                                                 (interpose ", ")
+                                                 (apply str))})
+                        {:workflow/run-id workflow-run-id
+                         :checkpoint/root checkpoint-root
+                         :checkpoint/read-failures read-failures})
+
+       machine-snapshot
+       (cond-> {:checkpoint/root checkpoint-root
+                :manifest manifest
+                :machine-snapshot machine-snapshot
+                :phase-results phase-results}
+         (seq read-failures) (assoc :checkpoint/read-failures read-failures))
+
+       :else nil))))
 
 (defn ^{:stratum 2} persist-execution-state!
   "Persist a machine snapshot, manifest, and current phase checkpoint,
