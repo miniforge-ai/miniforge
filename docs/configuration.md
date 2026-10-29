@@ -77,8 +77,9 @@ the execution tier. A role's model is the first of these that is set:
    need a model, so set `llm.model` for them.
 
 The shipped defaults set no model. An environment variable overrides the
-config file key it maps to. `claude` and `anthropic-api` take an
-`anthropic/...` id without the prefix.
+config file key it maps to. A blank setting counts as unset, and
+`mf config set llm.model nil` clears one. `claude` and `anthropic-api`
+take an `anthropic/...` id without the prefix.
 
 A config file that an older `mf config init`, `set`, `backend` or `edit`
 created may carry `:llm {:model "anthropic/claude-sonnet-4-5"}`, which

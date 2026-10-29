@@ -79,7 +79,8 @@
 (def ^{:stratum 0} string-valued-keys
   "Config keys whose values are model ids, stored as strings whatever EDN
    reads the value as: a model id reaches a CLI argv, which takes only
-   strings, so `config set llm.model 1.5` must not store a number."
+   strings, so `config set llm.model 1.5` must not store a number. nil
+   stays nil, so `config set llm.model nil` clears the setting."
   #{[:llm :model]
     [:agents :default-models :thinking]
     [:agents :default-models :execution]})
@@ -150,7 +151,7 @@
     (and (contains? keyword-valued-keys key-path) (string? value))
     (keyword value)
 
-    (and (contains? string-valued-keys key-path) (not (string? value)))
+    (and (contains? string-valued-keys key-path) (some? value) (not (string? value)))
     (str value)
 
     :else value))

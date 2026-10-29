@@ -19,7 +19,8 @@
   "Shared agent model policy and configuration helpers."
   (:require
    [ai.miniforge.config.interface :as config]
-   [ai.miniforge.llm.interface :as llm]))
+   [ai.miniforge.llm.interface :as llm]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -50,6 +51,16 @@
 (def ^{:stratum 0} ^:private thinking-roles
   "Roles that default to the higher-reasoning model tier."
   #{:planner :architect})
+
+(defn- ^{:stratum 0} model-text
+  "`model` as the string a client sends, or nil when it names no model. A
+   symbol, which an older `config set` stored for a bare word such as
+   gpt-5.4, becomes its text (a CLI argv takes only strings); a blank
+   string counts as unset."
+  [model]
+  (let [text (if (symbol? model) (str model) model)]
+    (when-not (and (string? text) (str/blank? text))
+      text)))
 
 (def ^{:stratum 0} ^:private bare-id-providers
   "Backends that take one provider's model ids without the provider
@@ -89,18 +100,16 @@
    3. Miniforge's model for the tier on `backend` (`backend-role-models`).
 
    The shipped default config sets neither 1 nor 2, so anything found there
-   is the user's own setting. A symbol, which an older `config set` stored
-   for a bare word such as gpt-5.4, is returned as its text: a CLI argv
-   takes only strings."
+   is the user's own setting. A blank setting is unset, and a symbol is
+   read as its text (`model-text`)."
   ([role] (default-model-for-role role nil))
   ([role backend]
-   (let [cfg   (config/load-merged-config)
-         tier  (if (thinking-roles role) :thinking :execution)
-         model (or (get-in cfg [:agents :default-models tier])
-                   (get-in cfg [:llm :model])
-                   (get-in backend-role-models
-                           [(or backend (get-in cfg [:llm :backend])) tier]))]
-     (if (symbol? model) (str model) model))))
+   (let [cfg  (config/load-merged-config)
+         tier (if (thinking-roles role) :thinking :execution)]
+     (or (model-text (get-in cfg [:agents :default-models tier]))
+         (model-text (get-in cfg [:llm :model]))
+         (get-in backend-role-models
+                 [(or backend (get-in cfg [:llm :backend])) tier])))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

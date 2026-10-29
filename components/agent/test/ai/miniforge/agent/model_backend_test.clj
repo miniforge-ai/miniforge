@@ -135,6 +135,18 @@
                     :implementer (llm/create-client {:backend :codex}))]
       (is (= [:codex "gpt-5.4"] (backend+model resolved))))))
 
+(deftest ^{:stratum 1} blank-model-setting-is-unset-test
+  (testing "a blank llm.model falls back to the backend default"
+    (is (= [:claude "claude-sonnet-4-6"]
+           (backend+model (resolve-with-config
+                           (over-shipped-defaults {:llm {:backend :claude :model ""}})
+                           :implementer (llm/create-client {:backend :claude}))))))
+  (testing "a blank tier setting falls back to llm.model"
+    (with-redefs [config/load-merged-config
+                  (constantly {:llm {:backend :claude :model "claude-haiku-4-5"}
+                               :agents {:default-models {:execution "  "}}})]
+      (is (= "claude-haiku-4-5" (model/default-model-for-role :implementer))))))
+
 ;; Selecting a model never changes the backend
 (deftest ^{:stratum 1} catalog-model-keeps-the-configured-backend-test
   (testing "a Claude catalog model keeps an anthropic-api client on the API"

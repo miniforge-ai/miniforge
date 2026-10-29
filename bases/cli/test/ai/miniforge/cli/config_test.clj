@@ -214,7 +214,17 @@
       (let [saved (edn/read-string (slurp path))]
         (is (= "gpt-5.4" (get-in saved [:llm :model])))
         (is (= "1.5" (get-in saved [:agents :default-models :thinking])))
-        (is (= ":sonnet" (get-in saved [:agents :default-models :execution])))))))
+        (is (= ":sonnet" (get-in saved [:agents :default-models :execution]))))))
+  (testing "nil clears a model setting instead of storing a blank string"
+    (let [dir  (java.nio.file.Files/createTempDirectory "config-set-model-nil" (make-array java.nio.file.attribute.FileAttribute 0))
+          path (str (.resolve dir "config.edn"))]
+      (with-out-str
+        (config/cmd-set {:config path :key "llm.model" :value "gpt-5.4"})
+        (config/cmd-set {:config path :key "llm.model" :value "nil"})
+        (config/cmd-set {:config path :key "agents.default-models.execution" :value "nil"}))
+      (let [saved (edn/read-string (slurp path))]
+        (is (nil? (get-in saved [:llm :model])))
+        (is (nil? (get-in saved [:agents :default-models :execution])))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
