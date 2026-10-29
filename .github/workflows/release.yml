@@ -221,6 +221,11 @@ jobs:
     needs: version
     runs-on: windows-latest
     continue-on-error: true
+    # Set only when every step through the upload succeeded; the scoop
+    # job keys on it rather than on needs.build-windows.result, which
+    # continue-on-error can report as success for a failed job.
+    outputs:
+      built: ${{ steps.built.outputs.built }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -327,6 +332,11 @@ jobs:
             dist/miniforge-windows-x86_64.zip.sha256
           retention-days: 5
 
+      - name: Mark Windows build complete
+        id: built
+        shell: bash
+        run: echo "built=true" >> "$GITHUB_OUTPUT"
+
   release:
     name: Create GitHub Release
     # Wait on both, but allow release to ship even if the Windows preview
@@ -382,21 +392,25 @@ jobs:
             brew install miniforge-ai/tap/miniforge
             ```
 
-            #### Direct download
-            Download the binary for your platform from the assets below, make it executable, and move it to your PATH:
-
-            **macOS ARM64 (Apple Silicon)**
+            #### Direct download (macOS and Linux)
+            The `miniforge-macos-arm64` and `miniforge-linux-x86_64` assets are
+            Babashka uberjars, not native executables: they run with
+            [Babashka](https://github.com/babashka/babashka#installation) (`bb`)
+            on your PATH, through a small `mf` launcher. Set `ASSET` to
+            `miniforge-macos-arm64` (Apple Silicon) or `miniforge-linux-x86_64`:
             ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}/miniforge-macos-arm64 -o miniforge
-            chmod +x miniforge
-            sudo mv miniforge /usr/local/bin/
-            ```
-
-            **Linux x86_64**
-            ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}/miniforge-linux-x86_64 -o miniforge
-            chmod +x miniforge
-            sudo mv miniforge /usr/local/bin/
+            ASSET=miniforge-macos-arm64
+            curl -fLO https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}/$ASSET
+            curl -fLO https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}/$ASSET.sha256
+            shasum -a 256 -c "$ASSET.sha256"   # Linux: sha256sum -c "$ASSET.sha256"
+            mkdir -p ~/.local/lib/miniforge ~/.local/bin
+            mv "$ASSET" ~/.local/lib/miniforge/miniforge.jar
+            cat > ~/.local/bin/mf <<'SH'
+            #!/bin/sh
+            exec bb --jar "$HOME/.local/lib/miniforge/miniforge.jar" -m ai.miniforge.cli.main "$@"
+            SH
+            chmod +x ~/.local/bin/mf
+            mf version   # needs ~/.local/bin on your PATH
             ```
 
             **Windows x86_64 (preview)**
@@ -528,11 +542,16 @@ jobs:
   # type `miniforge-release`. Reuses the existing GitHub App that the
   # homebrew job authenticates with — the app already has access to all
   # repos in the org, so we just point at scoop-bucket here.
+  #
+  # Runs only when the Windows preview build succeeded: without its zip in
+  # the release, the bucket's autoupdate would point at a missing asset.
   scoop:
     name: Trigger Scoop Bucket Autoupdate
-    needs: release
+    needs: [release, build-windows]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: >-
+      needs.build-windows.outputs.built == 'true' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
 
     steps:
       - name: Generate GitHub App token
