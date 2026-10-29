@@ -286,17 +286,21 @@ Budget rules:
 
 ### 5.2 Other Queries
 
+The classification context is `{:phase :task-type :changeset :enforcement}`, with the meanings of §5.1. A class
+depends on all four: the same rule can be `:gated` for one changeset and `:judged` for another (§7.2 item 4).
+
 | Query | Input | Output |
 |---|---|---|
 | `rule` | `:id`, `:detail` (`:behavior` or `:body`) | text at the pinned pack version; explicit not-found |
 | `related` | `:id`, `:hops` (1–2), `:edge-types` | entries with edge type and source |
-| `rules-for-paths` | `:paths`, `:phase`, `:enforcement` | manifest entries; for a new file type met mid-task |
-| `search` | `:text`, `:dewey-prefix`, `:phase`, `:changeset`, `:enforcement` | manifest entries; lexical match |
-| `enforcement-classes` | `:phase`, `:task-type`, `:changeset`, `:enforcement` | class for every applicable rule (§7) |
+| `rules-for-paths` | `:paths`, classification context | manifest entries; for a new file type met mid-task |
+| `search` | `:text`, `:dewey-prefix`, classification context | manifest entries; lexical match |
+| `enforcement-classes` | classification context | class for every applicable rule (§7) |
 
-Every query that returns manifest entries takes the phase, changeset and enforcement snapshot, because each entry
-carries a class. The pull tools (§6.2) bind these from the session's delivery context. The agent supplies only the
-lookup terms. `search` matches its text against title, behavior and body.
+Every query that returns manifest entries MUST take the full classification context, because each entry carries a
+class. The pull tools (§6.2) MUST bind that context from the session's delivery, never from the agent. The agent
+supplies only the lookup terms. `rules-for-paths` classifies against the session's changeset, not against
+`:paths`. `search` matches its text against title, behavior and body.
 
 ---
 
