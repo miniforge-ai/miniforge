@@ -37,6 +37,7 @@
    [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.checkpoint-store-records :as checkpoint-records]
+   [ai.miniforge.workflow.checkpoint-store-spec :as checkpoint-spec]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.schemas :as schemas]
    [babashka.fs :as fs]
@@ -304,8 +305,10 @@
       ;; the manifest actually written (merged with it) is validated
       ;; before anything is written.
       (try+
-        (let [merged-manifest (checkpoint-records/build-manifest ctx checkpoint-root
-                                                                 (read-edn-file manifest-path))
+        (let [existing-manifest (read-edn-file manifest-path)
+              merged-manifest (merge (checkpoint-records/build-manifest ctx checkpoint-root
+                                                                        existing-manifest)
+                                     (checkpoint-spec/spec-fields ctx existing-manifest))
               validation (schemas/validate-checkpoint-data
                           (assoc checkpoint-data :manifest merged-manifest))]
           (if (anomaly/anomaly? validation)

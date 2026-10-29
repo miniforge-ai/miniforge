@@ -21,6 +21,7 @@
    while this namespace remains the Polylith entrypoint."
   (:require
    [ai.miniforge.workflow.checkpoint-store-gc :as checkpoint-gc]
+   [ai.miniforge.workflow.checkpoint-store-spec :as checkpoint-spec]
    [ai.miniforge.workflow.fsm :as fsm]
    [ai.miniforge.workflow.interface.checkpoints :as checkpoints]
    [ai.miniforge.workflow.interface.configurable :as configurable]
@@ -484,3 +485,12 @@
    :checkpoint/root, :max-age-days, :events-dir. Returns {:checkpoint/root
    :deleted [run-id] :kept {reason [run-id]} :failures [anomaly]}."
   checkpoint-gc/gc-checkpoints!)
+
+;; Spec integrity on resume
+(def ^{:stratum 0} spec-drift
+  "How the spec file a run was started from has changed since its first
+   checkpoint, or nil when it has not (or none was recorded). Args: the
+   run's checkpoint manifest. Returns {:workflow/spec-path
+   :spec/expected-hash :spec/actual-hash}; actual is nil when the file is
+   gone."
+  checkpoint-spec/spec-drift)
