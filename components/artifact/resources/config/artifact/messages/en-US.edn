@@ -12,4 +12,6 @@
   :content/encoding-invalid "JSON content requires supported value-semantic data that round-trips through Transit within 16 MiB and 128 levels."
   :link/parent-not-found "Parent artifact not found"
   :link/child-not-found "Child artifact not found"
-  :link/artifact-not-found "Artifact not found"}}
+  :link/artifact-not-found "Artifact not found"
+  :link/self "An artifact cannot be linked to itself."
+  :store/close-timeout "Timed out waiting for queued artifact writes; recent artifacts may be missing from disk."}}
