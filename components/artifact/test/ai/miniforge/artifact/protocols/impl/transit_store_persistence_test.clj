@@ -224,7 +224,7 @@
         (run! #(p/save s (artifact %)) ["parent" "child"])
         ;; Hold a re-save of the parent between its cache and index updates.
         (with-redefs [impl/add-to-index (fn [index a]
-                                          (when-not (realized? paused)
+                                          (when (and (= "2" (:artifact/version a)) (not (realized? paused)))
                                             (deliver paused true)
                                             @resume)
                                           (add index a))]
@@ -289,5 +289,59 @@
       (testing "and in the file"
         (is (= ["child"] (:artifact/children
                           (read-or-unreadable (impl/artifact-file-path (artifacts-path dir) "parent"))))))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-index-write-during-a-resave-keeps-the-new-entry
+  (let [dir (temp-dir)
+        x-paused (promise)
+        resume (promise)
+        add impl/add-to-index
+        write impl/write-transit]
+    (try
+      (let [s (open-store dir)]
+        (p/save s (artifact "x"))
+        (p/close s)
+        ;; y's queued writes run while the re-save of x is held inside its
+        ;; in-memory index update.
+        (with-redefs [impl/write-transit (fn [path data]
+                                           (when (str/ends-with? path "/y.transit.json") @x-paused)
+                                           (write path data))
+                      impl/add-to-index (fn [index a]
+                                          (when (and (= "2.0.0" (:artifact/version a)) (not (realized? x-paused)))
+                                            (deliver x-paused true)
+                                            @resume)
+                                          (add index a))]
+          (p/save s (artifact "y"))
+          (let [saving (future (p/save s (assoc (artifact "x") :artifact/version "2.0.0")))]
+            @x-paused
+            (await-for 500 (:writer s))
+            (deliver resume true)
+            @saving))
+        (p/close s))
+      (testing "the index on disk has the re-saved version"
+        (is (= "2.0.0" (get-in (read-or-unreadable (impl/index-file-path (artifacts-path dir)))
+                               ["x" :artifact/version]))))
+      (finally
+        (deliver x-paused true)
+        (deliver resume true)
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-link-keeps-metadata-of-artifacts-another-store-saved
+  (let [dir (temp-dir)]
+    (try
+      ;; a opens before the link targets exist, so its index has neither.
+      (let [a (open-store dir)
+            b (open-store dir)]
+        (p/save b (assoc (artifact "parent") :artifact/type :plan))
+        (p/save b (artifact "child"))
+        (p/close b)
+        (is (true? (p/link a "parent" "child")))
+        (p/close a))
+      (let [s (open-store dir)]
+        (testing "after reopening, type queries still find both linked artifacts"
+          (is (= ["parent"] (map :artifact/id (p/query s {:artifact/type :plan}))))
+          (is (= ["child"] (map :artifact/id (p/query s {:artifact/type :code})))))
+        (p/close s))
       (finally
         (delete-dir! dir)))))
