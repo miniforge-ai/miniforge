@@ -5,6 +5,7 @@
   "Resolve protected ancestry before creating private checkpoint directories."
   (:require [ai.miniforge.workflow.boundary.checkpoint-directory-policy :as policy]
             [ai.miniforge.workflow.boundary.checkpoint-permissions :as permissions]
+            [ai.miniforge.workflow.boundary.checkpoint-path-policy :as path-policy]
             [babashka.fs :as fs]
             [slingshot.slingshot :refer [try+]])
   (:import [java.nio.file FileAlreadyExistsException]))
@@ -14,7 +15,7 @@
 (defn- ^{:stratum 0} existing-ancestor [directory]
   (loop [path (fs/absolutize directory) segments ()]
     (if (fs/exists? path)
-      [(fs/real-path path) segments]
+      [path segments]
       (recur (fs/parent path) (cons (fs/file-name path) segments)))))
 
 (defn- ^{:stratum 0} check-ancestry! [directory leaf?]
@@ -32,6 +33,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} existing! [directory]
+  (when (permissions/posix? directory) (path-policy/check! directory))
   (let [path (fs/real-path directory)]
     (when (permissions/posix? path) (check-ancestry! path true))
     path))
@@ -39,7 +41,9 @@
 (defn ^{:stratum 1} prepare! [directory]
   (let [[ancestor segments] (existing-ancestor directory)]
     (if (permissions/posix? ancestor)
-      (reduce create-private! (check-ancestry! ancestor (empty? segments)) segments)
-      (fs/create-dirs directory))))
+      (do
+        (path-policy/check! directory)
+        (reduce create-private! (check-ancestry! (fs/real-path ancestor) (empty? segments)) segments))
+      (fs/real-path (fs/create-dirs directory)))))
 
 (comment ::checkpoint-directory-creation)

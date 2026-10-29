@@ -43,4 +43,9 @@
       (refuse! path))
     path))
 
+(defn ^{:stratum 2} check-link! [path]
+  (let [attributes (fs/read-attributes path "posix:*" {:nofollow-links true})]
+    (when-not (trusted-owner? (:owner attributes)) (refuse! path))
+    path))
+
 (comment ::protected-checkpoint-directories)
