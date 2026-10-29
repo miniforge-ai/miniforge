@@ -38,6 +38,11 @@
   (or (System/getenv "MINIFORGE_HOME")
       (str (System/getProperty "user.home") "/.miniforge")))
 
+(defn ^{:stratum 0} default-miniforge-home
+  "The miniforge home when MINIFORGE_HOME is not set: <user.home>/.miniforge."
+  []
+  (str (System/getProperty "user.home") "/.miniforge"))
+
 (defn ^{:stratum 0} miniforge-home-override
   "MINIFORGE_HOME when it is set, else nil: a home the user chose."
   []
