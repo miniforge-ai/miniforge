@@ -43,6 +43,7 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.images :as images]
    [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
+   [ai.miniforge.llm.interface :as llm]
    [clojure.java.io]
    [clojure.string :as str]))
 
@@ -169,7 +170,8 @@
 (def ^{:stratum 0} agent-credential-names
   "Env vars N11 §8.1 injects into every capsule, whatever its trust level,
    for the agent itself: ANTHROPIC_API_KEY, the primary secret for current
-   tasks. `filter-env-by-trust` keeps these."
+   tasks. `filter-env-by-trust` keeps these, and `build-launch-plan` adds
+   the agent backend's own (`llm/backend-credential-env`)."
   #{"ANTHROPIC_API_KEY"})
 
 (def ^{:stratum 0} git-config-env-pattern
@@ -178,6 +180,10 @@
    trust filter drops all of it, not just the KEY_n names `secret-pattern`
    matches."
   #"GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)")
+
+(def ^{:stratum 0} proxy-env-pattern
+  "Proxy variables curl and git read. Their URL can carry `user:password@`."
+  #"(?i)(https?|all|ftp)_proxy")
 
 (defn ^{:stratum 0} build-mount-args
   "Build -v mount arguments from an execution plan map.
@@ -557,17 +563,27 @@
 
    A var is considered sensitive when its name contains any of:
    KEY, SECRET, TOKEN, PASSWORD, CREDENTIAL (case-insensitive) or belongs to
-   a GIT_CONFIG_* tuple (`git-config-env-pattern`), except the agent's own
-   credentials (`agent-credential-names`), which N11 §8.1 injects at every
-   trust level."
-  [env-map trust-level]
-  (if (contains? #{:trusted :privileged} trust-level)
-    env-map
-    (into {} (remove (fn [[k _]]
-                       (let [n (name k)]
-                         (and (or (re-find secret-pattern n) (re-matches git-config-env-pattern n))
-                              (not (contains? agent-credential-names n)))))
-                     env-map))))
+   a GIT_CONFIG_* tuple (`git-config-env-pattern`) or is GIT_CONFIG_PARAMETERS
+   (`git -c` config, which can hold an extraheader), except the agent's own
+   credentials (`agent-credential-names`, or `keep-names` when given), which
+   N11 §8.1 injects at every trust level. A proxy URL (`proxy-env-pattern`) keeps its address but
+   loses any `user:password@`, so an authenticating proxy needs a trusted
+   launch."
+  ([env-map trust-level] (filter-env-by-trust env-map trust-level agent-credential-names))
+  ([env-map trust-level keep-names]
+   (if (contains? #{:trusted :privileged} trust-level)
+     env-map
+     (into {} (keep (fn [[k v :as entry]]
+                      (let [n (name k)]
+                        (cond
+                          (contains? keep-names n) entry
+                          (or (re-find secret-pattern n)
+                              (re-matches git-config-env-pattern n)
+                              (= "GIT_CONFIG_PARAMETERS" n)) nil
+                          (re-matches proxy-env-pattern n)
+                          [k (str/replace (str v) #"^([A-Za-z][A-Za-z0-9+.-]*://)?[^/@]*@" "$1")]
+                          :else entry))))
+           env-map))))
 
 (defn ^{:stratum 1} build-resource-args
   "Build resource limit arguments.
@@ -586,10 +602,12 @@
 
 (defn- ^{:stratum 1} git-auth
   "{:user :token} that authenticates git to `remote`: the credential its URL
-   carried, else the token resolved for its host kind. nil without one."
-  [{:keys [repo-url host-kind url-auth]}]
+   carried, else the token resolved for its host kind. A resolved token is
+   never sent to a plain-http remote. nil without one."
+  [{:keys [repo-url https-url host-kind url-auth]}]
   (or url-auth
-      (when-let [token (resolve-git-token repo-url {:host-kind host-kind})]
+      (when-let [token (when-not (str/starts-with? (str/lower-case (str https-url)) "http://")
+                         (resolve-git-token repo-url {:host-kind host-kind}))]
         {:user  (get git-auth-users host-kind default-git-auth-user)
          :token token})))
 
@@ -601,9 +619,9 @@
    Env-supplied config is never written to .git/config, and exec passes the
    values in an env file, so the token lands in neither the capsule's repo
    state nor the runtime argv (N11 §2.2). Empty without a token or for a
-   non-https URL."
+   URL that is not http(s)."
   [https-url {:keys [user token]}]
-  (if-let [[_ origin] (when token (re-find #"^(https://[^/]+)/" https-url))]
+  (if-let [[_ origin] (when token (re-find #"^(https?://[^/]+)/" https-url))]
     (merge (git-config-env (conj git-credential-config
                                  [(str "http." origin "/.extraheader")
                                   (basic-auth-header user token)]))
@@ -778,19 +796,26 @@
    strings so the plan conforms to ExecutionPlanSchema, and secrets are
    dropped for an :untrusted plan (`filter-env-by-trust`). A nil or unknown
    :trust-level becomes :untrusted, so neither the secret filter nor the
-   read-only mount rule can be skipped by a malformed value.
+   read-only mount rule can be skipped by a malformed value. The filter keeps
+   the agent's credentials: `agent-credential-names` and those of the agent
+   backend, env-config's :agent-backend or else the configured [:llm :backend].
 
    This one plan is both what `check-plan-security` inspects and what
    `create-container` receives as :execution-plan, so the plan the gate
    checked is the plan that runs."
   [image-digest env-config]
-  (let [trust-level (get execution-plan/trust-levels (:trust-level env-config) :untrusted)]
+  (let [trust-level (get execution-plan/trust-levels (:trust-level env-config) :untrusted)
+        ;; `or`, not a get default: the user config is read only when
+        ;; env-config names no backend.
+        backend     (or (:agent-backend env-config)
+                        (get-in (config/load-merged-config) [:llm :backend]))]
     (cond-> {:image-digest image-digest
              :command      ["sleep" "infinity"]
              :mounts       (get env-config :mounts [])
              :env          (filter-env-by-trust
                             (normalize-plan-env (get env-config :env {}))
-                            trust-level)
+                            trust-level
+                            (into agent-credential-names (llm/backend-credential-env backend)))
              :trust-level  trust-level}
       (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
       (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))
