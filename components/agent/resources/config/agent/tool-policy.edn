@@ -52,8 +52,46 @@
  ;; Bash commands the hook refuses: java.util.regex patterns, each matched
  ;; anywhere in the command (re-find). Destructive or exfiltration-risk
  ;; commands.
+ ;;
+ ;; A deny list cannot stop a determined agent (variables, base64, a
+ ;; script it writes and runs). It is defense in depth; the env allowlist
+ ;; and capsule egress rules are the controls that hold.
  :bash/deny-patterns
- ["rm\\s+-rf\\s+/"
+ [;; Credential files and stores.
+  "\\.aws(/|\\b)"
+  "\\.ssh/"
+  "\\bid_(rsa|dsa|ecdsa|ed25519)\\b"
+  "\\.netrc\\b"
+  "\\.git-credentials\\b"
+  "\\.config/gh\\b"
+  "\\.docker/config\\.json"
+  "\\.kube/config"
+  "\\.gnupg\\b"
+  "\\.(npmrc|pypirc)\\b"
+  "\\.claude/\\.credentials"
+  "/proc/[^\\s/]+/environ"
+  ;; Commands that print tokens or the environment.
+  "\\bgh\\s+auth\\s+(token|status)\\b"
+  "\\bprintenv\\b"
+  "(^|[;&|(`]\\s*)env\\s*($|[|;&>)`])"
+  "\\b(export|declare|typeset)\\s+-[a-zA-Z]*p"
+  "\\$\\{?[A-Z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|PRIVATE_KEY)[A-Z0-9_]*"
+  "\\$\\{?AWS_[A-Z0-9_]+"
+  "\\bgit\\s+credential\\b"
+  "\\bgit\\b.*\\bcredential\\."
+  "\\bsecurity\\s+(find|dump)-"
+  "\\baws\\s+(configure|sts)\\b"
+  "\\bgcloud\\s+auth\\s+print-"
+  ;; Network clients. Build tools still fetch their dependencies.
+  "(^|[\\s;&|(`])(curl|wget|nc|ncat|netcat|socat|telnet|ftp|tftp|sftp|scp|ssh|rsync)(\\s|$)"
+  "/dev/(tcp|udp)/"
+  ;; Git commands that reach a remote the run did not configure, or
+  ;; publish. miniforge's release step pushes; the agent never does.
+  "\\bgit(\\s+-\\S+(\\s+[^-\\s]\\S*)?)*\\s+(push|remote\\s+(add|set-url))(\\s|$)"
+  "\\bgit(\\s+-\\S+(\\s+[^-\\s]\\S*)?)*\\s+(fetch|pull|clone|ls-remote)\\s+(\\S+\\s+)*\\S*(://|@)"
+  "\\bgit\\s+(.*\\s)?-c\\s+\\S*(url\\.|credential|sshCommand|askpass|hooksPath|fsmonitor)"
+  ;; Destructive commands.
+  "rm\\s+-rf\\s+/"
   "rm\\s+-rf\\s+~"
   "rm\\s+-rf\\s+\\*"
   "mkfs\\b"
@@ -66,7 +104,7 @@
   "wget\\s+.*\\|\\s*sh"
   "wget\\s+.*\\|\\s*bash"
   "eval\\s+.*\\$\\("
-  ":()\\s*\\{\\s*:\\|:\\s*&\\s*\\}\\s*;"  ; fork bomb
+  ":\\(\\)\\s*\\{\\s*:\\|:\\s*&\\s*\\}\\s*;"  ; fork bomb
   "shutdown\\b"
   "reboot\\b"
   "init\\s+0"
