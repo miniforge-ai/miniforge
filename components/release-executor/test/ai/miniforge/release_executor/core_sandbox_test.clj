@@ -363,6 +363,41 @@
       ;; The pipeline should succeed and create a PR
       (is (:success? result)))))
 
+(deftest ^{:stratum 1} release-git-network-calls-ask-for-credentials-test
+  (testing "every in-capsule git fetch and push asks the executor for git
+            credentials (origin holds none); gh calls do not"
+    (let [calls (atom [])
+          exec  (reify
+                  dag/TaskExecutor
+                  (executor-type [_] :mock)
+                  (execute! [_ _env-id command opts]
+                    (swap! calls conj [(str command) opts])
+                    (dag/ok {:exit-code 0
+                             :stdout (cond
+                                       (clojure.string/includes? (str command) "symbolic-ref")
+                                       "refs/remotes/origin/main\n"
+                                       (clojure.string/includes? (str command) "gh pr create")
+                                       "https://github.com/o/r/pull/1"
+                                       (clojure.string/includes? (str command) "git diff")
+                                       "M src/a.clj"
+                                       :else "abc123")
+                             :stderr ""})))
+          result (core/execute-release-phase
+                  (make-workflow-state)
+                  {:executor exec :environment-id "mock-env" :worktree-path "/tmp/wt"
+                   :create-pr? true :github-token "governed-token"}
+                  {:release-meta test-release-meta})
+          asks? (fn [prefix]
+                  (->> @calls
+                       (filter (fn [[cmd _]] (clojure.string/includes? cmd prefix)))
+                       (map (fn [[_ opts]] (:git-credentials? opts)))))]
+      (is (:success? result))
+      (is (seq (asks? "fetch")))
+      (is (every? true? (asks? "fetch")))
+      (is (seq (asks? "git push")))
+      (is (every? true? (asks? "git push")))
+      (is (not-any? true? (asks? "gh "))))))
+
 (deftest ^{:stratum 1} step-create-branch-prefers-base-branch-override
   (testing "an explicit base-branch-override (chained DAG task's parent branch)
             wins over the executor-detected default, so the PR stacks on the

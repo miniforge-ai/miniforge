@@ -743,6 +743,15 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
+(defn- ^{:stratum 3} with-git-credentials
+  "execute! opts: when they ask for :git-credentials?, the recorded remote's
+   credential env joins :env. Release's in-capsule fetch and push use this;
+   since origin carries no credential, they are unauthenticated without it."
+  [opts git-remotes environment-id]
+  (if (:git-credentials? opts)
+    (update opts :env merge (remote-credential-env git-remotes environment-id))
+    opts))
+
 ;; ============================================================================
 ;; Container Operations
 ;; ============================================================================
@@ -1135,7 +1144,8 @@
 
   (execute! [_this environment-id command opts]
     (try
-      (exec-in-container descriptor environment-id command opts)
+      (exec-in-container descriptor environment-id command
+                         (with-git-credentials opts git-remotes environment-id))
       (catch Exception e
         (result/err :exec-failed (.getMessage e)))))
 

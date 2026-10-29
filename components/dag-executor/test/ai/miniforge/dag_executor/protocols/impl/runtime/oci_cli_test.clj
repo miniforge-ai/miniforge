@@ -727,6 +727,22 @@
                  "+refs/heads/task/x:refs/remotes/origin/task/x"]]
                (map first (credentialed-calls @calls))))))))
 
+(deftest ^{:stratum 1} execute-git-credentials-test
+  (testing ":git-credentials? adds the recorded remote's credential to the
+            caller's env; without it the command gets only the caller's env"
+    (let [seen (atom [])]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-cli/exec-in-container (fn [_d _id _cmd opts] (swap! seen conj opts)
+                                                (result/ok {:exit-code 0}))]
+        (let [executor (recorded-remote-executor)]
+          (proto/execute! executor "c1" ["git" "push"] {:git-credentials? true
+                                                        :env {"GH_TOKEN" "t"}})
+          (proto/execute! executor "c1" ["git" "push"] {:env {"GH_TOKEN" "t"}}))
+        (let [[with-creds without] @seen]
+          (is (= "t" (get-in with-creds [:env "GH_TOKEN"])))
+          (is (contains? (:env with-creds) "GIT_CONFIG_VALUE_0"))
+          (is (= {"GH_TOKEN" "t"} (:env without))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} git-credential-env-is-read-by-git-test
