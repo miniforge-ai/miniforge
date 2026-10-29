@@ -8,6 +8,8 @@
 
 ## Problem and behavior
 
+Depends on the protected path and history boundaries in #2244.
+
 Shared temporary filenames let overlapping checkpoint writes consume another writer's bytes.
 Each write now owns a unique same-directory temporary and cleans it after success or failure.
 Atomic replacement preserves the previous checkpoint when publication fails.
@@ -15,6 +17,8 @@ Atomic replacement preserves the previous checkpoint when publication fails.
 New POSIX checkpoint files are private (`0600`).
 Replacements preserve existing POSIX read, write, and execute bits.
 Replacing a symlink publishes a private file and leaves the linked file untouched.
+Gate-history append creates private files, preserves existing permissions, and
+never follows a final symlink.
 
 ## Directory policy
 
@@ -23,6 +27,8 @@ Existing directory permissions are preserved, including read-only sharing.
 Resolved ancestry must have trusted owners and prevent entry replacement by other accounts.
 Sticky ancestors such as `/tmp` remain supported; writable checkpoint directories are refused.
 Publication uses the resolved directory even if a caller's directory alias changes during writing.
+Returned publication paths identify the files written.
+The store validates its root and run directory before any phase or history effects.
 Pin markers use the same writer with existing-only directory preparation.
 Pinning never recreates a run removed by GC; marker temporary names retain their GC meaning.
 
@@ -33,12 +39,13 @@ Non-POSIX providers retain native defaults.
 ## Verification
 
 The previous package fails the ownership, permission, and protected-directory regressions.
-The rebuilt CLI passes 43 isolated checkpoint, lock, pin, and GC tests with 144 assertions.
-All three workflow consumers pass against current main in 2m12s with clean process shutdown.
-Eight focused directory tests and the pin-publication integration pass 37 JVM assertions.
-Directory tests take under 22 ms; the integration takes 15 ms in this run.
+The focused review-regression JVM suites pass 21 tests and 78 assertions.
+All three workflow consumers pass serially in 2m11s after updating path
+expectations to the resolved publication contract.
+Rebuild the isolated CLI after final prerequisite alignment.
 The actual rename-failure test verifies preparation completed before removing the temporary.
-The pin-publication test uses latches to prove GC waits for the held lock and retains the run.
+The pin-publication test observes actual lock contention before releasing the
+pin and proves GC retains the run. Its release happens in a finally block.
 The integration runner discovers that project test automatically.
 
 The adversarial pass traces first creation, replacement, aliases, unsafe ancestry, and cleanup.

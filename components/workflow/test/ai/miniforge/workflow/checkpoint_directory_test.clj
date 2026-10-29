@@ -41,9 +41,10 @@
   (let [source (fs/create-dir (fs/path root "source"))
         replacement (fs/create-dir (fs/path root "alternate"))
         alias (fs/create-sym-link (fs/path root "alias") source)
-        write! (partial directories/switch-alias! spit alias replacement)]
-    (with-redefs [spit write!]
-      (support/write! (fs/path alias "snapshot.edn") :complete))
+        write! (partial directories/switch-alias! spit alias replacement)
+        published (with-redefs [spit write!]
+                    (support/write! (fs/path alias "snapshot.edn") :complete))]
+    (is (= (fs/path (fs/real-path source) "snapshot.edn") (fs/path published)))
     (is (= :complete (directories/read-value (fs/path source "snapshot.edn"))))
     (is (empty? (fs/list-dir replacement)))))
 

@@ -22,7 +22,7 @@
     (is (= ["snapshot.edn"] (mapv fs/file-name (fs/list-dir root))))))
 
 (defn- ^{:stratum 0} verify-interleaving [root]
-  (let [target (str (fs/path root "snapshot.edn"))
+  (let [target (str (fs/path (fs/real-path root) "snapshot.edn"))
         paths (atom [])
         interleaved-write! (partial support/interleave! spit (atom false) target paths)]
     (with-redefs [spit interleaved-write!]

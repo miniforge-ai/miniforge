@@ -49,6 +49,6 @@
          published (fs/path (fs/parent temporary) (fs/file-name target))]
      (cleanup/finish! (partial publish! temporary published data)
                       (partial remove-temporary! temporary))
-     target)))
+     (str published))))
 
 (comment ::temporary-file-ownership)

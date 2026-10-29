@@ -37,6 +37,7 @@
    [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.workflow.boundary.checkpoint-directory :as directory]
    [ai.miniforge.workflow.boundary.checkpoint-file :as checkpoint-file]
+   [ai.miniforge.workflow.boundary.checkpoint-history :as history]
    [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.checkpoint-store-records :as checkpoint-records]
@@ -194,13 +195,12 @@
                    ;; consumer reads.
                    :phase/gate-errors (:phase/gate-errors phase-result)
                    :phase/gate-failures (:phase/gate-failures phase-result)}]
-        (fs/create-dirs dir)
         ;; Same instant normalization the checkpoint records get: gate
         ;; errors carry java.time.Instant values (policy-pack violations'
         ;; :timestamp), which pr-str would emit as #object[...] and make
         ;; the history unreadable.
-        (with-open [w (java.io.FileOutputStream. (fs/file dir gate-history-filename) true)]
-          (.write w (.getBytes (str (pr-str (coerce/stringify-instants entry)) "\n") "UTF-8"))))
+        (history/append! (fs/path dir gate-history-filename)
+                         (str (pr-str (coerce/stringify-instants entry)) "\n")))
       (catch Exception _ nil))))
 
 (defn ^{:stratum 1} pin-checkpoint!
@@ -325,7 +325,6 @@
      (when (and (map? manifest) (not (anomaly/anomaly? manifest)))
        (try+
          (write-edn-atomically! path (assoc manifest :workflow/spec-path (str spec-path)))
-         path
          (catch Exception e
            (write-failure (checkpoint-paths/resolve-checkpoint-root opts) workflow-run-id nil e)))))))
 
@@ -367,6 +366,8 @@
       ;; the manifest actually written (merged with it) is validated
       ;; before anything is written.
       (try+
+        (directory/prepare! checkpoint-root)
+        (directory/prepare! (checkpoint-paths/workflow-checkpoint-dir checkpoint-root workflow-run-id))
         (let [existing-manifest (read-edn-file manifest-path)
               merged-manifest (merge (checkpoint-records/build-manifest ctx checkpoint-root
                                                                         existing-manifest)
@@ -380,30 +381,26 @@
                       :let [path (checkpoint-paths/phase-checkpoint-path checkpoint-root workflow-run-id resumed-phase)]
                       :when (and resumed-result (not (fs/exists? path)))]
                 (write-edn-atomically! path (checkpoint-records/build-phase-checkpoint ctx resumed-phase resumed-result)))
-              (when (and phase-name phase-result)
-                (write-edn-atomically!
-                 (checkpoint-paths/phase-checkpoint-path checkpoint-root
-                                                         workflow-run-id
-                                                         phase-name)
-                 (checkpoint-records/build-phase-checkpoint ctx phase-name phase-result))
-                (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
-              (write-edn-atomically! snapshot-path snapshot)
-              (write-edn-atomically! manifest-path merged-manifest)
-              ;; A run started pinned (`mf resume --pin` under a new run id)
-              ;; is pinned with its first checkpoint, through the locked pin
-              ;; the GC excludes; a pin that fails is a failed checkpoint.
-              (let [pin (when (and (true? (get-in ctx [:execution/opts :checkpoint/pin?]))
-                                   (not (fs/exists? (checkpoint-paths/pin-marker-path
-                                                     checkpoint-root workflow-run-id))))
-                          (pin-checkpoint! workflow-run-id {:checkpoint/root checkpoint-root}))]
-                (if (anomaly/anomaly? pin)
-                  (assoc-in pin [:anomaly/data :phase/name] phase-name)
-                  (cond-> {:checkpoint/root checkpoint-root
-                           :checkpoint/machine-snapshot-path snapshot-path
-                           :checkpoint/manifest-path manifest-path}
-                    (and phase-name phase-result)
-                    (assoc :checkpoint/phase phase-name
-                           :checkpoint/phase-path (checkpoint-paths/phase-checkpoint-path
-                                                   checkpoint-root workflow-run-id phase-name))))))))
+              (let [phase-path (when (and phase-name phase-result)
+                                 (write-edn-atomically!
+                                  (checkpoint-paths/phase-checkpoint-path checkpoint-root workflow-run-id phase-name)
+                                  (checkpoint-records/build-phase-checkpoint ctx phase-name phase-result)))]
+                (when phase-path
+                  (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
+                ;; A failed initial pin must remain a failed checkpoint.
+                (let [snapshot-path (write-edn-atomically! snapshot-path snapshot)
+                      manifest-path (write-edn-atomically! manifest-path merged-manifest)
+                      pin (when (and (true? (get-in ctx [:execution/opts :checkpoint/pin?]))
+                                     (not (fs/exists? (checkpoint-paths/pin-marker-path
+                                                       checkpoint-root workflow-run-id))))
+                            (pin-checkpoint! workflow-run-id {:checkpoint/root checkpoint-root}))]
+                  (if (anomaly/anomaly? pin)
+                    (assoc-in pin [:anomaly/data :phase/name] phase-name)
+                    (cond-> {:checkpoint/root checkpoint-root
+                             :checkpoint/machine-snapshot-path snapshot-path
+                             :checkpoint/manifest-path manifest-path}
+                      phase-path
+                      (assoc :checkpoint/phase phase-name
+                             :checkpoint/phase-path phase-path))))))))
         (catch Exception e
           (write-failure checkpoint-root workflow-run-id phase-name e))))))

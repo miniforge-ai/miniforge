@@ -5,7 +5,6 @@
   (:require [ai.miniforge.workflow.checkpoint-pin-publication-support :as support]
             [ai.miniforge.workflow.checkpoint-store :as store]
             [ai.miniforge.workflow.checkpoint-store-gc :as gc]
-            [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [babashka.fs :as fs]
             [clojure.test :refer [deftest is]])
@@ -18,23 +17,20 @@
         opts {:checkpoint/root root}
         inside (support/latch)
         release (support/latch)
-        gc-entered (support/latch)
-        lock! checkpoint-lock/with-run-lock
         create! (partial support/before-pin-temporary! fs/create-temp-file inside release)]
     (with-redefs [fs/create-temp-file create!]
       (let [pin (future (store/pin-checkpoint! id opts))]
         (is (support/await! inside))
-        (with-redefs [checkpoint-lock/with-run-lock
-                      (partial support/before-gc-lock! lock! gc-entered)]
-          (let [collect (future (gc/gc-checkpoints! opts))]
-            (is (support/await! gc-entered))
+        (let [collect (future (gc/gc-checkpoints! opts))]
+          (try
+            (is (support/await-contention! root id collect))
             (is (not (realized? collect)))
-            (.countDown ^CountDownLatch release)
-            (is (string? (deref pin support/wait-ms ::timed-out)))
-            (let [result (deref collect support/wait-ms ::timed-out)]
-              (is (empty? (:deleted result)))
-              (is (= [id] (get-in result [:kept :pinned])))
-              (is (fs/exists? (fs/path root (str id) "pinned"))))))))))
+            (finally (.countDown ^CountDownLatch release)))
+          (is (string? (deref pin support/wait-ms ::timed-out)))
+          (let [result (deref collect support/wait-ms ::timed-out)]
+            (is (empty? (:deleted result)))
+            (is (= [id] (get-in result [:kept :pinned])))
+            (is (fs/exists? (fs/path root (str id) "pinned")))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
