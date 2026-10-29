@@ -117,3 +117,27 @@
           (is (= head (git! dir "rev-parse" "HEAD")))
           (is (empty? (fs/glob (fs/path dir ".git") "index.fix-*"))))
         (finally (fs/delete-tree dir))))))
+
+(deftest ^{:stratum 2} run-fix-loop-refuses-a-fix-through-a-symlink-test
+  (testing "a fix to link.txt -> target.txt is refused before anything is written or staged"
+    (let [dir (repo-with-unrelated-change)]
+      (try
+        (spit (str (fs/path dir "target.txt")) "t1\n")
+        (fs/create-sym-link (fs/path dir "link.txt") "target.txt")
+        (git! dir "add" "target.txt" "link.txt")
+        (git! dir "commit" "-q" "-m" "link")
+        (let [head (git! dir "rev-parse" "HEAD")]
+          (with-redefs [fix/generate-fix (fn [& _] {:success true
+                                                    :artifact {:code/files [{:path "link.txt"
+                                                                             :content "t2\n"
+                                                                             :action :modify}]}
+                                                    :metrics {}})
+                        release/push-branch! (fn [& _] {:success? true})]
+            (let [result (fix/run-fix-loop {:task/id (random-uuid)}
+                                           {:pr/id 1 :pr/branch "fix/x"}
+                                           {:type :review-changes} (fn [& _]) {}
+                                           :worktree-path dir :max-attempts 1)]
+              (is (not (:success? result)))
+              (is (= "t1\n" (slurp (str (fs/path dir "target.txt")))))
+              (is (= head (git! dir "rev-parse" "HEAD"))))))
+        (finally (fs/delete-tree dir))))))
