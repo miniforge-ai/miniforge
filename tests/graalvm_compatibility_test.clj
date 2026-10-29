@@ -283,6 +283,43 @@
                 (finally
                   (register-evaluator! nil))))))))))
 
+(deftest ^{:stratum 1} test-workflow-run-reaches-its-pipeline-in-babashka
+  (testing "`mf workflow run` (run-workflow!) runs under Babashka, the CLI runtime"
+    ;; The manifest operations are JVM-only; starting one used to throw
+    ;; before the pipeline ran, so the command failed for every user.
+    ;; Everything around the run is stubbed: no workflow load, no LLM,
+    ;; no sink writing under ~/.miniforge.
+    (let [[loaded? error-msg] (require-namespace 'ai.miniforge.cli.workflow-runner)]
+      (is loaded? (str "workflow-runner should load: " error-msg))
+      (when loaded?
+        (let [v #(resolve (symbol %))
+              create-stream (v "ai.miniforge.event-stream.interface/create-event-stream")
+              tmp (io/file (System/getProperty "java.io.tmpdir") (str "bb-workflow-run-" (random-uuid)))
+              ran? (atom false)
+              stubs {(v "ai.miniforge.event-stream.interface/create-event-stream")
+                     (let [create @create-stream] (fn [& _] (create {:sinks []})))
+                     (v "ai.miniforge.event-stream.interface/workflow-dir")
+                     (fn [& _] tmp)
+                     (v "ai.miniforge.cli.workflow-runner.setup/resolve-workflow-interface")
+                     (constantly {:load-workflow (constantly {}) :run-pipeline (constantly nil)})
+                     (v "ai.miniforge.cli.workflow-runner.setup/load-and-validate-workflow")
+                     (constantly {:workflow/id :bb-check :workflow/version "1"})
+                     (v "ai.miniforge.cli.workflow-runner.execution/execute-workflow-pipeline")
+                     (fn [& _] (reset! ran? true) {:execution/status :completed})
+                     (v "ai.miniforge.cli.workflow-runner/run-gc-pass-best-effort!") (constantly nil)
+                     (v "ai.miniforge.cli.workflow-runner/enqueue-workflow-gc-best-effort!") (constantly nil)}]
+          (is (every? some? (keys stubs)) "the stubbed vars must resolve")
+          (when (every? some? (keys stubs))
+            (let [result (with-redefs-fn stubs
+                           #(try
+                              (binding [*out* (java.io.StringWriter.)]
+                                ((v "ai.miniforge.cli.workflow-runner/run-workflow!")
+                                 :bb-check {:quiet true}))
+                              (catch Exception e {::threw (ex-message e)})))]
+              (is (nil? (::threw result))
+                  (str "run-workflow! must not throw under Babashka: " (::threw result)))
+              (is @ran? "the run reaches its pipeline"))))))))
+
 (deftest ^{:stratum 1} test-operator-consumer-pass-executes-in-babashka
   (testing "consume-operator-events! runs a full pass under Babashka"
     (let [[loaded? error-msg] (require-namespace 'ai.miniforge.operator.interface)]
