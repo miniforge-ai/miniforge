@@ -1076,6 +1076,12 @@
    archived → live → legacy directories of a workflow, or nil."
   reader/workflow-events-dir)
 
+(def ^{:stratum 0} event-order-key
+  "`(event-order-key event)`: [timestamp-ms sequence-number], the order to
+   sort read events by before taking the newest; file names order them
+   only to their recorded time."
+  reader/event-order-key)
+
 (def ^{:stratum 0} read-workflow-events-by-id
   "Read events for a workflow id under a base events dir, probing the
    archived → live → legacy layouts and reading the first that exists.

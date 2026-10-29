@@ -499,6 +499,24 @@
                                   (resume-with snapshotted {:run-id (str snapshot-id)}))
                 "a --run-id naming the ended run itself is refused")))))))
 
+(deftest ^{:stratum 1} the-newest-lifecycle-event-goes-by-time-not-file-name-test
+  (with-temp-events-dir
+    (fn [base-dir]
+      (with-redefs [sut/events-dir (.getPath ^java.io.File base-dir)]
+        (let [snapshot-id (random-uuid)
+              dir         (doto (io/file base-dir "live" (str snapshot-id)) .mkdirs)
+              event       (fn [type seq-num] {"~:event/type" type "~:workflow/id" (str "~u" snapshot-id)
+                                              "~:event/timestamp" "~t2026-04-20T00:00:01.000Z"
+                                              "~:event/sequence-number" seq-num})]
+          ;; One legacy second: the names put the start last, its sequence number first.
+          (write-event! dir "20260420T000001Z-a.json" (event "~:workflow/failed" 2))
+          (write-event! dir "20260420T000001Z-b.json" (event "~:workflow/started" 1))
+          (is (not= snapshot-id
+                    (:registered (resume-with {:completed-phases [:plan] :phase-results {:plan {}}
+                                               :machine-snapshot {:execution/id snapshot-id}}
+                                              {})))
+              "the failure is the newest event, so the run resumes as a new attempt"))))))
+
 (deftest ^{:stratum 1} read-event-file-reads-per-event-json-from-workflow-dir-test
   ;; Regression guard for the iter-20 resume bug. Before this fix,
   ;; read-event-file looked for a single {workflow-id}.edn file that

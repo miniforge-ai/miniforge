@@ -175,6 +175,9 @@
                         (filter (comp #{:workflow/started :workflow/resumed :workflow/completed
                                         :workflow/failed :workflow/cancelled}
                                       :event/type))
+                        ;; Not file order: same-second legacy names sort by
+                        ;; their uuid suffix.
+                        (sort-by es/event-order-key)
                         last
                         :event/type)))))))
 
