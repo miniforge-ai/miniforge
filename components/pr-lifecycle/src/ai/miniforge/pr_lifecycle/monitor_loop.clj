@@ -67,15 +67,20 @@
                                             {:budget-summary summary}))))
 
 (defn- ^{:stratum 0} classify-comments
-  [new-comments generate-fn self-author]
+  "Classify `new-comments`. `trusted-authors` (logins) are acted on even
+   without an OWNER, MEMBER or COLLABORATOR association; see
+   `classifier/classify-comment`."
+  [new-comments generate-fn self-author trusted-authors]
   (if (seq new-comments)
     (classifier/classify-comments new-comments
                                   :generate-fn generate-fn
-                                  :self-author self-author)
+                                  :self-author self-author
+                                  :trusted-authors trusted-authors)
     {:change-requests []
      :questions []
      :approvals []
      :bot-comments []
+     :untrusted []
      :noise []
      :all []
      :stats {:total 0
@@ -83,6 +88,7 @@
              :questions 0
              :approvals 0
              :bot-comments 0
+             :untrusted 0
              :noise 0}}))
 
 (defn- ^{:stratum 0} actionable-comments
@@ -219,9 +225,14 @@
 ;------------------------------------------------------------------------------ Layer 3
 
 (defn ^{:stratum 3} run-cycle
-  "Run one poll → classify → route cycle for a single PR."
+  "Run one poll → classify → route cycle for a single PR.
+
+   Reads `:trusted-authors` from the monitor config: logins whose comments
+   are acted on even without an OWNER, MEMBER or COLLABORATOR author
+   association (a bot account, say). Everyone else without one is
+   classified `:untrusted` and never routed."
   [monitor pr-info]
-  (let [{:keys [worktree-path self-author generate-fn logger]} (:config @monitor)
+  (let [{:keys [worktree-path self-author generate-fn logger trusted-authors]} (:config @monitor)
         pr-number  (:pr/number pr-info)
         watermarks (:watermarks @monitor)
         pr-budget  (state/get-or-create-budget monitor pr-number)]
@@ -235,7 +246,8 @@
           (poll-error-result poll-result)
           (let [{:keys [new-comments watermarks]} (:data poll-result)
                 _          (persist-poll-state! monitor pr-number watermarks new-comments)
-                classified (classify-comments new-comments generate-fn self-author)
+                classified (classify-comments new-comments generate-fn self-author
+                                              trusted-authors)
                 _          (emit-classification-events! monitor pr-number classified)
                 results    (route-actionable-comments monitor pr-info classified)]
             (state/emit! monitor
