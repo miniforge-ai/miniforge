@@ -17,10 +17,6 @@
 
 (def ^{:stratum 0} ^:private shared-permissions "rw-r-----")
 
-(defn- ^{:stratum 0} with-posix-root [f]
-  (fixture/call-with-temp-checkpoint-root
-   (fn [root] (when (permissions/posix? root) (f root)))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} verify-private-history [root]
@@ -42,9 +38,9 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(deftest ^{:stratum 2} new-history-is-private-and-existing-sharing-is-preserved (with-posix-root verify-private-history))
+(deftest ^{:stratum 2} new-history-is-private-and-existing-sharing-is-preserved (fixture/call-with-posix-checkpoint-root verify-private-history))
 
-(deftest ^{:stratum 2} history-append-does-not-follow-a-symlink (with-posix-root verify-no-follow))
+(deftest ^{:stratum 2} history-append-does-not-follow-a-symlink (fixture/call-with-posix-checkpoint-root verify-no-follow))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.workflow.checkpoint-history-policy-test))

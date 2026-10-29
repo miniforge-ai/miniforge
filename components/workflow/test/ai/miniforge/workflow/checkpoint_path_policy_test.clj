@@ -21,10 +21,6 @@
 
 (defn- ^{:stratum 0} mode [path] (fs/posix->str (fs/posix-file-permissions path)))
 
-(defn- ^{:stratum 0} with-posix-root [f]
-  (fixture/call-with-temp-checkpoint-root
-   (fn [root] (when (permissions/posix? root) (f root)))))
-
 (defn- ^{:stratum 0} foreign-link-attributes [read! link path attributes options]
   (cond-> (read! path attributes options)
     (= (str link) (str path)) (assoc :owner "another-account")))
@@ -86,23 +82,23 @@
                                    (make-array java.nio.file.LinkOption 0))
   (is (thrown? IOException (directory/prepare! root))))
 
-(deftest ^{:stratum 1} trusted-aliases-are-resolved (with-posix-root verify-trusted-alias))
+(deftest ^{:stratum 1} trusted-aliases-are-resolved (fixture/call-with-posix-checkpoint-root verify-trusted-alias))
 
-(deftest ^{:stratum 1} writable-original-ancestry-cannot-hide-behind-an-alias (with-posix-root verify-writable-original-path))
+(deftest ^{:stratum 1} writable-original-ancestry-cannot-hide-behind-an-alias (fixture/call-with-posix-checkpoint-root verify-writable-original-path))
 
-(deftest ^{:stratum 1} native-providers-also-return-resolved-directories (with-posix-root verify-native-alias))
+(deftest ^{:stratum 1} native-providers-also-return-resolved-directories (fixture/call-with-posix-checkpoint-root verify-native-alias))
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(deftest ^{:stratum 2} missing-directories-are-created-private (with-posix-root verify-new-directories))
+(deftest ^{:stratum 2} missing-directories-are-created-private (fixture/call-with-posix-checkpoint-root verify-new-directories))
 
-(deftest ^{:stratum 2} existing-read-only-sharing-is-preserved (with-posix-root verify-read-only-sharing))
+(deftest ^{:stratum 2} existing-read-only-sharing-is-preserved (fixture/call-with-posix-checkpoint-root verify-read-only-sharing))
 
-(deftest ^{:stratum 2} writable-leaves-are-refused-without-chmod (with-posix-root verify-unsafe-leaves))
+(deftest ^{:stratum 2} writable-leaves-are-refused-without-chmod (fixture/call-with-posix-checkpoint-root verify-unsafe-leaves))
 
-(deftest ^{:stratum 2} foreign-aliases-are-refused-before-creation (with-posix-root verify-foreign-alias))
+(deftest ^{:stratum 2} foreign-aliases-are-refused-before-creation (fixture/call-with-posix-checkpoint-root verify-foreign-alias))
 
-(deftest ^{:stratum 2} sticky-bit-does-not-make-a-checkpoint-directory-safe (with-posix-root verify-sticky-leaf))
+(deftest ^{:stratum 2} sticky-bit-does-not-make-a-checkpoint-directory-safe (fixture/call-with-posix-checkpoint-root verify-sticky-leaf))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.workflow.checkpoint-path-policy-test))
