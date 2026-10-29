@@ -21,6 +21,7 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
+   [ai.miniforge.pr-lifecycle.fix-stage :as fix-stage]
    [ai.miniforge.release-executor.interface :as release]
    [babashka.fs :as fs]
    [babashka.process :as process]
@@ -64,6 +65,26 @@
     (git! dir "commit" "-q" "-m" "init")
     (spit (str (fs/path dir "d.txt")) "edited by someone else\n")
     dir))
+
+(deftest ^{:stratum 1} commit-fix-commits-a-fix-in-a-clean-repository-test
+  (testing "a fresh repository with nothing staged commits the fix"
+    (let [dir (str (fs/create-temp-dir {:prefix "fix-loop-clean-"}))]
+      (try
+        (git! dir "init" "-q")
+        (git! dir "config" "user.email" "t@example.com")
+        (git! dir "config" "user.name" "t")
+        (spit (str (fs/path dir "a.txt")) "a\n")
+        (git! dir "add" "a.txt")
+        (git! dir "commit" "-q" "-m" "init")
+        (spit (str (fs/path dir "a.txt")) "a2\n")
+        (with-redefs [release/push-branch! (fn [& _] {:success? true})]
+          (let [result (fix/commit-fix dir {:fix/type :review-changes} "fix/x" nil
+                                       [{:path "a.txt" :action :modify}])]
+            (is (dag/ok? result))
+            (is (= "M\ta.txt" (git! dir "show" "--name-status" "--format=" "HEAD")))
+            (is (= "" (git! dir "status" "--short")))
+            (is (not (fs/exists? (fs/path dir ".git" "index.lock"))))))
+        (finally (fs/delete-tree dir))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -194,5 +215,24 @@
           (is (= before (vec (fs/read-all-bytes (fs/path dir ".git" "index")))))
           (is (= "d.txt" (git! dir "diff" "--cached" "--name-only")))
           (is (= head (git! dir "rev-parse" "HEAD")))
+          (is (not (fs/exists? (fs/path dir ".git" "index.lock")))))
+        (finally (fs/delete-tree dir))))))
+
+(deftest ^{:stratum 2} stage-files-checks-the-real-index-whatever-git-index-file-says-test
+  (testing "GIT_INDEX_FILE pointing at a clean alternate index does not hide a staged file"
+    (let [dir       (repo-with-unrelated-change)
+          alternate (str (fs/path dir ".git" "alternate-index"))]
+      (try
+        (git! dir "add" "d.txt")
+        (process/sh {:dir dir :env (assoc (into {} (System/getenv)) "GIT_INDEX_FILE" alternate)}
+                    "git" "read-tree" "HEAD")
+        (spit (str (fs/path dir "a.txt")) "a2\n")
+        (let [before (vec (fs/read-all-bytes (fs/path dir ".git" "index")))
+              result (fix-stage/stage-files! dir [{:path "a.txt" :action :modify}]
+                                             (assoc (into {} (System/getenv))
+                                                    "GIT_INDEX_FILE" alternate))]
+          (is (re-find #"already has staged changes" (str (:error result))))
+          (is (= before (vec (fs/read-all-bytes (fs/path dir ".git" "index")))))
+          (is (= "d.txt" (git! dir "diff" "--cached" "--name-only")))
           (is (not (fs/exists? (fs/path dir ".git" "index.lock")))))
         (finally (fs/delete-tree dir))))))
