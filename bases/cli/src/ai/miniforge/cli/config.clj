@@ -98,16 +98,6 @@
       (keyword (str backend))
       backend)))
 
-(defn ^{:stratum 0} get-llm-timeout
-  "Get LLM timeout from config."
-  [config]
-  (get-in config [:llm :timeout-ms] 300000))
-
-(defn ^{:stratum 0} get-llm-line-timeout
-  "Get LLM line timeout from config."
-  [config]
-  (get-in config [:llm :line-timeout-ms] 60000))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} default-config

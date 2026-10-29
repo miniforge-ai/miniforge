@@ -72,15 +72,6 @@
   [var-name]
   (System/getenv var-name))
 
-(defn ^{:stratum 0} parse-env-value
-  "Parse environment variable value (string -> EDN)."
-  [value]
-  (when value
-    (try
-      (edn/read-string value)
-      (catch Exception _
-        value))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} default-user-config-path
@@ -132,19 +123,12 @@
    - MINIFORGE_LLM_MODEL
    - MINIFORGE_AGENT_THINKING_MODEL
    - MINIFORGE_AGENT_EXECUTION_MODEL
-   - MINIFORGE_MODEL_SELECTION_ENABLED
-   - MINIFORGE_MODEL_SELECTION_STRATEGY
-   - MINIFORGE_MODEL_SELECTION_COST_LIMIT
-   - MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL
-   - MINIFORGE_SELF_HEALING_ENABLED
-   - MINIFORGE_SELF_HEALING_AUTO_APPLY
-   - MINIFORGE_BACKEND_AUTO_SWITCH
-   - MINIFORGE_BACKEND_HEALTH_THRESHOLD
 
    Map a variable only when code reads the key it sets: an operator who sets
-   a variable that nothing reads believes a setting is in force. The
-   MODEL_SELECTION_*, SELF_HEALING_* and BACKEND_* entries do not meet that
-   yet; no run reads :model-selection or :self-healing from this config."
+   a variable that nothing reads believes a setting is in force. No run
+   reads :model-selection or :self-healing from this config, so the
+   MODEL_SELECTION_*, SELF_HEALING_* and BACKEND_* variables are not
+   mapped."
   [config]
   (cond-> config
     ;; LLM settings
@@ -159,33 +143,7 @@
     (assoc-in [:agents :default-models :thinking] (get-env-var "MINIFORGE_AGENT_THINKING_MODEL"))
 
     (get-env-var "MINIFORGE_AGENT_EXECUTION_MODEL")
-    (assoc-in [:agents :default-models :execution] (get-env-var "MINIFORGE_AGENT_EXECUTION_MODEL"))
-
-    ;; Model selection settings
-    (get-env-var "MINIFORGE_MODEL_SELECTION_ENABLED")
-    (assoc-in [:model-selection :enabled] (parse-env-value (get-env-var "MINIFORGE_MODEL_SELECTION_ENABLED")))
-
-    (get-env-var "MINIFORGE_MODEL_SELECTION_STRATEGY")
-    (assoc-in [:model-selection :strategy] (keyword (get-env-var "MINIFORGE_MODEL_SELECTION_STRATEGY")))
-
-    (get-env-var "MINIFORGE_MODEL_SELECTION_COST_LIMIT")
-    (assoc-in [:model-selection :cost-limit-per-task] (parse-env-value (get-env-var "MINIFORGE_MODEL_SELECTION_COST_LIMIT")))
-
-    (get-env-var "MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL")
-    (assoc-in [:model-selection :require-local] (parse-env-value (get-env-var "MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL")))
-
-    ;; Self-healing settings
-    (get-env-var "MINIFORGE_SELF_HEALING_ENABLED")
-    (assoc-in [:self-healing :enabled] (parse-env-value (get-env-var "MINIFORGE_SELF_HEALING_ENABLED")))
-
-    (get-env-var "MINIFORGE_SELF_HEALING_AUTO_APPLY")
-    (assoc-in [:self-healing :workaround-auto-apply] (parse-env-value (get-env-var "MINIFORGE_SELF_HEALING_AUTO_APPLY")))
-
-    (get-env-var "MINIFORGE_BACKEND_AUTO_SWITCH")
-    (assoc-in [:self-healing :backend-auto-switch] (parse-env-value (get-env-var "MINIFORGE_BACKEND_AUTO_SWITCH")))
-
-    (get-env-var "MINIFORGE_BACKEND_HEALTH_THRESHOLD")
-    (assoc-in [:self-healing :backend-health-threshold] (parse-env-value (get-env-var "MINIFORGE_BACKEND_HEALTH_THRESHOLD")))))
+    (assoc-in [:agents :default-models :execution] (get-env-var "MINIFORGE_AGENT_EXECUTION_MODEL"))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

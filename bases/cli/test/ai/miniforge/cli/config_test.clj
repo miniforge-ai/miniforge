@@ -72,24 +72,6 @@
     (is (= :vendor/opencode (config/get-llm-backend {:llm {:backend 'vendor/opencode}} nil)))
     (is (= :vendor/opencode (config/get-llm-backend {:llm {:backend "vendor/opencode"}} nil)))))
 
-(deftest ^{:stratum 0} get-llm-timeout-test
-  (testing "get-llm-timeout returns config value"
-    (let [cfg {:llm {:timeout-ms 600000}}]
-      (is (= 600000 (config/get-llm-timeout cfg)))))
-
-  (testing "get-llm-timeout returns default when not in config"
-    (is (= 300000 (config/get-llm-timeout {})))
-    (is (= 300000 (config/get-llm-timeout {:llm {}})))))
-
-(deftest ^{:stratum 0} get-llm-line-timeout-test
-  (testing "get-llm-line-timeout returns config value"
-    (let [cfg {:llm {:line-timeout-ms 120000}}]
-      (is (= 120000 (config/get-llm-line-timeout cfg)))))
-
-  (testing "get-llm-line-timeout returns default when not in config"
-    (is (= 60000 (config/get-llm-line-timeout {})))
-    (is (= 60000 (config/get-llm-line-timeout {:llm {}})))))
-
 (deftest ^{:stratum 0} config-structure-test
   (testing "config.edn has expected structure"
     (let [cfg (config/load-config)]
