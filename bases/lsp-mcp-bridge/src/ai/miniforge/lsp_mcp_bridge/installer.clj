@@ -198,38 +198,47 @@
         (fs/delete-tree dist-dir)
         (throw e)))))
 
+(defn ^{:stratum 0} launcher-target
+  "The path an install-dist! launcher at `path` execs, or nil when `path`
+   is not such a launcher (missing, a plain binary, anything else)."
+  [path]
+  (when (and (fs/regular-file? path) (< (fs/size path) 4096))
+    (some-> (re-find #"(?s)\A#!/bin/sh\nexec '((?:[^']|'\\'')*)' \"\$@\"\n\z" (slurp (str path)))
+            second
+            (str/replace "'\\''" "'"))))
+
 (defn ^{:stratum 0} finish-install!
   "Cleanup once the target has been replaced, so the install has already
-   succeeded. For an archive install, record `dist` in
-   `.dist/<binary>/active` (atomic rename) and prune that binary's trees
-   other than `dist` and the one `active` named before: the previous
-   install, which a running server may still use. A tree left by an
-   interrupted install is never recorded, so it is pruned. The prune is
-   skipped if `active` cannot be read or written. Then delete the staging
-   dir. Returns warning strings instead of throwing.
+   succeeded. For an archive install, prune that binary's trees under
+   `.dist/<binary>/` other than `dist` and the tree `prev` (what the
+   launcher execed before the swap) lies in: the previous install, which
+   a running server may still use. The launcher is the only record of
+   which tree is live; when `prev` does not point into `.dist/<binary>/`
+   and other trees exist, nothing is pruned and a warning says so. Then
+   delete the staging dir. Returns warning strings instead of throwing.
    Plain try: this base declares no slingshot dep (rule 211 exemption 1)."
-  [temp-dir dist]
+  [temp-dir dist prev]
   (let [delete! (fn [path]
                   (try (fs/delete-tree path) nil
                        (catch Exception e (str "could not remove " path ": " (ex-message e)))))
-        root    (some-> dist fs/parent)
-        active  (some-> root (fs/path "active"))
-        record! (fn []
-                  (let [prev (when (fs/exists? active) (str/trim (slurp (str active))))
-                        tmp  (fs/path temp-dir "active")]
-                    (spit (str tmp) (str (fs/file-name dist)))
-                    (Files/move tmp active (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
-                                                                   StandardCopyOption/REPLACE_EXISTING]))
-                    #{(str (fs/file-name dist)) prev}))]
+        root    (some-> dist fs/parent)]
     (filterv some?
              (conj (if dist
-                     (try (let [kept (record!)]
-                            (into [] (keep delete!)
-                                  (->> (fs/list-dir root)
-                                       (filter #(fs/directory? % {:nofollow-links true}))
-                                       (remove #(kept (str (fs/file-name %)))))))
+                     (try (let [others    (->> (fs/list-dir root)
+                                               (filter #(fs/directory? % {:nofollow-links true}))
+                                               (map #(str (fs/file-name %)))
+                                               (remove #{(str (fs/file-name dist))}))
+                                prev-tree (some-> prev fs/path
+                                                  (->> (fs/relativize (fs/real-path root)))
+                                                  fs/components first str)]
+                            (cond
+                              (empty? others) []
+                              (or (nil? prev-tree) (= ".." prev-tree))
+                              [(str "not pruning " root ": the previous launcher did not point into it")]
+                              :else (into [] (keep delete!)
+                                          (map #(fs/path root %) (remove #{prev-tree} others)))))
                           (catch Exception e
-                            [(str "could not record or prune " root ": " (ex-message e))]))
+                            [(str "could not prune " root ": " (ex-message e))]))
                      [])
                    (delete! temp-dir)))))
 
@@ -423,7 +432,8 @@
                               (str "Binary not found in the archive (no regular file at "
                                    in-archive ")")))]
             (fail-and-discard state anomaly)
-            (let [dist     (if (#{:zip :tar-gz} (:extract platform-asset))
+            (let [prev     (launcher-target final-binary)
+                  dist     (if (#{:zip :tar-gz} (:extract platform-asset))
                              (install-dist! state final-binary)
                              (do (Files/move (fs/path staged) (fs/path final-binary)
                                              (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
@@ -431,7 +441,7 @@
                                  nil))
                   ;; The target is replaced: the install has succeeded, and
                   ;; cleanup problems from here on are warnings.
-                  warnings (finish-install! temp-dir dist)]
+                  warnings (finish-install! temp-dir dist prev)]
               (binding [*out* *err*]
                 (doseq [w warnings] (println "Warning:" w)))
               (cond-> (assoc state :installed final-binary)

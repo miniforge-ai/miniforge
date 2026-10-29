@@ -442,3 +442,17 @@
           (is (fs/exists? t2) "recorded previous install kept")
           (is (not (fs/exists? orphan)) "tree from an interrupted install pruned")
           (is (not (fs/exists? t1))))))))
+
+(deftest ^{:stratum 2} prune-reads-previous-tree-from-launcher-test
+  (testing "the tree kept as previous is the one the launcher ran, not one a lagging marker names"
+    (with-base-dir
+      (fn [base]
+        (let [tgz            (write-tool-tgz! base)
+              [_ t1]         (install-tgz! base tgz)
+              [_ t2 bin-dir] (install-tgz! base tgz)]
+          ;; As if t2's install swapped the launcher but never updated a marker.
+          (spit (str (fs/path bin-dir ".dist" "tool" "active")) (str (fs/file-name t1)))
+          (let [[_ t3] (install-tgz! base tgz)]
+            (is (fs/exists? t3))
+            (is (fs/exists? t2) "the tree the launcher ran before the swap is kept")
+            (is (not (fs/exists? t1)))))))))
