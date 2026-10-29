@@ -695,6 +695,7 @@
             still authenticates the clone"
     (let [envs (atom [])]
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)
+                    oci-cli/container-git-config (fn [_ _] {})
                     oci-cli/exec-in-container (fn [_d _c cmd opts]
                                                 (swap! envs conj [cmd (:env opts)])
                                                 (result/ok {:exit-code 0 :stdout ""}))]
@@ -725,6 +726,7 @@
     (let [executor (recorded-remote-executor)
           calls    (atom [])]
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-cli/container-git-config (fn [_ _] {})
                     oci-cli/stop-container    (fn [& _] {:exit 0})
                     oci-cli/remove-container  (fn [& _] (result/ok {:released? true}))
                     oci-cli/exec-in-container
@@ -747,6 +749,7 @@
             origin's tracking ref, with the credential on the fetch alone"
     (let [calls (atom [])]
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-cli/container-git-config (fn [_ _] {})
                     oci-cli/exec-in-container
                     (fn [_d _id cmd opts]
                       (swap! calls conj [cmd opts])
@@ -763,6 +766,7 @@
             caller's env; without it the command gets only the caller's env"
     (let [seen (atom [])]
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-cli/container-git-config (fn [_ _] {})
                     oci-cli/exec-in-container (fn [_d _id _cmd opts] (swap! seen conj opts)
                                                 (result/ok {:exit-code 0}))]
         (let [executor (recorded-remote-executor)]
@@ -780,6 +784,7 @@
             caller's settings win, rather than overwritten"
     (let [seen (atom nil)]
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-cli/container-git-config (fn [_ _] {})
                     oci-cli/exec-in-container (fn [_d _id _cmd opts] (reset! seen opts)
                                                 (result/ok {:exit-code 0}))]
         (proto/execute! (recorded-remote-executor) "c1" ["git" "push"]
@@ -792,6 +797,27 @@
           (is (= ["url.https://github.com/.insteadOf" "git@github.com:"] (last entries)))
           (is (some #{["core.hooksPath" "/dev/null"]} entries))
           (is (= "t" (get-in @seen [:env "GH_TOKEN"]))))))))
+
+(deftest ^{:stratum 1} credential-env-follows-the-containers-git-config-test
+  (testing "the credential's GIT_CONFIG_* entries are numbered after the
+            tuple the container's own env sets (an image's http.proxy), so
+            the exec's GIT_CONFIG_COUNT keeps it rather than replacing it"
+    (let [seen (atom nil)]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-cli/run-runtime-timed (fn [_ms _d & args]
+                                                (when (= "inspect" (first args))
+                                                  {:exit 0
+                                                   :out  (str "PATH=/bin\nGIT_CONFIG_COUNT=1\n"
+                                                              "GIT_CONFIG_KEY_0=http.proxy\n"
+                                                              "GIT_CONFIG_VALUE_0=http://proxy:3128\n")}))
+                    oci-cli/exec-in-container (fn [_d _id _cmd opts] (reset! seen opts)
+                                                (result/ok {:exit-code 0}))]
+        (proto/execute! (recorded-remote-executor) "c1" ["git" "push"] {:git-credentials? true})
+        (let [entries ((private-fn 'git-config-entries) (:env @seen))]
+          (is (= ["http.proxy" "http://proxy:3128"] (first entries)))
+          (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
+                 (second (last entries))))
+          (is (not (contains? (:env @seen) "PATH"))))))))
 
 (deftest ^{:stratum 1} persist-without-changes-resolves-no-token-test
   (testing "a persist with nothing to push never resolves the credential,
@@ -939,9 +965,10 @@
                         descriptor "c1" "/workspace"
                         {:repo-url "git@github.com:o/r.git" :branch "main"})
                 all    (calls)
-                [version clone & later] all]
+                [version inspect clone & later] all]
             (is (result/ok? result))
             (is (some #{"--version"} (:argv version)))
+            (is (some #{"inspect"} (:argv inspect)) "the container's own git config is read first")
             (is (empty? (:env-file version)))
             (is (some #{"clone"} (:argv clone)))
             (is (not-any? #{"--single-branch"} (:argv clone))
@@ -963,7 +990,7 @@
           ((private-fn 'bootstrap-workspace!)
            descriptor "c1" "/workspace"
            {:repo-url (str "https://bob:" fake-token "@github.com/o/r.git")})
-          (let [[_version clone :as all] (calls)]
+          (let [[_version _inspect clone :as all] (calls)]
             (is (not-any? token-in? (mapcat :argv all)))
             (is (some #{"https://github.com/o/r.git"} (:argv clone)))
             (is (= (str "Authorization: Basic " (basic-auth "bob" fake-token))

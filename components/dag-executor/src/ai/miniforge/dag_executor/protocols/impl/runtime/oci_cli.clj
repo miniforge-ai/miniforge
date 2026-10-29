@@ -449,9 +449,9 @@
 
 (defn- ^{:stratum 0} git-config-entries
   "The [key value] pairs GIT_CONFIG_COUNT / KEY_n / VALUE_n in `env` set,
-   in order."
+   in order. An empty or non-numeric count, as git reads it, sets none."
   [env]
-  (for [i (range (parse-long (get env "GIT_CONFIG_COUNT" "0")))]
+  (for [i (range (or (parse-long (get env "GIT_CONFIG_COUNT" "")) 0))]
     [(get env (str "GIT_CONFIG_KEY_" i)) (get env (str "GIT_CONFIG_VALUE_" i))]))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -842,13 +842,18 @@
   (let [result (run-runtime-timed default-release-timeout-ms descriptor "rm" "-f" container-id)]
     (result/ok {:released? (zero? (:exit result))})))
 
-(defn- ^{:stratum 2} remote-credential-env
-  "Credential env for the git remote recorded when `environment-id` was
-   bootstrapped, or {} when none was recorded."
-  [git-remotes environment-id]
-  (if-let [remote (some-> git-remotes deref (get environment-id))]
-    (git-credential-env (:https-url remote) (git-auth remote))
-    {}))
+(defn- ^{:stratum 2} container-git-config
+  "The GIT_CONFIG_* entries the container's own environment sets: its image
+   ENV and launch env as the runtime recorded them, which no process in the
+   capsule can change. {} when there are none or inspect fails."
+  [descriptor container-id]
+  (let [r (run-runtime-timed default-exec-timeout-ms descriptor "inspect" "--format"
+                             "{{range .Config.Env}}{{println .}}{{end}}" container-id)]
+    (if (zero? (:exit r))
+      (into {} (keep #(when-let [[_ k v] (re-matches #"(GIT_CONFIG_[A-Z0-9_]+)=(.*)" %)]
+                        (when (re-matches git-config-env-pattern k) [k v])))
+            (str/split-lines (:out r)))
+      {})))
 
 (defn- ^{:stratum 2} combine-git-env
   "`base` then `extra`, with their GIT_CONFIG_* entries renumbered into one
@@ -906,16 +911,28 @@
        (:secrets-refs env-config)    (assoc :secrets-refs (:secrets-refs env-config))))))
 
 (defn- ^{:stratum 3} with-git-credentials
-  "execute! opts: when they ask for :git-credentials?, the recorded remote's
-   credential env joins :env. Release's in-capsule fetch and push use this;
-   since origin carries no credential, they are unauthenticated without it.
-   The two GIT_CONFIG_* blocks are combined (`combine-git-env`), the
-   caller's last, so a caller's own git config, such as release's push
-   retry, is kept and wins."
-  [opts git-remotes environment-id]
+  "execute! opts: when they ask for :git-credentials?, `cred-env` (a delay
+   of the recorded remote's credential env) joins :env. Release's
+   in-capsule fetch and push use this; since origin carries no credential,
+   they are unauthenticated without it. The two GIT_CONFIG_* blocks are
+   combined (`combine-git-env`), the caller's last, so a caller's own git
+   config, such as release's push retry, is kept and wins."
+  [opts cred-env]
   (if (:git-credentials? opts)
-    (update opts :env #(combine-git-env (remote-credential-env git-remotes environment-id) %))
+    (update opts :env #(combine-git-env @cred-env %))
     opts))
+
+(defn- ^{:stratum 3} capsule-credential-env
+  "`git-credential-env` for one command in `container-id`, after the
+   GIT_CONFIG_* entries the container's own environment sets
+   (`container-git-config`). An exec's GIT_CONFIG_COUNT replaces the
+   container's, so without them a trusted launch's or image's tuple, such
+   as an http.proxy, would be lost; the credential's come last and win."
+  [descriptor container-id https-url auth]
+  (let [cred (git-credential-env https-url auth)]
+    (if (seq cred)
+      (combine-git-env (container-git-config descriptor container-id) cred)
+      cred)))
 
 ;; ============================================================================
 ;; Container Operations
@@ -1190,6 +1207,14 @@
     (result/err :unknown-image-key {:key image-key
                                     :available (keys task-runner-images)})))
 
+(defn- ^{:stratum 4} remote-credential-env
+  "Credential env (`capsule-credential-env`) for the git remote recorded
+   when `environment-id` was bootstrapped, or {} when none was recorded."
+  [descriptor git-remotes environment-id]
+  (if-let [remote (some-> git-remotes deref (get environment-id))]
+    (capsule-credential-env descriptor environment-id (:https-url remote) (git-auth remote))
+    {}))
+
 (defn- ^{:stratum 4} bootstrap-workspace!
   "Clone a git repository into the container workspace after creation.
    Runs git clone, configures git identity, and checks out the target branch.
@@ -1198,7 +1223,7 @@
    Uses config-based token resolution (profile + env fallback) rather than
    URL-guessing. With a credential, checks the image's git can take it
    (`credential-git-check`), clones the plain URL and hands the credential
-   to the clone command alone (`git-credential-env`): origin's URL in the
+   to the clone command alone (`capsule-credential-env`): origin's URL in the
    capsule carries none, and no push URL is set. Clones every branch, so
    release can compare against a base other than the checked-out branch."
   [descriptor container-name workdir env-config]
@@ -1212,7 +1237,8 @@
                                     :sanitize? true)
           clone-cmd ["git" "clone" "--branch" (str branch) "--" clone-url workdir]
           result (-> (if auth (credential-git-check (exec! ["git" "--version"])) (result/ok nil))
-                     (chain-container-command #(exec! clone-cmd (git-credential-env https-url auth)))
+                     (chain-container-command
+                      #(exec! clone-cmd (capsule-credential-env descriptor container-name https-url auth)))
                      ;; Use --local (not --global) since container rootfs is read-only
                      (chain-container-command
                       #(exec! ["git" "-C" workdir "config" "user.email" "miniforge@miniforge.ai"]))
@@ -1348,7 +1374,8 @@
   (execute! [_this environment-id command opts]
     (try
       (exec-in-container descriptor environment-id command
-                         (with-git-credentials opts git-remotes environment-id))
+                         (with-git-credentials
+                           opts (delay (remote-credential-env descriptor git-remotes environment-id))))
       (catch Exception e
         (result/err :exec-failed (.getMessage e)))))
 
@@ -1383,13 +1410,13 @@
         (result/ok {:status :unknown :error (.getMessage e)}))))
 
   (persist-workspace! [_this environment-id opts]
-    (let [cred-env (delay (remote-credential-env git-remotes environment-id))
+    (let [cred-env (delay (remote-credential-env descriptor git-remotes environment-id))
           exec!    (workspace-exec-fn descriptor environment-id
                                       (get opts :workdir default-workdir) cred-env)]
       (workspace/git-persist! exec! (workspace-opts opts git-remotes environment-id))))
 
   (restore-workspace! [_this environment-id opts]
-    (let [cred-env (delay (remote-credential-env git-remotes environment-id))
+    (let [cred-env (delay (remote-credential-env descriptor git-remotes environment-id))
           exec!    (workspace-exec-fn descriptor environment-id
                                       (get opts :workdir default-workdir) cred-env)]
       (workspace/git-restore! exec! (workspace-opts opts git-remotes environment-id)))))
