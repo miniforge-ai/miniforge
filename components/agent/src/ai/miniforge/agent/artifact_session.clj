@@ -33,7 +33,8 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [malli.core :as m])
+   [malli.core :as m]
+   [slingshot.slingshot :refer [try+]])
   (:import
    [java.nio.file Files]
    [java.nio.file.attribute FileAttribute]))
@@ -83,12 +84,27 @@
     (catch Exception _ false)))
 
 (defn- ^{:stratum 0} find-bb-root
-  "Find the nearest ancestor directory containing bb.edn."
+  "Find the nearest ancestor directory whose bb.edn is miniforge's own: its
+   :tasks define the `miniforge` and `mcp-context-server` tasks that the
+   MCP server and PreToolUse hook commands run.
+
+   Any other bb.edn (a user repository's own, or one that does not parse)
+   is skipped. Taking it would point both commands at tasks that do not
+   exist there, and a failing PreToolUse hook does not block the tool."
   []
   (loop [dir (.getCanonicalFile (io/file (System/getProperty "user.dir")))]
-    (let [bb-file (io/file dir "bb.edn")]
+    (let [bb-file (io/file dir "bb.edn")
+          tasks   (when (.isFile bb-file)
+                    (try+
+                     (:tasks (edn/read-string {:default tagged-literal}
+                                              (slurp bb-file)))
+                     (catch Exception _ nil)))]
       (cond
-        (.exists bb-file) (.getPath dir)
+        (and (map? tasks)
+             (contains? tasks 'miniforge)
+             (contains? tasks 'mcp-context-server))
+        (.getPath dir)
+
         (nil? (.getParentFile dir)) nil
         :else (recur (.getParentFile dir))))))
 
@@ -464,9 +480,10 @@
    Resolution order:
    1. MINIFORGE_CMD env var (explicit override, e.g. \"/usr/local/bin/mf\")
    2. [\"bb\" \"--config\" <root>/bb.edn \"--deps-root\" <root> \"miniforge\"]
-      (dev mode — location-independent bb.edn task)
-   3. \"miniforge\" on PATH (installed binary)
-   4. [\"bb\" \"miniforge\"] as a final fallback"
+      (dev mode — miniforge's own bb.edn in an ancestor directory)
+   3. \"mf\" on PATH (installed binary: Homebrew, scoop, `bb install:local`)
+   4. \"miniforge\" on PATH (full binary name)
+   5. [\"bb\" \"miniforge\"] as a final fallback"
   []
   (let [bb-root (find-bb-root)]
     (cond
@@ -478,11 +495,15 @@
       bb-root
       ["bb" "--config" (str bb-root "/bb.edn") "--deps-root" bb-root "miniforge"]
 
-      ;; 3. Installed binary on PATH
+      ;; 3. Installed binary on PATH, under the name the installers use
+      (command-on-path? "mf")
+      ["mf"]
+
+      ;; 4. Installed binary under its full name
       (command-on-path? "miniforge")
       ["miniforge"]
 
-      ;; 4. Last-resort fallback
+      ;; 5. Last-resort fallback
       :else
       ["bb" "miniforge"])))
 
@@ -532,7 +553,7 @@
 
    Resolution order:
    1. MINIFORGE_MCP_CMD env var (explicit override)
-   2. bb task (dev mode — bb.edn found in ancestor directory)
+   2. bb task (dev mode — miniforge's own bb.edn in an ancestor directory)
    3. mf context-server (production — bundled in the miniforge binary)
    4. miniforge context-server (fallback binary name)
 
@@ -817,8 +838,9 @@
 (defn ^{:stratum 2} write-claude-settings!
   "Write Claude CLI settings JSON with PreToolUse hook for supervision.
 
-   The hook invokes `bb miniforge hook-eval` which reads the tool request
-   from stdin and returns allow/deny on stdout.
+   The hook runs `hook-eval` on the command `resolve-miniforge-command`
+   returns (e.g. `mf hook-eval`), which reads the tool request from stdin
+   and returns allow/deny on stdout.
 
    Returns the path to the settings file."
   [session-dir]

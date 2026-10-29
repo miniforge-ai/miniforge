@@ -28,6 +28,7 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.release-executor.messages :as msg]
    [ai.miniforge.release-executor.result :as result]
+   [ai.miniforge.redaction.interface :as redaction]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -284,10 +285,11 @@
 
 (defn ^{:stratum 1} edit-pr-body!
   "Update the body of an existing PR using gh CLI.
-   Used to replace the initial stub body with the full PR doc content."
+   Used to replace the initial stub body with the full PR doc content.
+   Secrets in `body` are replaced with the redaction marker first."
   ([executor env-id pr-number body] (edit-pr-body! executor env-id pr-number body {}))
   ([executor env-id pr-number body exec-opts]
-   (let [escaped-body (str/replace (or body "") "'" "'\\''")
+   (let [escaped-body (str/replace (or (redaction/redact body) "") "'" "'\\''")
          cmd (str "gh pr edit " pr-number " --body '" escaped-body "'")]
      (exec! executor env-id cmd exec-opts))))
 
@@ -440,13 +442,16 @@
      phantom success — release must never ship a PR doc claiming a PR it
      never opened.
    - A branch that already has an open PR (retry/resume) reuses that PR
-     rather than opening a duplicate."
+     rather than opening a duplicate.
+
+   Title and body are LLM-written and may quote a credential the agent saw;
+   secrets in them are replaced with the redaction marker before gh runs."
   ([executor env-id pr-opts] (create-pr! executor env-id pr-opts {}))
   ([executor env-id {:keys [title body base-branch]} exec-opts]
    (let [base (or base-branch "main")]
      (or (validate-safe-branch-name base)
-         (let [escaped-title (str/replace title "'" "'\\''")
-               escaped-body (str/replace (or body "") "'" "'\\''")
+         (let [escaped-title (str/replace (redaction/redact title) "'" "'\\''")
+               escaped-body (str/replace (or (redaction/redact body) "") "'" "'\\''")
                cmd (str "gh pr create"
                         " --title '" escaped-title "'"
                         " --body '" escaped-body "'"
