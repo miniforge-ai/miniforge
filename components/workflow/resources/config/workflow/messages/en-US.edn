@@ -37,6 +37,11 @@
   :chain/retention-unconfirmed "Chain retention did not receive a matching durable acknowledgment."
   :chain/retention-missing "A required chain recovery manifest is unavailable."
   :chain/retention-conflict "Chain recovery manifests conflict with the retained identity or composition."
+  ;; Checkpoint reads
+  :checkpoint/read-failed    "Checkpoint file {path} could not be read: {error}"
+  :checkpoint/no-record      "it holds no checkpoint record"
+  :checkpoint/unreadable     "The checkpoint for run {run-id} cannot be restored; unreadable: {files}"
+
   ;; Event publishing warnings
   :warn/websocket-send       "Warning: Failed to send event via WebSocket: {error}"
   :warn/publish-event        "Warning: Failed to publish event: {error}"
