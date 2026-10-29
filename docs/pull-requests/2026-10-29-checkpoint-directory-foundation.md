@@ -13,6 +13,9 @@ Provide private creation, protected canonical ancestry, and validation of the
 original path and symlink owners before resolving aliases. Preserve trusted
 aliases and existing read-only sharing. Reject unsafe existing directories
 without changing permissions. Return canonical directories on native providers.
+Validate every intermediate symlink target, including relative chains, with a
+40-hop expansion bound. Trusted aliases into external sticky ancestors remain
+supported when those ancestors are not the checkpoint directory itself.
 Provide a no-follow append boundary that creates private POSIX history files
 while preserving existing file permissions and append semantics.
 
@@ -26,4 +29,5 @@ Regression tests cover private creation, read-only sharing, writable leaves,
 trusted and foreign aliases, unsafe original ancestry, and native path resolution.
 History regressions cover private creation, retained sharing, append order,
 and refusal to follow a symlink.
+Root-identity and chained-alias regressions fail on the earlier publication head.
 Run normal hooks, standards, fresh-head review, and CI before merging.
