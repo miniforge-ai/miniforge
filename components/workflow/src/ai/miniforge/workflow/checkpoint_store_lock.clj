@@ -4,13 +4,20 @@
 (ns ai.miniforge.workflow.checkpoint-store-lock
   "One lock per checkpointed run, across processes: a file lock on
    `<root>/.locks/<run-id>.lock` behind a timed in-process lock. Pinning a
-   run and the GC's decision to delete it both hold it."
+   run and the GC's decision to delete it both hold it.
+
+   The GC deletes a lock file only while holding it (`remove-lock-file!`).
+   Another process may be waiting on that file, and then lock it after it
+   is gone, while a newcomer locks a new file at the same path; so every
+   acquirer checks that the file it locked is still the one the path
+   names (`holds-path?`) and starts over when it is not."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.workflow.messages :as messages]
    [babashka.fs :as fs]
    [slingshot.slingshot :refer [try+]])
   (:import
+   (java.nio ByteBuffer)
    (java.nio.channels FileChannel)
    (java.nio.file OpenOption StandardOpenOption)
    (java.util.concurrent TimeUnit)
@@ -30,6 +37,16 @@
   ".locks")
 
 (defonce ^{:stratum 0} ^:private process-locks (atom {}))
+
+(defn- ^{:stratum 0} holds-path?
+  "True when `channel`, whose lock this process holds, is the file `path`
+   names now: a fresh token written through the channel reads back by
+   path. False when the file was unlinked or the path replaced."
+  [^FileChannel channel path]
+  (let [token (str (random-uuid))]
+    (.truncate channel 0)
+    (.write channel (ByteBuffer/wrap (.getBytes token "UTF-8")) 0)
+    (= token (try+ (slurp (str path)) (catch Exception _ nil)))))
 
 (defn- ^{:stratum 0} busy [workflow-run-id path]
   (anomaly/anomaly :unavailable
@@ -56,27 +73,34 @@
 
 (defn- ^{:stratum 1} acquire-file-lock!
   "Open run `workflow-run-id`'s lock file and take its lock by `deadline`
-   (nanoTime). Returns `{:channel :lock}`, or an `:unavailable` anomaly:
-   busy past the deadline, or an I/O error making the lock directory,
-   opening the file or locking it."
+   (nanoTime), starting over while the locked file is no longer the one
+   the path names. Returns `{:channel :lock}`, or an `:unavailable`
+   anomaly: busy past the deadline, or an I/O error making the lock
+   directory, opening the file or locking it."
   [path deadline workflow-run-id]
   (try+
-    (fs/create-dirs (fs/parent path))
-    (let [channel (FileChannel/open path (into-array OpenOption [StandardOpenOption/CREATE
-                                                                 StandardOpenOption/WRITE]))]
-      (try+
-        ;; Hinted AutoCloseable: babashka does not expose FileLock.
-        (let [^java.lang.AutoCloseable held (loop []
-                                              (or (.tryLock channel)
-                                                  (when (pos? (- deadline (System/nanoTime)))
-                                                    (Thread/sleep lock-poll-ms)
-                                                    (recur))))]
-          (if held
-            {:channel channel :lock held}
-            (do (.close channel) (busy workflow-run-id path))))
-        (catch Exception e
-          (.close channel)
-          (throw e))))
+    (loop []
+      (fs/create-dirs (fs/parent path))
+      (let [channel (FileChannel/open path (into-array OpenOption [StandardOpenOption/CREATE
+                                                                   StandardOpenOption/WRITE]))
+            outcome (try+
+                      ;; Hinted AutoCloseable: babashka does not expose FileLock.
+                      (let [^java.lang.AutoCloseable held (loop []
+                                                            (or (.tryLock channel)
+                                                                (when (pos? (- deadline (System/nanoTime)))
+                                                                  (Thread/sleep lock-poll-ms)
+                                                                  (recur))))]
+                        (cond
+                          (nil? held) (do (.close channel) (busy workflow-run-id path))
+                          (holds-path? channel path) {:channel channel :lock held}
+                          :else (do (.close held) (.close channel)
+                                    (if (pos? (- deadline (System/nanoTime)))
+                                      ::stale
+                                      (busy workflow-run-id path)))))
+                      (catch Exception e
+                        (.close channel)
+                        (throw e)))]
+        (if (= ::stale outcome) (recur) outcome)))
     (catch Exception e
       (anomaly/exception-anomaly :unavailable
                                  (messages/t :checkpoint/lock-failed
@@ -93,8 +117,8 @@
    `lock-timeout-ms`. Returns what `f` returns, or an `:unavailable`
    anomaly when the lock stays busy past the deadline or cannot be taken
    (an I/O error). Exceptions from `f` propagate after the lock is
-   released. Lock files are never deleted: a waiter holding the old file
-   would otherwise share the lock with a caller that made a new one."
+   released. `f` may delete the lock file (`remove-lock-file!`): waiters
+   that locked the old file start over on the path."
   [checkpoint-root workflow-run-id f]
   (let [path (lock-file checkpoint-root workflow-run-id)
         deadline (+ (System/nanoTime) (* lock-timeout-ms 1000000))
@@ -110,6 +134,16 @@
                    (finally (.close ^java.lang.AutoCloseable lock)
                             (.close ^java.lang.AutoCloseable channel))))))
         (finally (.unlock in-process))))))
+
+(defn ^{:stratum 2} remove-lock-file!
+  "Delete run `workflow-run-id`'s lock file. Call it only while holding
+   that run's lock, from `with-run-lock`'s `f`. Best effort: nil whether
+   or not the file went."
+  [checkpoint-root workflow-run-id]
+  (try+
+    (fs/delete-if-exists (lock-file checkpoint-root workflow-run-id))
+    nil
+    (catch Exception _ nil)))
 
 (comment
   (with-run-lock "/tmp/checkpoints" (random-uuid) (constantly :held)))

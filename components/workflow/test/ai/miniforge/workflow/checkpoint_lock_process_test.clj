@@ -5,7 +5,8 @@
   "The per-run checkpoint lock excludes another process, not only other
    threads: while a second process (bb) holds a run's lock file, a pin and
    the GC in this process wait, then the pin lands and the GC keeps the
-   run. Skipped when bb is not on PATH."
+   run. A waiter that locks a lock file after it was deleted and replaced
+   starts over on the new file. Skipped when bb is not on PATH."
   (:require [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.interface :as workflow]
@@ -27,7 +28,24 @@
        "      held (.tryLock ch)]"
        "  (println (if held \"locked\" \"busy\")) (flush) (read-line))"))
 
+(def ^{:stratum 0} ^:private lock-swapper-script
+  "bb program: lock argv[0] and print \"locked\"; on a line from stdin,
+   delete it, lock a new file at the same path, release the old one and
+   print \"swapped\"; on the next line, exit (releasing the new one)."
+  (str "(let [[lock-file] *command-line-args*"
+       "      path (java.nio.file.Paths/get lock-file (make-array String 0))"
+       "      open #(java.nio.channels.FileChannel/open path (into-array java.nio.file.OpenOption"
+       "              [java.nio.file.StandardOpenOption/CREATE java.nio.file.StandardOpenOption/WRITE]))"
+       "      old (open) _ (.tryLock old)]"
+       "  (println \"locked\") (flush) (read-line)"
+       "  (java.nio.file.Files/delete path)"
+       "  (let [new (open)] (.tryLock new) (.close old)"
+       "    (println \"swapped\") (flush) (read-line)))"))
+
 (defn- ^{:stratum 0} deref-bounded [f] (deref f 10000 ::timed-out))
+
+(defn- ^{:stratum 0} send-line! [process]
+  (doto ^java.io.Writer (io/writer (:in process)) (.write "go\n") (.flush)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -57,5 +75,30 @@
               (is (= [id] (get-in (deref-bounded gc-run) [:kept :pinned])))
               (is (fs/exists? (fs/path root (str id))))))
           (finally (bp/destroy holder)))))))
+
+(deftest ^{:stratum 1} a-waiter-on-a-deleted-lock-file-starts-over
+  (if-not (fs/which "bb")
+    (println "SKIP cross-process checkpoint lock test: bb is not on PATH")
+    (fs/with-temp-dir [dir {:prefix "pin-lock-swap-"}]
+      (let [root (str dir)
+            id (random-uuid)
+            lock-file (str (checkpoint-lock/lock-file root id))
+            _ (fs/create-dirs (fs/parent lock-file))
+            other (bp/process ["bb" "-e" lock-swapper-script lock-file]
+                              {:in :pipe :out :pipe :err :inherit})
+            lines (io/reader (:out other))
+            read-line! #(deref-bounded (future (.readLine ^java.io.BufferedReader lines)))]
+        (try
+          (is (= "locked" (read-line!)))
+          (let [entered (future (checkpoint-lock/with-run-lock root id (constantly :entered)))]
+            (Thread/sleep 200)
+            (send-line! other)
+            (is (= "swapped" (read-line!)))
+            (Thread/sleep 300)
+            (testing "the old file's lock is free, the path's is not: still waiting"
+              (is (not (realized? entered))))
+            (send-line! other)
+            (is (= :entered (deref-bounded entered))))
+          (finally (bp/destroy other)))))))
 
 (comment ::checkpoint-lock-process)
