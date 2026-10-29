@@ -145,6 +145,15 @@
    running sinks or subscribers."
   stream/publish!)
 
+(def ^{:stratum 0} replay!
+  "Deliver an event another process already stored (e.g. read back from
+   its file sink) to a legacy stream's in-memory log and subscribers,
+   without this stream's sinks, so the event keeps a single stored copy.
+   Events subscribers publish while handling it skip the sinks too.
+   Returns the event; a current-profile stream returns an :unsupported
+   anomaly."
+  stream/replay!)
+
 (def ^{:stratum 0} subscribe!
   "Register a callback for events. 3-arg form subscribes to all events;
    4-arg form takes a filter-fn (fn [event] -> bool) so only matching

@@ -452,12 +452,13 @@
         server (http/run-server handler {:ip host :port port :legacy-return-value? false})
         _ (swap! resources assoc :server server :state state)
         actual-port (http/server-port server)
-        ;; Start file watcher to tail-follow event files
+        ;; Start file watcher to tail-follow event files. Watched events
+        ;; are already stored by the process that wrote them: replay!
+        ;; skips this stream's sinks, so none is written a second time.
         events-dir (str (config/miniforge-home) "/events")
         watcher-cleanup (watcher/start-watcher!
                          events-dir
-                         (fn [event]
-                           (es/publish! dashboard-event-stream event)))
+                         (partial es/replay! dashboard-event-stream))
         _ (swap! resources assoc :watcher-cleanup watcher-cleanup)]
     ;; Launch background archive scan
     (let [archive-state (:archived-workflows @state)
