@@ -983,6 +983,26 @@
           (is (or (some #{"DOCKER_DEFAULT_PLATFORM=linux/s390x"} argv)
                   (= "linux/s390x" (get env-file "DOCKER_DEFAULT_PLATFORM")))))))))
 
+(deftest ^{:stratum 3} create-container-sets-untrusted-proxies-with-e-test
+  (testing "an :untrusted plan's proxy variables go on argv as -e, which
+            Docker's configured proxies do not replace, and not in the env
+            file; a :trusted plan's, which may carry a password, stay there"
+    (with-fake-runtime :docker []
+      (fn [descriptor calls]
+        (oci-cli/create-container descriptor "c" "img" "/w" nil nil nil
+                                  :execution-plan {:trust-level :untrusted
+                                                   :env {"HTTPS_PROXY" "http://proxy:3128"
+                                                         "http_proxy" "" "LANG" "C"}})
+        (oci-cli/create-container descriptor "c" "img" "/w" nil nil nil
+                                  :execution-plan {:trust-level :trusted
+                                                   :env {"HTTPS_PROXY" "http://u:pw@proxy:3128"}})
+        (let [[untrusted trusted] (calls)]
+          (is (= ["-e" "HTTPS_PROXY=http://proxy:3128" "-e" "http_proxy="]
+                 (take 4 (drop-while #(not= "-e" %) (:argv untrusted)))))
+          (is (= {"LANG" "C"} (:env-file untrusted)))
+          (is (= {"HTTPS_PROXY" "http://u:pw@proxy:3128"} (:env-file trusted)))
+          (is (not-any? #(clojure.string/includes? % "pw@") (:argv trusted))))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli-test)

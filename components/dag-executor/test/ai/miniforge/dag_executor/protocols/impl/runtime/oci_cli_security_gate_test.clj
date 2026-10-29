@@ -41,6 +41,12 @@
 
 (defn- ^{:stratum 0} err-rules [r] (set (map :security/rule (get-in r [:error :data :security/findings]))))
 
+(def ^{:stratum 0} ^:private proxy-blanks
+  "The empty proxy variables every :untrusted plan sets."
+  (zipmap ["HTTP_PROXY" "HTTPS_PROXY" "FTP_PROXY" "ALL_PROXY" "NO_PROXY"
+           "http_proxy" "https_proxy" "ftp_proxy" "all_proxy" "no_proxy"]
+          (repeat "")))
+
 (defn- ^{:stratum 0} set-env
   "A plan's :env without its empty values."
   [plan]
@@ -88,7 +94,7 @@
       (is (= {:image-digest valid-digest
               :command      ["sleep" "infinity"]
               :mounts       []
-              :env          {}
+              :env          proxy-blanks
               :trust-level  :untrusted}
              plan))
       (is (= {:valid? true} (execution-plan/validate-plan plan))))))
@@ -128,7 +134,7 @@
             keeps everything"
     (let [env {:GH_TOKEN "t" :ANTHROPIC_API_KEY "k" :LANG "C.UTF-8"}]
       (is (= {"ANTHROPIC_API_KEY" "k" "LANG" "C.UTF-8"}
-             (:env (oci-cli/build-launch-plan valid-digest {:env env}))))
+             (set-env (oci-cli/build-launch-plan valid-digest {:env env}))))
       (is (= {"GH_TOKEN" "t" "ANTHROPIC_API_KEY" "k" "LANG" "C.UTF-8"}
              (:env (oci-cli/build-launch-plan valid-digest
                                               {:env env :trust-level :trusted})))))))
@@ -138,10 +144,10 @@
             named by :agent-backend or else the configured [:llm :backend]"
     (let [env {:OPENAI_API_KEY "o" :CURSOR_API_KEY "c" :GH_TOKEN "t"}]
       (is (= {"OPENAI_API_KEY" "o"}
-             (:env (oci-cli/build-launch-plan valid-digest {:env env :agent-backend :codex}))))
+             (set-env (oci-cli/build-launch-plan valid-digest {:env env :agent-backend :codex}))))
       (with-redefs [config/load-merged-config (constantly {:llm {:backend :cursor}})]
         (is (= {"CURSOR_API_KEY" "c"}
-               (:env (oci-cli/build-launch-plan valid-digest {:env env}))))))))
+               (set-env (oci-cli/build-launch-plan valid-digest {:env env}))))))))
 
 (deftest ^{:stratum 1} build-launch-plan-allows-only-listed-env-for-untrusted-test
   (testing "an :untrusted plan keeps a shell's basics, LC_*, CLAUDE_CODE_*
@@ -155,13 +161,31 @@
                             "PASSPHRASE" "p" "CLAUDE_CODE_OAUTH_TOKEN" "o"}
                       :env-passthrough [:MY_FLAG]}))))))
 
+(deftest ^{:stratum 1} build-launch-plan-blanks-image-secrets-and-proxies-test
+  (testing "an :untrusted plan sets an empty value for each proxy variable it
+            does not supply, so Docker cannot add the client's, and for each
+            secret or git config name in the image's ENV, so the image's
+            value is overridden; :trusted sets none"
+    (let [image-env #{"GH_TOKEN" "DB_PASSPHRASE" "GIT_CONFIG_VALUE_0" "GIT_CONFIG_PARAMETERS"
+                      "ANTHROPIC_API_KEY" "JAVA_HOME" "CLAUDE_CODE_MAX_OUTPUT_TOKENS"}
+          plan      (oci-cli/build-launch-plan valid-digest
+                                               {:env {"HTTPS_PROXY" "http://proxy:3128"}}
+                                               image-env)]
+      (is (= (merge proxy-blanks {"HTTPS_PROXY" "http://proxy:3128" "GH_TOKEN" ""
+                                  "DB_PASSPHRASE" "" "GIT_CONFIG_VALUE_0" ""
+                                  "GIT_CONFIG_PARAMETERS" ""})
+             (:env plan)))
+      (is (= {:valid? true} (execution-plan/validate-plan plan)))
+      (is (= {} (:env (oci-cli/build-launch-plan valid-digest {:trust-level :trusted}
+                                                 image-env)))))))
+
 (deftest ^{:stratum 1} build-launch-plan-treats-unknown-trust-as-untrusted-test
   (testing "a nil or unknown :trust-level launches as :untrusted: secrets
             are dropped and the plan records :untrusted"
     (doseq [trust-level [nil :unknown "trusted"]]
       (let [plan (oci-cli/build-launch-plan valid-digest {:env {:GH_TOKEN "t"}
                                                           :trust-level trust-level})]
-        (is (= {} (:env plan)) (str "trust level " (pr-str trust-level)))
+        (is (= {} (set-env plan)) (str "trust level " (pr-str trust-level)))
         (is (= :untrusted (:trust-level plan)))
         (is (= {:valid? true} (execution-plan/validate-plan plan)))))))
 
@@ -174,6 +198,7 @@
                      :git-remotes (atom {})})]
       (with-redefs [oci-cli/image-exists?          (fn [_ _] true)
                     oci-cli/resolve-image-digest!  (fn [_ _] valid-digest)
+                    oci-cli/image-env-names        (fn [_ _] #{})
                     oci-cli/create-container       (fn [_d container-name & _]
                                                      (result/ok {:container-name container-name}))
                     oci-cli/bootstrap-workspace!   (fn [& _] (result/ok {:base-branch "main"}))
@@ -191,6 +216,7 @@
                 repo URL without the user:password@ it was given"
         (with-redefs [oci-cli/image-exists?          (fn [_ _] true)
                       oci-cli/resolve-image-digest!  (fn [_ _] valid-digest)
+                      oci-cli/image-env-names        (fn [_ _] #{})
                       oci-cli/create-container       (fn [_d container-name & _]
                                                        (result/ok {:container-name container-name}))
                       oci-cli/bootstrap-workspace!   (fn [& _] (result/ok {:base-branch "main"}))
@@ -210,6 +236,7 @@
                      :image      "task-runner:latest"})]
       (with-redefs [oci-cli/image-exists?         (fn [_ _] true)
                     oci-cli/resolve-image-digest! (fn [_ _] valid-digest)
+                    oci-cli/image-env-names       (fn [_ _] #{})
                     oci-cli/create-container      (fn [_d container-name & _]
                                                     (result/ok {:container-name container-name}))
                     oci-cli/bootstrap-workspace!  (fn [& _] (result/err :container-command-failed "no branch"))
@@ -222,7 +249,7 @@
   (testing "an :untrusted plan drops a whole GIT_CONFIG_* tuple, whose
             VALUE_n can hold an Authorization header, not just its KEY_n"
     (is (= {"LANG" "C.UTF-8"}
-           (:env (oci-cli/build-launch-plan
+           (set-env (oci-cli/build-launch-plan
                   valid-digest
                   {:env {"GIT_CONFIG_COUNT"   "1"
                          "GIT_CONFIG_KEY_0"   "http.https://github.com/.extraheader"
@@ -234,7 +261,7 @@
             and drops GIT_CONFIG_PARAMETERS, which can carry an extraheader"
     (is (= {"HTTPS_PROXY" "http://proxy:3128" "http_proxy" "proxy:8080"
             "ALL_PROXY" "socks5://proxy:1080" "NO_PROXY" "localhost"}
-           (:env (oci-cli/build-launch-plan
+           (set-env (oci-cli/build-launch-plan
                   valid-digest
                   {:env {"HTTPS_PROXY" "http://u:pw@proxy:3128"
                          "http_proxy" "u:pw@proxy:8080"
@@ -254,6 +281,7 @@
                      :network    nil})]
       (with-redefs [oci-cli/image-exists?          (fn [_ _] true)
                     oci-cli/resolve-image-digest!  (fn [_ _] valid-digest)
+                    oci-cli/image-env-names        (fn [_ _] #{})
                     oci-cli/create-container       (fn [_d container-name image _workdir
                                                         _env _resources _network
                                                         & {:keys [execution-plan]}]
@@ -309,6 +337,18 @@
           r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
       (is (result/ok? r))
       (is (= :pass (get-in r [:data :security/decision]))))))
+
+(deftest ^{:stratum 2} unreadable-image-env-fails-closed-for-untrusted-test
+  (testing "an :untrusted launch whose image ENV cannot be read is refused,
+            and the ENV is read from the pinned digest; :trusted needs none"
+    (let [seen (atom nil)
+          r    (oci-cli/security-gate-check rootless-descriptor "img" base-env good-digest-fn
+                                            (fn [_ ref] (reset! seen ref) nil))]
+      (is (= :security-policy-violation (get-in r [:error :code])))
+      (is (= valid-digest @seen)))
+    (is (result/ok? (oci-cli/security-gate-check rootless-descriptor "img"
+                                                 (assoc base-env :trust-level :trusted)
+                                                 good-digest-fn (constantly nil))))))
 
 (deftest ^{:stratum 2} gate-ok-carries-launch-plan-test
   (testing "a passing gate returns the checked launch plan for the launch to use"

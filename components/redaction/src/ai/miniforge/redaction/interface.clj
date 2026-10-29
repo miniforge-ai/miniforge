@@ -57,6 +57,15 @@
   [s]
   (match/secret-string? s))
 
+(defn ^{:stratum 0} secret-key?
+  "True when K's name says its value is a secret (N3 §8.1 key patterns,
+   less the reference-suffix exclusions), whatever the value looks like.
+
+   Exposed so a consumer that must decide by name alone, such as which
+   container variables to clear, uses the same list as redaction."
+  [k]
+  (match/secret-key? k))
+
 (defn ^{:stratum 0} marker
   "The redaction marker substituted for an excluded value."
   []

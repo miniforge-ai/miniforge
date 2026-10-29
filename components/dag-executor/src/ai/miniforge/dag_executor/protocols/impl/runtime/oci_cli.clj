@@ -44,6 +44,7 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.llm.interface :as llm]
+   [ai.miniforge.redaction.interface :as redaction]
    [clojure.java.io]
    [clojure.string :as str]))
 
@@ -656,6 +657,22 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn- ^{:stratum 2} untrusted-env-blanks
+  "Empty values that override, in an untrusted capsule, what it would get
+   from outside env-config: every proxy variable (`proxy-env-names`), and
+   each name in `image-env` (the image's ENV) that the redaction policy
+   calls a secret or that is GIT_CONFIG_PARAMETERS or in a GIT_CONFIG_*
+   tuple, unless `keep-names` or `untrusted-env-allowed?` allow it."
+  [image-env keep-names]
+  (into (zipmap proxy-env-names (repeat ""))
+        (for [n image-env
+              :when (and (not (contains? keep-names n))
+                         (not (untrusted-env-allowed? n))
+                         (or (redaction/secret-key? n)
+                             (re-matches git-config-env-pattern n)
+                             (= "GIT_CONFIG_PARAMETERS" n)))]
+          [n ""])))
+
 (defn ^{:stratum 2} filter-env-by-trust
   "Return env-map as an untrusted capsule may have it, unless trust-level is
    :trusted or :privileged; :untrusted, nil and any unknown level all filter.
@@ -857,31 +874,36 @@
    read-only mount rule can be skipped by a malformed value. The filter keeps
    the agent's credentials: `agent-credential-names` and those of the agent
    backend, env-config's :agent-backend or else the configured [:llm :backend],
-   plus the names env-config's :env-passthrough lists.
+   plus the names env-config's :env-passthrough lists. An :untrusted plan
+   also sets `untrusted-env-blanks` for `image-env`, the names the image's
+   ENV sets, under any value env-config gives.
 
    This one plan is both what `check-plan-security` inspects and what
    `create-container` receives as :execution-plan, so the plan the gate
    checked is the plan that runs."
-  [image-digest env-config]
-  (let [trust-level (get execution-plan/trust-levels (:trust-level env-config) :untrusted)
-        ;; `or`, not a get default: the user config is read only when
-        ;; env-config names no backend.
-        backend     (or (:agent-backend env-config)
-                        (get-in (config/load-merged-config) [:llm :backend]))
-        keep-names  (-> agent-credential-names
-                        (into (llm/backend-credential-env backend))
-                        (into (map name) (:env-passthrough env-config)))]
-    (cond-> {:image-digest image-digest
-             :command      ["sleep" "infinity"]
-             :mounts       (get env-config :mounts [])
-             :env          (filter-env-by-trust
-                            (normalize-plan-env (get env-config :env {}))
-                            trust-level keep-names)
-             :trust-level  trust-level}
-      (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
-      (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))
-      (:network-profile env-config) (assoc :network-profile (:network-profile env-config))
-      (:secrets-refs env-config)    (assoc :secrets-refs (:secrets-refs env-config)))))
+  ([image-digest env-config] (build-launch-plan image-digest env-config #{}))
+  ([image-digest env-config image-env]
+   (let [trust-level (get execution-plan/trust-levels (:trust-level env-config) :untrusted)
+         ;; `or`, not a get default: the user config is read only when
+         ;; env-config names no backend.
+         backend     (or (:agent-backend env-config)
+                         (get-in (config/load-merged-config) [:llm :backend]))
+         keep-names  (-> agent-credential-names
+                         (into (llm/backend-credential-env backend))
+                         (into (map name) (:env-passthrough env-config)))
+         env         (filter-env-by-trust (normalize-plan-env (get env-config :env {}))
+                                          trust-level keep-names)]
+     (cond-> {:image-digest image-digest
+              :command      ["sleep" "infinity"]
+              :mounts       (get env-config :mounts [])
+              :env          (cond->> env
+                              (= :untrusted trust-level)
+                              (merge (untrusted-env-blanks image-env keep-names)))
+              :trust-level  trust-level}
+       (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
+       (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))
+       (:network-profile env-config) (assoc :network-profile (:network-profile env-config))
+       (:secrets-refs env-config)    (assoc :secrets-refs (:secrets-refs env-config))))))
 
 (defn- ^{:stratum 3} with-git-credentials
   "execute! opts: when they ask for :git-credentials?, the recorded remote's
@@ -910,6 +932,11 @@
    ai.miniforge.dag-executor.execution-plan/ExecutionPlanSchema, while this
    compatibility boundary also accepts partial plan maps.
 
+   An :untrusted plan's proxy variables go on argv as `-e`: Docker adds the
+   client's configured proxies for any name -e does not set, even one the
+   env file sets. The plan holds them without credentials
+   (`filter-env-by-trust`) or empty (`untrusted-env-blanks`).
+
    Returns {:container-id string :container-name string} on success."
   [descriptor container-name image workdir env-map resources network
    & {:keys [execution-plan]}]
@@ -917,7 +944,9 @@
                                (contains? execution-plan :env))
                         (:env execution-plan)
                         env-map)
-        env           (prepare-runtime-env! effective-env)
+        argv-env      (when (= :untrusted (:trust-level execution-plan))
+                        (select-keys effective-env proxy-env-names))
+        env           (prepare-runtime-env! (apply dissoc effective-env (keys argv-env)))
         resource-args (build-resource-args
                        descriptor resources
                        {:omit-memory? (some? (:memory-limit-mb execution-plan))})
@@ -942,6 +971,7 @@
                               security-args
                               runtime-fs-args
                               mount-args
+                              (mapcat (fn [[k v]] ["-e" (str k "=" v)]) (sort argv-env))
                               (:args env)
                               resource-args
                               (into [image] (get execution-plan :command ["sleep" "infinity"])))
@@ -990,6 +1020,14 @@
       (when (zero? (:exit result))
         (normalize-image-id (:out result))))
     (catch Exception _ nil)))
+
+(defn ^{:stratum 3} image-env-names
+  "The names the ENV of local image `image` sets, or nil on failure."
+  [descriptor image]
+  (let [result (run-runtime descriptor "image" "inspect" image
+                            "--format" "{{range .Config.Env}}{{println .}}{{end}}")]
+    (when (zero? (:exit result))
+      (into #{} (keep #(second (re-find #"^([^=]+)=" %))) (str/split-lines (:out result))))))
 
 (defn ^{:stratum 3} image-exists?
   "Check if a container image exists locally."
@@ -1093,17 +1131,32 @@
    A passing result also carries the checked `:launch-plan`;
    `acquire-environment!` creates the container FROM that plan — its digest as
    the immutable image reference, the plan itself as create-container's
-   :execution-plan."
-  [descriptor image env-config digest-fn]
-  (let [plan            (build-launch-plan (digest-fn descriptor image) env-config)
-        security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
-                         :rootless-action     plan-security/default-rootless-action}
-        decision        (plan-security/check-plan-security plan descriptor security-config)]
-    (if (response/anomaly-map? decision)
-      (result/err :security-policy-violation
-                  (:anomaly/message decision)
-                  {:security/findings (:security/findings decision)})
-      (result/ok (assoc (:output decision) :launch-plan plan)))))
+   :execution-plan.
+
+   `image-env-fn` (injected; by default it reports an empty ENV) gives the
+   names the pinned image's ENV sets, which an :untrusted plan blanks
+   (`untrusted-env-blanks`). An :untrusted launch whose image ENV cannot be
+   read fails closed."
+  ([descriptor image env-config digest-fn]
+   (security-gate-check descriptor image env-config digest-fn (constantly #{})))
+  ([descriptor image env-config digest-fn image-env-fn]
+   (let [digest          (digest-fn descriptor image)
+         image-env       (when digest (image-env-fn descriptor digest))
+         plan            (build-launch-plan digest env-config image-env)
+         security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
+                          :rootless-action     plan-security/default-rootless-action}
+         decision        (plan-security/check-plan-security plan descriptor security-config)]
+     (cond
+       (response/anomaly-map? decision)
+       (result/err :security-policy-violation
+                   (:anomaly/message decision)
+                   {:security/findings (:security/findings decision)})
+
+       (and (= :untrusted (:trust-level plan)) (nil? image-env))
+       (result/err :security-policy-violation (messages/t :oci/image-env-unreadable {:image image}))
+
+       :else
+       (result/ok (assoc (:output decision) :launch-plan plan))))))
 
 (defn ^{:stratum 4} resolve-image-digest!
   "Resolve the pinned `sha256:<64hex>` digest for `image`, pulling it first when
@@ -1242,7 +1295,8 @@
         ;; Capsule security gate (runtime-* policies): resolve the pinned image
         ;; digest and check the plan BEFORE launch. A hard-stop (forbidden)
         ;; aborts the acquire without creating a container.
-        (let [gate-result (security-gate-check descriptor image env-config resolve-image-digest!)]
+        (let [gate-result (security-gate-check descriptor image env-config
+                                               resolve-image-digest! image-env-names)]
           (if (result/err? gate-result)
             gate-result
             (let [container-name (str container-name-prefix
