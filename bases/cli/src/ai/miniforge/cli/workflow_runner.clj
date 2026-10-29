@@ -17,13 +17,13 @@
 ;; limitations under the License.
 (ns ai.miniforge.cli.workflow-runner
   (:require
-   [cheshire.core :as json]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow.interface.resume :as workflow-resume]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.runtime-env :as runtime-env]
    [ai.miniforge.cli.workflow-runner.chain :as chain]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.cli.workflow-runner.execution :as execution]
@@ -88,90 +88,106 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} run-workflow! [workflow-id {:keys [version output quiet event-stream dashboard-url]
-                                    :or {version "latest" output :pretty quiet false}
-                                    :as opts}]
+(defn ^{:stratum 1} run-workflow!
+  "Run workflow `workflow-id` and print its result in the `:output`
+   format. With `:output :json`, stdout carries exactly one JSON
+   document, the result or an error object: text printed on this thread
+   (the header, warnings) goes to stderr, and live progress, which is
+   printed from whichever thread publishes an event, is off. The result
+   is printed once the run's cleanup has finished, so a cleanup failure
+   yields the error document instead of a second one."
+  [workflow-id {:keys [version output quiet event-stream dashboard-url]
+                :or {version "latest" output :pretty quiet false}
+                :as opts}]
   ;; Piggyback deferred GC on each workflow start — deletes scratch refs
   ;; from finished workflows that are older than the 7-day retention window.
   (run-gc-pass-best-effort!)
-  (try
-    (let [{:keys [load-workflow run-pipeline]} (setup/resolve-workflow-interface)
-          ;; Create event stream if not provided (dashboard-url takes precedence)
-          stream (or event-stream
-                 (when-not dashboard-url
-                   (try
-                     (es/create-event-stream)
-                     (catch Exception _ nil))))]
-      (display/print-workflow-header workflow-id version quiet)
-      (let [workflow-input (context/resolve-input opts)
-            workflow (setup/load-and-validate-workflow load-workflow workflow-id version)
-            artifact-store (execution/create-artifact-store quiet)
-            callbacks (setup/create-phase-callbacks quiet)
-            ;; Pass dashboard-url in callbacks if provided
-            callbacks-with-url (cond-> callbacks
-                                 dashboard-url (assoc :dashboard-url dashboard-url))
-            progress-cleanup (display/start-progress! stream quiet)
-            ;; BD-2b sub-3a: per-workflow manifest. Stamps an :active /
-            ;; :live manifest before the pipeline starts and keeps the
-            ;; owner lease renewed via a heartbeat while alive. The
-            ;; happy path below marks :completed/:failed after drain;
-            ;; the finally falls back to :cancelled if neither fired.
-            manifest-handle (lifecycle/start-workflow-manifest! workflow-id stream)]
-        (try
-          (let [result (execution/execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store stream)]
-            (lifecycle/mark-manifest-terminal!
-             manifest-handle
-             (if (phase/succeeded? result) :completed :failed))
-            ;; BD-2a shutdown ordering: fence late publishers for this
-            ;; workflow, then drain sinks before returning. quiesce!
-            ;; rejects any post-terminal `publish!` for this workflow
-            ;; (heartbeat / cleanup background threads); drain! waits
-            ;; for in-flight publishes to settle and asks each sink to
-            ;; flush. Without this, headless exits could land before the
-            ;; producer-side completion event was durable.
-            (let [shutdown (lifecycle/event-stream-shutdown! stream workflow-id opts)]
-              ;; BD-2b sub-3b: archive happens after drain so any
-              ;; events that landed between mark-terminal and drain
-              ;; are inside live/{wid}/ before the rename. Best-effort
-              ;; — failures are logged but don't propagate; the
-              ;; boot-time recovery pass picks up half-finished
-              ;; archives on next start.
-              (lifecycle/archive-workflow-manifest! manifest-handle workflow-id)
-              (display/print-result result opts)
-              (cond-> result
-                (some? shutdown) (assoc :event-durability shutdown))))
-          (finally
-            ;; Every exit path — completion or pipeline throw — must
-            ;; release the transit store opened above; the old
-            ;; success-branch-only close leaked it on the throw path.
-            ;; close-artifact-store is nil-safe and swallows close-time
-            ;; exceptions, so one unconditional call covers all exits.
-            ;; First in the finally: the manifest and progress cleanups
-            ;; below do IO and may themselves throw, which would skip
-            ;; any close placed after them.
-            (execution/close-artifact-store artifact-store)
-            ;; If we got here without marking, the pipeline threw or was
-            ;; otherwise aborted before the success branch ran. Classify
-            ;; as :cancelled to mirror the existing event-stream
-            ;; publish-failure-event! :cancelled branch.
-            (lifecycle/mark-manifest-terminal! manifest-handle :cancelled)
-            (lifecycle/finish-workflow-manifest! manifest-handle)
-            (progress-cleanup)
-            ;; Schedule deferred GC for this workflow's scratch ref — fires
-            ;; here (finally) so it runs on both normal completion and any
-            ;; exception path.  The ref will be deleted on a future
-            ;; run-gc-pass-best-effort! call once older than 7 days.
-            (enqueue-workflow-gc-best-effort! workflow-id)))))
-    (catch Exception e
-      (when-not quiet
-        (println (display/colorize :red (messages/t :workflow-runner/run-error {:error (ex-message e)}))))
-      (when (= output :json)
-        (println (json/generate-string
-                  {:status "error"
-                   :error (ex-message e)
-                   :data (ex-data e)}
-                  {:pretty true})))
-      (throw e))))
+  (let [json? (= output :json)
+        stdout *out*]
+    (binding [*out* (if json? *err* *out*)]
+      (try
+        (let [{:keys [load-workflow run-pipeline]} (setup/resolve-workflow-interface)
+              ;; Create event stream if not provided (dashboard-url takes precedence)
+              stream (or event-stream
+                     (when-not dashboard-url
+                       (try
+                         (es/create-event-stream)
+                         (catch Exception _ nil))))]
+          (display/print-workflow-header workflow-id version quiet)
+          (let [workflow-input (context/resolve-input opts)
+                workflow (setup/load-and-validate-workflow load-workflow workflow-id version)
+                artifact-store (execution/create-artifact-store quiet)
+                callbacks (setup/create-phase-callbacks quiet)
+                ;; Pass dashboard-url in callbacks if provided
+                callbacks-with-url (cond-> callbacks
+                                     dashboard-url (assoc :dashboard-url dashboard-url))
+                progress-cleanup (display/start-progress! stream (or quiet json?))
+                ;; BD-2b sub-3a: per-workflow manifest. Stamps an :active /
+                ;; :live manifest before the pipeline starts and keeps the
+                ;; owner lease renewed via a heartbeat while alive. The
+                ;; happy path below marks :completed/:failed after drain;
+                ;; the finally falls back to :cancelled if neither fired.
+                manifest-handle (lifecycle/start-workflow-manifest! workflow-id stream)
+                [result final]
+                (try
+                  (let [result (execution/execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store stream)]
+                    (lifecycle/mark-manifest-terminal!
+                     manifest-handle
+                     (if (phase/succeeded? result) :completed :failed))
+                    ;; BD-2a shutdown ordering: fence late publishers for this
+                    ;; workflow, then drain sinks before returning. quiesce!
+                    ;; rejects any post-terminal `publish!` for this workflow
+                    ;; (heartbeat / cleanup background threads); drain! waits
+                    ;; for in-flight publishes to settle and asks each sink to
+                    ;; flush. Without this, headless exits could land before the
+                    ;; producer-side completion event was durable.
+                    (let [shutdown (lifecycle/event-stream-shutdown! stream workflow-id opts)]
+                      ;; BD-2b sub-3b: archive happens after drain so any
+                      ;; events that landed between mark-terminal and drain
+                      ;; are inside live/{wid}/ before the rename. Best-effort
+                      ;; — failures are logged but don't propagate; the
+                      ;; boot-time recovery pass picks up half-finished
+                      ;; archives on next start.
+                      (lifecycle/archive-workflow-manifest! manifest-handle workflow-id)
+                      [result (cond-> result
+                                (some? shutdown) (assoc :event-durability shutdown))]))
+                  (finally
+                    ;; Every exit path — completion or pipeline throw — must
+                    ;; release the transit store opened above; the old
+                    ;; success-branch-only close leaked it on the throw path.
+                    ;; close-artifact-store is nil-safe and swallows close-time
+                    ;; exceptions, so one unconditional call covers all exits.
+                    ;; First in the finally: the manifest and progress cleanups
+                    ;; below do IO and may themselves throw, which would skip
+                    ;; any close placed after them.
+                    (execution/close-artifact-store artifact-store)
+                    ;; If we got here without marking, the pipeline threw or was
+                    ;; otherwise aborted before the success branch ran. Classify
+                    ;; as :cancelled to mirror the existing event-stream
+                    ;; publish-failure-event! :cancelled branch.
+                    (lifecycle/mark-manifest-terminal! manifest-handle :cancelled)
+                    (lifecycle/finish-workflow-manifest! manifest-handle)
+                    (progress-cleanup)
+                    ;; Schedule deferred GC for this workflow's scratch ref — fires
+                    ;; here (finally) so it runs on both normal completion and any
+                    ;; exception path.  The ref will be deleted on a future
+                    ;; run-gc-pass-best-effort! call once older than 7 days.
+                    (enqueue-workflow-gc-best-effort! workflow-id)))]
+            (binding [*out* stdout]
+              (display/print-result result opts))
+            final))
+        (catch Exception e
+          (if json?
+            (binding [*out* stdout]
+              (display/print-result {:status "error"
+                                     :error (or (:anomaly/message (ex-data e)) (ex-message e))
+                                     :data (ex-data e)}
+                                    opts))
+            (when-not quiet
+              (println (display/colorize :red (messages/t :workflow-runner/run-error
+                                                          {:error (or (:anomaly/message (ex-data e))
+                                                                      (ex-message e))})))))
+          (throw e))))))
 
 (defn ^{:stratum 1} run-workflow-from-spec! [spec {:keys [quiet] :or {quiet false} :as opts}]
   ;; Piggyback deferred GC on each spec-driven workflow start.
@@ -222,11 +238,14 @@
                               :execution-opts (:execution-opts opts)
                               :source-dir (:spec/source-dir spec)})]
                         ;; Assoc repo-url, branch, and (optionally) execution-mode
-                        ;; so runner.clj can clone into Docker or create a worktree.
+                        ;; so runner.clj can clone into a container or create a
+                        ;; worktree. runtime-config carries MINIFORGE_RUNTIME to
+                        ;; the governed capsule's runtime selection.
                         (cond-> (assoc ctx
                                        :repo-url repo-url
                                        :branch branch
-                                       :execution-mode (get opts :execution-mode :local))
+                                       :execution-mode (get opts :execution-mode :local)
+                                       :runtime-config (runtime-env/selection-config))
 ))
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
@@ -243,10 +262,11 @@
         (assert-runtime-alignment! spec context)
         (provenance/print-runtime-provenance! quiet context)
         (preflight/run-backend-preflight! quiet llm-client context)
-        (let [provenance (spec-kanban/move-spec-to-in-progress! (:spec/provenance enriched-spec))
+        (let [[provenance run-input] (spec-kanban/start-spec! workflow-input
+                                                               (:spec/provenance enriched-spec))
               result (execution/execute-with-events {:run-pipeline run-pipeline
                                            :workflow workflow
-                                           :workflow-input workflow-input
+                                           :workflow-input run-input
                                            :context context
                                            :artifact-store artifact-store
                                            :event-stream event-stream
@@ -254,7 +274,7 @@
                                            :sandbox-cleanup sandbox-cleanup
                                            :opts opts})
               outcome-status (if (phase/succeeded? result) :completed :failed)]
-          (spec-kanban/move-spec-on-completion! provenance result)
+          (spec-kanban/finish-spec! provenance result)
           ;; Trigger meta-loop learning cycle in background
           (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
           result)
@@ -267,7 +287,9 @@
     (catch Object _
       (let [e (:throwable &throw-context)]
         (when-not quiet
-          (println (display/colorize :red (messages/t :workflow-runner/spec-execution-failed {:error (ex-message e)})))
+          (println (display/colorize :red (messages/t :workflow-runner/spec-execution-failed
+                                                      {:error (or (:anomaly/message (ex-data e))
+                                                                  (ex-message e))})))
           (flush))
         (throw+)))))
 

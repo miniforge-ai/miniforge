@@ -179,6 +179,20 @@
   (let [marker (io/file dir (layout/archived-marker-filename))]
     (and (.isFile marker) (< (.lastModified marker) cutoff))))
 
+(defmulti ^{:stratum 0} retention-hold
+  "Whether a store outside the event stream still needs a workflow's
+   stored events past their TTL. Dispatches on a hold key; each owner
+   registers one method under its own key (the workflow checkpoint store
+   holds a run's events while its checkpoint exists, so a resume does not
+   find a checkpoint and no events). `cleanup-stale-events!` keeps an
+   expired archived or legacy workflow directory when any registered hold
+   answers true for its directory name. Args: hold key, workflow id
+   (the directory name, a string), and the events root being cleaned (so
+   a hold can read the workflow's own events)."
+  (fn [hold _workflow-id _events-dir] hold))
+
+(defmethod ^{:stratum 0} retention-hold :default [_hold _workflow-id _events-dir] false)
+
 (defn- ^{:stratum 0} legacy-workflow-expired?
   "True when `dir`, a directory directly under the events root outside
    the live, archived and operator trees, is a pre-archive flat workflow
@@ -366,6 +380,9 @@
                       are older than the TTL; never one that holds
                       anything but event files.
 
+   An archived or legacy workflow a `retention-hold` keeps stays, however
+   old: its checkpoint (say) still points at it.
+
    Anywhere in the tree, `.transit.tmp` files older than the TTL go too:
    a writer killed between its temp write and the rename leaves one, and
    no reader ever picks it up. No symlink below the events directory is
@@ -386,7 +403,18 @@
         stale? (fn [^java.io.File f suffix]
                  (and (.isFile f)
                       (str/ends-with? (.getName f) suffix)
-                      (< (.lastModified f) cutoff)))]
+                      (< (.lastModified f) cutoff)))
+        ;; A registered `retention-hold` keeps the workflow; one that
+        ;; throws (an ex-info included, whose thrown object try+ sees as
+        ;; its data map) keeps it too: an unanswered question deletes
+        ;; nothing.
+        holds (remove #{:default} (keys (methods retention-hold)))
+        nonfatal? (fn [thrown] (not (instance? Error thrown)))
+        held? (fn [^java.io.File dir]
+                (boolean (some (fn [hold]
+                                 (try+ (retention-hold hold (.getName dir) events-dir)
+                                       (catch nonfatal? _ true)))
+                               holds)))]
     (if (.isDirectory events-dir)
       (let [reserved #{(layout/live-subdir) (layout/archived-subdir) (layout/operator-subdir)}
             ;; A symlinked archived/ or operator/ points outside the
@@ -397,10 +425,13 @@
             archived-root (real-subdir (layout/archived-subdir))
             operator-root (real-subdir (layout/operator-subdir))
             archives (when archived-root
-                       (filter #(archive-expired? % cutoff) (child-dirs archived-root)))
+                       (->> (child-dirs archived-root)
+                            (filter #(archive-expired? % cutoff))
+                            (remove held?)))
             legacy (->> (child-dirs events-dir)
                         (remove #(contains? reserved (.getName ^java.io.File %)))
-                        (filter #(legacy-workflow-expired? % cutoff manifest-filename)))
+                        (filter #(legacy-workflow-expired? % cutoff manifest-filename))
+                        (remove held?))
             pruned (reduce + 0 (map #(delete-all! (reverse (walk-tree %)))
                                     (concat archives legacy)))
             operator (if operator-root

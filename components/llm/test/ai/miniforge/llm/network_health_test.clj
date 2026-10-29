@@ -28,9 +28,19 @@
 
 ;------------------------------------------------------------------------------ Factories
 (def ^{:stratum 0} ^:private no-proxy-env
-  "Environment passed to `network-healthy?` so these tests send the
+  "Environment passed to `probe-network` so these tests send the
    direct request whatever proxy variables the machine running them has."
   {})
+
+(defn- ^{:stratum 0} healthy?
+  "The probe of `url` reports `:healthy`."
+  [url opts]
+  (= :healthy (nh/probe-network url opts)))
+
+(defn- ^{:stratum 0} unreachable?
+  "The probe of `url` reports `:unreachable`."
+  [url opts]
+  (= :unreachable (nh/probe-network url opts)))
 
 (defn- ^{:stratum 0} stub-http-client
   "Build an http-client stub matching `org.httpkit.client/request`'s
@@ -90,71 +100,71 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;------------------------------------------------------------------------------ network-healthy? (URL-driven)
-(deftest ^{:stratum 1} network-healthy?-treats-any-http-response-as-up-test
+;------------------------------------------------------------------------------ probe-network (URL-driven)
+(deftest ^{:stratum 1} probe-network-treats-any-http-response-as-up-test
   ;; Connectivity is about TCP/TLS reach + an HTTP exchange; any status
   ;; code proves the network completed a round trip. 4xx is the common
   ;; case for an unauthenticated HEAD on api.anthropic.com (returns 405
   ;; method-not-allowed), and 5xx still proves connectivity.
   (let [test-url "https://api.example.com/"]
     (testing "2xx response → healthy"
-      (is (nh/network-healthy?
+      (is (healthy?
             test-url
             {:env no-proxy-env :http-client (stub-http-client {:status 200 :body ""})})))
 
     (testing "4xx response → healthy (server reachable, just rejected the request)"
-      (is (nh/network-healthy?
+      (is (healthy?
             test-url
             {:env no-proxy-env :http-client (stub-http-client {:status 405 :body "Method Not Allowed"})}))
-      (is (nh/network-healthy?
+      (is (healthy?
             test-url
             {:env no-proxy-env :http-client (stub-http-client {:status 401 :body "Unauthorized"})})))
 
     (testing "5xx response → healthy (provider degraded but network is up)"
-      (is (nh/network-healthy?
+      (is (healthy?
             test-url
             {:env no-proxy-env :http-client (stub-http-client {:status 503 :body "Service Unavailable"})})))
 
     (testing "3xx redirect response → healthy"
-      (is (nh/network-healthy?
+      (is (healthy?
             test-url
             {:env no-proxy-env :http-client (stub-http-client {:status 301 :body ""
                                              :headers {"Location" "https://elsewhere"}})})))))
 
-(deftest ^{:stratum 1} network-healthy?-treats-connection-failure-as-down-test
+(deftest ^{:stratum 1} probe-network-treats-connection-failure-as-down-test
   (let [test-url "https://api.example.com/"]
     (testing ":error key (connection refused, DNS failure, etc.) → false"
-      (is (false? (nh/network-healthy?
+      (is (true? (unreachable?
                     test-url
                     {:env no-proxy-env :http-client (stub-http-client
                                     {:error (java.net.ConnectException. "Connection refused")})}))))
 
     (testing "unknown-host exception → false"
-      (is (false? (nh/network-healthy?
+      (is (true? (unreachable?
                     test-url
                     {:env no-proxy-env :http-client (stub-http-client
                                     {:error (java.net.UnknownHostException. "no such host")})}))))
 
     (testing "timeout exception → false"
-      (is (false? (nh/network-healthy?
+      (is (true? (unreachable?
                     test-url
                     {:env no-proxy-env :http-client (stub-http-client
                                     {:error (java.net.SocketTimeoutException. "timeout")})}))))
 
     (testing "response missing :status field → false"
-      (is (false? (nh/network-healthy?
+      (is (true? (unreachable?
                     test-url
                     {:env no-proxy-env :http-client (stub-http-client {:body "anomalous"})}))))
 
     (testing "non-map response → false"
-      (is (false? (nh/network-healthy?
+      (is (true? (unreachable?
                     test-url
                     {:env no-proxy-env :http-client (stub-http-client nil)})))
-      (is (false? (nh/network-healthy?
+      (is (true? (unreachable?
                     test-url
                     {:env no-proxy-env :http-client (stub-http-client "not-a-map")}))))))
 
-(deftest ^{:stratum 1} network-healthy?-treats-thrown-exception-as-down-test
+(deftest ^{:stratum 1} probe-network-treats-thrown-exception-as-down-test
   ;; Regression for PR #1051 comment review: http-kit can surface
   ;; connection failures as a *thrown* exception rather than an
   ;; `:error` map. The probe must catch both shapes — otherwise it
@@ -163,32 +173,32 @@
   ;; supposed to encapsulate.
   (let [test-url "https://api.example.com/"]
     (testing "synchronous exception from the http-client → false"
-      (is (false? (nh/network-healthy?
+      (is (true? (unreachable?
                     test-url
                     {:env no-proxy-env :http-client (throwing-http-client
                                     (java.net.ConnectException. "Connection refused"))}))))
 
     (testing "exception on @deref → false"
-      (is (false? (nh/network-healthy?
+      (is (true? (unreachable?
                     test-url
                     {:env no-proxy-env :http-client (throwing-on-deref-http-client
                                     (java.net.SocketTimeoutException. "timeout"))}))))
 
     (testing "RuntimeException from either path → false (defensive)"
-      (is (false? (nh/network-healthy?
+      (is (true? (unreachable?
                     test-url
                     {:env no-proxy-env :http-client (throwing-http-client
                                     (RuntimeException. "DNS resolver crash"))})))
-      (is (false? (nh/network-healthy?
+      (is (true? (unreachable?
                     test-url
                     {:env no-proxy-env :http-client (throwing-on-deref-http-client
                                     (RuntimeException. "wat"))}))))))
 
 ;------------------------------------------------------------------------------ Request shape
-(deftest ^{:stratum 1} network-healthy?-sends-head-request-test
+(deftest ^{:stratum 1} probe-network-sends-head-request-test
   (testing "probe uses HEAD method against the URL it was given"
     (let [capture (atom {})]
-      (nh/network-healthy?
+      (nh/probe-network
         "https://api.anthropic.com/"
         {:env no-proxy-env :http-client (stub-http-client {:status 200} :capture capture)})
       (is (= :head (get-in @capture [:last-request :method])))
@@ -196,19 +206,19 @@
              (get-in @capture [:last-request :url]))
           "URL is the one the caller passed in — no internal mapping"))))
 
-(deftest ^{:stratum 1} network-healthy?-default-timeout-test
+(deftest ^{:stratum 1} probe-network-default-timeout-test
   (testing "default-probe-timeout-ms is propagated to the http-client"
     (let [capture (atom {})]
-      (nh/network-healthy?
+      (nh/probe-network
         "https://api.example.com/"
         {:env no-proxy-env :http-client (stub-http-client {:status 200} :capture capture)})
       (is (= nh/default-probe-timeout-ms
              (get-in @capture [:last-request :timeout]))))))
 
-(deftest ^{:stratum 1} network-healthy?-custom-timeout-test
+(deftest ^{:stratum 1} probe-network-custom-timeout-test
   (testing ":timeout-ms in opts overrides the default"
     (let [capture (atom {})]
-      (nh/network-healthy?
+      (nh/probe-network
         "https://api.example.com/"
         {:timeout-ms  500
          :http-client (stub-http-client {:status 200} :capture capture)})

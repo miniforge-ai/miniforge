@@ -156,6 +156,14 @@
   ;; Execution mode
   :governed/no-capsule      "No capsule executor available for governed workflow"
   :governed/no-capsule-hint "Start Docker or configure a Kubernetes cluster"
+  :governed/runtime-selection-failed
+  "No capsule executor available for governed workflow: container runtime selection failed. {detail}"
+  :governed/runtime-selection-hint
+  "Start Podman or Docker, or set MINIFORGE_RUNTIME to a runtime that is installed and running"
+
+  ;; Checkpoint retention
+  :checkpoint/gc-delete-failed "Could not delete checkpoint {path}: {error}"
+  :warn/checkpoint-announce-failed "Warning: The checkpoint for phase {phase} was written, but announcing it failed: {error}"
 
   ;; Environment lifecycle
   :env/acquisition-failed   "Environment acquisition failed: {error}"

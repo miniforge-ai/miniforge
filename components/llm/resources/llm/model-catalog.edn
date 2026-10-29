@@ -305,7 +305,7 @@
   :gemini-2.5-pro
   {:model-id "gemini-2.5-pro"
    :provider :google
-   :backend :gemini
+   :backend :gemini-api
    :family :gemini
    :tier :flagship
    :capabilities
@@ -333,7 +333,7 @@
   :gemini-2.5-flash
   {:model-id "gemini-2.5-flash"
    :provider :google
-   :backend :gemini
+   :backend :gemini-api
    :family :gemini
    :tier :fast
    :capabilities
@@ -361,7 +361,7 @@
   :gemini-2.5-flash-lite
   {:model-id "gemini-2.5-flash-lite"
    :provider :google
-   :backend :gemini
+   :backend :gemini-api
    :family :gemini
    :tier :efficient
    :capabilities
