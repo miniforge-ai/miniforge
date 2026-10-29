@@ -75,6 +75,15 @@
   [events-dir]
   [(es/live-dir events-dir) (es/archived-dir events-dir)])
 
+(defn ^{:stratum 0} take-groups
+  "[files groups]: the files of the leading `groups` that cover at least
+   `size` files, and the groups left."
+  [groups size]
+  (loop [taken [] groups groups]
+    (if (or (>= (count taken) size) (empty? groups))
+      [taken groups]
+      (recur (into taken (first groups)) (rest groups)))))
+
 (defn ^{:stratum 0} unread?
   "True when file name `n` is not covered by `tracked` (see `unseen-files`)."
   [{:keys [names floor]} n]
@@ -149,13 +158,20 @@
     (read-ordered (event-files dir))
     []))
 
-(defn ^{:stratum 2} newest-events
-  "The events of the newest `n` event files of `workflow-id`, newest
-   first, from wherever the layout holds the workflow now."
-  [events-dir workflow-id n]
-  (if-let [dir (es/workflow-events-dir events-dir workflow-id)]
-    (vec (rseq (read-ordered (take-last n (event-files dir)))))
-    []))
+(defn ^{:stratum 2} newest-batches
+  "The events of `files` (a directory's event files, in name order) in
+   batches, newest batch first. A batch holds at least `size` files and
+   is cut only between files named in different milliseconds, so a
+   same-millisecond group is never split; its events are in creation
+   order (millisecond, then :event/sequence-number). Lazy: a reader of
+   the newest `size` events decodes only the first batch, then takes the
+   last `size` of it."
+  [files size]
+  (->> [[] (reverse (partition-by file-tick files))]
+       (iterate (fn [[_ groups]] (take-groups groups size)))
+       rest
+       (take-while (comp seq first))
+       (map (comp read-ordered first))))
 
 (defn ^{:stratum 2} recent-dirs
   "The `n` most recently modified workflow directories, newest first."

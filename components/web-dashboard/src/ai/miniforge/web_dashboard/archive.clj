@@ -161,7 +161,10 @@
           first-tick (some-> (first files) event-files/file-tick)
           head-count (+ 2 (count (take-while #(= first-tick (event-files/file-tick %)) files)))]
       (some-> (derive-summary (first (event-files/read-ordered (take head-count files)))
-                              (vec (rseq (event-files/read-ordered (take-last tail-file-count files))))
+                              (->> (first (event-files/newest-batches files tail-file-count))
+                                   (take-last tail-file-count)
+                                   reverse
+                                   vec)
                               nil
                               (reduce + 0 (map #(.length ^File %) files)))
               (assoc :events-dir (str events-dir))))))
