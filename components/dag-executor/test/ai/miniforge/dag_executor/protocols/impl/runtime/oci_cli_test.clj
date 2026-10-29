@@ -646,6 +646,34 @@
           (is (clojure.string/includes? (get-in result [:error :data :stderr])
                                         "could not read password")))))))
 
+(deftest ^{:stratum 1} persist-workspace-authenticates-push-only-test
+  (testing "a recorded remote's credential goes to push alone, with hooks
+            off; add/commit (which run workspace hooks) never see it"
+    (let [executor (oci-cli/create-docker-executor {:image "test:latest"})
+          calls    (atom [])]
+      (reset! (:git-remotes executor)
+              {"c1" {:repo-url  "https://github.com/o/r.git"
+                     :https-url "https://github.com/o/r.git"
+                     :host-kind :github}})
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-cli/stop-container    (fn [& _] {:exit 0})
+                    oci-cli/remove-container  (fn [& _] (result/ok {:released? true}))
+                    oci-cli/exec-in-container
+                    (fn [_d _id cmd opts]
+                      (swap! calls conj [cmd opts])
+                      {:data {:exit-code 0
+                              :stdout (if (= cmd "git status --porcelain") " M f" "sha")}})]
+        (is (true? (get-in (proto/persist-workspace! executor "c1" {:branch "task/x"})
+                           [:data :persisted?])))
+        (let [[push & more] (filter (fn [[_ opts]] (:env opts)) @calls)]
+          (is (empty? more))
+          (is (= ["git" "-c" "core.hooksPath=/dev/null" "push" "origin" "HEAD:task/x" "--force"]
+                 (first push)))
+          (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
+                 (get-in push [1 :env "GIT_CONFIG_VALUE_0"]))))
+        (proto/release-environment! executor "c1")
+        (is (= {} @(:git-remotes executor)))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} git-credential-env-is-read-by-git-test

@@ -335,6 +335,13 @@
        (.encodeToString (java.util.Base64/getEncoder)
                         (.getBytes (str user ":" token) "UTF-8"))))
 
+(defn- ^{:stratum 0} git-network-command?
+  "True for the git commands persist/restore send to the remote."
+  [cmd]
+  (and (vector? cmd)
+       (= "git" (first cmd))
+       (contains? #{"push" "fetch"} (second cmd))))
+
 ;; ============================================================================
 ;; Capsule security gate — runtime enforcement of the runtime-* policies
 ;; ============================================================================
@@ -660,6 +667,14 @@
   (let [result (run-runtime-timed default-release-timeout-ms descriptor "rm" "-f" container-id)]
     (result/ok {:released? (zero? (:exit result))})))
 
+(defn- ^{:stratum 2} remote-credential-env
+  "Credential env for the git remote recorded when `environment-id` was
+   bootstrapped, or {} when none was recorded."
+  [git-remotes environment-id]
+  (if-let [{:keys [repo-url https-url host-kind]} (some-> git-remotes deref (get environment-id))]
+    (git-credential-env https-url (resolve-git-token repo-url {:host-kind host-kind}) host-kind)
+    {}))
+
 (defn ^{:stratum 2} build-launch-plan
   "Assemble the execution plan for a pending launch from what the launch site
    actually knows: the resolved image digest, the caller's mounts / env /
@@ -966,6 +981,20 @@
             sha-r))))
     (result/ok nil)))
 
+(defn- ^{:stratum 4} workspace-exec-fn
+  "exec-fn for `workspace/git-persist!` and `git-restore!`. Given a
+   credential env, only push and fetch receive it, and they run with hooks
+   off: untrusted code writes the workspace, and a planted pre-push or
+   reference-transaction hook would inherit the credential from git."
+  [descriptor container-id workdir cred-env]
+  (let [exec! (container-exec-fn descriptor container-id workdir)]
+    (if (empty? cred-env)
+      exec!
+      (fn [cmd]
+        (if (git-network-command? cmd)
+          (exec! (into ["git" "-c" "core.hooksPath=/dev/null"] (rest cmd)) cred-env)
+          (exec! cmd))))))
+
 ;------------------------------------------------------------------------------ Layer 5
 
 (defn ^{:stratum 5} ensure-all-images!
@@ -984,7 +1013,11 @@
 ;; ============================================================================
 ;; OciCliExecutor Record
 ;; ============================================================================
-(defrecord ^{:stratum 5} OciCliExecutor [config descriptor image network]
+(defrecord ^{:stratum 5} OciCliExecutor [config descriptor image network git-remotes]
+  ;; `git-remotes` is an atom of environment-id -> `git-remote`, recorded at
+  ;; bootstrap so persist/restore can authenticate push and fetch per
+  ;; command; nil (as in tests that build the record directly) disables it.
+  ;;
   ;; Per-operation timeout guards (2026-07-18, follow-up to 2026-05-16 dogfood):
   ;; `acquire-environment!` is bounded by `with-acquisition-timeout` (PR #895).
   ;; `execute!`, `release-environment!`, `copy-to!`, and `copy-from!` each route
@@ -1053,6 +1086,8 @@
                                      image-digest (assoc :image-digest image-digest)
                                      (seq gate-warnings) (assoc :security/warnings gate-warnings)
                                      (seq gate-review)   (assoc :security/review gate-review))]
+                      (when-let [remote (git-remote env-config)]
+                        (some-> git-remotes (swap! assoc container-name remote)))
                       (result/ok (proto/create-environment-record
                                   container-name (descriptor/kind descriptor) task-id workdir
                                   (assoc env-config :metadata metadata))))
@@ -1078,6 +1113,7 @@
         (result/err :copy-failed (.getMessage e)))))
 
   (release-environment! [_this environment-id]
+    (some-> git-remotes (swap! dissoc environment-id))
     (try
       (stop-container descriptor environment-id default-stop-timeout)
       (remove-container descriptor environment-id)
@@ -1091,13 +1127,15 @@
         (result/ok {:status :unknown :error (.getMessage e)}))))
 
   (persist-workspace! [_this environment-id opts]
-    (let [exec! (container-exec-fn descriptor environment-id
-                                   (get opts :workdir default-workdir))]
+    (let [exec! (workspace-exec-fn descriptor environment-id
+                                   (get opts :workdir default-workdir)
+                                   (remote-credential-env git-remotes environment-id))]
       (workspace/git-persist! exec! opts)))
 
   (restore-workspace! [_this environment-id opts]
-    (let [exec! (container-exec-fn descriptor environment-id
-                                   (get opts :workdir default-workdir))]
+    (let [exec! (workspace-exec-fn descriptor environment-id
+                                   (get opts :workdir default-workdir)
+                                   (remote-credential-env git-remotes environment-id))]
       (workspace/git-restore! exec! opts))))
 
 ;------------------------------------------------------------------------------ Layer 6
@@ -1119,10 +1157,11 @@
   [config]
   (let [descriptor (descriptor/make-descriptor config)]
     (map->OciCliExecutor
-     {:config     config
-      :descriptor descriptor
-      :image      (get config :image (images/default-image))
-      :network    (:network config)})))
+     {:config      config
+      :descriptor  descriptor
+      :image       (get config :image (images/default-image))
+      :network     (:network config)
+      :git-remotes (atom {})})))
 
 ;------------------------------------------------------------------------------ Layer 7
 

@@ -106,6 +106,29 @@
              (:env (oci-cli/build-launch-plan valid-digest
                                               {:env env :trust-level :trusted})))))))
 
+(deftest ^{:stratum 1} acquire-records-git-remote-for-persist-test
+  (testing "a bootstrapped acquire records the caller's remote (not one read
+            back from the capsule) under the environment id"
+    (let [executor (oci-cli/map->OciCliExecutor
+                    {:descriptor  {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                     :image       "task-runner:latest"
+                     :git-remotes (atom {})})]
+      (with-redefs [oci-cli/image-exists?          (fn [_ _] true)
+                    oci-cli/resolve-image-digest!  (fn [_ _] valid-digest)
+                    oci-cli/create-container       (fn [_d container-name & _]
+                                                     (result/ok {:container-name container-name}))
+                    oci-cli/bootstrap-workspace!   (fn [& _] (result/ok {:base-branch "main"}))
+                    oci-cli/container-image-digest (fn [_ _] valid-digest)]
+        (let [r (proto/acquire-environment! executor "abcd1234efgh"
+                                            {:workdir "/workspace"
+                                             :repo-url "git@github.com:o/r.git"})]
+          (is (result/ok? r))
+          (is (= {"miniforge-task-abcd1234"
+                  {:repo-url  "git@github.com:o/r.git"
+                   :https-url "https://github.com/o/r.git"
+                   :host-kind :github}}
+                 @(:git-remotes executor))))))))
+
 (deftest ^{:stratum 1} acquire-launches-from-checked-plan-test
   (testing "acquire-environment! creates the container from the gate-checked
             plan: its digest as the image reference, the plan as the
