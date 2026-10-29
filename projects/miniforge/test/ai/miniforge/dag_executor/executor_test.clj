@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-executor.executor-test
   "Integration tests for TaskExecutor implementations.
 
@@ -26,11 +25,12 @@
    [ai.miniforge.dag-executor.executor :as executor]
    [ai.miniforge.dag-executor.result :as result]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Test helpers
 ;; ============================================================================
-
-(defn docker-available?
+(defn ^{:stratum 0} docker-available?
   "Check if Docker is available for testing."
   []
   (let [exec (executor/create-docker-executor {:image "alpine:latest"})
@@ -42,7 +42,7 @@
              (executor/release-environment! exec (:environment-id (:data env-result))))
            (result/ok? env-result)))))
 
-(defn k8s-available?
+(defn ^{:stratum 0} k8s-available?
   "Check if Kubernetes is available for testing."
   []
   (let [exec (executor/create-kubernetes-executor {})
@@ -50,25 +50,10 @@
     (and (result/ok? result)
          (:available? (:data result)))))
 
-(defmacro when-docker
-  "Execute body only if Docker is available, otherwise skip with message."
-  [& body]
-  `(if (docker-available?)
-     (do ~@body)
-     (println "  SKIPPED: Docker not available")))
-
-(defmacro when-k8s
-  "Execute body only if Kubernetes is available, otherwise skip with message."
-  [& body]
-  `(if (k8s-available?)
-     (do ~@body)
-     (println "  SKIPPED: Kubernetes not available")))
-
 ;; ============================================================================
 ;; Docker Executor Tests
 ;; ============================================================================
-
-(deftest docker-executor-availability-test
+(deftest ^{:stratum 0} docker-executor-availability-test
   (testing "Docker executor reports availability correctly"
     (let [exec (executor/create-docker-executor {:image "alpine:latest"})
           result (executor/available? exec)]
@@ -79,12 +64,106 @@
         ;; rather than the prior :docker-version key.
         (is (contains? (:data result) :runtime-version))))))
 
-(deftest docker-executor-type-test
+(deftest ^{:stratum 0} docker-executor-type-test
   (testing "Docker executor returns correct type"
     (let [exec (executor/create-docker-executor {})]
       (is (= :docker (executor/executor-type exec))))))
 
-(deftest docker-executor-lifecycle-test
+;; ============================================================================
+;; Kubernetes Executor Tests
+;; ============================================================================
+(deftest ^{:stratum 0} k8s-executor-availability-test
+  (testing "Kubernetes executor reports availability correctly"
+    (let [exec (executor/create-kubernetes-executor {})
+          result (executor/available? exec)]
+      (is (result/ok? result))
+      (is (contains? (:data result) :available?)))))
+
+(deftest ^{:stratum 0} k8s-executor-type-test
+  (testing "Kubernetes executor returns correct type"
+    (let [exec (executor/create-kubernetes-executor {})]
+      (is (= :kubernetes (executor/executor-type exec))))))
+
+;; ============================================================================
+;; Executor Registry Tests
+;; ============================================================================
+(deftest ^{:stratum 0} executor-registry-test
+  (testing "create-executor-registry creates all configured executors"
+    (let [registry (executor/create-executor-registry
+                    {:docker {:image "alpine:latest"}
+                     :kubernetes {:namespace "default"}
+                     :worktree {:base-path "/tmp/test-worktrees"}})]
+      (is (contains? registry :docker))
+      (is (contains? registry :kubernetes))
+      (is (contains? registry :worktree))
+
+      ;; The :docker slot runs on whichever container runtime the host's
+      ;; selection picks; :unavailable when none answers.
+      (is (#{:docker :podman :unavailable} (executor/executor-type (:docker registry))))
+      (is (= :kubernetes (executor/executor-type (:kubernetes registry))))
+      (is (= :worktree (executor/executor-type (:worktree registry)))))))
+
+(deftest ^{:stratum 0} executor-registry-fallback-test
+  (testing "Worktree executor is always included as fallback"
+    (let [registry (executor/create-executor-registry {})]
+      (is (contains? registry :worktree))
+      (is (= :worktree (executor/executor-type (:worktree registry)))))))
+
+(deftest ^{:stratum 0} select-executor-test
+  (testing "select-executor chooses best available"
+    (let [registry (executor/create-executor-registry
+                    {:docker {:image "alpine:latest"}
+                     :worktree {:base-path "/tmp/test-worktrees"}})
+          ;; Should select the container runtime if available, otherwise worktree
+          selected (executor/select-executor registry)]
+      (is (some? selected))
+      (is (#{:docker :podman :worktree} (executor/executor-type selected))))))
+
+(deftest ^{:stratum 0} select-executor-preferred-test
+  (testing "select-executor respects preferred option"
+    (let [registry (executor/create-executor-registry
+                    {:docker {:image "alpine:latest"}
+                     :worktree {:base-path "/tmp/test-worktrees"}})
+          ;; Explicitly prefer worktree
+          selected (executor/select-executor registry :preferred :worktree)]
+      (is (some? selected))
+      (is (= :worktree (executor/executor-type selected))))))
+
+;; ============================================================================
+;; Worktree Executor Tests (always available)
+;; ============================================================================
+(deftest ^{:stratum 0} worktree-executor-availability-test
+  (testing "Worktree executor is always available (git installed)"
+    (let [exec (executor/create-worktree-executor {})
+          result (executor/available? exec)]
+      (is (result/ok? result))
+      (is (:available? (:data result)))
+      (is (contains? (:data result) :git-version)))))
+
+(deftest ^{:stratum 0} worktree-executor-type-test
+  (testing "Worktree executor returns correct type"
+    (let [exec (executor/create-worktree-executor {})]
+      (is (= :worktree (executor/executor-type exec))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defmacro ^{:stratum 1} when-docker
+  "Execute body only if Docker is available, otherwise skip with message."
+  [& body]
+  `(if (docker-available?)
+     (do ~@body)
+     (println "  SKIPPED: Docker not available")))
+
+(defmacro ^{:stratum 1} when-k8s
+  "Execute body only if Kubernetes is available, otherwise skip with message."
+  [& body]
+  `(if (k8s-available?)
+     (do ~@body)
+     (println "  SKIPPED: Kubernetes not available")))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} docker-executor-lifecycle-test
   (testing "Docker executor full lifecycle"
     (when-docker
       (let [exec (executor/create-docker-executor {:image "alpine:latest"})
@@ -125,7 +204,7 @@
                       (is (result/ok? release-result))
                       (is (:released? (:data release-result))))))))))))))
 
-(deftest docker-executor-file-operations-test
+(deftest ^{:stratum 2} docker-executor-file-operations-test
   (testing "Docker executor file copy operations"
     (when-docker
       (let [exec (executor/create-docker-executor {:image "alpine:latest"})
@@ -174,7 +253,7 @@
             (.delete temp-file)
             (.delete temp-out)))))))
 
-(deftest docker-executor-with-environment-test
+(deftest ^{:stratum 2} docker-executor-with-environment-test
   (testing "with-environment helper manages lifecycle"
     (when-docker
       (let [exec (executor/create-docker-executor {:image "alpine:latest"})
@@ -187,7 +266,7 @@
         (is (= 0 (:exit-code (:data result))))
         (is (= "inside environment\n" (:stdout (:data result))))))))
 
-(deftest docker-executor-env-vars-test
+(deftest ^{:stratum 2} docker-executor-env-vars-test
   (testing "Docker executor passes environment variables"
     (when-docker
       (let [exec (executor/create-docker-executor {:image "alpine:latest"})
@@ -201,7 +280,7 @@
               (is (result/ok? result))
               (is (= "my_value:another_value\n" (:stdout (:data result)))))))))))
 
-(deftest docker-executor-workdir-test
+(deftest ^{:stratum 2} docker-executor-workdir-test
   (testing "Docker executor respects working directory"
     (when-docker
       (let [exec (executor/create-docker-executor {:image "alpine:latest"})
@@ -213,7 +292,7 @@
               (is (result/ok? result))
               (is (= "/tmp\n" (:stdout (:data result)))))))))))
 
-(deftest docker-executor-resource-limits-test
+(deftest ^{:stratum 2} docker-executor-resource-limits-test
   (testing "Docker executor applies resource limits"
     (when-docker
       (let [exec (executor/create-docker-executor {:image "alpine:latest"})
@@ -227,23 +306,7 @@
               (is (result/ok? result))
               (is (= 0 (:exit-code (:data result)))))))))))
 
-;; ============================================================================
-;; Kubernetes Executor Tests
-;; ============================================================================
-
-(deftest k8s-executor-availability-test
-  (testing "Kubernetes executor reports availability correctly"
-    (let [exec (executor/create-kubernetes-executor {})
-          result (executor/available? exec)]
-      (is (result/ok? result))
-      (is (contains? (:data result) :available?)))))
-
-(deftest k8s-executor-type-test
-  (testing "Kubernetes executor returns correct type"
-    (let [exec (executor/create-kubernetes-executor {})]
-      (is (= :kubernetes (executor/executor-type exec))))))
-
-(deftest k8s-executor-lifecycle-test
+(deftest ^{:stratum 2} k8s-executor-lifecycle-test
   (testing "Kubernetes executor full lifecycle"
     (when-k8s
       (let [exec (executor/create-kubernetes-executor
@@ -272,71 +335,9 @@
                       (is (result/ok? release-result)))))))))))))
 
 ;; ============================================================================
-;; Executor Registry Tests
-;; ============================================================================
-
-(deftest executor-registry-test
-  (testing "create-executor-registry creates all configured executors"
-    (let [registry (executor/create-executor-registry
-                    {:docker {:image "alpine:latest"}
-                     :kubernetes {:namespace "default"}
-                     :worktree {:base-path "/tmp/test-worktrees"}})]
-      (is (contains? registry :docker))
-      (is (contains? registry :kubernetes))
-      (is (contains? registry :worktree))
-
-      (is (= :docker (executor/executor-type (:docker registry))))
-      (is (= :kubernetes (executor/executor-type (:kubernetes registry))))
-      (is (= :worktree (executor/executor-type (:worktree registry)))))))
-
-(deftest executor-registry-fallback-test
-  (testing "Worktree executor is always included as fallback"
-    (let [registry (executor/create-executor-registry {})]
-      (is (contains? registry :worktree))
-      (is (= :worktree (executor/executor-type (:worktree registry)))))))
-
-(deftest select-executor-test
-  (testing "select-executor chooses best available"
-    (let [registry (executor/create-executor-registry
-                    {:docker {:image "alpine:latest"}
-                     :worktree {:base-path "/tmp/test-worktrees"}})
-          ;; Should select docker if available, otherwise worktree
-          selected (executor/select-executor registry)]
-      (is (some? selected))
-      (is (#{:docker :worktree} (executor/executor-type selected))))))
-
-(deftest select-executor-preferred-test
-  (testing "select-executor respects preferred option"
-    (let [registry (executor/create-executor-registry
-                    {:docker {:image "alpine:latest"}
-                     :worktree {:base-path "/tmp/test-worktrees"}})
-          ;; Explicitly prefer worktree
-          selected (executor/select-executor registry :preferred :worktree)]
-      (is (some? selected))
-      (is (= :worktree (executor/executor-type selected))))))
-
-;; ============================================================================
-;; Worktree Executor Tests (always available)
-;; ============================================================================
-
-(deftest worktree-executor-availability-test
-  (testing "Worktree executor is always available (git installed)"
-    (let [exec (executor/create-worktree-executor {})
-          result (executor/available? exec)]
-      (is (result/ok? result))
-      (is (:available? (:data result)))
-      (is (contains? (:data result) :git-version)))))
-
-(deftest worktree-executor-type-test
-  (testing "Worktree executor returns correct type"
-    (let [exec (executor/create-worktree-executor {})]
-      (is (= :worktree (executor/executor-type exec))))))
-
-;; ============================================================================
 ;; Error Handling Tests
 ;; ============================================================================
-
-(deftest docker-executor-invalid-command-test
+(deftest ^{:stratum 2} docker-executor-invalid-command-test
   (testing "Docker executor handles command failures"
     (when-docker
       (let [exec (executor/create-docker-executor {:image "alpine:latest"})
@@ -348,7 +349,7 @@
               (is (result/ok? result))
               (is (not= 0 (:exit-code (:data result)))))))))))
 
-(deftest docker-executor-copy-nonexistent-test
+(deftest ^{:stratum 2} docker-executor-copy-nonexistent-test
   (testing "Docker executor handles copy of nonexistent file"
     (when-docker
       (let [exec (executor/create-docker-executor {:image "alpine:latest"})
@@ -363,8 +364,7 @@
 ;; ============================================================================
 ;; Concurrent Execution Tests
 ;; ============================================================================
-
-(deftest docker-executor-concurrent-test
+(deftest ^{:stratum 2} docker-executor-concurrent-test
   (testing "Docker executor handles concurrent environments"
     (when-docker
       (let [exec (executor/create-docker-executor {:image "alpine:latest"})
@@ -397,7 +397,6 @@
 ;; ============================================================================
 ;; Rich Comment for REPL Testing
 ;; ============================================================================
-
 (comment
   ;; Quick REPL test for Docker
   (def exec (executor/create-docker-executor {:image "alpine:latest"}))
