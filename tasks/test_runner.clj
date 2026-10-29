@@ -157,7 +157,7 @@
    each named with its reason."
   []
   (println "🧪 Running project integration tests...")
-  (doseq [project ["miniforge" "miniforge-core"]]
+  (doseq [project (sort (keys project-test-roots))]
     (let [all-nses  (discovered-project-tests project)
           skipped   (filter #(contains? known-failing-project-tests %) all-nses)
           test-nses (remove #(contains? known-failing-project-tests %) all-nses)]
