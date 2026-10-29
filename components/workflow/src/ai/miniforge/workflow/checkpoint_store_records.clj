@@ -43,6 +43,13 @@
   []
   (str (java.time.Instant/now)))
 
+(def ^{:stratum 0} checkpoint-format-version
+  "The checkpoint format this build writes, stamped on every record as
+   `:checkpoint/format-version`, and the newest one it reads. Bump it when
+   a record's shape changes in a way an older reader would misread. A
+   record with no version predates the stamp and reads as legacy."
+  1)
+
 (def ^{:stratum 0} persisted-execution-keys
   "Serializable execution fields kept in the durable machine snapshot.
 
@@ -90,6 +97,16 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} readable-format?
+  "True when this build can read `record`: it carries no format version
+   (legacy, or no record at all), or an integer version no newer than
+   `checkpoint-format-version`. A newer or malformed version is not
+   guessed at."
+  [record]
+  (let [version (:checkpoint/format-version record)]
+    (or (nil? version)
+        (and (integer? version) (<= version checkpoint-format-version)))))
+
 (defn ^{:stratum 1} active-or-last-phase
   "Current or latest attempted phase, then the legacy checkpoint-order fallback."
   [ctx]
@@ -108,6 +125,7 @@
    from one writer and a live Date from another for the same key."
   [ctx]
   (-> (select-keys ctx persisted-execution-keys)
+      (assoc :checkpoint/format-version checkpoint-format-version)
       coerce/stringify-instants))
 
 (defn ^{:stratum 1} build-phase-checkpoint
@@ -115,7 +133,8 @@
   [ctx phase-name phase-result]
   (let [checkpointed-at (current-checkpoint-timestamp)]
     (coerce/stringify-instants
-     {:workflow/id (:execution/id ctx)
+     {:checkpoint/format-version checkpoint-format-version
+      :workflow/id (:execution/id ctx)
       :workflow/workflow-id (:execution/workflow-id ctx)
       :workflow/workflow-version (:execution/workflow-version ctx)
       :workflow/phase phase-name
@@ -145,7 +164,8 @@
                                    current-phase-ids)
          phase-paths (merge existing-phase-paths current-phase-paths)]
      (coerce/stringify-instants
-      {:workflow/id workflow-run-id
+      {:checkpoint/format-version checkpoint-format-version
+       :workflow/id workflow-run-id
        :workflow/workflow-id (:execution/workflow-id ctx)
        :workflow/workflow-version (:execution/workflow-version ctx)
        :workflow/phases-completed phase-ids

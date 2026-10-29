@@ -95,19 +95,32 @@
 (defn- ^{:stratum 1} read-checkpoint-file
   "Read one checkpoint file: its content, nil when it does not exist, or
    — when it exists but cannot be read or parsed (truncated, unreadable,
-   not EDN) or holds no record (empty, whitespace, a bare value) — an
+   not EDN), holds no record (empty, whitespace, a bare value), or was
+   written in a checkpoint format newer than this build reads — an
    anomaly naming the file. One bad file then costs the caller that file
    and nothing else."
   [path]
   (try+
     (let [content (read-edn-file path)]
-      (if (or (map? content) (not (fs/exists? path)))
-        content
+      (cond
+        (not (fs/exists? path)) content
+        (not (map? content))
         (anomaly/anomaly :unavailable
                          (messages/t :checkpoint/read-failed
                                      {:path (str path)
                                       :error (messages/t :checkpoint/no-record)})
-                         {:checkpoint/path (str path)})))
+                         {:checkpoint/path (str path)})
+        (checkpoint-records/readable-format? content) content
+        :else
+        (anomaly/anomaly :unsupported
+                         (messages/t :checkpoint/newer-format
+                                     {:path (str path)
+                                      :version (pr-str (:checkpoint/format-version content))
+                                      :supported checkpoint-records/checkpoint-format-version})
+                         {:checkpoint/path (str path)
+                          :checkpoint/format-version (:checkpoint/format-version content)
+                          :checkpoint/supported-format-version
+                          checkpoint-records/checkpoint-format-version})))
     (catch Exception e
       (anomaly/exception-anomaly :unavailable
                                  (messages/t :checkpoint/read-failed
@@ -203,8 +216,8 @@
                         (messages/t :checkpoint/unreadable
                                     {:run-id workflow-run-id
                                      :files (->> read-failures
-                                                 (map #(get-in % [:anomaly/data :checkpoint/path]))
-                                                 (interpose ", ")
+                                                 (map :anomaly/message)
+                                                 (interpose "; ")
                                                  (apply str))})
                         {:workflow/run-id workflow-run-id
                          :checkpoint/root checkpoint-root
