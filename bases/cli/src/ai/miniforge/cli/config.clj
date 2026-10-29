@@ -25,6 +25,7 @@
    [babashka.fs :as fs]
    [babashka.process :as process]
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.config.interface :as runtime-config]
    [ai.miniforge.config.interface.file :as config-file]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.backends :as backends]
@@ -200,22 +201,19 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} load-merged-config
-  "Load config with env var overrides."
+  "The config at `path` as a run reads it, for `config list` and `config get`:
+   the runtime's own loader (config/load-merged-config: shipped defaults, the
+   file, then every MINIFORGE_* variable it maps, the tier models included),
+   laid over the CLI's defaults for the keys only the CLI ships (:dashboard,
+   :artifacts). A second loader here applied only MINIFORGE_LLM_BACKEND and
+   MINIFORGE_LLM_MODEL, so `config get` could disagree with a run."
   [path]
-  (let [file-config (or (read-config-file path) {})
-        merged (merge-with (fn [v1 v2]
-                            (if (map? v1)
-                              (merge v1 v2)
-                              v2))
-                          default-config
-                          file-config)]
-    ;; Apply env var overrides
-    (cond-> merged
-      (System/getenv "MINIFORGE_LLM_BACKEND")
-      (assoc-in [:llm :backend] (keyword (System/getenv "MINIFORGE_LLM_BACKEND")))
-
-      (System/getenv "MINIFORGE_LLM_MODEL")
-      (assoc-in [:llm :model] (System/getenv "MINIFORGE_LLM_MODEL")))))
+  (merge-with (fn [v1 v2]
+                (if (map? v1)
+                  (merge v1 v2)
+                  v2))
+              default-config
+              (runtime-config/load-merged-config path)))
 
 (defn ^{:stratum 2} cmd-set
   "Set a configuration value."

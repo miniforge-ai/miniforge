@@ -22,6 +22,8 @@
             [ai.miniforge.cli.backends.status :as backend-status]
             [ai.miniforge.cli.config :as config]
             [ai.miniforge.cli.main.commands.shared :as shared]
+            ;; Loaded for config.user/get-env-var, which the env test redefines.
+            [ai.miniforge.config.interface]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]))
@@ -207,6 +209,21 @@
       (let [saved (edn/read-string (slurp path))]
         (is (nil? (get-in saved [:llm :model])))
         (is (nil? (get-in saved [:agents :default-models :execution])))))))
+
+(deftest ^{:stratum 0} config-get-applies-the-runtime-env-overrides-test
+  (testing "config get shows MINIFORGE_AGENT_EXECUTION_MODEL over the file, as a run reads it"
+    ;; The env lookup is config.user/get-env-var; resolved by name because the
+    ;; config interface has no seam for it.
+    (let [dir  (java.nio.file.Files/createTempDirectory "config-get-env" (make-array java.nio.file.attribute.FileAttribute 0))
+          path (str (.resolve dir "config.edn"))
+          env  {"MINIFORGE_AGENT_EXECUTION_MODEL" "from-env"}]
+      (spit path (pr-str {:agents {:default-models {:execution "from-file"}}}))
+      (with-redefs-fn {(resolve 'ai.miniforge.config.user/get-env-var) #(get env %)}
+        (fn []
+          (is (= "\"from-env\""
+                 (str/trim (with-out-str
+                             (config/cmd-get {:config path
+                                              :key "agents.default-models.execution"}))))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
