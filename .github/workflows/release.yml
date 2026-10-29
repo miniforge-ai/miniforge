@@ -369,14 +369,45 @@ jobs:
           find artifacts -type f -name 'miniforge-*' -exec cp {} release/ \;
           ls -lh release/
 
+      # The gate checked github.sha, so the release tag must point there.
+      # GitHub ignores target_commitish when the tag already exists (a
+      # dispatch reusing a version, or a tag push), so check the tag
+      # itself: create it at the gated commit when absent, and refuse to
+      # publish when it points anywhere else. A tag pushed with
+      # GITHUB_TOKEN does not start another workflow run.
+      - name: Pin the release tag to the gated commit
+        env:
+          TAG: ${{ needs.version.outputs.release_tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tag_commit() {
+            git fetch --quiet --depth=1 origin "+refs/tags/$TAG:refs/tags/$TAG" 2>/dev/null &&
+              git rev-parse "refs/tags/$TAG^{commit}"
+          }
+          if ! tagged=$(tag_commit); then
+            echo "Tag $TAG does not exist; creating it at $SHA."
+            if git push --quiet origin "$SHA:refs/tags/$TAG"; then
+              tagged=$SHA
+            else
+              echo "Could not create $TAG (another run may have just created it); re-reading it."
+              if ! tagged=$(tag_commit); then
+                echo "::error::Could not create or read tag $TAG; refusing to publish."
+                exit 1
+              fi
+            fi
+          fi
+          if [[ "$tagged" != "$SHA" ]]; then
+            echo "::error::Tag $TAG points at $tagged, not the gated commit $SHA; refusing to publish."
+            exit 1
+          fi
+          echo "Tag $TAG points at the gated commit $SHA."
+
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v0.1.15
         with:
           tag_name: ${{ needs.version.outputs.release_tag }}
-          # A dispatch creates the tag; point it at the gated, built
-          # commit rather than wherever main is by now.
-          target_commitish: ${{ github.sha }}
           name: Release ${{ needs.version.outputs.version }}
           draft: false
           prerelease: false
