@@ -19,6 +19,7 @@
   "The :no-secrets gate scans the files a change writes, names each
    finding by file and line, and never repeats the value."
   (:require [ai.miniforge.gate.interface :as gate]
+            [ai.miniforge.gate.no-secrets :as no-secrets]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]])
@@ -58,6 +59,16 @@
   ([artifact] (check artifact {}))
   ([artifact ctx] (gate/check-gate :no-secrets artifact ctx)))
 
+(defn ^{:stratum 0} sh!
+  "Run git in DIR; the commit identity and signing come from temp-git-repo."
+  [dir & args]
+  (apply shell/sh "git" "-C" dir args))
+
+(deftest ^{:stratum 0} added-lines-follows-hunk-headers-test
+  (is (= [[3 "x"] [4 "+y"] [9 "z"]]
+         (no-secrets/added-lines
+          (str "--- a/f\n+++ b/f\n@@ -2,0 +3,2 @@\n+x\n++y\n@@ -5 +8,0 @@\n-gone\n@@ -7 +9 @@\n-old\n+z\n")))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} code-files-are-scanned-test
@@ -73,8 +84,8 @@
                                       {:path "deploy/run.sh" :content (str "#!/bin/sh\n\nGH_TOKEN=opaqueVALUE123 mf run\n")}
                                       {:path "app/db.py" :content (str "password = \"" opaque "\"\n")}]})]
       (is (false? (:passed? result)))
-      (is (= [{:file "deploy/run.sh" :line 3} {:file "app/db.py" :line 1}]
-             (-> result :errors first :locations))))))
+      (is (= #{{:file "deploy/run.sh" :line 3} {:file "app/db.py" :line 1}}
+             (-> result :errors first :locations set))))))
 
 (deftest ^{:stratum 1} findings-never-carry-the-value-test
   (testing "the result names file and line only"
@@ -137,3 +148,46 @@
       (is (= #{{:file "src/app.clj" :line 2} {:file "deploy.env" :line 1}}
              (-> (check {:code/files []} {:execution/worktree-path dir})
                  :errors first :locations set))))))
+
+(defn ^{:stratum 1} locations
+  "The set of {:file :line} findings for ARTIFACT checked in worktree DIR."
+  [artifact dir]
+  (-> (check artifact {:execution/worktree-path dir}) :errors first :locations set))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} an-added-copy-of-an-existing-line-counts-test
+  (testing "a line already in the file elsewhere is exempt only where it was; the new copy is scanned"
+    (let [line (str "GH_TOKEN=" gh-token)
+          dir  (temp-git-repo {"README.md" (str "Example:\n" line "\n")})]
+      (spit (str dir "/README.md") (str "Example:\n" line "\nRun with:\n" line "\n"))
+      (is (= #{{:file "README.md" :line 4}} (locations {:code/files []} dir))))))
+
+(deftest ^{:stratum 2} a-stale-artifact-cannot-hide-the-disk-test
+  (testing "a clean artifact entry does not stop the changed on-disk file from being scanned"
+    (let [dir (temp-git-repo {"src/app.py" "import os\n"})]
+      (spit (str dir "/src/app.py") (str "import os\napi_key = '" gh-token "'\n"))
+      (is (= #{{:file "src/app.py" :line 2}}
+             (locations {:code/files [{:path "src/app.py" :content "import os\n"}]} dir))))))
+
+(deftest ^{:stratum 2} committed-task-work-is-measured-from-the-task-base-test
+  (let [dir  (temp-git-repo {"src/app.py" "import os\n"})
+        base (str/trim (:out (sh! dir "rev-parse" "HEAD")))]
+    (spit (str dir "/src/app.py") (str "import os\npassword = \"" opaque "\"\n"))
+    (sh! dir "commit" "-qam" "task checkpoint")
+    (testing "a credential committed after the task base is still found"
+      (is (= #{{:file "src/app.py" :line 2}}
+             (locations {:code/files [] :code/base-refs [base]} dir))))
+    (testing "a resumed workspace's A...HEAD range resolves to the merge base"
+      (is (= #{{:file "src/app.py" :line 2}}
+             (locations {:code/files [] :code/base-refs [(str base "...HEAD")]} dir))))
+    (testing "with no task base the gate falls back to HEAD, which already holds it"
+      (is (= #{} (locations {:code/files []} dir))))))
+
+(deftest ^{:stratum 2} names-git-would-quote-are-scanned-test
+  (testing "NUL-delimited listing: a non-ASCII or space-padded name is read as it is"
+    (let [dir (temp-git-repo {"README.md" "x\n"})]
+      (spit (str dir "/café.py") (str "token = '" gh-token "'\n"))
+      (spit (str dir "/ lead.env") "DB_PASSWORD=opaqueVALUE123\n")
+      (is (= #{{:file "café.py" :line 1} {:file " lead.env" :line 1}}
+             (locations {:code/files []} dir))))))

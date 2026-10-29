@@ -25,57 +25,15 @@
    - :plan-complete - Plan completeness check"
   (:require [ai.miniforge.gate.messages  :as msg]
             [ai.miniforge.gate.registry  :as registry]
-            [ai.miniforge.gate.stale-references :as stale-references]
+            [ai.miniforge.gate.no-secrets :as no-secrets]
             [ai.miniforge.policy-pack.interface :as policy-pack]
-            [ai.miniforge.redaction.interface :as redaction]
             [ai.miniforge.response.interface :as response]
             [cheshire.core               :as json]
-            [clojure.java.io             :as io]
-            [clojure.string              :as str]
             [slingshot.slingshot         :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Policy checks
-(defn ^{:stratum 0} secret-lines
-  "1-based numbers of the lines of TEXT that carry a secret-shaped value
-   (components/redaction's patterns, without the payment-card checksum,
-   which ordinary numbers in code pass). A line equal to one in KNOWN is
-   skipped: KNOWN holds the file's lines before this change, so a token
-   that was already in the file (a test fixture, a docstring example) is
-   not charged to the change that left it alone."
-  [text known]
-  (into []
-        (keep-indexed (fn [i line]
-                        (when (and (not (contains? known line))
-                                   (redaction/pattern-secret-string? line))
-                          (inc i))))
-        (str/split-lines text)))
-
-(defn ^{:stratum 0} change-sources
-  "[path text] for everything the change wrote: each :code/files entry
-   with string :content, the artifact's own :content / :artifact/content
-   (path from :artifact/path), and every other file the worktree has
-   changed or added against HEAD, read from disk. The last set is what
-   a retry that writes nothing leaves behind from the attempt before."
-  [artifact worktree]
-  (let [content (or (:content artifact) (:artifact/content artifact))
-        files   (for [{:keys [path content]} (:code/files artifact)
-                      :when (string? content)]
-                  [path content])
-        listed  (set (map first files))
-        on-disk (when worktree
-                  (for [path (stale-references/worktree-changed-paths worktree)
-                        :when (not (contains? listed path))
-                        :let [f (io/file worktree path)
-                              text (when (.isFile f)
-                                     (try+ (slurp f) (catch Exception _ nil)))]
-                        :when text]
-                    [path text]))]
-    (cond-> (into (vec files) on-disk)
-      (some? content) (conj [(:artifact/path artifact)
-                             (if (string? content) content (pr-str content))]))))
-
 (defn ^{:stratum 0} check-plan-complete
   "Check if plan artifact is complete."
   [artifact _ctx]
@@ -222,75 +180,42 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} check-no-secrets
-  "Fail when the change puts a secret-shaped value in a file.
-
-   Scans what `change-sources` returns: the artifact's files and
-   content, plus the worktree's other uncommitted changes. For a file
-   git already tracks, only lines that are new against HEAD in
-   :execution/worktree-path count; with no worktree, no git, or a new
-   file, every line does.
-
-   Findings carry file and line, never the matched value: the gate
-   result is logged and shown to the agent, so quoting the secret would
-   copy it into both."
-  [artifact ctx]
-  (let [worktree  (get ctx :execution/worktree-path)
-        locations (vec (for [[path text] (change-sources artifact worktree)
-                             :let [before (when (and worktree path)
-                                            (stale-references/before-content worktree path))]
-                             line (secret-lines text (if before (set (str/split-lines before)) #{}))]
-                         {:file path :line line}))]
-    (if (empty? locations)
-      {:passed? true}
-      {:passed? false
-       :errors [{:type      :secrets-detected
-                 :message   (msg/t :no-secrets/detected
-                                   {:locations (str/join ", "
-                                                         (map (fn [{:keys [file line]}]
-                                                                (str (or file (msg/t :no-secrets/artifact-content))
-                                                                     ":" line))
-                                                              locations))})
-                 :locations locations}]})))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defmethod ^{:stratum 2} registry/get-gate :no-secrets
+(defmethod ^{:stratum 1} registry/get-gate :no-secrets
   [_]
   {:name :no-secrets
    :description (msg/t :no-secrets/description)
-   :check check-no-secrets
+   :check no-secrets/check-no-secrets
    :repair nil})
 
-(defmethod ^{:stratum 2} registry/get-gate :plan-complete
+(defmethod ^{:stratum 1} registry/get-gate :plan-complete
   [_]
   {:name :plan-complete
    :description "Validates plan artifact is complete"
    :check check-plan-complete
    :repair nil})
 
-(defmethod ^{:stratum 2} registry/get-gate :review-approved
+(defmethod ^{:stratum 1} registry/get-gate :review-approved
   [_]
   {:name :review-approved
    :description "Validates review is approved"
    :check check-review-approved
    :repair nil})
 
-(defmethod ^{:stratum 2} registry/get-gate :quality-check
+(defmethod ^{:stratum 1} registry/get-gate :quality-check
   [_]
   {:name :quality-check
    :description "General quality validation"
    :check check-quality
    :repair nil})
 
-(defmethod ^{:stratum 2} registry/get-gate :release-ready
+(defmethod ^{:stratum 1} registry/get-gate :release-ready
   [_]
   {:name :release-ready
    :description "Validates artifact is ready for release"
    :check check-release-ready
    :repair nil})
 
-(defmethod ^{:stratum 2} registry/get-gate :policy-pack
+(defmethod ^{:stratum 1} registry/get-gate :policy-pack
   [_]
   {:name :policy-pack
    :description "Validates code against loaded policy packs by enforcement action"
@@ -312,9 +237,5 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; => {:passed? false :errors [{... :locations [{:file "src/a.py" :line 1}]}]}
-  (check-no-secrets {:code/files [{:path "src/a.py"
-                                   :content (str "api_key = '" "abcdefgh12" "'")}]} {})
-  (check-no-secrets {:content "(def x 42)"} {})
   (check-plan-complete {:plan {:steps [{:name "step1"}]}} {})
   :leave-this-here)

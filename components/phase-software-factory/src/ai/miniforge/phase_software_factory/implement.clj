@@ -991,7 +991,13 @@
                    (:codex-answers impl-result)
                    ;; §7.7.2 lost-vs-unanswered: the session's answer-log
                    ;; marker (:absent|:recorded|:unreadable).
-                   (:codex-answer-log impl-result)))]
+                   (:codex-answer-log impl-result)))
+        ;; The refs the artifact collector diffs against travel with the
+        ;; artifact, so the :no-secrets gate measures the change from the
+        ;; same task base rather than from HEAD.
+        result (cond-> result
+                 (map? (:output result))
+                 (assoc-in [:output :code/base-refs] (base-ref-candidates ctx)))]
     (-> (phase/enter-context ctx :implement :implementer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest)
         (assoc-in [:phase :watchdog-state]
