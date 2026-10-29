@@ -232,23 +232,26 @@
 
 ;; Workflow commands
 (defn ^{:stratum 0} workflow-run-cmd
+  "Exits 1 when the workflow id is missing, when the run throws, and when
+   it ends in anything but success (see `cmd-run/finish!`)."
   [m]
   (let [{:keys [workflow-id version input input-json output quiet dashboard-url]} (util/get-opts m)]
     (if-not workflow-id
-      (display/print-error (messages/t :workflow-run/usage
-                                       {:command (app-config/command-string "workflow run <workflow-id> [options]")}))
-      (try
-        (workflow-runner/run-workflow!
-         (keyword (str/replace workflow-id #"^:" ""))
-         {:version (or version "latest")
-          :input input
-          :input-json input-json
-          :output (or output :pretty)
-          :quiet (boolean quiet)
-          :dashboard-url dashboard-url})
-        (catch Exception e
-          (display/print-error (messages/t :workflow-run/failed
-                                           {:error (ex-message e)})))))))
+      (cmd-shared/usage-error! :workflow-run/usage "workflow run <workflow-id> [options]")
+      (cmd-run/finish!
+       (try
+         (workflow-runner/run-workflow!
+          (keyword (str/replace workflow-id #"^:" ""))
+          {:version (or version "latest")
+           :input input
+           :input-json input-json
+           :output (or output :pretty)
+           :quiet (boolean quiet)
+           :dashboard-url dashboard-url})
+         (catch Exception e
+           (display/print-error (messages/t :workflow-run/failed
+                                            {:error (ex-message e)}))
+           nil))))))
 
 ;; Workflow subcommands — spec-driven execution and lifecycle (N5)
 (defn ^{:stratum 0} workflow-execute-cmd [m] (cmd-workflow/workflow-execute-cmd (util/get-opts m)))
@@ -263,21 +266,24 @@
 
 ;; Chain commands
 (defn ^{:stratum 0} chain-run-cmd
+  "Exits 1 when the chain id is missing, when the chain throws, and when
+   it ends in anything but success (see `cmd-run/finish!`)."
   [m]
   (let [{:keys [chain-id version spec input-json quiet]} (util/get-opts m)]
     (if-not chain-id
-      (display/print-error (messages/t :chain-run/usage
-                                       {:command (app-config/command-string "chain run <chain-id> [options]")}))
-      (try
-        (workflow-runner/run-chain!
-         (keyword (str/replace chain-id #"^:" ""))
-         {:version (or version "latest")
-          :spec spec
-          :input-json input-json
-          :quiet (boolean quiet)})
-        (catch Exception e
-          (display/print-error (messages/t :chain-run/failed
-                                           {:error (ex-message e)})))))))
+      (cmd-shared/usage-error! :chain-run/usage "chain run <chain-id> [options]")
+      (cmd-run/finish!
+       (try
+         (workflow-runner/run-chain!
+          (keyword (str/replace chain-id #"^:" ""))
+          {:version (or version "latest")
+           :spec spec
+           :input-json input-json
+           :quiet (boolean quiet)})
+         (catch Exception e
+           (display/print-error (messages/t :chain-run/failed
+                                            {:error (ex-message e)}))
+           nil))))))
 
 ;; Observability commands
 (defn ^{:stratum 0} logs-tail-cmd [m] (observability/handle-logs (assoc (util/get-opts m) :subcommand "tail")))
@@ -296,7 +302,11 @@
 (defn ^{:stratum 0} resume-cmd
   "First-class `mf resume <workflow-id>` subcommand. The `<workflow-id>`
    can be passed positionally, or via `--workflow-id`/`-w` / the legacy
-   `--resume`/`-r` flag (kept so existing docs keep working)."
+   `--resume`/`-r` flag (kept so existing docs keep working).
+
+   Exits 1 when the id is missing and when the resumed run ends in
+   anything but success. resume-workflow returns nil only after reporting
+   the run already complete, a no-op success; its failures throw."
   [m]
   (let [opts (util/get-opts m)
         args (:args m)
@@ -304,8 +314,9 @@
                   (:resume opts)
                   (first args))]
     (if (str/blank? (str wf-id))
-      (display/print-error (messages/t :resume/missing-workflow-id))
-      (cmd-resume/resume-workflow wf-id opts))))
+      (do (display/print-error (messages/t :resume/missing-workflow-id))
+          (cmd-shared/exit! 1))
+      (some-> (cmd-resume/resume-workflow wf-id opts) cmd-run/finish!))))
 
 (defn ^{:stratum 0} scan-cmd [m] (cmd-scan/scan-cmd (util/get-opts m)))
 

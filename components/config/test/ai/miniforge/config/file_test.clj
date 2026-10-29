@@ -22,7 +22,9 @@
    [ai.miniforge.config.interface.file :as config-file]
    [ai.miniforge.file-durability.interface :as durability]
    [babashka.fs :as fs]
+   [babashka.process :as process]
    [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
@@ -37,6 +39,19 @@
   "Writers racing on one file: enough for read-modify-write races to lose a
    repo if the lock did not serialize them."
   16)
+
+(def ^{:stratum 0} ^:private lock-holder-script
+  "Babashka code that holds the FileChannel lock on the file named by its argument
+   until killed, printing :locked once it does. It must be another process: writers
+   inside one JVM already queue on the in-process monitor, whatever file they lock."
+  (str "(let [ch (java.nio.channels.FileChannel/open (.toPath (java.io.File. (first *command-line-args*)))"
+       " (into-array java.nio.file.OpenOption [java.nio.file.StandardOpenOption/CREATE"
+       " java.nio.file.StandardOpenOption/WRITE]))]"
+       " (.lock ch) (println :locked) (flush) (Thread/sleep 60000))"))
+
+(def ^{:stratum 0} ^:private holder-start-timeout-ms
+  "How long to wait for the lock-holder process to report it holds the lock."
+  30000)
 
 (deftest ^{:stratum 0} parse-config-test
   (is (nil? (sut/parse-config "p" "")))
@@ -89,6 +104,20 @@
     (is (fs/sym-link? link))
     (is (= {:llm {} :a 1} (edn/read-string (slurp real))))
     (is (= "rw-r-----" (fs/posix->str (fs/posix-file-permissions real))))))
+
+(deftest ^{:stratum 1} symlink-and-target-writers-share-the-lock-test
+  (testing "a writer going through a symlink waits on the lock another process holds for the target"
+    (let [real   (temp-config-path "{:llm {}}")
+          link   (str (fs/path (fs/create-temp-dir) "config.edn"))
+          _      (fs/create-sym-link link real)
+          holder (process/process ["bb" "-e" lock-holder-script (str real ".lock")] {:err :inherit})]
+      (try
+        (is (= ":locked" (deref (future (.readLine (io/reader (:out holder)))) holder-start-timeout-ms :timeout)))
+        (let [result (config-file/update-config! link #(assoc % :a 1))]
+          (is (= :unavailable (:anomaly/type result)))
+          (is (= "{:llm {}}" (slurp real))))
+        (finally
+          (process/destroy-tree holder))))))
 
 (deftest ^{:stratum 1} concurrent-writers-share-the-lock-test
   (let [path    (temp-config-path "{}")

@@ -30,7 +30,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;------------------------------------------------------------------------------ Layer 0: Fixtures & factories
+;; Fixtures & factories
 (def ^{:stratum 0} ^:dynamic *tmp-dir* nil)
 
 (defn ^{:stratum 0} tmp-dir-fixture [f]
@@ -126,7 +126,7 @@
     (with-redefs [es/request-intervention!
                   (fn [_request] (throw (ex-info "disk full" {})))
                   shared/exit! (fn [_] nil)]
-      (let [output (with-out-str (sut/workflow-cancel-cmd {:id (str (random-uuid))}))]
+      (let [output (with-out-str (binding [*err* *out*] (sut/workflow-cancel-cmd {:id (str (random-uuid))})))]
         (is (.contains output "disk full"))
         (is (not (.contains output "Cancel signal sent")))))))
 
@@ -136,7 +136,7 @@
                   (fn [_request]
                     (anomaly/anomaly :invalid-input "bad request" {}))
                   shared/exit! (fn [_] nil)]
-      (let [output (with-out-str (sut/workflow-cancel-cmd {:id (str (random-uuid))}))]
+      (let [output (with-out-str (binding [*err* *out*] (sut/workflow-cancel-cmd {:id (str (random-uuid))})))]
         (is (.contains output "bad request"))
         (is (not (.contains output "Cancel signal sent")))))))
 
@@ -148,7 +148,7 @@
           output  (atom "")]
       (with-redefs [worktree/worktree-root (constantly nil)
                     shared/exit! (fn [_] (reset! exited? true))]
-        (reset! output (with-out-str (sut/workflow-gc-scratch-cmd {}))))
+        (reset! output (with-out-str (binding [*err* *out*] (sut/workflow-gc-scratch-cmd {})))))
       (is @exited?)
       ;; The i18n message must mention "git repository" so the user understands.
       (is (re-find #"(?i)git" @output)))))
@@ -191,7 +191,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;------------------------------------------------------------------------------ Layer 1: Tests
+;; Tests
 (deftest ^{:stratum 1} derive-status-test
   (testing "completed events derive 'completed' status"
     (is (= "completed" (sut/derive-status (make-events :completed)))))
