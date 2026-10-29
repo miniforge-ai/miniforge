@@ -94,6 +94,18 @@
     (spit path "stale")
     (f path)))
 
+(def ^{:stratum 0} gz-entry
+  {:github "example/tool" :version "v1" :binary "tool"
+   :assets {(installer/platform-key) {:file "tool.gz" :extract :gzip}}})
+
+(defn ^{:stratum 0} await-parked
+  "Spin (no sleep) until `thread` parks, WAITING or TIMED_WAITING; at most 10 s."
+  [^Thread thread]
+  (let [deadline (+ (System/nanoTime) 10000000000)]
+    (while (and (not (#{"WAITING" "TIMED_WAITING"} (str (.getState thread))))
+                (< (System/nanoTime) deadline))
+      (Thread/onSpinWait))))
+
 (defn ^{:stratum 0} write-tool-tgz!
   "Write a tar.gz under `base` holding bin/tool (prints its own $0) and
    script/x.lua; return its path."
@@ -354,19 +366,16 @@
                         (fs/list-dir bin-dir))))))))
 
 (deftest ^{:stratum 1} concurrent-installs-of-one-binary-serialize-test
-  (testing "a second install of the same binary waits for the first, then uses its result"
+  (testing "a second auto-install of the same binary waits for the first, then uses its result"
     (with-base-dir
       (fn [base]
         (let [bin-dir   (str (fs/path base "bin dir's"))
-              entry     {:github "example/tool" :version "v1" :binary "tool"
-                         :assets {"test-platform" {:file "tool.gz" :extract :gzip}}}
               entered   (java.util.concurrent.CountDownLatch. 1)
               release   (java.util.concurrent.CountDownLatch. 1)
               downloads (atom 0)
               b-thread  (promise)
               install   #(binding [*err* (java.io.StringWriter.)]
-                           (installer/install-via-github entry "test-platform"))
-              deadline  (+ (System/nanoTime) 10000000000)]
+                           (installer/run-install gz-entry))]
           (with-redefs [installer/bin-dir       (constantly bin-dir)
                         installer/download-file (fn [_url dest]
                                                   (swap! downloads inc)
@@ -379,9 +388,7 @@
                   b (future (deliver b-thread (Thread/currentThread)) (install))]
               ;; A is inside its download. Wait until B parks: on the install
               ;; lock when installs serialize, inside its own download when not.
-              (while (and (not= "WAITING" (str (.getState ^Thread @b-thread)))
-                          (< (System/nanoTime) deadline))
-                (Thread/onSpinWait))
+              (await-parked @b-thread)
               (.countDown release)
               (is (= {:installed (str bin-dir "/tool")} @a))
               (is (= {:installed (str bin-dir "/tool")} @b))
@@ -397,6 +404,51 @@
           (is (= {:command ["/opt/lsp/tool" "--stdio"] :lsp-installer/warnings ["could not prune"]}
                  (installer/ensure-installed {:servers {:t {:tool-id :lsp/t :binary "lsp-warn-probe"}}}
                                              :lsp/t ["lsp-warn-probe" "--stdio"]))))))))
+
+(deftest ^{:stratum 1} auto-install-rechecks-after-an-earlier-install-test
+  (testing "an auto-install that runs after another one finished uses it instead of downloading"
+    (with-base-dir
+      (fn [base]
+        (let [downloads (atom 0)]
+          (with-redefs [installer/bin-dir       (constantly (str (fs/path base "bin")))
+                        installer/download-file (fn [_url dest]
+                                                  (swap! downloads inc)
+                                                  (write-gzip! dest script)
+                                                  nil)]
+            (binding [*err* (java.io.StringWriter.)]
+              (let [first-result (installer/run-install gz-entry)]
+                (is (= first-result (installer/run-install gz-entry)))
+                (is (= 1 @downloads))))))))))
+
+(deftest ^{:stratum 1} explicit-reinstall-does-not-reuse-a-failed-install-test
+  (testing "an explicit install queued behind a failing one performs its own install"
+    (with-base-dir
+      (fn [base]
+        (let [bin-dir  (str (fs/path base "bin"))
+              calls    (atom 0)
+              entered  (java.util.concurrent.CountDownLatch. 1)
+              release  (java.util.concurrent.CountDownLatch. 1)
+              b-thread (promise)
+              install  #(binding [*err* (java.io.StringWriter.)]
+                          (installer/install-via-github gz-entry (installer/platform-key)))]
+          (with-redefs [installer/bin-dir       (constantly bin-dir)
+                        installer/download-file (fn [_url dest]
+                                                  (case (swap! calls inc)
+                                                    1 (do (write-gzip! dest "#!/bin/sh\necho old\n") nil)
+                                                    2 (do (.countDown entered)
+                                                          (.await release)
+                                                          (response/make-anomaly :anomalies/fault "download failed"))
+                                                    (do (write-gzip! dest "#!/bin/sh\necho new\n") nil)))]
+            (install)
+            (let [a (future (install))
+                  _ (.await entered)
+                  b (future (deliver b-thread (Thread/currentThread)) (install))]
+              (try (await-parked @b-thread)
+                   (finally (.countDown release)))
+              (is (response/anomaly-map? @a))
+              (is (= {:installed (str bin-dir "/tool")} @b))
+              (is (= "#!/bin/sh\necho new\n" (slurp (str bin-dir "/tool"))) "B installed its own download")
+              (is (= 3 @calls)))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

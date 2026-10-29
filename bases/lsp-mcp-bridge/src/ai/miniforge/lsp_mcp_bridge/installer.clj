@@ -510,16 +510,20 @@
 (defn ^{:stratum 3} install-via-github
   "Install an LSP binary from GitHub Releases under the binary's install
    lock, so concurrent installers cannot replace or prune each other's
-   work. One that had to wait rechecks the target first and uses it when
-   the installer it waited for left a regular executable file there."
-  [server-entry platform]
+   work. With `:auto? true` (run-install, from ensure-installed) it first
+   rechecks the target under the lock and returns it when it is a regular
+   executable file, the test ensure-installed applied before the lock; a
+   caller that found nothing and then queued behind, or ran after, another
+   installer uses that install. Otherwise (an explicit install) it always
+   performs its own download and never reuses another installer's result."
+  [server-entry platform & {:keys [auto?]}]
   (let [dest-dir (bin-dir)
         binary   (:binary server-entry)
         target   (str dest-dir "/" binary)]
     (call-with-install-lock
      dest-dir binary
-     (fn [contended?]
-       (if (and contended? (fs/regular-file? target) (fs/executable? target))
+     (fn [_contended?]
+       (if (and auto? (fs/regular-file? target) (fs/executable? target))
          {:installed target}
          (-> {:server-entry server-entry :platform platform}
              step-resolve-asset
@@ -537,7 +541,7 @@
   [server-entry]
   (let [install-method (get server-entry :install-method :github)]
     (case install-method
-      :github     (install-via-github server-entry (platform-key))
+      :github     (install-via-github server-entry (platform-key) :auto? true)
       :npm        (install-via-npm server-entry)
       :go-install (install-via-go server-entry)
       :custom     (response/make-anomaly
