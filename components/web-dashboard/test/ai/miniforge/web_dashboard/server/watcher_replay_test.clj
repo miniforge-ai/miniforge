@@ -16,9 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.web-dashboard.server.watcher-replay-test
-  "`mf web` keeps the file sink on its stream, so its control and
-   supervisory events stay on disk. Events its watcher reads from disk
-   must reach the dashboard without being written a second time."
+  "Events the watcher reads reach `mf web`'s file-sink stream unwritten."
   (:require
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]

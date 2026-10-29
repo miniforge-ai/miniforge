@@ -120,11 +120,12 @@
   [stream event]
   (swap! stream retention/record event))
 
-(def ^{:stratum 0 :dynamic true} *replaying?*
-  "True while `replay!` delivers an event another process already stored.
-   An event a subscriber publishes meanwhile derives from it; that
-   process derives and stores its own, so this publish skips the sinks."
-  false)
+(def ^{:stratum 0 :dynamic true} *replaying*
+  "The streams `replay!` is delivering to on this thread (nested replays
+   add to it). A publish to one of them meanwhile derives from a stored
+   event, which its own process derives and stores, so it skips the sinks;
+   a publish to any other stream keeps them."
+  #{})
 
 (defn- ^{:stratum 0} deliver-to-sink!
   "Invoke `sink` with `event`, swallowing exceptions and logging them.
@@ -425,7 +426,7 @@
           (let [result (fence/with-in-flight stream event
                          (fn []
                            (let [{:keys [sinks subscribers filters logger]} @stream]
-                             (when-not *replaying?*
+                             (when-not (contains? *replaying* stream)
                                (deliver-to-sinks! sinks event logger))
                              (record-event! stream event)
                              (deliver-to-subscribers! subscribers filters event logger)
@@ -440,15 +441,11 @@
               result))))))
 
 (defn ^{:stratum 2} replay!
-  "Deliver `event`, which another process published and its file sink
-   already stored, to this legacy stream's in-memory log and subscribers
-   without running this stream's sinks: a sink here would store a second
-   copy, which a file watcher would then read again. Events subscribers
-   publish while handling it skip the sinks too (`*replaying?*`).
-
-   Returns the (redacted) event. An anomaly map is returned as is; a
-   current-profile stream returns an :unsupported anomaly, since it
-   restores history from its own journal."
+  "Deliver `event`, already stored by the process that published it, to
+   this legacy stream's log and subscribers without its sinks, which would
+   store a second copy. Subscribers' publishes to this stream meanwhile
+   skip its sinks too (`*replaying*`). Returns the redacted event; a
+   current-profile stream returns an :unsupported anomaly."
   [stream event]
   (cond
     (current/active? stream)
@@ -459,7 +456,7 @@
     :else
     (let [event (redaction/redact event)
           {:keys [subscribers filters logger]} @stream]
-      (binding [*replaying?* true]
+      (binding [*replaying* (conj *replaying* stream)]
         (record-event! stream event)
         (deliver-to-subscribers! subscribers filters event logger))
       event)))
