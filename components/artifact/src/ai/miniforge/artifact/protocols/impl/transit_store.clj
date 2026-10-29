@@ -144,9 +144,9 @@
       (update-in [child-id :artifact/parents] (fnil conj []) parent-id)))
 
 (defn- ^{:stratum 0} merge-index-entry
-  "Combine the on-disk and in-memory index entries for one artifact.
-   Links are only ever added, so the parents and children of both are
-   kept; the in-memory entry wins every other field."
+  "Combine the on-disk and in-memory copies of one artifact's index
+   entry or artifact file. Links are only ever added, so the parents and
+   children of both are kept; the in-memory copy wins every other field."
   [disk-entry memory-entry]
   (assoc (merge disk-entry memory-entry)
          :artifact/parents (vec (distinct (concat (:artifact/parents disk-entry)
@@ -265,14 +265,6 @@
      {:index {} :skipped []}
      files)))
 
-(defn ^{:stratum 1} persist-artifact!
-  "Persist an artifact to disk in Transit format."
-  [artifacts-dir artifact]
-  (let [id (:artifact/id artifact)
-        file-path (artifact-file-path artifacts-dir id)]
-    (write-transit file-path artifact)
-    id))
-
 (defn ^{:stratum 1} load-artifact-from-disk
   "Load an artifact from disk.
    Returns nil if not found."
@@ -307,6 +299,20 @@
     flushed?))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} persist-artifact!
+  "Persist an artifact to disk in Transit format. Under the index lock,
+   links already in the file on disk are kept: another store may have
+   linked this artifact since this one cached it."
+  [artifacts-dir artifact]
+  (let [id (:artifact/id artifact)
+        file-path (artifact-file-path artifacts-dir id)]
+    (call-with-index-lock
+     artifacts-dir
+     (fn []
+       (let [on-disk (try (read-transit file-path) (catch Exception _ nil))]
+         (write-transit file-path (if (map? on-disk) (merge-index-entry on-disk artifact) artifact)))))
+    id))
 
 (defn ^{:stratum 2} recover-index!
   "Under the index lock, re-read the index; if it is still unreadable,
@@ -365,17 +371,6 @@
                     :data {:artifacts-dir artifacts-dir}})
         last-written))))
 
-(defn ^{:stratum 2} persist-artifact-action
-  "Writer action: persist one artifact file, logging the outcome."
-  [state artifacts-dir artifact logger]
-  (let [id (:artifact/id artifact)]
-    (try
-      (persist-artifact! artifacts-dir artifact)
-      (log-artifact-saved logger id artifact)
-      (catch Exception e
-        (log-artifact-save-failed logger id e))))
-  state)
-
 (defn ^{:stratum 2} load-artifact-impl
   "Load artifact implementation."
   [{:keys [artifacts-dir cache logger]} id]
@@ -396,7 +391,20 @@
   (when (metadata-match? criteria metadata)
     id))
 
-(defn ^{:stratum 2} persist-linked-artifacts
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} persist-artifact-action
+  "Writer action: persist one artifact file, logging the outcome."
+  [state artifacts-dir artifact logger]
+  (let [id (:artifact/id artifact)]
+    (try
+      (persist-artifact! artifacts-dir artifact)
+      (log-artifact-saved logger id artifact)
+      (catch Exception e
+        (log-artifact-save-failed logger id e))))
+  state)
+
+(defn ^{:stratum 3} persist-linked-artifacts
   "Writer action: re-persist both linked artifacts to disk."
   [state record artifacts-dir parent-id child-id logger]
   (try
@@ -412,8 +420,6 @@
                            :child-id child-id}}))))
   state)
 
-;------------------------------------------------------------------------------ Layer 3
-
 (defn ^{:stratum 3} load-index
   "Load the artifact metadata index; {} when there is none.
    An unreadable index is moved aside and rebuilt from the per-artifact
@@ -425,19 +431,6 @@
      (if (anomaly? index)
        (recover-index! artifacts-dir logger)
        index))))
-
-(defn ^{:stratum 3} save-artifact
-  "Save artifact implementation. Caches the artifact, adds it to the
-   in-memory index, and queues its file and an index write on the
-   writer. An index entry whose file never landed loads as nil, which
-   query skips."
-  [{:keys [artifacts-dir cache index logger writer]} artifact]
-  (let [id (:artifact/id artifact)]
-    (swap! cache assoc id artifact)
-    (swap! index add-to-index artifact)
-    (send-off writer persist-artifact-action artifacts-dir artifact logger)
-    (send-off writer persist-index-action artifacts-dir index logger)
-    id))
 
 (defn ^{:stratum 3} filter-by-criteria
   "Filter artifacts by criteria."
@@ -452,6 +445,22 @@
     (link-target-anomaly artifact-id role)))
 
 ;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} save-artifact
+  "Save artifact implementation. Caches the artifact, adds it to the
+   in-memory index, and queues its file and an index write on the
+   writer, all under the writer's monitor: the queue order then matches
+   the order of cache and index updates when a link, or another save of
+   the same id, runs at the same time. An index entry whose file never
+   landed loads as nil, which query skips."
+  [{:keys [artifacts-dir cache index logger writer]} artifact]
+  (let [id (:artifact/id artifact)]
+    (locking writer
+      (swap! cache assoc id artifact)
+      (swap! index add-to-index artifact)
+      (send-off writer persist-artifact-action artifacts-dir artifact logger)
+      (send-off writer persist-index-action artifacts-dir index logger))
+    id))
 
 (defn ^{:stratum 4} query-artifacts
   "Query artifacts implementation."
@@ -483,14 +492,13 @@
                                   :role      (link-target-role result)}})))
         false)
       (do
-        (swap! index update-index-links parent-id child-id)
-
-        ;; Update cached artifacts if present
-        (update-cache-links cache parent-id child-id)
-
-        ;; Re-persist both artifacts, then the index, on the writer
-        (send-off writer persist-linked-artifacts record artifacts-dir parent-id child-id logger)
-        (send-off writer persist-index-action artifacts-dir index logger)
+        ;; Under the writer's monitor, as in save-artifact
+        (locking writer
+          (swap! index update-index-links parent-id child-id)
+          (update-cache-links cache parent-id child-id)
+          ;; Re-persist both artifacts, then the index, on the writer
+          (send-off writer persist-linked-artifacts record artifacts-dir parent-id child-id logger)
+          (send-off writer persist-index-action artifacts-dir index logger))
 
         (when logger
           (log/debug logger :system :artifact/linked

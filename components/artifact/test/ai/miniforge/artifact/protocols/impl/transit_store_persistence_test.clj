@@ -240,3 +240,52 @@
         (p/close s))
       (finally
         (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-links-from-two-stores-both-reach-the-artifact-file
+  (let [dir (temp-dir)
+        parent-file (impl/artifact-file-path (artifacts-path dir) "parent")]
+    (try
+      (let [s (open-store dir)]
+        (run! #(p/save s (artifact %)) ["parent" "c1" "c2"])
+        (p/close s))
+      ;; Both stores cache the unlinked parent before either links it.
+      (let [a (open-store dir)
+            b (open-store dir)]
+        (run! #(p/load-artifact % "parent") [a b])
+        (p/link a "parent" "c1")
+        (p/close a)
+        (p/link b "parent" "c2")
+        (p/close b))
+      (testing "the parent's file keeps both stores' links"
+        (is (= #{"c1" "c2"} (set (:artifact/children (read-or-unreadable parent-file))))))
+      (finally
+        (delete-dir! dir)))))
+
+(deftest ^{:stratum 1} test-link-made-during-a-save-survives-it
+  (let [dir (temp-dir)
+        paused (promise)
+        resume (promise)
+        add impl/add-to-index]
+    (try
+      (let [s (open-store dir)]
+        (run! #(p/save s (artifact %)) ["parent" "child"])
+        ;; Hold a re-save of the parent between its cache and index updates.
+        (with-redefs [impl/add-to-index (fn [index a]
+                                          (when-not (realized? paused)
+                                            (deliver paused true)
+                                            @resume)
+                                          (add index a))]
+          (let [saving (future (p/save s (assoc (artifact "parent") :artifact/version "2")))
+                _ @paused
+                linking (future (p/link s "parent" "child"))]
+            (deref linking 300 nil)
+            (deliver resume true)
+            @saving
+            @linking))
+        (p/close s))
+      (testing "the parent's file keeps the link"
+        (is (= ["child"] (:artifact/children
+                          (read-or-unreadable (impl/artifact-file-path (artifacts-path dir) "parent"))))))
+      (finally
+        (deliver resume true)
+        (delete-dir! dir)))))
