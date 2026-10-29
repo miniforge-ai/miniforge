@@ -30,6 +30,7 @@
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.digest :as digest]
    [ai.miniforge.event-stream.boundary.heartbeat :as heartbeat]
+   [ai.miniforge.event-stream.layout-reader :as layout-reader]
    [ai.miniforge.event-stream.layout-tail :as layout-tail]
    [ai.miniforge.event-stream.operator-requests :as operator-requests]
    [ai.miniforge.event-stream.reader :as reader]
@@ -1088,6 +1089,12 @@
    :window-ms (600000, how recently a directory was written to count as
    active), :thread-name. Returns a function that stops it."
   layout-tail/start!)
+
+(def ^{:stratum 0} read-layout-start-event
+  "`(read-layout-start-event events-dir workflow-id)`: the run's
+   :workflow/started event from its archived/ or live/ directory under
+   `events-dir`, ids as UUIDs; nil when there is none."
+  layout-reader/start-event)
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event timeline renderer

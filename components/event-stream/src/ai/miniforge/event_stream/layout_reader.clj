@@ -182,6 +182,16 @@
                         (cond-> failures there (assoc n tries))
                         true)))))))
 
+(defn ^{:stratum 2} start-event
+  "Workflow `wf-id`'s :workflow/started event, from its archived/ or else
+   live/ directory, reading files in order up to the first one; nil when
+   there is none."
+  [events-dir wf-id]
+  (let [wf-name (str wf-id)]
+    (->> (event-files (current-dir events-dir wf-name (io/file (sinks/live-dir events-dir) wf-name)))
+         (keep read-event)
+         (some #(when (= :workflow/started (:event/type %)) %)))))
+
 (defn ^{:stratum 2} active-dirs
   "{name dir} of the workflow directories modified at or after
    `since-ms`. A name under both roots maps to its archived directory."
