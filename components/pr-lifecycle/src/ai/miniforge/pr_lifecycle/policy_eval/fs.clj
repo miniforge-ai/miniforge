@@ -26,7 +26,10 @@
 
    Depends on Layer 1 indirectly via `materialize-fix!`, which
    consumes a planned `:to-apply` entry (the shape produced by
-   `policy-eval.plan/plan-fixes`)."
+   `policy-eval.plan/plan-fixes`).
+
+   The path guards (`safe-worktree-path`, `safe-worktree-entry-path`)
+   are public: `fix-loop/apply-fix-to-worktree` reuses them."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [babashka.fs :as fs]
@@ -36,11 +39,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; ── path safety ──────────────────────────────────────────────────────
-(defn- ^{:stratum 0} safe-worktree-path
+(defn ^{:stratum 0} safe-worktree-path
   "Resolve `relative-path` under `worktree-root`. Returns the
    canonical absolute path string when the target stays inside the
    worktree root, or returns nil when `relative-path` escapes
-   (path-traversal guard).
+   (path-traversal guard). Use it for reads and writes, which follow
+   a final symlink; deletes use `safe-worktree-entry-path`.
 
    Three layers of defense:
    1. Syntactic — reject absolute paths (leading `/`) and any
@@ -51,7 +55,9 @@
    2. Canonicalization — resolve symlinks and `.` segments via
       `getCanonicalPath`.
    3. Containment — require the canonical target to live under
-      the canonical worktree root."
+      the canonical worktree root, and not be a dangling symlink:
+      `getCanonicalPath` cannot resolve one, so it looks inside, but a
+      write follows it and creates the file wherever it points."
   [worktree-root relative-path]
   (try
     (let [path-str (str relative-path)]
@@ -70,7 +76,8 @@
         :else
         (let [root   (.getCanonicalPath (io/file (str worktree-root)))
               target (.getCanonicalPath (io/file (str worktree-root) path-str))]
-          (when (str/starts-with? target (str root java.io.File/separator))
+          (when (and (str/starts-with? target (str root java.io.File/separator))
+                     (not (and (fs/sym-link? target) (not (fs/exists? target)))))
             target))))
     (catch java.io.IOException _ nil)
     (catch SecurityException _ nil)))
@@ -103,6 +110,30 @@
              {:path relative-path})))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} safe-worktree-entry-path
+  "Resolve the directory entry `relative-path` names under
+   `worktree-root`, for a delete. Returns its absolute path string, or
+   nil when the entry would sit outside the worktree.
+
+   A delete removes the last component and does not follow it, so only
+   the parent goes through `safe-worktree-path`, and the last component
+   must be a plain name (not `.` or `..`). A top-level entry's parent
+   (none, or `.`) is the worktree root itself. Resolving the whole path
+   would follow a final symlink and validate where it points instead of
+   the entry being removed: with `link` pointing outside and
+   `outside/back` pointing back in, `link/back` resolves inside while the
+   delete removes `outside/back`."
+  [worktree-root relative-path]
+  (let [file   (io/file (str relative-path))
+        leaf   (.getName file)
+        parent (.getParent file)]
+    (when-not (or (str/blank? leaf) (contains? #{"." ".."} leaf))
+      (some-> (if (contains? #{nil "."} parent)
+                (str worktree-root)
+                (safe-worktree-path worktree-root parent))
+              (io/file leaf)
+              str))))
 
 ;; ── pipeline guards ──────────────────────────────────────────────────
 ;;
