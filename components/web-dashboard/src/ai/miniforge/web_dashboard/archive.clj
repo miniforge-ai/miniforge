@@ -16,16 +16,10 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.web-dashboard.archive
-  "Archive scanning — build lightweight workflow summaries from event files.
-
-   Two on-disk layouts:
-   - legacy `{events-dir}/<workflow-id>.edn`, one event per line: reads
-     only the first and last lines (two seeks);
-   - the event-stream file sink's directory per workflow (live/,
-     archived/ and the older flat `{events-dir}/<workflow-id>/`), one file
-     per event: reads only the first and last few files.
-   Either way it extracts name, status and timestamps without loading
-   every event into memory."
+  "Archive scanning — lightweight workflow summaries from the first and
+   last events of each legacy `<workflow-id>.edn` file (two seeks) and
+   each file sink workflow directory (live/, archived/, the older flat
+   layout), without loading every event into memory."
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [clojure.java.io :as io]
@@ -148,13 +142,10 @@
     (catch Exception _ nil)))
 
 (defn ^{:stratum 2} read-dir-summary
-  "Summary of `workflow-id`'s directory in the event-stream file sink
-   layout under `events-dir`: the first event is the earliest of the
-   files named in the first millisecond (plus two more, should those not
-   read), the status comes from the last `tail-file-count` files. The
-   summary keeps `events-dir`, not the directory, since an archive moves
-   a live directory to archived/. :file-size is the bytes of its event
-   files. nil when it holds no readable event."
+  "Summary of `workflow-id`'s file sink directory under `events-dir`,
+   from its first-millisecond files (plus two) and its last
+   `tail-file-count`. Keeps `events-dir`, not the directory, which an
+   archive may move. nil when it holds no readable event."
   [events-dir workflow-id]
   (when-let [dir (es/workflow-events-dir events-dir workflow-id)]
     (let [files      (event-files/event-files dir)

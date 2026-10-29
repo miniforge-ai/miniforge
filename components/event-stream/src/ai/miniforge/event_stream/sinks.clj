@@ -290,15 +290,10 @@
           nil)))))
 
 (defn ^{:stratum 0} event-file-ms
-  "The epoch milliseconds an event file's name records, inverting the
-   `event-filename` grammar: the timestamp of a legacy
-   `{yyyyMMddTHHmmssSSSZ}-{uuid}.json` name (or of the older
-   seconds-resolution `{yyyyMMddTHHmmssZ}-{uuid}.json`, at .000), the
-   timestamp bits of a `{snowflake-hex16}__{seq12}.transit.json` name.
-   All record when the event was made, so this orders a directory
-   holding several grammars, which their names alone do not. nil for
-   any other name (the manifest, the snapshot, a temp file), so it also
-   tells event files apart."
+  "The epoch ms an event file name records, inverting `event-filename`:
+   a legacy `{yyyyMMddTHHmmss[SSS]Z}-{uuid}.json` timestamp, or a
+   `{snowflake-hex16}__{seq12}.transit.json` id's timestamp bits. Orders
+   a directory mixing the grammars; nil for any other name."
   [^String file-name]
   (if-let [[_ ts ms] (re-matches #"(\d{8}T\d{6})(\d{3})?Z-[^/]+\.json" file-name)]
     (+ (.toEpochMilli (.toInstant (LocalDateTime/parse ts (DateTimeFormatter/ofPattern "yyyyMMdd'T'HHmmss"))
