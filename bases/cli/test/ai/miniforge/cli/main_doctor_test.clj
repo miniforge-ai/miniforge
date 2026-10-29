@@ -51,6 +51,15 @@ esac")
           esac ;;
 esac")
 
+(def ^{:stratum 0} fake-git-with-empty-email
+  "case \"$1\" in
+  --version) echo 'git version 2.99.0' ;;
+  config) case \"$2\" in
+            user.name) echo 'Test User' ;;
+            user.email) echo '' ;;
+          esac ;;
+esac")
+
 (def ^{:stratum 0} fake-gh
   "case \"$1\" in
   --version) echo 'gh version 2.99.0' ;;
@@ -184,6 +193,15 @@ esac")
                                           :cfg     {:llm {:backend :opencode}}
                                           :runtime runtime-found})]
       (is (= 1 exit))
+      (is (str/includes? out "git config --global user.email")))))
+
+(deftest ^{:stratum 2} empty-git-identity-fails-test
+  (testing "user.email set to \"\": `git config` exits 0 but git refuses to commit, so exit 1"
+    (let [{:keys [exit out]} (run-doctor {:tools   (assoc healthy-tools "git" fake-git-with-empty-email)
+                                          :cfg     {:llm {:backend :opencode}}
+                                          :runtime runtime-found})]
+      (is (= 1 exit))
+      (is (str/includes? out "set but empty"))
       (is (str/includes? out "git config --global user.email")))))
 
 (deftest ^{:stratum 2} runtime-required-only-for-governed-mode-test

@@ -117,6 +117,7 @@
   :doctor/timed-out "{cmd} did not finish within {timeout-ms} ms"
   :doctor/command-failed "{cmd} exited {exit}: {output}"
   :doctor/command-failed-silent "{cmd} exited {exit}"
+  :doctor/empty-output "set but empty"
   :doctor/hint-git-identity "Set it with: git config --global {key} \"<value>\""
   :doctor/gh-logged-in "logged in"
   :doctor/hint-gh-auth "Log in with: gh auth login"

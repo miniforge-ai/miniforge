@@ -41,7 +41,8 @@
 
    A command check spec is a result without :check/ok? and :check/detail,
    plus :check/argv, and optionally :check/ok-detail (shown instead of the
-   command's output on success) and :check/hint (shown on failure)."
+   command's output on success), :check/hint (shown on failure) and
+   :check/require-output? (a zero exit with blank output fails)."
   (:require
    [babashka.fs :as fs]
    [clojure.string :as str]
@@ -75,13 +76,14 @@
 
 (defn ^{:stratum 0} command-spec
   "A required check that passes when `argv` exits 0 within the timeout."
-  [id label argv & {:keys [ok-detail hint]}]
+  [id label argv & {:keys [ok-detail hint require-output?]}]
   (cond-> {:check/id        id
            :check/label     label
            :check/required? true
            :check/argv      argv}
-    ok-detail (assoc :check/ok-detail ok-detail)
-    hint      (assoc :check/hint hint)))
+    ok-detail       (assoc :check/ok-detail ok-detail)
+    hint            (assoc :check/hint hint)
+    require-output? (assoc :check/require-output? true)))
 
 (defn ^{:stratum 0} output-line
   "First line of a command's stdout, else of its stderr, else \"\"."
@@ -100,6 +102,15 @@
     (messages/t :doctor/command-failed-silent {:cmd cmd :exit exit})
     (messages/t :doctor/command-failed {:cmd cmd :exit exit :output line})))
 
+(defn ^{:stratum 0} require-output
+  "Fail a passing outcome with blank output when `spec` requires output.
+   `git config user.email` exits 0 for a key set to \"\", and git then
+   refuses to commit."
+  [spec {:keys [ok? detail] :as outcome}]
+  (if (and ok? (:check/require-output? spec) (str/blank? detail))
+    {:ok? false :detail (messages/t :doctor/empty-output)}
+    outcome))
+
 (defn ^{:stratum 0} finish-check
   "Turn a command check spec and its {:ok? :detail} outcome into a result."
   [spec {:keys [ok? detail]}]
@@ -107,7 +118,7 @@
         detail  (if ok? (get spec :check/ok-detail detail) detail)
         details (if (and hint (not ok?)) [hint] [])]
     (-> spec
-        (dissoc :check/argv :check/ok-detail :check/hint)
+        (dissoc :check/argv :check/ok-detail :check/hint :check/require-output?)
         (assoc :check/ok? ok?
                :check/detail detail
                :check/details details))))
@@ -119,7 +130,8 @@
   (command-spec (keyword "git" config-key)
                 (messages/t :doctor/label-git-identity {:key config-key})
                 ["git" "config" config-key]
-                :hint (messages/t :doctor/hint-git-identity {:key config-key})))
+                :hint (messages/t :doctor/hint-git-identity {:key config-key})
+                :require-output? true))
 
 (defn ^{:stratum 1} gh-auth-spec
   []
@@ -199,8 +211,9 @@
   [spec]
   (if (contains? spec :check/ok?)
     spec
-    (let [argv (:check/argv spec)]
-      (finish-check spec (command-outcome (first argv) (run-command argv))))))
+    (let [argv    (:check/argv spec)
+          outcome (command-outcome (first argv) (run-command argv))]
+      (finish-check spec (require-output spec outcome)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

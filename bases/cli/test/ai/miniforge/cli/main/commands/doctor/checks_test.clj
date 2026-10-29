@@ -61,6 +61,21 @@
         (is (= "gh exited 1: x" (:check/detail result)))
         (is (= ["Log in with: gh auth login"] (:check/details result)))))))
 
+(deftest ^{:stratum 0} require-output-test
+  (let [spec (sut/command-spec :git/user.email "Git user.email" ["git" "config" "user.email"]
+                               :require-output? true)]
+    (testing "a zero exit with blank output fails when the spec requires output"
+      (is (= {:ok? false :detail "set but empty"}
+             (sut/require-output spec {:ok? true :detail ""}))))
+    (testing "output present, or a spec that does not require it: outcome unchanged"
+      (is (= {:ok? true :detail "a@b.c"}
+             (sut/require-output spec {:ok? true :detail "a@b.c"})))
+      (is (= {:ok? true :detail ""}
+             (sut/require-output (dissoc spec :check/require-output?) {:ok? true :detail ""}))))
+    (testing "the flag does not leak into the result"
+      (is (not (contains? (sut/finish-check spec {:ok? true :detail "a@b.c"})
+                          :check/require-output?))))))
+
 (deftest ^{:stratum 0} unknown-backend-fails-without-running-anything-test
   (let [result (sut/command-check (sut/backend-spec :no-such-backend))]
     (is (true? (:check/required? result)))
