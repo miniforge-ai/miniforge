@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns graalvm-compatibility-test
   "GraalVM/Babashka compatibility test suite.
 
@@ -41,64 +40,29 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Runtime classification (reads ns-meta without loading the namespace)
 ;; ============================================================================
-
-(def ^:private jvm-only-meta-re
+(def ^{:stratum 0} ^:private jvm-only-meta-re
   "Distinctive enough that the only legitimate place it can appear is a
    brick's ns-meta marker."
   #":miniforge/runtime\s+:jvm-only")
 
-(defn- file-marked-jvm-only?
-  [^java.io.File f]
-  (and (.exists f)
-       (boolean (re-find jvm-only-meta-re (slurp f)))))
-
-(defn- component-interface-file
+(defn- ^{:stratum 0} component-interface-file
   [brick-name]
   (io/file "components" brick-name "src" "ai" "miniforge"
            (str/replace brick-name "-" "_") "interface.clj"))
 
-(defn jvm-only-component?
-  "True when `components/<brick-name>/…/interface.clj` self-declares
-   `{:miniforge/runtime :jvm-only}` in its ns metadata."
-  [brick-name]
-  (file-marked-jvm-only? (component-interface-file brick-name)))
-
-(defn- base-src-files
+(defn- ^{:stratum 0} base-src-files
   [base-name]
   (let [src-dir (io/file "bases" base-name "src")]
     (when (.exists src-dir)
       (->> (file-seq src-dir)
            (filter #(str/ends-with? (.getName %) ".clj"))))))
 
-(defn jvm-only-base?
-  "True when any .clj file under `bases/<base-name>/src` carries the
-   JVM-only marker — bases don't follow the single-interface convention
-   so we treat any marked file as opting the whole base out."
-  [base-name]
-  (boolean (some file-marked-jvm-only? (base-src-files base-name))))
-
-;; ============================================================================
-;; Discovery
-;; ============================================================================
-
-(defn discover-interface-namespaces
-  "Return one entry per component with an `interface.clj`:
-     {:brick-name …, :ns-sym …, :jvm-only? bool}"
-  []
-  (->> (-> (io/file "components") .listFiles seq)
-       (filter #(.isDirectory %))
-       (keep (fn [dir]
-               (let [brick-name (.getName dir)]
-                 (when (.exists (component-interface-file brick-name))
-                   {:brick-name brick-name
-                    :ns-sym     (symbol (str "ai.miniforge." brick-name ".interface"))
-                    :jvm-only?  (jvm-only-component? brick-name)}))))
-       (sort-by :brick-name)))
-
-(defn- path->namespace
+(defn- ^{:stratum 0} path->namespace
   "Convert a .clj file path (relative to src/) to a namespace symbol.
    e.g. ai/miniforge/cli/main.clj -> ai.miniforge.cli.main"
   [src-root clj-file]
@@ -111,32 +75,10 @@
         (str/replace "_" "-")
         symbol)))
 
-(defn discover-base-namespaces
-  "Return one entry per .clj file under `bases/<base>/src/`:
-     {:ns-sym …, :file …, :jvm-only? bool}
-
-   Per-file rather than per-base because some bases mix BB-safe and
-   JVM-only source files, and the loader tests require each file
-   independently."
-  []
-  (->> (-> (io/file "bases") .listFiles seq)
-       (filter #(.isDirectory %))
-       (mapcat (fn [dir]
-                 (let [src-dir (io/file dir "src")]
-                   (when (.exists src-dir)
-                     (->> (file-seq src-dir)
-                          (filter #(str/ends-with? (.getName %) ".clj"))
-                          (map (fn [f]
-                                 {:ns-sym    (path->namespace src-dir f)
-                                  :file      f
-                                  :jvm-only? (file-marked-jvm-only? f)})))))))
-       (sort-by (comp str :ns-sym))))
-
 ;; ============================================================================
 ;; Helpers
 ;; ============================================================================
-
-(defn require-namespace
+(defn ^{:stratum 0} require-namespace
   "Try to require a namespace. Returns [success? error-message]."
   [ns-symbol]
   (try
@@ -145,7 +87,7 @@
     (catch Exception e
       [false (str "Failed to require " ns-symbol ": " (ex-message e))])))
 
-(defn classpath-error?
+(defn ^{:stratum 0} classpath-error?
   "Check if the error is a classpath/file-not-found issue (not a compatibility issue)."
   [error-msg]
   (some #(str/includes? (or error-msg "") %)
@@ -153,7 +95,7 @@
          "FileNotFoundException"
          "on classpath"]))
 
-(defn jvm-only-error?
+(defn ^{:stratum 0} jvm-only-error?
   "Check if the error indicates JVM-only features that block GraalVM/Babashka."
   [error-msg]
   (some #(str/includes? (or error-msg "") %)
@@ -165,67 +107,7 @@
          "java.io.Closeable"
          "No matching clause"]))
 
-;; ============================================================================
-;; Tests
-;; ============================================================================
-
-(deftest test-all-components-load-in-babashka
-  (testing "Every BB-runtime component interface loads; JVM-only bricks are skipped."
-    (let [bricks (discover-interface-namespaces)]
-      (is (>= (count bricks) 20)
-          (str "Expected 20+ component interfaces, found " (count bricks)
-               ". Is the test running from the repo root?"))
-
-      (doseq [{:keys [ns-sym jvm-only?]} bricks]
-        (if jvm-only?
-          (println "  SKIP:" ns-sym "- :miniforge/runtime :jvm-only")
-          (let [[success? error-msg] (require-namespace ns-sym)]
-            (cond
-              success?
-              (is true (str ns-sym " loaded"))
-
-              (classpath-error? error-msg)
-              (println "  WARN:" ns-sym "- not on :dev classpath (add to deps.edn :dev alias)")
-
-              (jvm-only-error? error-msg)
-              (is false (str "JVM-ONLY DEPENDENCY DETECTED in " ns-sym ":\n"
-                             error-msg
-                             "\n\nThis blocks GraalVM native compilation."
-                             "\nFix: either use Babashka-compatible alternatives, or add"
-                             "\n     `{:miniforge/runtime :jvm-only}` to the ns metadata"
-                             "\n     if the brick is deliberately JVM-only."))
-
-              :else
-              (is false (str "Failed to load " ns-sym ":\n" error-msg)))))))))
-
-(deftest test-all-bases-load-in-babashka
-  (testing "Every BB-runtime base namespace loads; JVM-only files are skipped."
-    (let [files (discover-base-namespaces)]
-      (is (>= (count files) 3)
-          (str "Expected 3+ base namespaces, found " (count files)
-               ". Is the test running from the repo root?"))
-
-      (doseq [{:keys [ns-sym jvm-only?]} files]
-        (if jvm-only?
-          (println "  SKIP:" ns-sym "- :miniforge/runtime :jvm-only")
-          (let [[success? error-msg] (require-namespace ns-sym)]
-            (cond
-              success?
-              (is true (str ns-sym " loaded"))
-
-              (classpath-error? error-msg)
-              (println "  WARN:" ns-sym "- not on :dev classpath (add to deps.edn :dev alias)")
-
-              (jvm-only-error? error-msg)
-              (is false (str "JVM-ONLY DEPENDENCY DETECTED in " ns-sym ":\n"
-                             error-msg
-                             "\n\nFix: use Babashka-compatible alternatives, or mark the"
-                             "\n     file with `{:miniforge/runtime :jvm-only}` ns-meta."))
-
-              :else
-              (is false (str "Failed to load " ns-sym ":\n" error-msg)))))))))
-
-(deftest test-no-forbidden-dependencies
+(deftest ^{:stratum 0} test-no-forbidden-dependencies
   (testing "Forbidden JVM-only dependencies should not be present"
     (let [forbidden-deps {"org.clojure/data.json" "Use cheshire.core instead (bundled in Babashka)"
                           "org.clojure/java.jdbc" "Use next.jdbc instead"}
@@ -241,7 +123,7 @@
                  "Reason: Not GraalVM-compatible\n"
                  "Fix: " replacement))))))
 
-(deftest test-no-java-interface-in-defrecord
+(deftest ^{:stratum 0} test-no-java-interface-in-defrecord
   (testing "No defrecord should implement Java interfaces (Babashka limitation)"
     (let [src-files (->> (concat (file-seq (io/file "components"))
                                  (file-seq (io/file "bases")))
@@ -257,7 +139,89 @@
                            "Babashka's defrecord only supports Clojure protocols.\n"
                            "Fix: use a closure or protocol instead."))))))))
 
-(deftest test-workflow-execution-available
+;; ============================================================================
+;; Execution gate — loading is not enough
+;; ============================================================================
+;;
+;; Every test above proves a namespace LOADS under Babashka. That is a
+;; weaker guarantee than it looks: SCI also refuses individual *method
+;; calls* at invocation time, so a namespace can load cleanly and still
+;; die on its first real call. The operator-event consumer did exactly
+;; that — it held its cross-process guard with `(with-open [lock ...])`,
+;; and `FileLockImpl.close` is not on SCI's allowlist. Because the
+;; consumer runs inside the bb-hosted workflow runner behind a poller
+;; that contains per-tick failures, the whole governed control path
+;; degraded to a once-a-second warning that consumed nothing.
+;;
+;; So: exercise the call path, not just the require.
+(defn- ^{:stratum 0} consumer-lock-acquirable?
+  "Open a FRESH channel on the operator dir's `.consumer.lock` and try to
+   acquire the lock, releasing by CLOSING THE CHANNEL (never the lock —
+   bb forbids every `sun.nio.ch.FileLockImpl` method). Returns true iff
+   `.tryLock` yields a lock.
+
+   This is the direct check the twice-run pass cannot make on its own: an
+   empty operator dir returns `{:routed 0 …}` whether the pass acquired
+   the lock or bailed because it could not, so a leaked/still-held lock is
+   invisible in the result map. Here a lock the consumer failed to release
+   surfaces as either nil (another holder) or an
+   `OverlappingFileLockException` (same JVM, overlapping region) — both
+   map to false."
+  [operator-dir]
+  (let [lock-file (io/file operator-dir ".consumer.lock")
+        channel (java.nio.channels.FileChannel/open
+                 (.toPath lock-file)
+                 (into-array java.nio.file.OpenOption
+                             [java.nio.file.StandardOpenOption/CREATE
+                              java.nio.file.StandardOpenOption/WRITE]))]
+    (try
+      (some? (.tryLock channel))
+      (catch Exception _ false)
+      (finally (.close channel)))))
+
+;; ============================================================================
+;; miniforge-project BB-safety gate — no JVM-only bricks on the CLI classpath
+;; ============================================================================
+(defn- ^{:stratum 0} parse-deps-edn
+  [^java.io.File f]
+  (when (.exists f)
+    (edn/read-string (slurp f))))
+
+(defn- ^{:stratum 0} classify-local-root
+  "Map a `local-root` like `../../components/connector-http` or
+   `../../bases/etl` to `{:kind :component|:base :name <brick-name>}`.
+   Unrecognised shapes get `:kind nil`."
+  [local-root]
+  (let [parts (vec (str/split local-root #"/"))]
+    (cond
+      (some #{"components"} parts)
+      {:kind :component
+       :name (get parts (inc (.indexOf parts "components")))}
+
+      (some #{"bases"} parts)
+      {:kind :base
+       :name (get parts (inc (.indexOf parts "bases")))}
+
+      :else
+      {:kind nil :name nil})))
+
+;; ============================================================================
+;; Entry point
+;; ============================================================================
+(defn ^{:stratum 0} -main
+  "Entry point for running tests from command line."
+  []
+  (let [result (run-tests 'graalvm-compatibility-test)]
+    (System/exit (if (zero? (+ (:fail result) (:error result))) 0 1))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} file-marked-jvm-only?
+  [^java.io.File f]
+  (and (.exists f)
+       (boolean (re-find jvm-only-meta-re (slurp f)))))
+
+(deftest ^{:stratum 1} test-workflow-execution-available
   (testing "Workflow execution should be available in Babashka build"
     (let [[success? error-msg] (require-namespace 'ai.miniforge.workflow.interface)]
       (is success? (str "Workflow interface should load: " error-msg))
@@ -267,7 +231,7 @@
         (is (some? (resolve 'ai.miniforge.workflow.interface/run-pipeline))
             "Should resolve run-pipeline")))))
 
-(deftest test-operator-intervention-application-executes
+(deftest ^{:stratum 1} test-operator-intervention-application-executes
   (testing "Phase D intervention mechanisms run under Babashka, not just load"
     ;; A loading namespace is not a working one: SCI refuses some interop
     ;; at call time, so the control path is exercised here rather than
@@ -319,48 +283,7 @@
                 (finally
                   (register-evaluator! nil))))))))))
 
-;; ============================================================================
-;; Execution gate — loading is not enough
-;; ============================================================================
-;;
-;; Every test above proves a namespace LOADS under Babashka. That is a
-;; weaker guarantee than it looks: SCI also refuses individual *method
-;; calls* at invocation time, so a namespace can load cleanly and still
-;; die on its first real call. The operator-event consumer did exactly
-;; that — it held its cross-process guard with `(with-open [lock ...])`,
-;; and `FileLockImpl.close` is not on SCI's allowlist. Because the
-;; consumer runs inside the bb-hosted workflow runner behind a poller
-;; that contains per-tick failures, the whole governed control path
-;; degraded to a once-a-second warning that consumed nothing.
-;;
-;; So: exercise the call path, not just the require.
-
-(defn- consumer-lock-acquirable?
-  "Open a FRESH channel on the operator dir's `.consumer.lock` and try to
-   acquire the lock, releasing by CLOSING THE CHANNEL (never the lock —
-   bb forbids every `sun.nio.ch.FileLockImpl` method). Returns true iff
-   `.tryLock` yields a lock.
-
-   This is the direct check the twice-run pass cannot make on its own: an
-   empty operator dir returns `{:routed 0 …}` whether the pass acquired
-   the lock or bailed because it could not, so a leaked/still-held lock is
-   invisible in the result map. Here a lock the consumer failed to release
-   surfaces as either nil (another holder) or an
-   `OverlappingFileLockException` (same JVM, overlapping region) — both
-   map to false."
-  [operator-dir]
-  (let [lock-file (io/file operator-dir ".consumer.lock")
-        channel (java.nio.channels.FileChannel/open
-                 (.toPath lock-file)
-                 (into-array java.nio.file.OpenOption
-                             [java.nio.file.StandardOpenOption/CREATE
-                              java.nio.file.StandardOpenOption/WRITE]))]
-    (try
-      (some? (.tryLock channel))
-      (catch Exception _ false)
-      (finally (.close channel)))))
-
-(deftest test-operator-consumer-pass-executes-in-babashka
+(deftest ^{:stratum 1} test-operator-consumer-pass-executes-in-babashka
   (testing "consume-operator-events! runs a full pass under Babashka"
     (let [[loaded? error-msg] (require-namespace 'ai.miniforge.operator.interface)]
       (is loaded? (str "operator interface should load: " error-msg))
@@ -411,16 +334,7 @@
                   (is (consumer-lock-acquirable? (io/file events-dir "operator"))
                       "second pass must also release its lock"))))))))))))
 
-;; ============================================================================
-;; miniforge-project BB-safety gate — no JVM-only bricks on the CLI classpath
-;; ============================================================================
-
-(defn- parse-deps-edn
-  [^java.io.File f]
-  (when (.exists f)
-    (edn/read-string (slurp f))))
-
-(defn- project-local-root-deps
+(defn- ^{:stratum 1} project-local-root-deps
   "Return every `:local/root` dep declared in `projects/<project>/deps.edn`,
    flattened across `:deps` and test `:extra-deps`. Each entry is
    `{:dep-sym … :local-root …}`."
@@ -433,25 +347,89 @@
       {:dep-sym    dep-sym
        :local-root local-root})))
 
-(defn- classify-local-root
-  "Map a `local-root` like `../../components/connector-http` or
-   `../../bases/etl` to `{:kind :component|:base :name <brick-name>}`.
-   Unrecognised shapes get `:kind nil`."
-  [local-root]
-  (let [parts (vec (str/split local-root #"/"))]
-    (cond
-      (some #{"components"} parts)
-      {:kind :component
-       :name (get parts (inc (.indexOf parts "components")))}
+;------------------------------------------------------------------------------ Layer 2
 
-      (some #{"bases"} parts)
-      {:kind :base
-       :name (get parts (inc (.indexOf parts "bases")))}
+(defn ^{:stratum 2} jvm-only-component?
+  "True when `components/<brick-name>/…/interface.clj` self-declares
+   `{:miniforge/runtime :jvm-only}` in its ns metadata."
+  [brick-name]
+  (file-marked-jvm-only? (component-interface-file brick-name)))
 
-      :else
-      {:kind nil :name nil})))
+(defn ^{:stratum 2} jvm-only-base?
+  "True when any .clj file under `bases/<base-name>/src` carries the
+   JVM-only marker — bases don't follow the single-interface convention
+   so we treat any marked file as opting the whole base out."
+  [base-name]
+  (boolean (some file-marked-jvm-only? (base-src-files base-name))))
 
-(defn- jvm-only-local-root?
+(defn ^{:stratum 2} discover-base-namespaces
+  "Return one entry per .clj file under `bases/<base>/src/`:
+     {:ns-sym …, :file …, :jvm-only? bool}
+
+   Per-file rather than per-base because some bases mix BB-safe and
+   JVM-only source files, and the loader tests require each file
+   independently."
+  []
+  (->> (-> (io/file "bases") .listFiles seq)
+       (filter #(.isDirectory %))
+       (mapcat (fn [dir]
+                 (let [src-dir (io/file dir "src")]
+                   (when (.exists src-dir)
+                     (->> (file-seq src-dir)
+                          (filter #(str/ends-with? (.getName %) ".clj"))
+                          (map (fn [f]
+                                 {:ns-sym    (path->namespace src-dir f)
+                                  :file      f
+                                  :jvm-only? (file-marked-jvm-only? f)})))))))
+       (sort-by (comp str :ns-sym))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; ============================================================================
+;; Discovery
+;; ============================================================================
+(defn ^{:stratum 3} discover-interface-namespaces
+  "Return one entry per component with an `interface.clj`:
+     {:brick-name …, :ns-sym …, :jvm-only? bool}"
+  []
+  (->> (-> (io/file "components") .listFiles seq)
+       (filter #(.isDirectory %))
+       (keep (fn [dir]
+               (let [brick-name (.getName dir)]
+                 (when (.exists (component-interface-file brick-name))
+                   {:brick-name brick-name
+                    :ns-sym     (symbol (str "ai.miniforge." brick-name ".interface"))
+                    :jvm-only?  (jvm-only-component? brick-name)}))))
+       (sort-by :brick-name)))
+
+(deftest ^{:stratum 3} test-all-bases-load-in-babashka
+  (testing "Every BB-runtime base namespace loads; JVM-only files are skipped."
+    (let [files (discover-base-namespaces)]
+      (is (>= (count files) 3)
+          (str "Expected 3+ base namespaces, found " (count files)
+               ". Is the test running from the repo root?"))
+
+      (doseq [{:keys [ns-sym jvm-only?]} files]
+        (if jvm-only?
+          (println "  SKIP:" ns-sym "- :miniforge/runtime :jvm-only")
+          (let [[success? error-msg] (require-namespace ns-sym)]
+            (cond
+              success?
+              (is true (str ns-sym " loaded"))
+
+              (classpath-error? error-msg)
+              (println "  WARN:" ns-sym "- not on :dev classpath (add to deps.edn :dev alias)")
+
+              (jvm-only-error? error-msg)
+              (is false (str "JVM-ONLY DEPENDENCY DETECTED in " ns-sym ":\n"
+                             error-msg
+                             "\n\nFix: use Babashka-compatible alternatives, or mark the"
+                             "\n     file with `{:miniforge/runtime :jvm-only}` ns-meta."))
+
+              :else
+              (is false (str "Failed to load " ns-sym ":\n" error-msg)))))))))
+
+(defn- ^{:stratum 3} jvm-only-local-root?
   [local-root]
   (let [{:keys [kind name]} (classify-local-root local-root)]
     (case kind
@@ -459,7 +437,41 @@
       :base      (jvm-only-base? name)
       false)))
 
-(deftest test-no-jvm-only-brick-in-miniforge-project
+;------------------------------------------------------------------------------ Layer 4
+
+;; ============================================================================
+;; Tests
+;; ============================================================================
+(deftest ^{:stratum 4} test-all-components-load-in-babashka
+  (testing "Every BB-runtime component interface loads; JVM-only bricks are skipped."
+    (let [bricks (discover-interface-namespaces)]
+      (is (>= (count bricks) 20)
+          (str "Expected 20+ component interfaces, found " (count bricks)
+               ". Is the test running from the repo root?"))
+
+      (doseq [{:keys [ns-sym jvm-only?]} bricks]
+        (if jvm-only?
+          (println "  SKIP:" ns-sym "- :miniforge/runtime :jvm-only")
+          (let [[success? error-msg] (require-namespace ns-sym)]
+            (cond
+              success?
+              (is true (str ns-sym " loaded"))
+
+              (classpath-error? error-msg)
+              (println "  WARN:" ns-sym "- not on :dev classpath (add to deps.edn :dev alias)")
+
+              (jvm-only-error? error-msg)
+              (is false (str "JVM-ONLY DEPENDENCY DETECTED in " ns-sym ":\n"
+                             error-msg
+                             "\n\nThis blocks GraalVM native compilation."
+                             "\nFix: either use Babashka-compatible alternatives, or add"
+                             "\n     `{:miniforge/runtime :jvm-only}` to the ns metadata"
+                             "\n     if the brick is deliberately JVM-only."))
+
+              :else
+              (is false (str "Failed to load " ns-sym ":\n" error-msg)))))))))
+
+(deftest ^{:stratum 4} test-no-jvm-only-brick-in-miniforge-project
   (testing "projects/miniforge/deps.edn must not ship JVM-only bricks"
     (let [deps (project-local-root-deps "miniforge")]
       (is (seq deps)
@@ -473,16 +485,6 @@
                  "\n  Fix: remove the dep from projects/miniforge/deps.edn, or route"
                  "\n       the feature through a JVM shell-out (see bases/etl for the"
                  "\n       canonical pattern)."))))))
-
-;; ============================================================================
-;; Entry point
-;; ============================================================================
-
-(defn -main
-  "Entry point for running tests from command line."
-  []
-  (let [result (run-tests 'graalvm-compatibility-test)]
-    (System/exit (if (zero? (+ (:fail result) (:error result))) 0 1))))
 
 (comment
   ;; Run tests in REPL
