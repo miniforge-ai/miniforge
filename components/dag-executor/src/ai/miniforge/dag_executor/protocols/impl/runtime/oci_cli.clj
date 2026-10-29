@@ -174,6 +174,10 @@
    matches."
   #"GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)")
 
+(def ^{:stratum 0} proxy-env-pattern
+  "Proxy variables curl and git read. Their URL can carry `user:password@`."
+  #"(?i)(https?|all|ftp)_proxy")
+
 (defn ^{:stratum 0} build-mount-args
   "Build -v mount arguments from an execution plan map.
 
@@ -527,17 +531,26 @@
 
    A var is considered sensitive when its name contains any of:
    KEY, SECRET, TOKEN, PASSWORD, CREDENTIAL (case-insensitive) or belongs to
-   a GIT_CONFIG_* tuple (`git-config-env-pattern`), except the agent's own
+   a GIT_CONFIG_* tuple (`git-config-env-pattern`) or is GIT_CONFIG_PARAMETERS
+   (`git -c` config, which can hold an extraheader), except the agent's own
    credentials (`agent-credential-names`), which N11 §8.1 injects at every
-   trust level."
+   trust level. A proxy URL (`proxy-env-pattern`) keeps its address but
+   loses any `user:password@`, so an authenticating proxy needs a trusted
+   launch."
   [env-map trust-level]
   (if (contains? #{:trusted :privileged} trust-level)
     env-map
-    (into {} (remove (fn [[k _]]
-                       (let [n (name k)]
-                         (and (or (re-find secret-pattern n) (re-matches git-config-env-pattern n))
-                              (not (contains? agent-credential-names n)))))
-                     env-map))))
+    (into {} (keep (fn [[k v :as entry]]
+                     (let [n (name k)]
+                       (cond
+                         (contains? agent-credential-names n) entry
+                         (or (re-find secret-pattern n)
+                             (re-matches git-config-env-pattern n)
+                             (= "GIT_CONFIG_PARAMETERS" n)) nil
+                         (re-matches proxy-env-pattern n)
+                         [k (str/replace (str v) #"^([A-Za-z][A-Za-z0-9+.-]*://)?[^/@]*@" "$1")]
+                         :else entry))))
+          env-map)))
 
 (defn ^{:stratum 1} build-resource-args
   "Build resource limit arguments.
@@ -556,10 +569,12 @@
 
 (defn- ^{:stratum 1} git-auth
   "{:user :token} that authenticates git to `remote`: the credential its URL
-   carried, else the token resolved for its host kind. nil without one."
-  [{:keys [repo-url host-kind url-auth]}]
+   carried, else the token resolved for its host kind. A resolved token is
+   never sent to a plain-http remote. nil without one."
+  [{:keys [repo-url https-url host-kind url-auth]}]
   (or url-auth
-      (when-let [token (resolve-git-token repo-url {:host-kind host-kind})]
+      (when-let [token (when-not (str/starts-with? (str/lower-case (str https-url)) "http://")
+                         (resolve-git-token repo-url {:host-kind host-kind}))]
         {:user  (get git-auth-users host-kind default-git-auth-user)
          :token token})))
 
@@ -570,9 +585,9 @@
    that host only. Env-supplied config is never written to .git/config, and
    exec passes the value by name, so the token lands in neither the
    capsule's repo state nor the runtime argv (N11 §2.2). Empty without a
-   token or for a non-https URL."
+   token or for a URL that is not http(s)."
   [https-url {:keys [user token]}]
-  (if-let [[_ origin] (when token (re-find #"^(https://[^/]+)/" https-url))]
+  (if-let [[_ origin] (when token (re-find #"^(https?://[^/]+)/" https-url))]
     {"GIT_CONFIG_COUNT"    "1"
      "GIT_CONFIG_KEY_0"    (str "http." origin "/.extraheader")
      "GIT_CONFIG_VALUE_0"  (basic-auth-header user token)

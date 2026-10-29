@@ -183,6 +183,19 @@
                          "GIT_CONFIG_VALUE_0" "Authorization: Basic eDp0b2s="
                          "LANG"               "C.UTF-8"}}))))))
 
+(deftest ^{:stratum 1} build-launch-plan-strips-proxy-and-git-c-credentials-test
+  (testing "an :untrusted plan keeps proxy addresses without user:password@
+            and drops GIT_CONFIG_PARAMETERS, which can carry an extraheader"
+    (is (= {"HTTPS_PROXY" "http://proxy:3128" "http_proxy" "proxy:8080"
+            "ALL_PROXY" "socks5://proxy:1080" "NO_PROXY" "localhost"}
+           (:env (oci-cli/build-launch-plan
+                  valid-digest
+                  {:env {"HTTPS_PROXY" "http://u:pw@proxy:3128"
+                         "http_proxy" "u:pw@proxy:8080"
+                         "ALL_PROXY" "socks5://proxy:1080"
+                         "NO_PROXY" "localhost"
+                         "GIT_CONFIG_PARAMETERS" "'http.extraheader=Authorization: Basic eDp0b2s='"}}))))))
+
 (deftest ^{:stratum 1} acquire-launches-from-checked-plan-test
   (testing "acquire-environment! creates the container from the gate-checked
             plan: its digest as the image reference, the plan as the
