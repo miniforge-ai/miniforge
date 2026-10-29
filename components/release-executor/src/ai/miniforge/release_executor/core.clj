@@ -732,7 +732,7 @@
                                        (git/exec! worktree-path
                                                   ["git" "commit" "--amend" "--no-edit" "--no-verify"]))]
                         (if (and commit-r (result/succeeded? commit-r))
-                          (git/force-push! worktree-path (:github-token state))
+                          (git/force-push! worktree-path branch (:github-token state))
                           (or commit-r add-r)))
                       (let [add-r    (sandbox/exec! executor environment-id (str "git add " rel-path))
                             commit-r (when (result/succeeded? add-r)

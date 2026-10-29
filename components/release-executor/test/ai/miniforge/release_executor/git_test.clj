@@ -27,6 +27,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.release-executor.core :as core]
    [ai.miniforge.release-executor.git :as git]
+   [ai.miniforge.release-executor.push-auth :as push-auth]
    [ai.miniforge.release-executor.shell :as shell]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -93,7 +94,7 @@
                     process/shell (fn [opts & _]
                                     (reset! seen opts)
                                     {:exit 0 :out "" :err ""})]
-        (git/force-push! "/tmp/wt" "push-tok"))
+        (git/force-push! "/tmp/wt" "b" "push-tok"))
       (is (= "push-tok" (get-in @seen [:extra-env "GH_TOKEN"]))))))
 
 (deftest ^{:stratum 0} check-gh-auth-timeout-test
@@ -146,168 +147,94 @@
           (is (not (fs/exists? (fs/path (fs/parent dir) "escape.md"))))))
       (finally (fs/delete-tree dir)))))
 
-;;-------------------------------------------- push SSH→HTTPS fallback
-(deftest ^{:stratum 0} push-branch-https-fallback-test
-  (testing "push fails with a token → rewrite SSH origin to https-with-token, retry, restore"
-    (let [calls   (atom [])
-          push-n  (atom 0)]
-      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
-                    process/shell
-                    (fn [_opts & args]
-                      (let [a (vec args)]
-                        (swap! calls conj a)
-                        (cond
-                          (= "push" (second a))
-                          (do (swap! push-n inc)
-                              (if (= 1 @push-n)
-                                {:exit 1 :out "" :err "ssh: permission denied (publickey)"}
-                                {:exit 0 :out "pushed" :err ""}))
-                          (= ["git" "remote" "get-url" "origin"] a)
-                          {:exit 0 :out "git@github.com:o/r.git" :err ""}
-                          :else {:exit 0 :out "" :err ""})))]
-        (let [r        (git/push-branch! "/tmp/wt" "b" "tok")
-              set-urls (filter #(= ["git" "remote" "set-url"] (vec (take 3 %))) @calls)]
-          (is (:success? r) "second push over https succeeds")
-          (is (= 2 (count set-urls)) "origin is set to https-with-token then restored")
-          (is (re-find #"x-access-token:tok@github\.com/o/r\.git" (str (last (first set-urls))))
-              "temporary origin embeds the token over https")
-          (is (= "git@github.com:o/r.git" (last (second set-urls)))
-              "original ssh origin is restored"))))))
+;;-------------------------------------------- push SSH→HTTPS token fallback
+(deftest ^{:stratum 0} push-https-fallback-test
+  (doseq [[label push!] [["push-branch!" #(git/push-branch! "/tmp/wt" "b" "tok")]
+                         ["force-push!" #(git/force-push! "/tmp/wt" "b" "tok")]]]
+    (testing (str label ": a failed push with a token retries once over HTTPS, with
+                  the token only in the retry's environment")
+      (let [pushes (atom [])
+            shells (atom [])
+            r      (with-redefs [push-auth/inherited-env-config? (constantly false)
+                                 shell/run-bounded
+                                 (fn [args opts]
+                                   (swap! pushes conj {:args args :opts opts})
+                                   (if (= 1 (count @pushes))
+                                     {:exit 1 :out "" :err "ssh: permission denied (publickey)"}
+                                     {:exit 0 :out "pushed" :err ""}))
+                                 process/shell
+                                 (fn [_opts & args]
+                                   (swap! shells conj (vec args))
+                                   (if (= "remote.origin.pushurl" (last args))
+                                     {:exit 1 :out "" :err ""}
+                                     {:exit 0 :out "git@github.com:o/r.git\n" :err ""}))]
+                     (push!))
+            [first-push retry] @pushes
+            env    (get-in retry [:opts :extra-env])
+            h      "https://github.com/o/r.git"]
+        (is (:success? r))
+        (is (= 2 (count @pushes)))
+        (is (nil? (get-in first-push [:opts :extra-env "GIT_CONFIG_COUNT"])))
+        (is (= "tok" (get env "GH_TOKEN")))
+        (is (= {"GIT_CONFIG_COUNT"   "3"
+                "GIT_CONFIG_KEY_0"   (str "http." h ".extraHeader")
+                "GIT_CONFIG_VALUE_0" ""
+                "GIT_CONFIG_KEY_1"   (str "http." h ".extraHeader")
+                "GIT_CONFIG_VALUE_1" (str "Authorization: Basic "
+                                          (.encodeToString (java.util.Base64/getEncoder)
+                                                           (.getBytes "x-access-token:tok" "UTF-8")))
+                "GIT_CONFIG_KEY_2"   (str "url." h ".pushInsteadOf")
+                "GIT_CONFIG_VALUE_2" "git@github.com:o/r.git"}
+               (dissoc env "GH_TOKEN")))
+        (is (not-any? #(some #{"set-url"} %) @shells) "origin is read, never rewritten")
+        (is (every? #(some #{"origin"} (:args %)) @pushes)
+            "both pushes name origin, so pushRemote/pushDefault cannot redirect them")
+        (is (every? #(some #{"refs/heads/b:refs/heads/b"} (:args %)) @pushes)
+            "both pushes use the full refspec")
+        (is (not-any? #(str/includes? (str/join " " (:args %)) "tok") @pushes)
+            "the token is never in argv")))))
 
-(deftest ^{:stratum 0} push-branch-restore-failure-fails-loud-test
-  (testing "restore of origin failing after the https fallback fails loud with a scrub hint"
-    (let [push-n (atom 0) seturl-n (atom 0)]
-      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
-                    process/shell
-                    (fn [_opts & args]
-                      (let [a (vec args)]
-                        (cond
-                          (= "push" (second a))
-                          (do (swap! push-n inc)
-                              (if (= 1 @push-n)
-                                {:exit 1 :out "" :err "ssh: denied"}
-                                {:exit 0 :out "ok" :err ""}))
-                          (= ["git" "remote" "get-url" "origin"] a)
-                          {:exit 0 :out "git@github.com:o/r.git" :err ""}
-                          (= ["git" "remote" "set-url"] (vec (take 3 a)))
-                          (do (swap! seturl-n inc)
-                              (if (= 1 @seturl-n)
-                                {:exit 0 :out "" :err ""}          ; set to https ok
-                                {:exit 1 :out "" :err "config locked"})) ; restore fails
-                          :else {:exit 0 :out "" :err ""})))]
-        (let [r (git/push-branch! "/tmp/wt" "b" "tok")]
-          (is (not (:success? r)) "restore failure makes the overall result a failure")
-          (is (re-find #"Scrub it" (:error r)) "surfaces the scrub command")
-          (is (true? (:push-succeeded? r)) "records that the push itself succeeded"))))))
+(deftest ^{:stratum 0} https-url-locale-independent-test
+  (testing "host lowercasing ignores the default locale (tr-TR folds I to dotless ı)"
+    (let [default (java.util.Locale/getDefault)]
+      (try
+        (java.util.Locale/setDefault (java.util.Locale/forLanguageTag "tr-TR"))
+        (is (= ["github.com" "https://github.com/o/r.git"]
+               (push-auth/https-url "git@GITHUB.COM:o/r.git")))
+        (finally (java.util.Locale/setDefault default))))))
 
-;;-------------------------------------------- force-push shares the fallback
-(deftest ^{:stratum 0} force-push-https-fallback-test
-  (testing "force-push over SSH fails with a token → rewrite to https-with-token, retry, restore"
-    (let [calls  (atom [])
-          push-n (atom 0)]
-      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
-                    process/shell
-                    (fn [_opts & args]
-                      (let [a (vec args)]
-                        (swap! calls conj a)
-                        (cond
-                          (= "push" (second a))
-                          (do (swap! push-n inc)
-                              (if (= 1 @push-n)
-                                {:exit 1 :out "" :err "ssh: permission denied (publickey)"}
-                                {:exit 0 :out "pushed" :err ""}))
-                          (= ["git" "remote" "get-url" "origin"] a)
-                          {:exit 0 :out "git@github.com:o/r.git" :err ""}
-                          :else {:exit 0 :out "" :err ""})))]
-        (let [r        (git/force-push! "/tmp/wt" "tok")
-              set-urls (filter #(= ["git" "remote" "set-url"] (vec (take 3 %))) @calls)]
-          (is (:success? r) "second force-push over https succeeds")
-          (is (= 2 @push-n) "force-push retried once after the SSH failure")
-          (is (= 2 (count set-urls)) "origin is set to https-with-token then restored")
-          (is (re-find #"x-access-token:tok@github\.com/o/r\.git" (str (last (first set-urls))))
-              "temporary origin embeds the token over https")
-          (is (= "git@github.com:o/r.git" (last (second set-urls)))
-              "original ssh origin is restored"))))))
-
-(deftest ^{:stratum 0} force-push-restore-failure-fails-loud-test
-  (testing "force-push restore failure after the https fallback fails loud with a scrub hint"
-    (let [push-n (atom 0) seturl-n (atom 0)]
-      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
-                    process/shell
-                    (fn [_opts & args]
-                      (let [a (vec args)]
-                        (cond
-                          (= "push" (second a))
-                          (do (swap! push-n inc)
-                              (if (= 1 @push-n)
-                                {:exit 1 :out "" :err "ssh: denied"}
-                                {:exit 0 :out "ok" :err ""}))
-                          (= ["git" "remote" "get-url" "origin"] a)
-                          {:exit 0 :out "git@github.com:o/r.git" :err ""}
-                          (= ["git" "remote" "set-url"] (vec (take 3 a)))
-                          (do (swap! seturl-n inc)
-                              (if (= 1 @seturl-n)
-                                {:exit 0 :out "" :err ""}
-                                {:exit 1 :out "" :err "config locked"}))
-                          :else {:exit 0 :out "" :err ""})))]
-        (let [r (git/force-push! "/tmp/wt" "tok")]
-          (is (not (:success? r)) "restore failure makes the overall result a failure")
-          (is (re-find #"Scrub it" (:error r)) "surfaces the scrub command")
-          (is (true? (:push-succeeded? r)) "records that the push itself succeeded"))))))
-
-(deftest ^{:stratum 0} force-push-push-and-restore-both-fail-test
-  (testing "https retry push AND restore both fail → error carries both, push-succeeded? false"
-    (let [push-n (atom 0) seturl-n (atom 0)]
-      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
-                    process/shell
-                    (fn [_opts & args]
-                      (let [a (vec args)]
-                        (cond
-                          (= "push" (second a))
-                          (do (swap! push-n inc)
-                              (if (= 1 @push-n)
-                                {:exit 1 :out "" :err "ssh: denied"}
-                                {:exit 128 :out "" :err "remote rejected https"}))
-                          (= ["git" "remote" "get-url" "origin"] a)
-                          {:exit 0 :out "git@github.com:o/r.git" :err ""}
-                          (= ["git" "remote" "set-url"] (vec (take 3 a)))
-                          (do (swap! seturl-n inc)
-                              (if (= 1 @seturl-n)
-                                {:exit 0 :out "" :err ""}
-                                {:exit 1 :out "" :err "config locked"}))
-                          :else {:exit 0 :out "" :err ""})))]
-        (let [r (git/force-push! "/tmp/wt" "tok")]
-          (is (not (:success? r)))
-          (is (false? (:push-succeeded? r)) "records that the retry push also failed")
-          (is (re-find #"remote rejected https" (:error r)) "includes the retry push error")
-          (is (re-find #"config locked" (:error r)) "includes the restore error")
-          (is (re-find #"Scrub it" (:error r)) "still surfaces the scrub command"))))))
-
-(deftest ^{:stratum 0} force-push-https-setup-failure-test
-  (testing "repointing origin to the token URL fails → report it, skip the retry push, no restore"
-    (let [push-n (atom 0) seturl-n (atom 0)]
-      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
-                    process/shell
-                    (fn [_opts & args]
-                      (let [a (vec args)]
-                        (cond
-                          (= "push" (second a))
-                          (do (swap! push-n inc)
-                              {:exit 1 :out "" :err "ssh: denied"})
-                          (= ["git" "remote" "get-url" "origin"] a)
-                          {:exit 0 :out "git@github.com:o/r.git" :err ""}
-                          (= ["git" "remote" "set-url"] (vec (take 3 a)))
-                          (do (swap! seturl-n inc)
-                              {:exit 1 :out "" :err "config locked"})
-                          :else {:exit 0 :out "" :err ""})))]
-        (let [r (git/force-push! "/tmp/wt" "tok")]
-          (is (not (:success? r)))
-          (is (= 1 @push-n) "the retry push is not attempted when the token-URL set-url fails")
-          (is (= 1 @seturl-n) "only the token-URL set-url runs; no restore (origin unchanged)")
-          (is (false? (:push-succeeded? r)))
-          (is (re-find #"could not be applied" (:error r)) "reports the fallback could not be set up")
-          (is (re-find #"ssh: denied" (:error r)) "includes the original push error")
-          (is (re-find #"config locked" (:error r)) "surfaces the set-url error"))))))
+(deftest ^{:stratum 0} push-https-fallback-origin-kinds-test
+  (let [retry-env (fn [origin token]
+                    (let [pushes (atom [])]
+                      (with-redefs [push-auth/inherited-env-config? (constantly false)
+                                    shell/run-bounded (fn [_args opts]
+                                                        (swap! pushes conj opts)
+                                                        {:exit 1 :out "" :err "denied"})
+                                    process/shell (fn [_opts & args]
+                                                    (if (= "remote.origin.pushurl" (last args))
+                                                      {:exit 1 :out "" :err ""}
+                                                      {:exit 0 :out origin :err ""}))]
+                        (git/push-branch! "/tmp/wt" "b" token))
+                      {:pushes (count @pushes)
+                       :env    (get-in (second @pushes) [:extra-env])}))]
+    (testing "an HTTPS origin gets the header at its full URL"
+      (let [{:keys [pushes env]} (retry-env "https://github.com/o/r.git" "tok")]
+        (is (= 2 pushes))
+        (is (= "http.https://github.com/o/r.git.extraHeader" (get env "GIT_CONFIG_KEY_1")))))
+    (testing "an origin with no HTTPS form (a local path) is not retried"
+      (is (= 1 (:pushes (retry-env "/srv/git/r.git" "tok")))))
+    (testing "no token, no retry"
+      (is (= 1 (:pushes (retry-env "git@github.com:o/r.git" nil))))))
+  (testing "git config already in the environment: no retry, reason given"
+    (let [pushes (atom 0)
+          r      (with-redefs [push-auth/inherited-env-config? (constantly true)
+                               shell/run-bounded (fn [_args _opts]
+                                                   (swap! pushes inc)
+                                                   {:exit 1 :out "" :err "denied"})
+                               process/shell (fn [& _] {:exit 0 :out "git@github.com:o/r.git" :err ""})]
+                   (git/push-branch! "/tmp/wt" "b" "tok"))]
+      (is (= 1 @pushes))
+      (is (= :push/token-retry-env-config (:token-retry-skipped r))))))
 
 ;;------------------------------------------- core host-mode dispatch
 (deftest ^{:stratum 0} step-validate-inputs-host-mode-test
@@ -437,4 +364,127 @@
               (is (< (- (System/currentTimeMillis) started) 10000)
                   (str label " returns at the deadline, not when the remote gives up")))))
         (is (= "0" (str/trim (slurp prompt))) "GIT_TERMINAL_PROMPT=0 reaches git's children")
+        (finally (fs/delete-tree dir))))))
+
+;;------------------------------------------- token never reaches git config
+(deftest ^{:stratum 2} push-fallback-keeps-token-out-of-git-config-test
+  (testing "while the HTTPS token-fallback push hangs, and after it is killed,
+            .git/config holds no token and origin is unchanged"
+    (let [dir     (fs/create-temp-dir {:prefix "git-host-mode-token-"})
+          token   (str "ghp" "_" "fallbackTestToken0000000000000000000")
+          ;; The header carries base64("x-access-token:" token); check that too.
+          encoded (.encodeToString (java.util.Base64/getEncoder)
+                                   (.getBytes (str "x-access-token:" token) "UTF-8"))
+          leaked? #(let [c (slurp %)] (or (str/includes? c token) (str/includes? c encoded)))
+          origin  "git@github.com:o/r.git"
+          config  (str (fs/path dir ".git" "config"))]
+      (with-open [proxy (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))]
+        (try
+          (.setSoTimeout proxy 20000)
+          (init-repo! dir)
+          (sh! dir "git" "checkout" "-q" "-b" "release/token")
+          (sh! dir "git" "remote" "add" "origin" origin)
+          ;; The SSH push fails at once; the HTTPS retry goes through a local
+          ;; proxy that accepts the connection and never answers, so nothing
+          ;; reaches github.com.
+          (sh! dir "git" "config" "core.sshCommand" "false")
+          (sh! dir "git" "config" "http.proxy" (str "http://127.0.0.1:" (.getLocalPort proxy)))
+          (with-redefs [shell/default-timeout-ms 2000
+                        push-auth/inherited-env-config? (constantly false)]
+            (let [push (future (git/push-branch! dir "release/token" token))]
+              (with-open [_conn (.accept proxy)]
+                (is (not (leaked? config))
+                    "no token, plain or encoded, in .git/config while the retry is in flight")
+                (let [r (deref push 30000 ::stuck)]
+                  (is (not= ::stuck r) "the hung retry is killed at the deadline")
+                  (is (:timed-out? r))))))
+          (is (not (leaked? config)) "no token, plain or encoded, in .git/config afterwards")
+          (is (= origin (:output (git/exec! dir ["git" "remote" "get-url" "origin"]))))
+          (finally (fs/delete-tree dir)))))))
+
+;;------------------------------------------- token retry scope
+(deftest ^{:stratum 2} push-fallback-retry-scope-test
+  (let [h      "https://github.com/o/r.git"
+        header (str "Authorization: Basic "
+                    (.encodeToString (java.util.Base64/getEncoder)
+                                     (.getBytes "x-access-token:tok" "UTF-8")))
+        github ["remote" "add" "origin" "git@github.com:o/r.git"]
+        add    (fn [url] ["config" "--add" "remote.origin.pushurl" url])]
+    (doseq [[label setup expected]
+            [["SSH github.com origin" [github] :retry]
+             ["HTTPS github.com origin" [["remote" "add" "origin" h]] :retry]
+             ["uppercase SSH host" [["remote" "add" "origin" "git@GITHUB.COM:o/r.git"]] :retry]
+             ["HTTPS origin with :443" [["remote" "add" "origin" "https://github.com:443/o/r.git"]] :retry]
+             ["single SSH pushurl on github.com"
+              [["remote" "add" "origin" h] (add "git@github.com:o/r.git")] :retry]
+             ["mirror pushurl"
+              [github (add "git@github.com:o/r.git") (add "git@mirror.example.com:o/r.git")]
+              :push/token-retry-not-single-target]
+             ["mixed remotes"
+              [github (add "git@github.com:o/r.git") (add "/srv/git/r.git")]
+              :push/token-retry-not-single-target]
+             ["pushurl on another host"
+              [["remote" "add" "origin" h] (add "git@gitlab.example.com:o/r.git")]
+              :push/token-retry-untrusted-host]
+             ["equal-length pushInsteadOf"
+              [["remote" "add" "origin" h] ["config" "url.git@github.com:o/r.git.pushInsteadOf" h]]
+              :push/token-retry-rewritten]
+             ["identity pushInsteadOf"
+              [github ["config" "url.git@github.com:o/r.git.pushInsteadOf" "git@github.com:o/r.git"]]
+              :push/token-retry-rewritten]
+             ["insteadOf alias"
+              [["remote" "add" "origin" "gh:o/r.git"] ["config" "url.git@github.com:.insteadOf" "gh:"]]
+              :push/token-retry-rewritten]]]
+      (testing label
+        (let [dir (fs/create-temp-dir {:prefix "git-host-mode-scope-"})]
+          (try
+            (init-repo! dir)
+            (doseq [args setup] (apply sh! dir "git" args))
+            (sh! dir "git" "config" (str "http." h ".extraHeader") "Authorization: Basic OLD")
+            (let [envs     (atom [])
+                  r        (with-redefs [push-auth/inherited-env-config? (constantly false)
+                                         shell/run-bounded (fn [_args opts]
+                                                             (swap! envs conj (:extra-env opts))
+                                                             {:exit 1 :out "" :err "denied"})]
+                             (git/push-branch! dir "main" "tok"))
+                  real-git (fn [& args]
+                             (str/trim (:out (apply process/shell
+                                                    {:dir (str dir) :extra-env (second @envs)
+                                                     :out :string :continue true}
+                                                    "git" args))))]
+              (if (= :retry expected)
+                (do (is (= 2 (count @envs)))
+                    (is (= h (real-git "remote" "get-url" "--push" "origin"))
+                        "the retry pushes to the HTTPS URL")
+                    (is (= header (real-git "config" "--get-urlmatch" "http.extraHeader" h))
+                        "the token header replaces a repository-scoped one"))
+                (do (is (= 1 (count @envs)) "no retry, so the token is sent nowhere")
+                    (is (= expected (:token-retry-skipped r)))
+                    (is (str/includes? (:error r) "no credential was sent"))
+                    (is (str/includes? (:error r) "denied") "the original push error is kept"))))
+            (finally (fs/delete-tree dir))))))))
+
+;;------------------------------------------- full refspec on every release push
+(deftest ^{:stratum 2} release-pushes-use-full-refspec-test
+  (testing "with remote.origin.push remapping branches, push-branch! and the
+            amend force-push! both update refs/heads/<branch> on origin"
+    (let [dir    (fs/create-temp-dir {:prefix "git-host-mode-refspec-"})
+          wt     (fs/path dir "wt")
+          remote (str (fs/path dir "remote.git"))]
+      (try
+        (fs/create-dirs wt)
+        (init-repo! wt)
+        (sh! dir "git" "init" "-q" "--bare" "remote.git")
+        (sh! wt "git" "checkout" "-q" "-b" "release/x")
+        (sh! wt "git" "remote" "add" "origin" remote)
+        (sh! wt "git" "config" "remote.origin.push" "refs/heads/*:refs/heads/review/*")
+        (is (:success? (git/push-branch! wt "release/x")))
+        (sh! wt "git" "commit" "-q" "--amend" "-m" "amended")
+        (is (:success? (git/force-push! wt "release/x" nil)))
+        (is (= (:output (git/exec! wt ["git" "rev-parse" "HEAD"]))
+               (:output (git/exec! remote ["git" "rev-parse" "refs/heads/release/x"])))
+            "the amended commit is on refs/heads/release/x")
+        (is (= "refs/heads/release/x"
+               (:output (git/exec! remote ["git" "for-each-ref" "--format=%(refname)"])))
+            "nothing was pushed to review/release/x")
         (finally (fs/delete-tree dir))))))
