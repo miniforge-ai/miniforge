@@ -268,7 +268,7 @@
                   (first args))]
     (if (str/blank? (str wf-id))
       (do (display/print-error (messages/t :resume/missing-workflow-id))
-          (cmd-shared/exit! 1))
+          (cmd-shared/exit! cmd-shared/usage-exit-code))
       (some-> (cmd-run/resume-reporting-failure wf-id opts) cmd-run/finish!))))
 
 (defn ^{:stratum 0} scan-cmd [m] (cmd-scan/scan-cmd (util/get-opts m)))
@@ -376,7 +376,8 @@
     (catch Error fatal (throw fatal))
     (catch Object failure
       (display/print-error (messages/t :status/read-failed
-                            {:message (util/caught-message failure (:throwable &throw-context))})))))
+                            {:message (util/caught-message failure (:throwable &throw-context))}))
+      (cmd-shared/exit! 1))))
 
 (defn ^{:stratum 0} version-cmd [_m] (version/print!))
 

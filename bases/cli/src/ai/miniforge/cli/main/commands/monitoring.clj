@@ -138,4 +138,5 @@
           (when (str/includes? (str e) "terminal")
             (println)
             (println (messages/t :tui/proper-terminal-note))
-            (println (messages/t :tui/proper-terminal-advice))))))))
+            (println (messages/t :tui/proper-terminal-advice)))
+          (exit! 1))))))

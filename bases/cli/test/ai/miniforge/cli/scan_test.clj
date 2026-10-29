@@ -7,7 +7,8 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.compliance-scanner.interface :as compliance-scanner]
-   [ai.miniforge.cli.main.commands.scan :as sut])
+   [ai.miniforge.cli.main.commands.scan :as sut]
+   [ai.miniforge.cli.main.commands.shared :as shared])
   (:import [java.io File]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -28,12 +29,15 @@
       (try
         (spit (.getPath tmp) "{:invalid")
         (let [called (atom false)
+              exits  (atom [])
               output (with-out-str
                        (binding [*err* *out*]
-                         (with-redefs [compliance-scanner/scan (fn [& _] (reset! called true) {})]
+                         (with-redefs [compliance-scanner/scan (fn [& _] (reset! called true) {})
+                                       shared/exit! (fn [code] (swap! exits conj code) nil)]
                            (sut/scan-cmd {:pack (.getPath tmp)}))))]
           (is (false? @called)
               "scanner/scan must not be called when explicit --pack is malformed")
+          (is (= [1] @exits) "a scan that cannot run exits 1")
           (is (= 1 (count (re-seq #"Failed to parse EDN" output)))
               "error diagnostic must appear exactly once"))
         (finally
@@ -46,12 +50,15 @@
         (let [cfg-dir (doto (File. tmp-dir ".miniforge") (.mkdirs))]
           (spit (File. cfg-dir "config.edn") "{:invalid-edn")
           (let [called (atom false)
+                exits  (atom [])
                 output (with-out-str
                          (binding [*err* *out*]
-                           (with-redefs [compliance-scanner/scan (fn [& _] (reset! called true) {})]
+                           (with-redefs [compliance-scanner/scan (fn [& _] (reset! called true) {})
+                                         shared/exit! (fn [code] (swap! exits conj code) nil)]
                              (sut/scan-cmd {:repo (.getPath tmp-dir)}))))]
             (is (false? @called)
                 "scanner/scan must not be called when .miniforge/config.edn is malformed")
+            (is (= [1] @exits) "a scan that cannot run exits 1")
             (is (= 1 (count (re-seq #"Failed to parse EDN" output)))
                 "error diagnostic must appear exactly once")))
         (finally
@@ -67,12 +74,15 @@
           (spit (File. cfg-dir "config.edn")
                 (str "{:repo/packs [" (pr-str (.getPath bad-pack)) "]}"))
           (let [called (atom false)
+                exits  (atom [])
                 output (with-out-str
                          (binding [*err* *out*]
-                           (with-redefs [compliance-scanner/scan (fn [& _] (reset! called true) {})]
+                           (with-redefs [compliance-scanner/scan (fn [& _] (reset! called true) {})
+                                         shared/exit! (fn [code] (swap! exits conj code) nil)]
                              (sut/scan-cmd {:repo (.getPath tmp-dir)}))))]
             (is (false? @called)
                 "scanner/scan must not be called when a configured pack is malformed")
+            (is (= [1] @exits) "a scan that cannot run exits 1")
             (is (= 1 (count (re-seq #"Failed to parse EDN" output)))
                 "error diagnostic must appear exactly once")))
         (finally
