@@ -57,21 +57,20 @@
        vec))
 
 ;; Doctor integration
-(defn- ^{:stratum 0} format-runtime-line
-  "One-line summary for the doctor. Uses display/style for color."
+(defn- ^{:stratum 0} doctor-selected-line
+  "One-line summary of a successful selection, for the doctor."
   [{:keys [kind selection runtime-version]}]
-  (str (display/style "✓" :foreground :green) " "
-       (messages/t :runtime/doctor-line
-                   {:kind            (name kind)
-                    :runtime-version (or runtime-version "?")
-                    :selection       (name selection)})))
+  (messages/t :runtime/doctor-line
+              {:kind            (name kind)
+               :runtime-version (or runtime-version "?")
+               :selection       (name selection)}))
 
-(defn- ^{:stratum 0} print-runtime-error-line
+(defn- ^{:stratum 0} doctor-error-line
+  "One-line summary of a failed selection, for the doctor."
   [error]
-  (println (display/style "✗" :foreground :red) " "
-           (messages/t :runtime/doctor-error-line
-                       {:code    (some-> (:code error) name)
-                        :message (:message error)})))
+  (messages/t :runtime/doctor-error-line
+              {:code    (some-> (:code error) name)
+               :message (:message error)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -118,24 +117,41 @@
   (println)
   (pprint/pprint descriptor))
 
-(defn ^{:stratum 2} print-doctor-runtime-section
+(defn ^{:stratum 2} doctor-runtime-report
+  "Resolve the runtime for `mf doctor` and describe the outcome as data:
+   {:ok? bool :summary string :details [string ...]}. The doctor decides
+   whether a failure is fatal and renders it with its other checks."
+  []
+  (let [result     (dag/select-runtime (runtime-env/selection-config))
+        ok?        (dag/ok? result)
+        ;; Auto-probe reports what it tried on success and on failure.
+        probed-str (format-probed-list (or (get-in result [:data :probed])
+                                           (get-in result [:error :data :probed])))
+        summary    (if ok?
+                     (doctor-selected-line (:data result))
+                     (doctor-error-line (:error result)))
+        probed     (when probed-str
+                     [(messages/t :runtime/doctor-probed-line {:probed probed-str})])
+        hint       (messages/t :runtime/doctor-override-hint
+                               {:env-var runtime-env/runtime-env-var})
+        details    (conj (vec probed) hint)]
+    {:ok?     ok?
+     :summary summary
+     :details details}))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} print-doctor-runtime-section
   "Emit the runtime block of `mf doctor`. Picked up by main.clj's
    doctor-cmd."
   []
-  (let [result (dag/select-runtime (runtime-env/selection-config))]
-    (if (dag/ok? result)
-      (let [data (:data result)]
-        (println (format-runtime-line data))
-        (when-let [probed-str (format-probed-list (:probed data))]
-          (println "  " (messages/t :runtime/doctor-probed-line
-                                    {:probed probed-str})))
-        (println "  " (messages/t :runtime/doctor-override-hint
-                                  {:env-var runtime-env/runtime-env-var})))
-      (do (print-runtime-error-line (:error result))
-          (println "  " (messages/t :runtime/doctor-override-hint
-                                    {:env-var runtime-env/runtime-env-var}))))))
-
-;------------------------------------------------------------------------------ Layer 3
+  (let [{:keys [ok? summary details]} (doctor-runtime-report)
+        mark (if ok?
+               (display/style "✓" :foreground :green)
+               (display/style "✗" :foreground :red))]
+    (println mark summary)
+    (doseq [line details]
+      (println "  " line))))
 
 (defn ^{:stratum 3} runtime-info-cmd
   "Resolve the runtime per N11-delta §3 and print the result. Used both
