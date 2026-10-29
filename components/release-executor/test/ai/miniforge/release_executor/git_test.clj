@@ -94,7 +94,7 @@
                     process/shell (fn [opts & _]
                                     (reset! seen opts)
                                     {:exit 0 :out "" :err ""})]
-        (git/force-push! "/tmp/wt" "push-tok"))
+        (git/force-push! "/tmp/wt" "b" "push-tok"))
       (is (= "push-tok" (get-in @seen [:extra-env "GH_TOKEN"]))))))
 
 (deftest ^{:stratum 0} check-gh-auth-timeout-test
@@ -150,7 +150,7 @@
 ;;-------------------------------------------- push SSH→HTTPS token fallback
 (deftest ^{:stratum 0} push-https-fallback-test
   (doseq [[label push!] [["push-branch!" #(git/push-branch! "/tmp/wt" "b" "tok")]
-                         ["force-push!" #(git/force-push! "/tmp/wt" "tok")]]]
+                         ["force-push!" #(git/force-push! "/tmp/wt" "b" "tok")]]]
     (testing (str label ": a failed push with a token retries once over HTTPS, with
                   the token only in the retry's environment")
       (let [pushes (atom [])
@@ -189,8 +189,19 @@
         (is (not-any? #(some #{"set-url"} %) @shells) "origin is read, never rewritten")
         (is (every? #(some #{"origin"} (:args %)) @pushes)
             "both pushes name origin, so pushRemote/pushDefault cannot redirect them")
+        (is (every? #(some #{"refs/heads/b:refs/heads/b"} (:args %)) @pushes)
+            "both pushes use the full refspec")
         (is (not-any? #(str/includes? (str/join " " (:args %)) "tok") @pushes)
             "the token is never in argv")))))
+
+(deftest ^{:stratum 0} https-url-locale-independent-test
+  (testing "host lowercasing ignores the default locale (tr-TR folds I to dotless ı)"
+    (let [default (java.util.Locale/getDefault)]
+      (try
+        (java.util.Locale/setDefault (java.util.Locale/forLanguageTag "tr-TR"))
+        (is (= ["github.com" "https://github.com/o/r.git"]
+               (push-auth/https-url "git@GITHUB.COM:o/r.git")))
+        (finally (java.util.Locale/setDefault default))))))
 
 (deftest ^{:stratum 0} push-https-fallback-origin-kinds-test
   (let [retry-env (fn [origin token]
@@ -452,3 +463,28 @@
                     (is (str/includes? (:error r) "no credential was sent"))
                     (is (str/includes? (:error r) "denied") "the original push error is kept"))))
             (finally (fs/delete-tree dir))))))))
+
+;;------------------------------------------- full refspec on every release push
+(deftest ^{:stratum 2} release-pushes-use-full-refspec-test
+  (testing "with remote.origin.push remapping branches, push-branch! and the
+            amend force-push! both update refs/heads/<branch> on origin"
+    (let [dir    (fs/create-temp-dir {:prefix "git-host-mode-refspec-"})
+          wt     (fs/path dir "wt")
+          remote (str (fs/path dir "remote.git"))]
+      (try
+        (fs/create-dirs wt)
+        (init-repo! wt)
+        (sh! dir "git" "init" "-q" "--bare" "remote.git")
+        (sh! wt "git" "checkout" "-q" "-b" "release/x")
+        (sh! wt "git" "remote" "add" "origin" remote)
+        (sh! wt "git" "config" "remote.origin.push" "refs/heads/*:refs/heads/review/*")
+        (is (:success? (git/push-branch! wt "release/x")))
+        (sh! wt "git" "commit" "-q" "--amend" "-m" "amended")
+        (is (:success? (git/force-push! wt "release/x" nil)))
+        (is (= (:output (git/exec! wt ["git" "rev-parse" "HEAD"]))
+               (:output (git/exec! remote ["git" "rev-parse" "refs/heads/release/x"])))
+            "the amended commit is on refs/heads/release/x")
+        (is (= "refs/heads/release/x"
+               (:output (git/exec! remote ["git" "for-each-ref" "--format=%(refname)"])))
+            "nothing was pushed to review/release/x")
+        (finally (fs/delete-tree dir))))))

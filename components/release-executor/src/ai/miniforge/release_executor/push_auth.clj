@@ -49,7 +49,8 @@
              (or (re-matches #"[^@/:]+@([^:/]+):/?(.+)" (str url))
                  (re-matches #"ssh://(?:[^@/]+@)?([^:/]+)(?::\d+)?/(.+)" (str url))
                  (re-matches #"https://(?:[^@/]+@)?([^:/]+)(?::443)?/(.+)" (str url)))]
-    (let [host (str/lower-case host)]
+    ;; Locale/ROOT: under tr-TR the default locale folds I to dotless ı.
+    (let [host (.toLowerCase ^String host java.util.Locale/ROOT)]
       [host (str "https://" host "/" path)])))
 
 (defn ^{:stratum 0} inherited-env-config?

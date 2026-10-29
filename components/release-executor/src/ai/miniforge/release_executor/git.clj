@@ -93,6 +93,14 @@
        worktree-path (assoc :dir (str worktree-path))
        (seq env)     (assoc :extra-env env)))))
 
+(defn- ^{:stratum 0} branch-refspec
+  "Full refspec pushing local `branch` to the same-named branch on the
+   remote. Without an explicit destination, remote.origin.push can remap
+   one release push (`<branch>` -> review/<branch>) but not another, so
+   the PR branch could be left unchanged while the push succeeds."
+  [branch]
+  (str "refs/heads/" branch ":refs/heads/" branch))
+
 (defn- ^{:stratum 0} timeout-data
   "The :timed-out? flag and :timeout anomaly of a shell/run-bounded result,
    to carry into a shell-failure; {} when the call did not time out."
@@ -381,11 +389,12 @@
       (catch Exception _ nil))))
 
 (defn- ^{:stratum 1} raw-push!
-  "One `git push -u origin <branch>` with GH_TOKEN and `auth-env` (nil, or
-   the fallback's `push-auth/retry-plan` env) injected. Returns a shell-result."
+  "One `git push -u origin <branch-refspec>` with GH_TOKEN and `auth-env`
+   (nil, or the fallback's `push-auth/retry-plan` env) injected. Returns a
+   shell-result."
   [worktree-path branch-name github-token auth-env]
   (try
-    (let [r (shell/run-bounded ["git" "push" "-u" "origin" branch-name]
+    (let [r (shell/run-bounded ["git" "push" "-u" "origin" (branch-refspec branch-name)]
                                (gh-shell-opts worktree-path github-token auth-env))]
       (if (zero? (:exit r))
         (result/shell-success {:output (get r :out "")})
@@ -432,13 +441,15 @@
                  :token-retry-skipped skip))))))
 
 (defn- ^{:stratum 1} raw-force-push!
-  "One `git push --force-with-lease origin HEAD` with GH_TOKEN and
-   `auth-env` (nil, or the fallback's `push-auth/retry-plan` env) injected.
-   Names origin and the current branch so branch.<name>.pushRemote or
-   remote.pushDefault cannot send it elsewhere. Returns a shell-result."
-  [worktree-path github-token auth-env]
+  "One `git push --force-with-lease origin <branch-refspec>` with GH_TOKEN
+   and `auth-env` (nil, or the fallback's `push-auth/retry-plan` env)
+   injected. Names origin and the full refspec, the same target as
+   raw-push!, so pushRemote/pushDefault and remote.origin.push cannot send
+   it elsewhere. Returns a shell-result."
+  [worktree-path branch-name github-token auth-env]
   (try
-    (let [r (shell/run-bounded ["git" "push" "--force-with-lease" "origin" "HEAD"]
+    (let [r (shell/run-bounded ["git" "push" "--force-with-lease" "origin"
+                                (branch-refspec branch-name)]
                                (gh-shell-opts worktree-path github-token auth-env))]
       (if (zero? (:exit r))
         (result/shell-success {:output (get r :out "")})
@@ -540,11 +551,15 @@
    fails and a token is present, retries over HTTPS + token auth via the same
    with-https-token-fallback! that push-branch! uses — an SSH `origin` can't be
    authenticated by GH_TOKEN alone, so without this the PR-doc amend push would
-   fail in a token-only local run. Returns a shell-result."
-  [worktree-path github-token]
-  (with-https-token-fallback!
-   worktree-path github-token
-   #(raw-force-push! worktree-path github-token %)))
+   fail in a token-only local run. `branch-name` is the release branch
+   push-branch! pushed; both push the same full refspec. Returns a
+   shell-result."
+  [worktree-path branch-name github-token]
+  (or
+   (validate-safe-branch-name branch-name)
+   (with-https-token-fallback!
+    worktree-path github-token
+    #(raw-force-push! worktree-path branch-name github-token %))))
 
 (defn ^{:stratum 2} create-pr!
   "Create a pull request using gh CLI on the host.
