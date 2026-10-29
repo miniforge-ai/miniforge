@@ -585,7 +585,17 @@
                           :tags [(msg/t :rate-limit-test.system/security-tag)
                                  (msg/t :rate-limit-test.system/in-progress-tag)
                                  (msg/t :rate-limit-test.system/risk-tag)]}]}))))
-    (is (not (impl/rate-limited? nil)))))
+    (is (not (impl/rate-limited? nil))))
+
+  (testing "a model answer that mentions rate limits, 429, or a reset time is not a limit"
+    (let [claim (msg/t :rate-limit-test.system/limits-claim)]
+      (is (impl/rate-limited? claim) "the sentence alone reads like a notice")
+      (is (not (impl/rate-limited? (json/generate-string {:claims [{:claim claim}]})))
+          "a JSON answer is structured")
+      (is (not (impl/rate-limited? (str "```json\n" (json/generate-string {:claims [{:claim claim}]}) "\n```")))
+          "a fenced answer is structured")
+      (is (not (impl/rate-limited? (str/join " " (repeat 10 claim))))
+          "a long prose answer is longer than any notice"))))
 
 (deftest ^{:stratum 0} rate-limited-success-response-test
   (testing "rate limit content in success-response returns error"
