@@ -88,7 +88,9 @@
 (defn- ^{:stratum 0} git-argv
   "The argv for `git SUB ARGS` with the safe defaults every call gets."
   [sub & args]
-  (concat ["git" "--literal-pathspecs" "-c" "core.quotePath=false" sub]
+  ;; --no-replace-objects: a push sends the original objects, so the scan
+  ;; must not read through a local refs/replace substitute.
+  (concat ["git" "--no-replace-objects" "--literal-pathspecs" "-c" "core.quotePath=false" sub]
           (when (= "diff" sub)
             ["--no-textconv" "--no-ext-diff" "--text" "--no-color" "--inter-hunk-context=0"])
           args))
@@ -188,16 +190,19 @@
         (filter #(and (string? %) (not (str/blank? %))) candidates)))
 
 (defn- ^{:stratum 1} snapshot-tree
-  "The tree a commit of the worktree would record: `git add -A` into a
-   temporary index seeded from HEAD, then `git write-tree`. Nil when
-   git cannot build it. The temporary index lives in the git dir and is
-   removed."
+  "The tree a commit of the worktree would record: a copy of the real
+   index (so force-staged ignored files and index flags carry over, as
+   they do for persistence's `git add -A`), then `git add -A` into it and
+   `git write-tree`. Nil when git cannot build it. The copy lives in the
+   git dir and is removed."
   [ctx]
   (when-let [git-dir (some-> (run ctx (git-argv "rev-parse" "--absolute-git-dir")) str/trim not-empty)]
     (let [index (str git-dir "/mf-no-secrets-" (random-uuid) ".index")
+          real  (some-> (run ctx (git-argv "rev-parse" "--git-path" "index")) str/trim not-empty)
           with-index #(concat ["env" (str "GIT_INDEX_FILE=" index)] (apply git-argv %&))]
       (try
-        (when (and (run ctx (with-index "read-tree" "HEAD"))
+        (when (and real
+                   (run ctx ["cp" "--" real index])
                    (run ctx (with-index "add" "-A")))
           (some-> (run ctx (with-index "write-tree")) str/trim not-empty))
         (finally

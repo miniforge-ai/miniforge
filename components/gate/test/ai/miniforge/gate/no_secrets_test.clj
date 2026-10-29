@@ -383,3 +383,24 @@
       (sh! dir "config" "diff.interHunkContext" "5")
       (spit (str dir "/list.txt") (str "a\nnew\nb\nc\napi_key = '" gh-token "'\nd\n"))
       (is (= #{{:file "list.txt" :line 5}} (locations {:code/files []} dir))))))
+
+(deftest ^{:stratum 2} a-replaced-commit-is-scanned-as-pushed-test
+  (testing "refs/replace cannot swap a credential-bearing commit for a clean one: a push sends the original"
+    (let [dir  (temp-git-repo {"src/app.py" "import os\n"})
+          base (head-of dir)]
+      (spit (str dir "/src/app.py") (str "import os\napi_key = '" gh-token "'\n"))
+      (sh! dir "commit" "-qam" "leaky")
+      (let [leaky (head-of dir)]
+        (spit (str dir "/src/app.py") "import os\n")
+        (sh! dir "commit" "-qam" "remove")
+        (let [clean (str/trim (:out (sh! dir "commit-tree" "-p" base "-m" "clean" (str base "^{tree}"))))]
+          (sh! dir "replace" leaky clean)
+          (is (= #{{:file "src/app.py" :line 2 :commit leaky}}
+                 (locations {:code/files [] :code/base-refs [base]} dir))))))))
+
+(deftest ^{:stratum 2} a-force-staged-ignored-file-is-scanned-test
+  (testing "an ignored file added with git add -f is in what a commit would record"
+    (let [dir (temp-git-repo {".gitignore" ".env\n"})]
+      (spit (str dir "/.env") "DB_PASSWORD=opaqueVALUE123\n")
+      (sh! dir "add" "-f" ".env")
+      (is (= #{{:file ".env" :line 1}} (locations {:code/files []} dir))))))
