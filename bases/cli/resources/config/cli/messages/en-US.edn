@@ -127,6 +127,8 @@
   :doctor/runtime-optional "Required only for --execution-mode governed"
   :doctor/config-exists "{config-path}"
   :doctor/no-config "none, defaults apply; create one with '{command}'"
+  :doctor/config-unparseable "{config-path} does not parse: {error}"
+  :doctor/hint-config-unparseable "runs ignore this file and use the defaults; fix it, or replace it with '{command}'"
   :doctor/label-checkpoints "Checkpoints"
   :doctor/checkpoints-summary "{runs} run(s) under {root}; oldest {oldest-days} days"
   :doctor/checkpoints-none "none under {root}"

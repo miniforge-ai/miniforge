@@ -223,7 +223,23 @@
    [workflow input] or [workflow input opts]. Acquires the execution
    environment, runs phases, validates, publishes, and always cleans up.
    Returns the final execution context map; throws a slingshot anomaly on
-   governed-mode misconfiguration."
+   governed-mode misconfiguration.
+
+   Options an embedder supplies (see docs/architecture/workflow-component.md):
+   - :event-stream - required when any phase has gates. Each gate decision
+     is published as a :gate/decision event, and only an acknowledged
+     publication lets the phase advance. With no stream the decision is
+     unacknowledged and the gated phase fails closed. A process that keeps
+     its stream for days creates it with `:retention` (event-stream
+     `bounded-retention`) so the in-memory history stays bounded; sinks and
+     subscribers still see every event.
+   - :logger - the run's structured logger, kept as :execution/logger; the
+     default writes human-readable lines.
+   - :policy-packs - the packs the pack gates evaluate. Without it,
+     :policy-verify and :policy-review use the shipped standards pack, and
+     :policy-pack blocks.
+   - :checkpoint/root - where checkpoints are written; the default is the
+     configured root under the user's home."
   pipeline/run-pipeline)
 
 (def ^{:stratum 0} build-pipeline
