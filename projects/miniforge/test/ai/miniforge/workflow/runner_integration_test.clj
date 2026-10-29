@@ -93,9 +93,10 @@
                                       {:event-stream (events/create-event-stream {:sinks []})})
           chain (:execution/response-chain result)]
       (is (= :completed (:execution/status result)))
-      (is (= 1 (count (:response-chain chain))))
-      (is (= :plan (get-in chain [:response-chain 0 :operation])))
-      (is (= :completed (get-in result [:execution/phase-results :implement :status])))
+      ;; [:plan :done] has no :implement phase: after the DAG runs the
+      ;; plan's task, :done still runs, and no :implement result is made up.
+      (is (= [:plan :done] (mapv :operation (:response-chain chain))))
+      (is (not (contains? (:execution/phase-results result) :implement)))
       (is (true? (:succeeded? chain))))))
 
 (deftest ^{:stratum 1} unacknowledged-plan-decision-never-reaches-the-dag-test
