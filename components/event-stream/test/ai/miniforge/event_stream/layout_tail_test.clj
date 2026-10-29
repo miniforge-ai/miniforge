@@ -49,9 +49,7 @@
          extra))
 
 (defn- ^{:stratum 0} write-event-file!
-  "Write `event` into the workflow's live directory under a legacy file
-   name recording `ms`, the file and directory last modified then, as a
-   run writing it at `ms` leaves them."
+  "Write `event` into the run's live directory as a run would at `ms`."
   [events-dir wf-id event ms]
   (let [dir  (doto (io/file events-dir "live" (str wf-id)) .mkdirs)
         at   (java.time.LocalDateTime/ofInstant (java.time.Instant/ofEpochMilli ms)

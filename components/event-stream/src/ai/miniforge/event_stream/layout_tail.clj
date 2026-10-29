@@ -17,26 +17,17 @@
 ;; limitations under the License.
 (ns ai.miniforge.event-stream.layout-tail
   "Follow the runs other processes write through the file sink, and hand
-   each new event to a callback.
-
-   It polls rather than registering a watch per directory: it runs under
-   babashka, and an events dir holds a directory for every run. A poll
-   reads only the active directories (modified within `:window-ms`). The
-   active set is recomputed when a root's mtime changes or sits within a
-   second of the last listing (a workflow directory created or moved), at
-   most every `relist-min-ms`, and every `sweep-ms`, which also picks up
-   an old directory written to again.
+   each new event to a callback. It polls (it runs under babashka, with a
+   directory per run ever made) only the directories modified within
+   `:window-ms`, relisting them on a root change (at most every
+   `relist-min-ms`) and every `sweep-ms`. Runs active at startup are read
+   in full; elsewhere, files recorded before startup are skipped.
 
    Each run is tracked by a watermark and the names read above it
-   (`layout/track`). Only a decoded file counts as read: one that failed
-   to decode, or vanished in a move to archived/, is read on a later
-   poll, from archived/ under the same name. A directory leaving the
-   active set is read once more first, so a pause in polling loses
-   nothing; then only its watermark is kept.
-
-   Directories already active at startup are read in full, so a run in
-   progress arrives with its start event. In other directories, files
-   recorded before startup are skipped."
+   (`layout/track`). Only a decoded file counts as read, so one that
+   failed to decode or vanished in a move is read on a later poll. A
+   directory leaving the active set is read once more first, then keeps
+   only its watermark."
   (:require
    [ai.miniforge.event-stream.layout-reader :as layout]
    [slingshot.slingshot :refer [try+]]))
