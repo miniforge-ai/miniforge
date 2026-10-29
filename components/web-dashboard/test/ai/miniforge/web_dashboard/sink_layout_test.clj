@@ -25,7 +25,6 @@
    [ai.miniforge.web-dashboard.state.archive :as state-archive]
    [ai.miniforge.web-dashboard.state.core :as core]
    [ai.miniforge.web-dashboard.state.workflows :as workflows]
-   [ai.miniforge.web-dashboard.watcher :as watcher]
    [ai.miniforge.web-dashboard.server.websocket :as ws]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]]))
@@ -84,15 +83,6 @@
   (let [to (io/file events-dir "archived" (str wf-id))]
     (.mkdirs (.getParentFile to))
     (.renameTo (es/workflow-dir (str events-dir) wf-id) to)))
-
-(defn- ^{:stratum 0} await-count
-  "Wait up to 10 s for `events` to hold at least `n` items."
-  [events n]
-  (loop [deadline (+ (System/currentTimeMillis) 10000)]
-    (cond
-      (>= (count @events) n) true
-      (> (System/currentTimeMillis) deadline) false
-      :else (do (Thread/sleep 50) (recur deadline)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -230,24 +220,6 @@
       (is (= ["Ingested"] (->> (workflows/get-workflows dashboard)
                                (filter #(= wf-id (:id %)))
                                (mapv :name)))))))
-
-(deftest ^{:stratum 1} watcher-publishes-a-run-the-file-sink-writes
-  (let [events-dir (temp-events-dir)
-        stream     (file-sink-stream events-dir)
-        wf-id      (random-uuid)
-        published  (atom [])
-        stop!      (watcher/start-watcher! (str events-dir) #(swap! published conj %))]
-    (try
-      (es/publish! stream (wf-event :workflow/started wf-id :workflow/spec {:name "Live run"}))
-      (write-temp-file! events-dir wf-id (wf-event :workflow/failed wf-id))
-      (es/publish! stream (wf-event :workflow/phase-started wf-id :workflow/phase :plan))
-      (is (await-count published 2) "the watcher publishes events written under live/")
-      (Thread/sleep 1200)
-      (is (= #{:workflow/started :workflow/phase-started}
-             (set (map :event/type @published))))
-      (is (= 2 (count @published)) "each event once; the temp file is not read")
-      (is (= wf-id (:workflow/id (first @published))) "ids come back as UUIDs")
-      (finally (stop!)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

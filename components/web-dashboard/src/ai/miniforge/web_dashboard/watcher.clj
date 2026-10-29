@@ -40,34 +40,24 @@
     (catch Exception _
       nil)))
 
-(def ^{:stratum 0} poll-ms
-  "Interval between polls."
-  500)
+(def ^{:stratum 0} poll-ms "Interval between polls." 500)
 
-(def ^{:stratum 0} relist-min-ms
-  "Least time between two relists triggered by a root change."
-  1000)
+(def ^{:stratum 0} relist-min-ms "Least time between relists on a root change." 1000)
 
-(def ^{:stratum 0} sweep-ms
-  "Longest time between two relists."
-  10000)
+(def ^{:stratum 0} sweep-ms "Longest time between relists." 10000)
 
 (def ^{:stratum 0} active-window-ms
-  "A workflow directory modified within this window is active."
+  "A directory modified within this window is active."
   (:stale-threshold-ms dashboard-config/defaults))
 
 (def ^{:stratum 0} mtime-slack-ms
-  "Some file systems keep mtimes to the second, so a file written just
-   after startup can carry an earlier mtime. Files this close before
-   startup count as new; a repeat is deduped by event id."
+  "Mtimes can be kept to the second: times this close count as new."
   1000)
 
 (defn ^{:stratum 0} relist
   "`state` with its active directories recomputed at `now`. A directory
-   no longer active has had nothing written for `window-ms`, and was
-   listed after its last write, so its seen names are replaced by the
-   time `now - window-ms`: should it become active again, the files
-   modified from then on are the new ones."
+   idle for `window-ms` was listed after its last write, so its seen
+   names give way to the time `now - window-ms`."
   [state events-dir roots window-ms now]
   (let [active  (event-files/active-dirs events-dir (- now window-ms))
         dropped (remove (set (keys active)) (keys (:seen state)))]
@@ -105,10 +95,8 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} initial-state
-  "Watcher state at `now`: the directories active now are read in full on
-   the first poll; elsewhere, files modified before `now` (less
-   `mtime-slack-ms`) are skipped. Roots are read before the directories,
-   so a directory created in between still changes them."
+  "Watcher state at `now`: directories active now are read in full on
+   the first poll; elsewhere files modified before `now` are skipped."
   [events-dir now]
   (let [roots (event-files/root-mtimes events-dir)
         state (relist {:since-ms (- now mtime-slack-ms) :seen {}}
@@ -116,11 +104,9 @@
     (assoc state :seen (zipmap (keys (:active state)) (repeat #{})))))
 
 (defn ^{:stratum 1} poll-once!
-  "One poll at `now`: relist when a sweep is due or a root may have
-   changed since the last listing, then publish the new events of every
-   active directory. Returns the new state. A root whose mtime falls
-   within `mtime-slack-ms` of the last listing counts as changed: a
-   second change in the same mtime tick would not show."
+  "One poll at `now`: relist when a sweep is due or a root changed (or
+   changed within `mtime-slack-ms` of the last listing, which one mtime
+   tick could hide), then publish the new events of each active one."
   [state events-dir publish-fn now]
   (let [{:keys [listed-at]} state
         roots   (event-files/root-mtimes events-dir)
@@ -137,14 +123,9 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} start-watcher!
-  "Start a daemon thread that polls `events-dir` every `poll-ms` and calls
-   `publish-fn` with each new event (see the namespace doc).
-
-   Arguments:
-     events-dir  - The events root, e.g. ~/.miniforge/events
-     publish-fn  - Function (fn [event-map] ...) called for each new event
-
-   Returns: cleanup function that stops the watcher."
+  "Start a daemon thread that polls `events-dir` every `poll-ms` and
+   calls `publish-fn` with each new event. Returns a function that stops
+   it."
   [events-dir publish-fn]
   (let [running (atom true)
         thread (Thread.
