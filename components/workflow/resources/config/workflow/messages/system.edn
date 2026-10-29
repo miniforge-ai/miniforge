@@ -2,4 +2,5 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 {:workflow/system-messages
- {:env/persisted "Workspace persisted: {reference}"}}
+ {:env/persisted "Workspace persisted: {reference}"
+  :checkpoint/unsafe-directory "Unsafe checkpoint directory {path}: trusted ownership and protection from entry replacement are required."}}
