@@ -132,18 +132,19 @@
       [])))
 
 (defn- ^{:stratum 0} compact-into
-  "`events` plus the events of `files` (newer), compacted under `policy`.
-   The files are decoded a batch at a time, newest first, so a long run
-   is never held in full; a batch never splits a same-millisecond group,
-   and each older batch goes in front of what is kept, so compaction
-   sees publish order. Compacting newest-first keeps what compacting all
-   at once would: every lifecycle event, the newest others."
+  "`events` plus the events of `files`, compacted under `policy`. Files
+   are decoded a batch at a time, newest first (a batch never splits a
+   millisecond), each older batch in front of what is kept, so a long run
+   is never held in full. The result is merged with `events` by
+   `event-files/order-key` before the last compaction, since a delayed
+   file can be older than events already kept."
   [policy events files]
   (es/compact-events
-   (into events
-         (reduce (fn [kept batch] (es/compact-events (into batch kept) policy))
-                 []
-                 (event-files/newest-batches files (:max-events-per-workflow policy))))
+   (->> (event-files/newest-batches files (:max-events-per-workflow policy))
+        (reduce (fn [kept batch] (es/compact-events (into batch kept) policy)) [])
+        (into events)
+        (sort-by event-files/order-key)
+        vec)
    policy))
 
 (defn ^{:stratum 0} wf-name-from-started
@@ -531,6 +532,9 @@
   [state]
   (try
     (let [grouped-events (->> (merged-events state)
+                              ;; A watcher rebuild republishes events;
+                              ;; metrics must not sum the repeats.
+                              dedupe-events
                               (filter (comp some? wf-id))
                               (group-by (comp event-files/canonical-id wf-id)))]
       (->> grouped-events

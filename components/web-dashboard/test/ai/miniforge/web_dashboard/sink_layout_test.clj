@@ -310,6 +310,43 @@
                       (envelope stream :workflow/completed wf-id :workflow/status :success))
         (is (contains? (history) :workflow/completed))))))
 
+(deftest ^{:stratum 1} a-delayed-file-inside-the-window-keeps-the-newest-events
+  (let [events-dir (temp-events-dir)
+        stream     (es/create-event-stream {:sinks []})
+        dashboard  (core/create-state {:event-stream (es/create-event-stream {:sinks []})})
+        wf-id      (random-uuid)
+        dir        (doto (es/workflow-dir (str events-dir) wf-id) .mkdirs)
+        started    (envelope stream :workflow/started wf-id :workflow/spec {:name "Delayed"})
+        chunks     (into {} (map (fn [i] [i (envelope stream :agent/chunk wf-id :chunk/delta (str i))]))
+                         (range 1 7))
+        chunk-file #(legacy-name (+ snowflake-epoch-ms 1000) (format "%08x" (- 0xffff %)))
+        kept       #(set (keep :chunk/delta (workflows/get-events dashboard {:limit 1000})))]
+    (write-event! dir (legacy-name snowflake-epoch-ms "ffffffff") started)
+    (doseq [i (range 2 7)]
+      (write-event! dir (chunk-file i) (chunks i)))
+    (with-redefs [workflows/events-dir-path (str events-dir)
+                  workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
+      (is (= #{"2" "3" "4" "5" "6"} (kept)))
+      ;; Chunk 1, published first, lands last, in the same millisecond.
+      (write-event! dir (chunk-file 1) (chunks 1))
+      (is (= #{"2" "3" "4" "5" "6"} (kept)) "the newest five by sequence, not the last file read"))))
+
+(deftest ^{:stratum 1} a-republished-event-counts-once-in-a-workflow-summary
+  (let [stream    (es/create-event-stream {:sinks []})
+        dashboard (core/create-state {:event-stream stream})
+        wf-id     (random-uuid)
+        phase     (envelope stream :workflow/phase-completed wf-id :workflow/phase :plan :phase/tokens 40)]
+    (es/replay! stream (envelope stream :workflow/started wf-id :workflow/spec {:name "Twice"}))
+    ;; A watcher rebuild hands the same event over again.
+    (es/replay! stream phase)
+    (es/replay! stream phase)
+    (with-redefs [workflows/events-dir-path (str (temp-events-dir))]
+      (is (= 40 (->> (workflows/get-workflows dashboard)
+                     (filter #(= wf-id (:id %)))
+                     first
+                     :metrics
+                     :tokens))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} archive-scan-lists-live-archived-and-edn-workflows

@@ -78,6 +78,13 @@
   [event]
   (::file (meta event)))
 
+(defn ^{:stratum 0} order-key
+  "An event's place in creation order: the ms its file's name records,
+   then its :event/sequence-number."
+  [event]
+  [(some-> ^File (::file (meta event)) .getName es/event-file-ms)
+   (get event :event/sequence-number 0)])
+
 (defn ^{:stratum 0} roots
   "The file sink's per-workflow roots under `events-dir`, live first: a
    directory moving to archived/ is then seen in at least one of them."
@@ -133,10 +140,9 @@
    event knows its file (`source-file`)."
   [files]
   (->> files
-       (keep (fn [f] (when-let [event (read-event f)]
-                       [(file-ms f) (vary-meta event assoc ::file f)])))
-       (sort-by (fn [[ms event]] [ms (get event :event/sequence-number 0)]))
-       (mapv second)))
+       (keep (fn [f] (some-> (read-event f) (vary-meta assoc ::file f))))
+       (sort-by order-key)
+       vec))
 
 ;------------------------------------------------------------------------------ Layer 2
 
