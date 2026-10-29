@@ -188,6 +188,19 @@
                         (cond-> failures there (assoc n tries))
                         true)))))))
 
+(defn ^{:stratum 2} start-event
+  "Workflow `wf-id`'s :workflow/started event, from its archived/ or else
+   live/ directory, reading files in order up to the first one. A lookup
+   that finds none is tried once more, resolving the directory again, in
+   case the run moved to archived/ meanwhile; nil when there is none."
+  [events-dir wf-id]
+  (let [live    (sinks/live-workflow-dir events-dir wf-id)  ; the writer's name for the id
+        wf-name (.getName live)
+        lookup  #(->> (event-files (current-dir events-dir wf-name live))
+                      (keep read-event)
+                      (some (fn [e] (when (= :workflow/started (:event/type e)) e))))]
+    (or (lookup) (lookup))))
+
 (defn ^{:stratum 2} active-dirs
   "{name dir} of the workflow directories modified at or after
    `since-ms`, or nil when a root cannot be listed. A name under both
