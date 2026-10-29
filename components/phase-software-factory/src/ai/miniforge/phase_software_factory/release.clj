@@ -253,19 +253,20 @@
    these must not count as releasable work. Matches the same filter the
    curator applies upstream (iter-23 regression: empty-diff PRs).
 
+   Reads `git status -z`, whose paths are never quoted: without -z git
+   wraps a path with a space or non-ASCII bytes in C-style quotes, which
+   names no file on disk, and the file was left out of the release.
+
    Returns a `:release/git-status-failed` anomaly when the scan cannot
    run, never `[]` (which release would report as zero files)."
   [root-path]
   (try
-    (let [{:keys [exit out err]} (shell/sh "git" "status" "--porcelain" "-uall" :dir root-path)]
-      (if-let [failure (command-failure "git status --porcelain -uall" exit err nil)]
+    (let [{:keys [exit out err]} (shell/sh "git" "status" "--porcelain" "-uall" "-z" :dir root-path)]
+      (if-let [failure (command-failure "git status --porcelain -uall -z" exit err nil)]
         (git-status-failed root-path failure)
-        (->> (str/split-lines (or out ""))
-             (remove str/blank?)
-             (keep (fn [line]
-                     (let [xy   (subs line 0 2)
-                           path (str/trim (subs line 3))
-                           file (io/file root-path path)]
+        (->> (porcelain-z-entries out)
+             (keep (fn [[xy path]]
+                     (let [file (io/file root-path path)]
                        (cond
                          (str/includes? xy "D") {:path path :content "" :action :delete}
                          (.isFile file)         {:path path
