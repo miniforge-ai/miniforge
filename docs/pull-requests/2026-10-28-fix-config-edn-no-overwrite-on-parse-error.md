@@ -19,8 +19,10 @@ review (on-disk-state reviewer).
 
 ## Layer and dependencies
 
-Foundation plus CLI adapters, based on main. The follow-up PR for the TUI
-(pr-sync) and dashboard repo writers stacks on this one.
+Foundation plus CLI adapters, based on main. Four PRs stack on this one:
+the dashboard repo writers, the pr-sync (TUI) repo writers (after a mechanical
+stratum-lint PR for `pr_sync/core.clj`), and the `config set llm.backend`
+keyword fix.
 
 ## Changes
 
@@ -41,7 +43,7 @@ Foundation plus CLI adapters, based on main. The follow-up PR for the TUI
    file-durability or slingshot.
 4. CLI: `config set` and `config backend` use `update-config!`; on an anomaly
    they print it to stderr and exit 1. `init` and `edit` create the file under
-   the lock, keeping one another writer created first; `reset` uses
+   the lock, keeping a file another writer created first; `reset` uses
    `write-config!`. `fleet add` and `fleet remove` update only
    `[:fleet :repos]` under the same lock, report errors on stderr, and no
    longer copy the defaults into the file.
@@ -83,8 +85,10 @@ file are still lost on any rewrite (unchanged).
 
 ## Related work
 
-1. Follow-up PR: pr-sync (TUI `:repo add/remove`, discovery) and dashboard
-   repo writers, which replaced the whole config with `{:fleet {:repos [...]}}`
-   on a parse error.
-2. `config.user/update-user-config` has the same defaults fallback but no
-   callers; left for a separate change.
+1. Stacked follow-ups: dashboard repo writers; pr-sync stratum autofix, then
+   the pr-sync (TUI `:repo add/remove`, discovery) repo writers; `config set`
+   keyword values and unknown-backend failure.
+2. `config.user` writers (`update-user-config`, `save-user-config`,
+   `init-user-config`, `reset-user-config`) still skip the lock and atomic
+   write, and `update-user-config` keeps the defaults fallback. None has a
+   caller; left for a separate change.
