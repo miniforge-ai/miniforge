@@ -98,13 +98,39 @@
   {:github "example/tool" :version "v1" :binary "tool"
    :assets {(installer/platform-key) {:file "tool.gz" :extract :gzip}}})
 
+(defn ^{:stratum 0} await-latch
+  "Wait at most 10 s for `latch`, so a failed prerequisite cannot hang the
+   suite; true when it opened."
+  [^java.util.concurrent.CountDownLatch latch]
+  (.await latch 10 java.util.concurrent.TimeUnit/SECONDS))
+
+(defn ^{:stratum 0} deref-bounded
+  "Deref future `f`, waiting at most 10 s; ::timed-out otherwise."
+  [f]
+  (deref f 10000 ::timed-out))
+
 (defn ^{:stratum 0} await-parked
-  "Spin (no sleep) until `thread` parks, WAITING or TIMED_WAITING; at most 10 s."
-  [^Thread thread]
-  (let [deadline (+ (System/nanoTime) 10000000000)]
-    (while (and (not (#{"WAITING" "TIMED_WAITING"} (str (.getState thread))))
-                (< (System/nanoTime) deadline))
-      (Thread/onSpinWait))))
+  "Spin (no sleep) until the thread delivered to promise `p` parks, WAITING
+   or TIMED_WAITING. Each step waits at most 10 s."
+  [p]
+  (when-let [^Thread thread (deref p 10000 nil)]
+    (let [deadline (+ (System/nanoTime) 10000000000)]
+      (while (and (not (#{"WAITING" "TIMED_WAITING"} (str (.getState thread))))
+                  (< (System/nanoTime) deadline))
+        (Thread/onSpinWait)))))
+
+(def ^{:stratum 0} lock-holder-script
+  "bb program for a second process: take the FileChannel lock on argv[0],
+   print \"locked\", wait for a line on stdin, write an executable target at
+   argv[1] (the install it completed), then exit, which releases the lock."
+  (str "(let [[lock-file target] *command-line-args*"
+       "      ch (java.nio.channels.FileChannel/open (java.nio.file.Paths/get lock-file (make-array String 0))"
+       "           (into-array java.nio.file.OpenOption [java.nio.file.StandardOpenOption/CREATE"
+       "                                                 java.nio.file.StandardOpenOption/WRITE]))"
+       "      held (.tryLock ch)]"
+       "  (println (if held \"locked\" \"busy\")) (flush) (read-line)"
+       "  (spit target \"#!/bin/sh\\necho ok\\n\")"
+       "  (babashka.fs/set-posix-file-permissions target \"rwxr-xr-x\"))"))
 
 (defn ^{:stratum 0} write-tool-tgz!
   "Write a tar.gz under `base` holding bin/tool (prints its own $0) and
@@ -380,19 +406,59 @@
                         installer/download-file (fn [_url dest]
                                                   (swap! downloads inc)
                                                   (.countDown entered)
-                                                  (.await release)
+                                                  (await-latch release)
                                                   (write-gzip! dest script)
                                                   nil)]
             (let [a (future (install))
-                  _ (.await entered)
-                  b (future (deliver b-thread (Thread/currentThread)) (install))]
-              ;; A is inside its download. Wait until B parks: on the install
-              ;; lock when installs serialize, inside its own download when not.
-              (await-parked @b-thread)
-              (.countDown release)
-              (is (= {:installed (str bin-dir "/tool")} @a))
-              (is (= {:installed (str bin-dir "/tool")} @b))
-              (is (= 1 @downloads) "the waiting install rechecked the target instead of downloading"))))))))
+                  b (future (when (await-latch entered)
+                              (deliver b-thread (Thread/currentThread))
+                              (install)))]
+              (try
+                ;; A is inside its download. Wait until B parks: on the install
+                ;; lock when installs serialize, inside its own download when not.
+                (await-parked b-thread)
+                (.countDown release)
+                (is (= {:installed (str bin-dir "/tool")} (deref-bounded a)))
+                (is (= {:installed (str bin-dir "/tool")} (deref-bounded b)))
+                (is (= 1 @downloads) "the waiting install rechecked the target instead of downloading")
+                (finally
+                  (.countDown release)
+                  (future-cancel a)
+                  (future-cancel b))))))))))
+
+(deftest ^{:stratum 1} file-lock-serializes-installs-across-processes-test
+  (testing "an auto-install waits while another process holds the file lock, then uses its install"
+    (if-not (installer/which "bb")
+      (println "SKIP cross-process lock test: bb is not on PATH")
+      (with-base-dir
+        (fn [base]
+          (let [bin-dir   (str (fs/path base "bin dir's"))
+                lock-file (str (fs/path bin-dir ".dist" "tool" ".lock"))
+                target    (str bin-dir "/tool")
+                downloads (atom 0)
+                _         (fs/create-dirs (fs/parent lock-file))
+                holder    (bp/process ["bb" "-e" lock-holder-script lock-file target]
+                                      {:in :pipe :out :pipe :err :inherit})
+                locked    (future (.readLine ^java.io.BufferedReader (io/reader (:out holder))))
+                b-thread  (promise)]
+            (try
+              (is (= "locked" (deref-bounded locked)) "the other process holds the lock")
+              (with-redefs [installer/bin-dir       (constantly bin-dir)
+                            installer/download-file (fn [_url dest]
+                                                      (swap! downloads inc)
+                                                      (write-gzip! dest script)
+                                                      nil)]
+                (let [ours (future (deliver b-thread (Thread/currentThread))
+                                   (binding [*err* (java.io.StringWriter.)]
+                                     (installer/run-install gz-entry)))]
+                  (try
+                    (await-parked b-thread)
+                    (is (not (realized? ours)) "this process waits for the other's file lock")
+                    (doto ^java.io.Writer (io/writer (:in holder)) (.write "go\n") (.flush))
+                    (is (= {:installed target} (deref-bounded ours)))
+                    (is (zero? @downloads) "the install the other process completed is used")
+                    (finally (future-cancel ours)))))
+              (finally (bp/destroy holder)))))))))
 
 (deftest ^{:stratum 1} ensure-installed-passes-install-warnings-test
   (testing "ensure-installed keeps a successful install's warnings on its result"
@@ -436,19 +502,25 @@
                                                   (case (swap! calls inc)
                                                     1 (do (write-gzip! dest "#!/bin/sh\necho old\n") nil)
                                                     2 (do (.countDown entered)
-                                                          (.await release)
+                                                          (await-latch release)
                                                           (response/make-anomaly :anomalies/fault "download failed"))
                                                     (do (write-gzip! dest "#!/bin/sh\necho new\n") nil)))]
             (install)
             (let [a (future (install))
-                  _ (.await entered)
-                  b (future (deliver b-thread (Thread/currentThread)) (install))]
-              (try (await-parked @b-thread)
-                   (finally (.countDown release)))
-              (is (response/anomaly-map? @a))
-              (is (= {:installed (str bin-dir "/tool")} @b))
-              (is (= "#!/bin/sh\necho new\n" (slurp (str bin-dir "/tool"))) "B installed its own download")
-              (is (= 3 @calls)))))))))
+                  b (future (when (await-latch entered)
+                              (deliver b-thread (Thread/currentThread))
+                              (install)))]
+              (try
+                (await-parked b-thread)
+                (.countDown release)
+                (is (response/anomaly-map? (deref-bounded a)))
+                (is (= {:installed (str bin-dir "/tool")} (deref-bounded b)))
+                (is (= "#!/bin/sh\necho new\n" (slurp (str bin-dir "/tool"))) "B installed its own download")
+                (is (= 3 @calls))
+                (finally
+                  (.countDown release)
+                  (future-cancel a)
+                  (future-cancel b))))))))))
 
 (deftest ^{:stratum 1} interrupted-lock-wait-returns-an-anomaly-test
   (testing "interrupting an install waiting for the lock returns an anomaly and keeps the interrupt flag"
@@ -462,21 +534,25 @@
           (with-redefs [installer/bin-dir       (constantly (str (fs/path base "bin")))
                         installer/download-file (fn [_url dest]
                                                   (.countDown entered)
-                                                  (.await release)
+                                                  (await-latch release)
                                                   (write-gzip! dest script)
                                                   nil)]
             (let [a (future (install))
-                  _ (.await entered)
-                  b (future (deliver b-thread (Thread/currentThread))
-                            [(install) (Thread/interrupted)])]
+                  b (future (when (await-latch entered)
+                              (deliver b-thread (Thread/currentThread))
+                              [(install) (Thread/interrupted)]))]
               (try
-                (await-parked @b-thread)
-                (.interrupt ^Thread @b-thread)
-                (let [[result flag] @b]
+                (await-parked b-thread)
+                (when-let [^Thread t (deref b-thread 10000 nil)] (.interrupt t))
+                (let [[result flag] (deref b 10000 [::timed-out false])]
                   (is (= :anomalies/interrupted (:anomaly/category result)) (pr-str result))
                   (is flag "the interrupt flag is restored"))
-                (finally (.countDown release)))
-              (is (contains? @a :installed)))))))))
+                (.countDown release)
+                (is (contains? (deref-bounded a) :installed))
+                (finally
+                  (.countDown release)
+                  (future-cancel a)
+                  (future-cancel b))))))))))
 
 (deftest ^{:stratum 1} lock-release-failure-is-a-warning-test
   (testing "a lock release failure after a successful install is a warning, not a failure"
