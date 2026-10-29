@@ -85,13 +85,16 @@
    the pipeline resolved — parity with sandbox's gh-exec-opts :env injection.
    `worktree-path` may be nil (e.g. `gh auth status` needs no cwd). When no
    token is supplied the call inherits the ambient environment. `extra-env`
-   (the push fallback's `push-auth/retry-plan` env) is merged in."
+   (the push fallback's `push-auth/retry-plan` env) is merged in. A call
+   carrying a token runs with git's tracing variables removed
+   (`shell/trace-env-var?`), so a trace cannot log the credential."
   ([worktree-path github-token] (gh-shell-opts worktree-path github-token nil))
   ([worktree-path github-token extra-env]
    (let [env (merge (when github-token {"GH_TOKEN" github-token}) extra-env)]
      (cond-> {}
        worktree-path (assoc :dir (str worktree-path))
-       (seq env)     (assoc :extra-env env)))))
+       (seq env)     (assoc :extra-env env)
+       github-token  (assoc :no-trace? true)))))
 
 (defn- ^{:stratum 0} branch-refspec
   "Full refspec pushing local `branch` to the same-named branch on the
@@ -431,7 +434,7 @@
               :effective   (lines ["git" "remote" "get-url" "--push" "--all" "origin"])
               :pushurl?    (boolean (seq pushurls))
               :config      (lines ["git" "config" "--list"])
-              :env-config? (push-auth/inherited-env-config?)}
+              :env-config? (push-auth/inherited-env-config? (shell/parent-env))}
              github-token)]
         (if env
           (push! env)
