@@ -47,7 +47,8 @@
                    (keys schema)))))
 
 (defn ^{:stratum 0} value-ok?
-  "True when `value` fits `type`. nil fits every type: it clears the key.
+  "True when `value` fits `type`. nil fits every type: `config set` removes
+   the key for it (see config/dissoc-in), so the default applies.
    `backends` is the set of known backend keywords."
   [type value backends]
   (or (nil? value)

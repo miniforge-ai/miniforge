@@ -123,6 +123,22 @@
   [config]
   (config-schema/problems config-schema/schema (set (keys llm/backends)) config))
 
+(defn ^{:stratum 0} dissoc-in
+  "`m` without the value at `path`. A map the removal leaves empty is
+   removed too, so a cleared key falls back to its default instead of
+   leaving an empty section that a reader takes as set (an empty
+   [:observability :fleet] map hides the MINIFORGE_FLEET_URL fallback).
+   `m` is returned as is when `path` is absent."
+  [m path]
+  (let [[k & more] path]
+    (cond
+      (not (and (map? m) (contains? m k))) m
+      (empty? more) (dissoc m k)
+      :else (let [child (dissoc-in (get m k) more)]
+              (if (and (map? child) (empty? child))
+                (dissoc m k)
+                (assoc m k child))))))
+
 (defn ^{:stratum 0} problem-message
   "One line describing a config-schema problem. A keyword key segment is
    shown without its colon (llm.backend); any other key (a string, say,
@@ -257,11 +273,20 @@
           ;; Nothing is written: a run would ignore or reject the setting.
           (do (run! (comp print-error problem-message) problems)
               (shared/exit! 1))
-          (let [result (config-file/update-config! config-path #(assoc-in (or % default-config) key-path value))]
+          ;; nil clears the key: it is removed, so the default applies. An
+          ;; explicit nil would override the default and reach readers
+          ;; that do not expect one (the fleet sinks compare batch sizes).
+          (let [result (config-file/update-config! config-path
+                                                   #(let [cfg (or % default-config)]
+                                                      (if (nil? value)
+                                                        (dissoc-in cfg key-path)
+                                                        (assoc-in cfg key-path value))))]
             (when (anomaly/anomaly? result)
               (exit-with-anomaly! result))
             (println)
-            (print-success (messages/t :config/set-success {:key key-str :value (pr-str value)}))
+            (print-success (if (nil? value)
+                             (messages/t :config/clear-success {:key key-str})
+                             (messages/t :config/set-success {:key key-str :value (pr-str value)})))
             (println (messages/t :config/set-saved {:path config-path}))
             (println)))))))
 

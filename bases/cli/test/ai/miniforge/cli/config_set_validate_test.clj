@@ -49,6 +49,12 @@
       (binding [*out* out *err* err] (f)))
     {:exits @exits :out (str out) :err (str err)}))
 
+(deftest ^{:stratum 0} dissoc-in-test
+  (is (= {:a {:c 2}} (config/dissoc-in {:a {:b 1 :c 2}} [:a :b])))
+  (is (= {:x 1} (config/dissoc-in {:x 1 :a {:b {:c 1}}} [:a :b :c])) "emptied parents are removed")
+  (is (= {:a {:b 1}} (config/dissoc-in {:a {:b 1}} [:a :z])) "an absent path changes nothing")
+  (is (= {:a 5} (config/dissoc-in {:a 5} [:a :b])) "a non-map along the path changes nothing"))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} config-set-rejects-what-a-run-cannot-use-test
@@ -111,3 +117,22 @@
           (is (= [1] exits))
           (is (str/includes? (str out err) "\"llm\""))
           (is (str/includes? (str out err) "Unknown config key: \"\"")))))))
+
+(deftest ^{:stratum 1} config-set-nil-removes-the-key-test
+  (testing "config set <key> nil removes the key, so its default applies, instead of storing nil"
+    (with-config-file "{:llm {:backend :claude} :dashboard {:port 9090 :auto-open false}}"
+      (fn [path]
+        (let [{:keys [exits]} (run-recording
+                               #(do (config/cmd-set {:config path :key "observability.fleet.batch-size" :value "10"})
+                                    (config/cmd-set {:config path :key "observability.fleet.batch-size" :value "nil"})
+                                    (config/cmd-set {:config path :key "dashboard.port" :value "nil"})))
+              saved (edn/read-string (slurp path))]
+          (is (= [] exits))
+          (is (not (contains? saved :observability)) "the emptied fleet and observability maps go too")
+          (is (= {:auto-open false} (:dashboard saved)))
+          (is (= {:backend :claude} (:llm saved)))))))
+  (testing "clearing a key that is not set leaves the file as it was"
+    (with-config-file "{:llm {:backend :claude}}"
+      (fn [path]
+        (run-recording #(config/cmd-set {:config path :key "llm.model" :value "nil"}))
+        (is (= {:llm {:backend :claude}} (edn/read-string (slurp path))))))))

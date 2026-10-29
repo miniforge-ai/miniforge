@@ -659,6 +659,7 @@
   :config/set-usage "Usage: {command}"
   :config/set-example "Example: {command}"
   :config/set-success "✅ Set {key} to {value}"
+  :config/clear-success "✅ Cleared {key}; its default applies"
   :config/set-saved "   Saved to: {path}"
   :config/unknown-key "Unknown config key: {key}"
   :config/wrong-type "{key} must be {expected}, not {value}"
