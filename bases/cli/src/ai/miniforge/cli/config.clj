@@ -76,6 +76,14 @@
    reads belong here."
   #{[:llm :backend]})
 
+(def ^{:stratum 0} string-valued-keys
+  "Config keys whose values are model ids, stored as strings whatever EDN
+   reads the value as: a model id reaches a CLI argv, which takes only
+   strings, so `config set llm.model 1.5` must not store a number."
+  #{[:llm :model]
+    [:agents :default-models :thinking]
+    [:agents :default-models :execution]})
+
 (defn ^{:stratum 0} parse-config-value
   "Parse config value from string. A bare word, which EDN reads as a symbol,
    stays a string (`anthropic/claude-sonnet-4-5` is a model id, not a symbol)."
@@ -136,11 +144,16 @@
 
 (defn ^{:stratum 1} coerce-config-value
   "`value` as `config set` stores it under `key-path`: a keyword for the
-   `keyword-valued-keys`."
+   `keyword-valued-keys`, a string for the `string-valued-keys`."
   [key-path value]
-  (if (and (contains? keyword-valued-keys key-path) (string? value))
+  (cond
+    (and (contains? keyword-valued-keys key-path) (string? value))
     (keyword value)
-    value))
+
+    (and (contains? string-valued-keys key-path) (not (string? value)))
+    (str value)
+
+    :else value))
 
 ;; Config file operations
 (defn ^{:stratum 1} read-config-file

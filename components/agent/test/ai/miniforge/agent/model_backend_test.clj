@@ -127,6 +127,14 @@
         (is (= "gpt-5.4-pro" (model/default-model-for-role :planner)))
         (is (= "gpt-5.4" (model/default-model-for-role :implementer)))))))
 
+;; A model id reaches a CLI argv, which takes only strings
+(deftest ^{:stratum 1} symbol-model-in-config-reaches-the-client-as-a-string-test
+  (testing "a bare word an older `config set` stored as a symbol"
+    (let [resolved (resolve-with-config
+                    (over-shipped-defaults {:llm {:backend :codex :model 'gpt-5.4}})
+                    :implementer (llm/create-client {:backend :codex}))]
+      (is (= [:codex "gpt-5.4"] (backend+model resolved))))))
+
 ;; Selecting a model never changes the backend
 (deftest ^{:stratum 1} catalog-model-keeps-the-configured-backend-test
   (testing "a Claude catalog model keeps an anthropic-api client on the API"

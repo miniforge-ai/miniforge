@@ -30,8 +30,9 @@
    `default-model-for-role`).
 
    A backend missing here gets no model from miniforge, so its own default
-   applies: the codex and cursor CLIs use the model they are configured
-   with, and ollama uses codellama. The HTTP APIs that need a model
+   applies: the codex CLI uses its built-in default (miniforge runs it with
+   --ignore-user-config, so ~/.codex/config.toml is not read), the cursor
+   CLI its own default, and ollama codellama. The HTTP APIs that need a model
    (openai-api, gemini-api, openrouter, openai-compat) fail the call with a
    missing-model error until llm.model is set.
 
@@ -88,15 +89,18 @@
    3. Miniforge's model for the tier on `backend` (`backend-role-models`).
 
    The shipped default config sets neither 1 nor 2, so anything found there
-   is the user's own setting."
+   is the user's own setting. A symbol, which an older `config set` stored
+   for a bare word such as gpt-5.4, is returned as its text: a CLI argv
+   takes only strings."
   ([role] (default-model-for-role role nil))
   ([role backend]
-   (let [cfg  (config/load-merged-config)
-         tier (if (thinking-roles role) :thinking :execution)]
-     (or (get-in cfg [:agents :default-models tier])
-         (get-in cfg [:llm :model])
-         (get-in backend-role-models
-                 [(or backend (get-in cfg [:llm :backend])) tier])))))
+   (let [cfg   (config/load-merged-config)
+         tier  (if (thinking-roles role) :thinking :execution)
+         model (or (get-in cfg [:agents :default-models tier])
+                   (get-in cfg [:llm :model])
+                   (get-in backend-role-models
+                           [(or backend (get-in cfg [:llm :backend])) tier]))]
+     (if (symbol? model) (str model) model))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

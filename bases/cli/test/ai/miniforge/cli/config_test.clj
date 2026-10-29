@@ -203,6 +203,19 @@
         (is (= :opencode (get-in saved [:llm :backend])))
         (is (= "anthropic/claude-sonnet-4-5" (get-in saved [:llm :model])))))))
 
+(deftest ^{:stratum 0} config-set-stores-model-ids-as-strings-test
+  (testing "llm.model and the tier keys are stored as strings, whatever EDN reads the value as"
+    (let [dir  (java.nio.file.Files/createTempDirectory "config-set-model" (make-array java.nio.file.attribute.FileAttribute 0))
+          path (str (.resolve dir "config.edn"))]
+      (with-out-str
+        (config/cmd-set {:config path :key "llm.model" :value "gpt-5.4"})
+        (config/cmd-set {:config path :key "agents.default-models.thinking" :value "1.5"})
+        (config/cmd-set {:config path :key "agents.default-models.execution" :value ":sonnet"}))
+      (let [saved (edn/read-string (slurp path))]
+        (is (= "gpt-5.4" (get-in saved [:llm :model])))
+        (is (= "1.5" (get-in saved [:agents :default-models :thinking])))
+        (is (= ":sonnet" (get-in saved [:agents :default-models :execution])))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} defaults-carry-no-unread-keys-test

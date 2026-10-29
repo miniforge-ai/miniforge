@@ -69,8 +69,10 @@ the execution tier. A role's model is the first of these that is set:
 3. Miniforge's default for the backend: Claude Opus 4.6 for the thinking
    tier and Claude Sonnet 4.6 for the execution tier, on `opencode` (as
    `anthropic/...` ids), `claude` and `anthropic-api`.
-4. None: the backend's own default. The `codex` and `cursor` CLIs use the
-   model they are configured with and `ollama` uses `codellama`. The
+4. None: the backend's own default. The `codex` CLI uses its built-in
+   default model: miniforge runs it with `--ignore-user-config`, so a model
+   set in `~/.codex/config.toml` is not used; set `llm.model` instead.
+   The `cursor` CLI uses its own default and `ollama` uses `codellama`. The
    `openai-api`, `gemini-api`, `openrouter` and `openai-compat` backends
    need a model, so set `llm.model` for them.
 
@@ -82,9 +84,12 @@ A config file that an older `mf config init`, `set`, `backend` or `edit`
 created may carry `:llm {:model "anthropic/claude-sonnet-4-5"}`, which
 applies to every role. Remove it to get the defaults above.
 
+`mf config set` stores `llm.model` and the two tier keys as strings, so a
+model id needs no quoting.
+
 ```bash
-mf config backend codex                # roles use the codex CLI's model
-mf config set llm.model gpt-5.4        # every role uses gpt-5.4
+mf config backend codex                # roles use codex's built-in model
+mf config set llm.model gpt-5.4        # every role uses "gpt-5.4"
 MINIFORGE_AGENT_THINKING_MODEL=gpt-5.4-pro mf run spec.edn  # planner only
 ```
 
