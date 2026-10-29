@@ -22,8 +22,10 @@
    construction, not at delivery. These tests assert the secret is
    absent from every destination a published event reaches — sink,
    in-memory log, and subscriber — because a redacting sink would
-   still leave the other two holding it."
+   still leave the other two holding it. The file sink writes under a
+   temp dir, never the real ~/.miniforge/events."
   (:require
+   [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.event-stream.interface :as sut]))
@@ -36,9 +38,29 @@
 
 (defn- ^{:stratum 0} ->text [x] (pr-str x))
 
-(deftest ^{:stratum 0} envelope-identifiers-are-untouched-test
+(defn- ^{:stratum 0} temp-stream
+  "A stream whose file sink writes under a fresh temp dir. Returns
+   [stream events-dir]."
+  []
+  (let [dir (doto (io/file (System/getProperty "java.io.tmpdir")
+                           (str "miniforge-redaction-test-" (random-uuid)))
+              .mkdirs)]
+    [(sut/create-event-stream
+      {:config {:observability {:event-sinks [{:type :file :base-dir (str dir)}]}}})
+     dir]))
+
+(defn- ^{:stratum 0} sunk-text
+  "Everything the file sink wrote for `wf-id` under `dir`."
+  [dir wf-id]
+  (->> (.listFiles (sut/workflow-dir (str dir) wf-id))
+       (map slurp)
+       (apply str)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} envelope-identifiers-are-untouched-test
   (testing ":public-class fields pass through unchanged (N3 §8.4)"
-    (let [stream (sut/create-event-stream)
+    (let [[stream] (temp-stream)
           wf-id  (random-uuid)
           event  (sut/create-envelope stream :workflow/started wf-id "started")
           out    (sut/publish! stream event)]
@@ -47,7 +69,7 @@
       (is (= (:event/type event) (:event/type out)))
       (is (= (:event/version event) (:event/version out))))))
 
-(deftest ^{:stratum 0} every-position-is-covered-at-the-stream-test
+(deftest ^{:stratum 1} every-position-is-covered-at-the-stream-test
   (testing "a secret reaches the log from no position in an event"
     ;; Through publish! rather than redact directly, because that is the
     ;; boundary §8.1 governs. Each position here was a live leak at some
@@ -60,10 +82,13 @@
                ["key name"      {(keyword secret) :held}]
                ["key namespace" {(keyword secret "field") :held}]
                ["metadata"      {:carrier (with-meta {:a 1} {:note secret})}]]]
-        (let [stream (sut/create-event-stream)]
+        (let [[stream] (temp-stream)
+              wf-id    (str (random-uuid))]
           (sut/publish! stream (assoc event
                                       :event/type :tool/invoked
-                                      :workflow/id (str (random-uuid))))
+                                      :workflow/id wf-id))
+          (is (not (.exists (sut/workflow-dir wf-id)))
+              "nothing is written under the real ~/.miniforge/events")
           ;; *print-meta* or a metadata-borne secret is invisible to the
           ;; check that is supposed to catch it.
           (let [log (binding [*print-meta* true]
@@ -71,10 +96,8 @@
             (is (not (str/includes? log secret))
                 (str "secret survived in " position))))))))
 
-;------------------------------------------------------------------------------ Layer 1
-
 (deftest ^{:stratum 1} secret-reaches-no-destination-test
-  (let [stream     (sut/create-event-stream)
+  (let [[stream dir] (temp-stream)
         wf-id      (random-uuid)
         seen       (atom [])
         _          (sut/subscribe! stream :spy (fn [e] (swap! seen conj e)))
@@ -91,6 +114,10 @@
 
     (testing "the in-memory log holds no secret (N3.SD.2)"
       (is (not (str/includes? (->text (sut/get-events stream wf-id)) secret))))
+
+    (testing "the file sink wrote no secret"
+      (is (seq (sunk-text dir wf-id)) "the sink should have written the event")
+      (is (not (str/includes? (sunk-text dir wf-id) secret))))
 
     (testing "the subscriber received no secret"
       (is (seq @seen) "subscriber should have been called")
