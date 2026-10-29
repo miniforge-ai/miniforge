@@ -28,7 +28,8 @@
      without blocking callers; close waits for it (bounded by
      :close-timeout-ms, default impl/default-close-timeout-ms)
    - Atomic files: temp file + rename; the index is merged with the
-     on-disk copy under a lock
+     on-disk copy under a lock, and rebuilt from the artifact files if
+     it is unreadable
 
    File structure:
      ~/.miniforge/artifacts/
@@ -76,8 +77,8 @@
      ;; Ensure directory exists
      (impl/ensure-artifacts-dir! artifacts-dir)
 
-     ;; Load existing index
-     (let [index (impl/load-index artifacts-dir)]
+     ;; Load existing index (rebuilt from artifact files if unreadable)
+     (let [index (impl/load-index artifacts-dir logger)]
        (when logger
          (log/info logger :system :artifact/store-created
                    {:data {:type :transit

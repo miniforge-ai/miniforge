@@ -13,4 +13,6 @@
   :link/parent-not-found "Parent artifact not found"
   :link/child-not-found "Child artifact not found"
   :link/artifact-not-found "Artifact not found"
+  :index/unreadable "Artifact index is unreadable or is not a map."
+  :index/rebuilt "Artifact index was unreadable; copied it aside and rebuilt it from the artifact files."
   :store/close-timeout "Timed out waiting for queued artifact writes; recent artifacts may be missing from disk."}}
