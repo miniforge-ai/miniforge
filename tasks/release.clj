@@ -42,11 +42,13 @@
 (defn ^{:stratum 0} next-datever
   "The DateVer for the next release on `date`: one past the highest N
    among `tags-out` (the `git tag -l vYYYY.MM.DD.*` output for that day),
-   or N = 1 when the day has no release tag yet. Blank lines and tags
-   without a numeric N are ignored, so empty output gives .1 and a gap
-   left by a deleted tag is never reused."
+   or N = 1 when the day has no release tag yet. Only whole
+   vYYYY.MM.DD.N tags count: blank lines and any other suffix (rc.99,
+   1-rc) are ignored, so empty output gives .1 and a gap left by a
+   deleted tag is never reused."
   [^java.time.LocalDate date tags-out]
-  (let [taken (keep (fn [tag] (some-> (re-find #"\.(\d+)$" (str/trim tag)) second parse-long))
+  (let [taken (keep (fn [tag] (some-> (re-matches #"v\d{4}\.\d{2}\.\d{2}\.(\d+)" (str/trim tag))
+                                      second parse-long))
                     (str/split-lines (str tags-out)))
         n     (inc (reduce max 0 taken))]
     (format "%d.%02d.%02d.%d" (.getYear date) (.getMonthValue date) (.getDayOfMonth date) n)))

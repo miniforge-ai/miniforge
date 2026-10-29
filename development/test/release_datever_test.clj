@@ -52,4 +52,7 @@
   (testing "a gap left by a deleted tag is not reused"
     (is (= "2026.10.29.4" (release/next-datever day "v2026.10.29.1\nv2026.10.29.3"))))
   (testing "tags without a numeric N are ignored"
-    (is (= "2026.10.29.2" (release/next-datever day "v2026.10.29.1\nv2026.10.29.rc")))))
+    (is (= "2026.10.29.2" (release/next-datever day "v2026.10.29.1\nv2026.10.29.rc"))))
+  (testing "only a whole vYYYY.MM.DD.N tag counts: a numeric last component after another suffix does not"
+    (is (= "2026.10.29.2" (release/next-datever day "v2026.10.29.1\nv2026.10.29.rc.99")))
+    (is (= "2026.10.29.2" (release/next-datever day "v2026.10.29.1\nv2026.10.29.1-rc\nv2026.10.29.1.5")))))
