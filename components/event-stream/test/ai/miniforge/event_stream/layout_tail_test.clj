@@ -96,6 +96,28 @@
         (is (= [[old-id :workflow/resumed]]
                (mapv (juxt :workflow/id :event/type) @published)))))))
 
+(deftest ^{:stratum 1} a-root-that-cannot-be-listed-is-listed-again-not-taken-as-empty
+  (let [events-dir (temp-events-dir)
+        base       (str events-dir)
+        live       (io/file events-dir "live")
+        wf-id      (random-uuid)
+        published  (atom [])
+        t0         (System/currentTimeMillis)]
+    ;; A run started five minutes ago, so active, but older than the startup cutoff.
+    (write-event-file! events-dir wf-id (wf-event :workflow/started wf-id) (- t0 300000))
+    (let [s0 (try (.setReadable live false)
+                  (is (nil? (.listFiles live)) "precondition: the test does not run as root")
+                  (sut/initial-state base t0 window-ms)
+                  (finally (.setReadable live true)))
+          s1 (sut/initial-state base (+ t0 500) window-ms)
+          s2 (sut/poll-once! s1 base #(swap! published conj %) (+ t0 1000))]
+      (is (nil? s0) "startup is retried, not committed without its active runs")
+      (is (= [:workflow/started] (mapv :event/type @published)) "then the run is read in full")
+      (try (.setReadable live false)
+           (is (= (:active s2) (:active (sut/relist s2 base [] (+ t0 sut/sweep-ms))))
+               "a failed relist keeps the active set")
+           (finally (.setReadable live true))))))
+
 (deftest ^{:stratum 1} a-new-run-is-published-once-and-followed-into-archived
   (let [events-dir (temp-events-dir)
         base       (str events-dir)
