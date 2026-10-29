@@ -50,10 +50,8 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} default-close-timeout-ms
-  "Upper bound close-store waits for queued disk writes. Writes normally
-   finish in milliseconds; the bound only matters when one is stuck (for
-   example, another process holds the index lock) and keeps CLI exit from
-   hanging on it."
+  "Upper bound close-store waits for queued disk writes, so a stuck write
+   (e.g. another process holding the index lock) cannot hang CLI exit."
   10000)
 
 (defonce ^{:stratum 0 :private true} index-monitors
@@ -372,18 +370,12 @@
 
 (defn ^{:stratum 3} persist-index-action
   "Writer action: under the index lock, merge the in-memory index with
-   the one on disk, keep the result in memory and write it. Another
-   store or process may have added artifacts since this store loaded
-   the index; writing only the in-memory map would drop them. An
-   unreadable on-disk index is quarantined and rebuilt first, as at
-   store creation (see quarantine-index!).
-
-   The writer's state is the index value last written. When the
-   in-memory index is still that value, an earlier action already wrote
-   what this one was queued for (a burst of saves queues one write
-   each), so it is skipped. Failures are logged and leave the state
-   alone, so the next queued write retries: an agent action is the
-   outermost frame of the writer thread."
+   the one on disk (other stores and processes write it too), keep the
+   result in memory and write it. An unreadable on-disk index is
+   quarantined first (see quarantine-index!). The writer's state is the
+   index last written; if memory still holds it, an earlier queued write
+   already covered this one and it is skipped. Failures are logged and
+   leave the state alone, so the next queued write retries."
   [last-written artifacts-dir index logger]
   (if (identical? last-written @index)
     last-written
@@ -448,20 +440,17 @@
    An unreadable index is copied aside and rebuilt from the per-artifact
    files (see recover-index!) instead of failing store creation, which
    would leave every later run without persistence."
-  ([artifacts-dir] (load-index artifacts-dir nil))
-  ([artifacts-dir logger]
-   (let [index (read-index artifacts-dir)]
-     (if (anomaly? index)
-       (recover-index! artifacts-dir logger)
-       index))))
+  [artifacts-dir logger]
+  (let [index (read-index artifacts-dir)]
+    (if (anomaly? index)
+      (recover-index! artifacts-dir logger)
+      index)))
 
 (defn ^{:stratum 4} save-artifact
-  "Save artifact implementation. Caches the artifact, adds it to the
-   in-memory index, and queues its file and an index write on the
-   writer, all under the writer's monitor: the queue order then matches
-   the order of cache and index updates when a link, or another save of
-   the same id, runs at the same time. An index entry whose file never
-   landed loads as nil, which query skips."
+  "Save artifact implementation. Updates cache and index and queues the
+   file and index writes under the writer's monitor, so queue order
+   matches update order when a link or another save runs concurrently.
+   An index entry whose file never landed loads as nil; query skips it."
   [{:keys [artifacts-dir cache index logger writer]} artifact]
   (let [id (:artifact/id artifact)]
     (locking writer

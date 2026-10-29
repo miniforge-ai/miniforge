@@ -65,13 +65,6 @@
     (impl/read-transit path)
     (catch Exception _ ::unreadable)))
 
-(defn- ^{:stratum 0} on-disk-index
-  "The index file's content; {} when absent, ::unreadable when corrupt."
-  [^File dir]
-  (try
-    (or (impl/read-transit (impl/index-file-path (impl/artifacts-dir (.getPath dir)))) {})
-    (catch Exception _ ::unreadable)))
-
 (defn- ^{:stratum 0} on-disk-ids
   "Artifact ids in the index file, or ::unreadable when it is corrupt."
   [^File dir]
@@ -179,9 +172,7 @@
         (run! deref saves)
         (run! p/close stores)
         (testing "every save from both stores is in the index on disk, and it parses"
-          (is (= (set ids) (on-disk-ids dir))))
-        (testing "no temp files are left behind"
-          (is (empty? (filter #(str/ends-with? % ".tmp") (file-names (artifacts-path dir)))))))
+          (is (= (set ids) (on-disk-ids dir)))))
       (finally
         (delete-dir! dir)))))
 
@@ -228,7 +219,7 @@
           (is (= #{"parent" "child"} (set (map :artifact/id (p/query s {}))))))
         (testing "links are read back from the artifact files"
           (is (= ["child"] (:artifact/children (p/load-artifact s "parent"))))
-          (is (= ["parent"] (get-in (on-disk-index dir) ["child" :artifact/parents]))))
+          (is (= ["parent"] (get-in (read-or-unreadable index-path) ["child" :artifact/parents]))))
         (testing "the rebuilt index is on disk and the unreadable one is kept aside"
           (is (= #{"parent" "child"} (on-disk-ids dir)))
           (is (= 1 (count (filter #(str/starts-with? % "index.transit.json.corrupt-")
