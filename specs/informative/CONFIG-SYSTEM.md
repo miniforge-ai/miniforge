@@ -179,10 +179,6 @@ Configuration is merged from three sources (in order of precedence):
    backend does not serve is skipped with a warning.
    `docs/configuration.md` gives the full rules.
 
-   `config list` and `config get` apply only `MINIFORGE_LLM_BACKEND` and
-   `MINIFORGE_LLM_MODEL`, so they can disagree with a run when a tier
-   variable is set; #2207 makes them read the runtime's loader.
-
    These four are the only LLM variables mapped into the user config.
    Backends also read their own variables directly, outside the config:
    `ANTHROPIC_API_KEY` (anthropic-api), `OPENAI_API_KEY` (openai-api),
