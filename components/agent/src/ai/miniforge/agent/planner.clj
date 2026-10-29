@@ -446,8 +446,9 @@
 
 (defn- ^{:stratum 1} planner-retry-mcp-opts
   "Build the planner's submission-retry session opts from a fresh session.
-   Turn cap + progress-monitor come from planner.edn; model/disallowed-tools
-   match the main planner turn so the retry enforces the same policy pack."
+   Turn cap + progress-monitor come from planner.edn; disallowed-tools
+   match the main planner turn so the retry enforces the same policy pack.
+   The model comes from the client, as on the main turn."
   [config context session]
   (let [prompt-data     @planner-prompt-data
         budget-usd      (budget/resolve-cost-budget-usd :planner config context)
@@ -455,8 +456,7 @@
         retry-monitor   (prompts/load-progress-monitor
                          prompt-data :prompt/submission-retry-monitor)]
     (cond-> (artifact-session/session->mcp-opts session budget-usd retry-max-turns)
-      true (assoc :model (model/default-model-for-role :planner)
-                  :disallowed-tools planner-disallowed-tools
+      true (assoc :disallowed-tools planner-disallowed-tools
                   :progress-monitor retry-monitor)
       (:workdir session) (assoc :workdir (:workdir session)))))
 
@@ -530,7 +530,12 @@
                      :existing-files-section (existing-files-section existing-files files-list-fn)})))
 
 (defn- ^{:stratum 2} invoke-planner-session
-  "Session body for the planner: build mcp-opts with model hint, call LLM.
+  "Session body for the planner: build mcp-opts, call LLM.
+
+   The request names no model: `llm-client` already carries the planner's
+   model for its own backend (`model/resolve-llm-client-for-role`), or none
+   so the backend's default applies. A model computed here from the
+   configured backend would reach a client the run put on another backend.
 
    `effective-system` is the base planner prompt with the phase-filtered
    policy addendum appended by the caller (mirrors reviewer / releaser /
@@ -557,8 +562,7 @@
         ;;    before writing to it.</tool_use_error>
         ;; The implementer threads :workdir the same way.
         mcp-opts (cond-> (artifact-session/session->mcp-opts session budget-usd max-turns)
-                   true (assoc :model (model/default-model-for-role :planner)
-                               :disallowed-tools planner-disallowed-tools
+                   true (assoc :disallowed-tools planner-disallowed-tools
                                :progress-monitor (create-planner-progress-monitor))
                    (:workdir session) (assoc :workdir (:workdir session)))]
     ;; Carry the role disallow-list into the Cursor backend's permission

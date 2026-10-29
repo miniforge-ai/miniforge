@@ -24,6 +24,7 @@
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.model :as model]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.logging.interface :as log]))
 
@@ -570,6 +571,45 @@
           (is (= @#'planner/planner-disallowed-tools
                  (:disallowed-tools @captured))
               ":disallowed-tools opt must equal the planner's role-scoped list"))))))
+
+(deftest ^{:stratum 0} planner-request-leaves-the-model-to-the-client-test
+  (testing "a codex run's planner request carries no model of its own"
+    ;; The client is the one resolve-llm-client-for-role returns for codex:
+    ;; no model, so the codex CLI uses its own. A model the planner put in
+    ;; the request would override that.
+    (let [captured (atom nil)
+          codex-client (llm/create-client {:backend :codex})]
+      (with-redefs [config/load-merged-config
+                    (constantly (assoc-in config/default-config [:llm :backend] :codex))
+                    llm/success? (constantly true)
+                    llm/get-content (constantly "")
+                    llm/chat (fn [_client _prompt opts]
+                               (reset! captured opts)
+                               {:status :success})
+                    llm/chat-stream (fn [_client _prompt _on-chunk opts]
+                                      (reset! captured opts)
+                                      {:status :success})
+                    model/resolve-llm-client-for-role (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context body-fn]
+                      {:llm-result (body-fn {:dir "/tmp/fake-session"
+                                             :workdir "/tmp/fake-workdir"
+                                             :mcp-config-path "/tmp/fake-session/mcp-config.json"
+                                             :mcp-allowed-tools []
+                                             :supervision {}
+                                             :pre-session-snapshot {}})
+                       :artifact nil
+                       :worktree-artifacts {}
+                       :context-misses nil
+                       :pre-session-snapshot {}
+                       :session-mode :host})]
+        (try
+          (core/invoke (planner/create-planner {:llm-backend codex-client})
+                       {:llm-backend codex-client}
+                       {:description "Plan this"})
+          (catch Exception _))
+        (is (some? @captured) "the planner must have called the LLM")
+        (is (nil? (:model @captured)))))))
 
 ;; planner-submission-retry? — recovery trigger (incl. success-but-no-artifact)
 (def ^{:stratum 0} ^:private submission-retry? #'planner/planner-submission-retry?)
