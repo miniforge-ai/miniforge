@@ -12,6 +12,7 @@
         ai.miniforge/semantic-analyzer {:local/root "../semantic-analyzer"}
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/tool-registry {:local/root "../tool-registry"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
         slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases
  {:test {:extra-paths ["test"]

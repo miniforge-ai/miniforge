@@ -70,42 +70,35 @@
 
 (defn ^{:stratum 0} change-budget!
   "Apply `f` to PR `pr-number`'s budget as saved on disk merged with
-   `budget-state` (see `budget/change-saved-budget!`), together with any
-   changes still pending from failed saves, and cache the result. Returns
-   the budget written, or the anomaly.
+   `budget-state` (see `budget/change-saved-budget!`) and cache the result.
+   Returns the budget written, or the anomaly.
 
    A refusal (an anomaly carrying a budget in [:anomaly/data :budget])
-   caches that budget. Any other failure is logged and leaves the cache as
-   it was; with `on-failure` :retry, `f` stays pending for the next
-   successful change of this PR. The default, :block, is for reserving a
-   fix attempt, which must not run unless it was saved."
+   caches that budget. Any other failure is logged; with `on-failure`
+   :retry the change is applied to the cached budget, so the next save of
+   this PR writes it. Budgets record actions by id, so a change that did
+   reach disk before the failure was reported is not counted twice. The
+   default, :block, leaves the cache alone: it is for reserving a fix
+   attempt, which must not run unless it was saved."
   ([monitor pr-number budget-state f]
    (change-budget! monitor pr-number budget-state f :block))
   ([monitor pr-number budget-state f on-failure]
    (let [{:keys [repo-slug logger]} (:config @monitor)
-         pending (get-in @monitor [:pending-budget-changes pr-number] [])
-         ;; Pending changes go after `f`, so a refusal carries none of them.
-         changed (budget/change-saved-budget! repo-slug budget-state
-                                              #(let [result (f %)]
-                                                 (if (anomaly/anomaly? result)
-                                                   result
-                                                   (reduce (fn [b change] (change b)) result pending))))]
+         changed (budget/change-saved-budget! repo-slug budget-state f)]
      (cond
        (not (anomaly/anomaly? changed))
-       (swap! monitor #(-> %
-                           (assoc-in [:budgets pr-number] changed)
-                           (update-in [:pending-budget-changes pr-number] (comp vec (partial drop (count pending))))))
+       (swap! monitor assoc-in [:budgets pr-number] changed)
 
        (get-in changed [:anomaly/data :budget])
        (swap! monitor assoc-in [:budgets pr-number] (get-in changed [:anomaly/data :budget]))
 
        :else
        (do (when (= :retry on-failure)
-             (swap! monitor update-in [:pending-budget-changes pr-number] (fnil conj []) f))
+             (swap! monitor assoc-in [:budgets pr-number] (f budget-state)))
            (when logger
              (log/warn logger :pr-monitor :budget/save-failed
                        {:message (:anomaly/message changed)
-                        :data {:pr-number pr-number :pending (= :retry on-failure)}}))))
+                        :data {:pr-number pr-number :kept-in-cache (= :retry on-failure)}}))))
      changed)))
 
 (defn ^{:stratum 0} log-loop-start!

@@ -195,6 +195,21 @@
    base-dir to ~/.miniforge/events; (base-dir)."
   sinks/operator-dir)
 
+(def ^{:stratum 0} live-dir
+  "`{base-dir}/live/`, one directory per in-flight workflow. Arities:
+   () for ~/.miniforge/events; (base-dir)."
+  sinks/live-dir)
+
+(def ^{:stratum 0} archived-dir
+  "`{base-dir}/archived/`, where the archive moves a terminal workflow's
+   directory. Arities: () for ~/.miniforge/events; (base-dir)."
+  sinks/archived-dir)
+
+(def ^{:stratum 0} event-file-ms
+  "`(event-file-ms file-name)`: the epoch ms an event file name records,
+   in any grammar the sink has used; nil for any other name."
+  sinks/event-file-ms)
+
 (def ^{:stratum 0} serialize-event
   "Serialize an event map to the canonical Transit-JSON wire string —
    the exact encoding the file sink writes to disk (verbose mode: no

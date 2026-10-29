@@ -25,6 +25,7 @@
    [babashka.fs :as fs]
    [babashka.process :as process]
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.config.interface :as runtime-config]
    [ai.miniforge.config.interface.file :as config-file]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.backends :as backends]
@@ -75,6 +76,15 @@
    store :opencode: as a string or symbol it names no backend. Only keys a run
    reads belong here."
   #{[:llm :backend]})
+
+(def ^{:stratum 0} string-valued-keys
+  "Config keys whose values are model ids, stored as strings whatever EDN
+   reads the value as: a model id reaches a CLI argv, which takes only
+   strings, so `config set llm.model 1.5` must not store a number. nil
+   stays nil, so `config set llm.model nil` clears the setting."
+  #{[:llm :model]
+    [:agents :default-models :thinking]
+    [:agents :default-models :execution]})
 
 (defn ^{:stratum 0} parse-config-value
   "Parse config value from string. A bare word, which EDN reads as a symbol,
@@ -136,11 +146,16 @@
 
 (defn ^{:stratum 1} coerce-config-value
   "`value` as `config set` stores it under `key-path`: a keyword for the
-   `keyword-valued-keys`."
+   `keyword-valued-keys`, a string for the `string-valued-keys`."
   [key-path value]
-  (if (and (contains? keyword-valued-keys key-path) (string? value))
+  (cond
+    (and (contains? keyword-valued-keys key-path) (string? value))
     (keyword value)
-    value))
+
+    (and (contains? string-valued-keys key-path) (some? value) (not (string? value)))
+    (str value)
+
+    :else value))
 
 ;; Config file operations
 (defn ^{:stratum 1} read-config-file
@@ -167,7 +182,9 @@
                         :provider (or (get-in backend-config/backend-specs
                                               [(get-in config [:llm :backend]) :provider])
                                       (messages/t :config/llm-backend-provider-unknown))}))
-  (println (messages/t :config/llm-model {:model (get-in config [:llm :model])}))
+  (println (if-let [model (get-in config [:llm :model])]
+             (messages/t :config/llm-model {:model model})
+             (messages/t :config/llm-model-unset)))
   (println)
 
   ;; Artifacts. The directory comes from MINIFORGE_HOME, not from
@@ -194,22 +211,19 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} load-merged-config
-  "Load config with env var overrides."
+  "The config at `path` as a run reads it, for `config list` and `config get`:
+   the runtime's own loader (config/load-merged-config: shipped defaults, the
+   file, then every MINIFORGE_* variable it maps, the tier models included),
+   laid over the CLI's defaults for the keys only the CLI ships (:dashboard,
+   :artifacts). A second loader here applied only MINIFORGE_LLM_BACKEND and
+   MINIFORGE_LLM_MODEL, so `config get` could disagree with a run."
   [path]
-  (let [file-config (or (read-config-file path) {})
-        merged (merge-with (fn [v1 v2]
-                            (if (map? v1)
-                              (merge v1 v2)
-                              v2))
-                          default-config
-                          file-config)]
-    ;; Apply env var overrides
-    (cond-> merged
-      (System/getenv "MINIFORGE_LLM_BACKEND")
-      (assoc-in [:llm :backend] (keyword (System/getenv "MINIFORGE_LLM_BACKEND")))
-
-      (System/getenv "MINIFORGE_LLM_MODEL")
-      (assoc-in [:llm :model] (System/getenv "MINIFORGE_LLM_MODEL")))))
+  (merge-with (fn [v1 v2]
+                (if (map? v1)
+                  (merge v1 v2)
+                  v2))
+              default-config
+              (runtime-config/load-merged-config path)))
 
 (defn ^{:stratum 2} cmd-set
   "Set a configuration value."

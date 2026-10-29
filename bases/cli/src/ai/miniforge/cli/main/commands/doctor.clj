@@ -28,7 +28,8 @@
    [ai.miniforge.cli.main.commands.doctor.checks :as checks]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
-   [ai.miniforge.cli.messages :as messages]))
+   [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -43,7 +44,8 @@
         command-checks (mapv checks/command-check (checks/command-check-specs backend))]
     (conj command-checks
           (checks/runtime-check execution-mode)
-          (checks/config-check config/default-user-config-path))))
+          (checks/config-check config/default-user-config-path)
+          (checks/checkpoints-check (workflow/checkpoint-usage {})))))
 
 (defn ^{:stratum 0} failed-required
   [results]

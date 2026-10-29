@@ -165,11 +165,17 @@
    :requires ([test-runner])
    :task (test-runner/integration)}
 
+  test:dev
+  {:doc  "Run development/test (task and tooling tests; poly test :all skips the development project)"
+   :requires ([test-runner])
+   :task (test-runner/development)}
+
   test:all
-  {:doc  "Run full suite (unit bricks + project integration tests)"
+  {:doc  "Run full suite (unit bricks + project integration + development tests)"
    :task (do
            (run 'test:poly)
-           (run 'test:integration))}
+           (run 'test:integration)
+           (run 'test:dev))}
 
   ccov
   {:doc  "Run the repo coverage toolset from bb-tools.edn"
@@ -847,6 +853,7 @@
                  "components/reporting/src"
                  "components/reporting/resources"
                  "components/observer/src"
+                 "components/observer/resources"
                  "components/tool-registry/src"
                  "components/tool-registry/resources"
                  "components/pr-train/src"

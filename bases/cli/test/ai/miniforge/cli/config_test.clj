@@ -22,6 +22,8 @@
             [ai.miniforge.cli.backends.status :as backend-status]
             [ai.miniforge.cli.config :as config]
             [ai.miniforge.cli.main.commands.shared :as shared]
+            ;; Loaded for config.user/get-env-var, which the env test redefines.
+            [ai.miniforge.config.interface]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]))
@@ -131,6 +133,16 @@
       (is (str/includes? out (app-config/artifacts-dir)))
       (is (not (str/includes? out stale-dir))))))
 
+(deftest ^{:stratum 0} cli-defaults-name-no-model-test
+  (testing "the defaults that config init writes name no model"
+    ;; In the user's file a model is read as their choice for every role
+    ;; on every backend.
+    (is (nil? (get-in config/default-config [:llm :model]))))
+  (testing "config list says when no model is set"
+    (let [out (with-out-str
+                (config/display-config {:llm {:backend :codex}} "/nonexistent/config.edn"))]
+      (is (str/includes? out "model: not set")))))
+
 (deftest ^{:stratum 0} parse-config-value-rejects-reader-eval-test
   (testing "parse-config-value returns the raw string for #=() reader-eval forms"
     ;; edn/read-string rejects #=(...) — the catch block returns the literal
@@ -192,6 +204,44 @@
       (let [saved (edn/read-string (slurp path))]
         (is (= :opencode (get-in saved [:llm :backend])))
         (is (= "anthropic/claude-sonnet-4-5" (get-in saved [:llm :model])))))))
+
+(deftest ^{:stratum 0} config-set-stores-model-ids-as-strings-test
+  (testing "llm.model and the tier keys are stored as strings, whatever EDN reads the value as"
+    (let [dir  (java.nio.file.Files/createTempDirectory "config-set-model" (make-array java.nio.file.attribute.FileAttribute 0))
+          path (str (.resolve dir "config.edn"))]
+      (with-out-str
+        (config/cmd-set {:config path :key "llm.model" :value "gpt-5.4"})
+        (config/cmd-set {:config path :key "agents.default-models.thinking" :value "1.5"})
+        (config/cmd-set {:config path :key "agents.default-models.execution" :value ":sonnet"}))
+      (let [saved (edn/read-string (slurp path))]
+        (is (= "gpt-5.4" (get-in saved [:llm :model])))
+        (is (= "1.5" (get-in saved [:agents :default-models :thinking])))
+        (is (= ":sonnet" (get-in saved [:agents :default-models :execution]))))))
+  (testing "nil clears a model setting instead of storing a blank string"
+    (let [dir  (java.nio.file.Files/createTempDirectory "config-set-model-nil" (make-array java.nio.file.attribute.FileAttribute 0))
+          path (str (.resolve dir "config.edn"))]
+      (with-out-str
+        (config/cmd-set {:config path :key "llm.model" :value "gpt-5.4"})
+        (config/cmd-set {:config path :key "llm.model" :value "nil"})
+        (config/cmd-set {:config path :key "agents.default-models.execution" :value "nil"}))
+      (let [saved (edn/read-string (slurp path))]
+        (is (nil? (get-in saved [:llm :model])))
+        (is (nil? (get-in saved [:agents :default-models :execution])))))))
+
+(deftest ^{:stratum 0} config-get-applies-the-runtime-env-overrides-test
+  (testing "config get shows MINIFORGE_AGENT_EXECUTION_MODEL over the file, as a run reads it"
+    ;; The env lookup is config.user/get-env-var; resolved by name because the
+    ;; config interface has no seam for it.
+    (let [dir  (java.nio.file.Files/createTempDirectory "config-get-env" (make-array java.nio.file.attribute.FileAttribute 0))
+          path (str (.resolve dir "config.edn"))
+          env  {"MINIFORGE_AGENT_EXECUTION_MODEL" "from-env"}]
+      (spit path (pr-str {:agents {:default-models {:execution "from-file"}}}))
+      (with-redefs-fn {(resolve 'ai.miniforge.config.user/get-env-var) #(get env %)}
+        (fn []
+          (is (= "\"from-env\""
+                 (str/trim (with-out-str
+                             (config/cmd-get {:config path
+                                              :key "agents.default-models.execution"}))))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

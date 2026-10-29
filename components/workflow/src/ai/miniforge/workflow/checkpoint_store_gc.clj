@@ -169,6 +169,41 @@
                  (= (str workflow-id) (str (fs/file-name run-dir))))
         (str (fs/parent run-dir))))))
 
+(defn ^{:stratum 1} checkpoint-usage
+  "What the checkpoint root holds, read-only, cheap enough for `mf doctor`:
+   `{:checkpoint/root :runs :older :oldest-days :max-age-days}`. A run's
+   age here is its directory's mtime, which every checkpoint write moves
+   (each file is renamed into place), not the full-tree walk the GC does;
+   `:older` counts runs past `:max-age-days` (default 30) by that measure,
+   an estimate of what `gc-checkpoints!` would collect before pins and
+   live events are considered. Options as `gc-checkpoints!`.
+
+   A run that vanishes while it is read (a concurrent GC) is skipped. A
+   root that cannot be listed is an `:unavailable` anomaly naming it."
+  [opts]
+  (let [root (checkpoint-paths/resolve-checkpoint-root opts)
+        days (get opts :max-age-days default-retention-days)
+        now (get opts :now-ms (System/currentTimeMillis))
+        age (fn [dir]
+              (try+
+                (when (and (run-id dir) (fs/directory? dir {:nofollow-links true}))
+                  (- now (fs/file-time->millis (fs/last-modified-time dir {:nofollow-links true}))))
+                (catch Exception _ nil)))]
+    (try+
+      (let [ages (if (fs/directory? root) (into [] (keep age) (fs/list-dir root)) [])]
+        {:checkpoint/root root
+         :runs (count ages)
+         :older (count (filter #(> % (* days day-ms)) ages))
+         :oldest-days (when (seq ages) (quot (reduce max ages) day-ms))
+         :max-age-days days})
+      (catch Exception e
+        (anomaly/exception-anomaly :unavailable
+                                   (messages/t :checkpoint/usage-failed
+                                               {:root root
+                                                :error (or (ex-message e) (.getName (class e)))})
+                                   {:checkpoint/root root}
+                                   e)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} gc-checkpoints!

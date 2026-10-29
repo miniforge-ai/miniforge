@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli-integration-test
   "Integration tests for CLI backends.
 
@@ -23,6 +22,8 @@
    work correctly with miniforge's LLM interface.
 
    Tests marked ^:integration require real CLI access and may incur costs.
+   Every test that needs the real claude CLI is also marked ^:external;
+   bb test:dev skips those unless MINIFORGE_TEST_EXTERNAL=true.
    Run with: clojure -M:poly test :dev :include :integration"
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
@@ -32,7 +33,6 @@
 ;; ============================================================================
 ;; Fixtures
 ;; ============================================================================
-
 (use-fixtures :each
   (fn [f]
     (try
@@ -40,11 +40,12 @@
       (finally
         (harness/cleanup-test-state!)))))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; CLI Availability Tests
 ;; ============================================================================
-
-(deftest cli-availability-test
+(deftest ^{:stratum 0} ^:external cli-availability-test
   (testing "Claude CLI is available"
     (is (harness/cli-available? :claude)
         "Claude CLI should be installed")))
@@ -52,8 +53,7 @@
 ;; ============================================================================
 ;; Claude CLI Tests
 ;; ============================================================================
-
-(deftest ^:integration claude-simple-prompt-test
+(deftest ^{:stratum 0} ^:integration ^:external claude-simple-prompt-test
   (testing "Claude CLI responds to simple prompt"
     (when (harness/cli-available? :claude)
       (let [client (llm/create-client {:backend :claude})
@@ -65,7 +65,7 @@
         (is (re-find #"4" (llm/get-content response))
             "Response should contain the answer 4")))))
 
-(deftest ^:integration claude-system-prompt-test
+(deftest ^{:stratum 0} ^:integration ^:external claude-system-prompt-test
   (testing "Claude CLI respects system prompt"
     (when (harness/cli-available? :claude)
       (let [client (llm/create-client {:backend :claude})
@@ -84,7 +84,7 @@
                     (re-find #"(?i)me hearties" content))
                 "Response should be in pirate speak")))))))
 
-(deftest ^:integration claude-code-generation-test
+(deftest ^{:stratum 0} ^:integration ^:external claude-code-generation-test
   (testing "Claude CLI generates valid Clojure code"
     (when (harness/cli-available? :claude)
       (let [client (llm/create-client {:backend :claude})
@@ -111,8 +111,7 @@
 ;; ============================================================================
 ;; Error Handling Tests
 ;; ============================================================================
-
-(deftest cli-error-handling-test
+(deftest ^{:stratum 0} cli-error-handling-test
   (testing "Client handles errors gracefully"
     ;; Test with a backend that doesn't exist
     (is (thrown? Exception
@@ -122,8 +121,7 @@
 ;; ============================================================================
 ;; Mock Client Tests (Fast, no real CLI)
 ;; ============================================================================
-
-(deftest mock-client-test
+(deftest ^{:stratum 0} mock-client-test
   (testing "Mock client returns configured output"
     (let [client (llm/mock-client {:output "test response"})
           response (llm/chat client "anything")]
@@ -142,8 +140,7 @@
 ;; ============================================================================
 ;; Client Factory Tests
 ;; ============================================================================
-
-(deftest client-creation-test
+(deftest ^{:stratum 0} client-creation-test
   (testing "Can create client for each supported backend"
     (doseq [backend [:claude :echo]]
       (let [client (llm/create-client {:backend backend})]
@@ -153,8 +150,7 @@
 ;; ============================================================================
 ;; Echo Backend Tests
 ;; ============================================================================
-
-(deftest echo-backend-test
+(deftest ^{:stratum 0} echo-backend-test
   (testing "Echo backend returns the prompt"
     (let [client (llm/create-client {:backend :echo})
           response (llm/chat client "Hello, world!")]
@@ -164,7 +160,6 @@
 ;; ============================================================================
 ;; Rich Comment
 ;; ============================================================================
-
 (comment
   ;; Run all tests
   (clojure.test/run-tests 'ai.miniforge.cli-integration-test)
