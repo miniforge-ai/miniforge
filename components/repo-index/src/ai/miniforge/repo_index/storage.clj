@@ -69,11 +69,16 @@
           f (index-file repo-root (:tree-sha index))]
       (.mkdirs dir)
       (let [tmp (temp-file f)]
-        (spit tmp (pr-str index))
-        (Files/move (.toPath tmp) (.toPath f)
-                    (into-array java.nio.file.CopyOption
-                                [StandardCopyOption/ATOMIC_MOVE
-                                 StandardCopyOption/REPLACE_EXISTING])))
+        (try
+          (spit tmp (pr-str index))
+          (Files/move (.toPath tmp) (.toPath f)
+                      (into-array java.nio.file.CopyOption
+                                  [StandardCopyOption/ATOMIC_MOVE
+                                   StandardCopyOption/REPLACE_EXISTING]))
+          (finally
+            ;; Gone after a successful move; on failure, don't leave a
+            ;; uniquely named orphan behind for every attempt.
+            (Files/deleteIfExists (.toPath tmp)))))
       (.getPath f))
     (catch Exception _
       nil)))
