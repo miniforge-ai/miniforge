@@ -102,6 +102,18 @@
     (is (= ["restored-head"]
            (#'implement/task-base-refs {:execution/environment-metadata {:base-sha "restored-head"}})))))
 
+(deftest ^{:stratum 0} capsule-file-reads-use-the-capsule-checkout-test
+  (testing "scope files are read from the capsule's checkout, not the host worktree path"
+    (let [seen (atom [])
+          ctx  {:execution/execute-fn (fn [_executor _env-id _cmd opts]
+                                        (swap! seen conj (:workdir opts))
+                                        {:data {:stdout "x" :exit-code 0}})
+                :execution/executor ::capsule
+                :execution/environment-id "env-1"
+                :execution/capsule-workdir "/workspace"}]
+      (#'implement/resolve-existing-files ctx {} "/host/worktrees/task-1" ["src/a.clj"])
+      (is (= ["/workspace"] (distinct @seen))))))
+
 (deftest ^{:stratum 0} phase-defaults-registration-test
   (testing "implement phase defaults are registered"
     (let [defaults (phase/phase-defaults :implement)]
