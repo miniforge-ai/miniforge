@@ -22,8 +22,12 @@
 ;; the documented keys those leave unset (the model keys), and the keys
 ;; other code reads from or writes to the user config: fleet commands and
 ;; the dashboard keep [:fleet :repos]; policy-pack's trust_roots_config
-;; reads [:policy-pack :trust-roots] (and validates its entries itself).
-;; config-schema-test lists every reader's path and checks it is here.
+;; reads [:policy-pack :trust-roots] (and validates its entries itself);
+;; tenancy's resolver reads [:tenancy :operator-name]; the event and log
+;; fleet sinks take the [:observability :fleet] map as their options.
+;; config-schema-test scans src for literal get-in / assoc-in / update-in
+;; paths on the user config, and lists the reads that are not literal
+;; paths, and checks that each is here.
 ;;
 ;; Types: :keyword :string :boolean :integer :number :vector, :map (any
 ;; sub-key, any value), :backend (a known backend keyword) and :port (an
@@ -69,6 +73,8 @@
 
   [:fleet :repos]                                   :vector
 
+  [:tenancy :operator-name]                         :string
+
   [:observability :event-sinks]                     :vector
   [:observability :log-sinks]                       :vector
   [:observability :alerts]                          :vector
@@ -77,4 +83,5 @@
   [:observability :fleet :url]                      :string
   [:observability :fleet :api-key]                  :string
   [:observability :fleet :batch-size]               :integer
-  [:observability :fleet :flush-interval-ms]        :integer}}
+  [:observability :fleet :flush-interval-ms]        :integer
+  [:observability :fleet :timeout-ms]               :integer}}

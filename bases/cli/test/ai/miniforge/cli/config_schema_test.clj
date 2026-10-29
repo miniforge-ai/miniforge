@@ -42,37 +42,34 @@
                                      :observability 5}))))))))
 
 (def ^{:stratum 0} ^:private reader-paths
-  "Every user-config key path the code reads or writes, with its reader.
-   Found by grepping src for get-in / assoc-in / update-config! on the
-   config loaded from ~/.miniforge/config.edn. A new reader belongs here
-   and in config-schema.edn, or config set and validate reject its key."
-  {[:llm :backend]                       "agent/model.clj, cli/config.clj"
-   [:llm :model]                         "agent/model.clj"
-   [:agents :default-models :thinking]   "agent/model.clj"
-   [:agents :default-models :execution]  "agent/model.clj"
-   [:dashboard :port]                    "cli/main/commands/monitoring.clj"
-   [:workflow :checkpoint-root]          "workflow/checkpoint_store_paths.clj"
-   [:workflow/worktree-root]             "dag-executor/.../worktree.clj"
-   [:policy-packs :extra-search-paths]   "phase/agent_behavior.clj"
-   [:policy-packs :disabled-pack-ids]    "phase/agent_behavior.clj"
-   [:policy-pack :trust-roots]           "policy-pack/trust_roots_config.clj"
-   [:fleet :repos]                       "cli fleet and pr commands, pr-sync, web-dashboard trains"
-   [:governance :readiness]              "config/governance.clj"
-   [:governance :risk]                   "config/governance.clj"
-   [:governance :tiers]                  "config/governance.clj"
-   [:governance :knowledge-safety]       "config/governance.clj"
-   [:observability :event-sinks]         "event-stream/sinks.clj"
-   [:observability :log-sinks]           "logging/sinks.clj"
-   [:observability :alerts]              "observer/alert_subscriber.clj"
-   [:observability :fleet :url]          "event-stream/sinks.clj, logging/sinks.clj"})
+  "User-config reads that are not a literal get-in / assoc-in / update-in
+   path on the loaded config, which config-schema-source-scan-test cannot see: a
+   path held in a def, a sub-map read by keyword, a single-key get."
+  {[:workflow/worktree-root]             "dag-executor/.../worktree.clj (get config ...)"
+   [:policy-packs :extra-search-paths]   "phase/agent_behavior.clj, on (get cfg :policy-packs)"
+   [:policy-packs :disabled-pack-ids]    "phase/agent_behavior.clj, on (get cfg :policy-packs)"
+   [:policy-pack :trust-roots]           "policy-pack/trust_roots_config.clj user-config-path"
+   [:agents :default-models :thinking]   "agent/model.clj, [:agents :default-models tier]"
+   [:agents :default-models :execution]  "agent/model.clj, [:agents :default-models tier]"
+   [:governance :readiness]              "config/governance.clj, [:governance config-key]"
+   [:governance :risk]                   "config/governance.clj, [:governance config-key]"
+   [:governance :tiers]                  "config/governance.clj, [:governance config-key]"
+   [:governance :knowledge-safety]       "config/governance.clj, [:governance config-key]"
+   [:observability :fleet :url]          "event-stream and logging fleet sinks, from opts"
+   [:observability :fleet :api-key]      "event-stream and logging fleet sinks, from opts"
+   [:observability :fleet :batch-size]   "event-stream and logging fleet sinks, from opts"
+   [:observability :fleet :flush-interval-ms] "event-stream and logging fleet sinks, from opts"
+   [:observability :fleet :timeout-ms]   "event-stream and logging fleet sinks, from opts"})
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} schema-covers-every-reader-path-test
-  (testing "each key the code reads has a type in the schema"
+(deftest ^{:stratum 1} schema-covers-every-non-literal-read-test
+  (testing "each read the scan cannot see has a type in the schema"
     (doseq [[path reader] reader-paths]
       (is (some? (sut/key-type sut/schema path)) (str path " read by " reader))))
-  (testing "values the fleet commands and the trust-root loader store are accepted"
+  (testing "values the fleet commands, the trust-root loader and tenancy store are accepted"
     (is (= [] (sut/problems sut/schema #{:claude}
                             {:fleet {:repos ["acme/service"]}
-                             :policy-pack {:trust-roots {:trust-roots/publishers []}}})))))
+                             :policy-pack {:trust-roots {:trust-roots/publishers []}}
+                             :tenancy {:operator-name "operator1"}
+                             :observability {:fleet {:timeout-ms 30000}}})))))
