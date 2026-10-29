@@ -70,11 +70,14 @@
   (log/create-logger {:min-level :info :output :edn}))
 
 (defn- ^{:stratum 0} log-proxy-auth-change!
-  "Report that outage detection paused (`auth-required?`: the proxy
-   started answering 407) or resumed. Called only when the state changes,
-   so repeated 407s produce one warning, not one per probe."
-  [logger probe-url auth-required?]
-  (if auth-required?
+  "Report that outage detection paused (`status` is :proxy-auth-required:
+   the proxy started answering 407) or resumed (any other status). Called
+   only when the state changes, so repeated 407s produce one warning, not
+   one per probe. The resumed entry names the status that ended the
+   pause and does not claim the proxy let the probe through: it may be
+   :unreachable, in the same probe that declares a drop."
+  [logger probe-url status]
+  (if (= :proxy-auth-required status)
     (let [proxy (or (nh/probe-proxy-host probe-url (System/getenv))
                     (msg/t :network-monitor.system/unknown-proxy))]
       (log/warn logger :system :llm/network-probe-proxy-auth-required
@@ -84,8 +87,9 @@
                         :probe-url probe-url}}))
     (log/info logger :system :llm/network-probe-proxy-auth-cleared
               {:message (msg/t :network-monitor.system/proxy-auth-cleared
-                               {:probe-url probe-url})
-               :data {:probe-url probe-url}})))
+                               {:probe-url probe-url :status status})
+               :data {:probe-url probe-url
+                      :status status}})))
 
 ;; Scheduler
 (defn- ^{:stratum 0} next-failure-count
@@ -127,7 +131,7 @@
               next-failures (next-failure-count status consecutive-failures)
               auth-required? (= :proxy-auth-required status)]
           (when (not= auth-required? auth-paused?)
-            (log-proxy-auth-change! logger probe-url auth-required?))
+            (log-proxy-auth-change! logger probe-url status))
           (cond
             (>= next-failures failure-threshold)
             ;; CAS the running? atom from true → false. If we win, no

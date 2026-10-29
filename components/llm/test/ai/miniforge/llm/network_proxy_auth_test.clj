@@ -23,6 +23,7 @@
    pause in outage detection is logged once when it starts and once
    when it ends, not on every probe."
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.llm.network-health :as nh]
    [ai.miniforge.llm.network-monitor :as nnm]
@@ -74,6 +75,11 @@
   "A proxy that asks for credentials three times, then lets the probe
    through (the last status repeats)."
   [:proxy-auth-required :proxy-auth-required :proxy-auth-required :healthy])
+
+(def ^{:stratum 0} ^:private auth-then-unreachable-statuses
+  "A proxy that asks for credentials once, then stops answering (the
+   last status repeats, so the drop fires)."
+  [:proxy-auth-required :unreachable])
 
 (defn- ^{:stratum 0} logged
   "Entries in the collecting logger's `entries` with event `event`."
@@ -166,6 +172,25 @@
       (stop!)
       (is (= 1 (count (logged entries auth-required-event))))
       (is (= 1 (count (logged entries auth-cleared-event)))))))
+
+(deftest ^{:stratum 2} pause-ending-in-a-failure-is-not-reported-as-access-test
+  (testing "407 then :unreachable: the resumed entry names the status, not proxy access"
+    (let [[logger entries] (log/collecting-logger)
+          drops (promise)
+          stop! (nnm/start-network-monitor!
+                 (assoc (monitor-opts drops)
+                        :logger logger
+                        :probe-fn (scripted-probe auth-then-unreachable-statuses)))]
+      (try
+        (is (some? (deref drops drop-timeout-ms nil)) "the failures still declare the drop")
+        (let [cleared (logged entries auth-cleared-event)
+              entry (first cleared)]
+          (is (= 1 (count cleared)))
+          (is (= :unreachable (get-in entry [:data :status])))
+          (is (not (str/includes? (:log/message entry) "accepted"))
+              "the message does not say the proxy let the probe through"))
+        (finally
+          (stop!))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
