@@ -22,6 +22,16 @@
   :pr/reuse-unresolved "A PR already exists for this branch but could not be resolved via gh pr view: {error}"
   :pr/reuse-no-url "gh pr view returned no PR URL"
 
+  ;; push HTTPS+token fallback (host mode): why no credential was sent
+  :push/token-retry-skipped
+  "The HTTPS token retry was not attempted and no credential was sent: {reason}."
+  :push/token-retry-not-single-target
+  "origin has more than one push URL (a mirror or several url/pushurl entries)"
+  :push/token-retry-rewritten
+  "git rewrites origin's push URL (insteadOf or pushInsteadOf), so the destination is not the configured URL"
+  :push/token-retry-untrusted-host
+  "origin's push URL is not on github.com, the only host the token is sent to"
+
   ;; push HTTPS+token fallback
   :push/https-fallback-setup-failed
   "Push failed and the HTTPS token fallback could not be applied: repointing origin to the token URL failed, so origin is unchanged (no token persisted). Push error: {push-error}. Set-url error: {set-url-error}"

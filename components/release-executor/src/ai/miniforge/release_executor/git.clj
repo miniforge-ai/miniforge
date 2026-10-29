@@ -85,7 +85,7 @@
    the pipeline resolved — parity with sandbox's gh-exec-opts :env injection.
    `worktree-path` may be nil (e.g. `gh auth status` needs no cwd). When no
    token is supplied the call inherits the ambient environment. `extra-env`
-   (the push fallback's `push-auth/token-env`) is merged in."
+   (the push fallback's `push-auth/retry-plan` env) is merged in."
   ([worktree-path github-token] (gh-shell-opts worktree-path github-token nil))
   ([worktree-path github-token extra-env]
    (let [env (merge (when github-token {"GH_TOKEN" github-token}) extra-env)]
@@ -382,7 +382,7 @@
 
 (defn- ^{:stratum 1} raw-push!
   "One `git push -u origin <branch>` with GH_TOKEN and `auth-env` (nil, or
-   the fallback's `push-auth/token-env`) injected. Returns a shell-result."
+   the fallback's `push-auth/retry-plan` env) injected. Returns a shell-result."
   [worktree-path branch-name github-token auth-env]
   (try
     (let [r (shell/run-bounded ["git" "push" "-u" "origin" branch-name]
@@ -395,15 +395,15 @@
 
 (defn- ^{:stratum 1} with-https-token-fallback!
   "Run `push!` (a 1-arg fn: extra env map or nil -> shell-result) with no
-   extra env. On failure with a token present, retry once with
-   `push-auth/token-env` for origin's push targets, so an SSH `origin` that
-   GH_TOKEN alone can't authenticate still pushes over HTTPS. The targets
-   are read both as configured and as git resolves them for a push
-   (`get-url --push` applies insteadOf aliases, pushInsteadOf and
-   pushurl), so the retry reaches the URL git would really push to. The
-   token exists only in that retry's environment: origin and .git/config
-   are never modified, so a retry that hangs, times out or is killed leaves
-   no credential behind. Shared by push-branch! and force-push!."
+   extra env. On failure with a token present, retry once over HTTPS with
+   the token in that push's environment only (`push-auth/retry-plan`), so
+   an SSH `origin` that GH_TOKEN alone can't authenticate still pushes.
+   The retry runs only when origin has one push URL, git does not rewrite
+   it, and it is on github.com. Otherwise (mirrors, insteadOf rewrites,
+   other hosts) the original failure comes back with the reason no
+   credential was sent appended to :error and the message key in
+   :token-retry-skipped. origin and .git/config are never modified.
+   Shared by push-branch! and force-push!."
   [worktree-path github-token push!]
   (let [result (push! nil)]
     (if (or (result/succeeded? result) (not github-token))
@@ -413,19 +413,23 @@
                          (when (result/succeeded? r)
                            (remove str/blank? (str/split-lines (:output r))))))
             pushurls (lines ["git" "config" "--get-all" "remote.origin.pushurl"])
-            auth-env (push-auth/token-env
-                      {:raw       (or (seq pushurls)
-                                      (lines ["git" "config" "--get-all" "remote.origin.url"]))
-                       :effective (lines ["git" "remote" "get-url" "--push" "--all" "origin"])
-                       :pushurl?  (boolean (seq pushurls))}
-                      github-token)]
-        (if auth-env
-          (push! auth-env)
-          result)))))
+            {:keys [env skip]}
+            (push-auth/retry-plan
+             {:configured (or (seq pushurls)
+                              (lines ["git" "config" "--get-all" "remote.origin.url"]))
+              :effective  (lines ["git" "remote" "get-url" "--push" "--all" "origin"])
+              :pushurl?   (boolean (seq pushurls))}
+             github-token)]
+        (if env
+          (push! env)
+          (assoc result
+                 :error (str (:error result) "\n"
+                             (msg/t :push/token-retry-skipped {:reason (msg/t skip)}))
+                 :token-retry-skipped skip))))))
 
 (defn- ^{:stratum 1} raw-force-push!
   "One `git push --force-with-lease` with GH_TOKEN and `auth-env` (nil, or
-   the fallback's `push-auth/token-env`) injected. Returns a shell-result."
+   the fallback's `push-auth/retry-plan` env) injected. Returns a shell-result."
   [worktree-path github-token auth-env]
   (try
     (let [r (shell/run-bounded ["git" "push" "--force-with-lease"]
@@ -506,9 +510,9 @@
   "Push the current branch to origin. Injects `github-token` as GH_TOKEN for
    gh's git credential helper. If the initial push fails and a token is
    present, retries over HTTPS with the token passed in that push's
-   environment only (see `push-auth/token-env`) — so a token-only environment
-   whose `origin` is an SSH remote can still push, matching
-   sandbox/push-branch!.
+   environment only (see `push-auth/retry-plan`) — so a token-only environment
+   whose `origin` is a github.com SSH remote can still push. Mirrors,
+   rewritten URLs and other hosts are not retried.
 
    The optional `github-token` drives GH_TOKEN injection and the HTTPS
    fallback; the 2-arity keeps the historical public-interface signature

@@ -350,7 +350,7 @@
           encoded (.encodeToString (java.util.Base64/getEncoder)
                                    (.getBytes (str "x-access-token:" token) "UTF-8"))
           leaked? #(let [c (slurp %)] (or (str/includes? c token) (str/includes? c encoded)))
-          origin  "git@fallback.invalid:o/r.git"
+          origin  "git@github.com:o/r.git"
           config  (str (fs/path dir ".git" "config"))]
       (with-open [proxy (java.net.ServerSocket. 0 1 (java.net.InetAddress/getLoopbackAddress))]
         (try
@@ -358,8 +358,9 @@
           (init-repo! dir)
           (sh! dir "git" "checkout" "-q" "-b" "release/token")
           (sh! dir "git" "remote" "add" "origin" origin)
-          ;; The SSH push fails at once; the HTTPS retry goes through a proxy
-          ;; that accepts the connection and never answers.
+          ;; The SSH push fails at once; the HTTPS retry goes through a local
+          ;; proxy that accepts the connection and never answers, so nothing
+          ;; reaches github.com.
           (sh! dir "git" "config" "core.sshCommand" "false")
           (sh! dir "git" "config" "http.proxy" (str "http://127.0.0.1:" (.getLocalPort proxy)))
           (with-redefs [shell/default-timeout-ms 2000]
@@ -372,42 +373,4 @@
                   (is (:timed-out? r))))))
           (is (not (leaked? config)) "no token, plain or encoded, in .git/config afterwards")
           (is (= origin (:output (git/exec! dir ["git" "remote" "get-url" "origin"]))))
-          (finally (fs/delete-tree dir)))))))
-
-;;------------------------------------------- retry reaches the real push URL
-(deftest ^{:stratum 2} push-fallback-targets-effective-push-url-test
-  (doseq [[label setup] [["insteadOf alias origin (gh:)"
-                          [["remote" "add" "origin" "gh:o/r.git"]
-                           ["config" "url.git@github.com:.insteadOf" "gh:"]]]
-                         ["HTTPS origin sent over SSH by pushInsteadOf"
-                          [["remote" "add" "origin" "https://github.com/o/r.git"]
-                           ["config" "url.git@github.com:.pushInsteadOf" "https://github.com/"]]]
-                         ["explicit SSH pushurl"
-                          [["remote" "add" "origin" "https://github.com/o/r.git"]
-                           ["config" "remote.origin.pushurl" "git@github.com:o/r.git"]]]]]
-    (testing (str label ": the retry pushes to the HTTPS URL, and its header wins
-                  over a repository-scoped one")
-      (let [dir (fs/create-temp-dir {:prefix "git-host-mode-rewrite-"})]
-        (try
-          (init-repo! dir)
-          (doseq [args setup] (apply sh! dir "git" args))
-          (sh! dir "git" "config" "http.https://github.com/o/r.git.extraHeader"
-               "Authorization: Basic OLD")
-          (let [envs     (atom [])
-                _        (with-redefs [shell/run-bounded (fn [_args opts]
-                                                           (swap! envs conj (:extra-env opts))
-                                                           {:exit 1 :out "" :err "denied"})]
-                           (git/push-branch! dir "main" "tok"))
-                env      (second @envs)
-                real-git (fn [& args]
-                           (str/trim (:out (apply process/shell
-                                                  {:dir (str dir) :extra-env env
-                                                   :out :string :continue true}
-                                                  "git" args))))]
-            (is (= "https://github.com/o/r.git" (real-git "remote" "get-url" "--push" "origin")))
-            (is (= (str "Authorization: Basic "
-                        (.encodeToString (java.util.Base64/getEncoder)
-                                         (.getBytes "x-access-token:tok" "UTF-8")))
-                   (real-git "config" "--get-urlmatch" "http.extraHeader"
-                             "https://github.com/o/r.git"))))
           (finally (fs/delete-tree dir)))))))
