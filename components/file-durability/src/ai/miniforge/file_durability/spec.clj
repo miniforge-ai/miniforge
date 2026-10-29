@@ -12,3 +12,5 @@
 (def ^{:stratum 1} TextWrite [:tuple File :string])
 
 (def ^{:stratum 1} ByteWrite [:tuple File bytes?])
+
+(def ^{:stratum 1} PublicationWrite [:tuple File bytes? fn?])
