@@ -282,9 +282,10 @@
    can be passed positionally, or via `--workflow-id`/`-w` / the legacy
    `--resume`/`-r` flag (kept so existing docs keep working).
 
-   Exits 1 when the id is missing and when the resumed run ends in
+   Exits 1 when the id is missing, when the resume throws (reported on
+   stderr, not as a stack trace) and when the resumed run ends in
    anything but success. resume-workflow returns nil only after reporting
-   the run already complete, a no-op success; its failures throw."
+   the run already complete, a no-op success."
   [m]
   (let [opts (util/get-opts m)
         args (:args m)
@@ -294,7 +295,17 @@
     (if (str/blank? (str wf-id))
       (do (display/print-error (messages/t :resume/missing-workflow-id))
           (cmd-shared/exit! 1))
-      (some-> (cmd-resume/resume-workflow wf-id opts) cmd-run/finish!))))
+      (some-> (try+
+                (cmd-resume/resume-workflow wf-id opts)
+                (catch InterruptedException interrupted
+                  (.interrupt (Thread/currentThread))
+                  (throw interrupted))
+                (catch Error fatal (throw fatal))
+                (catch Object caught
+                  (cmd-resume/print-resume-failure caught (:throwable &throw-context))
+                  (cmd-shared/exit! 1)
+                  nil))
+              cmd-run/finish!))))
 
 (defn ^{:stratum 0} scan-cmd [m] (cmd-scan/scan-cmd (util/get-opts m)))
 
