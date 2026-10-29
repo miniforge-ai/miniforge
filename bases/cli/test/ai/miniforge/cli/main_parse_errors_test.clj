@@ -21,9 +21,11 @@
    command exits 2, and a command group named alone lists its own
    subcommands instead of the global help."
   (:require
+   [babashka.fs :as fs]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main :as main]
+   [ai.miniforge.cli.main.commands.plan-executor :as plan-executor]
    [ai.miniforge.cli.main.commands.resume :as cmd-resume]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [slingshot.slingshot :refer [try+]]))
@@ -97,6 +99,32 @@
                                                {:execution/status :completed})]
       (run-main "resume" "-r" "wf-1"))
     (is (= "wf-1" @resumed) "-r is the documented short form of --resume")))
+
+(deftest ^{:stratum 1} run-accepts-the-options-it-forwards-test
+  (testing "`--quiet` reaches the plan executor"
+    (let [plan (str (fs/create-temp-file {:suffix ".edn"}))
+          seen (atom nil)]
+      (spit plan (pr-str {:plan/id "p" :plan/tasks []}))
+      (with-redefs [plan-executor/execute-plan (fn [_parsed opts]
+                                                 (reset! seen opts)
+                                                 {:success? true})]
+        (let [{:keys [exit]} (run-main "run" plan "--quiet")]
+          (is (nil? exit))
+          (is (true? (:quiet @seen)))))))
+  (testing "the resume options reach resume-workflow, `--from-phase` as a keyword"
+    (let [run-id (str (random-uuid))
+          correlation-id (str (random-uuid))
+          seen (atom nil)]
+      (with-redefs [cmd-resume/resume-workflow (fn [workflow-id opts]
+                                                 (reset! seen [workflow-id opts])
+                                                 {:execution/status :completed})]
+        (let [{:keys [exit]} (run-main "run" "--resume" "wf-1" "--run-id" run-id
+                                       "--correlation-id" correlation-id
+                                       "--from-phase" "plan" "-q")]
+          (is (nil? exit))
+          (is (= "wf-1" (first @seen)))
+          (is (= {:run-id run-id :correlation-id correlation-id :from-phase :plan :quiet true}
+                 (select-keys (second @seen) [:run-id :correlation-id :from-phase :quiet]))))))))
 
 (deftest ^{:stratum 1} command-groups-list-their-own-subcommands-test
   (testing "a group with no handler of its own"

@@ -468,7 +468,10 @@
            :no-lint   {:coerce :boolean}
            :semantic  {:coerce :boolean}}}
 
-   ;; Run command
+   ;; Run command. The spec declares every option run-cmd or its delegates
+   ;; read: the spec workflow, the plan executor (--quiet) and, with
+   ;; --resume, resume-workflow (--quiet, --run-id, --correlation-id,
+   ;; --from-phase), the same flags `resume` declares.
    {:cmds ["run"]
     :fn run-cmd
     :args->opts [:spec]
@@ -477,7 +480,11 @@
            :worktree        {:alias :w}
            :resume          {:alias :r}
            :backend         {:coerce :keyword :alias :b}
-           :execution-mode  {:coerce :keyword :alias :m}}}
+           :execution-mode  {:coerce :keyword :alias :m}
+           :quiet           {:coerce :boolean :alias :q}
+           :run-id          {}
+           :correlation-id  {}
+           :from-phase      {:coerce :keyword}}}
 
    ;; Resume — first-class subcommand. Reuses `run --resume`'s
    ;; underlying logic through the workflow-resume component.
