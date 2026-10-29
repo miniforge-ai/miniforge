@@ -625,13 +625,17 @@
        :ttl-ms   - Retention for that cleanup pass in ms (default: 7 days)
 
    Returns: Sink function (fn [event] -> nil)"
-  [& [opts]]
+  ;; The directory is resolved once, at creation: the background cleanup
+  ;; and every write use the one the sink was created for, never one
+  ;; resolved later (a test pointing the default at a temp dir while it
+  ;; creates the sink keeps the cleanup there too).
+  [& [{:keys [base-dir] :or {base-dir (default-events-dir)} :as opts}]]
   ;; Non-blocking cleanup on sink creation
-  (future (try (cleanup-stale-events! opts) (catch Exception _ nil)))
+  (future (try (cleanup-stale-events! (update opts :events-dir #(or % base-dir)))
+               (catch Exception _ nil)))
   (fn [event]
     (try
-      (let [base-dir (or (:base-dir opts) (default-events-dir))
-            file-path (if-let [workflow-id (:workflow/id event)]
+      (let [file-path (if-let [workflow-id (:workflow/id event)]
                         (event-file-path base-dir workflow-id event)
                         (operator-event-file-path base-dir event))
             f   (io/file file-path)

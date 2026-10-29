@@ -24,11 +24,17 @@
    in-memory log, and subscriber — because a redacting sink would
    still leave the other two holding it."
   (:require
+   [babashka.fs :as fs]
    [clojure.string :as str]
-   [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.event-stream.interface :as sut]))
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [ai.miniforge.event-stream.interface :as sut]
+   [ai.miniforge.event-stream.sinks :as sinks]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:dynamic *events-dir*
+  "Where this test's file sinks write: a temp dir, never the user's home."
+  nil)
 
 (def ^{:stratum 0} ^:private secret "AKIAIOSFODNN7EXAMPLE")
 
@@ -36,9 +42,19 @@
 
 (defn- ^{:stratum 0} ->text [x] (pr-str x))
 
-(deftest ^{:stratum 0} envelope-identifiers-are-untouched-test
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} new-stream
+  "A stream whose file sink, one of the destinations under test, writes
+   under the test's temp dir."
+  []
+  (sut/create-event-stream {:sinks [(sinks/file-sink {:base-dir (str *events-dir*)})]}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} envelope-identifiers-are-untouched-test
   (testing ":public-class fields pass through unchanged (N3 §8.4)"
-    (let [stream (sut/create-event-stream)
+    (let [stream (new-stream)
           wf-id  (random-uuid)
           event  (sut/create-envelope stream :workflow/started wf-id "started")
           out    (sut/publish! stream event)]
@@ -47,7 +63,7 @@
       (is (= (:event/type event) (:event/type out)))
       (is (= (:event/version event) (:event/version out))))))
 
-(deftest ^{:stratum 0} every-position-is-covered-at-the-stream-test
+(deftest ^{:stratum 2} every-position-is-covered-at-the-stream-test
   (testing "a secret reaches the log from no position in an event"
     ;; Through publish! rather than redact directly, because that is the
     ;; boundary §8.1 governs. Each position here was a live leak at some
@@ -60,7 +76,7 @@
                ["key name"      {(keyword secret) :held}]
                ["key namespace" {(keyword secret "field") :held}]
                ["metadata"      {:carrier (with-meta {:a 1} {:note secret})}]]]
-        (let [stream (sut/create-event-stream)]
+        (let [stream (new-stream)]
           (sut/publish! stream (assoc event
                                       :event/type :tool/invoked
                                       :workflow/id (str (random-uuid))))
@@ -71,10 +87,8 @@
             (is (not (str/includes? log secret))
                 (str "secret survived in " position))))))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(deftest ^{:stratum 1} secret-reaches-no-destination-test
-  (let [stream     (sut/create-event-stream)
+(deftest ^{:stratum 2} secret-reaches-no-destination-test
+  (let [stream     (new-stream)
         wf-id      (random-uuid)
         seen       (atom [])
         _          (sut/subscribe! stream :spy (fn [e] (swap! seen conj e)))
@@ -103,3 +117,9 @@
       (is (= "deploy.sh" (get-in published [:tool/args :command])))
       (is (= wf-id (:workflow/id published)))
       (is (str/includes? (:message published) "running with")))))
+
+(use-fixtures :each
+  (fn [f]
+    (let [dir (fs/create-temp-dir {:prefix "redaction-test-"})]
+      (try (binding [*events-dir* dir] (f))
+           (finally (fs/delete-tree dir))))))
