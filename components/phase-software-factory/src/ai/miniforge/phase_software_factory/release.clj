@@ -427,7 +427,10 @@
                                (get-in default-config [:budget :iterations]))
         zero-files? (= :release/zero-files
                        (get-in result [:error :data :type]))
-        phase-status (if zero-files?
+        ;; A gate denial (projected onto :phase/status by the workflow's
+        ;; gate validation) fails the release whatever the agent returned.
+        gate-failed? (= :failed (get-in ctx [:phase :phase/status]))
+        phase-status (if (or zero-files? gate-failed?)
                        :failed
                        (phase/determine-phase-status
                         agent-status iterations max-iterations))

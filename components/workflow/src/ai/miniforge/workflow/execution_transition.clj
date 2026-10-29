@@ -146,8 +146,10 @@
    never bypasses it; the envelope carries :reason/missing-artifact.
 
    The decision is published before the result is returned. When it is not
-   acknowledged, the result also carries :phase/decision-unacknowledged (the
-   anomaly); `execution-step` refuses the phase boundary on it."
+   acknowledged, the result is failed like a denial (:phase/status :failed and
+   a :gate/decision-unacknowledged gate error) and also carries
+   :phase/decision-unacknowledged (the anomaly); `execution-step` refuses the
+   phase boundary on it."
   [interceptor phase-result ctx]
   (if (already-done? phase-result)
     phase-result
@@ -190,8 +192,13 @@
                                                (remove gate/passed?)
                                                (mapv #(-> (select-keys % [:gate :errors])
                                                           (update :errors (fnil vec [])))))))
+            ;; Projected before :leave runs, the same way as a denial, so leave
+            ;; handlers finalize a failed phase instead of publishing success.
             (anomaly/any-anomaly? receipt)
-            (assoc :phase/decision-unacknowledged receipt)))
+            (-> (assoc :phase/status :failed :phase/decision-unacknowledged receipt)
+                (update :phase/gate-errors (fnil conj [])
+                        {:code :gate/decision-unacknowledged
+                         :message (messages/t :gate/decision-unacknowledged)}))))
         phase-result))))
 
 ;------------------------------------------------------------------------------ Layer 2

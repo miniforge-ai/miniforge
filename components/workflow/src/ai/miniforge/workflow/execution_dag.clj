@@ -75,7 +75,9 @@
 
 (defn ^{:stratum 1} dag-skip-reason
   "Return the reason DAG execution should be skipped, or nil if it should proceed.
-   Reasons are keywords — :not-plan-phase, :disabled, :no-plan-id, :no-tasks."
+   Reasons are keywords — :not-plan-phase, :disabled, :no-plan-id, :no-tasks,
+   :plan-failed. A failed plan phase (including one its gates denied) keeps its
+   plan output, but its tasks are never executed."
   [phase-name phase-result ctx]
   (cond
     (not= :plan phase-name) :not-plan-phase
@@ -84,6 +86,7 @@
             (cond
               (nil? plan) :no-plan-id
               (empty? (:plan/tasks plan)) :no-tasks
+              (phase/failed? phase-result) :plan-failed
               :else nil))))
 
 (defn ^{:stratum 1} apply-dag-failure

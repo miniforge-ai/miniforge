@@ -9,7 +9,6 @@
             [ai.miniforge.workflow.execution-dag :as dag]
             [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
             [ai.miniforge.workflow.execution-transition :as transition]
-            [ai.miniforge.workflow.messages :as messages]
             [ai.miniforge.workflow.runner-outcome :as outcome]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -29,15 +28,11 @@
 
 (defn- ^{:stratum 0} recorded-result
   "A phase whose gate decision was not acknowledged is recorded as failed, so a
-   resume re-runs it. Its output and decision envelope are kept."
+   resume re-runs it, even when its :leave recomputed :status from the agent
+   result. Its output and decision envelope are kept."
   [result]
-  (if (:phase/decision-unacknowledged result)
-    (-> result
-        (assoc :status :failed)
-        (update :phase/gate-errors (fnil conj [])
-                {:code :gate/decision-unacknowledged
-                 :message (messages/t :gate/decision-unacknowledged)}))
-    result))
+  (cond-> result
+    (:phase/decision-unacknowledged result) (assoc :status :failed)))
 
 (defn- ^{:stratum 0} refused [context boundary failure fail]
   (let [message (:message (response/anomaly->event-data failure))
