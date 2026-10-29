@@ -97,3 +97,23 @@
           (is (dag/err? result))
           (is (= :stage-failed (get-in result [:error :code]))))
         (finally (fs/delete-tree dir))))))
+
+(deftest ^{:stratum 2} commit-fix-leaves-the-index-untouched-when-staging-fails-test
+  (testing "when the second file cannot be staged, the real index keeps what it had and nothing more"
+    (let [dir (repo-with-unrelated-change)]
+      (try
+        (spit (str (fs/path dir ".gitignore")) "ignored.txt\n")
+        (git! dir "add" "d.txt")
+        (spit (str (fs/path dir "a.txt")) "a2\n")
+        (spit (str (fs/path dir "ignored.txt")) "x\n")
+        (let [head   (git! dir "rev-parse" "HEAD")
+              before (git! dir "ls-files" "--stage")
+              result (fix/commit-fix dir {:fix/type :review-changes} "fix/x" nil
+                                     [{:path "a.txt" :action :modify}
+                                      {:path "ignored.txt" :action :create}])]
+          (is (= :stage-failed (get-in result [:error :code])))
+          (is (= before (git! dir "ls-files" "--stage")))
+          (is (= "d.txt" (git! dir "diff" "--cached" "--name-only")))
+          (is (= head (git! dir "rev-parse" "HEAD")))
+          (is (empty? (fs/glob (fs/path dir ".git") "index.fix-*"))))
+        (finally (fs/delete-tree dir))))))

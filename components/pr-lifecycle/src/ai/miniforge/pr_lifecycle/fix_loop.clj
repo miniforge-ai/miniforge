@@ -23,6 +23,7 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.events :as events]
+   [ai.miniforge.pr-lifecycle.fix-stage :as fix-stage]
    [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
    [ai.miniforge.pr-lifecycle.policy-eval.fs :as policy-fs]
    [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
@@ -30,10 +31,8 @@
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.release-executor.interface :as release]
-   [babashka.process :as process]
    [clojure.java.io :as io]
-   [clojure.string :as str]
-   [slingshot.slingshot :refer [try+]]))
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -236,10 +235,10 @@
    loop.
 
    Only `files` are staged, never the whole tree: the worktree can hold
-   changes the fix did not make. Pathspecs are literal, so a name with
-   glob characters stages only itself. A deleted path is unstaged from
-   the index (`git rm --cached --ignore-unmatch`), a no-op when git never
-   tracked it.
+   changes the fix did not make. They are staged into a copy of the index
+   and committed from it (`fix-stage`); the copy replaces the real index
+   only after the commit succeeds, so a staging or commit failure leaves
+   the real index as it was and a retry never commits leftovers.
 
    Arguments:
    - worktree-path: Path to git worktree
@@ -264,32 +263,23 @@
                 {:message "Committing fix"
                  :data {:branch branch :fix-type fix-type}}))
 
-    (let [stage-error (try+
-                       (some (fn [{:keys [path action]}]
-                               (let [args (if (= :delete action)
-                                            ["rm" "--cached" "--quiet" "--ignore-unmatch" "--" path]
-                                            ["add" "--" path])
-                                     r    (apply process/shell
-                                                 {:dir (str worktree-path) :continue true
-                                                  :out :string :err :string}
-                                                 "git" (concat git-dir/hooks-disabled-args
-                                                               ["--literal-pathspecs"] args))]
-                                 (when-not (zero? (:exit r))
-                                   (str path ": " (str/trim (str (:err r)))))))
-                             files)
-                       (catch Exception e (.getMessage e)))]
-      (if stage-error
+    (let [staged (fix-stage/stage-files! worktree-path files)]
+      (if-let [stage-error (:error staged)]
         (dag/err :stage-failed stage-error)
-        (let [stage-result (release/commit-changes! worktree-path commit-msg
-                                                    git-dir/hooks-disabled-args)]
-          (if (:success? stage-result)
-            (let [push-result (release/push-branch! worktree-path branch nil
-                                                    git-dir/hooks-disabled-args)]
-              (if (:success? push-result)
-                (dag/ok {:commit-sha (:commit-sha stage-result)
-                         :branch branch})
-                (dag/err :push-failed (:error push-result))))
-            (dag/err :commit-failed (:error stage-result))))))))
+        (let [commit-result (release/commit-changes! worktree-path commit-msg
+                                                     git-dir/hooks-disabled-args
+                                                     {"GIT_INDEX_FILE" (:temp staged)})]
+          (if-not (:success? commit-result)
+            (do (fix-stage/discard-index! staged)
+                (dag/err :commit-failed (:error commit-result)))
+            (if-let [install-error (fix-stage/install-index! staged)]
+              (dag/err :index-update-failed install-error)
+              (let [push-result (release/push-branch! worktree-path branch nil
+                                                      git-dir/hooks-disabled-args)]
+                (if (:success? push-result)
+                  (dag/ok {:commit-sha (:commit-sha commit-result)
+                           :branch branch})
+                  (dag/err :push-failed (:error push-result)))))))))))
 
 ;; Conversation follow-up
 (defn ^{:stratum 0} resolve-comment-thread
