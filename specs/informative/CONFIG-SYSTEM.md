@@ -174,7 +174,12 @@ Configuration is merged from three sources (in order of precedence):
    - `MINIFORGE_AGENT_THINKING_MODEL`
    - `MINIFORGE_AGENT_EXECUTION_MODEL`
 
-   These four are the only LLM variables miniforge reads.
+   These four are the only LLM variables mapped into the user config.
+   Backends also read their own variables directly, outside the config:
+   `ANTHROPIC_API_KEY` (anthropic-api), `OPENAI_API_KEY` (openai-api),
+   `OPENROUTER_API_KEY` (openrouter), `GEMINI_API_KEY` (gemini-api), and
+   `MINIFORGE_OPENAI_COMPAT_BASE_URL` and `MINIFORGE_OPENAI_COMPAT_API_KEY`
+   (openai-compat endpoint and key).
    `MINIFORGE_LLM_TIMEOUT`, `MINIFORGE_LLM_LINE_TIMEOUT`,
    `MINIFORGE_LLM_MAX_TOKENS`, `MINIFORGE_MAX_ITERATIONS`,
    `MINIFORGE_MAX_TOKENS`, `MINIFORGE_FAILURE_STRATEGY`,

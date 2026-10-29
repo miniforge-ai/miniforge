@@ -4,405 +4,134 @@
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
 
-# Intelligent Model Selection
+# Model Selector
 
-> Model selection is a **Miniforge SDLC** feature that leverages MiniForge Core's agent protocol to choose the optimal
-model per task.
+The model selector is a library API that picks a model from the model catalog for a classified task. No workflow
+calls it: a workflow run gives each role the model its configuration names, as
+[Configuration Management](configuration.md) describes, and no environment variable or `config.edn` key reaches the
+selector. The only caller in the codebase is `agent/create-agent`, and no workflow, phase or CLI command calls that.
 
-Miniforge automatically selects the optimal AI model for each task based on task characteristics, optimizing for
-quality, cost, and performance.
+## How it works
 
-> **Status:** this selector is a library API (`llm/select-model`, `agent/create-agent`). Workflow runs do not call
-> it; each role runs the model the user config sets, as [Configuration Management](configuration.md) describes. No
-> environment variable or `config.edn` key controls it.
+1. `agent/classify-task` reads a task map (`:phase`, `:agent-type`, `:description`, `:title`, `:context-tokens`,
+   `:privacy-required`, `:cost-limit`) and returns a classification such as
+   `{:type :thinking-heavy :confidence 0.9 :reason "..."}`.
+2. `llm/select-model` takes that classification, a config map (`:strategy`) and constraints (`:context-size`,
+   `:cost-limit`, `:require-local`). It walks the recommendation tiers for the task type and returns the first model
+   that is available and meets the constraints.
+3. `agent/create-agent` runs both steps unless its options carry `:model` or `:model-selection-enabled false`, and
+   logs the choice.
 
-## Overview
+The tiers per task type are `:task-type-recommendations` in
+[model-catalog.edn](../components/llm/resources/llm/model-catalog.edn), which also holds every model's profile:
 
-Instead of using a single model for everything, Miniforge intelligently chooses from 16 models across 4 providers:
+| Task type | Tiers |
+|-----------|-------|
+| `:thinking-heavy` | tier-1, tier-2, tier-3-local |
+| `:execution-focused` | tier-1, tier-2, tier-3-local |
+| `:simple-validation` | tier-1, tier-2, tier-3-local |
+| `:large-context` | tier-1, tier-2 |
+| `:privacy-sensitive` | tier-1-local, tier-2-local |
+| `:cost-optimized` | tier-1-free, tier-2-cheap, tier-3-moderate |
 
-- **Anthropic Claude**: Best overall quality and code generation
-- **OpenAI Codex (GPT-5)**: Code-specialized models
-- **Google Gemini**: Massive context windows (1-2M tokens), multimodal
-- **Open Source**: Local models for privacy and cost optimization
+Strategies:
 
-## How It Works
+1. `:automatic` (default) reads tier-1, tier-2 and tier-3-local, or only the `-local` tiers when `:require-local` is
+   set. If no model meets the constraints it takes the first available one.
+2. `:cost-optimized` reads tier-1-free, tier-2-cheap, tier-3-moderate, then tier-1.
+3. `:speed` reads tier-1 and tier-2, fastest first.
 
-### 1. Task Classification
+Nothing is selected when no model in the tiers the strategy reads qualifies (`:automatic` first retries without the
+constraints, taking any available model), or when the strategy reads none of the task type's tiers: `:automatic` reads
+none of the `:privacy-sensitive` or `:cost-optimized` tiers unless
+`:require-local` is set. `select-model` is meant to return Claude Sonnet 4.6 with `:fallback-used true` then, but it
+throws instead: the warning it logs on that path passes a keyword where `log/warn` expects a logger
+(IllegalArgumentException, "No implementation of method: :log*"). `create-agent` catches the exception and keeps the
+role's configured model.
 
-When you create an agent or start a workflow phase, the system analyzes:
+## Availability: provider API keys
 
-- **Phase**: planning, implementation, validation, testing, review
-- **Agent Type**: planner, implementer, validator, tester, reviewer
-- **Description**: keywords indicating complexity and type
-- **Context Size**: number of tokens/files involved
-- **Privacy Requirements**: whether local models are needed
-- **Cost Constraints**: budget limitations
+A cloud model counts as available only when its provider's API-key variable is set and not blank. These variables
+are not miniforge settings. The selector only checks that they are set; it neither calls a model nor creates a
+client.
 
-Example classifications:
+| Provider | Variable |
+|----------|----------|
+| `:anthropic` | `ANTHROPIC_API_KEY` |
+| `:openai` | `OPENAI_API_KEY` |
+| `:google` | `GOOGLE_API_KEY` |
+| `:groq` | `GROQ_API_KEY` |
 
-```clojure
-;; Planning phase
-{:type :thinking-heavy
- :confidence 0.95
- :reason "Phase 'plan' requires deep reasoning"}
+The map is `:provider-env-vars` in `components/llm/resources/llm/model-selector.edn`. Providers not in it, such as
+the local models' providers, are always available. The `:gemini-api` backend reads `GEMINI_API_KEY` for its own
+calls, not `GOOGLE_API_KEY`.
 
-;; Implementation phase
-{:type :execution-focused
- :confidence 0.90
- :reason "Code implementation task"}
+## Options
 
-;; Validation phase
-{:type :simple-validation
- :confidence 0.95
- :reason "Quick syntax checks"}
-```
-
-### 2. Model Selection
-
-Based on the classification, the system selects the optimal model:
-
-**Thinking-Heavy Tasks** (Planning, Architecture, Research)
-
-- Primary: **Opus 4.6** (best reasoning)
-- Alternatives: GPT-5.3 Codex, Gemini 2.0 Flash Thinking
-- Local: Llama 3.3 70B
-
-**Execution-Focused Tasks** (Implementation, Testing, Review)
-
-- Primary: **Sonnet 4.5** (best code generation)
-- Alternatives: GPT-5.2 Codex, GPT-5.3 Codex
-- Local: Qwen 2.5 Coder 32B, DeepSeek Coder 33B
-
-**Simple Validation** (Syntax, Formatting, Quick Checks)
-
-- Primary: **Haiku 4.5** (fastest, cheapest)
-- Alternatives: Gemini 2.0 Flash, GPT-5.1 Codex Max
-- Local: CodeLlama 34B
-
-**Large Context** (>200k tokens)
-
-- Primary: **Gemini Pro 2.0** (2M context window!)
-- Alternatives: Gemini 2.0 Flash (1M), Opus 4.6 (200k)
-
-**Privacy-Sensitive** (Proprietary code, offline)
-
-- Primary: **Llama 3.3 70B** (best local reasoning)
-- Alternatives: Qwen 2.5 Coder, DeepSeek Coder
-- For Chinese: GLM-4 Plus
-
-## Configuration
-
-Selection takes its options as arguments, not from `config.edn` or the environment. Earlier versions of this page
-listed `MINIFORGE_MODEL_SELECTION_ENABLED`, `MINIFORGE_MODEL_SELECTION_STRATEGY`,
-`MINIFORGE_MODEL_SELECTION_COST_LIMIT`, `MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL` and a `:model-selection` config
-block; nothing read them, and miniforge no longer accepts the variables.
+Options are arguments, not configuration. Earlier versions of this page listed `MINIFORGE_MODEL_SELECTION_ENABLED`,
+`MINIFORGE_MODEL_SELECTION_STRATEGY`, `MINIFORGE_MODEL_SELECTION_COST_LIMIT`,
+`MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL` and a `:model-selection` config block; nothing read them, and miniforge no
+longer accepts the variables.
 
 ```clojure
 ;; Strategy: :automatic (default), :cost-optimized or :speed
 (llm/select-model classification {:strategy :cost-optimized})
 
 ;; Constraints
-(llm/select-model classification {} {:cost-limit 0.05 :require-local true})
+(llm/select-model classification {} {:context-size 500000 :cost-limit 0.05 :require-local true})
 
 ;; create-agent takes :model-selection-enabled, :model-selection-strategy,
 ;; :privacy-required and :cost-limit; an explicit :model skips selection
-(create-agent :implementer {:model "claude-opus-4-6"})
+(agent/create-agent :implementer {:model "claude-opus-4-6"})
 ```
 
 Neither constraint is a hard limit:
 
 1. `:require-local` (`:privacy-required` on `create-agent`) does not keep data on the machine. Only the `:automatic`
    strategy reads it. When the task type lists no local model (the `:large-context` and `:cost-optimized` types list
-   none), selection falls back to Claude Sonnet 4.6, a cloud model. The `:cost-optimized` and `:speed` strategies
-   ignore it.
-   Do not use it to protect sensitive code.
+   none), nothing is selected, and `create-agent` keeps the role's configured model, a cloud model unless the config
+   names a local one. The `:cost-optimized` and `:speed` strategies ignore it. Do not use it to protect sensitive
+   code.
 2. `:cost-limit` filters models by price tier: a model's `:cost` level (`:economical`, `:moderate`, `:expensive`) is
    compared with fixed thresholds. It does not cap what a task spends. When no model passes, `:automatic` takes the
-   first available model and the final fallback is Claude Sonnet 4.6.
+   first available model in the tiers it reads.
 
-## Model Registry
-
-### Anthropic Claude
-
-**Opus 4.6** (Flagship)
-
-- Best for: Complex reasoning, architecture, planning
-- Reasoning: 10/10 | Code: 9/10 | Speed: 2/10 | Cost: $$
-- Context: 200k tokens
-
-**Sonnet 4.5** (Workhorse)
-
-- Best for: Code implementation, testing, review
-- Reasoning: 8/10 | Code: 10/10 | Speed: 7/10 | Cost: $
-- Context: 200k tokens
-
-**Haiku 4.5** (Efficient)
-
-- Best for: Validation, formatting, quick checks
-- Reasoning: 6/10 | Code: 7/10 | Speed: 10/10 | Cost: ¢
-- Context: 200k tokens
-
-### OpenAI Codex (GPT-5)
-
-**GPT-5.3 Codex** (Flagship)
-
-- Best for: Advanced code generation, polyglot programming
-- Reasoning: 10/10 | Code: 10/10 | Speed: 6/10 | Cost: $$
-- Context: 128k tokens
-
-**GPT-5.2 Codex** (Workhorse)
-
-- Best for: Standard code tasks, implementation
-- Reasoning: 8/10 | Code: 9/10 | Speed: 7/10 | Cost: $
-- Context: 128k tokens
-
-**GPT-5.1 Codex Max** (Balanced)
-
-- Best for: Fast code generation, large outputs
-- Reasoning: 8/10 | Code: 9/10 | Speed: 8/10 | Cost: $
-- Context: 128k tokens
-
-**GPT-5.2** (General)
-
-- Best for: Mixed code and text, documentation
-- Reasoning: 8/10 | Code: 7/10 | Speed: 7/10 | Cost: $
-- Context: 128k tokens
-
-### Google Gemini
-
-**Gemini Pro 2.0** (Workhorse)
-
-- Best for: Very large codebases, multimodal
-- Reasoning: 8/10 | Code: 8/10 | Speed: 7/10 | Cost: $
-- Context: **2M tokens!**
-
-**Gemini 2.0 Flash** (Fast)
-
-- Best for: Fast execution, large context, batch operations
-- Reasoning: 8/10 | Code: 8/10 | Speed: 9/10 | Cost: ¢
-- Context: 1M tokens
-
-#### Gemini 2.0 Flash Thinking (Experimental)
-
-- Best for: Extended reasoning, complex problem decomposition
-- Reasoning: 10/10 | Code: 8/10 | Speed: 3/10 | Cost: $$
-- Context: 1M tokens
-
-### Open Source / Local Models
-
-**Llama 3.3 70B** (OSS Flagship)
-
-- Best for: Privacy-sensitive, offline, cost-free
-- Reasoning: 8/10 | Code: 7/10 | Speed: 5/10 | Cost: Free
-- Context: 128k tokens
-
-**Qwen 2.5 Coder 32B** (OSS Specialist)
-
-- Best for: Fast local code generation
-- Reasoning: 7/10 | Code: 9/10 | Speed: 8/10 | Cost: Free
-- Context: 32k tokens
-
-**DeepSeek Coder 33B** (OSS Specialist)
-
-- Best for: Code-focused tasks, fill-in-the-middle
-- Reasoning: 7/10 | Code: 9/10 | Speed: 6/10 | Cost: Free
-- Context: 16k tokens
-
-**GLM-4 Plus** (OSS Advanced)
-
-- Best for: Chinese language, multilingual codebases
-- Reasoning: 8/10 | Code: 7/10 | Speed: 6/10 | Cost: Free
-- Context: 128k tokens
-
-**CodeLlama 34B** (OSS Specialist)
-
-- Best for: Fast local inference, low-resource environments
-- Reasoning: 6/10 | Code: 8/10 | Speed: 8/10 | Cost: Free
-- Context: 16k tokens
-
-## Examples
-
-### Large Codebase Analysis
+## API
 
 ```clojure
-;; Task with large context
-{:phase :implement
- :description "Refactor entire monorepo"
- :context-tokens 1500000}
+(require '[ai.miniforge.agent.interface :as agent]
+         '[ai.miniforge.llm.interface :as llm])
 
-;; Automatically selects Gemini Pro 2.0 (2M context)
-;; Output:
-;; Selected Model: Gemini Pro 2.0 (Google)
-;; Reason: Large context (1.5M tokens) requires specialized model
-;; Context Window: 2M tokens
-```
-
-## Cost Savings
-
-Example workflow with intelligent selection:
-
-| Phase | Task Type | Model | Cost |
-|-------|-----------|-------|------|
-| 1. Plan | Thinking-heavy | Opus 4.6 | $0.03 |
-| 2-5. Implement | Execution-focused | Sonnet 4.5 | $0.20 |
-| 6. Validate | Simple-validation | Haiku 4.5 | $0.01 |
-| 7. Review | Execution-focused | Sonnet 4.5 | $0.04 |
-| **Total** | | | **$0.28** |
-
-Compare to using Opus for everything: **$0.84**
-
-**Savings: 67%** with maintained quality (right model for each task)
-
-## Selection Matrix
-
-Decision tree for model selection:
-
-```text
-Task Type?
-│
-├─ Privacy Required? ──> LOCAL MODELS
-│                        • Llama 3.3 70B (reasoning)
-│                        • Qwen 2.5 Coder (code)
-│
-├─ Large Context (>200k)? ──> GEMINI
-│                              • Gemini Pro 2.0 (2M)
-│                              • Gemini 2.0 Flash (1M)
-│
-├─ Complex Reasoning? ──> TIER 1 THINKERS
-│                        • Opus 4.6 (best overall)
-│                        • GPT-5.3 Codex (code focus)
-│
-├─ Standard Code Work? ──> TIER 1 CODERS
-│                         • Sonnet 4.5 (best codegen)
-│                         • GPT-5.2/5.3 Codex
-│
-└─ Simple/Fast Tasks? ──> EFFICIENT MODELS
-                          • Haiku 4.5 (cheapest)
-                          • Gemini 2.0 Flash (fastest)
-```
-
-## Programmatic API
-
-### Task Classification
-
-```clojure
-(require '[ai.miniforge.agent.interface :as agent])
-
-;; Classify a task
 (def classification
-  (agent/classify-task
-    {:phase :plan
-     :agent-type :planner-agent
-     :description "Design distributed architecture"}))
+  (agent/classify-task {:phase :plan
+                        :agent-type :planner-agent
+                        :description "Design distributed architecture"}))
 
-;; => {:type :thinking-heavy
-;;     :confidence 0.95
-;;     :reason "Phase 'plan' requires thinking-heavy tasks"
-;;     :alternative-types [:execution-focused]
-;;     :all-reasons [...]}
-```
+(def selection (llm/select-model classification))
+;; With ANTHROPIC_API_KEY set:
+;; => {:model :opus-4.7 :model-id "claude-opus-4-7" :provider :anthropic
+;;     :backend :claude :task-type :thinking-heavy :strategy :automatic
+;;     :rationale "..." :fallback-used false ...}
 
-### Model Selection
+(llm/explain-selection selection)   ; text for a person to read
 
-```clojure
-(require '[ai.miniforge.llm.interface :as llm])
-
-;; Select model based on classification
-(def selection
-  (llm/select-model classification))
-
-;; => {:model :opus-4.6
-;;     :model-id "claude-opus-4-6"
-;;     :provider :anthropic
-;;     :backend :claude
-;;     :task-type :thinking-heavy
-;;     :confidence 0.95
-;;     :strategy :automatic
-;;     :rationale "..."}
-
-;; Get explanation
-(llm/explain-selection selection)
-;; => "Model Auto-Selected: Opus 4.6
-;;     Task: thinking-heavy (confidence: 95%)
-;;     Reasoning: Planning requires exceptional reasoning..."
-```
-
-### Query Model Registry
-
-```clojure
-;; Get model by capability
+;; Catalog queries
+(llm/get-model :sonnet-4.6)
 (llm/get-models-by-capability :reasoning :exceptional)
-;; => [:opus-4.6 :gpt-5.3-codex :gemini-2.0-flash-thinking-exp]
-
-;; Get models by use-case
 (llm/get-models-by-use-case :code-implementation)
-;; => [:sonnet-4.5 :gpt-5.2-codex ...]
-
-;; Get model profile
-(llm/get-model :sonnet-4.5)
-;; => {:model-id "claude-sonnet-4-5-20250929"
-;;     :provider :anthropic
-;;     :capabilities {:reasoning :excellent
-;;                    :code-generation :exceptional
-;;                    ...}
-;;     ...}
+(llm/recommend-models-for-task-type :large-context)
 ```
 
-### Agent Creation with Auto-Selection
-
-```clojure
-;; Create agent - automatically selects model based on role
-(def planner (agent/create-agent :planner {:phase :plan}))
-;; Logs: Model Auto-Selected: Opus 4.6 (thinking-heavy)
-
-(def implementer (agent/create-agent :implementer {:phase :implement}))
-;; Logs: Model Auto-Selected: Sonnet 4.5 (execution-focused)
-
-(def validator (agent/create-agent :validator {:phase :validate}))
-;; Logs: Model Auto-Selected: Haiku 4.5 (simple-validation)
-```
-
-## Best Practices
-
-1. **Trust the defaults**: Automatic selection is optimized for quality and cost
-2. **Use cost-optimized for batch operations**: When running many workflows
-3. **Do not rely on `:require-local` for sensitive code**: it can fall back to a cloud model (see Configuration)
-4. **Override only when necessary**: Let the system optimize
-5. **Monitor costs**: Check logs for model selection and costs
-6. **Local models for development**: Fast, free, no API calls
+`explain-selection` ends with a line naming `:spec/model-override`; nothing reads that key.
 
 ## Troubleshooting
 
-### Want to see selection reasoning?
-
-Enable verbose logging:
-
-```bash
-export MINIFORGE_LOG_LEVEL=debug
-miniforge workflow run spec.edn
-```
-
-### Override not working?
-
-Ensure you're passing `:model` explicitly:
-
-```clojure
-(create-agent :implementer {:model "claude-opus-4-6"})
-```
-
-### Local models not available?
-
-Install via Ollama:
-
-```bash
-ollama pull llama3.3:70b
-ollama pull qwen2.5-coder:32b
-ollama pull deepseek-coder:33b
-```
+`select-model` throwing IllegalArgumentException ("No implementation of method: :log*") means nothing was selected
+(see How it works). Check the provider API-key variables under Availability, and whether the strategy reads the task
+type's tiers at all.
 
 ## Further Reading
 
-- [Model Registry](../components/llm/src/ai/miniforge/llm/model_registry.clj) - All model profiles
+- [Model catalog](../components/llm/resources/llm/model-catalog.edn) - Model profiles and per-task-type tiers
 - [Task Classifier](../components/agent/src/ai/miniforge/agent/task_classifier.clj) - Classification logic
 - [Model Selector](../components/llm/src/ai/miniforge/llm/model_selector.clj) - Selection strategies
-- [Spec](../work/intelligent-model-selection.edn) - Original specification

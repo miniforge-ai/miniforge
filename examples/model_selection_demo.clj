@@ -295,11 +295,11 @@
 
 (println "  Neither is a hard limit. :cost-limit filters models by price tier;")
 
-(println "  it does not cap spend. :require-local falls back to a cloud model")
+(println "  it does not cap spend. :require-local selects nothing for task types")
 
-(println "  (Sonnet 4.6) for task types that list no local model, so it does")
+(println "  that list no local model, and create-agent then keeps the role's")
 
-(println "  not keep data on the machine.")
+(println "  configured model, usually a cloud one; it does not keep data local.")
 
 (println)
 
