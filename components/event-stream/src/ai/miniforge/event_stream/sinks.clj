@@ -224,9 +224,9 @@
 (defn- ^{:stratum 0} idle-unmanaged-run?
   "True when live workflow directory `dir` has a visible name, no
    manifest (no JVM runner manages it), nothing but event and temp files
-   besides an `archived.marker` an interrupted archive left (not a
-   symlink), and neither it nor any event file was modified since
-   `cutoff`."
+   besides an `archived.marker` an interrupted archive left (a regular
+   file: a symlink or a directory of that name makes the run ineligible),
+   and neither it nor any event file was modified since `cutoff`."
   [^java.io.File dir cutoff manifest-name marker-name]
   (let [children (.listFiles dir)]
     (and (some? children)
@@ -235,7 +235,8 @@
          (every? (fn [^java.io.File f]
                    (let [n (.getName f)]
                      (or (and (= marker-name n)
-                              (not (Files/isSymbolicLink (.toPath f))))
+                              (Files/isRegularFile (.toPath f)
+                                                   (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])))
                          (and (.isFile f)
                               (not= manifest-name n)
                               (or (str/ends-with? n ".json") (str/ends-with? n ".transit.tmp"))
@@ -243,10 +244,13 @@
                  children))))
 
 (defn- ^{:stratum 0} completed-run?
-  "True when the newest workflow lifecycle event in `dir`, among its 50
-   newest files, is a successful :workflow/completed. A started, resumed,
-   failed or cancelled run is not: resume can still write to it. Reads
-   the transit-JSON this namespace writes."
+  "True when the newest workflow lifecycle event in `dir` is a successful
+   :workflow/completed. A started, resumed, failed or cancelled run is
+   not: resume can still write to it. Reads event files newest-first, one
+   mtime at a time, and stops at the first mtime that holds a lifecycle
+   event, after reading every file with that mtime: notifications written
+   after completion, or files sharing an mtime, cannot hide the event.
+   Reads the transit-JSON this namespace writes."
   [^java.io.File dir]
   (let [parse (fn [^java.io.File f]
                 (try+ (json/parse-string (slurp f :encoding "UTF-8"))
@@ -255,12 +259,14 @@
                        (get e "~:event/sequence-number" 0)])
         lifecycle #{"~:workflow/started" "~:workflow/resumed" "~:workflow/completed"
                     "~:workflow/failed" "~:workflow/cancelled"}
+        lifecycle-events (fn [files]
+                           (seq (filter #(lifecycle (get % "~:event/type")) (keep parse files))))
+        mtime (fn [^java.io.File f] (.lastModified f))
         newest (->> (.listFiles dir)
                     (filter #(str/ends-with? (.getName ^java.io.File %) ".json"))
-                    (sort-by #(- (.lastModified ^java.io.File %)))
-                    (take 50)
-                    (keep parse)
-                    (filter #(lifecycle (get % "~:event/type")))
+                    (sort-by mtime >)
+                    (partition-by mtime)
+                    (some lifecycle-events)
                     (sort-by order #(compare %2 %1))
                     first)]
     (and (= "~:workflow/completed" (get newest "~:event/type"))

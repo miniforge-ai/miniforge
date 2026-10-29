@@ -21,6 +21,7 @@
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.event-stream.sinks :as sinks]
+   [cheshire.core :as json]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]]))
 
@@ -37,6 +38,17 @@
   (let [t (- (System/currentTimeMillis) (* 30 24 60 60 1000))]
     (doseq [^java.io.File f (reverse (file-seq dir))]
       (.setLastModified f t))))
+
+(defn- ^{:stratum 0} age-in-write-order!
+  "Age run directory `dir` 30 days, one second apart per event file in
+   the order its run wrote them, so the newest file holds the last event."
+  [^java.io.File dir]
+  (let [t0    (- (System/currentTimeMillis) (* 30 24 60 60 1000))
+        files (sort-by #(get (json/parse-string (slurp %)) "~:event/sequence-number")
+                       (.listFiles dir))]
+    (doseq [[i ^java.io.File f] (map-indexed vector files)]
+      (.setLastModified f (+ t0 (* i 1000))))
+    (.setLastModified dir (+ t0 (* (count files) 1000)))))
 
 (defn- ^{:stratum 0} write-run!
   "Write `event-types` for a new workflow with the real file sink under
@@ -98,6 +110,31 @@
     (sinks/cleanup-stale-events! {:events-dir dir})
     (is (= "keep me" (slurp outside)) "the file outside the events tree is untouched")
     (is (.isDirectory (live dir wf-id)) "the run is skipped, not archived")))
+
+(deftest ^{:stratum 1} a-completion-behind-many-later-events-is-found
+  (let [dir     (temp-events-dir)
+        notices (repeat 60 :pr/created)
+        spaced  (apply write-run! dir :workflow/started :workflow/completed notices)
+        tied    (apply write-run! dir :workflow/started :workflow/completed notices)]
+    (age-in-write-order! (live dir spaced))
+    (age-tree! (live dir tied))
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (testing "60 notifications written after completion, each newer"
+      (is (.isDirectory (archived dir spaced))))
+    (testing "every file sharing one mtime"
+      (is (.isDirectory (archived dir tied))))))
+
+(deftest ^{:stratum 1} a-directory-named-like-the-marker-keeps-the-run
+  (let [dir       (temp-events-dir)
+        no-events (io/file dir "live" "no-events")
+        completed (write-run! dir :workflow/started :workflow/completed)]
+    (doseq [run [no-events (live dir completed)]]
+      (spit (doto (io/file run "archived.marker" "notes.txt") io/make-parents) "keep me")
+      (age-tree! run))
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (is (.isFile (io/file no-events "archived.marker" "notes.txt"))
+        "a run with no events is not deleted through the directory")
+    (is (.isDirectory (live dir completed)) "a completed run is not archived")))
 
 (deftest ^{:stratum 1} live-runs-that-may-still-matter-stay
   (let [dir      (temp-events-dir)
