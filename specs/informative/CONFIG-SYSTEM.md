@@ -168,11 +168,20 @@ Configuration is merged from three sources (in order of precedence):
 
 1. **Environment variables** (highest priority)
    - `MINIFORGE_LLM_BACKEND`
-   - `MINIFORGE_LLM_MODEL`: the model for roles with no tier model set.
-     It takes effect once #2175 is merged; until then the shipped
-     `[:agents :default-models]` mask it.
+   - `MINIFORGE_LLM_MODEL`
    - `MINIFORGE_AGENT_THINKING_MODEL`
    - `MINIFORGE_AGENT_EXECUTION_MODEL`
+
+   A role's model is its tier variable or key (`THINKING` for the planner
+   and architect, `EXECUTION` for every other role), else `llm.model`,
+   else miniforge's default for the backend, else the backend's own. The
+   shipped defaults set no model. A setting naming a catalog model the
+   backend does not serve is skipped with a warning.
+   `docs/configuration.md` gives the full rules.
+
+   `config list` and `config get` apply only `MINIFORGE_LLM_BACKEND` and
+   `MINIFORGE_LLM_MODEL`, so they can disagree with a run when a tier
+   variable is set; #2207 makes them read the runtime's loader.
 
    These four are the only LLM variables mapped into the user config.
    Backends also read their own variables directly, outside the config:
