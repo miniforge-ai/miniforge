@@ -50,11 +50,11 @@ When nothing qualifies, `select-model` returns Claude Sonnet 4.6 with `:fallback
 fallback included, is checked against each constraint the caller set (`:require-local`, `:context-size`,
 `:cost-limit`); a model that fails one becomes a `:not-found` anomaly naming the unmet constraints.
 
-**Selection routes nothing.** A selection is a model id, not a client. `create-agent` stores the id in the agent's
-config, but the agent's `invoke` sends the task to the `:llm-backend` client in the invocation context, with that
-client's backend and model; it does not read the selection. `:require-local` / `:privacy-required` therefore does
-not keep data on the machine by itself: to do that, pass a local backend (an `:ollama` client, say) as
-`:llm-backend` and verify it yourself.
+**Selection routes nothing.** `create-agent` stores the selected model id in the agent's config; `invoke` sends the
+task to the `:llm-backend` (an `agent/LLMBackend`) in its context and never reads the selection, so
+`:privacy-required` keeps nothing on the machine. A client from `llm/create-client` is not an `agent/LLMBackend` and
+needs an adapter. When `select-model` returns an anomaly, `create-agent` still returns an agent with the role's
+default model and keeps the anomaly at `[:state :model-selection]`; check it.
 
 The models, their profiles and the recommendation tiers per task type are in
 [model-catalog.edn](../components/llm/resources/llm/model-catalog.edn). How a strategy walks those tiers is in
@@ -65,5 +65,6 @@ The models, their profiles and the recommendation tiers per task type are in
 1. `:cost-limit` filters models by price tier; it does not cap what a task spends.
 2. A cloud model counts as available only when its provider's API-key variable is set (`ANTHROPIC_API_KEY`,
    `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `GROQ_API_KEY`; see `:provider-env-vars` in
-   `components/llm/resources/llm/model-selector.edn`). The selector only checks that the variable is set.
+   `components/llm/resources/llm/model-selector.edn`). The selector only checks that the variable is set, and not
+   for the Sonnet fallback: a fallback result says nothing about provider availability.
 3. `explain-selection` ends with a line naming `:spec/model-override`; nothing reads that key.
