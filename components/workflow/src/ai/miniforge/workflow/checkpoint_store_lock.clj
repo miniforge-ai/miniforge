@@ -24,7 +24,7 @@
   (:import
    (java.nio.channels FileChannel)
    (java.nio.file Files LinkOption OpenOption StandardOpenOption)
-   (java.nio.file.attribute BasicFileAttributes)
+   (java.nio.file.attribute BasicFileAttributes FileAttribute)
    (java.util.concurrent TimeUnit)
    (java.util.concurrent.locks ReentrantLock)))
 
@@ -44,14 +44,31 @@
 (defonce ^{:stratum 0} ^:private process-locks (atom {}))
 
 (defn- ^{:stratum 0} same-file?
-  "True when the lock taken on the file `path` named at `opened` (its key
-   just after opening; `before` just before) is on the file the path names
-   `now`. False when the file was unlinked or the path replaced, or when
-   the path changed around the open."
+  "True when the path named one file throughout: just before the open
+   (`before`), just after it (`opened`) and once the lock is held (`now`).
+   Then the opened file is that file, and the lock is on the file the path
+   names. False when any sample differs or the file was absent before the
+   open: a file the open itself created could have been unlinked and
+   replaced before `opened` was sampled."
   [before opened now]
-  (and (not= :absent now)
-       (= opened now)
-       (or (= :absent before) (= before opened))))
+  (and (not= :absent before)
+       (= before opened now)))
+
+(defn- ^{:stratum 0} open-lock-channel
+  "A write channel on lock file `path`, created if absent, never through a
+   link (NOFOLLOW_LINKS: a link swapped in after the check fails here)."
+  ^FileChannel [path]
+  (FileChannel/open path (into-array OpenOption [StandardOpenOption/CREATE
+                                                 StandardOpenOption/WRITE
+                                                 LinkOption/NOFOLLOW_LINKS])))
+
+(defn- ^{:stratum 0} create-lock-file!
+  "Create lock file `path` if absent, without opening it. Nil either way:
+   a file another process made first is as good, and a failure shows on
+   the next attempt."
+  [path]
+  (try+ (Files/createFile path (make-array FileAttribute 0)) nil
+        (catch Exception _ nil)))
 
 (defn- ^{:stratum 0} symlinked [workflow-run-id path]
   (anomaly/anomaly :unavailable
@@ -105,30 +122,34 @@
       (if (or (fs/sym-link? (fs/parent path)) (fs/sym-link? path))
         (symlinked workflow-run-id path)
         (let [_ (fs/create-dirs (fs/parent path))
-              before (file-key path)
-              ;; NOFOLLOW_LINKS: a link swapped in after the check fails here.
-              channel (FileChannel/open path (into-array OpenOption [StandardOpenOption/CREATE
-                                                                     StandardOpenOption/WRITE
-                                                                     LinkOption/NOFOLLOW_LINKS]))
-              opened (file-key path)
-              outcome (try+
-                      ;; Hinted AutoCloseable: babashka does not expose FileLock.
-                      (let [^java.lang.AutoCloseable held (loop []
-                                                            (or (.tryLock channel)
-                                                                (when (pos? (- deadline (System/nanoTime)))
-                                                                  (Thread/sleep lock-poll-ms)
-                                                                  (recur))))]
-                        (cond
-                          (nil? held) (do (.close channel) (busy workflow-run-id path))
-                          (same-file? before opened (file-key path)) {:channel channel :lock held}
-                          :else (do (.close held) (.close channel)
-                                    (if (pos? (- deadline (System/nanoTime)))
-                                      ::stale
-                                      (busy workflow-run-id path)))))
-                      (catch Exception e
-                        (.close channel)
-                        (throw e)))]
-          (if (= ::stale outcome) (recur) outcome))))
+              before (file-key path)]
+          (if (= :absent before)
+            ;; Create it first, then sample again: identity is checked only
+            ;; on a file that existed before the open.
+            (do (create-lock-file! path)
+                (if (pos? (- deadline (System/nanoTime)))
+                  (recur)
+                  (busy workflow-run-id path)))
+            (let [channel (open-lock-channel path)
+                  opened (file-key path)
+                  outcome (try+
+                          ;; Hinted AutoCloseable: babashka does not expose FileLock.
+                          (let [^java.lang.AutoCloseable held (loop []
+                                                                (or (.tryLock channel)
+                                                                    (when (pos? (- deadline (System/nanoTime)))
+                                                                      (Thread/sleep lock-poll-ms)
+                                                                      (recur))))]
+                            (cond
+                              (nil? held) (do (.close channel) (busy workflow-run-id path))
+                              (same-file? before opened (file-key path)) {:channel channel :lock held}
+                              :else (do (.close held) (.close channel)
+                                        (if (pos? (- deadline (System/nanoTime)))
+                                          ::stale
+                                          (busy workflow-run-id path)))))
+                          (catch Exception e
+                            (.close channel)
+                            (throw e)))]
+              (if (= ::stale outcome) (recur) outcome))))))
     (catch Exception e
       (anomaly/exception-anomaly :unavailable
                                  (messages/t :checkpoint/lock-failed

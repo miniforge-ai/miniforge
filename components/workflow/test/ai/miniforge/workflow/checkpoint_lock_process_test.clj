@@ -119,6 +119,38 @@
             (is (= :entered (deref-bounded entered))))
           (finally (bp/destroy other)))))))
 
+(deftest ^{:stratum 1} a-file-replaced-between-open-and-sample-is-not-accepted
+  ;; The acquirer opens the lock file; before it samples the file's
+  ;; identity, the file is unlinked (a GC removing it) and another process
+  ;; locks a replacement. The lock on the unlinked file must not count.
+  (if-not (fs/which "bb")
+    (println "SKIP cross-process checkpoint lock test: bb is not on PATH")
+    (fs/with-temp-dir [dir {:prefix "pin-lock-replaced-"}]
+      (let [root (str dir)
+            id (random-uuid)
+            other (atom nil)
+            open-channel @#'checkpoint-lock/open-lock-channel]
+        (try
+          (with-redefs-fn
+            {#'checkpoint-lock/open-lock-channel
+             (fn [path]
+               (let [channel (open-channel path)]
+                 (when-not @other
+                   (fs/delete path)
+                   (let [p (bp/process ["bb" "-e" lock-holder-script (str path)]
+                                       {:in :pipe :out :pipe :err :inherit})]
+                     (reset! other p)
+                     (is (= "locked" (.readLine ^java.io.BufferedReader (io/reader (:out p)))))))
+                 channel))}
+            (fn []
+              (let [entered (future (checkpoint-lock/with-run-lock root id (constantly :entered)))]
+                (Thread/sleep 500)
+                (testing "the other process holds the replacement: still waiting"
+                  (is (not (realized? entered))))
+                (send-line! @other)
+                (is (= :entered (deref-bounded entered))))))
+          (finally (some-> @other bp/destroy)))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} another-process-cannot-lock-while-the-callback-runs
