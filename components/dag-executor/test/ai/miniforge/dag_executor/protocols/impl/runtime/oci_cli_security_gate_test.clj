@@ -183,6 +183,50 @@
             (is (= "https://github.com/o/r.git" (get-in r [:data :repo-url])))
             (is (not (str/includes? (pr-str r) "s3cret")))))))))
 
+(deftest ^{:stratum 1} acquire-removes-container-when-bootstrap-fails-test
+  (testing "a container whose workspace bootstrap failed is removed, since
+            the caller gets no environment id to release it with"
+    (let [removed  (atom [])
+          executor (oci-cli/map->OciCliExecutor
+                    {:descriptor {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                     :image      "task-runner:latest"})]
+      (with-redefs [oci-cli/image-exists?         (fn [_ _] true)
+                    oci-cli/resolve-image-digest! (fn [_ _] valid-digest)
+                    oci-cli/create-container      (fn [_d container-name & _]
+                                                    (result/ok {:container-name container-name}))
+                    oci-cli/bootstrap-workspace!  (fn [& _] (result/err :container-command-failed "no branch"))
+                    oci-cli/remove-container      (fn [_d id] (swap! removed conj id) (result/ok {}))]
+        (is (result/err? (proto/acquire-environment! executor "abcd1234efgh"
+                                                     {:repo-url "https://github.com/o/r.git"})))
+        (is (= ["miniforge-task-abcd1234"] @removed))))))
+
+(deftest ^{:stratum 1} acquire-removes-container-when-interrupted-test
+  (testing "a bootstrap cut short by the acquire timeout, which leaves the
+            worker interrupted, still removes its container: removal runs
+            with the interrupt flag clear, and the flag is set again after"
+    (let [interrupted-in-rm (atom nil)
+          executor          (oci-cli/map->OciCliExecutor
+                             {:descriptor {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                              :image      "task-runner:latest"})]
+      (with-redefs [oci-cli/image-exists?         (fn [_ _] true)
+                    oci-cli/resolve-image-digest! (fn [_ _] valid-digest)
+                    oci-cli/create-container      (fn [_d container-name & _]
+                                                    (result/ok {:container-name container-name}))
+                    oci-cli/bootstrap-workspace!  (fn [& _] (.interrupt (Thread/currentThread))
+                                                    (result/err :container-command-failed "interrupted"))
+                    oci-cli/remove-container      (fn [_d _id]
+                                                    (reset! interrupted-in-rm (.isInterrupted (Thread/currentThread)))
+                                                    (result/ok {}))]
+        ;; :acquisition-timeout-ms 0 runs the body on this thread; the flag
+        ;; is read (and cleared) before `is`, which clears it too.
+        (let [r    (proto/acquire-environment! executor "abcd1234efgh"
+                                               {:repo-url "https://github.com/o/r.git"
+                                                :acquisition-timeout-ms 0})
+              flag (Thread/interrupted)]
+          (is (result/err? r))
+          (is (false? @interrupted-in-rm))
+          (is (true? flag)))))))
+
 (deftest ^{:stratum 1} build-launch-plan-drops-git-config-tuples-test
   (testing "an :untrusted plan drops a whole GIT_CONFIG_* tuple, whose
             VALUE_n can hold an Authorization header, not just its KEY_n"

@@ -58,8 +58,9 @@
 (defn- ^{:stratum 0} token-auth-env
   "Environment for one push that authenticates to GitHub with `token`, or
    nil when `remote-url` is not a github.com SSH (git@github.com:path) or
-   HTTPS URL. Untrusted code can repoint the capsule's origin, and GH_TOKEN
-   is a GitHub credential, so no other host gets it.
+   HTTPS URL (any host case, default port allowed, as #2125's host-mode
+   retry reads it). Untrusted code can repoint the capsule's origin, and
+   GH_TOKEN is a GitHub credential, so no other host gets it.
 
    The settings travel as GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n /
    GIT_CONFIG_VALUE_n (git 2.31+), so the token is never written to the
@@ -71,7 +72,10 @@
   [remote-url token]
   (let [url      (str remote-url)
         ssh-host (second (re-matches #"git@([^:/]+):.+" url))
-        host     (or ssh-host (second (re-matches #"https://(?:[^@/]*@)?([^/]+)/.+" url)))]
+        ;; Locale/ROOT: under tr-TR the default locale folds I to dotless ı.
+        host     (some-> (or ssh-host
+                             (second (re-matches #"(?i)https://(?:[^@/]*@)?([^:/]+)(?::443)?/.+" url)))
+                         (.toLowerCase java.util.Locale/ROOT))]
     (when (= "github.com" host)
       (let [base    (str "https://" host "/")
             header  (str "Authorization: Basic "
@@ -79,7 +83,7 @@
                                           (.getBytes (str "x-access-token:" token) "UTF-8")))
             entries (cond-> [[(str "http." base ".extraHeader") ""]
                              [(str "http." base ".extraHeader") header]]
-                      ssh-host (conj [(str "url." base ".insteadOf") (str "git@" host ":")]))]
+                      ssh-host (conj [(str "url." base ".insteadOf") (str "git@" ssh-host ":")]))]
         (reduce-kv (fn [env i [k v]]
                      (assoc env (str "GIT_CONFIG_KEY_" i) k (str "GIT_CONFIG_VALUE_" i) v))
                    {"GIT_CONFIG_COUNT" (str (count entries))}

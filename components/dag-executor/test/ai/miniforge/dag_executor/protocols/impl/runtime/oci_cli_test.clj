@@ -367,11 +367,22 @@
                 "http.https://github.com/.extraheader"
                 (str "Authorization: Basic " (basic-auth "x-access-token" "tok"))}
                (git-config-of env)))
+        (is (= [["http.https://github.com/.extraheader" ""]
+                ["http.https://github.com/.extraheader"
+                 (str "Authorization: Basic " (basic-auth "x-access-token" "tok"))]]
+               (take-last 2 ((private-fn 'git-config-entries) env)))
+            "an empty extraheader first drops any header image or workspace config set")
         (is (= "0" (get env "GIT_TERMINAL_PROMPT")))
         (is (= "" (get env "GIT_ASKPASS")))))
-    (testing "an http remote gets its header too"
+    (testing "a repository served at the host root is authenticated too"
+      (is (= (str "Authorization: Basic " (basic-auth "x-access-token" "tok"))
+             (get (git-config-of (cred-env "https://git.example.com" auth))
+                  "http.https://git.example.com/.extraheader"))))
+    (testing "an http remote gets its header too, and the http transport"
       (is (some #{(str "Authorization: Basic " (basic-auth "x-access-token" "tok"))}
-                (vals (cred-env "http://git.example.com/r.git" auth)))))
+                (vals (cred-env "http://git.example.com/r.git" auth))))
+      (is (= "always" (get (git-config-of (cred-env "http://git.example.com/r.git" auth))
+                           "protocol.http.allow"))))
     (testing "no token, or a URL that is not http(s), yields no credential"
       (is (= {} (cred-env "https://github.com/o/r.git" nil)))
       (is (= {} (cred-env "git@github.com:o/r.git" auth))))))
@@ -701,12 +712,26 @@
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)
                     oci-cli/exec-in-container (fn [_d _c cmd opts]
                                                 (swap! envs conj [cmd (:env opts)])
-                                                {:data {:exit-code 0 :stdout ""}})]
+                                                (result/ok {:exit-code 0 :stdout ""}))]
         ((private-fn 'bootstrap-workspace!) (docker-descriptor) "c1" "/workspace"
                                             {:repo-url "http://bob:pw@git.example.com/r.git"})
         (let [[cmd env] (first (filter #(some #{"clone"} (first %)) @envs))]
           (is (some #{"http://git.example.com/r.git"} cmd))
           (is (some #{(str "Authorization: Basic " (basic-auth "bob" "pw"))} (vals env))))))))
+
+(deftest ^{:stratum 1} bootstrap-workspace-refuses-git-older-than-2-31-test
+  (testing "an image whose git ignores GIT_CONFIG_COUNT fails with a clear
+            error before any clone"
+    (let [cmds (atom [])]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] "tok")
+                    oci-cli/exec-in-container (fn [_d _c cmd _opts]
+                                                (swap! cmds conj cmd)
+                                                (result/ok {:exit-code 0 :stdout "git version 2.30.2\n"}))]
+        (let [r ((private-fn 'bootstrap-workspace!) (docker-descriptor) "c1" "/workspace"
+                                                    {:repo-url "https://github.com/o/r.git"})]
+          (is (= :git-too-old (get-in r [:error :code])))
+          (is (clojure.string/includes? (get-in r [:error :message]) "2.30.2"))
+          (is (= [["git" "--version"]] @cmds)))))))
 
 (deftest ^{:stratum 1} persist-workspace-authenticates-push-only-test
   (testing "with a recorded remote, only the push gets the credential, and
@@ -763,6 +788,37 @@
           (is (= "t" (get-in with-creds [:env "GH_TOKEN"])))
           (is (contains? (git-config-of (:env with-creds)) "http.https://github.com/.extraheader"))
           (is (= {"GH_TOKEN" "t"} (:env without))))))))
+
+(deftest ^{:stratum 1} execute-git-credentials-keeps-callers-git-config-test
+  (testing "a caller's own GIT_CONFIG_* block (release's push retry) is kept
+            alongside the recorded remote's, renumbered after it so the
+            caller's settings win, rather than overwritten"
+    (let [seen (atom nil)]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-cli/exec-in-container (fn [_d _id _cmd opts] (reset! seen opts)
+                                                (result/ok {:exit-code 0}))]
+        (proto/execute! (recorded-remote-executor) "c1" ["git" "push"]
+                        {:git-credentials? true
+                         :env {"GH_TOKEN"           "t"
+                               "GIT_CONFIG_COUNT"   "1"
+                               "GIT_CONFIG_KEY_0"   "url.https://github.com/.insteadOf"
+                               "GIT_CONFIG_VALUE_0" "git@github.com:"}})
+        (let [entries ((private-fn 'git-config-entries) (:env @seen))]
+          (is (= ["url.https://github.com/.insteadOf" "git@github.com:"] (last entries)))
+          (is (some #{["core.hooksPath" "/dev/null"]} entries))
+          (is (= "t" (get-in @seen [:env "GH_TOKEN"]))))))))
+
+(deftest ^{:stratum 1} persist-without-changes-resolves-no-token-test
+  (testing "a persist with nothing to push never resolves the credential,
+            so a slow token lookup (gh auth token) cannot hold it up"
+    (let [lookups (atom 0)]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] (swap! lookups inc) fake-token)
+                    oci-cli/exec-in-container (fn [_d _id _cmd _opts]
+                                                {:data {:exit-code 0 :stdout ""}})]
+        (is (true? (get-in (proto/persist-workspace! (recorded-remote-executor) "c1"
+                                                     {:branch "task/x"})
+                           [:data :no-changes?])))
+        (is (zero? @lookups))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -846,21 +902,46 @@
 
 (deftest ^{:stratum 3} exec-in-container-passes-env-through-an-env-file-test
   (testing "per-command env (release's GH_TOKEN, a HOME for the container)
-            leaves the runtime CLI's own environment alone; a value an env
-            file cannot hold goes by name"
-    (with-fake-runtime :podman ["GH_TOKEN" "HOME" "PEM"]
+            leaves the runtime CLI's own environment alone"
+    (with-fake-runtime :podman ["GH_TOKEN" "HOME"]
       (fn [descriptor calls]
         (oci-cli/exec-in-container descriptor "c" ["gh" "pr" "create"]
                                    {:env {"GH_TOKEN" fake-token
-                                          "HOME"     "/capsule-home"
-                                          "PEM"      "line1\nline2"}})
+                                          "HOME"     "/capsule-home"}})
         (let [{:keys [argv env env-file]} (first (calls))]
           (is (not-any? token-in? argv))
           (is (= {"GH_TOKEN" fake-token "HOME" "/capsule-home"} env-file))
           (is (not= fake-token (get env "GH_TOKEN")))
-          (is (not= "/capsule-home" (get env "HOME")))
-          (is (some #{"PEM"} argv))
-          (is (= "line1|line2" (get env "PEM"))))))))
+          (is (not= "/capsule-home" (get env "HOME"))))))))
+
+(deftest ^{:stratum 3} env-with-line-break-is-refused-test
+  (testing "a value with a line break, which an env file cannot hold, is
+            refused: the runtime CLI never runs, so the value reaches neither
+            its argv nor its environment (where LD_PRELOAD would load it)"
+    (with-fake-runtime :podman ["LD_PRELOAD"]
+      (fn [descriptor calls]
+        (let [r (oci-cli/exec-in-container descriptor "c" ["true"]
+                                           {:env {"LD_PRELOAD" "\n/tmp/evil.so"}})]
+          (is (= 1 (get-in r [:data :exit-code])))
+          (is (clojure.string/includes? (get-in r [:data :stderr]) "LD_PRELOAD"))
+          (is (empty? (calls))))
+        (is (result/err? (oci-cli/create-container descriptor "c" "img" "/w" nil nil nil
+                                                   :execution-plan {:env {"PEM" "a\nb"}})))
+        (is (empty? (calls)))))))
+
+(deftest ^{:stratum 3} env-name-that-is-not-an-identifier-is-refused-test
+  (testing "a name with a line break, which would write a second assignment
+            (here an unsanitized HTTPS_PROXY) or a bare line copying the
+            runtime CLI's own variable, is refused before the env file"
+    (with-fake-runtime :docker []
+      (fn [descriptor calls]
+        (is (result/err? (oci-cli/create-container
+                          descriptor "c" "img" "/w" nil nil nil
+                          :execution-plan {:env {"SAFE\nHTTPS_PROXY" "http://u:pw@proxy:3128"}})))
+        (let [r (oci-cli/exec-in-container descriptor "c" ["true"] {:env {"GH_TOKEN\n" ""}})]
+          (is (= 1 (get-in r [:data :exit-code])))
+          (is (clojure.string/includes? (get-in r [:data :stderr]) "GH_TOKEN\\n")))
+        (is (empty? (calls)))))))
 
 (deftest ^{:stratum 3} bootstrap-workspace-keeps-token-out-of-git-config-test
   (testing "the clone gets the token through its env file: no runtime argv
@@ -873,9 +954,13 @@
                         descriptor "c1" "/workspace"
                         {:repo-url "git@github.com:o/r.git" :branch "main"})
                 all    (calls)
-                [clone & later] all]
+                [version clone & later] all]
             (is (result/ok? result))
+            (is (some #{"--version"} (:argv version)))
+            (is (empty? (:env-file version)))
             (is (some #{"clone"} (:argv clone)))
+            (is (not-any? #{"--single-branch"} (:argv clone))
+                "every branch is cloned, so release can compare against its base")
             (is (not-any? token-in? (mapcat :argv all)))
             (is (some #{"https://github.com/o/r.git"} (:argv clone)))
             (is (not-any? #(some #{"set-url"} (:argv %)) all))
@@ -893,7 +978,7 @@
           ((private-fn 'bootstrap-workspace!)
            descriptor "c1" "/workspace"
            {:repo-url (str "https://bob:" fake-token "@github.com/o/r.git")})
-          (let [[clone :as all] (calls)]
+          (let [[_version clone :as all] (calls)]
             (is (not-any? token-in? (mapcat :argv all)))
             (is (some #{"https://github.com/o/r.git"} (:argv clone)))
             (is (= (str "Authorization: Basic " (basic-auth "bob" fake-token))
