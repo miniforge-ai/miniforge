@@ -66,6 +66,16 @@
    test-side mock landed; the production-side guard lives here."
   120000)
 
+(defn- ^{:stratum 0} without-interrupt
+  "Call (f) with the thread's interrupt flag clear, then set it again if it
+   was set. A timed-out acquire's worker is interrupted; its bounded cleanup
+   must still finish, and an interrupt would end the cleanup's own wait and
+   kill the runtime command doing it."
+  [f]
+  (let [interrupted? (Thread/interrupted)]
+    (try (f)
+         (finally (when interrupted? (.interrupt (Thread/currentThread)))))))
+
 (defn- ^{:stratum 0} acquire-failed-result
   [throwable]
   (result/err :acquire-failed
@@ -214,6 +224,13 @@
   "GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n: one config tuple
    whose values can carry a credential (an Authorization header)."
   #"GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)")
+
+(def ^{:stratum 0} refused-env-names
+  "Container env names a launch refuses whatever its trust level.
+   DOCKER_CUSTOM_HEADERS is a docker CLI variable (registry :cli-env-names),
+   so `env-arg` would put it inline on argv, where `ps` shows the headers
+   it carries; passed by name instead, it would set the CLI's own headers."
+  #{"DOCKER_CUSTOM_HEADERS"})
 
 (defn ^{:stratum 0} build-mount-args
   "Build -v mount arguments from an execution plan map.
@@ -1172,6 +1189,12 @@
    the immutable image reference, the plan itself as create-container's
    :execution-plan.
 
+   A plan env name that is not a plain identifier, or is in
+   `refused-env-names`, is a hard-stop at every trust level: such a name
+   is not one env-file assignment, and Podman reads `*` or a trailing `*`
+   in `-e NAME` as a pattern that copies every matching variable of its
+   own environment into the container.
+
    `image-env-fn` (injected; by default it reports an empty ENV) gives the
    pinned image's ENV, whose secrets an :untrusted plan blanks
    (`untrusted-env-blanks`). An :untrusted launch whose image ENV cannot be
@@ -1184,12 +1207,19 @@
          plan            (build-launch-plan digest env-config image-env)
          security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
                           :rootless-action     plan-security/default-rootless-action}
-         decision        (plan-security/check-plan-security plan descriptor security-config)]
+         decision        (plan-security/check-plan-security plan descriptor security-config)
+         bad-names       (filter #(or (contains? refused-env-names %)
+                                      (not (re-find execution-plan/env-name-pattern %)))
+                                 (keys (:env plan)))]
      (cond
        (response/anomaly-map? decision)
        (result/err :security-policy-violation
                    (:anomaly/message decision)
                    {:security/findings (:security/findings decision)})
+
+       (seq bad-names)
+       (result/err :security-policy-violation
+                   (messages/t :oci/env-name-refused {:names (str/join ", " (map pr-str bad-names))}))
 
        (and (= :untrusted (:trust-level plan)) (nil? image-env))
        (result/err :security-policy-violation (messages/t :oci/image-env-unreadable {:image image}))
@@ -1389,7 +1419,7 @@
                                     remote (assoc :repo-url (:repo-url remote))))))
                     ;; The caller gets no environment id to release, so
                     ;; remove the container that started.
-                    (do (remove-container descriptor container-name)
+                    (do (without-interrupt #(remove-container descriptor container-name))
                         bootstrap-result)))
                 create-result)))))))
 

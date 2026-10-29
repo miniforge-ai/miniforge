@@ -252,6 +252,34 @@
                                                      {:repo-url "https://github.com/o/r.git"})))
         (is (= ["miniforge-task-abcd1234"] @removed))))))
 
+(deftest ^{:stratum 1} acquire-removes-container-when-interrupted-test
+  (testing "a bootstrap cut short by the acquire timeout, which leaves the
+            worker interrupted, still removes its container: removal runs
+            with the interrupt flag clear, and the flag is set again after"
+    (let [interrupted-in-rm (atom nil)
+          executor          (oci-cli/map->OciCliExecutor
+                             {:descriptor {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                              :image      "task-runner:latest"})]
+      (with-redefs [oci-cli/image-exists?         (fn [_ _] true)
+                    oci-cli/resolve-image-digest! (fn [_ _] valid-digest)
+                    oci-cli/create-container      (fn [_d container-name & _]
+                                                    (result/ok {:container-name container-name}))
+                    oci-cli/image-env             (fn [_ _] {})
+                    oci-cli/bootstrap-workspace!  (fn [& _] (.interrupt (Thread/currentThread))
+                                                    (result/err :container-command-failed "interrupted"))
+                    oci-cli/remove-container      (fn [_d _id]
+                                                    (reset! interrupted-in-rm (.isInterrupted (Thread/currentThread)))
+                                                    (result/ok {}))]
+        ;; :acquisition-timeout-ms 0 runs the body on this thread; the flag
+        ;; is read (and cleared) before `is`, which clears it too.
+        (let [r    (proto/acquire-environment! executor "abcd1234efgh"
+                                               {:repo-url "https://github.com/o/r.git"
+                                                :acquisition-timeout-ms 0})
+              flag (Thread/interrupted)]
+          (is (result/err? r))
+          (is (false? @interrupted-in-rm))
+          (is (true? flag)))))))
+
 (deftest ^{:stratum 1} build-launch-plan-drops-git-config-tuples-test
   (testing "an :untrusted plan drops a whole GIT_CONFIG_* tuple, whose
             VALUE_n can hold an Authorization header, not just its KEY_n"
@@ -371,3 +399,16 @@
       (is (= valid-digest (:image-digest plan)))
       (is (= :untrusted (:trust-level plan)))
       (is (= ["sleep" "infinity"] (:command plan))))))
+
+(deftest ^{:stratum 2} non-identifier-env-name-hard-stops-test
+  (testing "an env name such as * or GH_*, which Podman's `-e NAME` reads as
+            a pattern over its own environment, stops the launch, as does
+            DOCKER_CUSTOM_HEADERS, which would go inline on argv"
+    (doseq [n ["*" "GH_*" "A B" "DOCKER_CUSTOM_HEADERS"]]
+      (let [env (assoc base-env :env {n "x"} :trust-level :trusted)
+            r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
+        (is (= :security-policy-violation (get-in r [:error :code])) (pr-str n))
+        (is (str/includes? (get-in r [:error :message]) (pr-str n)))))
+    (is (result/ok? (oci-cli/security-gate-check
+                     rootless-descriptor "img"
+                     (assoc base-env :env {"_A1" "x"} :trust-level :trusted) good-digest-fn)))))
