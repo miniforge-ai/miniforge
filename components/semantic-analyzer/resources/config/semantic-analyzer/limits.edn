@@ -20,4 +20,7 @@
 ;; per-rule batch analysis). Tuned for CLI-backend latency.
 {:max-file-size-bytes 50000
  :max-files-per-rule 5
- :default-rule-timeout-ms 300000}
+ :default-rule-timeout-ms 300000
+ ;; Wall-clock budget for one batched changed-files judgement (the gate path).
+ ;; Files still unjudged when it passes become judge failures, which block.
+ :judge-deadline-ms 1200000}

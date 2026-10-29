@@ -28,6 +28,12 @@
    Kept low to stay within per-rule timeout when using CLI backends."
   (get limits :max-files-per-rule 5))
 
+(def ^{:stratum 1} judge-deadline-ms
+  "Wall-clock budget for one batched changed-files judgement. Files still
+   unjudged when it passes become judge failures, so the gate fails closed
+   instead of waiting without bound."
+  (get limits :judge-deadline-ms 1200000))
+
 (def ^{:stratum 1} judge-answer-excerpt-chars
   "How much of an unparseable judge answer a judge-failure message quotes."
   (get limits :judge-answer-excerpt-chars 200))
