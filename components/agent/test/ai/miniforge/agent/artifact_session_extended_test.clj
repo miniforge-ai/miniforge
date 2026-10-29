@@ -307,8 +307,8 @@
           (is (str/ends-with? path "claude-settings.json"))
           (is (map? content))
           (is (vector? (get-in content [:hooks :PreToolUse])))
-          (is (= "command" (get-in content [:hooks :PreToolUse 0 :type])))
-          (is (str/includes? (get-in content [:hooks :PreToolUse 0 :command])
+          (is (= "command" (get-in content [:hooks :PreToolUse 0 :hooks 0 :type])))
+          (is (str/includes? (get-in content [:hooks :PreToolUse 0 :hooks 0 :command])
                              "hook-eval")))
         (finally
           (session/cleanup-session! s))))))
