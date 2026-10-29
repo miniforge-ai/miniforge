@@ -24,7 +24,8 @@
   (:require
    [babashka.fs :as fs]
    [clojure.string :as str]
-   [ai.miniforge.phase.interface :as phase]))
+   [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -72,3 +73,31 @@
   (if (phase/succeeded? result)
     (move-spec! provenance :done)
     (move-spec! provenance :failed)))
+
+(defn ^{:stratum 2} start-spec!
+  "`move-spec-to-in-progress!` for a run's input, keeping its spec
+   traceable. Takes the spec file's digest before the move and returns
+   `[provenance workflow-input]`: the provenance updated as
+   `move-spec-to-in-progress!` does, and the input carrying the file's
+   absolute location after the move (`:spec/location`) and that digest
+   (`:spec/hash`). The run's checkpoint manifest records both, so resume
+   can check the spec. `:spec/path` stays as given: PR provenance uses it."
+  [workflow-input provenance]
+  (let [spec-path (:spec/path workflow-input)
+        spec-hash (some-> spec-path workflow/spec-file-hash)
+        new-path (move-spec! provenance :in-progress)
+        location (or new-path spec-path)]
+    [(cond-> provenance new-path (assoc :source-file new-path))
+     (cond-> workflow-input
+       location (assoc :spec/location (str (fs/absolutize location)))
+       spec-hash (assoc :spec/hash spec-hash))]))
+
+(defn ^{:stratum 2} finish-spec!
+  "`move-spec-on-completion!` that also points run `workflow-id`'s
+   checkpoint manifest at the spec's new place (work/done or work/failed),
+   so a later resume still finds it. Returns the new path, nil when nothing
+   moved."
+  [workflow-id provenance result]
+  (when-let [new-path (move-spec! provenance (if (phase/succeeded? result) :done :failed))]
+    (workflow/record-spec-path! (str workflow-id) (str (fs/absolutize new-path)))
+    new-path))

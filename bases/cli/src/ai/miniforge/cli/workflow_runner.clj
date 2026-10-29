@@ -256,10 +256,11 @@
         (assert-runtime-alignment! spec context)
         (provenance/print-runtime-provenance! quiet context)
         (preflight/run-backend-preflight! quiet llm-client context)
-        (let [provenance (spec-kanban/move-spec-to-in-progress! (:spec/provenance enriched-spec))
+        (let [[provenance run-input] (spec-kanban/start-spec! workflow-input
+                                                               (:spec/provenance enriched-spec))
               result (execution/execute-with-events {:run-pipeline run-pipeline
                                            :workflow workflow
-                                           :workflow-input workflow-input
+                                           :workflow-input run-input
                                            :context context
                                            :artifact-store artifact-store
                                            :event-stream event-stream
@@ -267,7 +268,7 @@
                                            :sandbox-cleanup sandbox-cleanup
                                            :opts opts})
               outcome-status (if (phase/succeeded? result) :completed :failed)]
-          (spec-kanban/move-spec-on-completion! provenance result)
+          (spec-kanban/finish-spec! workflow-id provenance result)
           ;; Trigger meta-loop learning cycle in background
           (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
           result)
