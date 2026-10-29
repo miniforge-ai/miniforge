@@ -853,6 +853,7 @@
                  "components/reporting/src"
                  "components/reporting/resources"
                  "components/observer/src"
+                 "components/observer/resources"
                  "components/tool-registry/src"
                  "components/tool-registry/resources"
                  "components/pr-train/src"
