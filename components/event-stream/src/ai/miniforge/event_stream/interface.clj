@@ -95,8 +95,24 @@
    quiesce fence, in-flight counter, optional snowflake generator).
    Optional opts map: :logger, :sinks (vector of sink fns), :config
    (builds sinks from config), :snowflake-generator (BD-2b event-id
-   generator for lexically-sortable ids)."
+   generator for lexically-sortable ids), :retention (bound on the
+   in-memory history, e.g. `bounded-retention`; absent = unbounded)."
   stream/create-event-stream)
+
+(def ^{:stratum 0} bounded-retention
+  "Retention policy for a stream that lives for days (the web dashboard):
+   per workflow, every lifecycle event, the newest health event per
+   dependency and the newest 500 others, for the 100 most recently active
+   workflows. Pass as `:retention` to
+   `create-event-stream`; merge over it to change a limit."
+  stream/bounded-retention)
+
+(def ^{:stratum 0} compact-events
+  "`(compact-events events policy)`: the events of `events` (a vector in
+   publish order) that a retention policy such as `bounded-retention`
+   keeps, still in publish order. For a reader that bounds history it
+   loads from disk the way a bounded stream bounds its own. Pure."
+  stream/compact-events)
 
 (def ^{:stratum 0} prepare-current-publication
   "Prepare a supported current-write draft as [scope redacted-draft] or an anomaly.
@@ -162,6 +178,14 @@
    together. Arities: (workflow-id) defaults base-dir to
    ~/.miniforge/events; (base-dir workflow-id)."
   sinks/workflow-dir)
+
+(def ^{:stratum 0} retention-hold
+  "Multimethod `(retention-hold hold-key workflow-id events-dir)`: register
+   a method under your own hold key to keep a workflow's archived events
+   past their TTL while your store still needs them (the event cleanup
+   asks every registered hold). Workflow id is the events directory name;
+   events-dir is the events root being cleaned."
+  sinks/retention-hold)
 
 (def ^{:stratum 0} default-events-dir
   "The default events root (`~/.miniforge/events`) as a java.io.File —

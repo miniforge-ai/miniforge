@@ -37,6 +37,7 @@
    modified before startup are skipped; the archive scan and
    `historical-events` read those."
   (:require
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.web-dashboard.config :as dashboard-config]
    [ai.miniforge.web-dashboard.event-files :as event-files]
    [clojure.edn :as edn]
@@ -78,7 +79,7 @@
 (defn ^{:stratum 0} relist
   "`state` with its active directories recomputed at `now`. A directory
    no longer active has had nothing written for `window-ms`, and was
-   listed after its last write, so its seen names are replaced by the
+   listed after its last write, so its file tracking is replaced by the
    time `now - window-ms`: should it become active again, the files
    modified from then on are the new ones."
   [state events-dir roots window-ms now]
@@ -95,18 +96,20 @@
 
 (defn ^{:stratum 0} tail-dir
   "Publish the unseen events of directory `dir`, named `wf-name`, in
-   file-name order. Returns `state` with the directory's seen names. A
-   failing publish skips that event only."
+   creation order. Returns `state` with the directory's file tracking,
+   which keeps as many names as the dashboard's retention keeps events
+   per workflow. A failing publish skips that event only."
   [publish-fn state wf-name dir]
-  (let [[names events] (event-files/read-unseen dir
-                                                (get-in state [:seen wf-name])
-                                                (get-in state [:since wf-name]
-                                                        (:since-ms state)))]
-    (doseq [event events]
+  (let [[tracked files] (event-files/unseen-files
+                         dir
+                         (get-in state [:seen wf-name])
+                         (:max-events-per-workflow es/bounded-retention)
+                         (get-in state [:since wf-name] (:since-ms state)))]
+    (doseq [event (event-files/read-ordered files)]
       (try+
         (publish-fn event)
         (catch Exception _ nil)))
-    (assoc-in state [:seen wf-name] names)))
+    (assoc-in state [:seen wf-name] tracked)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -119,7 +122,7 @@
   (let [roots (event-files/root-mtimes events-dir)
         state (relist {:since-ms (- now mtime-slack-ms) :seen {}}
                       events-dir roots active-window-ms now)]
-    (assoc state :seen (zipmap (keys (:active state)) (repeat #{})))))
+    (assoc state :seen (zipmap (keys (:active state)) (repeat {})))))
 
 (defn ^{:stratum 1} poll-once!
   "One poll at `now`: relist when a sweep is due or a root may have

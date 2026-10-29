@@ -64,6 +64,10 @@
     {:max-age-days {:coerce :int :alias :a :default 7}
      :repo-path    {:coerce :string :alias :r}}))
 
+(def ^{:stratum 0} workflow-gc-checkpoints-flag-spec
+  (flags/with-help-flag
+    {:max-age-days {:coerce :int :alias :a}}))
+
 (def ^{:stratum 0} chain-run-flag-spec
   (flags/with-help-flag
     {:version    {:coerce :string :alias :v :default "latest"}

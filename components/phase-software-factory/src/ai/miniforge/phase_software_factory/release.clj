@@ -88,72 +88,34 @@
   [ctx]
   (workspace/resolve-execution-workdir ctx "release"))
 
-(defn- ^{:stratum 0} git-dirty-files
-  "Scan git working tree for new/modified/deleted files; return as :code/files entries.
-   Used as fallback when the implement phase wrote files directly to disk
-   (design docs, specs, UX assets, etc.) rather than returning them in a
-   :code/files artifact.
+(defn- ^{:stratum 0} command-failure
+  "Failure detail for one scan command, or nil when it exited 0. A capsule
+   executor that could not run the command returns `{:ok? false :error ...}`
+   with no exit code; a missing exit code counts as failure, as in verify."
+  [command exit stderr executor-error]
+  (when-not (= 0 exit)
+    {:detail (or (not-empty (str/trim (str stderr)))
+                 (:message executor-error)
+                 (str command " exited " exit))
+     :data   (cond-> {:command command :exit exit :stderr stderr}
+               executor-error (assoc :executor/error executor-error))}))
 
-   Filters out non-substantive paths (session markers, miniforge runtime
-   artifacts) via `agent/substantive-file?` — a diff consisting only of
-   these must not count as releasable work. Matches the same filter the
-   curator applies upstream (iter-23 regression: empty-diff PRs)."
-  [root-path]
-  (try
-    (let [{:keys [out]} (shell/sh "git" "status" "--porcelain" "-uall" :dir root-path)
-          lines (->> (str/split-lines (or out "")) (remove str/blank?))]
-      (->> lines
-           (keep (fn [line]
-                   (let [xy   (subs line 0 2)
-                         path (str/trim (subs line 3))
-                         file (io/file root-path path)]
-                     (cond
-                       (str/includes? xy "D") {:path path :content "" :action :delete}
-                       (.isFile file)         {:path path
-                                               :content (slurp file)
-                                               :action (if (str/starts-with? (str/trim xy) "?")
-                                                         :create
-                                                         :modify)}))))
-           (filter agent/substantive-file?)
-           vec))
-    (catch Exception _ [])))
-
-(defn- ^{:stratum 0} git-dirty-files-capsule
-  "Scan git working tree inside a task capsule via execute-fn (N11 §9.3).
-   Used for K8s executors where the filesystem is not locally accessible.
-   execute-fn is dag-exec/execute! passed through context to avoid cross-component requires.
-
-   Applies the same `agent/substantive-file?` filter as the local variant so
-   session markers and miniforge runtime artifacts don't slip through the
-   governed path (iter-23 empty-diff regression)."
-  [execute-fn executor env-id root-path]
-  (try
-    (let [result (execute-fn executor env-id "git status --porcelain -uall" {:workdir root-path})
-          out    (get-in result [:data :stdout] "")
-          lines  (->> (str/split-lines out) (remove str/blank?))
-          path-of (fn [line] (str/trim (subs line 3)))
-          substantive-line? (fn [line]
-                              (and (>= (count line) 3)
-                                   (agent/substantive-file? {:path (path-of line)})))]
-      (->> lines
-           (filter substantive-line?)
-           (keep (fn [line]
-                   (let [status (str/trim (subs line 0 2))
-                         path   (path-of line)]
-                     (cond
-                       (str/includes? status "D")
-                       {:path path :content "" :action :delete}
-
-                       :else
-                       ;; Read file content via executor
-                       (let [cat-result (execute-fn executor env-id (str "cat " root-path "/" path)
-                                                    {:workdir root-path})
-                             content (get-in cat-result [:data :stdout] "")]
-                         {:path    path
-                          :content content
-                          :action  (if (= "??" status) :create :modify)})))))
-           vec))
-    (catch Exception _ [])))
+(defn- ^{:stratum 0} git-status-failed
+  "Anomaly for a working-tree scan that could not run (git exited non-zero,
+   the capsule executor failed, or a listed file could not be read).
+   Distinct from the terminal `:release/zero-files`: a failed scan says
+   nothing about whether there is work to release. `error-release` retries
+   it in place like any non-terminal release error (what a held index.lock
+   needs). `failure` is `{:detail string :data map}`."
+  [root-path {:keys [detail data]}]
+  (anomaly/sub-anomaly :unavailable
+                       :anomalies.phase/enter-failed
+                       (messages/t :release/git-status-failed
+                                   {:worktree-path root-path :detail detail})
+                       (merge {:type          :release/git-status-failed
+                               :phase         :release
+                               :worktree-path root-path}
+                              data)))
 
 (defn- ^{:stratum 0} rehydrate-committed-files
   "Read content for the `:code/file-paths` recorded by the implement
@@ -263,16 +225,107 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} git-dirty-files
+  "Scan git working tree for new/modified/deleted files; return as :code/files entries.
+   Used as fallback when the implement phase wrote files directly to disk
+   (design docs, specs, UX assets, etc.) rather than returning them in a
+   :code/files artifact.
+
+   Filters out non-substantive paths (session markers, miniforge runtime
+   artifacts) via `agent/substantive-file?` — a diff consisting only of
+   these must not count as releasable work. Matches the same filter the
+   curator applies upstream (iter-23 regression: empty-diff PRs).
+
+   Returns a `:release/git-status-failed` anomaly when the scan cannot
+   run, never `[]` (which release would report as zero files)."
+  [root-path]
+  (try
+    (let [{:keys [exit out err]} (shell/sh "git" "status" "--porcelain" "-uall" :dir root-path)]
+      (if-let [failure (command-failure "git status --porcelain -uall" exit err nil)]
+        (git-status-failed root-path failure)
+        (->> (str/split-lines (or out ""))
+             (remove str/blank?)
+             (keep (fn [line]
+                     (let [xy   (subs line 0 2)
+                           path (str/trim (subs line 3))
+                           file (io/file root-path path)]
+                       (cond
+                         (str/includes? xy "D") {:path path :content "" :action :delete}
+                         (.isFile file)         {:path path
+                                                 :content (slurp file)
+                                                 :action (if (str/starts-with? (str/trim xy) "?")
+                                                           :create
+                                                           :modify)}))))
+             (filter agent/substantive-file?)
+             vec)))
+    (catch Exception e
+      (git-status-failed root-path {:detail (or (ex-message e) (.getName (class e)))
+                                    :data   {:exception/class (.getName (class e))}}))))
+
+(defn- ^{:stratum 1} git-dirty-files-capsule
+  "Scan git working tree inside a task capsule via execute-fn (N11 §9.3).
+   Used for K8s executors where the filesystem is not locally accessible.
+   execute-fn is dag-exec/execute! passed through context to avoid cross-component requires.
+
+   Applies the same `agent/substantive-file?` filter as the local variant so
+   session markers and miniforge runtime artifacts don't slip through the
+   governed path (iter-23 empty-diff regression).
+
+   Returns a `:release/git-status-failed` anomaly when `git status` or a
+   file's `cat` fails in the capsule, rather than `[]` or empty content."
+  [execute-fn executor env-id root-path]
+  (try
+    (let [run (fn [command]
+                (let [result (execute-fn executor env-id command {:workdir root-path})]
+                  {:out     (or (get-in result [:data :stdout]) "")
+                   :failure (command-failure command
+                                             (get-in result [:data :exit-code])
+                                             (get-in result [:data :stderr])
+                                             (:error result))}))
+          path-of (fn [line] (str/trim (subs line 3)))
+          substantive-line? (fn [line]
+                              (and (>= (count line) 3)
+                                   (agent/substantive-file? {:path (path-of line)})))
+          read-entry (fn [line]
+                       (let [status (str/trim (subs line 0 2))
+                             path   (path-of line)]
+                         (if (str/includes? status "D")
+                           {:path path :content "" :action :delete}
+                           (let [{:keys [out failure]} (run (str "cat " root-path "/" path))]
+                             (if failure
+                               (git-status-failed root-path failure)
+                               {:path    path
+                                :content out
+                                :action  (if (= "??" status) :create :modify)})))))
+          {:keys [out failure]} (run "git status --porcelain -uall")]
+      (if failure
+        (git-status-failed root-path failure)
+        (reduce (fn [files line]
+                  (let [entry (read-entry line)]
+                    (if (anomaly/anomaly? entry)
+                      (reduced entry)
+                      (conj files entry))))
+                []
+                (->> (str/split-lines out)
+                     (remove str/blank?)
+                     (filter substantive-line?)))))
+    (catch Exception e
+      (git-status-failed root-path {:detail (or (ex-message e) (.getName (class e)))
+                                    :data   {:exception/class (.getName (class e))}}))))
+
 (defn- ^{:stratum 1} release-files-result
-  "Return release file data or a canonical anomaly when there is no
-   substantive work to release."
+  "Return release file data, the failed scan's own anomaly when `dirty` is
+   one, or a canonical anomaly when there is no substantive work to release."
   [committed dirty impl-result worktree-path]
-  (or (not-empty committed)
-      (not-empty dirty)
-      (anomaly/sub-anomaly :invalid-input
-                           :anomalies.phase/enter-failed
-                           (messages/t :release/zero-files)
-                           (zero-files-data impl-result worktree-path))))
+  (cond
+    (seq committed)          committed
+    (anomaly/anomaly? dirty) dirty
+    (seq dirty)              dirty
+    :else
+    (anomaly/sub-anomaly :invalid-input
+                         :anomalies.phase/enter-failed
+                         (messages/t :release/zero-files)
+                         (zero-files-data impl-result worktree-path))))
 
 (defn ^{:stratum 1} build-executor-context
   "Build context for the release executor from phase context.
@@ -489,13 +542,20 @@
         agent wrote to the worktree but the boundary did not commit
         (legacy / partial-write path).
      3. Throw :release/zero-files when both paths come back empty —
-        the only legitimate \"nothing to release\" condition.
+        the only legitimate \"nothing to release\" condition. When the
+        git scan itself fails, throw its :release/git-status-failed
+        instead, carrying git's error.
+
+   `probe` is the scan enter-release already ran to decide whether to
+   skip (nil when it ran none). It stands in for step 2's rescan, so a
+   failed probe raises its own error instead of a clean rescan turning
+   it into zero-files.
 
    Stage-3 dogfood (2026-05-07) tripped on the missing #1 path:
    plan/implement/verify/review all green, files committed on the
    task branch, but release threw zero-files because git-dirty-files
    saw a clean worktree. This commit closes that gap."
-  [ctx]
+  [ctx probe]
   (let [impl-result   (get-in ctx [:execution/phase-results :implement :result])
         impl-artifact (get-in ctx [:execution/phase-results :implement :artifact])
         impl-status   (:status impl-result)]
@@ -507,9 +567,11 @@
           env-id         (get ctx :execution/environment-id)
           committed      (rehydrate-committed-files impl-artifact worktree-path)
           dirty          (when (empty? committed)
-                           (if (and governed? execute-fn executor env-id)
+                           (cond
+                             (some? probe) probe
+                             (and governed? execute-fn executor env-id)
                              (git-dirty-files-capsule execute-fn executor env-id worktree-path)
-                             (git-dirty-files worktree-path)))
+                             :else (git-dirty-files worktree-path)))
           files          (release-files! committed dirty impl-result worktree-path)
           code-artifacts [{:artifact/type    :code
                            :artifact/content {:code/id        (random-uuid)
@@ -559,25 +621,29 @@
         logger (or (get-in ctx [:execution/logger])
                    (log/create-logger {:min-level :debug :output :human}))
         ;; Emit phase-started telemetry event
-        _ (phase/emit-phase-started! ctx :release)]
+        _ (phase/emit-phase-started! ctx :release)
+        ;; Skip probe: scan only when an empty worktree means "nothing to release".
+        probe (when (contains? #{:already-implemented :already-satisfied nil} impl-status)
+                (let [wt         (ctx-worktree-path ctx)
+                      execute-fn (get ctx :execution/execute-fn)
+                      executor   (get ctx :execution/executor)
+                      env-id     (get ctx :execution/environment-id)]
+                  (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
+                    (git-dirty-files-capsule execute-fn executor env-id wt)
+                    (git-dirty-files wt))))]
     ;; Short-circuit: skip release when there is nothing to release.
     ;; This covers:
     ;; - implement returned :already-implemented (no new code)
     ;; - plan returned :already-satisfied (DAG had 0 tasks, no implement ran)
     ;; In both cases, only skip if there are also no git changes from other phases.
-    (if (and (contains? #{:already-implemented :already-satisfied nil} impl-status)
-             (let [wt         (ctx-worktree-path ctx)
-                   execute-fn (get ctx :execution/execute-fn)
-                   executor   (get ctx :execution/executor)
-                   env-id     (get ctx :execution/environment-id)]
-               (empty? (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
-                         (git-dirty-files-capsule execute-fn executor env-id wt)
-                         (git-dirty-files wt)))))
+    ;; A failed scan returns an anomaly, which does not skip; build-workflow-state
+    ;; reuses the probe rather than rescanning, so the anomaly is what it raises.
+    (if (and (vector? probe) (empty? probe))
       (-> (phase/enter-context ctx :release nil gates budget start-time
                                       (phase/skipped :already-implemented))
           (assoc-in [:phase :status] :completed))
       (let [;; Build workflow state and context
-            workflow-state (build-workflow-state ctx)
+            workflow-state (build-workflow-state ctx probe)
         _ (log/debug logger :release :release/workflow-state-built
                      {:data {:artifact-count (count (:workflow/artifacts workflow-state))
                              :file-count (count (get-in (first (:workflow/artifacts workflow-state))

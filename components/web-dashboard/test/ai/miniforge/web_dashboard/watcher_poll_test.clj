@@ -69,14 +69,14 @@
     (es/publish! stream (wf-event :workflow/phase-started active-id))
     (let [t0 (System/currentTimeMillis)
           s1 (sut/poll-once! (sut/initial-state base t0) base publish (+ t0 500))]
-      (is (= [[(str active-id) :workflow/started] [(str active-id) :workflow/phase-started]]
+      (is (= [[active-id :workflow/started] [active-id :workflow/phase-started]]
              (mapv (juxt :workflow/id :event/type) @published))
           "a run active at startup is read from its first event; an old one is not")
       (testing "an old directory written to again joins at the next sweep, new files only"
         (reset! published [])
         (es/publish! stream (wf-event :workflow/resumed old-id))
         (sut/poll-once! s1 base publish (+ t0 500 sut/sweep-ms))
-        (is (= [[(str old-id) :workflow/resumed]]
+        (is (= [[old-id :workflow/resumed]]
                (mapv (juxt :workflow/id :event/type) @published)))))))
 
 (deftest ^{:stratum 1} a-new-run-is-published-once-and-followed-into-archived
@@ -113,7 +113,7 @@
     (es/publish! stream (wf-event :workflow/started wf-id))
     (let [t0 (System/currentTimeMillis)
           s1 (sut/poll-once! (sut/initial-state base t0) base publish (+ t0 500))
-          seen (get-in s1 [:seen (str wf-id)])
+          seen (get-in s1 [:seen (str wf-id) :names])
           ;; Nothing written for the whole window: the sweep drops the directory.
           t1 (+ t0 sut/active-window-ms 1000)
           s2 (sut/poll-once! s1 base publish t1)]
@@ -143,4 +143,4 @@
       ;; within the same mtime tick does.
       (.setLastModified live-root recorded)
       (sut/poll-once! s0 base #(swap! published conj %) (+ t0 1100))
-      (is (= #{(str first-id) (str second-id)} (set (map :workflow/id @published)))))))
+      (is (= #{first-id second-id} (set (map :workflow/id @published)))))))
