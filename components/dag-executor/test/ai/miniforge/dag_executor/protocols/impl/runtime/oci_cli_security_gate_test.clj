@@ -21,6 +21,7 @@
    resolver is injected, so these exercise the gate decision (block / warn /
    review / pass) without a container runtime."
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.execution-plan :as execution-plan]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
@@ -126,6 +127,16 @@
              (:env (oci-cli/build-launch-plan valid-digest
                                               {:env env :trust-level :trusted})))))))
 
+(deftest ^{:stratum 1} build-launch-plan-keeps-agent-backend-credentials-test
+  (testing "an :untrusted plan keeps the credential the agent backend reads,
+            named by :agent-backend or else the configured [:llm :backend]"
+    (let [env {:OPENAI_API_KEY "o" :CURSOR_API_KEY "c" :GH_TOKEN "t"}]
+      (is (= {"OPENAI_API_KEY" "o"}
+             (:env (oci-cli/build-launch-plan valid-digest {:env env :agent-backend :codex}))))
+      (with-redefs [config/load-merged-config (constantly {:llm {:backend :cursor}})]
+        (is (= {"CURSOR_API_KEY" "c"}
+               (:env (oci-cli/build-launch-plan valid-digest {:env env}))))))))
+
 (deftest ^{:stratum 1} build-launch-plan-treats-unknown-trust-as-untrusted-test
   (testing "a nil or unknown :trust-level launches as :untrusted: secrets
             are dropped and the plan records :untrusted"
@@ -182,6 +193,19 @@
                          "GIT_CONFIG_KEY_0"   "http.https://github.com/.extraheader"
                          "GIT_CONFIG_VALUE_0" "Authorization: Basic eDp0b2s="
                          "LANG"               "C.UTF-8"}}))))))
+
+(deftest ^{:stratum 1} build-launch-plan-strips-proxy-and-git-c-credentials-test
+  (testing "an :untrusted plan keeps proxy addresses without user:password@
+            and drops GIT_CONFIG_PARAMETERS, which can carry an extraheader"
+    (is (= {"HTTPS_PROXY" "http://proxy:3128" "http_proxy" "proxy:8080"
+            "ALL_PROXY" "socks5://proxy:1080" "NO_PROXY" "localhost"}
+           (:env (oci-cli/build-launch-plan
+                  valid-digest
+                  {:env {"HTTPS_PROXY" "http://u:pw@proxy:3128"
+                         "http_proxy" "u:pw@proxy:8080"
+                         "ALL_PROXY" "socks5://proxy:1080"
+                         "NO_PROXY" "localhost"
+                         "GIT_CONFIG_PARAMETERS" "'http.extraheader=Authorization: Basic eDp0b2s='"}}))))))
 
 (deftest ^{:stratum 1} acquire-launches-from-checked-plan-test
   (testing "acquire-environment! creates the container from the gate-checked

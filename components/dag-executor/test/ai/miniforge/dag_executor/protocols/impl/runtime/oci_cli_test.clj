@@ -363,9 +363,11 @@
       (is (= (str "Authorization: Basic " (basic-auth "x-access-token" "tok"))
              (get (git-config-of (cred-env "https://git.example.com" auth))
                   "http.https://git.example.com/.extraheader"))))
-    (testing "no token, or a URL that is not https, yields no credential"
+    (testing "an http remote gets its header too"
+      (is (some #{(str "Authorization: Basic " (basic-auth "x-access-token" "tok"))}
+                (vals (cred-env "http://git.example.com/r.git" auth)))))
+    (testing "no token, or a URL that is not http(s), yields no credential"
       (is (= {} (cred-env "https://github.com/o/r.git" nil)))
-      (is (= {} (cred-env "http://github.com/o/r.git" auth)))
       (is (= {} (cred-env "git@github.com:o/r.git" auth))))))
 
 (deftest ^{:stratum 1} git-remote-test
@@ -393,6 +395,9 @@
       (testing "a credential from the URL wins over the resolved token"
         (is (= {:user "bob" :token "pw"}
                (git-auth {:host-kind :github :url-auth {:user "bob" :token "pw"}})))))
+    (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] "tok")]
+      (testing "a resolved token is not sent over plain http"
+        (is (nil? (git-auth {:host-kind :generic :https-url "http://git.example.com/r.git"})))))
     (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)]
       (is (nil? (git-auth {:host-kind :github}))))))
 
@@ -682,6 +687,20 @@
                                         "Workspace bootstrap failed"))
           (is (clojure.string/includes? (get-in result [:error :data :stderr])
                                         "could not read password")))))))
+
+(deftest ^{:stratum 1} bootstrap-workspace-authenticates-http-userinfo-test
+  (testing "an http URL's user:password@ is stripped from the clone URL and
+            still authenticates the clone"
+    (let [envs (atom [])]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)
+                    oci-cli/exec-in-container (fn [_d _c cmd opts]
+                                                (swap! envs conj [cmd (:env opts)])
+                                                {:data {:exit-code 0 :stdout ""}})]
+        ((private-fn 'bootstrap-workspace!) (docker-descriptor) "c1" "/workspace"
+                                            {:repo-url "http://bob:pw@git.example.com/r.git"})
+        (let [[cmd env] (first (filter #(some #{"clone"} (first %)) @envs))]
+          (is (some #{"http://git.example.com/r.git"} cmd))
+          (is (some #{(str "Authorization: Basic " (basic-auth "bob" "pw"))} (vals env))))))))
 
 (deftest ^{:stratum 1} persist-workspace-authenticates-push-only-test
   (testing "with a recorded remote, only the push gets the credential, and
