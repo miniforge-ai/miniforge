@@ -987,11 +987,14 @@
    in-capsule fetch and push use this; since origin carries no credential,
    they are unauthenticated without it. The two GIT_CONFIG_* blocks are
    combined (`combine-git-env`), the caller's last, so a caller's own git
-   config, such as release's push retry, is kept and wins."
+   config, such as release's push retry, is kept and wins. An env left
+   holding GIT_CONFIG_* entries gets `git-trace-off-env` last, so a
+   caller's own header is not traced when no credential resolved."
   [opts cred-env]
-  (if (:git-credentials? opts)
-    (update opts :env #(combine-git-env @cred-env %))
-    opts))
+  (let [opts (cond-> opts
+               (:git-credentials? opts) (update :env #(combine-git-env @cred-env %)))]
+    (cond-> opts
+      (seq (git-config-entries (:env opts))) (update :env merge git-trace-off-env))))
 
 (defn- ^{:stratum 3} capsule-credential-env
   "`git-credential-env` for one command in `container-id`, its GIT_CONFIG_*

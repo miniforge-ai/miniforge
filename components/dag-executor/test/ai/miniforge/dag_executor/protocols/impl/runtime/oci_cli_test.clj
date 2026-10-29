@@ -831,6 +831,28 @@
           (is (some #{["core.hooksPath" "/dev/null"]} entries))
           (is (= "t" (get-in @seen [:env "GH_TOKEN"]))))))))
 
+(deftest ^{:stratum 1} execute-turns-git-tracing-off-for-a-callers-header-test
+  (testing "with no credential resolved, a caller's own Authorization header
+            (release's push retry) still runs with git tracing off, over a
+            GIT_TRACE_CURL and GIT_TRACE_REDACT=0 the container inherits"
+    (let [seen   (atom [])
+          header "Authorization: Basic eC1hY2Nlc3MtdG9rZW46dA=="
+          env    {"GH_TOKEN"           "t"
+                  "GIT_CONFIG_COUNT"   "1"
+                  "GIT_CONFIG_KEY_0"   "http.https://github.com/.extraHeader"
+                  "GIT_CONFIG_VALUE_0" header}]
+      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)
+                    oci-cli/exec-in-container (fn [_d _id _cmd opts] (swap! seen conj opts)
+                                                (result/ok {:exit-code 0}))]
+        (let [executor (recorded-remote-executor)]
+          (proto/execute! executor "c1" ["git" "push"] {:git-credentials? true :env env})
+          (proto/execute! executor "c1" ["git" "push"] {:env env})))
+      (is (= 2 (count @seen)))
+      (doseq [{e :env} @seen]
+        (is (= header (get e "GIT_CONFIG_VALUE_0")))
+        (is (= "1" (get e "GIT_TRACE_REDACT")))
+        (is (= ["" ""] (map #(get e %) ["GIT_TRACE_CURL" "GIT_TRACE2_EVENT"])))))))
+
 (deftest ^{:stratum 1} container-git-count-reads-whole-entries-test
   (testing "the container's GIT_CONFIG_COUNT comes from whole env entries,
             so a later multi-line value holding a count line cannot change it"
