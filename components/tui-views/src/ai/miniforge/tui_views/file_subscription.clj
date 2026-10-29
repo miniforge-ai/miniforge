@@ -27,6 +27,7 @@
   (:require
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.logging.interface :as log]
    [clojure.java.io :as io]
    [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.tui-views.subscription :as subscription]))
@@ -98,6 +99,17 @@
               dispatch-fn))
     (when wf-id (swap! known conj wf-id))
     (some-> (subscription/translate-event event) dispatch-fn)))
+
+(defn ^{:stratum 0} tail-logger
+  "A logger for the layout tail's warnings that appends EDN lines to
+   ~/.miniforge/logs/tui.log, so none is printed over the TUI's screen."
+  []
+  (let [f (io/file (config/miniforge-home) "logs" "tui.log")]
+    (log/create-logger
+     {:min-level :warn
+      :output    (fn [entry]
+                   (io/make-parents f)
+                   (spit f (str (pr-str entry) "\n") :append true))})))
 
 (defn ^{:stratum 0} stop-subscription!
   "Stop the file-subscription polling thread."
@@ -191,7 +203,9 @@
                     (.setName "tui-file-subscription")
                     (.start))
         stop-tail (es/start-layout-tail! dir (partial dispatch-event! dispatch-fn dir (atom #{}))
-                                         {:poll-ms poll-ms :thread-name "tui-layout-tail"})]
+                                         {:poll-ms     poll-ms
+                                          :thread-name "tui-layout-tail"
+                                          :logger      (tail-logger)})]
     (fn []
       (stop-subscription! running? thread)
       (stop-tail))))

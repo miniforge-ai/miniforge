@@ -19,7 +19,9 @@
   "The standalone TUI follows runs the event-stream file sink writes
    under live/<workflow-id>/."
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.logging.interface :as log]
    [ai.miniforge.tui-views.file-subscription :as file-sub]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is]]))
@@ -55,6 +57,14 @@
     (reset! msgs [])
     (dispatch! {:event/type :workflow/resumed :workflow/id wf-id})
     (is (= [:msg/workflow-added] (map first @msgs)) "a resume shows the run as running again")))
+
+(deftest ^{:stratum 0} tail-warnings-go-to-a-log-file-not-the-screen
+  (let [home (doto (io/file (System/getProperty "java.io.tmpdir") (str "tui-home-" (random-uuid))) .mkdirs)
+        out  (with-out-str
+               (with-redefs [config/miniforge-home (constantly (str home))]
+                 (log/warn (file-sub/tail-logger) :event-stream :event-tail/gap {:message "gap"})))]
+    (is (= "" out))
+    (is (re-find #":event-tail/gap" (slurp (io/file home "logs" "tui.log"))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
