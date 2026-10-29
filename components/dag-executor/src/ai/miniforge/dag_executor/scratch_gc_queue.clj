@@ -66,6 +66,7 @@
    [clojure.string :as str]
    [slingshot.slingshot :refer [try+]])
   (:import
+   [java.io PushbackReader StringReader]
    [java.nio.channels FileChannel]
    [java.nio.file Paths StandardOpenOption]
    [java.time Instant]))
@@ -120,23 +121,26 @@
 ;; Queue I/O helpers
 (defn- ^{:stratum 0} read-gc-queue
   "Entries of the queue at `path`: result/ok vector (`[]` when the file is
-   absent or blank), or result/err `:scratch-gc-queue/corrupt` when the
-   content is not an EDN vector. Never writes."
+   absent or holds only whitespace and comments), or result/err
+   `:scratch-gc-queue/corrupt` unless it holds exactly one EDN vector and
+   nothing after it. Never writes."
   [path]
   (let [f       (io/file path)
-        content (if (.exists f) (slurp f) "")
+        reader  (PushbackReader. (StringReader. (if (.exists f) (slurp f) "")))
+        eof     (Object.)
         corrupt #(result/err :scratch-gc-queue/corrupt
                              (str "GC queue " path " is unreadable (" % ")")
                              {:path path})]
-    (if (str/blank? content)
-      (result/ok [])
-      (try+
-        (let [parsed (edn/read-string content)]
-          (if (sequential? parsed)
-            (result/ok (vec parsed))
-            (corrupt (str "top-level form is " (pr-str (type parsed))))))
-        (catch Exception e
-          (corrupt (or (ex-message e) (str (type e)))))))))
+    (try+
+      (let [form  (edn/read {:eof eof} reader)
+            extra (edn/read {:eof eof} reader)]
+        (cond
+          (identical? eof form)        (result/ok [])
+          (not (identical? eof extra)) (corrupt "more than one top-level form")
+          (vector? form)               (result/ok form)
+          :else                        (corrupt (str "top-level form is " (pr-str (type form))))))
+      (catch Exception e
+        (corrupt (or (ex-message e) (str (type e))))))))
 
 (defn- ^{:stratum 0} write-gc-queue!
   "Overwrite `path` with the EDN representation of `entries`.

@@ -37,32 +37,25 @@
 (def ^{:stratum 0} eight-days-ago
   (java.util.Date. (- (System/currentTimeMillis) (* 8 24 60 60 1000))))
 
-(defn- ^{:stratum 0} git-repo!
-  "A new git repository `dir`/`repo-name` (`git init` plus `init-args`);
-   returns its canonical path."
-  [dir repo-name & init-args]
-  (let [repo (fs/file dir repo-name)]
-    (fs/create-dirs repo)
-    (apply shell/sh "git" "init" "-q" (concat init-args [(str repo)]))
-    (.getCanonicalPath repo)))
+(defn- ^{:stratum 0} git!
+  "Run git with `args`, isolated from the user's and the system's git
+   config and from GIT_* variables, with commit signing off and a fixed
+   identity. Fails the test when git exits non-zero; returns stdout."
+  [& args]
+  (let [env (->> (System/getenv)
+                 (remove (fn [[k _]] (str/starts-with? k "GIT_")))
+                 (into {})
+                 (merge {"GIT_CONFIG_GLOBAL" "/dev/null" "GIT_CONFIG_NOSYSTEM" "1"}))
+        r   (apply shell/sh "git" "-c" "commit.gpgsign=false" "-c" "core.hooksPath=/dev/null"
+                   "-c" "user.name=t" "-c" "user.email=t@example.com"
+                   (concat args [:env env]))]
+    (is (zero? (:exit r)) (str "git " (str/join " " args) ": " (:err r)))
+    (str/trim (:out r))))
 
 (defn- ^{:stratum 0} git-dir
   "Canonical path of `path`/.git, the GC queue's key for a plain checkout."
   [path]
   (.getCanonicalPath (fs/file path ".git")))
-
-(defn- ^{:stratum 0} scratch-ref!
-  "Point refs/miniforge/scratch/`workflow-id` in git dir `repo` at a new
-   commit of the empty tree."
-  [repo workflow-id]
-  (let [commit (:out (shell/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@example.com"
-                               "commit-tree" "4b825dc642cb6eb9a060e54bf8d69288fbee4904" "-m" "scratch"))]
-    (shell/sh "git" "-C" repo "update-ref" (str "refs/miniforge/scratch/" workflow-id) (str/trim commit))))
-
-(defn- ^{:stratum 0} scratch-refs
-  [repo]
-  (str/split-lines (str/trim (:out (shell/sh "git" "-C" repo "for-each-ref" "--format=%(refname)"
-                                             "refs/miniforge/scratch/")))))
 
 (defn- ^{:stratum 0} queued-ids
   [queue]
@@ -76,7 +69,31 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} gc-pass-keeps-other-repositories-entries-test
+(defn- ^{:stratum 1} git-repo!
+  "A new git repository `dir`/`repo-name` (`git init` plus `init-args`);
+   returns its canonical path."
+  [dir repo-name & init-args]
+  (let [repo (fs/file dir repo-name)]
+    (fs/create-dirs repo)
+    (apply git! "init" "-q" (concat init-args [(str repo)]))
+    (.getCanonicalPath repo)))
+
+(defn- ^{:stratum 1} scratch-refs
+  [repo]
+  (str/split-lines (git! "-C" repo "for-each-ref" "--format=%(refname)" "refs/miniforge/scratch/")))
+
+(defn- ^{:stratum 1} scratch-ref!
+  "Point refs/miniforge/scratch/`workflow-id` in git dir `repo` at a new
+   commit of the empty tree, and check that the ref exists."
+  [repo workflow-id]
+  (let [ref    (str "refs/miniforge/scratch/" workflow-id)
+        commit (git! "-C" repo "commit-tree" "4b825dc642cb6eb9a060e54bf8d69288fbee4904" "-m" "scratch")]
+    (git! "-C" repo "update-ref" ref commit)
+    (is (= ref (git! "-C" repo "for-each-ref" "--format=%(refname)" ref)) "fixture ref created")))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} gc-pass-keeps-other-repositories-entries-test
   (let [dir      (str (fs/create-temp-dir))
         queue    (str dir "/queue.edn")
         repo-a   (git-repo! dir "a")
@@ -96,15 +113,13 @@
           (is (= ["wf-a"] (queued-ids queue))))))
     (fs/delete-tree dir)))
 
-(deftest ^{:stratum 1} worktrees-of-one-repository-share-its-entries-test
+(deftest ^{:stratum 2} worktrees-of-one-repository-share-its-entries-test
   (let [dir      (str (fs/create-temp-dir))
         queue    (str dir "/queue.edn")
         repo     (git-repo! dir "a")
         worktree (str dir "/a-worktree")]
-    (shell/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@example.com"
-              "-c" "commit.gpgsign=false" "-c" "core.hooksPath=/dev/null"
-              "commit" "-q" "--allow-empty" "-m" "init")
-    (shell/sh "git" "-C" repo "worktree" "add" "-q" worktree)
+    (git! "-C" repo "commit" "-q" "--allow-empty" "-m" "init")
+    (git! "-C" repo "worktree" "add" "-q" worktree)
     (with-redefs [sut/gc-queue-path               (constantly queue)
                   scratch-commit/gc-scratch-refs! (fn [_ _] (result/ok {:deleted [] :retained 0}))]
       (testing "an entry enqueued from a worktree names the repository"
@@ -116,28 +131,33 @@
       (is (result/err? (sut/enqueue-workflow-gc! "wf-x" (str (fs/create-dirs (fs/file dir "plain")))))))
     (fs/delete-tree dir)))
 
-(deftest ^{:stratum 1} unreadable-queue-is-reported-and-kept-test
-  (let [dir     (str (fs/create-temp-dir))
-        queue   (str dir "/queue.edn")
-        repo    (git-repo! dir "a")
-        damaged "[{:workflow-id \"wf-a\" :finished-at"]
+(deftest ^{:stratum 2} unreadable-queue-is-reported-and-kept-test
+  (let [dir   (str (fs/create-temp-dir))
+        queue (str dir "/queue.edn")
+        repo  (git-repo! dir "a")]
     (with-redefs [sut/gc-queue-path (constantly queue)]
-      (doseq [[op call] [["enqueue" #(sut/enqueue-workflow-gc! "wf-new")]
+      (doseq [damaged ["[{:workflow-id \"wf-a\" :finished-at"
+                       "[] [{:workflow-id \"wf-old\"}]"
+                       "({:workflow-id \"wf-old\"})"]
+              [op call] [["enqueue" #(sut/enqueue-workflow-gc! "wf-new")]
                          ["GC pass" #(sut/run-deferred-gc! repo 7)]]]
         (spit queue damaged)
         (let [r      (call)
               copies (fs/glob dir "queue.edn.corrupt-*")]
-          (testing op
+          (testing (str op " on a queue holding " damaged)
             (testing "returns an error instead of treating the queue as empty"
               (is (result/err? r)))
             (testing "keeps the unreadable content in a quarantine copy"
               (is (= [damaged] (mapv (comp slurp str) copies)))))
           (run! fs/delete copies)))
+      (testing "whitespace and comments around the one vector are fine"
+        (spit queue ";; queue\n[]\n;; end\n")
+        (is (result/ok? (sut/run-deferred-gc! repo 7))))
       (testing "the queue is usable again afterwards"
         (is (result/ok? (sut/enqueue-workflow-gc! "wf-next")))))
     (fs/delete-tree dir)))
 
-(deftest ^{:stratum 1} bare-repositories-in-one-directory-are-kept-apart-test
+(deftest ^{:stratum 2} bare-repositories-in-one-directory-are-kept-apart-test
   (let [dir   (str (fs/create-temp-dir))
         queue (str dir "/queue.edn")
         bare-a (git-repo! dir "a.git" "--bare")
@@ -155,7 +175,7 @@
         (is (= ["refs/miniforge/scratch/wf-b"] (scratch-refs bare-b)))))
     (fs/delete-tree dir)))
 
-(deftest ^{:stratum 1} separate-git-dir-repository-is-collected-in-its-git-dir-test
+(deftest ^{:stratum 2} separate-git-dir-repository-is-collected-in-its-git-dir-test
   (let [dir     (str (fs/create-temp-dir))
         queue   (str dir "/queue.edn")
         sep-dir (str dir "/sep.git")
@@ -171,7 +191,7 @@
         (is (= [""] (scratch-refs sep-dir)))))
     (fs/delete-tree dir)))
 
-(deftest ^{:stratum 1} stale-entry-without-git-dir-triggers-a-sweep-test
+(deftest ^{:stratum 2} stale-entry-without-git-dir-triggers-a-sweep-test
   (let [dir      (str (fs/create-temp-dir))
         queue    (str dir "/queue.edn")
         repo     (git-repo! dir "a")
