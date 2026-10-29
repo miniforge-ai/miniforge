@@ -33,7 +33,8 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [malli.core :as m])
+   [malli.core :as m]
+   [slingshot.slingshot :refer [try+]])
   (:import
    [java.nio.file Files]
    [java.nio.file.attribute FileAttribute]))
@@ -332,12 +333,22 @@
                    :component :agent/artifact-session})))
 
 (defn ^{:stratum 0} cleanup-capsule-session!
-  "Remove the session directory inside the capsule."
+  "Remove the session directory inside the capsule.
+
+   Runs with the thread's interrupt flag cleared and sets it again
+   afterwards. An interrupted agent call (the implement watchdog's kill)
+   unwinds through here with the flag set, and the executor's wait on
+   `docker exec` is interruptible, so the removal would otherwise stop
+   before it ran."
   [session]
-  (try
-    ((:exec! session) (:executor session) (:environment-id session)
-                      (str "rm -rf " (file-artifacts/shell-quote (:dir session))) {:workdir (:workdir session)})
-    (catch Exception _ nil)))
+  (let [interrupted? (Thread/interrupted)]
+    (try+
+      ((:exec! session) (:executor session) (:environment-id session)
+                        (str "rm -rf " (file-artifacts/shell-quote (:dir session))) {:workdir (:workdir session)})
+      (catch Exception _ nil)
+      (finally
+        (when interrupted?
+          (.interrupt (Thread/currentThread)))))))
 
 ;------------------------------------------------------------------------------ Layer 2.75
 ;; Session → MCP opts
