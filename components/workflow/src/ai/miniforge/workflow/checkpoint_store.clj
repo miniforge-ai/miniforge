@@ -95,10 +95,10 @@
     (fs/create-dirs (fs/parent target))
     (spit temp-path (pr-str data))
     (Files/move (fs/path temp-path)
-                (fs/path target-path)
-                (into-array java.nio.file.CopyOption
-                            [StandardCopyOption/ATOMIC_MOVE
-                             StandardCopyOption/REPLACE_EXISTING]))
+               (fs/path target-path)
+               (into-array java.nio.file.CopyOption
+                           [StandardCopyOption/ATOMIC_MOVE
+                            StandardCopyOption/REPLACE_EXISTING]))
     target-path))
 
 (defn ^{:stratum 1} load-checkpoint-data

@@ -32,6 +32,19 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} expected-agent-distinguishes-intentional-absence-from-missing-identity
+  (let [draft (fixture/draft (random-uuid) :workflow/phase-started)]
+    (doseq [expected-agent [:implementer :agent/none]]
+      (let [started (assoc draft :phase/expected-agent expected-agent)
+            prepared (events/prepare-current-publication
+                      (assoc-in started [:phase/context :password] "fixture-password"))]
+        (is (vector? prepared))
+        (is (= expected-agent (:phase/expected-agent (second prepared))))
+        (is (= (redaction/marker) (get-in (second prepared) [:phase/context :password])))))
+    (doseq [invalid [nil "agent/none" false]]
+      (is (refused? (assoc draft :phase/expected-agent invalid))))
+    (is (refused? (dissoc draft :phase/expected-agent)))))
+
 (deftest ^{:stratum 1} all-canonical-profiles-are-scoped-and-require-their-fields
   (doseq [[event-type payload] fixture/payloads]
     (let [workflow-id (random-uuid)

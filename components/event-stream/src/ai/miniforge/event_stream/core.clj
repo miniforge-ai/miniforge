@@ -24,6 +24,7 @@
    [ai.miniforge.event-stream.envelope-draft :as draft]
    [ai.miniforge.event-stream.current-publication :as current]
    [ai.miniforge.event-stream.publication-fence :as fence]
+   [ai.miniforge.event-stream.workflow-terminal-fields :as terminal]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.response.interface :as response]
@@ -580,42 +581,14 @@
     (assoc :phase/gap-since-last-event-ms gap-since-last-event-ms)))
 
 (defn ^{:stratum 2} workflow-completed [stream workflow-id status & [duration-ms opts]]
-  (-> (create-envelope stream :workflow/completed workflow-id
-                       (str "Workflow " (name status)))
-      (assoc :workflow/status status)
-      (cond-> duration-ms (assoc :workflow/duration-ms duration-ms)
-              (:tokens opts) (assoc :workflow/tokens (:tokens opts))
-              (:cost-usd opts) (assoc :workflow/cost-usd (:cost-usd opts))
-              (:pr-info opts) (assoc :workflow/pr-info (:pr-info opts))
-              (seq (:pr-infos opts)) (assoc :workflow/pr-infos (:pr-infos opts))
-              (:workflow/evidence-bundle-id opts)
-              (assoc :workflow/evidence-bundle-id (:workflow/evidence-bundle-id opts)))))
+  (let [payload (terminal/completed status duration-ms opts)
+        event (create-envelope stream :workflow/completed workflow-id (:message payload))]
+    (terminal/attach event payload)))
 
 (defn ^{:stratum 2} workflow-failed [stream workflow-id error & [{:keys [failure/class]}]]
-  (let [;; Handle anomaly maps, Throwables, and plain error maps
-        anomaly-map (cond
-                      (response/anomaly-map? error) error
-                      (instance? Throwable error) (response/from-exception error)
-                      (and (map? error) (:anomaly error)) (:anomaly error)
-                      :else nil)
-        error-map (cond
-                    (instance? Throwable error)
-                    {:message (.getMessage ^Throwable error)
-                     :type (str (type error))}
-                    (response/anomaly-map? error)
-                    (response/anomaly->event-data error)
-                    :else error)
-        event-data (response/anomaly->event-data
-                    (or anomaly-map
-                        (response/make-anomaly :anomalies/fault
-                                               (get error-map :message "unknown error"))))]
-    (-> (create-envelope stream :workflow/failed workflow-id
-                         (str "Workflow failed: " (:message error-map "unknown error")))
-        (assoc :workflow/failure-reason (:message error-map (:message event-data))
-               :workflow/error-details error-map
-               :workflow/anomaly-code (:anomaly-code event-data)
-               :workflow/retryable? (:retryable? event-data false))
-        (cond-> class (assoc :failure/class class)))))
+  (let [payload (terminal/failed error class)
+        event (create-envelope stream :workflow/failed workflow-id (:message payload))]
+    (terminal/attach event payload)))
 
 (defn ^{:stratum 2} llm-request [stream workflow-id agent-id model & [prompt-tokens]]
   (-> (create-envelope stream :llm/request workflow-id
@@ -679,39 +652,6 @@
       (cond-> violations (assoc :gate/violations violations)
               class (assoc :failure/class class)
               envelope-id (assoc :envelope/id envelope-id))))
-
-(defn ^{:stratum 2} phase-decision
-  "One event per gated phase transition carrying the DecisionEnvelope
-   (Ariadne 1d): the event-stream copy of the one truth artifact. The
-   envelope is runtime-minted; this event references it whole so replay
-   and the console see exactly what the gate core decided."
-  [stream workflow-id phase envelope]
-  (-> (create-envelope stream :gate/decision workflow-id
-                       (str "Phase " (name (or phase :unknown)) " decision: "
-                            (name (:envelope/decision envelope))))
-      (assoc :gate/phase phase
-             :envelope/id (:envelope/id envelope)
-             :gate/decision-envelope envelope)))
-
-(defn ^{:stratum 2} gate-rule-applied
-  "Per-rule policy evidence event: records that policy `rule-id` was evaluated
-   in `phase` with `status` (one of :passed, :failed, :skipped-by-phase,
-   :not-applicable). Emitted for considered AND skipped rules so the full
-   applied set for a run is reconstructable (closes the rule-visibility gap).
-
-   `extra` may carry :severity, :enforcement (the rule's enforcement action),
-   and :violation (a NON-SENSITIVE summary for a :failed rule — callers must
-   not pass raw match content; see gate/policy-pack's violation-summary)."
-  [stream workflow-id phase rule-id status & [extra]]
-  (-> (create-envelope stream :gate/rule-applied workflow-id
-                       (str "Rule " rule-id " " (name status) " in " (name phase)))
-      (assoc :gate/phase   phase
-             :rule/id       rule-id
-             :rule/status   status)
-      (cond-> (:severity extra)    (assoc :rule/severity (:severity extra))
-              (:enforcement extra) (assoc :rule/enforcement (:enforcement extra))
-              (:violation extra)   (assoc :rule/violation (:violation extra))
-              (:envelope-id extra) (assoc :envelope/id (:envelope-id extra)))))
 
 ;; Tool lifecycle events
 (defn ^{:stratum 2} tool-invoked [stream workflow-id agent-id tool-id & [params-summary]]

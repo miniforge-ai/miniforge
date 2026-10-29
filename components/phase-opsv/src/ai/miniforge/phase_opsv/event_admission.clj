@@ -28,7 +28,7 @@
   (let [prepared (events/prepare-current-publication event)]
     (cond
       (anomaly/any-anomaly? prepared) (canonical-failure prepared)
-      (m/validate opsv/DraftProfile (second prepared)) (second prepared)
+      (m/validate [:or DecisionEvent opsv/DraftProfile] (second prepared)) (second prepared)
       :else (anomaly/anomaly :invalid-input (msg/ts :event/invalid) {}))))
 
 (defn- ^{:stratum 1} legacy-event [event]

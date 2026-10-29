@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.artifact-test-support
-  (:require [ai.miniforge.event-stream.interface :as events]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.phase-opsv.lifecycle :as lifecycle]
             [ai.miniforge.phase-opsv.test-support :as support]
             [clojure.java.io :as io]
@@ -11,6 +12,17 @@
            [java.nio.file.attribute FileAttribute]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} attempted-output [output]
+  (assoc output :opsv/phase-produced-artifact-refs []))
+
+(defn ^{:stratum 0} discovery-output [ctx]
+  {:opsv/experiment-pack (get-in ctx [:execution/input :opsv/experiment-pack])})
+
+(defn ^{:stratum 0} reject-event-type [event-type publish stream event]
+  (if (= event-type (:event/type event))
+    (anomaly/anomaly :unavailable "injected event publication failure" {})
+    (publish stream event)))
 
 (defn ^{:stratum 0} configured [ctx]
   (assoc-in ctx [:execution/opts :opsv/evidence-base]

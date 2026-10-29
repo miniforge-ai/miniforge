@@ -9,8 +9,9 @@
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.phase-opsv.event-delivery :as delivery]
             [ai.miniforge.phase-opsv.messages :as msg]
-            [ai.miniforge.phase-opsv.pr-model :as model]
-            [ai.miniforge.phase-opsv.runtime-context :as context]))
+            [ai.miniforge.phase-opsv.pr-audit-model :as model]
+            [ai.miniforge.phase-opsv.runtime-context :as context]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -18,13 +19,22 @@
   (anomaly/anomaly :unavailable (msg/ts :pr/audit-unavailable) {}))
 
 (defn- ^{:stratum 0} event [ctx stream transaction]
-  (events/actuation-disposition
-   stream (context/workflow-id ctx) (get-in transaction [:effect/proposal :opsv/evidence-bundle-id])
-   {:opsv/governed-effect (model/governed-effect transaction)
-    :opsv/effect-state (:effect/state transaction)
-    :opsv/decision-envelope (get-in transaction [:effect/proposal :opsv/envelope])
-    :opsv/effect-observed (select-keys (:effect/observed transaction) [:pr/url :pr/number :pr/head-sha])
-    :opsv/effect-failure (:effect/failure transaction)}))
+  (let [data (model/payload transaction)
+        workflow-id (context/workflow-id ctx)
+        bundle-id (get-in transaction [:effect/proposal :opsv/evidence-bundle-id])
+        expected (assoc data :event/type :opsv.actuation/disposition
+                             :workflow/id workflow-id :opsv/evidence-bundle-id bundle-id)
+        published (if (events/current-event-stream? stream) [] (events/get-events stream))]
+    (if (anomaly/any-anomaly? published) published
+      (or (model/matching-event expected (concat published (:opsv/disposition-events ctx)))
+          (events/actuation-disposition stream workflow-id bundle-id data)))))
+
+(defn- ^{:stratum 0} call-with-audit-failure [failure operation]
+  (try+ (operation)
+        (catch InterruptedException _
+          (.interrupt (Thread/currentThread))
+          failure)
+        (catch Object _ failure)))
 
 (defn- ^{:stratum 0} ready? [ctx transaction]
   (let [bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
@@ -43,19 +53,15 @@
 (defn- ^{:stratum 1} publish! [ctx transaction]
   (let [stream (context/stream ctx)]
     (if (and stream (ready? ctx transaction))
-      (delivery/emit! ctx stream (event ctx stream transaction))
+      (let [draft (event ctx stream transaction)
+            failure (call-with-audit-failure (unavailable) #(delivery/emit! ctx stream draft))]
+        (some-> failure (assoc-in [:anomaly/data :opsv/disposition-event] draft)))
       (unavailable))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} record! [ctx transaction]
-  (let [failure (try (publish! ctx transaction)
-                     (catch InterruptedException _
-                       (let [failure (unavailable)]
-                         (.interrupt (Thread/currentThread))
-                         failure))
-                     (catch Throwable _
-                       (unavailable)))]
+  (let [failure (call-with-audit-failure (unavailable) #(publish! ctx transaction))]
     (if failure
       (assoc-in failure [:anomaly/data :effect/transaction] transaction)
       transaction)))

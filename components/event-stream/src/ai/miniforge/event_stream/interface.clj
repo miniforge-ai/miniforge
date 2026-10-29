@@ -29,7 +29,7 @@
    [ai.miniforge.event-stream.interface.opsv :as opsv]
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.digest :as digest]
-   [ai.miniforge.event-stream.heartbeat :as heartbeat]
+   [ai.miniforge.event-stream.boundary.heartbeat :as heartbeat]
    [ai.miniforge.event-stream.operator-requests :as operator-requests]
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.sinks :as sinks]
@@ -218,20 +218,29 @@
 
 ;; Phase heartbeat scheduler — start/stop liveness signalling for long-running phases.
 (def ^{:stratum 0} start-heartbeat!
-  "Start periodic :workflow/phase-heartbeat emission for a phase on a
-   daemon scheduled executor. Returns an opaque stop handle map
-   (:heartbeat/executor, :heartbeat/future, :heartbeat/phase-id,
-   :heartbeat/last-tick, :heartbeat/seq-num) to pass to stop-heartbeat!.
-   Throws ex-info when event-stream is not IDeref, or when :interval-ms
-   is not a positive integer. opts: {:interval-ms long} (default 30s)."
+  "Start profile-aware phase heartbeats; return an owned stop handle or anomaly.
+   Current opts: positive :interval-ms (default 30s), :progress-sources (default
+   :unknown). Declare sources only when substantive-work ports are instrumented
+   continuously from entry. Every start creates a fresh activation; no replay
+   inference. Legacy construction and invalid-interval exceptions are retained."
   heartbeat/start-heartbeat!)
 
 (def ^{:stratum 0} stop-heartbeat!
-  "Stop a heartbeat scheduler returned by start-heartbeat!. Nil-safe.
-   Cancels the periodic ScheduledFuture (does not interrupt an in-flight
-   tick unless opts :may-interrupt? is true) then shuts down the backing
-   executor. Returns nil."
+  "Stop an owned scheduler. Nil-safe. Current handles close admission and cancel
+   before waiting for an in-flight tick; successful stop leaves no running tick.
+   Optional :may-interrupt? defaults false. Returns nil or a current anomaly."
   heartbeat/stop-heartbeat!)
+
+(def ^{:stratum 0} observe-heartbeat-progress!
+  "Report substantive progress through a captured current activation handle.
+   Source must be declared at entry; position is positive, strictly increasing
+   per source and activation. Repeats, stale positions and stopped handles cannot
+   advance progress. Unknown coverage remains unknown. Returns nil or anomaly."
+  heartbeat/observe-heartbeat-progress!)
+
+(def ^{:stratum 0} heartbeat-dropped-count
+  "Return the current activation's failed ephemeral publication count or anomaly."
+  heartbeat/heartbeat-dropped-count)
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event constructors
@@ -275,23 +284,50 @@
   "Construct an N3 governed OPSV effect disposition event."
   opsv/actuation-disposition)
 
+(def ^{:stratum 0} checkpoint-written
+  "Construct a checkpoint write fact: stream, workflow UUID, phase, path, byte size."
+  events/checkpoint-written)
+
+(def ^{:stratum 0} checkpoint-write-failed
+  "Construct a failed write fact: stream, workflow UUID, phase, error-message/class map."
+  events/checkpoint-write-failed)
+
+(def ^{:stratum 0} machine-snapshot-written
+  "Construct a snapshot write fact: stream, workflow UUID, state, path, byte size."
+  events/machine-snapshot-written)
+
+(def ^{:stratum 0} machine-snapshot-write-failed
+  "Construct a failed snapshot fact: stream, workflow UUID, state, error-message/class map."
+  events/machine-snapshot-write-failed)
+
+(def ^{:stratum 0} workflow-resumed
+  "Construct a resume fact: stream, original workflow UUID, state, phase, skipped phases."
+  events/workflow-resumed)
+
+(def ^{:stratum 0} workflow-spec-hash-mismatch
+  "Construct a drift fact: stream, workflow UUID, expected hash, actual hash."
+  events/workflow-spec-hash-mismatch)
+
 (def ^{:stratum 0} workflow-started
   "Build and return a :workflow/started event envelope map. Multi-arity
    for the legacy 2/3-arg call shape; the opts arity may carry
    :routing/trigger-event-id so the automation-edge-correlator links the
-   handler workflow back to its routing trigger."
+   handler workflow back to its routing trigger. Current drafts require
+   :workflow/intent in opts and do not reserve a sequence number."
   events/workflow-started)
 
 (def ^{:stratum 0} phase-started
   "Build and return a :workflow/phase-started event envelope map for the
-   given phase keyword; optional context is attached as :phase/context."
+   given phase keyword; optional context is attached as :phase/context.
+   Current drafts require a fifth options argument with :phase/expected-agent."
   events/phase-started)
 
 (def ^{:stratum 0} phase-completed
   "Build and return a :workflow/phase-completed event envelope map.
-   Records :phase/outcome (default :success) and, when present on the
+   Records :phase/outcome (legacy default :success) and, when present on the
    result, duration, artifacts, error, transition-request, redirect-to,
-   tokens, cost, meta, and termination-reason."
+   tokens, cost, meta, and termination-reason. Current drafts require explicit
+   outcome, duration and artifacts; construction does not reserve a position."
   events/phase-completed)
 
 (def ^{:stratum 0} workspace-persisted
@@ -331,16 +367,16 @@
   events/tool-call-completed)
 
 (def ^{:stratum 0} phase-heartbeat
-  "Build and return a :workflow/phase-heartbeat event envelope map for
-   long-running phase liveness (:phase/active-since,
-   :phase/events-emitted, :phase/last-event-at,
-   :phase/gap-since-last-event-ms)."
+  "Build a heartbeat without publishing. Current streams require N3 §3.1.1
+   liveness and explicit progress coverage; legacy streams retain tick fields.
+   Current drafts acquire their journal sequence only on publication."
   events/phase-heartbeat)
 
 (def ^{:stratum 0} workflow-completed
   "Build and return a :workflow/completed event envelope map carrying a
    status keyword and optional duration plus opts (tokens, cost,
-   pr-info, pr-infos, evidence-bundle-id)."
+   pr-info, pr-infos, evidence-bundle-id). Current drafts require :completed status,
+   duration and evidence identity, and carry no competing status field."
   events/workflow-completed)
 
 (def ^{:stratum 0} workflow-failed
@@ -348,7 +384,8 @@
    the error (Throwable, anomaly map, or plain map) into
    :workflow/failure-reason, :workflow/error-details,
    :workflow/anomaly-code, and :workflow/retryable?; optional
-   :failure/class."
+   :failure/class. Current drafts require the class and may carry
+   :workflow/failure-phase in opts."
   events/workflow-failed)
 
 (def ^{:stratum 0} llm-request
@@ -394,15 +431,16 @@
   events/gate-failed)
 
 (def ^{:stratum 0} phase-decision
-  "One event per gated phase transition carrying the DecisionEnvelope."
+  "Carry the exact runtime DecisionEnvelope. Current streams receive a draft;
+   legacy streams retain constructor-assigned positions. Retain drafts for retries."
   events/phase-decision)
 
 (def ^{:stratum 0} gate-rule-applied
   "Build and return a :gate/rule-applied event envelope map: per-rule
    policy evidence recording rule-id evaluated in phase with status
-   (:passed, :failed, :skipped-by-phase, :not-applicable). Optional
+   (:passed, :failed, :skipped-by-phase, :not-applicable, :guidance). Optional
    extra carries :severity, :enforcement, and a NON-SENSITIVE
-   :violation summary."
+   :violation summary. Current streams receive sequence-free drafts."
   events/gate-rule-applied)
 
 (def ^{:stratum 0} tool-invoked

@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.25.0-draft
-**Date:** 2026-10-04
+**Version:** 0.26.0-draft
+**Date:** 2026-10-20
 **Status:** Living specification during OSS development
 
 ---
@@ -540,6 +540,13 @@ Documents superseded by normative specs. Retained for reference during migration
 
 ### Approved contract decisions
 
+On 2026-10-17 the product owner approved formalizing `gate/decision` and
+`gate/rule-applied` in N3 and registering their typed current-journal contracts.
+This is the decision source for N3 §3.9.1: preserve runtime decision and per-rule
+evidence without changing approval policy or weakening journal validation.
+The associated PR record is
+`docs/pull-requests/2026-10-17-feat-gate-current-contracts.md`.
+
 On 2026-10-04 the product owner approved preserving deployed chain-step and
 supervisory capabilities through explicit N1/N3 reconciliation during the
 implementation-completion work. This approval is the product-decision source
@@ -629,6 +636,15 @@ Normative specs are enforced by:
 ---
 
 ## Version History
+
+- **0.26.0-draft** (2026-10-20) - Product owner approved the N3 heartbeat
+  amendment: Workflow scope, ephemeral retention of at least 24 hours, and
+  separate scheduler liveness and substantive progress. N3 0.12.0 defines
+  payload 2.0.0, explicit unknown coverage and retained-history compatibility.
+  This is a contract decision, not a claim of runtime conformance or N7 completion.
+
+- **0.25.1-draft** (2026-10-17) - Approved N3 gate decision and rule-evidence
+  registration, typed payloads, and fail-closed audit publication. N3 0.11.0→0.11.1.
 
 - **0.25.0-draft** (2026-10-04) - Approved chain/supervisory reconciliation:
   separate definition and invocation identities, chain-run scope, step/edge

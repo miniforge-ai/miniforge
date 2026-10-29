@@ -889,15 +889,20 @@
         (is (some #{"--max-budget-usd"} args))
         (is (some #{"2.5"} args))))
 
-    (testing "falls back to 0.10 when max-tokens set but no budget-usd"
+    (testing "falls back to the client default when max-tokens set but no budget-usd"
       (let [args (args-fn {:prompt "test" :max-tokens 8000})]
         (is (some #{"--max-budget-usd"} args))
-        (is (some #{"0.10"} args))))
+        (is (some #{"1.00"} args))))
+
+    (testing "the default clears the Claude CLI's fixed per-call cost (~$0.09-0.14)"
+      (let [args (args-fn {:prompt "test" :max-tokens 8000})
+            budget (second (drop-while #(not= "--max-budget-usd" %) args))]
+        (is (> (parse-double budget) 0.14))))
 
     (testing "budget-usd takes priority over max-tokens fallback"
       (let [args (args-fn {:prompt "test" :max-tokens 8000 :budget-usd 5.0})]
         (is (some #{"5.0"} args))
-        (is (not (some #{"0.10"} args)))))
+        (is (not (some #{"1.00"} args)))))
 
     (testing "no budget flag when neither budget-usd nor max-tokens"
       (let [args (args-fn {:prompt "test"})]

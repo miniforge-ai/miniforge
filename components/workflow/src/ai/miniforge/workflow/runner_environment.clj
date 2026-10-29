@@ -23,14 +23,15 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workflow.boundary.environment :as boundary]
    [ai.miniforge.workflow.context :as context]
+   [ai.miniforge.workflow.environment-notifications :as notifications]
+   [ai.miniforge.workflow.environment-records :as records]
+   [ai.miniforge.workflow.governed-environment :as governed]
    [ai.miniforge.workflow.messages :as messages]
-   [ai.miniforge.workflow.runner-defaults :as defaults]
-   [clojure.java.shell :as shell]
-   [clojure.string :as str]))
+   [ai.miniforge.workflow.runner-defaults :as defaults]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -89,32 +90,11 @@
                       :hint (messages/t :governed/no-capsule-hint)})))
 
 ;; Environment record construction
-(defn- ^{:stratum 0} read-head-sha
-  "Return the current HEAD SHA of `working-dir` as a string, or nil
-   when the directory is missing, not a git repo, or `git rev-parse`
-   exits non-zero. Best-effort — never throws."
-  [working-dir]
-  (when working-dir
-    (try
-      (let [{:keys [exit out]} (shell/sh "git" "-C" (str working-dir)
-                                         "rev-parse" "HEAD")]
-        (when (zero? exit) (str/trim out)))
-      (catch Exception _ nil))))
+(def ^{:stratum 0} build-env-record records/build)
 
-(defn- ^{:stratum 0} normalized-environment-metadata
-  "Return acquired environment metadata when it is a map; otherwise return an empty map."
-  [env]
-  (let [metadata (get env :metadata)]
-    (if (map? metadata) metadata {})))
-
-(defn ^{:stratum 0} release-execution-environment!
-  "Release an execution environment. Safe to call with nil values."
-  [executor environment-id]
-  (when (and executor environment-id)
-    (try
-      (dag/release-environment! executor environment-id)
-      (catch Exception e
-        (println (messages/t :env/release-failed {:error (ex-message e)}))))))
+(def ^{:stratum 0} release-execution-environment!
+  "Release nil-safely; ordinary failures warn, critical causes propagate."
+  boundary/release!)
 
 (defn- ^{:stratum 0} boundary-phase
   [phase-ctx]
@@ -123,21 +103,6 @@
     (if-some [last-phase (context/active-or-last-phase phase-ctx)]
       last-phase
       :unknown)))
-
-(def ^{:stratum 0} ^:private persist-tier-by-mode
-  "Maps `:execution/mode` to the persist tier the executor is using.
-   :governed routes through the docker/k8s tier's `git-persist!` (push to
-   remote). :local routes through the worktree tier's `archive-bundle!`
-   (git bundle on local disk). The event consumers (dashboard, evidence
-   bundle) display the tier so users can tell push-to-remote checkpoints
-   from local-archive checkpoints at a glance."
-  {:governed :remote
-   :local    :worktree})
-
-(def ^{:stratum 0} ^:private default-persist-tier
-  "Tier label used when `:execution/mode` is missing or unrecognized.
-   Conservative default — local archive is always present in OSS."
-  :worktree)
 
 (defn- ^{:stratum 0} persist-opts
   "Build the opts map passed to `dag/persist-workspace!`. Keeps map
@@ -155,44 +120,7 @@
       branch      (assoc :branch branch)
       base-branch (assoc :base-branch base-branch))))
 
-(defn- ^{:stratum 0} publish-workspace-persisted!
-  "Publish the `:workspace/persisted` event when the run has an event
-   stream. Swallows publish exceptions — persistence already succeeded;
-   a downstream subscriber's failure should not surface as a workflow
-   error."
-  [context event-data]
-  (when-let [stream (get context :event-stream)]
-    (try
-      (es/publish! stream
-                   (es/workspace-persisted stream
-                                           (get context :execution/id)
-                                           event-data))
-      (catch Exception _e nil))))
-
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} build-env-record
-  "Acquire environment from executor and build the result map.
-
-   Records the acquired worktree's HEAD SHA under
-   `[:environment-metadata :base-sha]` so downstream consumers
-   (M1 of the labeled-PR-actions plan: the watcher ancestry-check
-   via `git merge-base --is-ancestor base merge`) can tell whether
-   a workflow predates a given fix without reconstructing history."
-  [executor workflow-id mode env-config {:keys [acquire-env! result-ok? result-unwrap]}]
-  (let [task-id    (if (uuid? workflow-id) workflow-id (random-uuid))
-        env-result (acquire-env! executor task-id env-config)]
-    (when (result-ok? env-result)
-      (let [env       (result-unwrap env-result)
-            workdir   (:workdir env)
-            base-sha  (read-head-sha workdir)
-            metadata  (cond-> (normalized-environment-metadata env)
-                        base-sha (assoc :base-sha base-sha))]
-        {:executor             executor
-         :environment-id       (:environment-id env)
-         :worktree-path        workdir
-         :execution-mode       mode
-         :environment-metadata metadata}))))
 
 (defn- ^{:stratum 1} restore-local-workspace-checkpoint!
   "Restore a persisted local workspace branch before acquiring a worktree.
@@ -216,109 +144,14 @@
                      :data checkpoint}))
         result)
       (catch Exception e
+        (boundary/preserve-critical! e)
         (log/warn env-logger :workflow :workflow/restore-failed
                   {:message (messages/t :env/restore-failed
                                         {:error (ex-message e)})
                    :data checkpoint})
         nil))))
 
-(defn- ^{:stratum 1} persist-tier-for
-  [context]
-  (get persist-tier-by-mode (get context :execution/mode) default-persist-tier))
-
-(defn- ^{:stratum 1} log-workspace-persisted!
-  [event-data]
-  (let [bundle-or-sha (or (:bundle-path event-data) (:commit-sha event-data))
-        message       (str "Workspace persisted: " bundle-or-sha)]
-    (log/info env-logger :workflow :workflow/workspace-persisted
-              {:message message
-               :data    event-data})))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} acquire-worktree-and-capsule
-  "Acquire both a host worktree and a capsule for governed mode."
-  [executor workflow-id mode env-config fns]
-  (let [wt-registry  ((:create-registry fns) {:worktree {}})
-        wt-executor  ((:select-exec fns) wt-registry :preferred :worktree)
-        wt-result    (when wt-executor
-                       (build-env-record wt-executor workflow-id mode env-config fns))
-        capsule      (build-env-record executor workflow-id mode env-config fns)]
-    (when (and wt-result capsule)
-      (assoc capsule
-             :worktree-path (:worktree-path wt-result)
-             :worktree-executor wt-executor
-             :worktree-environment-id (:environment-id wt-result)))))
-
-(defn- ^{:stratum 2} persist-event-data
-  "Shared event/log payload for a persisted checkpoint. Both the log line
-   and the `:workspace/persisted` event read from this — single source of
-   truth for the persistence record."
-  [context phase env-id data]
-  {:phase        phase
-   :env-id       env-id
-   :branch       (:branch data)
-   :commit-sha   (:commit-sha data)
-   :bundle-path  (:bundle-path data)
-   :persist-tier (persist-tier-for context)})
-
-;------------------------------------------------------------------------------ Layer 3
-
-;; Full acquisition and release
-(defn ^{:stratum 3} acquire-execution-environment!
-  "Acquire an isolated execution environment before pipeline starts.
-   Boundary wrapper around the anomaly-returning executor availability check.
-
-   Returns env map, or nil (local) / throws (governed) on failure. Governed
-   acquisition failure deliberately escalates for legacy runner callers that
-   rely on try+ exception flow; prefer anomaly-returning helpers such as
-   `check-executor-for-mode` for non-boundary branching."
-  [workflow-id {:keys [repo-url branch repo-path execution-mode executor-config
-                       resume-workspace]}]
-  (let [mode (get {:governed :governed} execution-mode :local)]
-    (try
-      (let [fns      (dag-executor-fns)
-            config   (registry-config-for-mode mode executor-config)
-            registry ((:create-registry fns) config)
-            executor (select-capsule-executor registry mode fns)
-            branch   (or (:branch resume-workspace) branch)
-            env-config (cond-> {}
-                         repo-url (assoc :repo-url repo-url)
-                         branch   (assoc :branch branch)
-                         repo-path (assoc :repo-path repo-path))]
-        (when-let [a (check-executor-for-mode executor mode)]
-          ;; Boundary throw: acquire-execution-environment! is the
-          ;; runner's escalation point for governed-mode unavailability.
-          ;; The slingshot shape preserves the contract that legacy
-          ;; try+ callers above this layer rely on.
-          (response/throw-anomaly! :anomalies.executor/unavailable
-                                   (:anomaly/message a)
-                                   {:anomaly.executor/mode (get-in a [:anomaly/data :mode])
-                                    :hint (get-in a [:anomaly/data :hint])}))
-        (when (= :local mode)
-          (restore-local-workspace-checkpoint! executor repo-path resume-workspace))
-        (when executor
-          (if (= :governed mode)
-            (acquire-worktree-and-capsule executor workflow-id mode env-config fns)
-            (build-env-record executor workflow-id mode env-config fns))))
-      (catch Exception e
-        (when (= :governed mode) (throw e))
-        (log/warn env-logger :workflow :workflow/env-acquisition-failed
-                  {:message (messages/t :env/acquisition-failed {:error (ex-message e)})})
-        nil))))
-
-(defn- ^{:stratum 3} announce-persisted!
-  "Announce a successful persist on every visibility surface: log line,
-   first-class event, and (transitively) the evidence-bundle collector
-   that harvests events."
-  [context phase env-id data]
-  (let [event-data (persist-event-data context phase env-id data)]
-    (log-workspace-persisted! event-data)
-    (publish-workspace-persisted! context event-data)))
-
-;------------------------------------------------------------------------------ Layer 4
-
-(defn ^{:stratum 4} persist-workspace-at-phase-boundary!
+(defn ^{:stratum 1} persist-workspace-at-phase-boundary!
   "Persist workspace at phase completion.
 
    Both modes (:governed and :local) participate. :governed pushes to a
@@ -377,7 +210,7 @@
                        :data {:phase phase :result result}})
 
             (:persisted? data)
-            (announce-persisted! context phase env-id data)
+            (notifications/announce! env-logger context phase env-id data)
 
             :else
             (log/info env-logger :workflow :workflow/persist-no-changes
@@ -385,8 +218,57 @@
                        :data {:phase phase :branch (:branch data)}}))
           result)
         (catch Exception e
+          (boundary/preserve-critical! e)
           (log/warn env-logger :workflow :workflow/persist-failed
                     {:message (messages/t :env/persist-failed
                                           {:error (ex-message e)})
                      :data {:phase phase :error (ex-message e)}})
           nil)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Full acquisition and release
+(defn ^{:stratum 2} acquire-execution-environment!
+  "Acquire an isolated execution environment before pipeline starts.
+   Boundary wrapper around the anomaly-returning executor availability check.
+
+   Returns env map, or nil (local) / throws (governed) on failure. Governed
+   acquisition failure deliberately escalates for legacy runner callers that
+   rely on try+ exception flow; prefer anomaly-returning helpers such as
+   `check-executor-for-mode` for non-boundary branching."
+  [workflow-id {:keys [repo-url branch repo-path execution-mode executor-config
+                       resume-workspace]}]
+  (let [mode (get {:governed :governed} execution-mode :local)]
+    (try
+      (let [fns      (dag-executor-fns)
+            config   (registry-config-for-mode mode executor-config)
+            registry ((:create-registry fns) config)
+            executor (select-capsule-executor registry mode fns)
+            branch   (or (:branch resume-workspace) branch)
+            env-config (cond-> {}
+                         repo-url (assoc :repo-url repo-url)
+                         branch   (assoc :branch branch)
+                         repo-path (assoc :repo-path repo-path))]
+        (when-let [a (check-executor-for-mode executor mode)]
+          ;; Boundary throw: acquire-execution-environment! is the
+          ;; runner's escalation point for governed-mode unavailability.
+          ;; The slingshot shape preserves the contract that legacy
+          ;; try+ callers above this layer rely on.
+          (response/throw-anomaly! :anomalies.executor/unavailable
+                                   (:anomaly/message a)
+                                   {:anomaly.executor/mode (get-in a [:anomaly/data :mode])
+                                    :hint (get-in a [:anomaly/data :hint])}))
+        (when (= :local mode)
+          (restore-local-workspace-checkpoint! executor repo-path resume-workspace))
+        (when executor
+          (if (= :governed mode)
+            (governed/acquire! executor workflow-id mode env-config fns)
+            (build-env-record executor workflow-id mode env-config fns))))
+      (catch Exception e
+        (boundary/preserve-critical! e)
+        (when (= :governed mode) (throw e))
+        (log/warn env-logger :workflow :workflow/env-acquisition-failed
+                  {:message (messages/t :env/acquisition-failed {:error (ex-message e)})})
+        nil))))
+
+(comment ::workflow-environment-lifetime)

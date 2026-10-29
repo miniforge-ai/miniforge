@@ -1,3 +1,9 @@
 {:event-stream/messages
  {:delivery/quiesced "publish! rejected: workflow quiesced"
+  :heartbeat/emission-failed "Current heartbeat publication failed."
+  :heartbeat/invalid-options "Heartbeat identity, interval or progress sources are invalid."
+  :heartbeat/invalid-handle "Current heartbeat handle or progress observation is invalid."
+  :heartbeat/closed-stream "Cannot start a heartbeat on a closed current stream."
+  :heartbeat/start-failed "Heartbeat scheduler could not be started."
+  :workflow/invalid-completion-status "Current completion events require the completed workflow status."
   :chain/invalid-draft "Chain draft has invalid lifecycle fields, identity, or reserved envelope fields."}}
