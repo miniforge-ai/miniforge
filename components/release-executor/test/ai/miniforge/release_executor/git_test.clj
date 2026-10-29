@@ -344,10 +344,14 @@
 (deftest ^{:stratum 2} push-fallback-keeps-token-out-of-git-config-test
   (testing "while the HTTPS token-fallback push hangs, and after it is killed,
             .git/config holds no token and origin is unchanged"
-    (let [dir    (fs/create-temp-dir {:prefix "git-host-mode-token-"})
-          token  "ghp_fallbackTestToken0000000000000000000"
-          origin "git@fallback.invalid:o/r.git"
-          config (str (fs/path dir ".git" "config"))]
+    (let [dir     (fs/create-temp-dir {:prefix "git-host-mode-token-"})
+          token   (str "ghp" "_" "fallbackTestToken0000000000000000000")
+          ;; The header carries base64("x-access-token:" token); check that too.
+          encoded (.encodeToString (java.util.Base64/getEncoder)
+                                   (.getBytes (str "x-access-token:" token) "UTF-8"))
+          leaked? #(let [c (slurp %)] (or (str/includes? c token) (str/includes? c encoded)))
+          origin  "git@fallback.invalid:o/r.git"
+          config  (str (fs/path dir ".git" "config"))]
       (with-open [proxy (java.net.ServerSocket. 0 1 (java.net.InetAddress/getLoopbackAddress))]
         (try
           (.setSoTimeout proxy 20000)
@@ -361,11 +365,49 @@
           (with-redefs [shell/default-timeout-ms 2000]
             (let [push (future (git/push-branch! dir "release/token" token))]
               (with-open [_conn (.accept proxy)]
-                (is (not (str/includes? (slurp config) token))
-                    "no token in .git/config while the retry is in flight")
+                (is (not (leaked? config))
+                    "no token, plain or encoded, in .git/config while the retry is in flight")
                 (let [r (deref push 30000 ::stuck)]
                   (is (not= ::stuck r) "the hung retry is killed at the deadline")
                   (is (:timed-out? r))))))
-          (is (not (str/includes? (slurp config) token)) "no token in .git/config afterwards")
+          (is (not (leaked? config)) "no token, plain or encoded, in .git/config afterwards")
           (is (= origin (:output (git/exec! dir ["git" "remote" "get-url" "origin"]))))
+          (finally (fs/delete-tree dir)))))))
+
+;;------------------------------------------- retry reaches the real push URL
+(deftest ^{:stratum 2} push-fallback-targets-effective-push-url-test
+  (doseq [[label setup] [["insteadOf alias origin (gh:)"
+                          [["remote" "add" "origin" "gh:o/r.git"]
+                           ["config" "url.git@github.com:.insteadOf" "gh:"]]]
+                         ["HTTPS origin sent over SSH by pushInsteadOf"
+                          [["remote" "add" "origin" "https://github.com/o/r.git"]
+                           ["config" "url.git@github.com:.pushInsteadOf" "https://github.com/"]]]
+                         ["explicit SSH pushurl"
+                          [["remote" "add" "origin" "https://github.com/o/r.git"]
+                           ["config" "remote.origin.pushurl" "git@github.com:o/r.git"]]]]]
+    (testing (str label ": the retry pushes to the HTTPS URL, and its header wins
+                  over a repository-scoped one")
+      (let [dir (fs/create-temp-dir {:prefix "git-host-mode-rewrite-"})]
+        (try
+          (init-repo! dir)
+          (doseq [args setup] (apply sh! dir "git" args))
+          (sh! dir "git" "config" "http.https://github.com/o/r.git.extraHeader"
+               "Authorization: Basic OLD")
+          (let [envs     (atom [])
+                _        (with-redefs [shell/run-bounded (fn [_args opts]
+                                                           (swap! envs conj (:extra-env opts))
+                                                           {:exit 1 :out "" :err "denied"})]
+                           (git/push-branch! dir "main" "tok"))
+                env      (second @envs)
+                real-git (fn [& args]
+                           (str/trim (:out (apply process/shell
+                                                  {:dir (str dir) :extra-env env
+                                                   :out :string :continue true}
+                                                  "git" args))))]
+            (is (= "https://github.com/o/r.git" (real-git "remote" "get-url" "--push" "origin")))
+            (is (= (str "Authorization: Basic "
+                        (.encodeToString (java.util.Base64/getEncoder)
+                                         (.getBytes "x-access-token:tok" "UTF-8")))
+                   (real-git "config" "--get-urlmatch" "http.extraHeader"
+                             "https://github.com/o/r.git"))))
           (finally (fs/delete-tree dir)))))))
