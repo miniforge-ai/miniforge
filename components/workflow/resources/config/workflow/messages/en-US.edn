@@ -181,6 +181,7 @@
   :env/persist-skipped      "Workspace persist skipped at {phase}: {reason}"
   :env/persist-rejected     "Workspace persist rejected at {phase}: {code}"
   :env/persist-no-changes   "Nothing to persist at {phase}: worktree clean"
+  :env/persist-held         "Workspace committed but not pushed at {phase}: a gate denied the phase"
   :env/restore-failed       "Workspace restore failed: {error}"
 
   ;; v2 multi-parent merge (DAG orchestrator) — anomaly + log messages

@@ -58,12 +58,14 @@
    - exec-fn: (fn [cmd] -> result-map) — executes a command in the environment;
               cmd may be a string (passed to sh -c) or a vector (exec'd directly,
               no shell — preferred for user-supplied values to avoid injection)
-   - opts: {:branch string, :message string}
+   - opts: {:branch string, :message string, :push? bool}
+     :push? false commits without pushing (default true).
 
-   Returns result monad with {:persisted? bool :commit-sha string :branch string}.
+   Returns result monad with {:persisted? bool :pushed? bool :commit-sha
+   string :branch string}.
    Every git step's exit code is checked: a failed commit or push that
    still reported :persisted? true was a silent loss of work."
-  [exec-fn {:keys [branch message] :or {branch "task/unknown" message "phase checkpoint"}}]
+  [exec-fn {:keys [branch message push?] :or {branch "task/unknown" message "phase checkpoint" push? true}}]
   (if (not (safe-branch? branch))
     (result/err :invalid-branch (str "Branch must be a non-empty string not starting with '-': " (pr-str branch)))
     (try
@@ -79,15 +81,17 @@
           ;; Unsigned: a scratch-worktree commit must not depend on the
           ;; operator's signing agent (see worktree tier commit-staged!).
           (let [commit-r (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)])
-                push-r (when-not (failed-step commit-r "")
+                push-r (when (and push? (not (failed-step commit-r "")))
                          (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"]))
-                sha-r (when (and push-r (not (failed-step push-r "")))
+                sha-r (when (and (not (failed-step commit-r ""))
+                                 (or (not push?) (and push-r (not (failed-step push-r "")))))
                         (exec-fn "git rev-parse HEAD"))]
             (cond
               (failed-step commit-r "") (result/err :persist-commit-failed (failed-step commit-r "git commit failed"))
               (failed-step push-r "")   (result/err :persist-push-failed (failed-step push-r "git push failed"))
               (failed-step sha-r "")    (result/err :persist-sha-failed (failed-step sha-r "git rev-parse failed"))
               :else (result/ok {:persisted? true
+                                :pushed? (boolean push?)
                                 :commit-sha (str/trim (get-in sha-r [:data :stdout] ""))
                                 :branch branch})))))
       (catch Exception e

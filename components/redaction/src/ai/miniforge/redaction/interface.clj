@@ -57,6 +57,18 @@
   [s]
   (match/secret-string? s))
 
+(defn ^{:stratum 0} pattern-secret-string?
+  "True when S matches a secret value pattern: `secret-string?` without
+   the payment-card checksum scan.
+
+   For scanning source code. Any 12-19 digit run that passes the Luhn
+   checksum counts as a card, and ordinary numbers in code do one time
+   in ten — `(* 20 24 60 60 1000)` is one — so a gate that blocks on
+   code would refuse correct changes. Credentials, keys and SSNs are
+   still matched by the same patterns redaction uses."
+  [s]
+  (match/pattern-secret-string? s))
+
 (defn ^{:stratum 0} marker
   "The redaction marker substituted for an excluded value."
   []

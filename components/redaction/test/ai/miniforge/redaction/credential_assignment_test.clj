@@ -58,6 +58,13 @@
    ["GH_TOKEN=[REDACTED]" "GH_TOKEN=[REDACTED]" "exactly the marker, unquoted"]
    ["DB_PASSWORD: \"[REDACTED]\"" "DB_PASSWORD: \"[REDACTED]\"" "exactly the marker, quoted"]
    ["x-access-token:[REDACTED]@github.com" "x-access-token:[REDACTED]@github.com" "exactly the marker, x-access-token"]
+   ;; a quoted literal assigned in code (moved from the :no-secrets gate)
+   ["password = \"hunter2hunter2\"" "password = \"[REDACTED]\"" "code assignment, spaces around ="]
+   ["self.api_key = 'opaqueVALUE123'" "self.api_key = '[REDACTED]'" "attribute assignment"]
+   ["client-secret='opaque value 123'" "client-secret='[REDACTED]'" "hyphenated name, spaces in value"]
+   ["password == \"hunter2hunter2\"" "password == \"hunter2hunter2\"" "a comparison, not an assignment"]
+   ["token = \"short\"" "token = \"short\"" "fewer than 8 characters"]
+   ["password = \"$DB_PASSWORD_VAR\"" "password = \"$DB_PASSWORD_VAR\"" "quoted variable reference"]
    ;; x-access-token
    ["auth x-access-token:opaqueVALUE123" "auth x-access-token:[REDACTED]" "outside a URL"]
    ["push x-access-token:opaqueVALUE123@github.com/o/r" "push x-access-token:[REDACTED]@github.com/o/r" "host survives"]
@@ -90,3 +97,12 @@
       (is (= (not= input expected) (sut/secret-string? input)) "secret-string? on the input")
       (is (= expected (sut/redact expected)) "redaction is idempotent")
       (is (not (sut/secret-string? expected)) "redacted text reads clean"))))
+
+(deftest ^{:stratum 1} pattern-secret-string-skips-card-checksums-test
+  (testing "ordinary numbers in code can pass the card checksum; the pattern-only check ignores them"
+    (let [code "(def retention-ms (* 20 24 60 60 1000))"]
+      (is (sut/secret-string? code) "the card checksum fires on this arithmetic")
+      (is (not (sut/pattern-secret-string? code)))))
+  (testing "it still answers for every pattern row"
+    (doseq [[input expected] rows]
+      (is (= (not= input expected) (sut/pattern-secret-string? input)) (pr-str input)))))
