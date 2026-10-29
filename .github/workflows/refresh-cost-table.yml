@@ -185,10 +185,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # A red run used to go unnoticed: this workflow failed all 24 of its
-  # weekly runs (2026-05-18 to 2026-10-26) with no signal. Same channel as ci.yml's
-  # main-status job: one open tracking issue, a comment per further
-  # failure, closed by the next green run. No checkout or toolchain, so
-  # the alert survives the breakage it reports.
+  # weekly runs (2026-05-18 to 2026-10-26) with no signal. Same channel as
+  # ci.yml's main-status job: one open tracking issue, a comment per
+  # further failure, closed by the next green run. No checkout or
+  # toolchain, so the alert survives the breakage it reports.
   alert:
     name: Alert on failure
     runs-on: ubuntu-latest
