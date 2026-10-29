@@ -96,6 +96,21 @@
         (git/force-push! "/tmp/wt" "push-tok"))
       (is (= "push-tok" (get-in @seen [:extra-env "GH_TOKEN"]))))))
 
+(deftest ^{:stratum 0} check-gh-auth-timeout-test
+  (testing "a timed-out `gh auth status` keeps :timed-out? and the :timeout anomaly
+            instead of reading as an ordinary auth failure"
+    (let [anom {:anomaly/type :timeout :anomaly/message "gh auth status timed out"}]
+      (with-redefs [process/shell     (fn [& _] {:exit 0 :out "/usr/bin/gh" :err ""})
+                    shell/run-bounded (fn [_args _opts]
+                                        {:exit 124 :out "" :err "gh auth status timed out"
+                                         :timed-out? true :anomaly anom})]
+        (let [r (git/check-gh-auth! "tok")]
+          (is (false? (:authenticated? r)))
+          (is (true? (:timed-out? r)))
+          (is (= anom (:anomaly r)))
+          (is (= "gh auth status timed out" (:error r))
+              "a deadline is not reported as missing auth"))))))
+
 (deftest ^{:stratum 0} commit-changes-rev-parse-failure-test
   (testing "commit-changes! surfaces a rev-parse failure instead of reporting a
             phantom success with a missing sha"

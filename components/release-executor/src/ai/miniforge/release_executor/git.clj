@@ -245,7 +245,8 @@
    auth); the 0-arity keeps the historical public-interface signature and
    inherits the ambient environment.
 
-   Returns {:available? bool :authenticated? bool :user string :error string}"
+   Returns {:available? bool :authenticated? bool :user string :error string},
+   plus :timed-out? and :anomaly when `gh auth status` hit its deadline."
   ([] (check-gh-auth! nil))
   ([github-token]
    (try
@@ -260,8 +261,13 @@
             (let [output (get auth-r :out "")
                   user-match (re-find #"Logged in to [^\s]+ account (\S+)" output)]
               (gh-authenticated (or (second user-match) "unknown")))
-            (gh-available-unauthenticated
-             (str "gh not authenticated. Run: gh auth login\n" (get auth-r :err "")))))))
+            ;; A timeout is not an auth failure: report its own message and
+            ;; carry :timed-out? / :anomaly like the other bounded calls.
+            (merge (gh-available-unauthenticated
+                    (if (:timed-out? auth-r)
+                      (get auth-r :err "")
+                      (str "gh not authenticated. Run: gh auth login\n" (get auth-r :err ""))))
+                   (timeout-data auth-r))))))
     (catch Exception e
       (gh-unavailable (.getMessage e))))))
 
