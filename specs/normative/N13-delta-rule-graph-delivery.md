@@ -263,9 +263,11 @@ The query runs these steps in order:
 
 1. **Candidates.** Keep resolved rules whose phase and task type match. Keep a file-scoped rule only when a glob
    matches a path. At review and release, paths are the changeset only. At plan and implement, paths are the
-   changeset; when it is empty, the scope paths; when those are empty, the repo paths. Every applicability test,
-   globs included, MUST use the gate's predicate (§4.6). At plan and implement, always-on rules bypass phase, task and
-   file filtering. At review they are filtered like any rule. At release they are not delivered (§6.3).
+   changeset; when it is empty, the scope paths; when those are empty, the repo paths. A scope path naming a
+   directory MUST expand to the repo paths under it before matching. A file glob never matches a bare directory.
+   Every applicability test, globs included, MUST use the gate's predicate (§4.6). At plan and implement, always-on
+   rules bypass phase, task and file filtering. At review they are filtered like any rule. At release they are not
+   delivered (§6.3).
 2. **Classify.** Compute each candidate's enforcement class (§7.2).
 3. **Rank.** Always-on rules come first, then failed rules, then rules one edge from a failed rule. Next comes ledger
    rank (N13 §5.4), once the ledger is confident. Ties break on the number of matching paths, then on citations from
@@ -591,6 +593,8 @@ Each obligation names the stage from which it applies.
 12. Stage 1. An empty review changeset selects no file-scoped rule and reports no file-scoped rule `:unenforced`.
 13. Stage 1. A semantic `:hard-halt` rule whose only changed file exceeds the judge's size limit is `:judged` and
     reaches review delivery.
+14. Stage 2. At plan, with an empty changeset, the scope path `components/knowledge/src` selects `:std/polylith`.
+    Its glob `components/**/*.clj` matches the `.clj` files under that directory, not the directory itself.
 
 ---
 
