@@ -97,14 +97,25 @@
 
 (deftest ^{:stratum 1} build-launch-plan-drops-secrets-for-untrusted-test
   (testing "an :untrusted plan (the default) launches without secret-named
-            env, so no process in the capsule inherits them; :trusted keeps
-            them"
+            env such as GH_TOKEN, so no process in the capsule inherits it,
+            but keeps the agent's ANTHROPIC_API_KEY (N11 §8.1); :trusted
+            keeps everything"
     (let [env {:GH_TOKEN "t" :ANTHROPIC_API_KEY "k" :LANG "C.UTF-8"}]
-      (is (= {"LANG" "C.UTF-8"}
+      (is (= {"ANTHROPIC_API_KEY" "k" "LANG" "C.UTF-8"}
              (:env (oci-cli/build-launch-plan valid-digest {:env env}))))
       (is (= {"GH_TOKEN" "t" "ANTHROPIC_API_KEY" "k" "LANG" "C.UTF-8"}
              (:env (oci-cli/build-launch-plan valid-digest
                                               {:env env :trust-level :trusted})))))))
+
+(deftest ^{:stratum 1} build-launch-plan-treats-unknown-trust-as-untrusted-test
+  (testing "a nil or unknown :trust-level launches as :untrusted: secrets
+            are dropped and the plan records :untrusted"
+    (doseq [trust-level [nil :unknown "trusted"]]
+      (let [plan (oci-cli/build-launch-plan valid-digest {:env {:GH_TOKEN "t"}
+                                                          :trust-level trust-level})]
+        (is (= {} (:env plan)) (str "trust level " (pr-str trust-level)))
+        (is (= :untrusted (:trust-level plan)))
+        (is (= {:valid? true} (execution-plan/validate-plan plan)))))))
 
 (deftest ^{:stratum 1} acquire-records-git-remote-for-persist-test
   (testing "a bootstrapped acquire records the caller's remote (not one read

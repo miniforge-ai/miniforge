@@ -22,8 +22,34 @@ env:
   MINIFORGE_CI_BOT_APP_ID: "3360143"
 
 jobs:
+  # Resolves the release version once, before any build, so every
+  # artifact is stamped with it (MINIFORGE_VERSION -> miniforge/version.edn
+  # in the jar, read by `mf version`).
+  version:
+    name: Determine version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+    steps:
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            RELEASE_TAG="v${VERSION}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+          echo "Release tag: $RELEASE_TAG"
+
   build:
     name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    needs: version
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -77,6 +103,8 @@ jobs:
             clojure-${{ runner.os }}-
 
       - name: Build uberscript
+        env:
+          MINIFORGE_VERSION: ${{ needs.version.outputs.version }}
         run: bb build:cli
 
       - name: Create artifact name
@@ -110,6 +138,7 @@ jobs:
   # see docs/platform-support.md.
   build-windows:
     name: Build windows-x86_64 (preview)
+    needs: version
     runs-on: windows-latest
     continue-on-error: true
     steps:
@@ -175,6 +204,8 @@ jobs:
             clojure-${{ runner.os }}-
 
       - name: Build uberjar
+        env:
+          MINIFORGE_VERSION: ${{ needs.version.outputs.version }}
         run: bb build:cli
         shell: pwsh
 
@@ -208,32 +239,17 @@ jobs:
     name: Create GitHub Release
     # Wait on both, but allow release to ship even if the Windows preview
     # build fails — Mac/Linux builds remain the gating dependency.
-    needs: [build, build-windows]
+    needs: [version, build, build-windows]
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      release_tag: ${{ steps.version.outputs.release_tag }}
+      version: ${{ needs.version.outputs.version }}
+      release_tag: ${{ needs.version.outputs.release_tag }}
       upload_url: ${{ steps.create_release.outputs.upload_url }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Determine version
-        id: version
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION="${{ github.event.inputs.version }}"
-            RELEASE_TAG="v${VERSION}"
-          else
-            VERSION="${GITHUB_REF#refs/tags/v}"
-            RELEASE_TAG="${GITHUB_REF_NAME}"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION"
-          echo "Release tag: $RELEASE_TAG"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -253,14 +269,14 @@ jobs:
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.version.outputs.release_tag }}
-          name: Release ${{ steps.version.outputs.version }}
+          tag_name: ${{ needs.version.outputs.release_tag }}
+          name: Release ${{ needs.version.outputs.version }}
           draft: false
           prerelease: false
           files: release/*
           generate_release_notes: true
           body: |
-            ## Miniforge ${{ steps.version.outputs.version }}
+            ## Miniforge ${{ needs.version.outputs.version }}
 
             ### Installation
 
@@ -274,14 +290,14 @@ jobs:
 
             **macOS ARM64 (Apple Silicon)**
             ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/miniforge-macos-arm64 -o miniforge
+            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}/miniforge-macos-arm64 -o miniforge
             chmod +x miniforge
             sudo mv miniforge /usr/local/bin/
             ```
 
             **Linux x86_64**
             ```bash
-            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/miniforge-linux-x86_64 -o miniforge
+            curl -L https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}/miniforge-linux-x86_64 -o miniforge
             chmod +x miniforge
             sudo mv miniforge /usr/local/bin/
             ```
@@ -293,7 +309,7 @@ jobs:
             page). The Windows artifact may be missing if the preview build
             failed — check the assets list below.
             ```powershell
-            Invoke-WebRequest -Uri https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/miniforge-windows-x86_64.zip -OutFile miniforge.zip
+            Invoke-WebRequest -Uri https://github.com/${{ github.repository }}/releases/download/v${{ needs.version.outputs.version }}/miniforge-windows-x86_64.zip -OutFile miniforge.zip
             Expand-Archive miniforge.zip -DestinationPath $env:LOCALAPPDATA\Programs\miniforge
             $env:PATH += ";$env:LOCALAPPDATA\Programs\miniforge"
             mf version

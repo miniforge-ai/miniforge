@@ -57,14 +57,16 @@
   (is (nil? (sut/parse-config "p" "")))
   (is (nil? (sut/parse-config "p" ";; only a comment\n")))
   (is (= {:a 1} (sut/parse-config "p" "{:a 1} ;; trailing comment")))
-  (is (anomaly/anomaly? (sut/parse-config "p" "#=(+ 1 2)"))))
+  (is (anomaly/anomaly? (sut/parse-config "p" "#=(+ 1 2)")))
+  (is (anomaly/anomaly? (sut/parse-config "p" "nil")) "a lone nil is a form, not an empty file"))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} refuses-to-overwrite-unparseable-file-test
   (doseq [[label content] [["truncated map" "{:llm {:backend :claude} :policy-packs"]
                            ["not a map" "[:fleet]"]
-                           ["two top-level forms" "{:llm {}} {:fleet {}}"]]]
+                           ["two top-level forms" "{:llm {}} {:fleet {}}"]
+                           ["a lone nil" "nil"]]]
     (testing label
       (let [path   (temp-config-path content)
             result (config-file/update-config! path #(assoc-in % [:fleet :repos] ["a/b"]))]
@@ -96,28 +98,31 @@
       (is (= ["a/b" "c/d" "e/f"] (get-in (edn/read-string (slurp path)) [:fleet :repos]))))))
 
 (deftest ^{:stratum 1} write-keeps-mode-and-symlink-test
-  (let [real (temp-config-path "{:llm {}}")
-        link (str (fs/path (fs/create-temp-dir) "config.edn"))]
-    (fs/set-posix-file-permissions real "rw-r-----")
-    (fs/create-sym-link link real)
-    (config-file/update-config! link #(assoc % :a 1))
-    (is (fs/sym-link? link))
-    (is (= {:llm {} :a 1} (edn/read-string (slurp real))))
-    (is (= "rw-r-----" (fs/posix->str (fs/posix-file-permissions real))))))
+  ;; POSIX modes and unprivileged symlinks do not exist on Windows.
+  (when-not (fs/windows?)
+    (let [real (temp-config-path "{:llm {}}")
+          link (str (fs/path (fs/create-temp-dir) "config.edn"))]
+      (fs/set-posix-file-permissions real "rw-r-----")
+      (fs/create-sym-link link real)
+      (config-file/update-config! link #(assoc % :a 1))
+      (is (fs/sym-link? link))
+      (is (= {:llm {} :a 1} (edn/read-string (slurp real))))
+      (is (= "rw-r-----" (fs/posix->str (fs/posix-file-permissions real)))))))
 
 (deftest ^{:stratum 1} symlink-and-target-writers-share-the-lock-test
   (testing "a writer going through a symlink waits on the lock another process holds for the target"
-    (let [real   (temp-config-path "{:llm {}}")
-          link   (str (fs/path (fs/create-temp-dir) "config.edn"))
-          _      (fs/create-sym-link link real)
-          holder (process/process ["bb" "-e" lock-holder-script (str real ".lock")] {:err :inherit})]
-      (try
-        (is (= ":locked" (deref (future (.readLine (io/reader (:out holder)))) holder-start-timeout-ms :timeout)))
-        (let [result (config-file/update-config! link #(assoc % :a 1))]
-          (is (= :unavailable (:anomaly/type result)))
-          (is (= "{:llm {}}" (slurp real))))
-        (finally
-          (process/destroy-tree holder))))))
+    (when-not (fs/windows?)
+      (let [real   (temp-config-path "{:llm {}}")
+            link   (str (fs/path (fs/create-temp-dir) "config.edn"))
+            _      (fs/create-sym-link link real)
+            holder (process/process ["bb" "-e" lock-holder-script (str real ".lock")] {:err :inherit})]
+        (try
+          (is (= ":locked" (deref (future (.readLine (io/reader (:out holder)))) holder-start-timeout-ms :timeout)))
+          (let [result (config-file/update-config! link #(assoc % :a 1))]
+            (is (= :unavailable (:anomaly/type result)))
+            (is (= "{:llm {}}" (slurp real))))
+          (finally
+            (process/destroy-tree holder)))))))
 
 (deftest ^{:stratum 1} concurrent-writers-share-the-lock-test
   (let [path    (temp-config-path "{}")
@@ -138,6 +143,26 @@
         (is (str/includes? (:anomaly/message result) path))))
     (is (= "{:llm {}}" (slurp path)))
     (is (= #{"config.edn" "config.edn.lock"} (set (map fs/file-name (fs/list-dir (fs/parent path))))))))
+
+(deftest ^{:stratum 1} vanishing-file-is-an-anomaly-not-a-throw-test
+  (testing "a file deleted while its target is resolved comes back as an anomaly from both writers"
+    (let [path (temp-config-path "{:llm {}}")]
+      (with-redefs [sut/publish-target (fn [_] (throw (java.nio.file.NoSuchFileException. path)))]
+        (doseq [result [(config-file/update-config! path #(assoc % :a 1))
+                        (config-file/write-config! path {:a 1})]]
+          (is (= :fault (:anomaly/type result)))
+          (is (str/includes? (:anomaly/message result) path)))))))
+
+(deftest ^{:stratum 1} renamed-but-not-synced-is-its-own-anomaly-test
+  (testing "a failed fsync after the rename says the write landed, so callers do not retry it"
+    ;; Windows skips the directory fsync, so there is nothing to fail there.
+    (when-not (fs/windows?)
+      (let [path (temp-config-path "{:llm {}}")]
+        (with-redefs [durability/confirm! (fn [_] (anomaly/anomaly :fault "fsync failed" {}))]
+          (let [result (config-file/update-config! path #(assoc % :a 1))]
+            (is (= :anomalies.config/not-synced (anomaly/subtype result)))
+            (is (str/includes? (:anomaly/message result) path))))
+        (is (= {:llm {} :a 1} (edn/read-string (slurp path))) "the new content is in place")))))
 
 (deftest ^{:stratum 1} write-config-replaces-unparseable-file-test
   (let [path (temp-config-path "{:broken")]

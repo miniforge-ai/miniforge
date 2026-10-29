@@ -866,6 +866,19 @@
                    (get (git-config-of (:env-file clone))
                         "http.https://github.com/.extraheader")))))))))
 
+(deftest ^{:stratum 3} container-env-leaves-runtime-cli-variables-alone-test
+  (testing "a container's DOCKER_DEFAULT_PLATFORM reaches the container but
+            not the docker CLI's own environment, where it would change the
+            platform `docker run` pulls and starts"
+    (with-fake-runtime :docker ["DOCKER_DEFAULT_PLATFORM"]
+      (fn [descriptor calls]
+        (oci-cli/create-container descriptor "c" "img" "/w" nil nil nil
+                                  :execution-plan {:env {"DOCKER_DEFAULT_PLATFORM" "linux/s390x"}})
+        (let [{:keys [argv env env-file]} (first (calls))]
+          (is (not= "linux/s390x" (get env "DOCKER_DEFAULT_PLATFORM")))
+          (is (or (some #{"DOCKER_DEFAULT_PLATFORM=linux/s390x"} argv)
+                  (= "linux/s390x" (get env-file "DOCKER_DEFAULT_PLATFORM")))))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli-test)
