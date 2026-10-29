@@ -84,12 +84,14 @@
     @newest))
 
 (defn- ^{:stratum 0} manifest-hold
-  "`:pinned` when the run's manifest pins it, `:unreadable` when the
-   manifest exists but cannot be read as a map (pinned or not is then
-   unknown), else nil."
+  "`:pinned` when the run has a pin marker, or its manifest carries a
+   legacy `:pinned? true`; `:unreadable` when the manifest exists but
+   cannot be read as a map (pinned or not is then unknown); else nil."
   [dir]
   (let [manifest (fs/file dir checkpoint-paths/manifest-filename)]
-    (when (fs/exists? manifest)
+    (cond
+      (fs/exists? (fs/file dir checkpoint-paths/pin-marker-filename)) :pinned
+      (fs/exists? manifest)
       (try+
         (let [content (edn/read-string (slurp manifest))]
           (cond (not (map? content)) :unreadable

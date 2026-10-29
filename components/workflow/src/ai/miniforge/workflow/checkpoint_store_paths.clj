@@ -46,6 +46,12 @@
   "Filename for the durable workflow checkpoint manifest."
   "manifest.edn")
 
+(def ^{:stratum 0} pin-marker-filename
+  "A run is pinned while this file exists in its checkpoint directory: the
+   checkpoint GC keeps it. A file of its own rather than a manifest key, so
+   pinning never shares a read-modify-write with a checkpoint write."
+  "pinned")
+
 (def ^{:stratum 0} phase-checkpoints-directory-name
   "Directory name for per-phase checkpoint files."
   "phases")
@@ -80,6 +86,12 @@
   [checkpoint-root workflow-run-id]
   (str (fs/path (workflow-checkpoint-dir checkpoint-root workflow-run-id)
                 manifest-filename)))
+
+(defn ^{:stratum 1} pin-marker-path
+  "Path to the pin marker of a workflow run."
+  [checkpoint-root workflow-run-id]
+  (str (fs/path (workflow-checkpoint-dir checkpoint-root workflow-run-id)
+                pin-marker-filename)))
 
 (defn ^{:stratum 1} phase-checkpoints-dir
   "Directory that stores per-phase checkpoint files."

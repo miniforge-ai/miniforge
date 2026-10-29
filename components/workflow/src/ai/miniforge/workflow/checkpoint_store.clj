@@ -324,6 +324,12 @@
                 (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
               (write-edn-atomically! snapshot-path snapshot)
               (write-edn-atomically! manifest-path merged-manifest)
+              ;; A run started pinned (`mf resume --pin` under a new run id)
+              ;; gets its pin marker with its first checkpoint.
+              (when (true? (get-in ctx [:execution/opts :checkpoint/pin?]))
+                (let [marker (checkpoint-paths/pin-marker-path checkpoint-root workflow-run-id)]
+                  (when-not (fs/exists? marker)
+                    (write-edn-atomically! marker {:pinned-at (str (java.time.Instant/now))}))))
               (cond-> {:checkpoint/root checkpoint-root
                        :checkpoint/machine-snapshot-path snapshot-path
                        :checkpoint/manifest-path manifest-path}
@@ -335,27 +341,27 @@
           (write-failure checkpoint-root workflow-run-id phase-name e))))))
 
 (defn ^{:stratum 2} pin-checkpoint!
-  "Pin a run's checkpoint: set `:pinned? true` in its manifest, which the
-   checkpoint GC never collects and later checkpoints of the run keep.
-   Returns the manifest path, or an anomaly: `:not-found` when the run has
-   no manifest, `:unavailable` when it cannot be read or written."
+  "Pin a run's checkpoint: write its pin marker (atomically), which the
+   checkpoint GC never collects past. The marker is its own file, so a
+   checkpoint write rewriting the manifest at the same time cannot drop
+   it. Returns the marker path, or an anomaly: `:not-found` when the run
+   has no checkpoint, `:unavailable` when the marker cannot be written."
   ([workflow-run-id]
    (pin-checkpoint! workflow-run-id {}))
   ([workflow-run-id opts]
    (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
-         path (checkpoint-paths/manifest-path checkpoint-root workflow-run-id)
+         path (checkpoint-paths/pin-marker-path checkpoint-root workflow-run-id)
          data {:workflow/run-id workflow-run-id :checkpoint/path path}]
-     (try+
-       (if-let [manifest (read-edn-file path)]
-         (do (write-edn-atomically! path (assoc manifest :pinned? true))
-             path)
-         (anomaly/anomaly :not-found
-                          (messages/t :checkpoint/pin-no-manifest {:run-id workflow-run-id})
-                          data))
-       (catch Exception e
-         (anomaly/exception-anomaly :unavailable
-                                    (messages/t :checkpoint/pin-failed
-                                                {:run-id workflow-run-id
-                                                 :error (or (ex-message e) (.getName (class e)))})
-                                    data
-                                    e))))))
+     (if-not (fs/exists? (checkpoint-paths/manifest-path checkpoint-root workflow-run-id))
+       (anomaly/anomaly :not-found
+                        (messages/t :checkpoint/pin-no-manifest {:run-id workflow-run-id})
+                        data)
+       (try+
+         (write-edn-atomically! path {:pinned-at (str (java.time.Instant/now))})
+         (catch Exception e
+           (anomaly/exception-anomaly :unavailable
+                                      (messages/t :checkpoint/pin-failed
+                                                  {:run-id workflow-run-id
+                                                   :error (or (ex-message e) (.getName (class e)))})
+                                      data
+                                      e)))))))

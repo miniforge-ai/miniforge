@@ -143,8 +143,8 @@
 
 (defn ^{:stratum 1} build-manifest
   "Build the durable checkpoint manifest for an execution context. It
-   carries `:pinned? true` when the existing manifest did or the run was
-   started with `:checkpoint/pin?`, so the checkpoint GC keeps the run."
+   keeps a legacy `:pinned? true` from the existing manifest (a run pinned
+   before pins moved to their own marker file), so the GC still keeps it."
   ([ctx checkpoint-root]
    (build-manifest ctx checkpoint-root nil))
   ([ctx checkpoint-root existing-manifest]
@@ -175,7 +175,6 @@
                (checkpoint-paths/machine-snapshot-path checkpoint-root workflow-run-id)
                :workflow/phase-checkpoints phase-paths
                :workflow/last-checkpoint-at (current-checkpoint-timestamp)}
-        ;; A pinned run stays pinned: the checkpoint GC never collects it.
-        (or (true? (:pinned? existing-manifest))
-            (true? (get-in ctx [:execution/opts :checkpoint/pin?])))
+        ;; A legacy manifest pin stays: the checkpoint GC never collects it.
+        (true? (:pinned? existing-manifest))
         (assoc :pinned? true))))))
