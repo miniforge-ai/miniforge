@@ -24,6 +24,7 @@
    Default gates: [:tests-pass :coverage]"
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate]
             [ai.miniforge.workspace.interface :as workspace]
             [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
@@ -290,7 +291,7 @@
         duration-ms (if start-time (- end-time start-time) 0)
         result (get-in ctx [:phase :result])
         agent-status (:status result)
-        gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))
         parse-error? (true? (get-in result [:metrics :parse-error?]))
         timeout? (and (= :error agent-status)
                       (not parse-error?)
