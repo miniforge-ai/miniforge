@@ -57,6 +57,20 @@
         (update-in [:execution/metrics :cost-usd]    (fnil + 0.0) (or cost-usd 0.0))
         (update-in [:execution/metrics :duration-ms] (fnil + 0)   (or duration-ms 0)))))
 
+(defn- ^{:stratum 0} dag-failure-error
+  "The :execution/errors entry for a failed DAG run. An operator cancel
+   is recorded as :dashboard-stop with the stop anomaly's message and
+   data, the same entry the runner writes when it sees :stopped at a
+   phase boundary, so a cancel reads the same wherever it lands."
+  [dag-result]
+  (if (:cancelled? dag-result)
+    (let [stop (:error dag-result)]
+      {:type    :dashboard-stop
+       :message (:anomaly/message stop)
+       :data    (:anomaly/data stop)})
+    {:type       :dag-execution-failed
+     :dag-result dag-result}))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} dag-skip-reason
@@ -79,9 +93,7 @@
    (-> ctx
        (assoc :execution/dag-result dag-result)
        (roll-dag-metrics-into-execution dag-result)
-       (update :execution/errors conj
-               {:type :dag-execution-failed
-                :dag-result dag-result}))))
+       (update :execution/errors conj (dag-failure-error dag-result)))))
 
 (defn ^{:stratum 1} dag-skip-diagnostic
   "Produce a structured snapshot of phase-result for :no-plan-id / :no-tasks
