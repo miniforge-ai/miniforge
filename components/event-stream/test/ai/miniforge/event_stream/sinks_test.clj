@@ -218,6 +218,18 @@
               (is (= :workflow/started (:event/type parsed)))
               (is (= wf-id (:workflow/id parsed)))))))))
 
+  (testing "leaves only the final event file, no temp file, in the workflow directory"
+    (with-temp-dir
+      (fn [dir]
+        (let [sink (sinks/file-sink {:base-dir dir})
+              wf-id (random-uuid)]
+          (dotimes [_ 3] (sink (sample-event {:workflow/id wf-id})))
+          (let [names (map #(.getName ^java.io.File %)
+                           (list-files (io/file dir "live" (str wf-id))))]
+            (is (= 3 (count names)))
+            (is (every? #(str/ends-with? % ".json") names)
+                "every file is a finished event; none is a .transit.tmp"))))))
+
   (testing "writes one file per event in the workflow subdirectory"
     (with-temp-dir
       (fn [dir]
@@ -435,6 +447,20 @@
               (is (= 1 deleted))
               (is (not (.exists old-file)))
               (is (.exists new-file))))))))
+
+  (testing "removes temp files a killed writer left behind, once they are stale"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf-dir (io/file dir "live" "wf-1")
+              orphan (io/file wf-dir ".es-123.transit.tmp")
+              fresh (io/file wf-dir ".es-456.transit.tmp")]
+          (.mkdirs wf-dir)
+          (spit orphan "{")
+          (spit fresh "{")
+          (.setLastModified orphan (- (System/currentTimeMillis) (* 8 24 60 60 1000)))
+          (is (= 1 (sinks/cleanup-stale-events! {:events-dir dir})))
+          (is (not (.exists orphan)))
+          (is (.exists fresh) "a temp file young enough to be mid-write is left alone")))))
 
   (testing "returns 0 when directory does not exist"
     (is (= 0 (sinks/cleanup-stale-events!

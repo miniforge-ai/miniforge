@@ -266,7 +266,9 @@
 
 (defn ^{:stratum 1} cleanup-stale-events!
   "Delete event files older than TTL from the events directory.
-   Walks all subdirectories (per-workflow and operator).
+   Walks all subdirectories (per-workflow and operator). Also removes
+   `.transit.tmp` files of the same age: a writer killed between its
+   temp write and the rename leaves one, and no reader ever picks it up.
 
    Arguments:
      opts - Map with optional:
@@ -282,7 +284,8 @@
     (if (.isDirectory events-dir)
       (let [stale-files (->> (file-seq events-dir)
                              (filter #(and (.isFile %)
-                                           (str/ends-with? (.getName %) ".json")
+                                           (or (str/ends-with? (.getName %) ".json")
+                                               (str/ends-with? (.getName %) ".transit.tmp"))
                                            (< (.lastModified %) cutoff))))]
         (doseq [f stale-files] (.delete f))
         (count stale-files))
@@ -490,7 +493,7 @@
                                     [StandardCopyOption/ATOMIC_MOVE
                                      StandardCopyOption/REPLACE_EXISTING]))
             (catch Throwable e
-              (try (Files/delete (.toPath tmp))
+              (try (Files/deleteIfExists (.toPath tmp))
                    (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
               (throw e)))))
       (catch Exception e
