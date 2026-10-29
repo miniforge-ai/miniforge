@@ -18,6 +18,7 @@
 (ns ai.miniforge.pr-lifecycle.monitor-handlers
   "Comment handlers for the PR monitor loop."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix-loop]
@@ -43,6 +44,49 @@
    :bot-comment    :skip
    :untrusted      :skip
    :noise          :skip})
+
+(defn- ^{:stratum 0} stop-unrecorded-attempt!
+  "The fix attempt could not be saved to the budget file, so it is not
+   started: an attempt that runs unrecorded would escape the hard stop.
+   Escalates with the save error."
+  [monitor pr-number comment-id save-error]
+  (when-let [logger (get-in @monitor [:config :logger])]
+    (log/warn logger :pr-monitor :handler/budget-unsaved
+              {:message (str "Fix attempt on PR #" pr-number " not started: budget not saved")
+               :data {:comment-id comment-id :error (:anomaly/message save-error)}}))
+  (state/emit! monitor (mevents/escalated pr-number :budget-unsaved
+                                          {:comment-id comment-id
+                                           :error (:anomaly/message save-error)}))
+  {:success? false :reason :budget-unsaved})
+
+(defn- ^{:stratum 0} stop-exhausted!
+  "Escalate a change request whose budget `pr-budget` is exhausted, and skip it."
+  [monitor pr-number comment-id pr-budget exhausted]
+  (let [logger  (get-in @monitor [:config :logger])
+        summary (budget/budget-summary pr-budget)]
+    (state/emit! monitor (mevents/budget-exhausted pr-number
+                           (assoc summary :exhausted-by exhausted)))
+    (state/emit! monitor (mevents/escalated pr-number :budget-exhausted
+                           {:comment-id comment-id
+                            :budget-summary summary}))
+    (when logger
+      (log/warn logger :pr-monitor :handler/budget-exhausted
+                {:message (str "Budget exhausted for PR #" pr-number ": "
+                               (name exhausted))
+                 :data summary}))
+    {:success? false
+     :reason :budget-exhausted
+     :exhausted-by exhausted}))
+
+(defn- ^{:stratum 0} reserve-attempt
+  "`pr-budget` with one more attempt on `comment-id`, or, when a limit is
+   already reached, an :exhausted anomaly carrying it."
+  [comment-id pr-budget]
+  (if-let [exhausted (budget/any-budget-exhausted? pr-budget comment-id)]
+    (anomaly/anomaly :exhausted
+                     (str "Budget exhausted for PR #" (:pr-number pr-budget) ": " (name exhausted))
+                     {:budget pr-budget :exhausted-by exhausted})
+    (budget/record-fix-attempt pr-budget comment-id)))
 
 (defn ^{:stratum 0} handle-question
   "Handle a question comment by generating and posting a reply."
@@ -83,9 +127,8 @@
                 (state/emit! monitor (mevents/question-answered pr-number comment-id))
                 (state/emit! monitor (mevents/reply-posted pr-number comment-id
                                                            :question-reply))
-                (let [pr-budget (state/get-or-create-budget monitor pr-number)]
-                  (state/update-budget! monitor pr-number
-                                        (budget/record-question-answered pr-budget)))
+                (state/change-budget! monitor pr-number (state/get-or-create-budget monitor pr-number)
+                                      budget/record-question-answered :retry)
                 (swap! monitor update-in [:evidence :questions-answered] conj
                        {:comment-id comment-id :at (java.util.Date.)})
                 (swap! monitor update-in [:evidence :comments-addressed] inc)
@@ -142,76 +185,73 @@
         comment-id (:comment/id comment)
         pr-budget (state/get-or-create-budget monitor pr-number)]
     (if-let [exhausted (budget/any-budget-exhausted? pr-budget comment-id)]
-      (let [summary (budget/budget-summary pr-budget)]
-        (state/emit! monitor (mevents/budget-exhausted pr-number
-                               (assoc summary :exhausted-by exhausted)))
-        (state/emit! monitor (mevents/escalated pr-number :budget-exhausted
-                               {:comment-id comment-id
-                                :budget-summary summary}))
-        (when logger
-          (log/warn logger :pr-monitor :handler/budget-exhausted
-                    {:message (str "Budget exhausted for PR #" pr-number ": "
-                                   (name exhausted))
-                     :data summary}))
-        {:success? false
-         :reason :budget-exhausted
-         :exhausted-by exhausted})
+      (stop-exhausted! monitor pr-number comment-id pr-budget exhausted)
       (if-not generate-fn
         (do
           (when logger
             (log/warn logger :pr-monitor :handler/no-generate-fn
                       {:message "Cannot fix change-request — no generate-fn configured"}))
           {:success? false :reason :no-generate-fn})
-        (let [updated-budget (budget/record-fix-attempt pr-budget comment-id)
-              _ (state/update-budget! monitor pr-number updated-budget)
-              attempt (get-in updated-budget [:comment-attempts comment-id])
-              _ (state/emit! monitor (mevents/fix-started pr-number comment-id attempt))
-              task {:task/id (random-uuid)
-                    :task/type :fix
-                    :task/acceptance-criteria
-                    [(str "Address review comment: " (:comment/body comment))]}
-              failure-info {:type :review-changes
-                            :summary (:comment/body comment)
-                            :comments [{:body (:comment/body comment)
-                                        :author (:comment/author comment)
-                                        :path (:comment/path comment)
-                                        :line (:comment/line comment)}]
-                            :affected-files (when (:comment/path comment)
-                                              [(:comment/path comment)])
-                            :comment-id comment-id
-                            :parent-pr-number pr-number}
-              context {:logger logger
-                       :worktree-path worktree-path}
-              fix-result (fix-loop/run-fix-loop
-                          task pr-info failure-info generate-fn context
-                          :worktree-path worktree-path
-                          :max-attempts 1
-                          :event-bus event-bus
-                          :auto-resolve-comments true)]
-          (if (succeeded? fix-result)
-            (let [commit-sha (:commit-sha fix-result)
-                  final-budget (budget/record-fix-pushed updated-budget)]
-              (state/update-budget! monitor pr-number final-budget)
-              (state/emit! monitor (mevents/fix-pushed pr-number comment-id commit-sha))
-              (let [reply-body (str "Addressed in commit " commit-sha
-                                    ".\n\n---\n*Fixed by miniforge's autonomous PR monitor.*")]
-                (poller/post-comment worktree-path pr-number reply-body)
-                (state/emit! monitor (mevents/reply-posted pr-number comment-id
-                                                           :fix-reply)))
-              (swap! monitor update-in [:evidence :fixes-pushed] conj
-                     {:comment-id comment-id :sha commit-sha :at (java.util.Date.)})
-              (swap! monitor update-in [:evidence :comments-addressed] inc)
-              (when logger
-                (log/info logger :pr-monitor :handler/fix-pushed
-                          {:message (str "Fix pushed for comment on PR #" pr-number)
-                           :data {:commit-sha commit-sha :attempt attempt}}))
-              {:success? true :commit-sha commit-sha :attempt attempt})
-            (do
-              (when logger
-                (log/warn logger :pr-monitor :handler/fix-failed
-                          {:message (str "Fix failed for comment on PR #" pr-number)
-                           :data {:reason (:reason fix-result) :attempt attempt}}))
-              {:success? false :reason (:reason fix-result) :attempt attempt})))))))
+        ;; Checked and recorded against the budget on disk, under its lock:
+        ;; another monitor may have spent attempts since this one cached it.
+        (let [reserved (state/change-budget! monitor pr-number pr-budget
+                                             (partial reserve-attempt comment-id))]
+          (cond
+            (= :exhausted (:anomaly/type reserved))
+            (let [{:keys [budget exhausted-by]} (:anomaly/data reserved)]
+              (stop-exhausted! monitor pr-number comment-id budget exhausted-by))
+
+            (anomaly/anomaly? reserved)
+            (stop-unrecorded-attempt! monitor pr-number comment-id reserved)
+
+            :else
+            (let [attempt (get-in reserved [:comment-attempts comment-id])
+                  _ (state/emit! monitor (mevents/fix-started pr-number comment-id attempt))
+                  task {:task/id (random-uuid)
+                        :task/type :fix
+                        :task/acceptance-criteria
+                        [(str "Address review comment: " (:comment/body comment))]}
+                  failure-info {:type :review-changes
+                                :summary (:comment/body comment)
+                                :comments [{:body (:comment/body comment)
+                                            :author (:comment/author comment)
+                                            :path (:comment/path comment)
+                                            :line (:comment/line comment)}]
+                                :affected-files (when (:comment/path comment)
+                                                  [(:comment/path comment)])
+                                :comment-id comment-id
+                                :parent-pr-number pr-number}
+                  context {:logger logger
+                           :worktree-path worktree-path}
+                  fix-result (fix-loop/run-fix-loop
+                              task pr-info failure-info generate-fn context
+                              :worktree-path worktree-path
+                              :max-attempts 1
+                              :event-bus event-bus
+                              :auto-resolve-comments true)]
+              (if (succeeded? fix-result)
+                (let [commit-sha (:commit-sha fix-result)]
+                  (state/change-budget! monitor pr-number reserved budget/record-fix-pushed :retry)
+                  (state/emit! monitor (mevents/fix-pushed pr-number comment-id commit-sha))
+                  (let [reply-body (str "Addressed in commit " commit-sha
+                                        ".\n\n---\n*Fixed by miniforge's autonomous PR monitor.*")]
+                    (poller/post-comment worktree-path pr-number reply-body)
+                    (state/emit! monitor (mevents/reply-posted pr-number comment-id
+                                                               :fix-reply)))
+                  (swap! monitor update-in [:evidence :fixes-pushed] conj
+                         {:comment-id comment-id :sha commit-sha :at (java.util.Date.)})
+                  (swap! monitor update-in [:evidence :comments-addressed] inc)
+                  (when logger
+                    (log/info logger :pr-monitor :handler/fix-pushed
+                              {:message (str "Fix pushed for comment on PR #" pr-number)
+                               :data {:commit-sha commit-sha :attempt attempt}}))
+                  {:success? true :commit-sha commit-sha :attempt attempt})
+                (do
+                  (when logger
+                    (log/warn logger :pr-monitor :handler/fix-failed
+                              {:message (str "Fix failed for comment on PR #" pr-number)
+                               :data {:reason (:reason fix-result) :attempt attempt}}))
+                  {:success? false :reason (:reason fix-result) :attempt attempt})))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

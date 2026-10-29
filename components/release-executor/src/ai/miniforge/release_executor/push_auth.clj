@@ -54,13 +54,13 @@
       [host (str "https://" host "/" path)])))
 
 (defn ^{:stratum 0} inherited-env-config?
-  "True when this process's environment already carries git config
-   (GIT_CONFIG_COUNT or GIT_CONFIG_PARAMETERS). The retry's own
-   GIT_CONFIG_COUNT would replace the first and be followed by the second,
-   so the retry would not run under the config the probes saw."
-  []
-  (boolean (or (System/getenv "GIT_CONFIG_COUNT")
-               (System/getenv "GIT_CONFIG_PARAMETERS"))))
+  "True when `env`, the environment the retry would start from, already
+   carries git config (GIT_CONFIG_COUNT or GIT_CONFIG_PARAMETERS). The
+   retry's own GIT_CONFIG_COUNT would replace the first and be followed by
+   the second, so the retry would not run under the config the probes saw."
+  [env]
+  (boolean (or (get env "GIT_CONFIG_COUNT")
+               (get env "GIT_CONFIG_PARAMETERS"))))
 
 (defn ^{:stratum 0} rewrite-prefixes
   "Values of the url.<base>.insteadOf / pushInsteadOf rules in `git config

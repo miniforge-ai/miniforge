@@ -48,6 +48,7 @@
                            :event-bus                     (events/create-event-bus)
                            :logger                        nil
                            :worktree-path                 "/dev/null"
+                           :repo-slug                     "example/repo"
                            :self-author                   "miniforge[bot]"
                            :generate-fn                   nil
                            :max-fix-attempts-per-comment  3
