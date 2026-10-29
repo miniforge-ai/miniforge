@@ -16,7 +16,7 @@
    [ai.miniforge.tool-registry.interface :as tool-registry]
    [clojure.java.io :as io]
    [clojure.string :as str])
-  (:import [java.nio.file Files StandardCopyOption]))
+  (:import [java.nio.file Files LinkOption Path StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -125,14 +125,22 @@
   (when (:success? result)
     (let [edits (:result result)]
       (when (seq edits)
+        ;; Replace the real file, not a symlink pointing at it, and give
+        ;; the temp file the original's mode: createTempFile makes 0600,
+        ;; which would otherwise strip group/other read and the exec bit.
         (let [content   (slurp file)
               formatted (apply-text-edits content edits)
-              f         (io/file file)
-              dir       (or (.getParentFile f) (io/file "."))
-              tmp       (java.io.File/createTempFile ".fmt-" ".tmp" dir)]
+              ^Path target (.toRealPath (.toPath (io/file file))
+                                        (make-array LinkOption 0))
+              tmp       (java.io.File/createTempFile ".fmt-" ".tmp"
+                                                     (.toFile (.getParent target)))]
           (try
             (spit tmp formatted)
-            (Files/move (.toPath tmp) (.toPath f)
+            (when (.supportsFileAttributeView (Files/getFileStore target) "posix")
+              (Files/setPosixFilePermissions
+               (.toPath tmp)
+               (Files/getPosixFilePermissions target (make-array LinkOption 0))))
+            (Files/move (.toPath tmp) target
                         (into-array StandardCopyOption
                                     [StandardCopyOption/ATOMIC_MOVE
                                      StandardCopyOption/REPLACE_EXISTING]))

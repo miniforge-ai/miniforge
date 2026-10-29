@@ -84,3 +84,59 @@
           (is (response/success? result))
           (is (= ["src/foo.clj"] (get-in result [:output :formatted])))
           (is (= "(defn x []\n  2)\n" (slurp file))))))))
+
+(defn- ^{:stratum 0} repair-with-edit!
+  "Run repair-format over `rel-path` under `root`, with an LSP stub that
+   rewrites the second line of `(defn x []\\n  1)` to return 2."
+  [root rel-path]
+  (with-redefs [tool-registry/find-tools (fn [_ _] [{:tool/id :lsp/clojure
+                                                     :tool/config {:lsp/file-patterns ["**/*.clj"]}}])
+                tool-registry/get-lsp-client (fn [_ _] ::client)
+                tool-registry/format-document
+                (fn [_ _ _]
+                  {:success? true
+                   :result [{:range {:start {:line 0 :character 0}
+                                     :end {:line 1 :character 4}}
+                             :newText "(defn x []\n  2)"}]})]
+    (format-gate/repair-format {:code/files [{:path rel-path}]}
+                               []
+                               {:execution/worktree-path (str root)
+                                :tool-registry ::registry})))
+
+(defn- ^{:stratum 0} temp-src-dir
+  "A fresh temp worktree root with an empty src/ under it. The stub's
+   file pattern **/*.clj needs at least one directory segment."
+  []
+  (let [root (.toFile (java.nio.file.Files/createTempDirectory
+                       "format-gate-test" (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (.mkdirs (io/file root "src"))
+    root))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} repair-format-keeps-the-file-mode
+  (testing "an atomic rewrite keeps the original permission bits"
+    (let [root (temp-src-dir)
+          file (io/file root "src" "run.clj")
+          path (.toPath file)
+          mode (java.nio.file.attribute.PosixFilePermissions/fromString "rwxr-xr-x")]
+      (spit file "(defn x []\n  1)\n")
+      (when (.supportsFileAttributeView (java.nio.file.Files/getFileStore path) "posix")
+        (java.nio.file.Files/setPosixFilePermissions path mode)
+        (is (response/success? (repair-with-edit! root "src/run.clj")))
+        (is (= "(defn x []\n  2)\n" (slurp file)))
+        (is (= mode (java.nio.file.Files/getPosixFilePermissions
+                     path (make-array java.nio.file.LinkOption 0)))
+            "the temp file's 0600 must not replace the source's mode")))))
+
+(deftest ^{:stratum 1} repair-format-writes-through-a-symlink
+  (testing "a symlinked source keeps its link; the file it points at is rewritten"
+    (let [root (temp-src-dir)
+          real (io/file root "src" "real.clj")
+          link (io/file root "src" "link.clj")]
+      (spit real "(defn x []\n  1)\n")
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath link) (.toPath real) (make-array java.nio.file.attribute.FileAttribute 0))
+      (is (response/success? (repair-with-edit! root "src/link.clj")))
+      (is (java.nio.file.Files/isSymbolicLink (.toPath link)) "the link is not replaced by a regular file")
+      (is (= "(defn x []\n  2)\n" (slurp real))))))
