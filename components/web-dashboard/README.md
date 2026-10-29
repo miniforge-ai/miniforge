@@ -55,9 +55,9 @@ Visit <http://localhost:8080> to see the dashboard.
 ## Security
 
 The dashboard binds to `127.0.0.1` unless `MINIFORGE_WEB_HOST` names another
-address. On a loopback bind it answers only to `localhost`, `127.0.0.1`, `[::1]` or
-its configured address on its own port in the `Host` header (a `Host`
-without a port means 80), so a DNS rebinding attack cannot reach it.
+address. A loopback bind accepts only `localhost`, `127.0.0.1`, `[::1]`, or its configured address in the `Host` header.
+The header must name its own port; a missing port means 80.
+These checks block DNS rebinding.
 
 On any bind it:
 
@@ -71,11 +71,12 @@ On any bind it:
 
 A public bind requires operator login (`MINIFORGE_WEB_USERNAME` and
 `MINIFORGE_WEB_PASSWORD`). The dashboard does not terminate TLS, so put a
-public bind behind a TLS proxy that sets `X-Forwarded-Proto: https`, and
-set `MINIFORGE_WEB_TRUST_PROXY=true` so the dashboard believes that
-header (an explicit `:trust-proxy? false` option overrides it, and a
-loopback bind ignores forwarded headers). Origins are then compared as `https` on port 443, and the session
-cookie carries the `Secure` flag. Without the setting, X-Forwarded-Proto
+public bind behind a TLS proxy that sets `X-Forwarded-Proto: https`.
+Set `MINIFORGE_WEB_TRUST_PROXY=true` so the dashboard trusts that header.
+An explicit `:trust-proxy? false` option overrides it.
+A loopback bind ignores forwarded headers.
+When a public bind trusts that header, origins use HTTPS on port 443 and the session cookie carries the `Secure` flag.
+Without the setting, X-Forwarded-Proto
 is ignored.
 
 ## Structure

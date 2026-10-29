@@ -163,9 +163,8 @@ than hardcoded kernel literals.
 
 ### Chains and workflow families
 
-Chains and workflow families are discovered from every matching classpath
-resource root, so the kernel does not need to know which app owns which
-workflow family.
+Chains and workflow families are discovered from every matching classpath resource root.
+The kernel does not need to know which app owns each workflow family.
 
 ## What Belongs in the Shared Component
 
