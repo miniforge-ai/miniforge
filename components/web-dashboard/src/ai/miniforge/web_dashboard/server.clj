@@ -452,11 +452,19 @@
    - :event-stream - Event stream atom for subscribing to workflow events
    - :pr-train-manager - PR train manager instance
    - :repo-dag-manager - Repo DAG manager instance
-   - :auth - Optional dashboard auth config"
-  [{:keys [port host event-stream pr-train-manager repo-dag-manager auth]
+   - :auth - Optional dashboard auth config
+   - :trust-proxy? - Take the client's scheme from X-Forwarded-Proto, for a
+                     dashboard behind a TLS proxy (default
+                     MINIFORGE_WEB_TRUST_PROXY=true, else false)"
+  [{:keys [port host event-stream pr-train-manager repo-dag-manager auth trust-proxy?]
     :or {port (:port defaults)}} resources]
   (let [host (or host (System/getenv "MINIFORGE_WEB_HOST") (:host defaults))
-        auth-state (assoc (auth/build-auth-state auth) :public-bind? (not (loopback-host? host)))
+        trust-proxy? (boolean (or trust-proxy?
+                                  (= "true" (some-> (System/getenv "MINIFORGE_WEB_TRUST_PROXY")
+                                                    str/lower-case))))
+        auth-state (assoc (auth/build-auth-state auth)
+                          :public-bind? (not (loopback-host? host))
+                          :trust-proxy? trust-proxy?)
         _ (when-not (or (loopback-host? host) (auth/enabled? auth-state))
             (throw (ex-info (messages/t :server/public-bind-without-auth {:host host})
                             {:host host})))
@@ -483,7 +491,10 @@
         ingest-token (str (random-uuid))
         ;; Before control readiness: until then every request gets a 503.
         _ (swap! state assoc
-                 :bind {:loopback? (loopback-host? host) :port actual-port}
+                 :bind {:loopback? (loopback-host? host)
+                        :host (connect-host host)
+                        :port actual-port
+                        :trust-proxy? trust-proxy?}
                  :ingest-token ingest-token)
         ;; Start file watcher to tail-follow event files. Watched events
         ;; are already stored by the process that wrote them: replay!

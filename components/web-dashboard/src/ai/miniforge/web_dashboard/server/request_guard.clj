@@ -23,7 +23,8 @@
    dashboard; DNS rebinding can make a hostile name resolve to 127.0.0.1.
    So:
    - a dashboard bound to loopback answers only to a loopback Host header
-     (localhost, 127.0.0.1, [::1]) on its own port;
+     (localhost, 127.0.0.1, [::1], or the configured bind address) on its
+     own port;
    - a WebSocket upgrade and every state-changing request with an Origin
      header must come from the dashboard's own origin (or, on a loopback
      bind, a loopback origin on its port);
@@ -32,7 +33,11 @@
      can send without a preflight;
    - event ingest (/api/events/ingest, /ws/events) needs this start's
      token in the `X-Miniforge-Ingest-Token` header; the token is in the
-     discovery file, readable only by the user who started the dashboard."
+     discovery file, readable only by the user who started the dashboard.
+
+   Every comparison is between origins normalized by `normalize-origin`
+   (java.net.URI): scheme, lower-cased host, and the effective port, 80
+   for http and 443 for https when none is given."
   (:require
    [cheshire.core :as json]
    [clojure.string :as str]))
@@ -40,36 +45,45 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} loopback-host-names
-  "Host names a loopback-bound dashboard answers to."
-  #{"localhost" "127.0.0.1" "[::1]"})
+  "Host names a loopback-bound dashboard answers to, besides its
+   configured bind address."
+  ["localhost" "127.0.0.1" "[::1]"])
 
 (def ^{:stratum 0} ingest-token-header
   "Request header (lower-cased, as the server presents headers) that
    carries the ingest token."
   "x-miniforge-ingest-token")
 
-(defn ^{:stratum 0} host-authority
-  "`[host port]` of a Host header value (`host[:port]`, an IPv6 host in
-   brackets), lower-cased; port is nil when absent. Nil when unparseable."
-  [value]
-  (let [v (str/lower-case (str/trim (str value)))]
-    (when-let [[_ host port] (or (re-matches #"(\[[0-9a-f:.]+\])(?::(\d+))?" v)
-                                 (re-matches #"([^:\[\]/]+)(?::(\d+))?" v))]
-      [host port])))
-
-(defn ^{:stratum 0} origin-authority
-  "`[host port]` of an Origin header (`scheme://host[:port]`) for http or
-   https, with the scheme's default port filled in. Nil for `null` or
-   anything else."
+(defn ^{:stratum 0} normalize-origin
+  "`scheme://host:port` for an http or https origin string (`scheme://host`
+   with an optional port and nothing else), with the scheme and host
+   lower-cased and the port made explicit: 80 for http, 443 for https.
+   Nil for `null`, another scheme, a path, user info, or anything
+   java.net.URI cannot parse as a server authority."
   [origin]
   (try
-    (let [uri    (java.net.URI. (str origin))
+    (let [uri    (.parseServerAuthority (java.net.URI. (str origin)))
           scheme (some-> (.getScheme uri) str/lower-case)
           host   (some-> (.getHost uri) str/lower-case)
           port   (.getPort uri)]
-      (when (and host (contains? #{"http" "https"} scheme))
-        [host (str (if (neg? port) (if (= "https" scheme) 443 80) port))]))
+      (when (and host
+                 (contains? #{"http" "https"} scheme)
+                 (nil? (.getRawUserInfo uri))
+                 (contains? #{nil ""} (.getRawPath uri))
+                 (nil? (.getRawQuery uri))
+                 (nil? (.getRawFragment uri)))
+        (str scheme "://" host ":"
+             (if (neg? port) (if (= "https" scheme) 443 80) port))))
     (catch Exception _ nil)))
+
+(defn ^{:stratum 0} external-scheme
+  "The scheme the client used: X-Forwarded-Proto when the dashboard trusts
+   a TLS proxy (`trust-proxy?`), else the connection's own scheme."
+  [req trust-proxy?]
+  (let [forwarded (some-> (get-in req [:headers "x-forwarded-proto"]) str/trim str/lower-case)]
+    (if (and trust-proxy? (contains? #{"http" "https"} forwarded))
+      forwarded
+      (name (or (:scheme req) :http)))))
 
 (defn ^{:stratum 0} forbidden
   "403 JSON response naming why the request was refused."
@@ -86,23 +100,20 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} loopback-host-header?
-  "True when Host header `value` names a loopback host on `port`."
-  [value port]
-  (let [[host p] (host-authority value)]
-    (boolean (and (contains? loopback-host-names host) (= (str port) p)))))
+(defn ^{:stratum 1} loopback-origins
+  "The origins a loopback-bound dashboard answers as: http on its port for
+   localhost, 127.0.0.1, [::1] and its configured bind address `:host`."
+  [{:keys [host port]}]
+  (into #{}
+        (keep #(normalize-origin (str "http://" % ":" port)))
+        (cond-> loopback-host-names host (conj host))))
 
-(defn ^{:stratum 1} allowed-origin?
-  "True when `origin` is the request's own origin (the Host header's host
-   and port; a Host without a port matches the scheme's default), or, on a
-   loopback bind, a loopback origin on the bound port."
-  [origin host-header {:keys [loopback? port]}]
-  (let [[oh op] (origin-authority origin)
-        [h p]   (host-authority host-header)]
-    (boolean
-     (and oh
-          (or (and (= oh h) (or (= op p) (and (nil? p) (contains? #{"80" "443"} op))))
-              (and loopback? port (contains? loopback-host-names oh) (= (str port) op)))))))
+(defn ^{:stratum 1} request-origin
+  "The normalized origin the request was addressed to: its external scheme
+   and its Host header."
+  [req {:keys [trust-proxy?]}]
+  (normalize-origin (str (external-scheme req trust-proxy?) "://"
+                         (get-in req [:headers "host"]))))
 
 (defn ^{:stratum 1} ingest-token-valid?
   "True when `req` carries `token` in the ingest-token header. False when
@@ -115,18 +126,21 @@
 
 (defn ^{:stratum 2} refusal
   "A 403 response when `req` must be refused before routing, else nil.
-   `bind` is `{:loopback? bool :port n}` for the running listener; the Host
-   check applies only on a loopback bind."
+   `bind` describes the listener: `:loopback?`, `:port`, `:host` (the
+   configured address, IPv6 in brackets) and `:trust-proxy?`."
   [req bind]
-  (let [{:strs [origin host content-type]} (:headers req)
-        mutating? (contains? #{:post :put :patch :delete} (:request-method req))]
+  (let [{:strs [origin content-type]} (:headers req)
+        mutating? (contains? #{:post :put :patch :delete} (:request-method req))
+        loopback  (when (:loopback? bind) (loopback-origins bind))
+        addressed (request-origin req bind)]
     (cond
-      (and (:loopback? bind) (not (loopback-host-header? host (:port bind))))
+      (and loopback (not (contains? loopback addressed)))
       (forbidden "host-not-allowed")
 
       (and origin
            (or mutating? (contains? #{"/ws" "/ws/events"} (:uri req)))
-           (not (allowed-origin? origin host bind)))
+           (let [o (normalize-origin origin)]
+             (not (and o (or (= o addressed) (contains? loopback o))))))
       (forbidden "cross-origin-request")
 
       (and mutating?

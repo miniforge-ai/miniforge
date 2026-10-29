@@ -28,6 +28,7 @@
    [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.web-dashboard.server :as server]
    [ai.miniforge.web-dashboard.server.auth :as auth]
+   [ai.miniforge.web-dashboard.server.request-guard :as guard]
    [ai.miniforge.web-dashboard.state.workflows :as workflows]
    [cheshire.core :as json]
    [clojure.string :as str]
@@ -79,6 +80,32 @@
          "Connection: close"]
         headers))
 
+(defn- ^{:stratum 0} get-request
+  "A GET of /api/events with Host header `host` over plain HTTP."
+  [host & [headers]]
+  {:request-method :get :uri "/api/events" :scheme :http
+   :headers (merge {"host" host} headers)})
+
+(deftest ^{:stratum 0} origin-is-compared-by-scheme-host-and-port-test
+  (let [bind    {:loopback? false :port 7878 :host "dashboard.example" :trust-proxy? true}
+        upgrade (fn [origin bind]
+                  (guard/refusal {:request-method :get :uri "/ws" :scheme :http
+                                  :headers {"host" "dashboard.example"
+                                            "x-forwarded-proto" "https"
+                                            "origin" origin}}
+                                 bind))]
+    (testing "behind a trusted TLS proxy the dashboard's origin is https on 443"
+      (is (nil? (upgrade "https://dashboard.example" bind)))
+      (is (nil? (upgrade "https://DASHBOARD.example:443" bind))))
+    (testing "the same host on another scheme or port is another origin"
+      (is (some? (upgrade "https://dashboard.example:80" bind)))
+      (is (some? (upgrade "http://dashboard.example" bind)))
+      (is (some? (upgrade "https://dashboard.example.evil.example" bind))))
+    (testing "without a trusted proxy X-Forwarded-Proto is ignored"
+      (let [untrusted (assoc bind :trust-proxy? false)]
+        (is (some? (upgrade "https://dashboard.example" untrusted)))
+        (is (nil? (upgrade "http://dashboard.example" untrusted)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} with-dashboard
@@ -100,10 +127,11 @@
               (server/stop-server! handle))))))))
 
 (deftest ^{:stratum 1} session-cookie-is-secure-on-a-public-bind-behind-tls-test
-  (let [login (fn [public-bind? headers]
+  (let [login (fn [public-bind? headers & [trust-proxy?]]
                 (let [auth-state (assoc (auth/build-auth-state
                                          {:users [{:username "alice" :password "wonderland"}]})
-                                        :public-bind? public-bind?)]
+                                        :public-bind? public-bind?
+                                        :trust-proxy? (if (nil? trust-proxy?) true trust-proxy?))]
                   (get-in (auth/handle-login-submit
                            auth-state
                            {:uri "/login" :request-method :post
@@ -113,9 +141,37 @@
                           [:headers "Set-Cookie"])))]
     (testing "a public bind reached over TLS sets Secure"
       (is (str/includes? (login true {"x-forwarded-proto" "https"}) "; Secure")))
+    (testing "X-Forwarded-Proto counts only from a trusted proxy"
+      (is (not (str/includes? (login true {"x-forwarded-proto" "https"} false) "Secure"))))
     (testing "plain HTTP or a loopback bind does not"
       (is (not (str/includes? (login true {}) "Secure")))
       (is (not (str/includes? (login false {"x-forwarded-proto" "https"}) "Secure"))))))
+
+(deftest ^{:stratum 1} configured-loopback-address-is-allowed-test
+  (testing "a dashboard bound to 127.1.2.3 answers to that address"
+    (let [bind {:loopback? true :port 7878 :host "127.1.2.3"}]
+      (is (nil? (guard/refusal (get-request "127.1.2.3:7878") bind)))
+      (is (nil? (guard/refusal (get-request "localhost:7878") bind)))
+      (is (some? (guard/refusal (get-request "127.9.9.9:7878") bind)))
+      (is (some? (guard/refusal (get-request "rebind.example:7878") bind)))))
+  (testing "a dashboard bound to the expanded IPv6 loopback answers to it and to [::1]"
+    (let [bind {:loopback? true :port 7878 :host "[0:0:0:0:0:0:0:1]"}]
+      (is (nil? (guard/refusal (get-request "[0:0:0:0:0:0:0:1]:7878") bind)))
+      (is (nil? (guard/refusal (get-request "[::1]:7878") bind))))))
+
+(deftest ^{:stratum 1} omitted-host-port-means-80-test
+  (testing "on a port-80 bind, Host: localhost with no port is the dashboard"
+    (let [bind {:loopback? true :port 80 :host "127.0.0.1"}]
+      (is (nil? (guard/refusal (get-request "localhost") bind)))
+      (is (nil? (guard/refusal (get-request "localhost:80") bind)))
+      (is (nil? (guard/refusal (assoc (get-request "localhost" {"origin" "http://localhost"})
+                                      :request-method :post
+                                      :headers {"host" "localhost" "origin" "http://localhost"
+                                                "content-type" "application/json"})
+                               bind)))))
+  (testing "on another port it is not"
+    (is (some? (guard/refusal (get-request "localhost")
+                              {:loopback? true :port 7878 :host "127.0.0.1"})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

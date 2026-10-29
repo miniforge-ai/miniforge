@@ -83,11 +83,14 @@
   "True when the session cookie must carry the Secure flag: the dashboard
    is bound to a public address (`:public-bind?`, set at startup) and the
    request reached it over TLS. http-kit does not terminate TLS, so a
-   public bind sits behind a TLS proxy that sets X-Forwarded-Proto."
-  [{:keys [public-bind?]} req]
+   public bind sits behind a TLS proxy; its X-Forwarded-Proto counts only
+   when the dashboard is configured to trust it (`:trust-proxy?`)."
+  [{:keys [public-bind? trust-proxy?]} req]
   (boolean (and public-bind?
                 (or (= :https (:scheme req))
-                    (= "https" (str/lower-case (str (get-in req [:headers "x-forwarded-proto"]))))))))
+                    (and trust-proxy?
+                         (= "https" (str/lower-case
+                                     (str/trim (str (get-in req [:headers "x-forwarded-proto"]))))))))))
 
 (defn- ^{:stratum 0} session-cookie-value
   [{:keys [cookie-name session-ttl-ms]} token secure?]
