@@ -52,32 +52,41 @@
 (defn- ^{:stratum 0} publish-prepared
   "Publish what enter-release prepared through `publish-context`, folding
    the outcome into the phase `result`: on success its output gains the
-   release artifacts and :workflow/pr-info. A result with no
-   :release/prepared fails rather than completing without a push."
+   release artifacts, the publish metrics and :workflow/pr-info. A failure
+   keeps the prepared output (readiness, consultation) beside the error. A
+   result with no :release/prepared fails rather than completing without a
+   push."
   [result publish-context logger]
-  (if-let [prepared (get-in result [:output :release/prepared])]
-    (try
-      (let [exec-result (release-executor/publish-release prepared publish-context)]
-        (if (:success? exec-result)
-          (let [content (:artifact/content (first (:artifacts exec-result)))]
-            (update result :output merge
-                    (cond-> {:release/status    :completed
-                             :release/artifacts (:artifacts exec-result)}
-                      (:pr-url content)
-                      (assoc :workflow/pr-info {:pr-number  (:pr-number content)
-                                                :pr-url     (:pr-url content)
-                                                :branch     (:branch content)
-                                                :commit-sha (:commit-sha content)}))))
-          (do (log/error logger :release :release/publish-failed
-                         {:data {:errors (:errors exec-result)}})
-              (response/failure (messages/t :release/publish-failed)
-                                {:data {:errors  (:errors exec-result)
-                                        :metrics (:metrics exec-result)}}))))
-      (catch Exception e
-        (log/error logger :release :release/publish-threw {:message (ex-message e)})
-        (response/failure e)))
-    (response/failure (messages/t :release/not-prepared)
-                      {:data {:type :release/not-prepared}})))
+  (let [failed (fn [failure]
+                 (cond-> failure
+                   (:output result) (assoc :output (:output result))))]
+    (if-let [prepared (get-in result [:output :release/prepared])]
+      (try
+        (let [exec-result (release-executor/publish-release prepared publish-context)]
+          (if (:success? exec-result)
+            (let [content (:artifact/content (first (:artifacts exec-result)))]
+              (update result :output
+                      (fn [output]
+                        (cond-> (assoc output
+                                       :release/status    :completed
+                                       :release/artifacts (:artifacts exec-result)
+                                       :release/metrics   (merge (:release/metrics output)
+                                                                 (:metrics exec-result)))
+                          (:pr-url content)
+                          (assoc :workflow/pr-info {:pr-number  (:pr-number content)
+                                                    :pr-url     (:pr-url content)
+                                                    :branch     (:branch content)
+                                                    :commit-sha (:commit-sha content)})))))
+            (do (log/error logger :release :release/publish-failed
+                           {:data {:errors (:errors exec-result)}})
+                (failed (response/failure (messages/t :release/publish-failed)
+                                          {:data {:errors  (:errors exec-result)
+                                                  :metrics (:metrics exec-result)}})))))
+        (catch Exception e
+          (log/error logger :release :release/publish-threw {:message (ex-message e)})
+          (failed (response/failure e))))
+      (failed (response/failure (messages/t :release/not-prepared)
+                                {:data {:type :release/not-prepared}})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

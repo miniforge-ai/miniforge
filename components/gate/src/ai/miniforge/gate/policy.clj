@@ -100,13 +100,16 @@
    skipped release (nothing to publish) passes. The gate runner passes the
    phase `:output` as the artifact."
   [artifact _ctx]
-  (let [{:keys [ready? checks]} (:release/readiness artifact)]
+  (let [readiness (:release/readiness artifact)
+        {:keys [ready? checks]} readiness]
     (if (or (true? ready?) (true? (:skipped artifact)))
       {:passed? true}
       {:passed? false
        :errors [{:type    :not-release-ready
-                 :message (msg/t :release/not-ready
-                                 {:checks (pr-str (remove :passed? checks))})
+                 :message (if (map? readiness)
+                            (msg/t :release/not-ready
+                                   {:checks (pr-str (remove :passed? checks))})
+                            (msg/t :release/no-readiness))
                  :checks  (vec checks)}]})))
 
 ;; Policy Pack Gate (classifies by enforcement action, via policy-pack)

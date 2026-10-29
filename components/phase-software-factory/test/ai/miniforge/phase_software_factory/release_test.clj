@@ -820,6 +820,28 @@
             (is (= "feature/test-123" (:branch pr-info))
                 "Branch name should be captured"))))))))
 
+(deftest ^{:stratum 3} leave-release-keeps-the-prepared-output-when-publish-fails-test
+  (testing "a failed push or PR fails the phase and keeps readiness and consultation"
+    (with-test-worktree
+      (fn [worktree]
+        (with-redefs [release-executor/prepare-release
+                      (constantly {:success? true :artifacts [] :prepared {} :metrics {}})
+                      release-executor/publish-release
+                      (constantly {:success? false :artifacts []
+                                   :errors [{:type :push-failed :message "rejected"}]
+                                   :metrics {}})]
+          (let [interceptor (phase/get-phase-interceptor {:phase :release})
+                ctx  (assoc (create-base-context worktree) :phase-config {:phase :release})
+                left ((:leave interceptor) ((:enter interceptor) ctx))
+                result (get-in left [:phase :result])]
+            (is (= :failed (get-in left [:phase :status])))
+            (is (false? (:success result)))
+            (is (= [{:type :push-failed :message "rejected"}]
+                   (get-in result [:error :data :errors])))
+            (is (map? (get-in result [:output :release/readiness])))
+            (is (contains? (:output result) :codex/consultation))
+            (is (nil? (:workflow/pr-info left)))))))))
+
 (deftest ^{:stratum 3} release-enter-prepares-without-publishing-test
   (testing "enter-release branches and commits but pushes nothing and opens no PR"
     (with-test-worktree

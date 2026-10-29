@@ -119,6 +119,11 @@
         (is (false? (:passed? result)))
         (is (= :not-release-ready (-> result :errors first :type)))))))
 
+(deftest ^{:stratum 0} check-release-ready-says-when-no-readiness-was-recorded
+  (is (re-find #"recorded no readiness"
+               (-> (policy/check-release-ready {:codex/consultation {}} {})
+                   :errors first :message))))
+
 (deftest ^{:stratum 0} check-release-ready-passes-when-ready-or-skipped
   (is (true? (:passed? (policy/check-release-ready
                         {:release/readiness {:ready? true}} {}))))

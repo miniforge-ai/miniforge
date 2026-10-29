@@ -390,7 +390,7 @@
         (is (some #(clojure.string/includes? % "git push -u origin feature/test-change") @cmds))
         (is (some #(clojure.string/includes? % "gh pr create") @cmds))
         (is (not-any? #(clojure.string/starts-with? % "git commit -m") @cmds)
-            "publish does not commit again")
+            "publish makes no new commit (it only amends the PR doc onto the release commit)")
         (is (= "https://github.com/o/r/pull/7"
                (get-in published [:artifacts 0 :artifact/content :pr-url])))))))
 

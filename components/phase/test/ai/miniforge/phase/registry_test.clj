@@ -81,6 +81,12 @@
             [:syntax :format :lint :no-secrets]
             [:syntax :lint])))))
 
+(deftest ^{:stratum 0} merge-gates-preserves-release-ready-gate-test
+  (testing "a release override that omits :release-ready cannot drop it: the
+            release publishes only after this gate reads verify and review"
+    (is (= [:policy-pack :release-ready]
+           (registry/merge-gates [:release-ready] [:policy-pack])))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} merge-with-defaults-no-gates-override-keeps-defaults-test

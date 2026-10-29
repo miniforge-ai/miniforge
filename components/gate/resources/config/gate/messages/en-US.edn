@@ -59,6 +59,10 @@
   :release/not-ready
   "Release not ready: the verify and review outcomes it requires did not pass (failed checks={checks})"
 
+  ;; Release-ready gate — the release output records no readiness (a failed prepare, or another producer)
+  :release/no-readiness
+  "Release not ready: the release phase recorded no readiness"
+
   ;; Behavioral gate — registry description
   :behavioral/description
   "Validates harness telemetry event stream against policy packs (phase: observe)"
