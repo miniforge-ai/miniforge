@@ -575,11 +575,10 @@
       (is (= "/mf-home/worktrees" (worktree/default-base-path))))))
 
 (deftest ^{:stratum 0} default-base-path-without-miniforge-home-is-under-user-home-test
-  (testing "with MINIFORGE_HOME unset, the home is <user.home>/.miniforge, not /tmp"
+  (testing "with MINIFORGE_HOME unset, the home is <user.home>/.miniforge"
     (with-redefs [config/miniforge-home-override (constantly nil)]
-      (let [p (worktree/default-base-path)]
-        (is (= (str (System/getProperty "user.home") "/.miniforge/worktrees") p))
-        (is (not (str/starts-with? p "/tmp")))))))
+      (is (= (str (System/getProperty "user.home") "/.miniforge/worktrees")
+             (worktree/default-base-path))))))
 
 (deftest ^{:stratum 0} default-base-path-reads-workflow-worktree-root-from-config-test
   (testing "default-base-path with config map returns :workflow/worktree-root when present"
