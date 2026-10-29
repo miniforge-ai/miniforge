@@ -25,6 +25,8 @@
             [ai.miniforge.compliance-scanner.interface :as scanner]
             [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.pr-lifecycle.github :as github]
+            [ai.miniforge.pr-lifecycle.policy-eval.git :as pe-git]
+            [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
             [ai.miniforge.pr-lifecycle.policy-eval-responder :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -34,6 +36,9 @@
 
 (defn ^{:stratum 0} worktree-fixture [f]
   (let [w (str (fs/create-temp-dir {:prefix "policy-eval-responder-test-"}))]
+    ;; A repository: the path guard asks git where its metadata is and
+    ;; refuses every path when git cannot answer.
+    (process/sh {:dir w :env (git-dir/git-env)} "git" "init" "-q")
     (try
       (binding [*worktree* w] (f))
       (finally (try (fs/delete-tree w) (catch Throwable _ nil))))))
@@ -190,6 +195,32 @@
             (str "should be :path-traversal for " bad))))
     (testing "the legitimate inside file still wrote fine"
       (is (= "ok" (str/trim (read-file "src/inside.clj")))))))
+
+(deftest ^{:stratum 2} apply-single-line-replacement-rejects-the-git-dir
+  (testing "a suggested fix cannot rewrite a line of the worktree's git config"
+    (write-file! ".git/config" "[core]\n\tbare = false\n")
+    (let [r (sut/apply-single-line-replacement!
+             *worktree* ".git/config" 2 "\thooksPath = tools/hooks")]
+      (is (= :policy-eval/path-traversal (get-in r [:error :code])))
+      (is (= "[core]\n\tbare = false\n" (read-file ".git/config"))))))
+
+(deftest ^{:stratum 2} commit-and-push-runs-git-with-hooks-disabled
+  (testing "the policy-eval commit runs no hook the applied fixes could have changed"
+    (let [ran  (str *worktree* "-hook-ran")
+          git! (fn [& args] (apply process/sh {:dir *worktree* :env (git-dir/git-env)} "git" args))]
+      (try
+        (git! "config" "user.email" "t@example.com")
+        (git! "config" "user.name" "t")
+        (doseq [hook ["pre-commit" "commit-msg" "post-commit"]]
+          (let [f (fs/path *worktree* ".git" "hooks" hook)]
+            (spit (str f) (str "#!/bin/sh\necho " hook " >> '" ran "'\n"))
+            (fs/set-posix-file-permissions f "rwxr-xr-x")))
+        (write-file! "src/a.clj" "(ns a)\n")
+        ;; No remote, so the push fails; the commit before it is what is checked.
+        (pe-git/commit-and-push! *worktree* [{:path "src/a.clj" :line 1}])
+        (is (zero? (:exit (git! "rev-parse" "--verify" "HEAD"))))
+        (is (not (fs/exists? ran)))
+        (finally (fs/delete-if-exists ran))))))
 
 (deftest ^{:stratum 2} apply-single-line-replacement-no-op-when-already-applied
   (testing "before == replacement → :already-applied, no file rewrite, no spurious diff"
