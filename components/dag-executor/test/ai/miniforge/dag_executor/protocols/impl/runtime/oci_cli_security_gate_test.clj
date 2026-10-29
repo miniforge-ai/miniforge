@@ -25,6 +25,7 @@
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
    [ai.miniforge.dag-executor.result :as result]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -94,6 +95,40 @@
              (:mounts plan)))
       (is (= {:valid? true} (execution-plan/validate-plan plan))
           "a fully-threaded launch plan conforms to ExecutionPlanSchema"))))
+
+(deftest ^{:stratum 1} build-launch-plan-drops-secrets-for-untrusted-test
+  (testing "an :untrusted plan (the default) launches without secret-named
+            env, so no process in the capsule inherits them; :trusted keeps
+            them"
+    (let [env {:GH_TOKEN "t" :ANTHROPIC_API_KEY "k" :LANG "C.UTF-8"}]
+      (is (= {"LANG" "C.UTF-8"}
+             (:env (oci-cli/build-launch-plan valid-digest {:env env}))))
+      (is (= {"GH_TOKEN" "t" "ANTHROPIC_API_KEY" "k" "LANG" "C.UTF-8"}
+             (:env (oci-cli/build-launch-plan valid-digest
+                                              {:env env :trust-level :trusted})))))))
+
+(deftest ^{:stratum 1} acquire-records-git-remote-for-persist-test
+  (testing "a bootstrapped acquire records the caller's remote (not one read
+            back from the capsule) under the environment id"
+    (let [executor (oci-cli/map->OciCliExecutor
+                    {:descriptor  {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                     :image       "task-runner:latest"
+                     :git-remotes (atom {})})]
+      (with-redefs [oci-cli/image-exists?          (fn [_ _] true)
+                    oci-cli/resolve-image-digest!  (fn [_ _] valid-digest)
+                    oci-cli/create-container       (fn [_d container-name & _]
+                                                     (result/ok {:container-name container-name}))
+                    oci-cli/bootstrap-workspace!   (fn [& _] (result/ok {:base-branch "main"}))
+                    oci-cli/container-image-digest (fn [_ _] valid-digest)]
+        (let [r (proto/acquire-environment! executor "abcd1234efgh"
+                                            {:workdir "/workspace"
+                                             :repo-url "git@github.com:o/r.git"})]
+          (is (result/ok? r))
+          (is (= {"miniforge-task-abcd1234"
+                  {:repo-url  "git@github.com:o/r.git"
+                   :https-url "https://github.com/o/r.git"
+                   :host-kind :github}}
+                 @(:git-remotes executor))))))))
 
 (deftest ^{:stratum 1} acquire-launches-from-checked-plan-test
   (testing "acquire-environment! creates the container from the gate-checked
@@ -171,3 +206,15 @@
       (is (= valid-digest (:image-digest plan)))
       (is (= :untrusted (:trust-level plan)))
       (is (= ["sleep" "infinity"] (:command plan))))))
+
+(deftest ^{:stratum 2} non-identifier-env-name-hard-stops-test
+  (testing "an env name such as * or GH_*, which Podman's `-e NAME` reads as
+            a pattern over its own environment, stops the launch"
+    (doseq [n ["*" "GH_*" "A B"]]
+      (let [env (assoc base-env :env {n "x"} :trust-level :trusted)
+            r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
+        (is (= :security-policy-violation (get-in r [:error :code])) (pr-str n))
+        (is (str/includes? (get-in r [:error :message]) (pr-str n)))))
+    (is (result/ok? (oci-cli/security-gate-check
+                     rootless-descriptor "img"
+                     (assoc base-env :env {"_A1" "x"} :trust-level :trusted) good-digest-fn)))))

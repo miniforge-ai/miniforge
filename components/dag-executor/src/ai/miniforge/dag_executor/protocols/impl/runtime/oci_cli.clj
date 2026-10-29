@@ -136,10 +136,25 @@
   [s]
   (str "'" (str/replace s "'" "'\"'\"'") "'"))
 
-(defn ^{:stratum 0} build-env-args
-  "Build -e arguments for environment variables."
-  [env-map]
-  (mapcat (fn [[k v]] ["-e" (str (name k) "=" v)]) env-map))
+(defn- ^{:stratum 0} env-arg
+  "The `-e` value for one env entry: NAME alone, or NAME=value when the
+   name is in `cli-names` (registry :cli-env-names), the names the runtime
+   CLI reads from its own environment. Passing one of those by name would
+   reconfigure the CLI, so it goes inline."
+  [cli-names [k v]]
+  (if (contains? cli-names (name k))
+    (str (name k) "=" v)
+    (name k)))
+
+(defn ^{:stratum 0} build-child-env
+  "The entries `build-env-args` passed by name, as the string map to add to
+   the runtime CLI process's environment."
+  [descriptor env-map]
+  (let [cli-names (registry/cli-env-names (descriptor/kind descriptor))]
+    (into {}
+          (for [[k v] env-map
+                :when (not (contains? cli-names (name k)))]
+            [(name k) (str v)]))))
 
 (def ^{:stratum 0} secret-pattern
   "Regex matching env var names that carry sensitive values."
@@ -306,14 +321,26 @@
   [_repo-url {:keys [host-kind]}]
   (config/resolve-token host-kind))
 
-(defn- ^{:stratum 0} authenticated-https-url
-  "Inject token credentials into an HTTPS git URL.
-   Uses the host-appropriate token format based on host-kind."
-  [https-url token host-kind]
-  (str/replace https-url #"https://"
-               (if (= host-kind :gitlab)
-                 (str "https://oauth2:" token "@")
-                 (str "https://x-access-token:" token "@"))))
+(def ^{:stratum 0} ^:private git-auth-users
+  "HTTP basic-auth username each host kind pairs with a token; hosts not
+   listed take `default-git-auth-user`."
+  {:gitlab "oauth2"})
+
+(def ^{:stratum 0} ^:private default-git-auth-user "x-access-token")
+
+(defn- ^{:stratum 0} basic-auth-header
+  "HTTP Basic Authorization header carrying `token` for `user`."
+  [user token]
+  (str "Authorization: Basic "
+       (.encodeToString (java.util.Base64/getEncoder)
+                        (.getBytes (str user ":" token) "UTF-8"))))
+
+(defn- ^{:stratum 0} git-network-command?
+  "True for the git commands persist/restore send to the remote."
+  [cmd]
+  (and (vector? cmd)
+       (= "git" (first cmd))
+       (contains? #{"push" "fetch"} (second cmd))))
 
 ;; ============================================================================
 ;; Capsule security gate — runtime enforcement of the runtime-* policies
@@ -389,9 +416,12 @@
    When `timeout-ms` is nil or <= 0 the call is unbounded. On timeout the
    process tree is destroyed forcibly and a result with :exit 124 is returned
    so callers that check `(zero? :exit)` surface it as a command failure."
-  [timeout-ms descriptor args & {:keys [stdin-bytes]}]
+  [timeout-ms descriptor args & {:keys [stdin-bytes env]}]
   (try
-    (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
+    (let [pb (doto (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
+               ;; `env` joins the CLI's own environment, where `-e NAME`
+               ;; args read their values (`build-child-env`).
+               (-> .environment (.putAll (or env {}))))
           process (.start pb)
           stdout-fut (runtime-process/read-stream-future (.getInputStream process))
           stderr-fut (runtime-process/read-stream-future (.getErrorStream process))
@@ -440,8 +470,21 @@
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out "" :out-bytes (byte-array 0) :err-bytes (byte-array 0)})))
 
+(defn ^{:stratum 1} build-env-args
+  "Build -e arguments for environment variables. Each entry is passed by
+   name (`-e NAME`) so its value never appears on the runtime argv, where
+   `ps` shows it to every host user; the CLI reads the value from its own
+   environment, which `build-child-env` supplies. Names the CLI itself
+   reads go inline as `-e NAME=value`."
+  [descriptor env-map]
+  (let [cli-names (registry/cli-env-names (descriptor/kind descriptor))]
+    (mapcat (fn [entry] ["-e" (env-arg cli-names entry)]) env-map)))
+
 (defn ^{:stratum 1} filter-env-by-trust
   "Return env-map with sensitive entries removed for :untrusted trust level.
+   `build-launch-plan` applies it to the container env, which every process
+   in the capsule inherits; host-side callers that need a secret for one
+   command (release's GH_TOKEN for `gh`) pass it on that exec instead.
 
    For :trusted and :privileged trust levels the map is returned unchanged.
    A var is considered sensitive when its name contains any of:
@@ -466,28 +509,36 @@
        (:cpu merged)
        (into ["--cpus" (str (:cpu merged))])))))
 
-(defn ^{:stratum 1} build-launch-plan
-  "Assemble the execution plan for a pending launch from what the launch site
-   actually knows: the resolved image digest, the caller's mounts / env /
-   trust level from env-config, and the capsule's keep-alive command. Optional
-   fields (:time-limit-ms :memory-limit-mb :network-profile :secrets-refs)
-   pass through only when env-config carries them — absent fields stay absent
-   rather than being filled with guesses. The :env keys are normalized to
-   strings so the plan conforms to ExecutionPlanSchema.
+(defn- ^{:stratum 1} git-remote
+  "The repo to bootstrap, from env-config: {:repo-url :https-url :host-kind},
+   or nil when env-config carries no :repo-url. SSH URLs become HTTPS, since
+   containers lack an SSH agent. The executor keeps this, not anything read
+   back from the capsule, as the host its git credential is scoped to, so
+   repointing origin inside the capsule cannot redirect the credential."
+  [env-config]
+  (when-let [repo-url (:repo-url env-config)]
+    {:repo-url  repo-url
+     :https-url (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" repo-url)]
+                  (str "https://" host "/" path)
+                  repo-url)
+     :host-kind (get env-config :host-kind (infer-host-kind repo-url))}))
 
-   This one plan is both what `check-plan-security` inspects and what
-   `create-container` receives as :execution-plan, so the plan the gate
-   checked is the plan that runs."
-  [image-digest env-config]
-  (cond-> {:image-digest image-digest
-           :command      ["sleep" "infinity"]
-           :mounts       (get env-config :mounts [])
-           :env          (normalize-plan-env (get env-config :env {}))
-           :trust-level  (get env-config :trust-level :untrusted)}
-    (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
-    (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))
-    (:network-profile env-config) (assoc :network-profile (:network-profile env-config))
-    (:secrets-refs env-config)    (assoc :secrets-refs (:secrets-refs env-config))))
+(defn- ^{:stratum 1} git-credential-env
+  "Env that authenticates one git command to the host of `https-url`: an
+   Authorization header set through GIT_CONFIG_COUNT/KEY/VALUE (git 2.31+),
+   scoped by `http.<origin>/.extraheader` so git sends it to that host only.
+   Env-supplied config is never written to .git/config, and exec passes the
+   value by name, so the token lands in neither the capsule's repo state nor
+   the runtime argv (N11 §2.2). Empty without a token or for a non-https URL."
+  [https-url token host-kind]
+  (if-let [[_ origin] (when token (re-find #"^(https://[^/]+)/" https-url))]
+    {"GIT_CONFIG_COUNT"    "1"
+     "GIT_CONFIG_KEY_0"    (str "http." origin "/.extraheader")
+     "GIT_CONFIG_VALUE_0"  (basic-auth-header
+                            (get git-auth-users host-kind default-git-auth-user)
+                            token)
+     "GIT_TERMINAL_PROMPT" "0"}
+    {}))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -540,11 +591,12 @@
   (apply run-runtime-timed nil descriptor args))
 
 (defn ^{:stratum 2} run-runtime-process
-  "Execute a runtime CLI command with optional stdin bytes.
+  "Execute a runtime CLI command with optional stdin bytes and extra
+   environment entries for the CLI process.
    Internal callers that need a bounded deadline use `run-runtime-process-timed`
    directly; this public entry point is unbounded for backward-compatibility."
-  [descriptor args & {:keys [stdin-bytes]}]
-  (run-runtime-process-timed nil descriptor args :stdin-bytes stdin-bytes))
+  [descriptor args & {:keys [stdin-bytes env]}]
+  (run-runtime-process-timed nil descriptor args :stdin-bytes stdin-bytes :env env))
 
 (defn ^{:stratum 2} exec-in-container
   "Execute a command in a running container."
@@ -553,7 +605,7 @@
                    ["sh" "-c" command]
                    command)
         workdir-args (when (:workdir opts) ["-w" (:workdir opts)])
-        env-args (build-env-args (:env opts))
+        env-args (build-env-args descriptor (:env opts))
         full-args (concat ["exec"]
                           workdir-args
                           env-args
@@ -563,7 +615,8 @@
                      (:timeout-ms opts)
                      default-exec-timeout-ms)
         start-time (System/currentTimeMillis)
-        result (apply run-runtime-timed timeout-ms descriptor full-args)]
+        result (run-runtime-process-timed timeout-ms descriptor full-args
+                                          :env (build-child-env descriptor (:env opts)))]
     (result/ok {:exit-code (:exit result)
                 :stdout (:out result)
                 :stderr (:err result)
@@ -614,33 +667,40 @@
   (let [result (run-runtime-timed default-release-timeout-ms descriptor "rm" "-f" container-id)]
     (result/ok {:released? (zero? (:exit result))})))
 
-(defn ^{:stratum 2} security-gate-check
-  "Run the capsule-isolation security gate for a pending launch. Resolves the
-   image's content-addressed digest via `digest-fn` (injected for testing),
-   builds the launch plan the gate inspects via `build-launch-plan`, and
-   applies `plan-security/check-plan-security`. The host-path allowlist is the
-   sandbox workdir (the only host path a well-formed plan mounts today).
+(defn- ^{:stratum 2} remote-credential-env
+  "Credential env for the git remote recorded when `environment-id` was
+   bootstrapped, or {} when none was recorded."
+  [git-remotes environment-id]
+  (if-let [{:keys [repo-url https-url host-kind]} (some-> git-remotes deref (get environment-id))]
+    (git-credential-env https-url (resolve-git-token repo-url {:host-kind host-kind}) host-kind)
+    {}))
 
-   Returns `result/ok` carrying the gate decision when the launch may proceed
-   (a passing gate may still carry non-blocking :security/warnings — e.g. a
-   non-rootless runtime in OSS), or `result/err :security-policy-violation`
-   with the findings on a hard-stop. A nil digest fails closed (hard-stop),
-   since a plan with no pinned digest cannot satisfy require-image-digest-pin.
+(defn ^{:stratum 2} build-launch-plan
+  "Assemble the execution plan for a pending launch from what the launch site
+   actually knows: the resolved image digest, the caller's mounts / env /
+   trust level from env-config, and the capsule's keep-alive command. Optional
+   fields (:time-limit-ms :memory-limit-mb :network-profile :secrets-refs)
+   pass through only when env-config carries them — absent fields stay absent
+   rather than being filled with guesses. The :env keys are normalized to
+   strings so the plan conforms to ExecutionPlanSchema, and secrets are
+   dropped for an :untrusted plan (`filter-env-by-trust`).
 
-   A passing result also carries the checked `:launch-plan`;
-   `acquire-environment!` creates the container FROM that plan — its digest as
-   the immutable image reference, the plan itself as create-container's
-   :execution-plan."
-  [descriptor image env-config digest-fn]
-  (let [plan            (build-launch-plan (digest-fn descriptor image) env-config)
-        security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
-                         :rootless-action     plan-security/default-rootless-action}
-        decision        (plan-security/check-plan-security plan descriptor security-config)]
-    (if (response/anomaly-map? decision)
-      (result/err :security-policy-violation
-                  (:anomaly/message decision)
-                  {:security/findings (:security/findings decision)})
-      (result/ok (assoc (:output decision) :launch-plan plan)))))
+   This one plan is both what `check-plan-security` inspects and what
+   `create-container` receives as :execution-plan, so the plan the gate
+   checked is the plan that runs."
+  [image-digest env-config]
+  (let [trust-level (get env-config :trust-level :untrusted)]
+    (cond-> {:image-digest image-digest
+             :command      ["sleep" "infinity"]
+             :mounts       (get env-config :mounts [])
+             :env          (filter-env-by-trust
+                            (normalize-plan-env (get env-config :env {}))
+                            trust-level)
+             :trust-level  trust-level}
+      (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
+      (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))
+      (:network-profile env-config) (assoc :network-profile (:network-profile env-config))
+      (:secrets-refs env-config)    (assoc :secrets-refs (:secrets-refs env-config)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 
@@ -666,7 +726,7 @@
                                (contains? execution-plan :env))
                         (:env execution-plan)
                         env-map)
-        env-args      (build-env-args effective-env)
+        env-args      (build-env-args descriptor effective-env)
         resource-args (build-resource-args
                        descriptor resources
                        {:omit-memory? (some? (:memory-limit-mb execution-plan))})
@@ -694,7 +754,8 @@
                               env-args
                               resource-args
                               (into [image] (get execution-plan :command ["sleep" "infinity"])))
-        result        (apply run-runtime descriptor cmd-args)]
+        result        (run-runtime-process descriptor cmd-args
+                                           :env (build-child-env descriptor effective-env))]
     (if (zero? (:exit result))
       (result/ok {:container-id (str/trim (:out result))
                   :container-name container-name})
@@ -793,7 +854,8 @@
 
 (defn- ^{:stratum 3} container-exec-fn
   "Build a function that executes commands inside a container.
-   Returns (fn [cmd] -> result-map).
+   Returns (fn [cmd] -> result-map); the (fn [cmd env]) arity adds `env`
+   to that one command's environment.
 
    Options:
    - :error-on-failure? — return result/err on non-zero exit (default false)
@@ -802,22 +864,66 @@
   [descriptor container-id workdir
    & {:keys [error-on-failure? error-prefix sanitize?]
       :or {error-on-failure? false error-prefix (messages/t :oci/command-failed) sanitize? false}}]
-  (fn [cmd]
-    (let [r (exec-in-container descriptor container-id cmd {:workdir workdir})]
-      (if (and error-on-failure?
-               (not (zero? (get-in r [:data :exit-code] 1))))
-        (let [safe-cmd (if sanitize? (sanitize-token (str cmd)) (str cmd))
-              stderr   (if sanitize?
-                         (sanitize-token (or (get-in r [:data :stderr]) ""))
-                         (or (get-in r [:data :stderr]) ""))]
-          (result/err :container-command-failed
-                      (messages/t :oci/command-failed-detail
-                                  {:prefix error-prefix :command safe-cmd
-                                   :stderr (if (seq stderr) (str "\n" stderr) "")})
-                      {:cmd safe-cmd
-                       :stderr stderr
-                       :exit (get-in r [:data :exit-code])}))
-        r))))
+  (fn exec!
+    ([cmd] (exec! cmd nil))
+    ([cmd env]
+     (let [r (exec-in-container descriptor container-id cmd
+                                (cond-> {:workdir workdir} (seq env) (assoc :env env)))]
+       (if (and error-on-failure?
+                (not (zero? (get-in r [:data :exit-code] 1))))
+         (let [safe-cmd (if sanitize? (sanitize-token (str cmd)) (str cmd))
+               stderr   (if sanitize?
+                          (sanitize-token (or (get-in r [:data :stderr]) ""))
+                          (or (get-in r [:data :stderr]) ""))]
+           (result/err :container-command-failed
+                       (messages/t :oci/command-failed-detail
+                                   {:prefix error-prefix :command safe-cmd
+                                    :stderr (if (seq stderr) (str "\n" stderr) "")})
+                       {:cmd safe-cmd
+                        :stderr stderr
+                        :exit (get-in r [:data :exit-code])}))
+         r)))))
+
+(defn ^{:stratum 3} security-gate-check
+  "Run the capsule-isolation security gate for a pending launch. Resolves the
+   image's content-addressed digest via `digest-fn` (injected for testing),
+   builds the launch plan the gate inspects via `build-launch-plan`, and
+   applies `plan-security/check-plan-security`. The host-path allowlist is the
+   sandbox workdir (the only host path a well-formed plan mounts today).
+
+   Returns `result/ok` carrying the gate decision when the launch may proceed
+   (a passing gate may still carry non-blocking :security/warnings — e.g. a
+   non-rootless runtime in OSS), or `result/err :security-policy-violation`
+   with the findings on a hard-stop. A nil digest fails closed (hard-stop),
+   since a plan with no pinned digest cannot satisfy require-image-digest-pin.
+
+   A passing result also carries the checked `:launch-plan`;
+   `acquire-environment!` creates the container FROM that plan — its digest as
+   the immutable image reference, the plan itself as create-container's
+   :execution-plan.
+
+   A plan env name that is not a plain identifier is a hard-stop at every
+   trust level: the launch passes each name as `-e NAME`, and Podman reads
+   `*` or a trailing `*` there as a pattern that copies every matching
+   variable of its own environment into the container."
+  [descriptor image env-config digest-fn]
+  (let [plan            (build-launch-plan (digest-fn descriptor image) env-config)
+        security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
+                         :rootless-action     plan-security/default-rootless-action}
+        decision        (plan-security/check-plan-security plan descriptor security-config)
+        bad-names       (remove #(re-matches #"[A-Za-z_][A-Za-z0-9_]*" %) (keys (:env plan)))]
+    (cond
+      (response/anomaly-map? decision)
+      (result/err :security-policy-violation
+                  (:anomaly/message decision)
+                  {:security/findings (:security/findings decision)})
+
+      (seq bad-names)
+      (result/err :security-policy-violation
+                  (messages/t :oci/env-name-refused {:names (str/join ", " (map pr-str bad-names))}))
+
+      :else
+      (result/ok (assoc (:output decision) :launch-plan plan)))))
 
 ;------------------------------------------------------------------------------ Layer 4
 
@@ -859,27 +965,20 @@
    Returns a result map with bootstrap metadata. No-op success when
    repo-url is nil (local mode / pre-existing workspace).
    Uses config-based token resolution (profile + env fallback) rather than
-   URL-guessing. Converts SSH URLs to HTTPS for containers where SSH agents
-   are not available."
+   URL-guessing. With a token, clones the plain HTTPS URL and hands the
+   token to the clone command alone (`git-credential-env`): origin's URL
+   in the capsule carries no credential, and no push URL is set."
   [descriptor container-name workdir env-config]
-  (if-let [repo-url (:repo-url env-config)]
+  (if-let [{:keys [repo-url https-url host-kind]} (git-remote env-config)]
     (let [branch    (get env-config :branch "main")
-          host-kind (or (:host-kind env-config)
-                        (infer-host-kind repo-url))
           token     (resolve-git-token repo-url {:host-kind host-kind})
-          ;; Convert SSH URL to HTTPS (containers lack SSH agent)
-          https-url (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" repo-url)]
-                      (str "https://" host "/" path)
-                      repo-url)
-          clone-url (if token
-                      (authenticated-https-url https-url token host-kind)
-                      repo-url)
+          clone-url (if token https-url repo-url)
           exec!  (container-exec-fn descriptor container-name "/"
                                     :error-on-failure? true
                                     :error-prefix (messages/t :oci/bootstrap-failed)
                                     :sanitize? true)
           clone-cmd ["git" "clone" "--branch" (str branch) "--single-branch" "--" clone-url workdir]
-          result (-> (exec! clone-cmd)
+          result (-> (exec! clone-cmd (git-credential-env https-url token host-kind))
                      ;; Use --local (not --global) since container rootfs is read-only
                      (chain-container-command
                       #(exec! ["git" "-C" workdir "config" "user.email" "miniforge@miniforge.ai"]))
@@ -887,19 +986,27 @@
                       #(exec! ["git" "-C" workdir "config" "user.name" "miniforge"])))]
       (if (result/err? result)
         result
-        (let [push-url-result (if token
-                                (exec! ["git" "-C" workdir "remote" "set-url" "--push" "origin" "--"
-                                        (authenticated-https-url https-url token host-kind)])
-                                result)
-              sha-r (chain-container-command
-                     push-url-result
-                     #(exec! ["git" "-C" workdir "rev-parse" "HEAD"]))]
+        (let [sha-r (exec! ["git" "-C" workdir "rev-parse" "HEAD"])]
           (if (result/ok? sha-r)
             (let [base-sha (str/trim (get-in sha-r [:data :stdout] ""))]
               (result/ok (cond-> {:base-branch (str branch)}
                            (seq base-sha) (assoc :base-sha base-sha))))
             sha-r))))
     (result/ok nil)))
+
+(defn- ^{:stratum 4} workspace-exec-fn
+  "exec-fn for `workspace/git-persist!` and `git-restore!`. Given a
+   credential env, only push and fetch receive it, and they run with hooks
+   off: untrusted code writes the workspace, and a planted pre-push or
+   reference-transaction hook would inherit the credential from git."
+  [descriptor container-id workdir cred-env]
+  (let [exec! (container-exec-fn descriptor container-id workdir)]
+    (if (empty? cred-env)
+      exec!
+      (fn [cmd]
+        (if (git-network-command? cmd)
+          (exec! (into ["git" "-c" "core.hooksPath=/dev/null"] (rest cmd)) cred-env)
+          (exec! cmd))))))
 
 ;------------------------------------------------------------------------------ Layer 5
 
@@ -919,7 +1026,11 @@
 ;; ============================================================================
 ;; OciCliExecutor Record
 ;; ============================================================================
-(defrecord ^{:stratum 5} OciCliExecutor [config descriptor image network]
+(defrecord ^{:stratum 5} OciCliExecutor [config descriptor image network git-remotes]
+  ;; `git-remotes` is an atom of environment-id -> `git-remote`, recorded at
+  ;; bootstrap so persist/restore can authenticate push and fetch per
+  ;; command; nil (as in tests that build the record directly) disables it.
+  ;;
   ;; Per-operation timeout guards (2026-07-18, follow-up to 2026-05-16 dogfood):
   ;; `acquire-environment!` is bounded by `with-acquisition-timeout` (PR #895).
   ;; `execute!`, `release-environment!`, `copy-to!`, and `copy-from!` each route
@@ -988,6 +1099,8 @@
                                      image-digest (assoc :image-digest image-digest)
                                      (seq gate-warnings) (assoc :security/warnings gate-warnings)
                                      (seq gate-review)   (assoc :security/review gate-review))]
+                      (when-let [remote (git-remote env-config)]
+                        (some-> git-remotes (swap! assoc container-name remote)))
                       (result/ok (proto/create-environment-record
                                   container-name (descriptor/kind descriptor) task-id workdir
                                   (assoc env-config :metadata metadata))))
@@ -1013,6 +1126,7 @@
         (result/err :copy-failed (.getMessage e)))))
 
   (release-environment! [_this environment-id]
+    (some-> git-remotes (swap! dissoc environment-id))
     (try
       (stop-container descriptor environment-id default-stop-timeout)
       (remove-container descriptor environment-id)
@@ -1026,13 +1140,15 @@
         (result/ok {:status :unknown :error (.getMessage e)}))))
 
   (persist-workspace! [_this environment-id opts]
-    (let [exec! (container-exec-fn descriptor environment-id
-                                   (get opts :workdir default-workdir))]
+    (let [exec! (workspace-exec-fn descriptor environment-id
+                                   (get opts :workdir default-workdir)
+                                   (remote-credential-env git-remotes environment-id))]
       (workspace/git-persist! exec! opts)))
 
   (restore-workspace! [_this environment-id opts]
-    (let [exec! (container-exec-fn descriptor environment-id
-                                   (get opts :workdir default-workdir))]
+    (let [exec! (workspace-exec-fn descriptor environment-id
+                                   (get opts :workdir default-workdir)
+                                   (remote-credential-env git-remotes environment-id))]
       (workspace/git-restore! exec! opts))))
 
 ;------------------------------------------------------------------------------ Layer 6
@@ -1054,10 +1170,11 @@
   [config]
   (let [descriptor (descriptor/make-descriptor config)]
     (map->OciCliExecutor
-     {:config     config
-      :descriptor descriptor
-      :image      (get config :image (images/default-image))
-      :network    (:network config)})))
+     {:config      config
+      :descriptor  descriptor
+      :image       (get config :image (images/default-image))
+      :network     (:network config)
+      :git-remotes (atom {})})))
 
 ;------------------------------------------------------------------------------ Layer 7
 
