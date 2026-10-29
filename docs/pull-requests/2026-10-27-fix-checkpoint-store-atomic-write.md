@@ -35,9 +35,10 @@ All three workflow consumers passed serially (1m42s). The rebuilt CLI is
 without production source overlays. New JVM tests take 54 ms and 8 ms;
 both remain below the brick-test placement threshold.
 
-The main-alignment hooks passed after prose repairs. Signing then failed because
-the 1Password agent socket was unavailable. Final signed hooks, review, and remote
-CI remain required; no gate was bypassed.
+Normal hooks passed after prose repairs, and the main-alignment commit is signed.
+Signing required desktop-agent access outside the sandbox. The standards scan
+reports no violations; the whole PR has 66 reportable code lines.
+Exact-head review and remote CI remain required; no gate was bypassed.
 
 ## Scope and deployment
 
