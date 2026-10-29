@@ -49,7 +49,7 @@
   (:import
    [java.io ByteArrayOutputStream]
    [java.net.http HttpClient HttpResponse$BodyHandlers]
-   [java.nio.file Files StandardCopyOption]
+   [java.nio.file Files LinkOption OpenOption StandardCopyOption StandardOpenOption]
    [java.time Instant LocalDateTime ZonedDateTime ZoneOffset]
    [java.time.format DateTimeFormatter]))
 
@@ -224,8 +224,9 @@
 (defn- ^{:stratum 0} idle-unmanaged-run?
   "True when live workflow directory `dir` has a visible name, no
    manifest (no JVM runner manages it), nothing but event and temp files
-   besides an `archived.marker` an interrupted archive left, and neither
-   it nor any event file was modified since `cutoff`."
+   besides an `archived.marker` an interrupted archive left (not a
+   symlink), and neither it nor any event file was modified since
+   `cutoff`."
   [^java.io.File dir cutoff manifest-name marker-name]
   (let [children (.listFiles dir)]
     (and (some? children)
@@ -233,7 +234,8 @@
          (< (.lastModified dir) cutoff)
          (every? (fn [^java.io.File f]
                    (let [n (.getName f)]
-                     (or (= marker-name n)
+                     (or (and (= marker-name n)
+                              (not (Files/isSymbolicLink (.toPath f))))
                          (and (.isFile f)
                               (not= manifest-name n)
                               (or (str/ends-with? n ".json") (str/ends-with? n ".transit.tmp"))
@@ -276,7 +278,13 @@
       0
       (try+
         (.mkdirs archived-root)
-        (spit (io/file dir marker-name) "")
+        ;; NOFOLLOW_LINKS: a symlinked marker fails here instead of
+        ;; truncating whatever it points to outside the events tree.
+        (.close (Files/newOutputStream (.toPath (io/file dir marker-name))
+                                       (into-array OpenOption [StandardOpenOption/CREATE
+                                                               StandardOpenOption/TRUNCATE_EXISTING
+                                                               StandardOpenOption/WRITE
+                                                               LinkOption/NOFOLLOW_LINKS])))
         (Files/move (.toPath dir) (.toPath target)
                     (into-array StandardCopyOption [StandardCopyOption/ATOMIC_MOVE]))
         1

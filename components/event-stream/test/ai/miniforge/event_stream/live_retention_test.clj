@@ -87,6 +87,18 @@
     (is (not (.exists (live dir wf-id))))
     (is (.isFile (io/file (archived dir wf-id) "archived.marker")))))
 
+(deftest ^{:stratum 1} a-symlinked-marker-is-never-written-through
+  (let [dir     (temp-events-dir)
+        outside (doto (io/file (temp-events-dir) "outside.txt") (spit "keep me"))
+        wf-id   (write-run! dir :workflow/started :workflow/completed)]
+    (java.nio.file.Files/createSymbolicLink
+     (.toPath (io/file (live dir wf-id) "archived.marker")) (.toPath outside)
+     (make-array java.nio.file.attribute.FileAttribute 0))
+    (age-tree! (live dir wf-id))
+    (sinks/cleanup-stale-events! {:events-dir dir})
+    (is (= "keep me" (slurp outside)) "the file outside the events tree is untouched")
+    (is (.isDirectory (live dir wf-id)) "the run is skipped, not archived")))
+
 (deftest ^{:stratum 1} live-runs-that-may-still-matter-stay
   (let [dir      (temp-events-dir)
         running  (write-run! dir :workflow/started :workflow/phase-started)
