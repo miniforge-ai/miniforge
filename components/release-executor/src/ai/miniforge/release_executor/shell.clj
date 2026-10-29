@@ -26,8 +26,10 @@
 
    - gives the child empty stdin and GIT_TERMINAL_PROMPT=0 /
      GH_PROMPT_DISABLED=1, so git and gh fail rather than prompt;
-   - waits at most `timeout-ms`, then kills the child and every descendant
-     (git forks ssh and git-remote-https; killing git alone orphans them);
+   - waits at most `timeout-ms`, then kills the child, its descendants, and
+     any process seen as a descendant while it ran (git forks ssh and
+     git-remote-https; killing git alone orphans them), and closes the
+     output pipes so no reader thread is left blocked;
    - reports a timeout as data: a non-zero :exit, :timed-out? true, the
      message in :err, and a :timeout anomaly in :anomaly."
   (:require
@@ -56,14 +58,22 @@
   {"GIT_TERMINAL_PROMPT" "0"
    "GH_PROMPT_DISABLED"  "1"})
 
-(defn- ^{:stratum 0} destroy-process-tree!
-  "Forcibly kill `proc` and its descendants, children first. Same approach
-   as phase-software-factory verify's helper; dag-executor's version is not
-   on its public interface."
+(def ^{:stratum 0} poll-ms
+  "How often a running call's descendants are recorded. A helper whose
+   parent exits (git-remote-https, a credential helper) is reparented and
+   no longer listed as a descendant, so the kill set is collected while
+   the tree is still intact."
+  100)
+
+(def ^{:stratum 0} drain-grace-ms
+  "How long, after the kill, to wait for the stdout/stderr readers to end
+   before cancelling them."
+  2000)
+
+(defn- ^{:stratum 0} descendants-of
+  "Current descendants of `proc` as ProcessHandles."
   [^Process proc]
-  (doseq [^java.lang.ProcessHandle child (.. proc descendants (toArray))]
-    (.destroyForcibly child))
-  (.destroyForcibly proc))
+  (vec (.. proc descendants (toArray))))
 
 (defn- ^{:stratum 0} command-label
   "First three argv words (\"git push -u\", \"gh pr create\"), for messages.
@@ -73,17 +83,63 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} run-bounded
+(defn- ^{:stratum 1} wait-recording-descendants
+  "Wait up to `timeout-ms` for `done`, recording `proc`'s descendants every
+   `poll-ms`. Returns [result observed-handles], with result ::timeout when
+   the deadline passed first."
+  [^Process proc done timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop [observed #{}]
+      (let [observed (into observed (descendants-of proc))
+            left     (- deadline (System/currentTimeMillis))
+            result   (if (pos? left) (deref done (min poll-ms left) ::pending) ::timeout)]
+        (if (= ::pending result)
+          (recur observed)
+          [result observed])))))
+
+(defn- ^{:stratum 1} destroy-all!
+  "Forcibly kill every recorded descendant still alive, `proc`'s current
+   descendants, then `proc`. ProcessHandle checks the start time, so a
+   recorded pid reused by an unrelated process is not killed. Same approach
+   as phase-software-factory verify's helper; dag-executor's version is not
+   on its public interface."
+  [^Process proc observed]
+  (doseq [^java.lang.ProcessHandle h (into (set observed) (descendants-of proc))]
+    (.destroyForcibly h))
+  (.destroyForcibly proc))
+
+(defn- ^{:stratum 1} release-readers!
+  "Close `proc`'s stdout/stderr pipes so the futures copying them end even
+   when a process that escaped the kill still holds the write side, wait up
+   to `drain-grace-ms`, then cancel whatever is left. Returns true when
+   every reader ended on its own."
+  [proc done]
+  (let [^Process p (:proc proc)
+        readers    [done (:out proc) (:err proc)]
+        deadline   (+ (System/currentTimeMillis) drain-grace-ms)]
+    (.close (.getInputStream p))
+    (.close (.getErrorStream p))
+    (loop []
+      (cond
+        (every? future-done? readers)           true
+        (> (System/currentTimeMillis) deadline) (do (run! future-cancel readers) false)
+        :else                                   (do (Thread/sleep 20) (recur))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} run-bounded
   "Run argv `args` with empty stdin, `non-interactive-env`, and a deadline.
 
    opts: :dir, :extra-env (merged over `non-interactive-env`), :timeout-ms
    (default `default-timeout-ms`).
 
    Returns {:exit :out :err} when the process finishes. At the deadline it
-   kills the process tree and returns {:exit `timeout-exit-code` :out \"\"
-   :err <message> :timed-out? true :anomaly <:timeout anomaly>}. A process
-   that cannot be started throws, as `process/shell` does; callers already
-   catch that."
+   kills the process, its descendants, and any process recorded as a
+   descendant while it ran; closes the output pipes; and returns
+   {:exit `timeout-exit-code` :out \"\" :err <message> :timed-out? true
+   :anomaly <:timeout anomaly> :readers-done? <bool>}. :readers-done? is
+   false when an output reader had to be cancelled. A process that cannot
+   be started throws, as `process/shell` does; callers already catch that."
   [args {:keys [dir extra-env timeout-ms]}]
   (let [timeout-ms (or timeout-ms default-timeout-ms)
         label      (command-label args)
@@ -96,18 +152,16 @@
                           args)
         ;; bb's process record has no timed deref, so wait on a future.
         done       (future @proc)
-        finished   (deref done timeout-ms ::timeout)]
+        [finished observed] (wait-recording-descendants (:proc proc) done timeout-ms)]
     (if (not= ::timeout finished)
       (select-keys finished [:exit :out :err])
-      (let [message (msg/t :shell/timed-out {:command label :timeout-ms timeout-ms})]
-        (destroy-process-tree! (:proc proc))
-        ;; The output readers end once the pipes close. If a stray holder
-        ;; keeps one open, stop waiting rather than leak this thread.
-        (when (= ::timeout (deref done 5000 ::timeout))
-          (future-cancel done))
-        {:exit       timeout-exit-code
-         :out        ""
-         :err        message
-         :timed-out? true
-         :anomaly    (anomaly/anomaly :timeout message
-                                      {:command label :timeout-ms timeout-ms})}))))
+      (let [message       (msg/t :shell/timed-out {:command label :timeout-ms timeout-ms})
+            _             (destroy-all! (:proc proc) observed)
+            readers-done? (release-readers! proc done)]
+        {:exit          timeout-exit-code
+         :out           ""
+         :err           message
+         :timed-out?    true
+         :readers-done? readers-done?
+         :anomaly       (anomaly/anomaly :timeout message
+                                         {:command label :timeout-ms timeout-ms})}))))
