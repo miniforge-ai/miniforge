@@ -24,6 +24,7 @@
    Agent: none (orchestration only)
    Default gates: none"
   (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.interface.dag-prs :as dag-prs]))
 
@@ -97,12 +98,15 @@
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at] (System/currentTimeMillis))
         end-time (System/currentTimeMillis)
-        duration-ms (- end-time start-time)]
+        duration-ms (- end-time start-time)
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))]
     (-> ctx
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
         (assoc-in [:metrics :pr-monitor :duration-ms] duration-ms)
-        (update-in [:execution :phases-completed] (fnil conj []) :pr-monitor)
+        (cond-> gate-failed? (assoc-in [:phase :status] :failed))
+        (cond-> (not gate-failed?)
+          (update-in [:execution :phases-completed] (fnil conj []) :pr-monitor))
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
 (defn ^{:stratum 0} error-pr-monitor
