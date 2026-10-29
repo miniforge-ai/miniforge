@@ -34,18 +34,14 @@
    checkpoint."
   (:require
    [ai.miniforge.coerce.interface :as coerce]
+   [ai.miniforge.workflow.boundary.checkpoint-file :as checkpoint-file]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.checkpoint-store-records :as checkpoint-records]
    [ai.miniforge.workflow.schemas :as schemas]
    [babashka.fs :as fs]
-   [clojure.edn :as edn])
-  (:import [java.nio.file Files StandardCopyOption]))
+   [clojure.edn :as edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} temp-file-suffix
-  "Temporary suffix used for atomic checkpoint writes."
-  ".tmp")
 
 (defn- ^{:stratum 0} read-edn-file
   "Read a checkpoint EDN file, normalizing instants the same way the
@@ -86,20 +82,11 @@
               workflow-run-id)]
      (boolean (and (fs/directory? dir) (seq (fs/list-dir dir)))))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} write-edn-atomically!
+(defn- ^{:stratum 0} write-edn-atomically!
   [target-path data]
-  (let [target (fs/file target-path)
-        temp-path (str target-path temp-file-suffix)]
-    (fs/create-dirs (fs/parent target))
-    (spit temp-path (pr-str data))
-    (Files/move (fs/path temp-path)
-               (fs/path target-path)
-               (into-array java.nio.file.CopyOption
-                           [StandardCopyOption/ATOMIC_MOVE
-                            StandardCopyOption/REPLACE_EXISTING]))
-    target-path))
+  (checkpoint-file/write! target-path data))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} load-checkpoint-data
   "Load durable checkpoint data for a workflow run, if present."
