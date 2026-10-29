@@ -261,6 +261,18 @@
       (is (nil? (get-in result [:phase :result :output :phase/verdict]))
           ":phase/verdict on the result not attached during :retrying"))))
 
+(defn- ^{:stratum 0} readiness-ctx
+  "A ctx whose pipeline configures `phases` and whose recorded results are
+   `results` (phase -> phase map)."
+  [phases results]
+  {:execution/workflow {:workflow/pipeline (mapv #(hash-map :phase %) phases)}
+   :execution/phase-results results})
+
+(def ^{:stratum 0} verify-passed {:status :completed :result {:status :success}})
+
+(defn- ^{:stratum 0} review-decided [decision]
+  {:status :completed :result {:status :success :output {:review/decision decision}}})
+
 (deftest ^{:stratum 0} error-release-treats-zero-files-as-terminal-test
   (testing "zero-files exceptions fail instead of retrying the release phase"
     (let [interceptor (phase/get-phase-interceptor {:phase :release})
@@ -281,6 +293,27 @@
              (get-in result [:phase :error :data :type]))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} release-readiness-test
+  (let [ready? (comp :ready? release/release-readiness)
+        both   [:implement :verify :review :release]]
+    (testing "verify passed and review approved"
+      (is (true? (ready? (readiness-ctx both {:verify verify-passed
+                                               :review (review-decided :approved)})))))
+    (testing "review requested changes"
+      (is (false? (ready? (readiness-ctx both {:verify verify-passed
+                                                :review (review-decided :changes-requested)})))))
+    (testing "verify failed"
+      (is (false? (ready? (readiness-ctx both {:verify {:status :failed}
+                                                :review (review-decided :approved)})))))
+    (testing "a configured phase with no recorded result"
+      (is (false? (ready? (readiness-ctx both {:review (review-decided :approved)})))))
+    (testing "only verify configured, and it passed"
+      (is (true? (ready? (readiness-ctx [:implement :verify :release]
+                                        {:verify verify-passed})))))
+    (testing "neither configured: no evidence"
+      (is (false? (ready? (readiness-ctx [:implement :release] {}))))
+      (is (false? (ready? {}))))))
 
 (defn ^{:stratum 1} with-test-worktree
   [f]

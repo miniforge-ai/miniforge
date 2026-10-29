@@ -226,6 +226,21 @@
     :else
     :approved))
 
+(defn- ^{:stratum 0} readiness-check
+  "One phase's readiness evidence: verify completed, or review completed
+   with an approving decision. A phase with no recorded result fails."
+  [ctx phase-name]
+  (let [phase-result (get-in ctx [:execution/phase-results phase-name])
+        completed?   (and (some? phase-result) (phase/succeeded? phase-result))
+        decision     (when (= :review phase-name)
+                       (response/review-decision (response/phase-output phase-result)))]
+    (cond-> {:phase   phase-name
+             :passed? (and completed?
+                           (or (not= :review phase-name)
+                               (contains? #{:approved :conditionally-approved} decision)))}
+      (nil? phase-result)     (assoc :reason :no-result)
+      (= :review phase-name)  (assoc :decision decision))))
+
 (defn- ^{:stratum 0} attach-error-verdict
   "Phase 3b: when error-release fails terminally, attach the verdict to
    the result so the FSM's guarded :phase/fail array reads it. The
@@ -242,6 +257,17 @@
         (assoc-in [:phase :result :output :phase/verdict] verdict))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} release-readiness
+  "Whether the release may publish: each of verify and review that the
+   workflow pipeline configures must have passed. A pipeline configuring
+   neither has no evidence and is not ready. The :release-ready gate reads
+   this from the phase output's :release/readiness."
+  [ctx]
+  (let [configured (set (map :phase (get-in ctx [:execution/workflow :workflow/pipeline])))
+        checks     (mapv #(readiness-check ctx %) (filter configured [:verify :review]))]
+    {:ready? (boolean (and (seq checks) (every? :passed? checks)))
+     :checks (if (seq checks) checks [{:phase :verify :passed? false :reason :not-configured}])}))
 
 (defn- ^{:stratum 1} git-dirty-files
   "Scan git working tree for new/modified/deleted files; return as :code/files entries.
@@ -691,7 +717,9 @@
                         (merge
                          {:release/id (get release-artifact :artifact/id (random-uuid))
                           :release/status :completed
-                          :release/artifacts (:artifacts exec-result)}
+                          :release/artifacts (:artifacts exec-result)
+                          ;; Read by the :release-ready gate.
+                          :release/readiness (release-readiness ctx)}
                          ;; Include PR info for evidence bundle
                          (when (:pr-url content)
                            {:workflow/pr-info {:pr-number (:pr-number content)
