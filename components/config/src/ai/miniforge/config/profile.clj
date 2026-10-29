@@ -87,13 +87,14 @@
 
 (defn- ^{:stratum 1} gh-cli-token
   "Attempt to get a GitHub token from the gh CLI (`cmd`, by default
-   `gh auth token`). Returns the token; nil when gh gives none; :timeout
-   when gh has not printed it and exited within `timeout-ms`; or
+   `gh auth token`). Returns the token; nil when gh fails or gives none;
+   :timeout when gh has not exited and printed it within `timeout-ms`; or
    :interrupted when the calling thread is interrupted, with its interrupt
    flag set again. A reader thread takes gh's first output line under the
-   same deadline, so a child that keeps stdout open after gh exits cannot
-   hold the read. However it ends, gh and every process it started (a
-   credential helper, or the real gh behind a wrapper) are killed."
+   same deadline, read only once gh exits 0, so a child that keeps stdout
+   open after gh exits cannot hold the read. However it ends, gh and every
+   process it started (a credential helper, or the real gh behind a
+   wrapper) are killed."
   ([] (gh-cli-token ["gh" "auth" "token"] gh-token-timeout-ms))
   ([cmd timeout-ms]
    (try
@@ -102,12 +103,12 @@
            deadline (+ (System/nanoTime) (* timeout-ms 1000000))
            line     (future (.readLine (io/reader (.getInputStream p))))]
        (try
-         (let [token (deref line timeout-ms ::timeout)]
-           (cond
-             (= ::timeout token) :timeout
-             (not (.waitFor p (- deadline (System/nanoTime))
-                            java.util.concurrent.TimeUnit/NANOSECONDS)) :timeout
-             (zero? (.exitValue p)) (some-> token str/trim not-empty)))
+         (cond
+           (not (.waitFor p timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)) :timeout
+           (not (zero? (.exitValue p))) nil
+           :else (let [token (deref line (max 0 (quot (- deadline (System/nanoTime)) 1000000))
+                                    ::timeout)]
+                   (if (= ::timeout token) :timeout (some-> token str/trim not-empty))))
          (catch InterruptedException _
            (.interrupt (Thread/currentThread))
            :interrupted)

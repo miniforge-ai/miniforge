@@ -106,7 +106,12 @@
             the read past the deadline"
     (let [started (System/currentTimeMillis)]
       (is (= :timeout (#'profile/gh-cli-token ["sh" "-c" "sleep 3 & sleep 0.2; exit 0"] 1000)))
-      (is (< (- (System/currentTimeMillis) started) 2500)))))
+      (is (< (- (System/currentTimeMillis) started) 2500))))
+  (testing "a gh that fails is no token at once, without waiting on the
+            child holding its stdout"
+    (let [started (System/currentTimeMillis)]
+      (is (nil? (#'profile/gh-cli-token ["sh" "-c" "sleep 3 & sleep 0.2; exit 1"] 2000)))
+      (is (< (- (System/currentTimeMillis) started) 1500)))))
 
 (deftest ^{:stratum 0} gh-cli-token-interrupt-kills-gh-and-keeps-the-flag-test
   (testing "an interrupted lookup kills gh's process tree, returns
