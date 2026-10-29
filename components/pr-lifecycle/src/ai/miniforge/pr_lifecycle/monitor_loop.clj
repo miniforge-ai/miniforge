@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.monitor-loop
   "PR monitor loop orchestration."
   (:require
@@ -29,6 +28,8 @@
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
    [ai.miniforge.schema.interface :as schema]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; The :pr-monitor/{loop-started,cycle-completed,loop-stopped} events emitted
 ;; below are defined in monitor_events/monitor-event-types (this group's source
 ;; of truth); no new event types are introduced here.
@@ -38,15 +39,12 @@
 ;; workflow stream under ~/.miniforge/events — callers (e.g. the observe phase)
 ;; must pass the workflow bus for these events to be durable. The wiring here is
 ;; correct regardless of which bus is supplied.
-
-;------------------------------------------------------------------------------ Layer 0
 ;; API compatibility + schemas
-
-(def create-monitor
+(def ^{:stratum 0} create-monitor
   "Compatibility alias for monitor creation."
   state/create-monitor)
 
-(def CycleResult
+(def ^{:stratum 0} CycleResult
   [:map
    [:processed nat-int?]
    [:results [:vector any?]]
@@ -56,33 +54,11 @@
    [:error {:optional true} any?]
    [:classified-stats {:optional true} map?]])
 
-(defn- validate!
+(defn- ^{:stratum 0} validate!
   [result-schema value]
   (schema/validate result-schema value))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Single cycle helpers
-
-(defn- cycle-result
-  [result]
-  (validate! CycleResult result))
-
-(defn- time-budget-stop-result
-  [_pr-number]
-  (cycle-result {:processed 0
-                 :results []
-                 :new-comments 0
-                 :stopped? true
-                 :stop-reason :time-budget-exhausted}))
-
-(defn- poll-error-result
-  [poll-result]
-  (cycle-result {:processed 0
-                 :results []
-                 :new-comments 0
-                 :error (:error poll-result)}))
-
-(defn- emit-time-budget-stop!
+(defn- ^{:stratum 0} emit-time-budget-stop!
   [monitor pr-number pr-budget]
   (let [summary (budget/budget-summary pr-budget)]
     (state/emit! monitor (mevents/budget-exhausted pr-number
@@ -90,16 +66,21 @@
     (state/emit! monitor (mevents/escalated pr-number :time-limit
                                             {:budget-summary summary}))))
 
-(defn- classify-comments
-  [new-comments generate-fn self-author]
+(defn- ^{:stratum 0} classify-comments
+  "Classify `new-comments`. `trusted-authors` (logins) are acted on even
+   without an OWNER, MEMBER or COLLABORATOR association; see
+   `classifier/classify-comment`."
+  [new-comments generate-fn self-author trusted-authors]
   (if (seq new-comments)
     (classifier/classify-comments new-comments
                                   :generate-fn generate-fn
-                                  :self-author self-author)
+                                  :self-author self-author
+                                  :trusted-authors trusted-authors)
     {:change-requests []
      :questions []
      :approvals []
      :bot-comments []
+     :untrusted []
      :noise []
      :all []
      :stats {:total 0
@@ -107,14 +88,15 @@
              :questions 0
              :approvals 0
              :bot-comments 0
+             :untrusted 0
              :noise 0}}))
 
-(defn- actionable-comments
+(defn- ^{:stratum 0} actionable-comments
   [classified]
   (concat (:change-requests classified)
           (:questions classified)))
 
-(defn- emit-classification-events!
+(defn- ^{:stratum 0} emit-classification-events!
   [monitor pr-number classified]
   (doseq [classification (:all classified)]
     (state/emit! monitor
@@ -127,7 +109,7 @@
                                               :confidence (:confidence classification)
                                               :method (:method classification)}))))
 
-(defn- persist-poll-state!
+(defn- ^{:stratum 0} persist-poll-state!
   [monitor pr-number watermarks new-comments]
   (swap! monitor assoc :watermarks watermarks)
   (poller/save-watermarks! watermarks)
@@ -136,69 +118,28 @@
                (mevents/poll-completed pr-number
                                        {:new-comment-count (count new-comments)})))
 
-(defn- route-actionable-comments
-  [monitor pr-info classified]
-  (into [] (map #(handlers/route-comment monitor pr-info %))
-        (actionable-comments classified)))
-
-(defn- completed-cycle-result
-  [new-comments classified results]
-  (let [classified-stats (:stats classified)]
-    (cycle-result {:processed (count results)
-                   :results results
-                   :new-comments (count new-comments)
-                   :classified-stats classified-stats})))
-
-(defn run-cycle
-  "Run one poll → classify → route cycle for a single PR."
-  [monitor pr-info]
-  (let [{:keys [worktree-path self-author generate-fn logger]} (:config @monitor)
-        pr-number  (:pr/number pr-info)
-        watermarks (:watermarks @monitor)
-        pr-budget  (state/get-or-create-budget monitor pr-number)]
-    (if (budget/time-budget-exhausted? pr-budget)
-      (do
-        (emit-time-budget-stop! monitor pr-number pr-budget)
-        (time-budget-stop-result pr-number))
-      (let [poll-result (poller/poll-pr-for-new-comments
-                         worktree-path pr-number watermarks logger)]
-        (if (dag/err? poll-result)
-          (poll-error-result poll-result)
-          (let [{:keys [new-comments watermarks]} (:data poll-result)
-                _          (persist-poll-state! monitor pr-number watermarks new-comments)
-                classified (classify-comments new-comments generate-fn self-author)
-                _          (emit-classification-events! monitor pr-number classified)
-                results    (route-actionable-comments monitor pr-info classified)]
-            (state/emit! monitor
-                         (mevents/cycle-completed pr-number
-                                                  {:new-comments (count new-comments)
-                                                   :classified-stats (:stats classified)
-                                                   :actions-taken (count results)}))
-            (completed-cycle-result new-comments classified results)))))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Loop lifecycle
-
-(declare step-monitor-loop!)
-
-(defn- retry-after-poll-error!
-  [monitor author logger poll-interval-ms pr-result]
+(defn- ^{:stratum 0} retry-after-poll-error!
+  "Log a failed open-PR poll and wait one interval. Returns true: retry."
+  [logger poll-interval-ms pr-result]
   (when logger
     (log/warn logger :pr-monitor :loop/poll-prs-failed
               {:message "Failed to poll open PRs — retrying"
                :data {:error (:error pr-result)}}))
   (Thread/sleep poll-interval-ms)
-  (step-monitor-loop! monitor author))
+  true)
 
-(defn- stop-when-no-open-prs!
-  "Stop the loop because no open PRs were found. Records :no-open-prs as stop reason."
+(defn- ^{:stratum 0} stop-when-no-open-prs!
+  "Stop the loop because no open PRs were found. Records :no-open-prs as
+   stop reason. Returns false: do not poll again."
   [monitor logger]
   (when logger
     (log/info logger :pr-monitor :loop/no-open-prs
               {:message "No open PRs found — stopping monitor loop"}))
-  (swap! monitor assoc :running? false :stop-reason :no-open-prs))
+  (swap! monitor assoc :running? false :stop-reason :no-open-prs)
+  false)
 
-(defn- log-cycle-stop
+(defn- ^{:stratum 0} log-cycle-stop
   [logger pr cycle-result]
   (when (and (:stopped? cycle-result) logger)
     (log/info logger :pr-monitor :loop/pr-budget-stopped
@@ -206,19 +147,7 @@
                              " stopped: "
                              (:stop-reason cycle-result))})))
 
-(defn- run-pr-cycle!
-  [monitor logger pr]
-  (when (:running? @monitor)
-    (try
-      (log-cycle-stop logger pr (run-cycle monitor pr))
-      (catch Exception e
-        (when logger
-          (log/error logger :pr-monitor :loop/cycle-error
-                     {:message "Error in monitor cycle"
-                      :data {:pr-number (:pr/number pr)
-                             :error (.getMessage e)}}))))))
-
-(defn- finalize-loop-iteration!
+(defn- ^{:stratum 0} finalize-loop-iteration!
   "Advance cycle counter, record timestamp, and emit an iteration-level heartbeat.
    prs-polled is the count of PRs processed in this iteration.
    The nil pr-number distinguishes this iteration-level event from the per-PR
@@ -233,20 +162,127 @@
     (state/emit! monitor (mevents/cycle-completed nil {:iteration (:cycles updated)
                                                        :prs-polled prs-polled}))))
 
-(defn- continue-loop!
-  [monitor author poll-interval-ms]
+(defn- ^{:stratum 0} continue-loop!
+  "Wait one interval while the loop is running. Returns true to poll
+   again, nil once the loop has been stopped."
+  [monitor poll-interval-ms]
   (when (:running? @monitor)
     (Thread/sleep poll-interval-ms)
-    (step-monitor-loop! monitor author)))
+    true))
 
-(defn- step-monitor-loop!
+(defn ^{:stratum 0} stop-monitor-loop
+  "Stop a running monitor loop gracefully. Records :manual-stop as stop reason."
+  [monitor]
+  (swap! monitor assoc :running? false :stop-reason :manual-stop))
+
+(defn ^{:stratum 0} monitor-running?
+  "Check if the monitor loop is currently running."
+  [monitor]
+  (:running? @monitor))
+
+(defn ^{:stratum 0} monitor-evidence
+  "Get current evidence from the monitor."
+  [monitor]
+  (:evidence @monitor))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Single cycle helpers
+(defn- ^{:stratum 1} cycle-result
+  [result]
+  (validate! CycleResult result))
+
+(defn- ^{:stratum 1} route-actionable-comments
+  [monitor pr-info classified]
+  (into [] (map #(handlers/route-comment monitor pr-info %))
+        (actionable-comments classified)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} time-budget-stop-result
+  [_pr-number]
+  (cycle-result {:processed 0
+                 :results []
+                 :new-comments 0
+                 :stopped? true
+                 :stop-reason :time-budget-exhausted}))
+
+(defn- ^{:stratum 2} poll-error-result
+  [poll-result]
+  (cycle-result {:processed 0
+                 :results []
+                 :new-comments 0
+                 :error (:error poll-result)}))
+
+(defn- ^{:stratum 2} completed-cycle-result
+  [new-comments classified results]
+  (let [classified-stats (:stats classified)]
+    (cycle-result {:processed (count results)
+                   :results results
+                   :new-comments (count new-comments)
+                   :classified-stats classified-stats})))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} run-cycle
+  "Run one poll → classify → route cycle for a single PR.
+
+   Reads `:trusted-authors` from the monitor config: logins whose comments
+   are acted on even without an OWNER, MEMBER or COLLABORATOR author
+   association (a bot account, say). Everyone else without one is
+   classified `:untrusted` and never routed."
+  [monitor pr-info]
+  (let [{:keys [worktree-path self-author generate-fn logger trusted-authors]} (:config @monitor)
+        pr-number  (:pr/number pr-info)
+        watermarks (:watermarks @monitor)
+        pr-budget  (state/get-or-create-budget monitor pr-number)]
+    (if (budget/time-budget-exhausted? pr-budget)
+      (do
+        (emit-time-budget-stop! monitor pr-number pr-budget)
+        (time-budget-stop-result pr-number))
+      (let [poll-result (poller/poll-pr-for-new-comments
+                         worktree-path pr-number watermarks logger)]
+        (if (dag/err? poll-result)
+          (poll-error-result poll-result)
+          (let [{:keys [new-comments watermarks]} (:data poll-result)
+                _          (persist-poll-state! monitor pr-number watermarks new-comments)
+                classified (classify-comments new-comments generate-fn self-author
+                                              trusted-authors)
+                _          (emit-classification-events! monitor pr-number classified)
+                results    (route-actionable-comments monitor pr-info classified)]
+            (state/emit! monitor
+                         (mevents/cycle-completed pr-number
+                                                  {:new-comments (count new-comments)
+                                                   :classified-stats (:stats classified)
+                                                   :actions-taken (count results)}))
+            (completed-cycle-result new-comments classified results)))))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn- ^{:stratum 4} run-pr-cycle!
+  [monitor logger pr]
+  (when (:running? @monitor)
+    (try
+      (log-cycle-stop logger pr (run-cycle monitor pr))
+      (catch Exception e
+        (when logger
+          (log/error logger :pr-monitor :loop/cycle-error
+                     {:message "Error in monitor cycle"
+                      :data {:pr-number (:pr/number pr)
+                             :error (.getMessage e)}}))))))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn- ^{:stratum 5} step-monitor-loop!
+  "Poll open PRs once and run a cycle for each. Returns true when the
+   loop should poll again."
   [monitor author]
   (let [{:keys [poll-interval-ms logger worktree-path]} (:config @monitor)]
     (when (:running? @monitor)
       (let [pr-result (poller/poll-open-prs worktree-path author)]
         (cond
           (dag/err? pr-result)
-          (retry-after-poll-error! monitor author logger poll-interval-ms pr-result)
+          (retry-after-poll-error! logger poll-interval-ms pr-result)
 
           (empty? (:prs (:data pr-result)))
           (stop-when-no-open-prs! monitor logger)
@@ -262,9 +298,23 @@
                                       (reduced n)))
                                   0 prs)]
             (finalize-loop-iteration! monitor processed)
-            (continue-loop! monitor author poll-interval-ms)))))))
+            (continue-loop! monitor poll-interval-ms)))))))
 
-(defn run-monitor-loop
+;------------------------------------------------------------------------------ Layer 6
+
+(defn- ^{:stratum 6} run-steps!
+  "Repeat `step-monitor-loop!` with `recur` until it says to stop. The
+   step functions used to call each other instead, adding stack frames
+   on every poll until a long-running monitor died with
+   StackOverflowError."
+  [monitor author]
+  (loop []
+    (when (step-monitor-loop! monitor author)
+      (recur))))
+
+;------------------------------------------------------------------------------ Layer 7
+
+(defn ^{:stratum 7} run-monitor-loop
   "Run the PR monitor loop continuously until stopped.
 
    Emits loop-started on entry and loop-stopped on exit (covering all exit
@@ -277,7 +327,7 @@
     (swap! monitor assoc :running? true :started-at (java.util.Date.) :stop-reason nil)
     (state/log-loop-start! monitor author)
     (state/emit! monitor (mevents/loop-started nil (:config @monitor)))
-    (step-monitor-loop! monitor author)
+    (run-steps! monitor author)
     (state/emit! monitor (mevents/loop-stopped nil (get @monitor :stop-reason :completed)))
     (when logger
       (log/info logger :pr-monitor :loop/stopped
@@ -290,18 +340,3 @@
                                 (/ (double (- (System/currentTimeMillis)
                                               (.getTime ^java.util.Date started)))
                                    3600000.0))}))))
-
-(defn stop-monitor-loop
-  "Stop a running monitor loop gracefully. Records :manual-stop as stop reason."
-  [monitor]
-  (swap! monitor assoc :running? false :stop-reason :manual-stop))
-
-(defn monitor-running?
-  "Check if the monitor loop is currently running."
-  [monitor]
-  (:running? @monitor))
-
-(defn monitor-evidence
-  "Get current evidence from the monitor."
-  [monitor]
-  (:evidence @monitor))
