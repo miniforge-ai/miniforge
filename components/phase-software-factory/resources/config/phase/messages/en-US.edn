@@ -32,6 +32,7 @@
   :verify/tests-passed        "All {pass-count} test(s) passed"
   :verify/tests-failed        "Tests failed: {fail-count} failure(s), {error-count} error(s)"
   :verify/failing-tests       "Failing: {tests}"
+  :verify/more-failing-tests  "{tests} (+{count} more)"
   :verify/output-unparseable  "Test output could not be parsed"
   :verify/gate-failed         "Gate validation failed"
   :verify/failed              "Verification failed"

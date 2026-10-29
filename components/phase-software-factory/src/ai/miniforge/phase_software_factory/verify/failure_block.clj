@@ -34,6 +34,9 @@
   (let [[_ tag test-name location] (re-find config/failure-header-pattern (first lines))
         kind (if (= "FAIL" tag) :fail :error)
         detail (str/join "\n" (detail-lines lines))]
-    {:kind kind :test test-name :location location :detail detail}))
+    {:kind kind
+     :test test-name
+     :location location
+     :detail detail}))
 
 (comment ::failure-blocks)

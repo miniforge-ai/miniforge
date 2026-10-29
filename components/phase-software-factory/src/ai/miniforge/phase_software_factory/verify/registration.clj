@@ -7,6 +7,11 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} callbacks [enter leave error]
+  {:enter enter
+   :leave leave
+   :error error})
+
 (defn- ^{:stratum 0} enter-configured [enter config ctx]
   (enter (assoc ctx :phase-config config)))
 
@@ -17,7 +22,11 @@
         enter (partial enter-configured (:enter handlers) merged)
         leave @(:leave handlers)
         error @(:error handlers)]
-    {:name id :config merged :enter enter :leave leave :error error}))
+    {:name id
+     :config merged
+     :enter enter
+     :leave leave
+     :error error}))
 
 ;------------------------------------------------------------------------------ Layer 2
 
