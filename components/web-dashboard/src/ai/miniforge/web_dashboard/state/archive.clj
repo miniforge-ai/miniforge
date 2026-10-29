@@ -18,6 +18,7 @@
 (ns ai.miniforge.web-dashboard.state.archive
   "Archived workflow state — queries, deletion, retention."
   (:require
+   [ai.miniforge.event-stream.interface :as es]
    [clojure.java.io :as io]
    [ai.miniforge.web-dashboard.event-files :as event-files]
    [ai.miniforge.web-dashboard.watcher :as watcher]
@@ -54,12 +55,18 @@
   "Read full events from an archived workflow's .edn file, or its event
    directory, on demand. Returns events vector (most recent first, limited
    to 200). An event directory is looked up again under the summary's
-   events root, since an archive may have moved it since the scan."
+   events root, since an archive may have moved it since the scan, by the
+   summary's own id: the sink names a keyword id's directory after its
+   name, which the id's string form does not give."
   [state workflow-id]
   (let [archive-atom (:archived-workflows @state)
-        summary      (when archive-atom (get @archive-atom (str workflow-id)))]
-    (if-let [events-dir (:events-dir summary)]
-      (event-files/newest-events events-dir workflow-id 200)
+        summary      (when archive-atom (get @archive-atom (str workflow-id)))
+        dir          (some-> (:events-dir summary) (es/workflow-events-dir (:id summary)))]
+    (if (:events-dir summary)
+      (->> (some-> dir event-files/event-files (event-files/newest-batches 200) first)
+           (take-last 200)
+           reverse
+           vec)
       (if-let [file-path (:file-path summary)]
         (try
           (let [file (io/file file-path)]

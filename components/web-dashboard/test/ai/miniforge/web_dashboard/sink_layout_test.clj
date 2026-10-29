@@ -125,6 +125,40 @@
               5)
           "file tracking is bounded too"))))
 
+(deftest ^{:stratum 1} a-same-millisecond-group-across-a-cutoff-keeps-every-reader-in-order
+  (let [events-dir (temp-events-dir)
+        stream     (es/create-event-stream {:sinks []})
+        wf-id      (random-uuid)
+        dir        (doto (es/workflow-dir (str events-dir) wf-id) .mkdirs)
+        started    (envelope stream :workflow/started wf-id :workflow/spec {:name "Tied run"})
+        chunks     (mapv #(envelope stream :agent/chunk wf-id :chunk/delta (str %)) (range 1 204))
+        completed  (envelope stream :workflow/completed wf-id :workflow/status :success)
+        ;; 204 files in one millisecond, named against publish order, so the
+        ;; newest events sort first and every cutoff (10, 200, 5) falls inside it.
+        tied-name  #(format "20260101T000000001Z-%08x-0000-4000-8000-000000000000.json"
+                            (- 0xffffffff (:event/sequence-number %)))
+        found      (atom {})]
+    (spit (io/file dir "20260101T000000000Z-00000000-0000-4000-8000-000000000000.json")
+          (es/serialize-event started))
+    (doseq [event (conj chunks completed)]
+      (spit (io/file dir (tied-name event)) (es/serialize-event event)))
+    (archive/scan-archive! (str events-dir) #(swap! found assoc (str (:id %)) %) (constantly nil))
+    (is (= :completed (:status (get @found (str wf-id)))) "the summary's last 10 files")
+    (let [newest (state-archive/get-archived-workflow-events
+                  (atom {:archived-workflows (atom @found)}) wf-id)]
+      (is (= [:workflow/completed "203" "202"] [(:event/type (first newest))
+                                                 (:chunk/delta (second newest))
+                                                 (:chunk/delta (nth newest 2))])
+          "the archive endpoint's newest 200, newest first")
+      (is (= 200 (count newest))))
+    (with-redefs [workflows/events-dir-path (str events-dir)
+                  workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
+      (is (= #{"199" "200" "201" "202" "203"}
+             (->> (workflows/get-events (core/create-state {:event-stream stream}) {:limit 1000})
+                  (keep :chunk/delta)
+                  set))
+          "the history's 5-file batches keep the newest 5 chunks"))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} archive-scan-lists-live-archived-and-edn-workflows
@@ -204,3 +238,14 @@
           "one card, not one per source")
       (is (= 3 (count (workflows/get-events dashboard {:workflow-id wf-id})))
           "no event twice"))))
+
+(deftest ^{:stratum 2} archived-events-of-a-keyword-workflow-id-load
+  (let [events-dir (temp-events-dir)
+        stream     (file-sink-stream events-dir)
+        found      (atom {})]
+    (publish-run! stream :canonical-sdlc "Keyword run")
+    (archive/scan-archive! (str events-dir) #(swap! found assoc (str (:id %)) %) (constantly nil))
+    (is (= "Keyword run" (:name (get @found ":canonical-sdlc"))))
+    (is (= 3 (count (state-archive/get-archived-workflow-events
+                     (atom {:archived-workflows (atom @found)}) ":canonical-sdlc")))
+        "the URL's string id finds the summary; its keyword id finds canonical-sdlc/")))

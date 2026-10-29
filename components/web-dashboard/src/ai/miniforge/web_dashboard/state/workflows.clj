@@ -132,13 +132,19 @@
       [])))
 
 (defn- ^{:stratum 0} compact-into
-  "`events` plus the events of `files`, decoded and compacted under
-   `policy` one chunk at a time, so a long run is never held in full."
+  "`events` plus the events of `files` (newer), compacted under `policy`.
+   The files are decoded a batch at a time, newest first, so a long run
+   is never held in full; a batch never splits a same-millisecond group,
+   and each older batch goes in front of what is kept, so compaction
+   sees publish order. Compacting newest-first keeps what compacting all
+   at once would: every lifecycle event, the newest others."
   [policy events files]
-  (reduce (fn [kept chunk]
-            (es/compact-events (into kept (event-files/read-ordered chunk)) policy))
-          events
-          (partition-all (:max-events-per-workflow policy) files)))
+  (es/compact-events
+   (into events
+         (reduce (fn [kept batch] (es/compact-events (into batch kept) policy))
+                 []
+                 (event-files/newest-batches files (:max-events-per-workflow policy))))
+   policy))
 
 (defn ^{:stratum 0} wf-name-from-started
   "Extract a display name for a workflow from its started event."
