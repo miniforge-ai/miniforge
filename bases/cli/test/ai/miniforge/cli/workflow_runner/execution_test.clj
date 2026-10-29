@@ -31,6 +31,7 @@
    throw — must release it here."
   (:require
    [ai.miniforge.artifact.interface :as artifact]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.cli.workflow-runner.execution :as sut]
    [ai.miniforge.cli.workflow-runner.lifecycle :as lifecycle]
@@ -95,6 +96,16 @@
                       (catch Object thrown
                         {:thrown thrown}))))]
     (assoc outcome :closed @closed)))
+
+(deftest ^{:stratum 0} close-artifact-store-warns-on-stderr-when-close-is-incomplete-test
+  (let [err (java.io.StringWriter.)
+        out (with-out-str
+              (binding [*err* err]
+                (with-redefs [artifact/close-store (constantly false)]
+                  (sut/close-artifact-store ::store))))]
+    (testing "an incomplete close is reported on stderr, not stdout"
+      (is (str/includes? (str err) (messages/t :workflow-runner/artifact-store-close-warning)))
+      (is (= "" out)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
