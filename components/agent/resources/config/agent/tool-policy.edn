@@ -49,6 +49,45 @@
   ;; it keeps the read tools.
   :releaser    #{"mcp__context__context_write" "Write" "Read" "Glob" "Grep" "LS"}}
 
+ ;; For each tool that names a file system path: the tool_input keys
+ ;; holding one. Each path must resolve inside the session's worktree (the
+ ;; hook's --root) and out of its git metadata, per pr-lifecycle's
+ ;; safe-worktree-path, and must not match :tool/protected-paths. A tool
+ ;; listed here is refused when the hook has no root to check against.
+ :tool/path-keys
+ {"Read"                        [:file_path]
+  "Write"                       [:file_path]
+  "Edit"                        [:file_path]
+  "MultiEdit"                   [:file_path]
+  "NotebookEdit"                [:notebook_path]
+  "Glob"                        [:path]
+  "Grep"                        [:path]
+  "LS"                          [:path]
+  "mcp__context__context_read"  [:path]
+  "mcp__context__context_write" [:path]
+  "mcp__context__context_grep"  [:path]}
+
+ ;; Glob-pattern inputs: refused when absolute, starting with ~, or with a
+ ;; .. segment, since the search would then leave the worktree.
+ :tool/glob-keys
+ {"Glob"                       [:pattern]
+  "Grep"                       [:glob]
+  "mcp__context__context_glob" [:pattern]
+  "mcp__context__context_grep" [:glob]}
+
+ ;; Worktree paths no agent tool may touch, as regexes over the path
+ ;; relative to the worktree: agent CLI and MCP config that a later
+ ;; session in the same worktree would load, and the session directory
+ ;; miniforge writes inside a capsule. miniforge writes these itself.
+ :tool/protected-paths
+ ["(?i)^\\.claude(/|$)"
+  "(?i)^\\.mcp\\.json$"
+  "(?i)^\\.codex(/|$)"
+  "(?i)^\\.cursor(/|$)"
+  "(?i)^\\.opencode(/|$)"
+  "(?i)^opencode\\.jsonc?$"
+  "(?i)^\\.miniforge-session(/|$)"]
+
  ;; Bash commands the hook refuses: java.util.regex patterns, each matched
  ;; anywhere in the command (re-find). Destructive or exfiltration-risk
  ;; commands.

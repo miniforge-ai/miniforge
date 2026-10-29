@@ -119,19 +119,24 @@
 
 ;; Core evaluation function
 (defn ^{:stratum 1} evaluate-tool-use
-  "Evaluate `role`'s request to call `tool-name` with `tool-input`.
+  "Evaluate a session's request to call `tool-name` with `tool-input`.
+   `session` carries the agent :role, the worktree :root and :path-ok?
+   (see `tool-policy/path-refusal`).
 
    Returns {:decision \"allow\"} or {:decision \"deny\" :reason string}.
-   Denies a tool `role-tools` does not list for `role`, every tool when
-   `policy` has no entry for `role` (nil included), and a Bash command
+   Denies a tool `role-tools` does not list for the role, every tool when
+   `policy` has no entry for the role (nil included), a path outside the
+   worktree or in its git metadata, and a Bash command
    `evaluate-bash-command` refuses. The three-argument form reads
    `tool-policy`.
 
    `hook-eval-stdin!` maps the result to Claude's PreToolUse reply."
-  ([role tool-name tool-input]
-   (evaluate-tool-use @tool-policy role tool-name tool-input))
-  ([policy role tool-name tool-input]
-   (let [allowed (role-tools policy role)]
+  ([session tool-name tool-input]
+   (evaluate-tool-use @tool-policy session tool-name tool-input))
+  ([policy {:keys [role] :as session} tool-name tool-input]
+   (let [allowed (role-tools policy role)
+         outside (when (contains? allowed tool-name)
+                   (tool-policy/path-refusal policy session tool-name tool-input))]
      (cond
        (nil? allowed)
        {:decision "deny"
@@ -140,6 +145,9 @@
        (not (contains? allowed tool-name))
        {:decision "deny"
         :reason (str "Tool " (pr-str tool-name) " is not allowed for role " (pr-str role))}
+
+       outside
+       {:decision "deny" :reason outside}
 
        (= "Bash" tool-name)
        (evaluate-bash-command (:bash/deny-patterns policy) (:command tool-input))
@@ -154,8 +162,9 @@
 
    Reads Claude PreToolUse JSON from stdin:
      {\"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"ls\"}}
-   evaluates it for the role in `opts` (with none, every tool is refused)
-   and writes `hook-reply` to stdout.
+   evaluates it for the session `opts` describe (:role, :root, :path-ok?;
+   with no role every tool is refused, with no root every file tool) and
+   writes `hook-reply` to stdout.
 
    Returns the exit code: 0 once a reply is written. When reading or
    evaluating the request throws, it writes nothing to stdout, explains on
@@ -164,13 +173,13 @@
    other non-zero code lets the call through, so the hook command
    artifact-session writes turns a failure to start this one into 2 too."
   ([] (hook-eval-stdin! {}))
-  ([{:keys [role]}]
+  ([opts]
    (try+
     (let [input (read-hook-request)
           tool-name (:tool_name input)
           tool-input (get input :tool_input {})
           tool-input-kw (into {} (map (fn [[k v]] [(keyword k) v]) tool-input))
-          result (evaluate-tool-use role tool-name tool-input-kw)
+          result (evaluate-tool-use opts tool-name tool-input-kw)
           ;; Emit event (no-ops if no event stream bound)
           _ (emit-tool-use-event! tool-name result)]
       (println (json/generate-string (hook-reply result)))
@@ -183,16 +192,16 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (evaluate-tool-use :implementer "Bash" {:command "ls -la"})
+  (evaluate-tool-use {:role :implementer} "Bash" {:command "ls -la"})
   ;; => {:decision "allow"}
 
-  (evaluate-tool-use :implementer "Bash" {:command "rm -rf /"})
+  (evaluate-tool-use {:role :implementer} "Bash" {:command "rm -rf /"})
   ;; => {:decision "deny" :reason "..."}
 
-  (evaluate-tool-use :reviewer "Write" {:file_path "src/x.clj"})
+  (evaluate-tool-use {:role :reviewer} "Write" {:file_path "src/x.clj"})
   ;; => {:decision "deny" :reason "Tool \"Write\" is not allowed for role :reviewer"}
 
-  (evaluate-tool-use nil "mcp__context__context_read" {:path "src/core.clj"})
+  (evaluate-tool-use {} "mcp__context__context_read" {:path "src/core.clj"})
   ;; => {:decision "deny" :reason "No tool policy for role nil; every tool is refused"}
 
   :end)

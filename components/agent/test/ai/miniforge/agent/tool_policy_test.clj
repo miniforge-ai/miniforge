@@ -35,10 +35,12 @@
   "The roles that open an artifact session, and so run the hook."
   #{:planner :implementer :tester :reviewer :releaser})
 
-(defn- ^{:stratum 0} decision
-  "The decision string for `role` calling `tool-name` with `tool-input`."
-  [role tool-name tool-input]
-  (:decision (sut/evaluate-tool-use role tool-name tool-input)))
+(def ^{:stratum 0} ^:private worktree "/work/repo")
+
+(defn- ^{:stratum 0} stub-path-ok?
+  "Stands in for pr-lifecycle's guard: refuses a .git component."
+  [_root relative-path]
+  (not (re-find #"(?i)(^|/)\.git(/|$)" relative-path)))
 
 (def ^{:stratum 0} ^:private exfiltration-commands
   "Bash commands the hook allowed on main, plus close variants: secret
@@ -78,7 +80,23 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} unknown-tool-is-denied-test
+(defn- ^{:stratum 1} decision
+  "The decision string for `role` calling `tool-name` with `tool-input` in
+   a session rooted at `worktree`."
+  [role tool-name tool-input]
+  (:decision (sut/evaluate-tool-use {:role role :root worktree :path-ok? stub-path-ok?}
+                                    tool-name tool-input)))
+
+(deftest ^{:stratum 1} every-session-role-has-a-policy-test
+  (testing "each role that opens a session is listed and gets the :common tools"
+    (let [policy @sut/tool-policy]
+      (doseq [role session-roles]
+        (is (contains? (:roles policy) role) (str role))
+        (is (every? (sut/role-tools policy role) (:common policy)) (str role))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} unknown-tool-is-denied-test
   (testing "a tool the role's set does not list is refused, not allowed by default"
     (is (= "deny" (decision :implementer "SomeNewTool" {})))
     (is (= "deny" (decision :implementer "mcp__other__exfiltrate" {})))
@@ -87,25 +105,25 @@
     (doseq [role [:implementer :tester] tool ["Monitor" "PowerShell" "Agent" "Skill"]]
       (is (= "deny" (decision role tool {:command "printenv"})) (str role " " tool)))))
 
-(deftest ^{:stratum 1} missing-or-unknown-role-denies-every-tool-test
+(deftest ^{:stratum 2} missing-or-unknown-role-denies-every-tool-test
   (testing "with no role, or one the policy does not list, nothing is allowed"
     (doseq [role [nil :curator "implementer"]]
       (is (= "deny" (decision role "mcp__context__context_read" {:path "x.clj"}))
           (str "role " (pr-str role))))))
 
-(deftest ^{:stratum 1} roles-get-their-own-tools-test
+(deftest ^{:stratum 2} roles-get-their-own-tools-test
   (testing "each role keeps the tools its job needs"
     (doseq [[role tool] [[:implementer "Write"] [:implementer "Bash"] [:planner "Write"]
                          [:tester "Bash"] [:releaser "Write"]]]
       (is (= "allow" (decision role tool {:command "bb test"})) (str role " " tool)))))
 
-(deftest ^{:stratum 1} reviewer-has-no-write-path-test
+(deftest ^{:stratum 2} reviewer-has-no-write-path-test
   (testing "the reviewer inspects only: native and MCP writes and Bash are refused"
     (doseq [tool ["Write" "Edit" "MultiEdit" "Bash" "mcp__context__context_write"]]
       (is (= "deny" (decision :reviewer tool {})) tool))
     (is (= "allow" (decision :reviewer "mcp__context__context_read" {:path "x.clj"})))))
 
-(deftest ^{:stratum 1} disallowed-native-tools-stay-denied-test
+(deftest ^{:stratum 2} disallowed-native-tools-stay-denied-test
   (testing "every tool a role's --disallowedTools list removes is refused by the hook too"
     (doseq [[role tools] {:implementer @#'implementer/implementer-disallowed-tools
                           :planner     @#'planner/planner-disallowed-tools
@@ -114,7 +132,7 @@
             tool tools]
       (is (= "deny" (decision role tool {})) (str role " " tool)))))
 
-(deftest ^{:stratum 1} bash-exfiltration-is-denied-test
+(deftest ^{:stratum 2} bash-exfiltration-is-denied-test
   (testing "secret reads, token commands, network clients and pushes are refused"
     (doseq [command exfiltration-commands]
       (is (= "deny" (decision :implementer "Bash" {:command command})) command)))
@@ -122,9 +140,25 @@
     (doseq [command build-commands]
       (is (= "allow" (decision :implementer "Bash" {:command command})) command))))
 
-(deftest ^{:stratum 1} every-session-role-has-a-policy-test
-  (testing "each role that opens a session is listed and gets the :common tools"
-    (let [policy @sut/tool-policy]
-      (doseq [role session-roles]
-        (is (contains? (:roles policy) role) (str role))
-        (is (every? (sut/role-tools policy role) (:common policy)) (str role))))))
+(deftest ^{:stratum 2} file-tools-stay-in-the-worktree-test
+  (testing "paths inside the worktree pass"
+    (doseq [[role tool input] [[:releaser "Read" {:file_path "/work/repo/src/a.clj"}]
+                               [:implementer "Write" {:file_path "/work/repo/src/b.clj"}]
+                               [:implementer "mcp__context__context_write" {:path "src/c.clj"}]
+                               [:releaser "Grep" {:path "/work/repo" :glob "*.clj"}]
+                               [:implementer "Write" {:file_path "/work/repo/.miniforge/implement.edn"}]]]
+      (is (= "allow" (decision role tool input)) (str tool " " input))))
+  (testing "paths outside it, in git metadata, or in agent config are refused"
+    (doseq [[role tool input] [[:releaser "Read" {:file_path "/etc/passwd"}]
+                               [:releaser "Read" {:file_path "~/.aws/credentials"}]
+                               [:releaser "Read" {:file_path "/work/repo/../other/x"}]
+                               [:implementer "Write" {:file_path "/work/repo/.git/hooks/pre-commit"}]
+                               [:implementer "mcp__context__context_write" {:path "../escape.clj"}]
+                               [:implementer "Write" {:file_path "/work/repo/.claude/settings.local.json"}]
+                               [:implementer "Edit" {:file_path "/work/repo/.mcp.json"}]
+                               [:releaser "Glob" {:pattern "/etc/**"}]
+                               [:releaser "Grep" {:path "/"}]]]
+      (is (= "deny" (decision role tool input)) (str tool " " input))))
+  (testing "with no worktree root every file tool is refused"
+    (is (= "deny" (:decision (sut/evaluate-tool-use {:role :implementer :path-ok? stub-path-ok?}
+                                                    "Write" {:file_path "/work/repo/a.clj"}))))))
