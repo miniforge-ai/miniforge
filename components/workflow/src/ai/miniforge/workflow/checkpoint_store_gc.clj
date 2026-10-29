@@ -7,9 +7,10 @@
 
    `gc-checkpoints!` deletes a run's checkpoint directory once nothing in
    it has changed for the retention period (30 days by default, per the
-   checkpoint spec), unless the run is pinned (`:pinned? true` in its
-   manifest), its manifest cannot be read (so whether it is pinned is
-   unknown), or its events are still live (in flight or paused).
+   checkpoint spec), unless the run is pinned (a pin marker, or a legacy
+   `:pinned? true` in its manifest), its manifest cannot be read (so
+   whether it is pinned is unknown), or its events are still live (in
+   flight or paused).
 
    Event retention is shorter (archived events go 7 days after archiving),
    so without a hold a failed run resumed after a week would find its
@@ -22,12 +23,14 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
+   [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.messages :as messages]
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.string :as str]
-   [slingshot.slingshot :refer [try+]]))
+   [slingshot.slingshot :refer [try+]])
+  (:import [java.nio.file.attribute BasicFileAttributes]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -72,45 +75,70 @@
 (defn- ^{:stratum 0} last-change-ms
   "When anything in `dir` last changed: the newest mtime in its own tree.
    The walk does not follow links, and a link's own mtime is left out, so
-   a link to a fresh tree elsewhere cannot keep an expired run recent."
+   a link to a fresh tree elsewhere cannot keep an expired run recent.
+
+   Times come from the attributes the walk read when it listed each entry,
+   never a second stat: a file renamed or deleted in between (a checkpoint
+   or pin write landing) cannot fail the scan, and one gone before the walk
+   reads it is skipped (the walk's default). Pin marker temp files are
+   skipped too; their rename changes the directory's own mtime anyway."
   [dir]
   (let [newest (volatile! 0)
-        see! (fn [path _attrs]
-               (when-not (fs/sym-link? path)
-                 (vswap! newest max (fs/file-time->millis
-                                     (fs/last-modified-time path {:nofollow-links true}))))
+        see! (fn [path ^BasicFileAttributes attrs]
+               (when-not (or (.isSymbolicLink attrs) (checkpoint-paths/pin-marker-temp? path))
+                 (vswap! newest max (.toMillis (.lastModifiedTime attrs))))
                :continue)]
     (fs/walk-file-tree dir {:pre-visit-dir see! :visit-file see!})
     @newest))
 
 (defn- ^{:stratum 0} manifest-hold
-  "`:pinned` when the run's manifest pins it, `:unreadable` when the
-   manifest exists but cannot be read as a map (pinned or not is then
-   unknown), else nil."
+  "`:pinned` when the run has a pin marker, or its manifest carries a
+   legacy `:pinned? true`; `:unreadable` when the manifest exists but
+   cannot be read as a map (pinned or not is then unknown); else nil."
   [dir]
   (let [manifest (fs/file dir checkpoint-paths/manifest-filename)]
-    (when (fs/exists? manifest)
+    (cond
+      (fs/exists? (fs/file dir checkpoint-paths/pin-marker-filename)) :pinned
+      (fs/exists? manifest)
       (try+
         (let [content (edn/read-string (slurp manifest))]
           (cond (not (map? content)) :unreadable
                 (true? (:pinned? content)) :pinned))
         (catch Exception _ :unreadable)))))
 
-(defn- ^{:stratum 0} delete-run!
-  "Delete one run's checkpoint directory: its id, or an anomaly naming it."
-  [dir id]
-  (try+
-    (fs/delete-tree dir)
-    id
-    (catch Exception e
-      (anomaly/exception-anomaly :unavailable
-                                 (messages/t :checkpoint/gc-delete-failed
-                                             {:path (str dir)
-                                              :error (or (ex-message e) (.getName (class e)))})
-                                 {:workflow/run-id id :checkpoint/path (str dir)}
-                                 e))))
+(defn- ^{:stratum 0} delete-failure [dir id e]
+  (anomaly/exception-anomaly :unavailable
+                             (messages/t :checkpoint/gc-delete-failed
+                                         {:path (str dir)
+                                          :error (or (ex-message e) (.getName (class e)))})
+                             {:workflow/run-id id :checkpoint/path (str dir)}
+                             e))
+
+(defn- ^{:stratum 0} pinned-dir?
+  [dir]
+  (fs/exists? (fs/file dir checkpoint-paths/pin-marker-filename)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} delete-run!
+  "Delete one run's checkpoint directory under the run's lock, which a pin
+   takes too. The pin marker is checked again under it, so a pin that
+   landed after the run was classified keeps the run, and a pin that comes
+   later finds the run gone and fails. Returns the run id when deleted,
+   `{:pinned id}` when a pin arrived first, or an anomaly (lock busy, I/O)."
+  [root dir id]
+  (checkpoint-lock/with-run-lock
+   root id
+   (fn []
+     (try+
+       (if (pinned-dir? dir)
+         {:pinned id}
+         (do (fs/delete-tree dir)
+             ;; The lock file stays: unlinking it would let a new caller
+             ;; lock a fresh file while a waiter holds the old one.
+             id))
+       (catch Exception e
+         (delete-failure dir id e))))))
 
 (defmethod ^{:stratum 1} es/retention-hold ::checkpoint
   [_hold workflow-id events-dir]
@@ -135,6 +163,27 @@
       (>= (last-change-ms dir) cutoff-ms) :recent
       (fs/directory? (es/workflow-dir events-dir id)) :live
       :else (or (manifest-hold dir) :expired))))
+
+(defn ^{:stratum 1} run-checkpoint-root
+  "The checkpoint root run `workflow-id` was checkpointed under: the
+   default root when it holds the run, else the root the run's own events
+   (under `events-dir`) announce, else nil. An `:unavailable` anomaly when
+   the lookup fails, such as a run directory that cannot be listed."
+  [workflow-id events-dir]
+  (try+
+    (if (checkpoint-store/checkpoint-present? workflow-id)
+      (checkpoint-paths/resolve-checkpoint-root {})
+      (let [run-dir (announced-run-dir events-dir workflow-id)]
+        (when (and run-dir (not= :unknown run-dir)
+                   (= (str workflow-id) (str (fs/file-name run-dir))))
+          (str (fs/parent run-dir)))))
+    (catch Exception e
+      (anomaly/exception-anomaly :unavailable
+                                 (messages/t :checkpoint/root-lookup-failed
+                                             {:run-id (str workflow-id)
+                                              :error (or (ex-message e) (.getName (class e)))})
+                                 {:workflow/run-id workflow-id}
+                                 e))))
 
 (defn ^{:stratum 1} checkpoint-usage
   "What the checkpoint root holds, read-only, cheap enough for `mf doctor`:
@@ -194,12 +243,14 @@
         runs (when (fs/directory? root)
                (filter #(fs/directory? % {:nofollow-links true}) (fs/list-dir root)))
         by-disposition (group-by #(disposition % cutoff-ms events-dir) runs)
-        results (mapv #(delete-run! % (run-id %)) (get by-disposition :expired))]
+        results (mapv #(delete-run! root % (run-id %)) (get by-disposition :expired))
+        pinned-late (keep :pinned (filter map? (remove anomaly/anomaly? results)))]
     {:checkpoint/root root
      :deleted (filterv uuid? results)
-     :kept (into {}
-                 (map (fn [[k dirs]] [k (mapv run-id dirs)]))
-                 (dissoc by-disposition :expired nil))
+     :kept (cond-> (into {}
+                         (map (fn [[k dirs]] [k (mapv run-id dirs)]))
+                         (dissoc by-disposition :expired nil))
+             (seq pinned-late) (update :pinned (fnil into []) pinned-late))
      :failures (filterv anomaly/anomaly? results)}))
 
 (comment

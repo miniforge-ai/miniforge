@@ -121,7 +121,7 @@
     (es/publish! stream (wf-event :workflow/started wf-id))
     (let [t0 (System/currentTimeMillis)
           s1 (sut/poll-once! (sut/initial-state base t0) base publish (+ t0 500))
-          seen (get-in s1 [:seen (str wf-id)])
+          seen (get-in s1 [:seen (str wf-id) :names])
           ;; Nothing written for the whole window: the sweep drops the directory.
           t1 (+ t0 sut/active-window-ms 1000)
           s2 (sut/poll-once! s1 base publish t1)]
@@ -152,6 +152,25 @@
       (.setLastModified live-root recorded)
       (sut/poll-once! s0 base #(swap! published conj %) (+ t0 1100))
       (is (= #{first-id second-id} (set (map :workflow/id @published)))))))
+
+(deftest ^{:stratum 1} a-file-that-turns-up-below-the-tracked-ones-is-published
+  (let [events-dir (temp-events-dir)
+        base       (str events-dir)
+        stream     (es/create-event-stream {:sinks []})
+        wf-id      (random-uuid)
+        dir        (doto (es/workflow-dir base wf-id) .mkdirs)
+        name-at    #(format "%016x__%012d.transit.json" (bit-shift-left (* 1000 %1) 22) %2)
+        published  (atom [])
+        publish    #(swap! published conj %)
+        t0         (System/currentTimeMillis)]
+    (spit (io/file dir (name-at 5 1))
+          (es/serialize-event (es/create-envelope stream :workflow/started wf-id "started")))
+    (let [s1 (sut/poll-once! (sut/initial-state base t0) base publish (+ t0 500))]
+      ;; A delayed rename: recorded before every file read so far.
+      (spit (io/file dir (name-at 2 0))
+            (es/serialize-event (es/create-envelope stream :workflow/resumed wf-id "late")))
+      (sut/poll-once! s1 base publish (+ t0 1000))
+      (is (some #(= :workflow/resumed (:event/type %)) @published)))))
 
 (defn- ^{:stratum 1} archive-after-listing
   "An `event-files` stand-in that archives the run right after listing."

@@ -762,6 +762,8 @@
   :resume/run-id-taken "Cannot resume under run id {run-id}: a run with that id already exists."
   :resume/run-id-archived "Cannot resume under run id {run-id}: that run is archived (or in the legacy layout), so readers of the id would not see this attempt's events. Omit --run-id to resume it under a new one."
   :resume/run-id-unchecked "Cannot resume under run id {run-id}: checking whether that id is already taken failed: {error}"
+  :resume/pinned "Pinned the checkpoint of run {run-id}: checkpoint GC will keep it."
+  :resume/pin-failed "Warning: could not pin the checkpoint of run {run-id}: {error}"
   :workflow-runner/previously-completed "   Previously completed: {count} tasks"
   :workflow-runner/recovered-artifacts "   Recovered artifacts: {count}"
   :workflow-runner/no-completed-tasks "   No completed tasks found in checkpointed resume state. Starting fresh run."

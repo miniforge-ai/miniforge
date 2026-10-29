@@ -62,6 +62,17 @@
       (fail state :preflight (failure-detail result :deploy/render-failed))
       (assoc state :rendered-yaml rendered))))
 
+(defn- ^{:stratum 1} check-manifest-policy
+  "Refuse rendered manifests the deployment pack blocks before they leave this
+   process. A server dry run already sends the body to the cluster API, where
+   admission webhooks and request-body audit logs can see it."
+  [state]
+  (let [{:keys [blocking require-approval]} (authority/manifest-findings (:rendered-yaml state))
+        refused (concat blocking require-approval)]
+    (if (seq refused)
+      (fail state :authority (str/join "; " (map :message refused)))
+      state)))
+
 (defn- ^{:stratum 1} server-dry-run
   [state]
   (let [result ((get-in state [:operations :server-dry-run!])
@@ -129,7 +140,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} transact!
-  "Resolve, preflight, authorize, persist, commit, and reconcile one deploy."
+  "Resolve, render, check manifest policy, preflight, authorize, persist,
+   commit, and reconcile one deploy."
   [context deploy-config operations ^Instant now]
   (-> {:context context
        :deploy-config deploy-config
@@ -137,6 +149,7 @@
        :now now}
       (advance resolve-target)
       (advance render-manifests)
+      (advance check-manifest-policy)
       (advance server-dry-run)
       (advance prepare-authority)
       (advance require-permission)

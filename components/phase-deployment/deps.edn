@@ -11,6 +11,7 @@
         ai.miniforge/evidence-bundle {:local/root "../evidence-bundle"}
         ai.miniforge/policy-pack {:local/root "../policy-pack"}
         cheshire/cheshire {:mvn/version "5.13.0"}
+        clj-commons/clj-yaml {:mvn/version "1.0.29"}
         metosin/malli {:mvn/version "0.16.4"}}
  :aliases
  {:test {:extra-paths ["test"]

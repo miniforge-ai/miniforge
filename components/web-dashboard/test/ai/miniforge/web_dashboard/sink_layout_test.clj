@@ -118,7 +118,7 @@
            (mapv :event/type (state-archive/get-archived-workflow-events
                               (atom {:archived-workflows (atom @found)}) wf-id))))))
 
-(deftest ^{:stratum 1} a-same-millisecond-group-across-a-cutoff-keeps-the-readers-in-order
+(deftest ^{:stratum 1} a-same-millisecond-group-across-a-cutoff-keeps-every-reader-in-order
   (let [events-dir (temp-events-dir)
         stream     (es/create-event-stream {:sinks []})
         wf-id      (random-uuid)
@@ -127,7 +127,7 @@
         chunks     (mapv #(envelope stream :agent/chunk wf-id :chunk/delta (str %)) (range 1 204))
         completed  (envelope stream :workflow/completed wf-id :workflow/status :success)
         ;; 204 files in one millisecond, named against publish order, so the
-        ;; newest events sort first and both cutoffs (10, 200) fall inside it.
+        ;; newest events sort first and every cutoff (10, 200, 5) falls inside it.
         tied-name  #(format "20260101T000000001Z-%08x-0000-4000-8000-000000000000.json"
                             (- 0xffffffff (:event/sequence-number %)))
         found      (atom {})]
@@ -143,7 +143,14 @@
                                                  (:chunk/delta (second newest))
                                                  (:chunk/delta (nth newest 2))])
           "the archive endpoint's newest 200, newest first")
-      (is (= 200 (count newest))))))
+      (is (= 200 (count newest))))
+    (with-redefs [workflows/events-dir-path (str events-dir)
+                  workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
+      (is (= #{"199" "200" "201" "202" "203"}
+             (->> (workflows/get-events (core/create-state {:event-stream stream}) {:limit 1000})
+                  (keep :chunk/delta)
+                  set))
+          "the history's 5-file batches keep the newest 5 chunks"))))
 
 (deftest ^{:stratum 1} sidecar-files-do-not-count-toward-the-endpoint-limit
   (let [events-dir (temp-events-dir)
@@ -220,6 +227,97 @@
       (is (= ["Ingested"] (->> (workflows/get-workflows dashboard)
                                (filter #(= wf-id (:id %)))
                                (mapv :name)))))))
+
+(deftest ^{:stratum 1} the-archive-wide-history-keeps-a-bounded-window-per-workflow
+  (let [events-dir (temp-events-dir)
+        stream     (es/create-event-stream {:sinks []})
+        dashboard  (core/create-state {:event-stream (es/create-event-stream {:sinks []})})
+        wf-id      (random-uuid)
+        dir        (doto (es/workflow-dir (str events-dir) wf-id) .mkdirs)
+        ;; One file per millisecond. The real sink, on a fast machine, puts
+        ;; several in one, and tracking keeps every name of its floor's
+        ;; millisecond, so the name count would depend on timing.
+        write!     #(write-event! dir (legacy-name (+ snowflake-epoch-ms %1) "ffffffff") %2)
+        chunk!     #(write! (+ 3 (parse-long %)) (envelope stream :agent/chunk wf-id :chunk/delta %))
+        disk-events #(filter (comp #{wf-id} :workflow/id) (workflows/get-events dashboard {:limit 1000}))]
+    (write! 0 (envelope stream :workflow/started wf-id :workflow/spec {:name "Long run"}))
+    (write! 1 (envelope stream :workflow/phase-started wf-id :workflow/phase :implement))
+    (run! chunk! (map str (range 20)))
+    (write! 30 (envelope stream :workflow/completed wf-id :workflow/status :success))
+    (with-redefs [workflows/events-dir-path (str events-dir)
+                  workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
+      (let [events (disk-events)]
+        (is (= 8 (count events)) "3 lifecycle events and the newest 5 others")
+        (is (= #{"15" "16" "17" "18" "19"} (set (keep :chunk/delta events)))))
+      (chunk! "20")
+      (is (contains? (set (keep :chunk/delta (disk-events))) "20") "a later file is still read")
+      (is (<= (count (get-in @@#'workflows/recent-dir-reads
+                             [(str (es/workflow-dir (str events-dir) wf-id)) :tracked :names]))
+              5)
+          "file tracking is bounded too"))))
+
+(deftest ^{:stratum 1} files-that-appear-late-reach-the-history
+  (let [events-dir (temp-events-dir)
+        stream     (es/create-event-stream {:sinks []})
+        dashboard  (core/create-state {:event-stream (es/create-event-stream {:sinks []})})
+        wf-id      (random-uuid)
+        dir        (doto (es/workflow-dir (str events-dir) wf-id) .mkdirs)
+        at         #(+ snowflake-epoch-ms (* 1000 %))
+        history    #(set (map (some-fn :chunk/delta :event/type)
+                              (workflows/get-events dashboard {:limit 1000})))]
+    (write-event! dir (legacy-name (at 0) "ffffffff")
+                  (envelope stream :workflow/started wf-id :workflow/spec {:name "Late"}))
+    (doseq [i (range 1 11)]
+      (write-event! dir (legacy-name (at i) "ffffffff")
+                    (envelope stream :agent/chunk wf-id :chunk/delta (str i))))
+    (with-redefs [workflows/events-dir-path (str events-dir)
+                  workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
+      (is (= #{:workflow/started "6" "7" "8" "9" "10"} (history)))
+      (testing "a file in the oldest tracked millisecond whose name sorts first"
+        (write-event! dir (legacy-name (at 6) "00000000")
+                      (envelope stream :agent/chunk wf-id :chunk/delta "late in 6"))
+        (is (contains? (history) "late in 6")))
+      (testing "a file recorded before every tracked one (a delayed rename)"
+        (write-event! dir (legacy-name (at 3) "11111111")
+                      (envelope stream :workflow/completed wf-id :workflow/status :success))
+        (is (contains? (history) :workflow/completed))))))
+
+(deftest ^{:stratum 1} a-delayed-file-inside-the-window-keeps-the-newest-events
+  (let [events-dir (temp-events-dir)
+        stream     (es/create-event-stream {:sinks []})
+        dashboard  (core/create-state {:event-stream (es/create-event-stream {:sinks []})})
+        wf-id      (random-uuid)
+        dir        (doto (es/workflow-dir (str events-dir) wf-id) .mkdirs)
+        started    (envelope stream :workflow/started wf-id :workflow/spec {:name "Delayed"})
+        chunks     (into {} (map (fn [i] [i (envelope stream :agent/chunk wf-id :chunk/delta (str i))]))
+                         (range 1 7))
+        chunk-file #(legacy-name (+ snowflake-epoch-ms 1000) (format "%08x" (- 0xffff %)))
+        kept       #(set (keep :chunk/delta (workflows/get-events dashboard {:limit 1000})))]
+    (write-event! dir (legacy-name snowflake-epoch-ms "ffffffff") started)
+    (doseq [i (range 2 7)]
+      (write-event! dir (chunk-file i) (chunks i)))
+    (with-redefs [workflows/events-dir-path (str events-dir)
+                  workflows/disk-retention (merge es/bounded-retention {:max-events-per-workflow 5})]
+      (is (= #{"2" "3" "4" "5" "6"} (kept)))
+      ;; Chunk 1, published first, lands last, in the same millisecond.
+      (write-event! dir (chunk-file 1) (chunks 1))
+      (is (= #{"2" "3" "4" "5" "6"} (kept)) "the newest five by sequence, not the last file read"))))
+
+(deftest ^{:stratum 1} a-republished-event-counts-once-in-a-workflow-summary
+  (let [stream    (es/create-event-stream {:sinks []})
+        dashboard (core/create-state {:event-stream stream})
+        wf-id     (random-uuid)
+        phase     (envelope stream :workflow/phase-completed wf-id :workflow/phase :plan :phase/tokens 40)]
+    (es/replay! stream (envelope stream :workflow/started wf-id :workflow/spec {:name "Twice"}))
+    ;; A watcher rebuild hands the same event over again.
+    (es/replay! stream phase)
+    (es/replay! stream phase)
+    (with-redefs [workflows/events-dir-path (str (temp-events-dir))]
+      (is (= 40 (->> (workflows/get-workflows dashboard)
+                     (filter #(= wf-id (:id %)))
+                     first
+                     :metrics
+                     :tokens))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

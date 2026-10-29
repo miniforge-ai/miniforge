@@ -365,6 +365,23 @@
         _ (doseq [failure (:checkpoint-read-failures recorded)]
             (display/print-info (messages/t :resume/checkpoint-unreadable
                                             {:error (:anomaly/message failure)})))
+        ;; `--pin`: the checkpoint GC keeps a pinned run, pinned under the
+        ;; root its checkpoint lives in. Nothing to pin is reported, and the
+        ;; resume goes on.
+        _ (when (:pin opts)
+            (let [root (workflow/run-checkpoint-root (str workflow-id) events-dir)
+                  ;; A root that cannot be looked up is a failed pin.
+                  pinned (cond
+                           (anomaly/anomaly? root) root
+                           root (workflow/pin-checkpoint! (str workflow-id) {:checkpoint/root root})
+                           :else (workflow/pin-checkpoint! (str workflow-id)))]
+              (cond
+                (anomaly/anomaly? pinned)
+                (display/print-info (messages/t :resume/pin-failed
+                                                {:run-id (str workflow-id)
+                                                 :error (:anomaly/message pinned)}))
+                (not quiet)
+                (display/print-info (messages/t :resume/pinned {:run-id (str workflow-id)})))))
         ;; A phase whose checkpointed result did not read is rewound to, as
         ;; `--from-phase` would: the snapshot is parked after it, and
         ;; restoring it would run later phases without that output.
@@ -467,6 +484,9 @@
                                      (get reconstructed :input {})
                                      {:llm-backend llm-client
                                       :acting (:acting reconstructed)
+                                      ;; `--pin` also pins the checkpoints this
+                                      ;; attempt writes, under a new run id too.
+                                      :checkpoint/pin? (boolean (:pin opts))
                                       ;; The id announced and registered
                                       ;; above; without it a snapshot-less
                                       ;; resume minted a second id.

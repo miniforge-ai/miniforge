@@ -35,6 +35,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.coerce.interface :as coerce]
+   [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.checkpoint-store-records :as checkpoint-records]
    [ai.miniforge.workflow.checkpoint-store-spec :as checkpoint-spec]
@@ -125,6 +126,14 @@
               workflow-run-id)]
      (boolean (and (fs/directory? dir) (seq (fs/list-dir dir)))))))
 
+(defn- ^{:stratum 0} pin-failure [workflow-run-id data e]
+  (anomaly/exception-anomaly :unavailable
+                             (messages/t :checkpoint/pin-failed
+                                         {:run-id workflow-run-id
+                                          :error (or (ex-message e) (.getName (class e)))})
+                             data
+                             e))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} read-checkpoint-file
@@ -205,6 +214,47 @@
         (with-open [w (java.io.FileOutputStream. (fs/file dir gate-history-filename) true)]
           (.write w (.getBytes (str (pr-str (coerce/stringify-instants entry)) "\n") "UTF-8"))))
       (catch Exception _ nil))))
+
+(defn ^{:stratum 1} pin-checkpoint!
+  "Pin a run's checkpoint: write its pin marker, which the checkpoint GC
+   never collects past. The marker is its own file, so a checkpoint write
+   rewriting the manifest at the same time cannot drop it, and it is
+   written under the run's lock (`checkpoint-store-lock`), which the GC
+   holds while it decides to delete the run: the pin lands before that
+   decision or finds the run gone. Returns the marker path, or an anomaly:
+   `:not-found` when the run has no checkpoint, `:unavailable` when the
+   lock stays busy, the marker cannot be written or anything else fails;
+   it does not throw."
+  ([workflow-run-id]
+   (pin-checkpoint! workflow-run-id {}))
+  ([workflow-run-id opts]
+   (try+
+     (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
+           path (checkpoint-paths/pin-marker-path checkpoint-root workflow-run-id)
+           data {:workflow/run-id workflow-run-id :checkpoint/path path}]
+       (checkpoint-lock/with-run-lock
+        checkpoint-root workflow-run-id
+        (fn []
+          (if-not (fs/exists? (checkpoint-paths/manifest-path checkpoint-root workflow-run-id))
+            (anomaly/anomaly :not-found
+                             (messages/t :checkpoint/pin-no-manifest {:run-id workflow-run-id})
+                             data)
+            ;; Into the run directory by path, never creating it.
+            (try+
+              (let [temp (str (fs/path (fs/parent path)
+                                       (str checkpoint-paths/pin-marker-temp-prefix
+                                            (random-uuid) temp-file-suffix)))]
+                (spit temp (pr-str {:pinned-at (str (java.time.Instant/now))}))
+                (Files/move (fs/path temp) (fs/path path)
+                            (into-array java.nio.file.CopyOption
+                                        [StandardCopyOption/ATOMIC_MOVE
+                                         StandardCopyOption/REPLACE_EXISTING]))
+                path)
+              (catch Exception e
+                (pin-failure workflow-run-id data e)))))))
+     ;; Root resolution or the lock itself failing: still an anomaly.
+     (catch Exception e
+       (pin-failure workflow-run-id {:workflow/run-id workflow-run-id} e)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -357,12 +407,21 @@
                 (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
               (write-edn-atomically! snapshot-path snapshot)
               (write-edn-atomically! manifest-path merged-manifest)
-              (cond-> {:checkpoint/root checkpoint-root
-                       :checkpoint/machine-snapshot-path snapshot-path
-                       :checkpoint/manifest-path manifest-path}
-                (and phase-name phase-result)
-                (assoc :checkpoint/phase phase-name
-                       :checkpoint/phase-path (checkpoint-paths/phase-checkpoint-path
-                                               checkpoint-root workflow-run-id phase-name))))))
+              ;; A run started pinned (`mf resume --pin` under a new run id)
+              ;; is pinned with its first checkpoint, through the locked pin
+              ;; the GC excludes; a pin that fails is a failed checkpoint.
+              (let [pin (when (and (true? (get-in ctx [:execution/opts :checkpoint/pin?]))
+                                   (not (fs/exists? (checkpoint-paths/pin-marker-path
+                                                     checkpoint-root workflow-run-id))))
+                          (pin-checkpoint! workflow-run-id {:checkpoint/root checkpoint-root}))]
+                (if (anomaly/anomaly? pin)
+                  (assoc-in pin [:anomaly/data :phase/name] phase-name)
+                  (cond-> {:checkpoint/root checkpoint-root
+                           :checkpoint/machine-snapshot-path snapshot-path
+                           :checkpoint/manifest-path manifest-path}
+                    (and phase-name phase-result)
+                    (assoc :checkpoint/phase phase-name
+                           :checkpoint/phase-path (checkpoint-paths/phase-checkpoint-path
+                                                   checkpoint-root workflow-run-id phase-name))))))))
         (catch Exception e
           (write-failure checkpoint-root workflow-run-id phase-name e))))))
