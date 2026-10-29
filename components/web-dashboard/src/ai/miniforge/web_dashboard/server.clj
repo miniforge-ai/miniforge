@@ -71,6 +71,16 @@
       (and (str/includes? h ":") (not (str/starts-with? h "["))) (str "[" h "]")
       :else h)))
 
+(defn ^{:stratum 0} dashboard-stream
+  "The stream the dashboard reads: `event-stream` when the caller supplies
+   one, else a dashboard-local stream. That stream has NO file sinks, so
+   events the watcher reads from ~/.miniforge/events/ are not written back,
+   and a bounded history, since the dashboard runs for days and re-reads
+   the history on every workflow-list refresh."
+  [event-stream]
+  (or event-stream
+      (es/create-event-stream {:sinks [] :retention es/bounded-retention})))
+
 (defn- ^{:stratum 0} banner-line
   "One line of the startup box: `text` padded to the box's inner width."
   [text]
@@ -428,9 +438,7 @@
         _ (when-not (or (loopback-host? host) (auth/enabled? auth-state))
             (throw (ex-info (messages/t :server/public-bind-without-auth {:host host})
                             {:host host})))
-        ;; Create dashboard-local event stream with NO file sinks to prevent write-back loop.
-        ;; The watcher reads from ~/.miniforge/events/ and publishes to this in-memory-only stream.
-        dashboard-event-stream (or event-stream (es/create-event-stream {:sinks []}))
+        dashboard-event-stream (dashboard-stream event-stream)
         state (state/create-state {:event-stream dashboard-event-stream
                                    :auth auth-state
                                    :pr-train-manager pr-train-manager

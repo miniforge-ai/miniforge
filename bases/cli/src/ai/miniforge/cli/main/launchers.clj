@@ -44,7 +44,9 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} start-dashboard! [start! {:keys [port]}]
-  (let [event-stream (events/create-event-stream)
+  ;; The dashboard process runs for days; bound the in-memory history its
+  ;; views re-read. Sinks and subscribers still see every event.
+  (let [event-stream (events/create-event-stream {:retention events/bounded-retention})
         _ (supervisory/ensure-attached! event-stream)
         pr-train-manager (create-pr-train-manager event-stream)
         repo-dag-manager (create-repo-dag-manager)]
