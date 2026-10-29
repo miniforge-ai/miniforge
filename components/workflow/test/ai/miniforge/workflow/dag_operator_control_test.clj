@@ -30,6 +30,7 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
    [ai.miniforge.workflow.messages :as messages]
+   [ai.miniforge.workflow.runner-defaults :as runner-defaults]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -39,6 +40,18 @@
 (def ^{:stratum 0} ^:private left-id (random-uuid))
 
 (def ^{:stratum 0} ^:private right-id (random-uuid))
+
+(def ^{:stratum 0} ^:private poll-ms
+  "Pause-poll interval for these tests, in place of the runner's 1 s."
+  5)
+
+(def ^{:stratum 0} ^:private wait-limit-ms
+  "Upper bound on any wait, so a regression fails instead of hanging."
+  5000)
+
+(def ^{:stratum 0} ^:private settle-ms
+  "How long a paused run is watched for a launch that must not happen."
+  150)
 
 (defn- ^{:stratum 0} plan-task
   [id description dependencies]
@@ -94,6 +107,16 @@
    :plan/name "chain"
    :plan/tasks [(plan-task root-id "root" [])
                 (plan-task left-id "left" [root-id])]})
+
+(defn- ^{:stratum 1} await-condition
+  "Poll `pred` until it holds or `wait-limit-ms` passes; returns whether it held."
+  [pred]
+  (let [deadline (+ (System/currentTimeMillis) wait-limit-ms)]
+    (loop []
+      (cond
+        (pred) true
+        (> (System/currentTimeMillis) deadline) false
+        :else (do (Thread/sleep (long poll-ms)) (recur))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -154,6 +177,56 @@
       (is (true? (:success? result)))
       (is (not (:cancelled? result)))
       (is (= 3 (:tasks-completed result))))))
+
+(deftest ^{:stratum 2} cancel-before-start-launches-nothing-test
+  (let [control (es/create-control-state)
+        launched (atom [])
+        [logger _] (log/collecting-logger)
+        _ (es/cancel! control)
+        result (with-redefs [dag-orch/execute-single-task
+                             (recording-task-fn launched (constantly nil))]
+                 (dag-orch/execute-plan-as-dag fan-out-plan {:logger logger :control-state control}))]
+    (is (empty? @launched))
+    (is (true? (:cancelled? result)))
+    (is (= 0 (:tasks-completed result)))
+    (is (= 3 (:tasks-unreached result)))))
+
+(deftest ^{:stratum 2} pause-holds-next-batch-until-resume-test
+  (let [control (es/create-control-state)
+        launched (atom [])
+        [logger entries] (log/collecting-logger)
+        pause-on-root (fn [task-id] (when (= root-id task-id) (es/pause! control)))]
+    (with-redefs [dag-orch/execute-single-task (recording-task-fn launched pause-on-root)
+                  runner-defaults/pause-poll-interval-ms (constantly poll-ms)]
+      (let [run (future (dag-orch/execute-plan-as-dag fan-out-plan
+                                                      {:logger logger :control-state control}))]
+        (await-condition #(or (logged? entries :dag/paused) (< 1 (count @launched))))
+        (is (logged? entries :dag/paused) "the loop holds before the second batch")
+        (Thread/sleep (long settle-ms))
+        (is (= [root-id] @launched) "nothing launches while the run is paused")
+        (es/resume! control)
+        (let [result (deref run wait-limit-ms ::timed-out)]
+          (is (not= ::timed-out result) "resume releases the held batch")
+          (is (true? (:success? result)))
+          (is (= 3 (:tasks-completed result)))
+          (is (= #{root-id left-id right-id} (set @launched))))))))
+
+(deftest ^{:stratum 2} cancel-while-paused-ends-the-wait-test
+  (let [control (es/create-control-state)
+        launched (atom [])
+        [logger entries] (log/collecting-logger)
+        pause-on-root (fn [task-id] (when (= root-id task-id) (es/pause! control)))]
+    (with-redefs [dag-orch/execute-single-task (recording-task-fn launched pause-on-root)
+                  runner-defaults/pause-poll-interval-ms (constantly poll-ms)]
+      (let [run (future (dag-orch/execute-plan-as-dag fan-out-plan
+                                                      {:logger logger :control-state control}))]
+        (await-condition #(or (logged? entries :dag/paused) (< 1 (count @launched))))
+        (es/cancel! control)
+        (let [result (deref run wait-limit-ms ::timed-out)]
+          (is (not= ::timed-out result) "a cancel during a pause must not wait for a resume")
+          (is (true? (:cancelled? result)))
+          (is (= [root-id] @launched))
+          (is (= 2 (:tasks-unreached result))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
