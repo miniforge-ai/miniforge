@@ -18,6 +18,7 @@
 (ns ai.miniforge.dag-executor.workspace-test
   (:require
    [clojure.test :refer [deftest is testing]]
+   [clojure.java.shell :as shell]
    [clojure.string :as str]
    [ai.miniforge.dag-executor.workspace :as sut]
    [ai.miniforge.dag-executor.result :as result]))
@@ -105,6 +106,29 @@
           r (sut/git-persist! exec-fn {:branch "task/x"})]
       (is (= :persist-status-failed (get-in r [:error :code]))))))
 
+(defn- ^{:stratum 0} single-branch-clone
+  "A bare remote with one commit on main, cloned with --single-branch as
+   the governed bootstrap does. Returns the clone's directory."
+  []
+  (let [tmp    (str (java.nio.file.Files/createTempDirectory
+                     "persist-single-branch" (make-array java.nio.file.attribute.FileAttribute 0)))
+        remote (str tmp "/remote.git")
+        seed   (str tmp "/seed")
+        clone  (str tmp "/clone")
+        git    (fn [dir & args] (apply shell/sh "git" "-C" dir args))]
+    (shell/sh "git" "init" "-q" "--bare" "-b" "main" remote)
+    (shell/sh "git" "init" "-q" "-b" "main" seed)
+    (doseq [dir [seed]]
+      (git dir "config" "user.email" "t@t") (git dir "config" "user.name" "t"))
+    (spit (str seed "/a.txt") "a\n")
+    (git seed "add" "-A")
+    (git seed "-c" "commit.gpgsign=false" "commit" "-qm" "base")
+    (git seed "push" "-q" remote "main")
+    (shell/sh "git" "clone" "-q" "--branch" "main" "--single-branch" remote clone)
+    (git clone "config" "user.email" "t@t")
+    (git clone "config" "user.name" "t")
+    clone))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} cmd-has?
@@ -175,6 +199,18 @@
       (is (result/err? r))
       (is (= :invalid-branch (-> r :error :code)))
       (is (false? @exec-called) "exec-fn must not be invoked for an empty branch"))))
+
+(deftest ^{:stratum 1} git-persist!-after-a-push-a-clean-persist-is-a-no-op-test
+  (testing "--single-branch: the pushed task branch is not re-pushed by the next clean persist"
+    (let [clone   (single-branch-clone)
+          exec-fn (fn [cmd]
+                    (let [r (if (string? cmd)
+                              (shell/sh "sh" "-c" cmd :dir clone)
+                              (apply shell/sh (concat cmd [:dir clone])))]
+                      {:data {:exit-code (:exit r) :stdout (:out r) :stderr (:err r)}}))]
+      (spit (str clone "/a.txt") "a\nb\n")
+      (is (true? (:pushed? (result/unwrap (sut/git-persist! exec-fn {:branch "task/x"})))))
+      (is (true? (:no-changes? (result/unwrap (sut/git-persist! exec-fn {:branch "task/x"}))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -286,3 +322,32 @@
                             "git rev-parse" (shell-result head-sha)})]
       (is (true? (:pushed? (result/unwrap (sut/git-persist! exec-fn {:branch "task/x"})))))
       (is (some #(cmd-has? % "git push") @calls)))))
+
+(deftest ^{:stratum 2} git-persist!-pushes-a-held-commit-from-a-clean-worktree-test
+  (testing "a held commit followed by a clean, allowed persist is pushed"
+    (let [[held-exec held-calls] (recording-exec-fn {"git status"    (shell-result " M src/a.clj")
+                                                     "git rev-parse" (shell-result head-sha)})
+          [clean-exec calls]     (recording-exec-fn {"git status"    (shell-result "")
+                                                     "git rev-list"  (shell-result "1\n")
+                                                     "git rev-parse" (shell-result head-sha)})
+          held  (sut/git-persist! held-exec {:branch "task/x" :push? false})
+          later (sut/git-persist! clean-exec {:branch "task/x"})]
+      (is (false? (:pushed? (result/unwrap held))))
+      (is (not-any? #(cmd-has? % "push") @held-calls))
+      (is (= {:persisted? true :pushed? true :commit-sha head-sha :branch "task/x"}
+             (result/unwrap later)))
+      (is (some #(cmd-has? % "git push") @calls))
+      (is (not-any? #(cmd-has? % "commit") @calls) "nothing new to commit")))
+  (testing "a clean worktree with nothing pending is still a no-op"
+    (let [[exec-fn calls] (recording-exec-fn {"git status"   (shell-result "")
+                                              "git rev-list" (shell-result "0\n")})]
+      (is (true? (:no-changes? (result/unwrap (sut/git-persist! exec-fn {:branch "task/x"})))))
+      (is (not-any? #(cmd-has? % "push") @calls)))))
+
+(deftest ^{:stratum 2} git-persist!-pending-check-failure-is-an-error-test
+  (testing "a failed rev-list on a clean worktree is an error, not :no-changes?"
+    (let [[exec-fn calls] (recording-exec-fn {"git status"   (shell-result "")
+                                              "git rev-list" {:data {:exit-code 128 :stderr "bad"}}})
+          r (sut/git-persist! exec-fn {:branch "task/x"})]
+      (is (= :persist-pending-failed (get-in r [:error :code])))
+      (is (not-any? #(cmd-has? % "push") @calls)))))

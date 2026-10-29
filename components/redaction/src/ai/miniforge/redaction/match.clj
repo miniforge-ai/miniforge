@@ -70,6 +70,18 @@
    (when (string? s)
      (some #(re-find % s) (:redaction/secret-value-patterns @policy/policy)))))
 
+(defn ^{:stratum 0} pattern-secret-spans
+  "[start end] of every secret value pattern match in S, over the whole
+   string, so a match spanning lines is found whole. Payment-card
+   candidates are not checked (see `pattern-secret-string?`)."
+  [s]
+  (when (string? s)
+    (vec (for [^java.util.regex.Pattern pattern (:redaction/secret-value-patterns @policy/policy)
+               :let [m (re-matcher pattern s)]
+               span (loop [acc []]
+                      (if (.find m) (recur (conj acc [(.start m) (.end m)])) acc))]
+           span))))
+
 (defn ^{:stratum 0} redact-string
   "Replace every secret-looking substring in S with the marker.
 

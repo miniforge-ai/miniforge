@@ -92,6 +92,16 @@
     (is (= 8 (get-in implement/default-config [:budget :iterations])))
     (is (= 600 (get-in implement/default-config [:budget :time-seconds])))))
 
+(deftest ^{:stratum 0} implement-re-entry-keeps-the-recorded-task-base-test
+  (testing "a resumed implement recovers the base its earlier attempt recorded, not the restored HEAD"
+    (is (= ["task-base"]
+           (#'implement/task-base-refs
+            {:execution/environment-metadata {:base-sha "restored-head"}
+             :execution/phase-results {:implement {:artifact {:code/base-refs ["task-base"]}}}}))))
+  (testing "with nothing recorded it computes fresh candidates"
+    (is (= ["restored-head"]
+           (#'implement/task-base-refs {:execution/environment-metadata {:base-sha "restored-head"}})))))
+
 (deftest ^{:stratum 0} phase-defaults-registration-test
   (testing "implement phase defaults are registered"
     (let [defaults (phase/phase-defaults :implement)]

@@ -25,6 +25,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.interface.gate :as phase-gate]
+   [ai.miniforge.phase.interface.task-base :as task-base]
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
    [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
@@ -473,6 +474,12 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn- ^{:stratum 2} task-base-refs
+  "The task base refs to carry: the ones a previous implement attempt
+   recorded (a resumed run restores them), else fresh candidates."
+  [ctx]
+  (or (task-base/recorded-refs ctx) (base-ref-candidates ctx)))
+
 (defn- ^{:stratum 2} failure-focused-output
   "The failure blocks first, verbatim, then the head/tail excerpt. Head and
    tail alone lost every failure of a 6,000-line run (series 8, 2026-09-04):
@@ -804,6 +811,11 @@
         {:keys [task rules-manifest codex-outcome]} (build-implement-task ctx)
         ;; Cache loaded files and context pack for subsequent retries
         ctx (cond-> ctx
+              ;; Resolved once and carried: the artifact collector, the
+              ;; :no-secrets gate and every later persistence boundary
+              ;; measure the change from the same resume-aware base.
+              (not (get ctx :execution/task-base-refs))
+              (assoc :execution/task-base-refs (task-base-refs ctx))
               (not (get-in ctx [:execution/cached-files]))
               (assoc-in [:execution/cached-files] (:task/existing-files task))
               (and (:task/context-pack task) (not (get-in ctx [:execution/pack-context])))
@@ -875,7 +887,7 @@
             :executor (get ctx :execution/executor)
             :execute-fn (get ctx :execution/execute-fn)
             :pre-session-snapshot (get ctx :execution/pre-session-snapshot)
-            :base-refs (base-ref-candidates ctx)
+            :base-refs (get ctx :execution/task-base-refs)
             :intent-scope (get-in ctx [:execution/input :intent :scope])
             :spec-description (get-in ctx [:execution/input :description])
             :llm-client (get ctx :llm-backend)
@@ -997,7 +1009,7 @@
         ;; same task base rather than from HEAD.
         result (cond-> result
                  (map? (:output result))
-                 (assoc-in [:output :code/base-refs] (base-ref-candidates ctx)))]
+                 (assoc-in [:output :code/base-refs] (get ctx :execution/task-base-refs)))]
     (-> (phase/enter-context ctx :implement :implementer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest)
         (assoc-in [:phase :watchdog-state]

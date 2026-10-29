@@ -26,6 +26,7 @@
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.phase-test-support :as phase-test-support]
             [ai.miniforge.workflow.runner-phase-step :as phase-step]
+            [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
 
@@ -37,30 +38,50 @@
   (str "ghp" "_" "abcdefghijklmnopqrstuvwxyz0123456789"))
 
 (defn ^{:stratum 0} writer
-  "An implement-like interceptor that outputs ARTIFACT, checked by GATES."
-  [gates artifact]
+  "An interceptor for PHASE that outputs ARTIFACT, checked by GATES."
+  [phase gates artifact]
   {:name   ::writer
-   :config {:phase phase-test-support/runner-test-implement :gates gates}
+   :config {:phase phase :gates gates}
    :enter  (fn [c]
-             (phase/enter-context c phase-test-support/runner-test-implement :implementer gates
+             (phase/enter-context c phase :implementer gates
                                   {:tokens 1 :iterations 1 :time-seconds 1}
                                   (System/currentTimeMillis)
                                   {:status :success :output artifact}))
    :leave  identity
    :error  (fn [c _] c)})
 
+(defn ^{:stratum 0} temp-worktree
+  "A git repo with one commit, then FILES ({path content}) written over it
+   uncommitted. Returns the directory."
+  [files]
+  (let [dir (str (java.nio.file.Files/createTempDirectory
+                  "gate-denied-persist" (make-array java.nio.file.attribute.FileAttribute 0)))
+        git #(apply shell/sh "git" "-C" dir %&)]
+    (git "init" "-q")
+    (git "config" "user.email" "test@test")
+    (git "config" "user.name" "test")
+    (git "config" "commit.gpgsign" "false")
+    (spit (str dir "/README.md") "x\n")
+    (git "add" "-A")
+    (git "commit" "-qm" "base")
+    (doseq [[path content] files] (spit (str dir "/" path) content))
+    dir))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} governed-phase!
-  "Run one governed phase with GATES over ARTIFACT. Returns the commands
-   the capsule's git-persist! ran, each as one string."
-  [gates artifact]
+  "Run one governed PHASE (implement by default) with GATES over ARTIFACT,
+   merging EXTRA into the context. Returns the commands the capsule's
+   git-persist! ran, each as one string."
+  ([gates artifact]
+   (governed-phase! phase-test-support/runner-test-implement gates artifact {}))
+  ([phase gates artifact extra]
   (let [cmds    (atom [])
         exec!   (fn [cmd]
                   (swap! cmds conj (if (string? cmd) cmd (str/join " " cmd)))
                   {:data {:stdout "abc123" :exit-code 0}})
         wf      {:workflow/id :gate-denied-persist :workflow/version "1.0.0"
-                 :workflow/pipeline [{:phase phase-test-support/runner-test-implement}]}
+                 :workflow/pipeline [{:phase phase}]}
         context (assoc (ctx/create-context wf {:task "t"} {})
                        :execution/mode :governed
                        :execution/executor ::capsule
@@ -70,8 +91,8 @@
                        ;; allowed phase to advance; an in-memory stream.
                        :event-stream (events/create-event-stream {:sinks []}))]
     (with-redefs [dag/persist-workspace! (fn [_ _ opts] (workspace/git-persist! exec! opts))]
-      (phase-step/execute-phase [(writer gates artifact)] context {}))
-    @cmds))
+      (phase-step/execute-phase [(writer phase gates artifact)] (merge context extra) {}))
+    @cmds)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -91,3 +112,26 @@
   (testing "control: the same harness pushes when the gates allow the phase"
     (is (some #(str/includes? % "git push")
               (governed-phase! [:no-secrets] {:code/files [{:path "a.py" :content "x = 1\n"}]})))))
+
+(deftest ^{:stratum 2} a-later-phase-does-not-publish-a-left-behind-secret-test
+  (let [secret (str "api_key = '" gh-token "'\n")
+        dir    (temp-worktree {"config.py" secret})
+        extra  {:execution/worktree-path dir}]
+    (testing "implement is denied over the credential it wrote"
+      (is (= [] (governed-phase! phase-test-support/runner-test-implement [:no-secrets]
+                                 {:code/files [{:path "config.py" :content secret}]} extra))))
+    (testing "the plan phase a redirect runs next succeeds, yet commits and pushes nothing"
+      (is (= [] (governed-phase! phase-test-support/runner-test-plan [] {:plan/tasks []} extra))))
+    (testing "once the credential is gone, the plan boundary publishes again"
+      (spit (str dir "/config.py") "x = 1\n")
+      (is (some #(str/includes? % "git push")
+                (governed-phase! phase-test-support/runner-test-plan [] {:plan/tasks []} extra))))))
+
+(deftest ^{:stratum 2} an-unscannable-worktree-is-held-not-pushed-test
+  (testing "a later phase whose worktree git cannot read commits locally and pushes nothing"
+    (let [dir  (str (java.nio.file.Files/createTempDirectory
+                     "gate-denied-not-a-repo" (make-array java.nio.file.attribute.FileAttribute 0)))
+          cmds (governed-phase! phase-test-support/runner-test-plan [] {:plan/tasks []}
+                                {:execution/worktree-path dir})]
+      (is (some #(str/includes? % "commit") cmds))
+      (is (not-any? #(str/includes? % "push") cmds)))))

@@ -116,6 +116,7 @@
                :execution/worktree-path (get opts :worktree-path
                                              (get opts :sandbox-workdir))
                :execution/mode mode
+               :execution/capsule-workdir (get opts :capsule-workdir)
                :execution/started-at (java.time.Instant/now)
                :execution/environment-metadata environment-metadata
                :execution/execute-fn (when governed? dag-exec/execute!)

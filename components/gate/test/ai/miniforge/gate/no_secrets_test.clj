@@ -76,6 +76,35 @@
       (is (= "rwx------" (fs/posix->str (fs/posix-file-permissions dir))))
       (finally (fs/delete-tree dir)))))
 
+(defn ^{:stratum 0} capsule-ctx
+  "A governed-run context: the host path does not exist, and the fake
+   execute-fn runs a command in DIR only when given the capsule's own
+   workdir (/workspace), as a real capsule checkout would."
+  [dir]
+  {:execution/worktree-path "/host/path/not-in-the-capsule"
+   :execution/capsule-workdir "/workspace"
+   :execution/executor ::capsule
+   :execution/environment-id "env-1"
+   :execution/execute-fn (fn [_executor _env-id cmd opts]
+                           (if (= "/workspace" (:workdir opts))
+                             (let [r (shell/sh "sh" "-c" cmd :dir dir)]
+                               {:ok? true :data {:exit-code (:exit r) :stdout (:out r)}})
+                             {:ok? true :data {:exit-code 128 :stdout ""}}))})
+
+(def ^{:stratum 0} pem-body
+  "Base64-looking key material; not a key."
+  "MIIEpAIBAAKCAQEAvxQ8kZ2mNqR7wTc3d4e5f6g7h8i9j0kLmNoPqRsTuVwX")
+
+(defn ^{:stratum 0} pem
+  "A PEM private-key block around BODY."
+  [body]
+  (str "-----BEGIN RSA PRIVATE KEY-----\n" body "\n-----END RSA PRIVATE KEY-----\n"))
+
+(defn ^{:stratum 0} head-of
+  "HEAD's commit id in DIR."
+  [dir]
+  (str/trim (:out (shell/sh "git" "-C" dir "rev-parse" "HEAD"))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} code-files-are-scanned-test
@@ -161,6 +190,91 @@
   [artifact dir]
   (-> (check artifact {:execution/worktree-path dir}) :errors first :locations set))
 
+(deftest ^{:stratum 1} the-capsule-worktree-is-read-through-the-executor-test
+  (let [dir (temp-git-repo {"README.md" "x\n"})]
+    (testing "a clean governed change passes: the executor's worktree is readable"
+      (spit (str dir "/notes.md") "nothing secret\n")
+      (is (:passed? (check {:code/files []} (capsule-ctx dir)))))
+    (testing "a credential only on the capsule's disk is found there"
+      (spit (str dir "/deploy.env") "DB_PASSWORD=opaqueVALUE123\n")
+      (is (= [{:file "deploy.env" :line 1}]
+             (-> (check {:code/files []} (capsule-ctx dir)) :errors first :locations))))))
+
+(deftest ^{:stratum 1} an-uninspectable-worktree-fails-the-gate-test
+  (testing "a supplied worktree git cannot read is a failure, not an artifact-only pass"
+    (let [dir (str (Files/createTempDirectory "no-secrets-not-git" (make-array FileAttribute 0)))]
+      (is (= :worktree-uninspectable
+             (-> (check {:code/files [{:path "a.py" :content "x = 1\n"}]}
+                        {:execution/worktree-path dir})
+                 :errors first :type)))))
+  (testing "with no worktree supplied, the artifact alone is checked"
+    (is (:passed? (check {:code/files [{:path "a.py" :content "x = 1\n"}]} {})))))
+
+(deftest ^{:stratum 1} a-credential-committed-then-removed-is-found-test
+  (testing "the final tree is clean, but the commit that held the credential would be pushed"
+    (let [dir  (temp-git-repo {"src/app.py" "import os\n"})
+          base (str/trim (:out (sh! dir "rev-parse" "HEAD")))]
+      (spit (str dir "/src/app.py") (str "import os\npassword = \"" opaque "\"\n"))
+      (sh! dir "commit" "-qam" "add")
+      (let [leaky (str/trim (:out (sh! dir "rev-parse" "HEAD")))]
+        (spit (str dir "/src/app.py") "import os\n")
+        (sh! dir "commit" "-qam" "remove")
+        (let [result (check {:code/files [] :code/base-refs [base]} {:execution/worktree-path dir})]
+          (is (= [{:file "src/app.py" :line 2 :commit leaky}] (-> result :errors first :locations)))
+          (is (str/includes? (-> result :errors first :message) (subs leaky 0 12))))))))
+
+(deftest ^{:stratum 1} unreadable-history-is-uninspectable-test
+  (testing "a blob read that fails while scanning history fails the gate"
+    (let [dir  (temp-git-repo {"a.py" "x = 1\n"})
+          base (str/trim (:out (sh! dir "rev-parse" "HEAD")))
+          ctx  (capsule-ctx dir)
+          real (:execution/execute-fn ctx)]
+      (spit (str dir "/a.py") "x = 2\n")
+      (sh! dir "commit" "-qam" "change")
+      (is (= :worktree-uninspectable
+             (-> (check {:code/files [] :code/base-refs [base]}
+                        (assoc ctx :execution/execute-fn
+                               (fn [executor env-id cmd opts]
+                                 (if (str/includes? cmd "'cat-file'")
+                                   {:ok? true :data {:exit-code 128 :stdout ""}}
+                                   (real executor env-id cmd opts)))))
+                 :errors first :type))))))
+
+(deftest ^{:stratum 1} a-submodule-pointer-update-passes-test
+  (testing "a gitlink has no content here: it is skipped, not unreadable"
+    (let [dir  (temp-git-repo {"README.md" "x\n"})
+          base (head-of dir)]
+      (sh! dir "update-index" "--add" "--cacheinfo"
+           (str "160000," (apply str (repeat 40 "a")) ",standards/miniforge"))
+      (sh! dir "commit" "-qm" "pin submodule")
+      (is (:passed? (check {:code/files [] :code/base-refs [base]} {:execution/worktree-path dir}))))))
+
+(deftest ^{:stratum 1} findings-beat-unreadability-test
+  (testing "a secret found anywhere is reported even when another part cannot be read"
+    (let [dir  (temp-git-repo {"README.md" "x\n"})
+          ctx  (capsule-ctx dir)
+          real (:execution/execute-fn ctx)]
+      (spit (str dir "/deploy.env") "DB_PASSWORD=opaqueVALUE123\n")
+      (let [result (check {:code/files []}
+                          (assoc ctx :execution/execute-fn
+                                 (fn [executor env-id cmd opts]
+                                   (if (str/includes? cmd "'rev-list'")
+                                     {:ok? true :data {:exit-code 128 :stdout ""}}
+                                     (real executor env-id cmd opts)))))]
+        (is (= :secrets-detected (-> result :errors first :type)))
+        (is (= [{:file "deploy.env" :line 1}] (-> result :errors first :locations)))))))
+
+(deftest ^{:stratum 1} the-task-base-precedes-the-environment-base-test
+  (testing "with no artifact (a persistence-boundary check), the carried task base is used"
+    (let [dir       (temp-git-repo {"src/app.py" "import os\n"})
+          task-base (head-of dir)]
+      (spit (str dir "/src/app.py") (str "import os\npassword = \"" opaque "\"\n"))
+      (sh! dir "commit" "-qam" "restored task work")
+      (let [ctx {:execution/worktree-path dir
+                 :execution/task-base-refs [task-base]
+                 :execution/environment-metadata {:base-sha (head-of dir)}}]
+        (is (= :secrets-detected (-> (check {} ctx) :errors first :type)))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} an-added-copy-of-an-existing-line-counts-test
@@ -182,12 +296,13 @@
         base (str/trim (:out (sh! dir "rev-parse" "HEAD")))]
     (spit (str dir "/src/app.py") (str "import os\npassword = \"" opaque "\"\n"))
     (sh! dir "commit" "-qam" "task checkpoint")
-    (testing "a credential committed after the task base is still found"
-      (is (= #{{:file "src/app.py" :line 2}}
+    (let [head (str/trim (:out (sh! dir "rev-parse" "HEAD")))]
+    (testing "a credential committed after the task base is still found, in the file and its commit"
+      (is (= #{{:file "src/app.py" :line 2} {:file "src/app.py" :line 2 :commit head}}
              (locations {:code/files [] :code/base-refs [base]} dir))))
     (testing "a resumed workspace's A...HEAD range resolves to the merge base"
-      (is (= #{{:file "src/app.py" :line 2}}
-             (locations {:code/files [] :code/base-refs [(str base "...HEAD")]} dir))))
+      (is (= #{{:file "src/app.py" :line 2} {:file "src/app.py" :line 2 :commit head}}
+             (locations {:code/files [] :code/base-refs [(str base "...HEAD")]} dir)))))
     (testing "with no task base the gate falls back to HEAD, which already holds it"
       (is (= #{} (locations {:code/files []} dir))))))
 
@@ -204,3 +319,88 @@
     (let [dir (temp-git-repo {"README.md" "x\n"})]
       (spit (str dir "/blob.dat") (str "head\u0000\napi_key = '" gh-token "'\n"))
       (is (= #{{:file "blob.dat" :line 2}} (locations {:code/files []} dir))))))
+
+(deftest ^{:stratum 2} git-defaults-cannot-hide-content-test
+  (testing "a textconv driver that masks content does not hide the working change or its commit"
+    (let [dir  (temp-git-repo {".gitattributes" "*.env diff=mask\n" "app.env" "x\n"})
+          base (str/trim (:out (sh! dir "rev-parse" "HEAD")))]
+      (sh! dir "config" "diff.mask.textconv" "sed s/./x/g")
+      (spit (str dir "/app.env") "x\nDB_PASSWORD=opaqueVALUE123\n")
+      (sh! dir "commit" "-qam" "env")
+      (is (= #{{:file "app.env" :line 2}
+               {:file "app.env" :line 2 :commit (str/trim (:out (sh! dir "rev-parse" "HEAD")))}}
+             (locations {:code/files [] :code/base-refs [base]} dir)))))
+  (testing "a file named like pathspec magic is selected literally"
+    (let [dir (temp-git-repo {":(literal)deploy.env" "x\n"})]
+      (spit (str dir "/:(literal)deploy.env") "x\nDB_PASSWORD=opaqueVALUE123\n")
+      (is (= #{{:file ":(literal)deploy.env" :line 2}} (locations {:code/files []} dir))))))
+
+(deftest ^{:stratum 2} a-secret-added-while-merging-is-found-test
+  (testing "an edit made while resolving a merge counts, even once a later commit removes it"
+    (let [dir  (temp-git-repo {"a.txt" "a\n" "b.txt" "b\n"})
+          base (str/trim (:out (sh! dir "rev-parse" "HEAD")))
+          main (str/trim (:out (sh! dir "symbolic-ref" "--short" "HEAD")))]
+      (sh! dir "checkout" "-qb" "side")
+      (spit (str dir "/b.txt") "b\nside\n")
+      (sh! dir "commit" "-qam" "side")
+      (sh! dir "checkout" "-q" main)
+      (spit (str dir "/a.txt") "a\nmain\n")
+      (sh! dir "commit" "-qam" "main")
+      (sh! dir "merge" "-q" "--no-commit" "side")
+      (spit (str dir "/a.txt") (str "a\nmain\napi_key = '" gh-token "'\n"))
+      (sh! dir "add" "-A")
+      (sh! dir "commit" "-qm" "merge side")
+      (let [merge (str/trim (:out (sh! dir "rev-parse" "HEAD")))]
+        (spit (str dir "/a.txt") "a\nmain\n")
+        (sh! dir "commit" "-qam" "remove")
+        (is (= #{{:file "a.txt" :line 3 :commit merge}}
+               (locations {:code/files [] :code/base-refs [base]} dir)))))))
+
+(deftest ^{:stratum 2} matches-spanning-lines-are-found-test
+  (testing "a PEM body replaced between unchanged BEGIN/END markers"
+    (let [dir (temp-git-repo {"key.pem" (pem "placeholder")})]
+      (spit (str dir "/key.pem") (pem pem-body))
+      (is (= #{{:file "key.pem" :line 2}} (locations {:code/files []} dir)))))
+  (testing "a Bearer value folded onto the line after the header"
+    (let [dir (temp-git-repo {"api.yaml" "headers:\n  Authorization: Bearer\n"})]
+      (spit (str dir "/api.yaml") (str "headers:\n  Authorization: Bearer\n    " opaque opaque "\n"))
+      (is (= #{{:file "api.yaml" :line 3}} (locations {:code/files []} dir)))))
+  (testing "a multi-line match wholly in unchanged lines stays exempt"
+    (let [dir (temp-git-repo {"key.pem" (pem pem-body)})]
+      (spit (str dir "/key.pem") (str (pem pem-body) "# rotated yearly\n"))
+      (is (= #{} (locations {:code/files []} dir))))))
+
+(deftest ^{:stratum 2} content-and-line-numbers-come-from-the-same-blob-test
+  (testing "a clean filter that drops a line does not shift the credential out of view"
+    (let [dir (temp-git-repo {".gitattributes" "*.cfg filter=strip\n"})]
+      (sh! dir "config" "filter.strip.clean" "sed 1d")
+      (spit (str dir "/app.cfg") "GENERATED\nx\n")
+      (sh! dir "add" "-A") (sh! dir "commit" "-qm" "cfg")
+      (spit (str dir "/app.cfg") (str "GENERATED\nx\napi_key = '" gh-token "'\n"))
+      (is (= #{{:file "app.cfg" :line 2}} (locations {:code/files []} dir)))))
+  (testing "configured diff.interHunkContext does not renumber added lines"
+    (let [dir (temp-git-repo {"list.txt" "a\nb\nc\nd\n"})]
+      (sh! dir "config" "diff.interHunkContext" "5")
+      (spit (str dir "/list.txt") (str "a\nnew\nb\nc\napi_key = '" gh-token "'\nd\n"))
+      (is (= #{{:file "list.txt" :line 5}} (locations {:code/files []} dir))))))
+
+(deftest ^{:stratum 2} a-replaced-commit-is-scanned-as-pushed-test
+  (testing "refs/replace cannot swap a credential-bearing commit for a clean one: a push sends the original"
+    (let [dir  (temp-git-repo {"src/app.py" "import os\n"})
+          base (head-of dir)]
+      (spit (str dir "/src/app.py") (str "import os\napi_key = '" gh-token "'\n"))
+      (sh! dir "commit" "-qam" "leaky")
+      (let [leaky (head-of dir)]
+        (spit (str dir "/src/app.py") "import os\n")
+        (sh! dir "commit" "-qam" "remove")
+        (let [clean (str/trim (:out (sh! dir "commit-tree" "-p" base "-m" "clean" (str base "^{tree}"))))]
+          (sh! dir "replace" leaky clean)
+          (is (= #{{:file "src/app.py" :line 2 :commit leaky}}
+                 (locations {:code/files [] :code/base-refs [base]} dir))))))))
+
+(deftest ^{:stratum 2} a-force-staged-ignored-file-is-scanned-test
+  (testing "an ignored file added with git add -f is in what a commit would record"
+    (let [dir (temp-git-repo {".gitignore" ".env\n"})]
+      (spit (str dir "/.env") "DB_PASSWORD=opaqueVALUE123\n")
+      (sh! dir "add" "-f" ".env")
+      (is (= #{{:file ".env" :line 1}} (locations {:code/files []} dir))))))
