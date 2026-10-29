@@ -120,4 +120,32 @@
       (is (not (str/includes? text "./src/a.clj")) "paths match the cache's relative keys")
       (is (contains? (:files @cache/cache-state) "src/a.clj")))))
 
+(deftest ^{:stratum 2} persisted-outside-entries-are-not-served-test
+  (testing "an outside-root entry in a cache persisted before confinement is dropped on load"
+    (let [{:keys [repo outside]} (repo-with-outside)
+          secret-path (str (io/file outside "secret.txt"))
+          artifact-dir (temp-dir)]
+      (.mkdirs (io/file repo ".miniforge"))
+      (spit (io/file repo ".miniforge" "context-cache.edn")
+            (pr-str {:files {secret-path "needle in the secret"
+                             "src/a.clj" "(ns a) ;; needle"}
+                     :mtimes {}}))
+      (cache/load-cache! (str artifact-dir) (str repo))
+      (is (= #{"src/a.clj"} (set (keys (:files @cache/cache-state)))))
+      (is (:isError (cache/handle-context-read {"path" secret-path})))
+      (is (not (str/includes? (str (response-text (cache/handle-context-grep {"pattern" "needle"})))
+                              "secret")))
+      (is (not (str/includes? (str (response-text (cache/handle-context-grep {"pattern" "needle"
+                                                                              "path" secret-path})))
+                              "needle in the secret")))))
+
+  (testing "an outside entry already in memory is not served by read or a path-scoped grep"
+    (let [{:keys [outside]} (repo-with-outside)
+          secret-path (str (io/file outside "secret.txt"))]
+      (swap! cache/cache-state assoc-in [:files secret-path] "needle in the secret")
+      (is (:isError (cache/handle-context-read {"path" secret-path})))
+      (is (not (str/includes? (str (response-text (cache/handle-context-grep {"pattern" "needle"
+                                                                              "path" secret-path})))
+                              "needle in the secret"))))))
+
 (use-fixtures :each with-clean-cache)

@@ -415,7 +415,11 @@
       detected as stale and re-read on access (no stale cross-phase content).
    2. this phase's PRE-POPULATED cache at <artifact-dir>/context-cache.edn —
       the orchestrator's curated, just-read file set. Merged ON TOP (wins)
-      and stamped with current disk mtimes."
+      and stamped with current disk mtimes.
+
+   Entries whose path lands outside source-root are dropped: a cache
+   persisted before reads were confined can still hold them, and a fresh
+   cached entry is served without touching the disk."
   ([artifact-dir] (load-cache! artifact-dir nil))
   ([artifact-dir source-root]
    (swap! cache-state assoc :source-root source-root :artifact-dir artifact-dir)
@@ -423,11 +427,14 @@
      (let [persistent (read-cache-edn (persistent-cache-path source-root))
            prepop     (read-cache-edn (str artifact-dir "/context-cache.edn"))
            pre-files  (get prepop :files {})
-           files      (merge (get persistent :files {}) pre-files)
+           files      (into {}
+                            (filter (comp some? resolve-source-path key))
+                            (merge (get persistent :files {}) pre-files))
            ;; persistent entries keep stored mtimes (stale ones re-read);
            ;; pre-pop entries were just read fresh → stamp current mtime.
            pre-mtimes (reduce-kv (fn [m p _] (assoc m p (file-mtime p))) {} pre-files)
-           mtimes     (merge (get persistent :mtimes {}) pre-mtimes)]
+           mtimes     (select-keys (merge (get persistent :mtimes {}) pre-mtimes)
+                                   (keys files))]
        (swap! cache-state assoc :files files :mtimes mtimes)
        (when (seq files)
          (binding [*out* *err*]
@@ -508,22 +515,24 @@
    cached entry whose file changed on disk since it was cached — reads from
    disk, re-caches (with the new mtime), and returns the current content.
    Records a miss only on a GENUINE miss (never cached), not on a
-   staleness-driven refresh. Returns content string or nil."
+   staleness-driven refresh. Returns content string or nil, and nil
+   without consulting the cache for a path outside source-root."
   [path]
-  (let [cached (cache-get path)]
-    (if (and cached (not (cache-stale? path)))
-      (do (record-read! path :cache)
-          cached)
-      (try
-        (let [content (slurp (resolve-source-path path))]
-          (cache-put! path content)
-          (when (nil? cached)
-            (record-miss! "context_read" {:path path} (estimate-tokens content)))
-          (record-read! path (if cached :refresh :filesystem))
-          content)
-        (catch Exception _
-          (record-read! path :absent)
-          nil)))))
+  (when-let [source-path (resolve-source-path path)]
+    (let [cached (cache-get path)]
+      (if (and cached (not (cache-stale? path)))
+        (do (record-read! path :cache)
+            cached)
+        (try
+          (let [content (slurp source-path)]
+            (cache-put! path content)
+            (when (nil? cached)
+              (record-miss! "context_read" {:path path} (estimate-tokens content)))
+            (record-read! path (if cached :refresh :filesystem))
+            content)
+          (catch Exception _
+            (record-read! path :absent)
+            nil))))))
 
 (defn- ^{:stratum 5} cache-new-files!
   "Cache files discovered by shell grep that aren't already cached.
@@ -547,8 +556,14 @@
   (let [files         (cached-files)
         searchable    (filter-cached-files files target-path glob-filter)
         cache-results (search-cached-files searchable pattern-str)]
-    (if (seq cache-results)
+    (cond
+      (and target-path (nil? (resolve-source-path target-path)))
+      []
+
+      (seq cache-results)
       cache-results
+
+      :else
       (let [rg-results (or (shell-grep pattern-str target-path glob-filter) [])]
         (if (seq rg-results)
           (do (cache-new-files! rg-results pattern-str files)
