@@ -12,6 +12,10 @@ model per task.
 Miniforge automatically selects the optimal AI model for each task based on task characteristics, optimizing for
 quality, cost, and performance.
 
+> **Status:** this selector is a library API (`llm/select-model`, `agent/create-agent`). Workflow runs do not call
+> it; each role runs the model the user config sets, as [Configuration Management](configuration.md) describes. No
+> environment variable or `config.edn` key controls it.
+
 ## Overview
 
 Instead of using a single model for everything, Miniforge intelligently chooses from 16 models across 4 providers:
@@ -88,67 +92,20 @@ Based on the classification, the system selects the optimal model:
 
 ## Configuration
 
-### Enable/Disable
-
-Model selection is **enabled by default**. To disable:
-
-```bash
-# Environment variable
-export MINIFORGE_MODEL_SELECTION_ENABLED=false
-
-# Or in ~/.miniforge/config.edn
-{:model-selection {:enabled false}}
-```
-
-### Selection Strategy
-
-Choose how models are selected:
-
-```bash
-# Automatic (default) - best model for task type
-export MINIFORGE_MODEL_SELECTION_STRATEGY=automatic
-
-# Cost-optimized - cheapest sufficient model
-export MINIFORGE_MODEL_SELECTION_STRATEGY=cost-optimized
-
-# Speed - fastest model
-export MINIFORGE_MODEL_SELECTION_STRATEGY=speed
-
-# Or in config.edn
-{:model-selection {:strategy :cost-optimized}}
-```
-
-### Cost Limits
-
-Set maximum cost per task:
-
-```bash
-export MINIFORGE_MODEL_SELECTION_COST_LIMIT=0.05
-
-# Or in config.edn
-{:model-selection {:cost-limit-per-task 0.05}}
-```
-
-### Privacy Mode
-
-Require local models only:
-
-```bash
-export MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL=true
-
-# Or in config.edn
-{:model-selection {:require-local true}}
-```
-
-### Override for Specific Tasks
-
-Force a specific model for a workflow phase:
+Selection takes its options as arguments, not from `config.edn` or the environment. Earlier versions of this page
+listed `MINIFORGE_MODEL_SELECTION_ENABLED`, `MINIFORGE_MODEL_SELECTION_STRATEGY`,
+`MINIFORGE_MODEL_SELECTION_COST_LIMIT`, `MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL` and a `:model-selection` config
+block; nothing read them, and miniforge no longer accepts the variables.
 
 ```clojure
-;; In spec or workflow config
-{:spec/model-override :opus-4.6}
+;; Strategy: :automatic (default), :cost-optimized or :speed
+(llm/select-model classification {:strategy :cost-optimized})
 
-;; Or when creating agent
+;; Constraints
+(llm/select-model classification {} {:cost-limit 0.05 :require-local true})
+
+;; create-agent takes :model-selection-enabled, :model-selection-strategy,
+;; :privacy-required and :cost-limit; an explicit :model skips selection
 (create-agent :implementer {:model "claude-opus-4-6"})
 ```
 
@@ -253,49 +210,6 @@ Force a specific model for a workflow phase:
 - Context: 16k tokens
 
 ## Examples
-
-### Automatic Selection in Action
-
-```bash
-# Planning phase - automatically selects Opus 4.6
-miniforge workflow run my-spec.edn
-
-# Output:
-# 🎯 Model Auto-Selected: Opus 4.6
-# Task: Plan architecture (thinking-heavy)
-# Reasoning: Planning requires exceptional reasoning capabilities
-# Cost: $0.03
-```
-
-### Cost-Optimized Workflow
-
-```bash
-# Enable cost optimization
-export MINIFORGE_MODEL_SELECTION_STRATEGY=cost-optimized
-
-# Run workflow
-miniforge workflow run my-spec.edn
-
-# Output shows cheaper models selected:
-# Phase 1: Plan (Opus 4.6) - $0.03
-# Phase 2-5: Implement (Sonnet 4.5) - $0.20
-# Phase 6: Validate (Haiku 4.5) - $0.01
-# Total: $0.24 (vs $0.84 all-Opus)
-# Savings: 71%
-```
-
-### Privacy-First Development
-
-```bash
-# Require local models only
-export MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL=true
-
-# All phases use local models:
-# Plan: Llama 3.3 70B
-# Implement: Qwen 2.5 Coder 32B
-# Validate: CodeLlama 34B
-# Cost: $0 (local inference)
-```
 
 ### Large Codebase Analysis
 
@@ -447,14 +361,6 @@ Task Type?
 6. **Local models for development**: Fast, free, no API calls
 
 ## Troubleshooting
-
-### Model selection not working?
-
-Check configuration:
-
-```bash
-miniforge config get model-selection
-```
 
 ### Want to see selection reasoning?
 
