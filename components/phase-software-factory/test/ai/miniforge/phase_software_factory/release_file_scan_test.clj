@@ -204,3 +204,25 @@
       (is (some? ex))
       (is (= :release/git-status-failed (:type (ex-data ex))))
       (is (str/includes? (str (ex-message ex)) "container not running")))))
+
+(deftest ^{:stratum 2} failed-skip-probe-is-not-rescanned-into-zero-files-test
+  (testing "an :already-implemented release whose skip probe fails raises the
+            probe's error, even when a rescan would come back clean"
+    (let [calls      (atom 0)
+          execute-fn (fn [_executor _env-id command _opts]
+                       (when (str/starts-with? command "git status")
+                         (if (= 1 (swap! calls inc))
+                           {:ok? true :data {:exit-code 128 :stdout "" :stderr index-lock-stderr}}
+                           {:ok? true :data {:exit-code 0 :stdout ""}})))
+          ctx        (assoc (release-ctx "/workspace" :already-implemented)
+                            :execution/mode           :governed
+                            :execution/execute-fn     execute-fn
+                            :execution/executor       :mock-executor
+                            :execution/environment-id "env-1")
+          ex         (enter-error ctx)]
+      (is (= :release/git-status-failed (:type (ex-data ex)))
+          "the probe's own error, not a terminal :release/zero-files")
+      (is (str/includes? (str (ex-message ex)) "index.lock"))
+      (testing "and the retried attempt, now scanning clean, skips as before"
+        (is (= :completed (get-in ((:enter (release-interceptor)) ctx)
+                                  [:phase :status])))))))

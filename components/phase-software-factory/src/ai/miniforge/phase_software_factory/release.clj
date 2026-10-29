@@ -546,11 +546,16 @@
         git scan itself fails, throw its :release/git-status-failed
         instead, carrying git's error.
 
+   `probe` is the scan enter-release already ran to decide whether to
+   skip (nil when it ran none). It stands in for step 2's rescan, so a
+   failed probe raises its own error instead of a clean rescan turning
+   it into zero-files.
+
    Stage-3 dogfood (2026-05-07) tripped on the missing #1 path:
    plan/implement/verify/review all green, files committed on the
    task branch, but release threw zero-files because git-dirty-files
    saw a clean worktree. This commit closes that gap."
-  [ctx]
+  [ctx probe]
   (let [impl-result   (get-in ctx [:execution/phase-results :implement :result])
         impl-artifact (get-in ctx [:execution/phase-results :implement :artifact])
         impl-status   (:status impl-result)]
@@ -562,9 +567,11 @@
           env-id         (get ctx :execution/environment-id)
           committed      (rehydrate-committed-files impl-artifact worktree-path)
           dirty          (when (empty? committed)
-                           (if (and governed? execute-fn executor env-id)
+                           (cond
+                             (some? probe) probe
+                             (and governed? execute-fn executor env-id)
                              (git-dirty-files-capsule execute-fn executor env-id worktree-path)
-                             (git-dirty-files worktree-path)))
+                             :else (git-dirty-files worktree-path)))
           files          (release-files! committed dirty impl-result worktree-path)
           code-artifacts [{:artifact/type    :code
                            :artifact/content {:code/id        (random-uuid)
@@ -614,27 +621,29 @@
         logger (or (get-in ctx [:execution/logger])
                    (log/create-logger {:min-level :debug :output :human}))
         ;; Emit phase-started telemetry event
-        _ (phase/emit-phase-started! ctx :release)]
+        _ (phase/emit-phase-started! ctx :release)
+        ;; Skip probe: scan only when an empty worktree means "nothing to release".
+        probe (when (contains? #{:already-implemented :already-satisfied nil} impl-status)
+                (let [wt         (ctx-worktree-path ctx)
+                      execute-fn (get ctx :execution/execute-fn)
+                      executor   (get ctx :execution/executor)
+                      env-id     (get ctx :execution/environment-id)]
+                  (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
+                    (git-dirty-files-capsule execute-fn executor env-id wt)
+                    (git-dirty-files wt))))]
     ;; Short-circuit: skip release when there is nothing to release.
     ;; This covers:
     ;; - implement returned :already-implemented (no new code)
     ;; - plan returned :already-satisfied (DAG had 0 tasks, no implement ran)
     ;; In both cases, only skip if there are also no git changes from other phases.
-    ;; A failed scan returns an anomaly map, which is not `empty?`, so it does
-    ;; not skip: build-workflow-state rescans and raises the git error.
-    (if (and (contains? #{:already-implemented :already-satisfied nil} impl-status)
-             (let [wt         (ctx-worktree-path ctx)
-                   execute-fn (get ctx :execution/execute-fn)
-                   executor   (get ctx :execution/executor)
-                   env-id     (get ctx :execution/environment-id)]
-               (empty? (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
-                         (git-dirty-files-capsule execute-fn executor env-id wt)
-                         (git-dirty-files wt)))))
+    ;; A failed scan returns an anomaly, which does not skip; build-workflow-state
+    ;; reuses the probe rather than rescanning, so the anomaly is what it raises.
+    (if (and (vector? probe) (empty? probe))
       (-> (phase/enter-context ctx :release nil gates budget start-time
                                       (phase/skipped :already-implemented))
           (assoc-in [:phase :status] :completed))
       (let [;; Build workflow state and context
-            workflow-state (build-workflow-state ctx)
+            workflow-state (build-workflow-state ctx probe)
         _ (log/debug logger :release :release/workflow-state-built
                      {:data {:artifact-count (count (:workflow/artifacts workflow-state))
                              :file-count (count (get-in (first (:workflow/artifacts workflow-state))
