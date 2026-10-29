@@ -19,6 +19,16 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} bare-relative-history-filenames-are-supported
+  (let [temporary (fs/create-temp-file {:dir "."
+                                       :prefix "mf-history-relative-"})
+        filename (fs/path (fs/file-name temporary))]
+    (try
+      (fs/delete temporary)
+      (history/append! filename first-record)
+      (is (= first-record (slurp (fs/file temporary))))
+      (finally (java.nio.file.Files/deleteIfExists temporary)))))
+
 (defn- ^{:stratum 1} verify-file-type-refusal [root]
   (let [target (fs/path root "history.edn")]
     (spit (fs/file target) first-record)

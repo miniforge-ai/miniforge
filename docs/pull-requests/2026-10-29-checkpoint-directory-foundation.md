@@ -31,6 +31,7 @@ trusted and foreign aliases, unsafe original ancestry, and native path resolutio
 History regressions cover private creation, retained sharing, append order,
 and refusal to follow a symlink.
 Root-identity and chained-alias regressions fail on the earlier publication head.
-The focused JVM suite passes 17 tests and 40 assertions, including chained
-aliases through sticky external ancestors for both creation and existing paths.
+The focused suites also cover bare relative history filenames and parent
+traversal through sticky aliases. Ancestor restrictions remain distinct from
+checkpoint-leaf restrictions during creation.
 Run normal hooks, standards, fresh-head review, and CI before merging.

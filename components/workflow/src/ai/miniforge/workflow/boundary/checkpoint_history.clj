@@ -33,8 +33,9 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} append! [path text]
-  (require-regular-history! path)
-  (let [buffer (ByteBuffer/wrap (.getBytes ^String text StandardCharsets/UTF_8))]
+  (let [path (fs/absolutize path)
+        buffer (ByteBuffer/wrap (.getBytes ^String text StandardCharsets/UTF_8))]
+    (require-regular-history! path)
     (with-open [channel (FileChannel/open (fs/path path) append-options (creation-attributes path))]
       (while (.hasRemaining buffer) (.write channel buffer)))))
 
