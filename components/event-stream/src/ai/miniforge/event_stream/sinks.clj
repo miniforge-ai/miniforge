@@ -111,23 +111,20 @@
   (and (uuid? id)
        (zero? (.getLeastSignificantBits ^java.util.UUID id))))
 
-(defn- ^{:stratum 0} ensure-parent-dir!
-  [file-path]
-  (some-> file-path .getParentFile .mkdirs))
-
 ;; File Sink paths
-(defn- ^{:stratum 0} workflow-id-segment
-  "Normalize a workflow-id into a path segment safe for the OS
-   filesystem. Keywords become their plain name (`:canonical-sdlc` →
-   `canonical-sdlc`) — `(str ...)` would otherwise include the colon
-   prefix, which is invalid on Windows and creates surprising layouts
-   elsewhere. UUIDs / strings pass through `str` unchanged. Reused by
-   `workflow-dir` and `event-file-path` so on-disk path normalisation
-   is consistent across all callers."
-  ^String [workflow-id]
-  (if (keyword? workflow-id)
-    (name workflow-id)
-    (str workflow-id)))
+(defn- ^{:stratum 0} safe-path-segment
+  "`s` when it can only name one entry inside its parent: letters, digits,
+   `.`, `_` and `-`, starting with a letter or digit (so never `.`, `..`,
+   a hidden name or anything with a separator). Otherwise `id-` plus the
+   first 16 hex digits of its SHA-256: the same input always maps to the
+   same name, and nothing an event carries can climb out of the events
+   directory. Ids reach here from the unauthenticated ingest endpoint."
+  ^String [^String s]
+  (if (re-matches #"[A-Za-z0-9][A-Za-z0-9._-]*" s)
+    s
+    (let [digest (.digest (java.security.MessageDigest/getInstance "SHA-256")
+                          (.getBytes s "UTF-8"))]
+      (str "id-" (subs (apply str (map #(format "%02x" %) digest)) 0 16)))))
 
 ;; Stream Sinks
 (defn ^{:stratum 0} stdout-sink
@@ -204,6 +201,20 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} workflow-id-segment
+  "Normalize a workflow-id into a path segment safe for the OS
+   filesystem. Keywords become their plain name (`:canonical-sdlc` →
+   `canonical-sdlc`) — `(str ...)` would otherwise include the colon
+   prefix, which is invalid on Windows and creates surprising layouts
+   elsewhere. UUIDs and plain names pass through unchanged; anything else
+   goes through `safe-path-segment`. Reused by `workflow-dir` and
+   `event-file-path` so on-disk path normalisation is consistent across
+   all callers."
+  ^String [workflow-id]
+  (safe-path-segment (if (keyword? workflow-id)
+                       (name workflow-id)
+                       (str workflow-id))))
+
 (defn ^{:stratum 1} event->transit-json
   "Serialize `event` to a Transit-JSON string using the verbose writer.
    Verbose mode disables transit's cache codes (repeated keywords stay
@@ -240,7 +251,7 @@
            "__"
            (format "%012d" seq-num)
            ".transit.json")
-      (str (now-sortable-str) "-" (or id (random-uuid)) ".json"))))
+      (str (now-sortable-str) "-" (safe-path-segment (str (or id (random-uuid)))) ".json"))))
 
 (defn ^{:stratum 1} live-dir
   "Return the `{base-dir}/live/` directory that holds in-flight
@@ -478,24 +489,24 @@
       (let [base-dir (or (:base-dir opts) (default-events-dir))
             file-path (if-let [workflow-id (:workflow/id event)]
                         (event-file-path base-dir workflow-id event)
-                        (operator-event-file-path base-dir event))]
-        (let [f   (io/file file-path)
-              dir (or (.getParentFile f) (io/file "."))
-              _   (.mkdirs dir)
-              tmp (java.io.File/createTempFile ".es-" ".transit.tmp" dir)]
-          (try
-            ;; Explicit UTF-8: payload strings can carry non-ASCII and these
-            ;; files are a cross-language contract surface — platform default
-            ;; encoding must never decide the on-disk bytes.
-            (spit tmp (event->transit-json event) :encoding "UTF-8")
-            (Files/move (.toPath tmp) (.toPath f)
-                        (into-array StandardCopyOption
-                                    [StandardCopyOption/ATOMIC_MOVE
-                                     StandardCopyOption/REPLACE_EXISTING]))
-            (catch Throwable e
-              (try (Files/deleteIfExists (.toPath tmp))
-                   (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
-              (throw e)))))
+                        (operator-event-file-path base-dir event))
+            f   (io/file file-path)
+            dir (or (.getParentFile f) (io/file "."))
+            _   (.mkdirs dir)
+            tmp (java.io.File/createTempFile ".es-" ".transit.tmp" dir)]
+        (try
+          ;; Explicit UTF-8: payload strings can carry non-ASCII and these
+          ;; files are a cross-language contract surface — platform default
+          ;; encoding must never decide the on-disk bytes.
+          (spit tmp (event->transit-json event) :encoding "UTF-8")
+          (Files/move (.toPath tmp) (.toPath f)
+                      (into-array StandardCopyOption
+                                  [StandardCopyOption/ATOMIC_MOVE
+                                   StandardCopyOption/REPLACE_EXISTING]))
+          (catch Throwable e
+            (try (Files/deleteIfExists (.toPath tmp))
+                 (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
+            (throw e))))
       (catch Exception e
         ;; Log to stderr so failures are visible without breaking the event stream
         (binding [*out* *err*]

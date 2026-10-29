@@ -116,6 +116,15 @@
       (is (= 2 (count created-sinks)))
       (is (every? fn? created-sinks)))))
 
+(deftest ^{:stratum 0} safe-ids-keep-their-directory-names-test
+  (testing "UUIDs and keyword names are used as is, so existing event directories stay put"
+    (let [id (random-uuid)]
+      (is (= (str id) (.getName (sinks/live-workflow-dir "/base" id))))
+      (is (= "canonical-sdlc" (.getName (sinks/live-workflow-dir "/base" :canonical-sdlc))))
+      (is (= (.getName (sinks/live-workflow-dir "/base" "../x"))
+             (.getName (sinks/live-workflow-dir "/base" "../x")))
+          "an encoded id maps to the same directory every time"))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; `mock-http-client` lives in the shared
@@ -488,3 +497,32 @@
   (testing "returns 0 when directory does not exist"
     (is (= 0 (sinks/cleanup-stale-events!
               {:events-dir (io/file "/tmp/nonexistent-miniforge-test-dir")})))))
+
+(deftest ^{:stratum 1} file-sink-keeps-hostile-ids-inside-the-events-dir-test
+  (testing "a workflow id with .. or separators cannot place files outside base-dir"
+    (with-temp-dir
+      (fn [root]
+        (let [base (io/file root "events")
+              sink (sinks/file-sink {:base-dir base})]
+          (.mkdirs base)
+          (sink (sample-event {:workflow/id "../../escaped"}))
+          (sink (sample-event {:workflow/id "/tmp/absolute-escape"}))
+          (sink (sample-event {:workflow/id ".."}))
+          (let [outside (remove #(str/starts-with? (.getCanonicalPath ^java.io.File %)
+                                                   (str (.getCanonicalPath base) "/"))
+                                (filter #(.isFile ^java.io.File %) (file-seq root)))]
+            (is (empty? outside) "every file the sink wrote is under base-dir"))
+          (is (not (.exists (io/file root "escaped"))))
+          (is (= 3 (count (filter #(.isFile ^java.io.File %)
+                                  (file-seq (io/file base "live")))))
+              "all three events were still written, under encoded directory names")))))
+
+  (testing "a non-snowflake event id cannot add directories to the file name"
+    (with-temp-dir
+      (fn [root]
+        (let [sink (sinks/file-sink {:base-dir root})
+              wf-id (random-uuid)]
+          (sink (sample-event {:workflow/id wf-id :event/id "../../../x"}))
+          (let [files (list-files (io/file root "live" (str wf-id)))]
+            (is (= 1 (count files)))
+            (is (not (str/includes? (.getName ^java.io.File (first files)) "..")))))))))
