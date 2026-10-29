@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.checkpoint-temporary-support
   (:require [ai.miniforge.workflow.checkpoint-store :as store]
+            [babashka.fs :as fs]
             [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -14,7 +15,14 @@
   (write-original! path content)
   (throw failure))
 
+(defn ^{:stratum 0} permission-mode [path]
+  (fs/posix->str (fs/posix-file-permissions path)))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} observe-permissions! [write! observed path contents]
+  (swap! observed conj (permission-mode path))
+  (write! path contents))
 
 (defn ^{:stratum 1} attempt-write! [target value]
   (try+ (write! target value) (catch Exception failure failure)))

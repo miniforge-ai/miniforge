@@ -5,6 +5,7 @@
   "Force bytes before rename and confirm publication before acknowledgment."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.file-durability.interface :as durability]
+            [ai.miniforge.workflow.boundary.checkpoint-permissions :as permissions]
             [babashka.fs :as fs]
             [slingshot.slingshot :refer [throw+]])
   (:import [java.nio.charset StandardCharsets]
@@ -26,6 +27,7 @@
 (defn ^{:stratum 1} publish! [temporary target data]
   (let [bytes (.getBytes (pr-str data) StandardCharsets/UTF_8)]
     (require-durable! (durability/write-temporary-bytes! (fs/file temporary) bytes))
+    (permissions/prepare! temporary target)
     (Files/move (fs/path temporary) (fs/path target) atomic-replacement)
     (require-durable! (durability/confirm! (fs/file target)))))
 

@@ -1,5 +1,6 @@
 <!--
   Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
 
@@ -13,8 +14,7 @@ Shared temporary names let overlapping writes consume or overwrite another write
 
 ## Layer and dependencies
 
-Storage boundary, small follow-up to #2039. Based on its reviewed branch;
-wait for #2039 to merge before opening this dependent PR.
+Storage boundary, small follow-up to merged #2039. Aligned with main after its merge.
 Preserve all previous branches and normal signing, test, review, and CI gates.
 
 ## Verification plan
@@ -32,9 +32,26 @@ No production sources overlay the package. New JVM tests take 12 ms and 6 ms,
 so both remain in the workflow brick.
 
 The adversarial pass traced relative-path resolution, temporary creation, write,
-rename, and cleanup. Temporary files use the platform's fresh-file permissions.
+rename, and cleanup. POSIX temporary files are explicitly private (`0600`).
 The shared cleanup boundary preserves original failures and fatal priority.
 Namespaces have at most three inferred strata; no duplicated cleanup policy.
+Normal signed hooks pass; the standards scan reports no violations.
+The initial change had 91 reportable code lines. Parent alignment preserves the
+exact tested production and test tree.
+
+## Permission review correction
+
+The approved policy makes first POSIX publications private (`0600`).
+Replacements retain the existing POSIX read, write, and execute permission bits.
+Permissions transfer only after content writing completes, before atomic rename.
+Permission failures abort publication and clean up the owned temporary file.
+Non-POSIX providers retain native defaults; ACL and ownership preservation are not promised.
+Two regression tests cover seven assertions, including private incomplete files.
+The previous package fails three assertions; the corrected source passes all seven.
+All three workflow consumers pass (1m33s); the rebuilt CLI is 39,233,889 bytes.
+Four isolated packaged checkpoint suites pass 15 tests and 59 assertions.
+New JVM tests take 11 ms and 3 ms; the standards scan reports zero violations.
+The correction has 68 reportable lines; the complete PR has 157.
 
 ## Limits and deployment
 

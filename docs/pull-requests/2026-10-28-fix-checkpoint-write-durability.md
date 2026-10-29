@@ -36,5 +36,12 @@ on the project JVM. Shared factories preserve the original phase and gate shapes
 
 ## Limits
 
+The approved permission policy is retained after parent alignment: private new
+POSIX checkpoints, existing permission bits preserved on replacement.
+Permission transfer follows completed byte writing and precedes atomic rename.
+Published-file confirmation then forces the final file and directory metadata.
+The aligned consumers pass in 2m28s; isolated packaged suites pass 18 tests and
+70 assertions, including the permission and relocated persistence scenarios.
+
 No checkpoint format migration. Multi-file transactional recovery and runner failure
 events remain separate integration work. This PR does not claim complete N7 recovery.
