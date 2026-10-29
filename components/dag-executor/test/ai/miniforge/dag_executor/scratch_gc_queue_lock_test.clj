@@ -3,8 +3,9 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.dag-executor.scratch-gc-queue-lock-test
   "The scratch GC queue lock holds for the whole read-modify-write: another
-   process cannot take it while the holder reads the queue. Skipped when
-   bb is not on PATH."
+   process cannot take it while the holder reads the queue, nor after a
+   second caller in the same process tried for it. Skipped when bb is not
+   on PATH."
   (:require [ai.miniforge.dag-executor.scratch-gc-queue :as sut]
             [babashka.fs :as fs]
             [clojure.java.shell :as shell]
@@ -35,6 +36,13 @@
         ;; The read opens and closes a descriptor on the queue file, as
         ;; every GC pass and enqueue does under the lock.
         (is (= "busy" (#'sut/with-queue-lock! queue
-                       (fn [] (#'sut/read-gc-queue queue) (probe)))))))))
+                       (fn []
+                         (#'sut/read-gc-queue queue)
+                         ;; A second caller in this process must not open
+                         ;; the sidecar: closing it would drop this lock.
+                         (let [other (deref (future (#'sut/with-queue-lock! queue (constantly :entered)))
+                                            5000 ::timed-out)]
+                           (is (= :scratch-gc-queue/locked (get-in other [:error :code]))))
+                         (probe)))))))))
 
 (comment ::scratch-gc-queue-lock)
