@@ -129,6 +129,10 @@
         ;; the temp file the original's mode before writing to it: a new
         ;; file gets the umask default, which would drop an exec bit or
         ;; leave a 0600 file's contents readable while the write runs.
+        ;; A per-file ACL is not carried: babashka has no ACL attribute
+        ;; view, and Linux POSIX ACLs are invisible to NIO anyway. A git
+        ;; worktree's files only hold ACLs inherited from their directory,
+        ;; which the temp file, created there too, inherits the same way.
         (let [content   (slurp file)
               formatted (apply-text-edits content edits)
               ^Path target (.toRealPath (.toPath (io/file file))
