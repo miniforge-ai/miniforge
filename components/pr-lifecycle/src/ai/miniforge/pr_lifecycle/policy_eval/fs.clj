@@ -96,7 +96,9 @@
                       (not (git-dir/reaches-metadata? root path-str)))
              target))))
      (catch java.io.IOException _ nil)
-     (catch SecurityException _ nil))))
+     (catch SecurityException _ nil)
+     ;; java.nio rejects names it cannot represent (a NUL byte, say).
+     (catch IllegalArgumentException _ nil))))
 
 ;; ── content read/write (trailing-newline preserving) ─────────────────
 (defn- ^{:stratum 0} read-content

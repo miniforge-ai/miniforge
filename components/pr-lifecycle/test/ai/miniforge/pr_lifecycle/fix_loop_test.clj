@@ -453,3 +453,43 @@
         (is (refused? worktree "notes.txt" :create))
         (is (not (fs/exists? (fs/path worktree "notes.txt"))))
         (finally (fs/delete-tree base))))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-compares-file-system-components-test
+  (let [{:keys [base worktree]} (temp-layout)
+        config (str (fs/path worktree ".git" "config"))
+        before (slurp config)]
+    (try
+      (testing "a symlink named by a single space that points at .git is followed, not dropped"
+        (fs/create-sym-link (fs/path worktree " ") (fs/path worktree ".git"))
+        (is (refused? worktree " /config" :modify))
+        (is (= before (slurp config))))
+      (testing "on POSIX a backslash is part of a name, so link a\\b is one component"
+        (fs/create-sym-link (fs/path worktree "a\\b") (fs/path worktree ".git"))
+        (is (refused? worktree "a\\b/config" :modify))
+        (is (= before (slurp config))))
+      (finally (fs/delete-tree base)))))
+
+(deftest ^{:stratum 1} apply-fix-to-worktree-protects-untracked-metadata-link-targets-test
+  (let [{:keys [base worktree]} (temp-layout)
+        hooks (fs/path worktree ".git" "hooks")
+        hook  "#!/bin/sh\nexit 0\n"]
+    (try
+      (fs/create-dirs (fs/path worktree "scripts"))
+      (spit (str (fs/path worktree "scripts" "pre-commit")) hook)
+      (spit (str (fs/path worktree "scripts" "pre-push")) hook)
+      (git! worktree "add" "scripts/pre-push")
+      (fs/create-sym-link (fs/path hooks "pre-commit") (fs/path ".." ".." "scripts" "pre-commit"))
+      (fs/create-sym-link (fs/path hooks "pre-push") (fs/path ".." ".." "scripts" "pre-push"))
+      (testing "a hook linked to a script git does not track protects that script"
+        (is (refused? worktree "scripts/pre-commit" :modify))
+        (is (refused? worktree "scripts/pre-commit" :delete))
+        (is (= hook (slurp (str (fs/path worktree "scripts" "pre-commit"))))))
+      (testing "a hook linked to a tracked script leaves it editable; the edit shows in the diff"
+        (is (dag/ok? (fix/apply-fix-to-worktree
+                      worktree {:code/files [{:path "scripts/pre-push" :content "x"
+                                              :action :modify}]} nil))))
+      (testing "a symlinked .git/config protects its untracked target"
+        (fs/move (fs/path worktree ".git" "config") (fs/path worktree "gitconfig"))
+        (fs/create-sym-link (fs/path worktree ".git" "config") (fs/path ".." "gitconfig"))
+        (is (refused? worktree "gitconfig" :modify)))
+      (finally (fs/delete-tree base)))))
