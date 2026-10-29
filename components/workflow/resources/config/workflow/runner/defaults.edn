@@ -48,4 +48,4 @@
   ;; Environment defaults
   :default-workdir        "/workspace"
   :task-branch-prefix     "task/"
-  :default-docker-image   "miniforge/task-runner-clojure:latest"}}
+  :default-docker-image   "docker.io/miniforge/task-runner-clojure:latest"}}

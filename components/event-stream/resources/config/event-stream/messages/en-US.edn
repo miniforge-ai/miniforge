@@ -136,6 +136,10 @@
   :fleet-sink.system/flush-error
   "fleet-sink: flush error: {error}"
 
+  ;; Event retention (bounded in-memory history) — programmer-error guard.
+  :retention.system/invalid-limits
+  "Event retention limits must be positive integers; got :max-workflows {max-workflows}, :max-events-per-workflow {max-events-per-workflow}"
+
   ;; Reliability metric event constructors (N3 §3.17, N1 §5.5)
   ;; System-facing observability strings — routed through catalog so
   ;; they stay auditable and overridable without a code release.

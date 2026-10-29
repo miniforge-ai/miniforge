@@ -16,8 +16,11 @@
             [ai.miniforge.failure-classifier.interface :as failure]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
+            [ai.miniforge.workflow.fsm :as workflow-fsm]
             [ai.miniforge.workflow.messages :as messages]
-            [ai.miniforge.workflow.runner-event-dispatch :as dispatch]))
+            [ai.miniforge.workflow.runner-event-dispatch :as dispatch]
+            [babashka.fs :as fs]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -33,7 +36,49 @@
      :failure/class (failure/classify {:exception/class (:anomaly/ex-class data)
                                        :error/message message})}))
 
+(defn- ^{:stratum 0} write-event
+  "The event announcing what `written` (the store's result) wrote, with
+   its absolute path: `:workflow/checkpoint-written` for a phase
+   checkpoint, else `:workflow/machine-snapshot-written` for the snapshot
+   (a checkpoint taken before any phase result has only that)."
+  [stream context {:checkpoint/keys [phase phase-path machine-snapshot-path]}]
+  (if phase-path
+    (let [path (str (fs/absolutize phase-path))]
+      (es/checkpoint-written stream (:execution/id context) phase path (fs/size path)))
+    (let [path (str (fs/absolutize machine-snapshot-path))
+          state (workflow-fsm/current-state (:execution/fsm-state context))]
+      (es/machine-snapshot-written stream (:execution/id context)
+                                   (if (keyword? state) state (:execution/status context))
+                                   path (fs/size path)))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} announce-write!
+  "Publish the write the store just made (see `write-event`). A relative
+   root resolves against this process's working directory, which a later
+   event cleanup does not share, so the path is absolute. The run's events
+   then name its checkpoint root, which the event cleanup's retention hold
+   reads to keep those events while the checkpoint exists, wherever the
+   run wrote it. Needs a stateful stream (see `report-write-failure!`).
+   The write already succeeded, so a failed or refused announcement is
+   logged and never thrown; an Error still propagates."
+  [context written]
+  (let [stream (get-in context [:execution/opts :event-stream])
+        logger (:execution/logger context)
+        warn! (fn [error]
+                (log/warn logger :system :workflow/checkpoint-written
+                          {:message (messages/t :warn/checkpoint-announce-failed
+                                                {:phase (some-> (:checkpoint/phase written) name)
+                                                 :error error})}))]
+    (when (and (:checkpoint/machine-snapshot-path written) (dispatch/stateful-stream? stream))
+      (try+
+        (let [receipt (dispatch/publish-event! stream (write-event stream context written))]
+          (when (anomaly/any-anomaly? receipt)
+            (warn! (:anomaly/message receipt))))
+        #_{:clj-kondo/ignore [:unresolved-symbol]}
+        (catch dispatch/nonfatal? _
+          (let [thrown (:throwable &throw-context)]
+            (warn! (or (ex-message thrown) (some-> thrown class .getName)))))))))
 
 (defn- ^{:stratum 1} report-write-failure!
   "Warn on the run's logger and publish `:workflow/checkpoint-write-failed`.
@@ -65,12 +110,14 @@
 
 (defn ^{:stratum 2} checkpoint!
   "Persist `context`'s checkpoint and return what the store returned. A
-   write failure is reported (warning plus event) and returned as the
+   written phase checkpoint is announced with `:workflow/checkpoint-written`.
+   A write failure is reported (warning plus event) and returned as the
    store's anomaly; it is never thrown, so the caller keeps running."
   [context]
   (let [written (checkpoint-store/persist-execution-state! context)]
-    (when (anomaly/anomaly? written)
-      (report-write-failure! context written))
+    (if (anomaly/anomaly? written)
+      (report-write-failure! context written)
+      (announce-write! context written))
     written))
 
 (comment

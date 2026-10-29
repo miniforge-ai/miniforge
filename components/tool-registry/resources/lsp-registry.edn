@@ -28,6 +28,17 @@
 ;;   :custom     — Requires manual installation (instructions provided)
 ;;
 ;; Platform keys: "macos-aarch64", "macos-x86_64", "linux-x86_64", "linux-aarch64"
+;;
+;; Asset keys (:github installs):
+;;   :file              — release asset file name
+;;   :extract           — :zip, :tar-gz, :gzip (single file) or :none
+;;   :binary-in-archive — path of the binary inside the archive, when nested
+;;   :sha256            — optional hex SHA-256 of the asset file. When present
+;;                        the installer verifies the download and fails the
+;;                        install on mismatch. No entry below pins one yet:
+;;                        add a hash only from the upstream release's
+;;                        published checksum, never one computed from an
+;;                        unverified download.
 
 {:registry/version "1.0.0"
  :registry/bin-dir "~/.miniforge/bin"

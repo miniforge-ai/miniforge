@@ -89,7 +89,9 @@
    "    resolve <id> <r>  Resolve a decision (--comment for note)"
    "    terminate <id>    Terminate an agent"
    ""
-   "  doctor              Check system health"
+   "  doctor              Check the tools a run needs; exits 1 if a required one fails"
+   "    -b, --backend <b> Check this LLM backend instead of the configured one"
+   "    -m, --execution-mode <m>  Execution mode to check for (local, governed)"
    "  version             Show version info"
    "  help                Show this help"]
   :help/note "{binary} (this CLI) uses Babashka for fast startup."
@@ -103,17 +105,32 @@
   :main/unknown-option "Unknown option: {option}"
   :main/missing-option "Missing required option: {option}"
   :main/invalid-option "Invalid value for {option}: {message}"
-  :doctor/checks
-  [["bb" "Babashka" "Required for CLI"]
-   ["gum" "Charm Gum" "Required for TUI"]
-   ["git" "Git" "Required for version control"]
-   ["gh" "GitHub CLI" "Required for PR operations"]
-   ["claude" "Claude CLI" "Required for LLM backend"]]
-  :doctor/config-exists "Config file exists at {config-path}"
-  :doctor/no-config "No config file. Run '{command}'"
+  :doctor/label-git "Git"
+  :doctor/label-git-identity "Git {key}"
+  :doctor/label-gh "GitHub CLI"
+  :doctor/label-gh-auth "GitHub CLI login"
+  :doctor/label-backend "LLM backend {backend}"
+  :doctor/label-runtime "Container runtime"
+  :doctor/label-config "Config file"
+  :doctor/required "required"
+  :doctor/optional "optional"
+  :doctor/not-found "{cmd} not found on PATH"
+  :doctor/timed-out "{cmd} did not finish within {timeout-ms} ms"
+  :doctor/command-failed "{cmd} exited {exit}: {output}"
+  :doctor/command-failed-silent "{cmd} exited {exit}"
+  :doctor/empty-output "set but empty"
+  :doctor/hint-git-identity "Set it with: git config --global {key} \"<value>\""
+  :doctor/gh-logged-in "logged in"
+  :doctor/hint-gh-auth "Log in with: gh auth login"
+  :doctor/backend-unknown "unknown backend; see '{command}'"
+  :doctor/backend-no-cli "no CLI needed"
+  :doctor/runtime-optional "Required only for --execution-mode governed"
+  :doctor/config-exists "{config-path}"
+  :doctor/no-config "none, defaults apply; create one with '{command}'"
+  :doctor/summary-ok "All required checks passed."
+  :doctor/summary-failed "{count} required check(s) failed."
 
   ;; Runtime adapter (N11-delta Phase 3)
-  :runtime/doctor-section-title "Container runtime"
   :runtime/doctor-line "Runtime: {kind} {runtime-version} (selected by {selection})"
   :runtime/doctor-error-line "No usable container runtime: {code} — {message}"
   :runtime/doctor-probed-line "Probed: {probed}"
@@ -510,6 +527,9 @@
   :workflow-cmd/gc-scratch-no-repo "gc-scratch: not inside a git repository (no .git found)"
   :workflow-cmd/gc-scratch-success "Scratch-ref GC: pruned {pruned} queue entries, deleted {deleted} git refs, {remaining} queue entries remain."
   :workflow-cmd/gc-scratch-failed "gc-scratch failed: {error}"
+  :workflow-cmd/gc-checkpoints-success "Checkpoint GC under {root}: deleted {deleted}, kept {kept}."
+  :workflow-cmd/gc-checkpoints-unreadable "Kept checkpoint {run-id}: its manifest does not read, so whether it is pinned is unknown."
+  :workflow-cmd/gc-checkpoints-bad-age "gc-checkpoints: --max-age-days must be 0 or more (got {days})."
 
   ;; ── PR ────────────────────────────────────────────────────────────────
   :pr/no-repos "No repositories specified."
@@ -615,12 +635,6 @@
   :config/llm-backend "  backend: {backend} ({provider})"
   :config/llm-backend-provider-unknown "Unknown"
   :config/llm-model "  model: {model}"
-  :config/llm-max-tokens "  max-tokens: {max-tokens}"
-  :config/llm-timeout "  timeout: {minutes} minutes"
-  :config/section-workflow "Workflow Settings:"
-  :config/workflow-max-iterations "  max-iterations: {max-iterations}"
-  :config/workflow-max-tokens "  max-tokens: {max-tokens}"
-  :config/workflow-failure-strategy "  failure-strategy: {failure-strategy}"
   :config/section-artifacts "Artifacts:"
   :config/artifacts-dir "  dir: {dir}"
   :config/section-config-files "Config Files:"
@@ -778,6 +792,8 @@
   "Cancel a running workflow by ID."
   :workflow-runner.help/workflow-gc-scratch-summary
   "Garbage-collect stale workflow scratch git refs from the deferred GC queue."
+  :workflow-runner.help/workflow-gc-checkpoints-summary
+  "Delete checkpoints unchanged for --max-age-days (default 30); pinned runs and runs with live events are kept."
   :workflow-runner.help/chain-run-summary
   "Execute a chain (multi-workflow) by ID."
   :workflow-runner.help/chain-list-summary

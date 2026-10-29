@@ -129,19 +129,32 @@
 (defn- ^{:stratum 1} read-checkpoint-file
   "Read one checkpoint file: its content, nil when it does not exist, or
    — when it exists but cannot be read or parsed (truncated, unreadable,
-   not EDN) or holds no record (empty, whitespace, a bare value) — an
+   not EDN), holds no record (empty, whitespace, a bare value), or was
+   written in a checkpoint format newer than this build reads — an
    anomaly naming the file. One bad file then costs the caller that file
    and nothing else."
   [path]
   (try+
     (let [content (read-edn-file path)]
-      (if (or (map? content) (not (fs/exists? path)))
-        content
+      (cond
+        (not (fs/exists? path)) content
+        (not (map? content))
         (anomaly/anomaly :unavailable
                          (messages/t :checkpoint/read-failed
                                      {:path (str path)
                                       :error (messages/t :checkpoint/no-record)})
-                         {:checkpoint/path (str path)})))
+                         {:checkpoint/path (str path)})
+        (checkpoint-records/readable-format? content) content
+        :else
+        (anomaly/anomaly :unsupported
+                         (messages/t :checkpoint/newer-format
+                                     {:path (str path)
+                                      :version (pr-str (:checkpoint/format-version content))
+                                      :supported checkpoint-records/checkpoint-format-version})
+                         {:checkpoint/path (str path)
+                          :checkpoint/format-version (:checkpoint/format-version content)
+                          :checkpoint/supported-format-version
+                          checkpoint-records/checkpoint-format-version})))
     (catch Exception e
       (anomaly/exception-anomaly :unavailable
                                  (messages/t :checkpoint/read-failed
@@ -237,8 +250,8 @@
                         (messages/t :checkpoint/unreadable
                                     {:run-id workflow-run-id
                                      :files (->> read-failures
-                                                 (map #(get-in % [:anomaly/data :checkpoint/path]))
-                                                 (interpose ", ")
+                                                 (map :anomaly/message)
+                                                 (interpose "; ")
                                                  (apply str))})
                         {:workflow/run-id workflow-run-id
                          :checkpoint/root checkpoint-root
@@ -261,7 +274,9 @@
    none under its id: a resume under a new run id (a retried attempt, a
    rewind) can then itself be resumed with them.
 
-   Returns the written paths, nil for a context with no run id, or —
+   Returns the written paths (with `:checkpoint/phase` and
+   `:checkpoint/phase-path` when a phase checkpoint was written), nil for
+   a context with no run id, or —
    when a read or write fails — an `:unavailable` anomaly naming the
    run, phase and root; an existing manifest that would merge into an
    invalid one is an `:invalid-input` anomaly, with nothing written. A failed write is reported, not thrown: the
@@ -309,8 +324,12 @@
                 (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
               (write-edn-atomically! snapshot-path snapshot)
               (write-edn-atomically! manifest-path merged-manifest)
-              {:checkpoint/root checkpoint-root
-               :checkpoint/machine-snapshot-path snapshot-path
-               :checkpoint/manifest-path manifest-path})))
+              (cond-> {:checkpoint/root checkpoint-root
+                       :checkpoint/machine-snapshot-path snapshot-path
+                       :checkpoint/manifest-path manifest-path}
+                (and phase-name phase-result)
+                (assoc :checkpoint/phase phase-name
+                       :checkpoint/phase-path (checkpoint-paths/phase-checkpoint-path
+                                               checkpoint-root workflow-run-id phase-name))))))
         (catch Exception e
           (write-failure checkpoint-root workflow-run-id phase-name e))))))
