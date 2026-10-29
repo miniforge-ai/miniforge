@@ -235,10 +235,11 @@
    loop.
 
    Only `files` are staged, never the whole tree: the worktree can hold
-   changes the fix did not make. They are staged into a copy of the index
-   and committed from it (`fix-stage`); the copy replaces the real index
+   changes the fix did not make. They are staged and committed under
+   git's own index lock (`fix-stage`): the lock file replaces the index
    only after the commit succeeds, so a staging or commit failure leaves
-   the real index as it was and a retry never commits leftovers.
+   the index as it was, a retry never commits leftovers, and a concurrent
+   git command is never overwritten.
 
    Arguments:
    - worktree-path: Path to git worktree
@@ -268,7 +269,7 @@
         (dag/err :stage-failed stage-error)
         (let [commit-result (release/commit-changes! worktree-path commit-msg
                                                      git-dir/hooks-disabled-args
-                                                     {"GIT_INDEX_FILE" (:temp staged)})]
+                                                     {"GIT_INDEX_FILE" (:lock staged)})]
           (if-not (:success? commit-result)
             (do (fix-stage/discard-index! staged)
                 (dag/err :commit-failed (:error commit-result)))

@@ -16,17 +16,25 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.pr-lifecycle.fix-stage
-  "Stage a fix's files into a temporary index, so a failure leaves the
-   worktree's real index as it was.
+  "Stage and commit a fix's files under git's own index lock, so a
+   failure leaves the worktree's index as it was and no concurrent git
+   command can be overwritten.
 
-   `fix-loop/commit-fix` copies the current index beside it, stages
-   exactly the fix's files into the copy (GIT_INDEX_FILE), commits from
-   the copy, and only then moves it over the real index. A staging or
-   commit failure deletes the copy, so a retry never commits what an
-   earlier attempt staged. Every git command here runs with hooks
-   disabled (`git-dir/hooks-disabled-args`; `git add` can run
-   post-index-change) and literal pathspecs, so a name with glob
-   characters stages only itself."
+   This follows git's protocol for writing an index: create
+   `<gitdir>/index.lock` exclusively (another git process holding it
+   makes the fix fail), copy the index into it, stage exactly the fix's
+   files and commit with GIT_INDEX_FILE pointing at the lock file, then
+   rename the lock file over the index on success or delete it on any
+   failure. Other git commands see the lock and wait or fail, as they do
+   for git itself. A retry therefore never commits what an earlier
+   attempt staged.
+
+   The git dir comes from `git rev-parse --absolute-git-dir`, so a relative
+   worktree path and a linked worktree both resolve to the right index.
+   Every git command here runs with hooks disabled
+   (`git-dir/hooks-disabled-args`; `git add` can run post-index-change)
+   and literal pathspecs, so a name with glob characters stages only
+   itself."
   (:require
    [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
    [babashka.process :as process]
@@ -36,14 +44,16 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} index-file
-  "Absolute path of the index git uses in `worktree-path`, or nil when
-   git cannot say."
+(defn ^{:stratum 0} index-paths
+  "`{:index :lock}`: absolute paths of the index git uses in
+   `worktree-path` and of its lock file, from `git rev-parse
+   --absolute-git-dir`; nil when git cannot say."
   [worktree-path]
-  (let [r (process/sh {:dir (str worktree-path)} "git" "rev-parse" "--git-path" "index")]
+  (let [r (process/sh {:dir (str worktree-path)} "git" "rev-parse" "--absolute-git-dir")]
     (when (zero? (:exit r))
-      (let [f (io/file (str/trim-newline (str (:out r))))]
-        (str (if (.isAbsolute f) f (io/file (str worktree-path) (str f))))))))
+      (let [git-dir (str/trim-newline (str (:out r)))]
+        {:index (str (io/file git-dir "index"))
+         :lock  (str (io/file git-dir "index.lock"))}))))
 
 (defn ^{:stratum 0} stage-file!
   "Stage one fix file into the index at `index`: `git add` for a write,
@@ -61,45 +71,58 @@
       (str path ": " (str/trim (str (:err r)))))))
 
 (defn ^{:stratum 0} discard-index!
-  "Delete the temporary index of a `stage-files!` result."
-  [{:keys [temp]}]
-  (when temp
-    (io/delete-file temp true)))
+  "Release the lock of a `stage-files!` result without touching the index."
+  [{:keys [lock]}]
+  (when lock
+    (io/delete-file lock true)))
 
-(defn ^{:stratum 0} install-index!
-  "Move the temporary index of a `stage-files!` result over the real one,
-   after the commit from it succeeded. Returns nil, or an error message."
-  [{:keys [index temp]}]
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} install-index!
+  "Rename the lock file of a `stage-files!` result over the index, after
+   the commit from it succeeded; that releases the lock. Returns nil, or
+   an error message (the lock is then deleted)."
+  [{:keys [index lock] :as staged}]
   (try+
-   (java.nio.file.Files/move (.toPath (io/file temp)) (.toPath (io/file index))
+   (java.nio.file.Files/move (.toPath (io/file lock)) (.toPath (io/file index))
                              (into-array java.nio.file.CopyOption
                                          [java.nio.file.StandardCopyOption/REPLACE_EXISTING
                                           java.nio.file.StandardCopyOption/ATOMIC_MOVE]))
    nil
    (catch Exception e
+     (discard-index! staged)
      (.getMessage e))))
 
-;------------------------------------------------------------------------------ Layer 1
-
 (defn ^{:stratum 1} stage-files!
-  "Copy the worktree's index to a temporary file beside it and stage
-   `files` (an artifact's `:code/files`: `:path`, `:action`) into the copy.
-   Returns `{:index :temp}`, or `{:error msg}` after deleting the copy;
-   the real index is never touched."
+  "Take git's index lock in `worktree-path`, copy the index into it, and
+   stage `files` (an artifact's `:code/files`: `:path`, `:action`) into the
+   lock file. Returns `{:index :lock}` with the lock held, for the commit
+   (GIT_INDEX_FILE = `:lock`) and then `install-index!` or
+   `discard-index!`; or `{:error msg}` with the lock released, or never
+   taken when another process holds it. The index itself is not written."
   [worktree-path files]
   (try+
-   (if-let [index (index-file worktree-path)]
-     (let [temp {:temp (str index ".fix-" (random-uuid))}]
+   (if-let [{:keys [index lock] :as paths} (index-paths worktree-path)]
+     (cond
+       (not (.exists (io/file index)))
+       {:error "the worktree has no index"}
+
+       (not (try+ (java.nio.file.Files/createFile (.toPath (io/file lock))
+                                                  (make-array java.nio.file.attribute.FileAttribute 0))
+                  true
+                  (catch java.nio.file.FileAlreadyExistsException _ false)))
+       {:error (str lock " exists: another git process is using the index")}
+
+       :else
        (try+
-        (when (.exists (io/file index))
-          (io/copy (io/file index) (io/file (:temp temp))))
-        (if-let [error (some #(stage-file! worktree-path (:temp temp) %) files)]
-          (do (discard-index! temp)
+        (io/copy (io/file index) (io/file lock))
+        (if-let [error (some #(stage-file! worktree-path lock %) files)]
+          (do (discard-index! paths)
               {:error error})
-          (assoc temp :index index))
+          paths)
         (catch Exception e
-          (discard-index! temp)
+          (discard-index! paths)
           {:error (.getMessage e)})))
-     {:error "git cannot locate the worktree's index"})
+     {:error "git cannot locate the worktree's git dir"})
    (catch Exception e
      {:error (.getMessage e)})))

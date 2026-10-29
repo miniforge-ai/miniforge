@@ -115,7 +115,7 @@
           (is (= before (git! dir "ls-files" "--stage")))
           (is (= "d.txt" (git! dir "diff" "--cached" "--name-only")))
           (is (= head (git! dir "rev-parse" "HEAD")))
-          (is (empty? (fs/glob (fs/path dir ".git") "index.fix-*"))))
+          (is (not (fs/exists? (fs/path dir ".git" "index.lock")))))
         (finally (fs/delete-tree dir))))))
 
 (deftest ^{:stratum 2} run-fix-loop-refuses-a-fix-through-a-symlink-test
@@ -141,3 +141,41 @@
               (is (= "t1\n" (slurp (str (fs/path dir "target.txt")))))
               (is (= head (git! dir "rev-parse" "HEAD"))))))
         (finally (fs/delete-tree dir))))))
+
+(deftest ^{:stratum 2} commit-fix-fails-cleanly-when-the-index-is-locked-test
+  (testing "another process's index.lock makes the fix fail without touching the index or the lock"
+    (let [dir  (repo-with-unrelated-change)
+          lock (fs/path dir ".git" "index.lock")]
+      (try
+        (spit (str lock) "held by someone else")
+        (spit (str (fs/path dir "a.txt")) "a2\n")
+        (let [head   (git! dir "rev-parse" "HEAD")
+              before (vec (fs/read-all-bytes (fs/path dir ".git" "index")))
+              result (fix/commit-fix dir {:fix/type :review-changes} "fix/x" nil
+                                     [{:path "a.txt" :action :modify}])]
+          (is (= :stage-failed (get-in result [:error :code])))
+          (is (= before (vec (fs/read-all-bytes (fs/path dir ".git" "index")))))
+          (is (= "held by someone else" (slurp (str lock))))
+          (is (= head (git! dir "rev-parse" "HEAD"))))
+        (finally (fs/delete-tree dir))))))
+
+(deftest ^{:stratum 2} commit-fix-works-from-a-relative-worktree-path-test
+  (testing "a worktree path relative to the process directory stages into the right index"
+    ;; Nest the repository so a path relative to this process's directory
+    ;; does not also resolve from inside the repository by coincidence.
+    (let [base (repo-with-unrelated-change)
+          dir  (str (fs/path base "a" "b" "c" "repo"))]
+      (fs/create-dirs (fs/parent dir))
+      (doseq [entry (fs/list-dir base)
+              :when (not= "a" (str (fs/file-name entry)))]
+        (fs/move entry (fs/path (fs/create-dirs dir) (fs/file-name entry))))
+      (try
+        (spit (str (fs/path dir "a.txt")) "a2\n")
+        (let [relative (str (fs/relativize (fs/canonicalize ".") (fs/canonicalize dir)))]
+          (with-redefs [release/push-branch! (fn [& _] {:success? true})]
+            (let [result (fix/commit-fix relative {:fix/type :review-changes} "fix/x" nil
+                                         [{:path "a.txt" :action :modify}])]
+              (is (dag/ok? result))
+              (is (= "M\ta.txt" (git! dir "show" "--name-status" "--format=" "HEAD")))
+              (is (not (fs/exists? (fs/path dir ".git" "index.lock")))))))
+        (finally (fs/delete-tree base))))))
