@@ -102,9 +102,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} event-files
-  "The event files in `dir` by recorded ms, then name."
+  "The event files in `dir` by recorded ms, then name; nil when `dir`
+   cannot be listed (an I/O failure, or no such directory)."
   [dir]
-  (->> (.listFiles (io/file dir))
+  (some->> (.listFiles (io/file dir))
        (filter file-ms)
        (sort-by (juxt file-ms file-name))))
 
@@ -139,12 +140,12 @@
 
 (defn ^{:stratum 2} unread-files
   "The event files in `dir` that `tracked` does not cover: recorded at or
-   after its watermark, and not among its names. A file name always
-   holds one event."
+   after its watermark, and not among its names (nil when `dir` cannot
+   be listed). A file name always holds one event."
   [dir {:keys [watermark names]}]
-  (filterv #(and (>= (file-ms %) watermark)
-                 (not (contains? names (file-name %))))
-           (event-files dir)))
+  (some->> (event-files dir)
+           (filterv #(and (>= (file-ms %) watermark)
+                          (not (contains? names (file-name %)))))))
 
 (defn ^{:stratum 2} read-unread
   "[events tracked gaps]: the events of a run's unread `files` (from
@@ -158,7 +159,8 @@
    again. A file gone before decoding (the run moved to archived/) is
    retried without counting. After `max-read-attempts` failed reads of a
    file still there, it is given up as corrupt: it counts as read, the
-   caller reports the gap, and the files behind it go on."
+   caller reports the gap, and the files behind it go on. A listing that
+   failed (`files` nil) leaves tracking as it was, marked :pending?."
   [files tracked]
   (let [done (fn [read gaps failures pending?]
                [(->> read
@@ -168,8 +170,11 @@
                     (assoc :failures failures :pending? pending?))
                 gaps])]
     (loop [[f & more] files, read [], gaps [], failures (get tracked :failures {})]
-      (if-not f
+      (cond
+        (nil? files) [[] (assoc tracked :pending? true) []]
+        (not f)
         (done read gaps failures false)
+        :else
         (let [event (read-event f)
               n     (file-name f)
               tries (inc (get failures n 0))

@@ -70,11 +70,13 @@
 (defn ^{:stratum 0} tail-dir
   "Hand the unread events of workflow `wf-name` (directory `dir`, or its
    archived/ directory once the run has moved) to `on-event` in creation
-   order, and track them. A file given up as corrupt is logged. A failing
-   `on-event` skips that event only."
+   order, and track them. A file given up as corrupt is logged. A failed
+   listing is retried, unless the run's directory is gone from live/ and
+   archived/ alike. A failing `on-event` skips that event only."
   [on-event events-dir state wf-name dir]
   (let [tracked (get-in state [:tracked wf-name] {:watermark (:since-ms state) :names {}})
-        files   (layout/unread-files (layout/current-dir events-dir wf-name dir) tracked)
+        files   (or (layout/unread-files (layout/current-dir events-dir wf-name dir) tracked)
+                    (when-not (.exists (layout/current-dir events-dir wf-name dir)) []))
         [events tracked gaps] (layout/read-unread files tracked)]
     (doseq [f gaps]
       (log/warn (:logger state) :event-stream :event-tail/gap
