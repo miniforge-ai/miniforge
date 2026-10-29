@@ -219,10 +219,11 @@
     0))
 
 (defn ^{:stratum 1} workflow-id=
-  "String-normalized workflow-id equality so UUID/string forms match."
+  "Workflow-id equality through `event-files/canonical-id`, so UUID,
+   string and keyword forms match."
   [expected event]
-  (= (some-> expected str)
-     (some-> (wf-id event) str)))
+  (= (event-files/canonical-id expected)
+     (event-files/canonical-id (wf-id event))))
 
 (defn ^{:stratum 1} workflow-event-file
   "Resolve the event file for a specific workflow-id."
@@ -231,16 +232,18 @@
 
 (defn ^{:stratum 1} dedupe-events
   "Deduplicate live + historical events by event-id, falling back to a
-   composite key of stable fields when no id is present."
+   composite key of stable fields when no id is present. Ids compare in
+   their `event-files/canonical-id` form."
   [events]
   (->> events
        (reduce (fn [acc event]
-                 (let [event-key (get event :event/id
-                                      [(get event :event/type)
-                                       (some-> (wf-id event) str)
-                                       (event-ts event)
-                                       (get event :event/sequence-number)
-                                       (get event :message)])]
+                 (let [event-key (if-let [id (get event :event/id)]
+                                   (event-files/canonical-id id)
+                                   [(get event :event/type)
+                                    (event-files/canonical-id (wf-id event))
+                                    (event-ts event)
+                                    (get event :event/sequence-number)
+                                    (get event :message)])]
                    (assoc acc event-key event)))
                {})
        vals
@@ -373,14 +376,11 @@
        vec))
 
 (defn ^{:stratum 2} historical-events
-  "Read events from disk for one workflow, or for the archive.
-
-   Sources: legacy `<workflow-id>.edn` files, and the event-stream file
-   sink's workflow directories. For one workflow: its archived, live or
-   older flat directory. Without a workflow-id: the
+  "Events from disk (legacy `<workflow-id>.edn` files and file sink
+   directories) for one workflow, or, without a workflow-id, for the
    `max-recent-workflows` most recently modified live/ and archived/
-   directories, since the workflow list shows no more than that and the
-   archive scan covers the rest."
+   directories: no more than the list shows; the archive scan covers the
+   rest."
   [workflow-id]
   (if workflow-id
     (into (or (read-event-file (workflow-event-file workflow-id)) [])
@@ -446,9 +446,9 @@
    keeps test isolation when callers use a non-default state."
   [state]
   (let [live-events (live-stream-events state)
-        live-wf-ids (into #{} (keep wf-id live-events))
+        live-wf-ids (into #{} (keep (comp event-files/canonical-id wf-id)) live-events)
         disk-events (->> (historical-events nil)
-                         (remove #(live-wf-ids (wf-id %))))]
+                         (remove #(live-wf-ids (event-files/canonical-id (wf-id %)))))]
     (into live-events disk-events)))
 
 ;------------------------------------------------------------------------------ Layer 4
@@ -505,7 +505,7 @@
   (try
     (let [grouped-events (->> (merged-events state)
                               (filter (comp some? wf-id))
-                              (group-by wf-id))]
+                              (group-by (comp event-files/canonical-id wf-id)))]
       (->> grouped-events
            (map (fn [[id wf-events]] (workflow-summary-from-events id wf-events)))
            (sort-by workflow-recency >)
@@ -538,7 +538,8 @@
   "Get workflow detail by string id."
   [state id]
   (let [workflows (get-workflows state)]
-    (or (first (filter #(= (str (:id %)) id) workflows))
+    (or (first (filter #(= (event-files/canonical-id (:id %)) (event-files/canonical-id id))
+                       workflows))
         {:error "Workflow not found"})))
 
 ;; Workflow command queue

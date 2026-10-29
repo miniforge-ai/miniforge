@@ -41,8 +41,8 @@
   "Remove any archived workflows whose IDs also appear in the live list.
    Arg order supports ->> threading: live-workflows first, archived-vals last."
   [live-workflows archived-vals]
-  (let [live-ids (->> live-workflows (map (comp str :id)) set)]
-    (remove #(contains? live-ids (str (:id %))) archived-vals)))
+  (let [live-ids (->> live-workflows (map (comp event-files/canonical-id :id)) set)]
+    (remove #(contains? live-ids (event-files/canonical-id (:id %))) archived-vals)))
 
 ;; Queries
 (defn ^{:stratum 0} archive-loading?
@@ -52,12 +52,9 @@
     (if flag @flag false)))
 
 (defn ^{:stratum 0} get-archived-workflow-events
-  "Read full events from an archived workflow's .edn file, or its event
-   directory, on demand. Returns events vector (most recent first, limited
-   to 200). An event directory is looked up again under the summary's
-   events root, since an archive may have moved it since the scan, by the
-   summary's own id: the sink names a keyword id's directory after its
-   name, which the id's string form does not give."
+  "The newest 200 events of an archived workflow, newest first, from its
+   .edn file or its event directory, which is resolved again from the
+   summary's events root and typed id (an archive may have moved it)."
   [state workflow-id]
   (let [archive-atom (:archived-workflows @state)
         summary      (when archive-atom (get @archive-atom (str workflow-id)))

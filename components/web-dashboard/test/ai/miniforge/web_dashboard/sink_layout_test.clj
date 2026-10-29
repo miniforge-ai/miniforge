@@ -25,6 +25,7 @@
    [ai.miniforge.web-dashboard.state.archive :as state-archive]
    [ai.miniforge.web-dashboard.state.core :as core]
    [ai.miniforge.web-dashboard.state.workflows :as workflows]
+   [ai.miniforge.web-dashboard.server.websocket :as ws]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]]))
 
@@ -204,6 +205,21 @@
              (->> (workflows/get-events dashboard {:workflow-id wf-id})
                   (sort-by :event/sequence-number)
                   (mapv :event/type)))))))
+
+(deftest ^{:stratum 1} a-json-ingested-event-the-stream-persists-is-one-event
+  (let [events-dir (temp-events-dir)
+        dashboard  (core/create-state {:event-stream (file-sink-stream events-dir)})
+        wf-id      (random-uuid)]
+    ;; JSON ingest keeps :event/id a string; the persisted copy reads back as a UUID.
+    (ws/handle-workflow-event dashboard (str "{\"event/type\": \"workflow/started\", "
+                                             "\"event/id\": \"" (random-uuid) "\", "
+                                             "\"workflow/id\": \"" wf-id "\", "
+                                             "\"workflow/spec\": {\"name\": \"Ingested\"}}"))
+    (with-redefs [workflows/events-dir-path (str events-dir)]
+      (is (= 1 (count (workflows/get-events dashboard {:workflow-id wf-id}))))
+      (is (= ["Ingested"] (->> (workflows/get-workflows dashboard)
+                               (filter #(= wf-id (:id %)))
+                               (mapv :name)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

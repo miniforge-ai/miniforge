@@ -196,22 +196,18 @@
   sinks/operator-dir)
 
 (def ^{:stratum 0} live-dir
-  "The in-flight workflows root (`{base-dir}/live/`): one directory per
-   workflow, written by the file sink. Arities: () defaults base-dir to
-   ~/.miniforge/events; (base-dir)."
+  "`{base-dir}/live/`, one directory per in-flight workflow. Arities:
+   () for ~/.miniforge/events; (base-dir)."
   sinks/live-dir)
 
 (def ^{:stratum 0} archived-dir
-  "The archived workflows root (`{base-dir}/archived/`): where the archive
-   moves a terminal workflow's live directory. Arities: () defaults
-   base-dir to ~/.miniforge/events; (base-dir)."
+  "`{base-dir}/archived/`, where the archive moves a terminal workflow's
+   directory. Arities: () for ~/.miniforge/events; (base-dir)."
   sinks/archived-dir)
 
 (def ^{:stratum 0} event-file-ms
-  "`(event-file-ms file-name)`: the epoch ms an event file's name records
-   (legacy `{ts}-{uuid}.json` or Snowflake `{hex}__{seq}.transit.json`),
-   which orders a directory holding both; nil for a name that is not an
-   event file (manifest, snapshot, temp file)."
+  "`(event-file-ms file-name)`: the epoch ms an event file name records,
+   in any grammar the sink has used; nil for any other name."
   sinks/event-file-ms)
 
 (def ^{:stratum 0} serialize-event

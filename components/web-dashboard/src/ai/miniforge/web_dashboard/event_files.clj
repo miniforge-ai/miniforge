@@ -16,15 +16,9 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.web-dashboard.event-files
-  "Read the event-stream file sink's on-disk layout.
-
-   The sink writes one transit-JSON file per event under
-   `{events-dir}/live/<workflow-id>/`; a JVM run's archive moves that
-   directory to `{events-dir}/archived/<workflow-id>/`. File names sort
-   in creation order. Files are decoded with the event-stream reader.
-   Skipped: the sink's temp files (`.es-*.transit.tmp`), any other name
-   starting with `.`, and JSON files that are not events (the manifest,
-   the snapshot)."
+  "Read the file sink's layout: one transit-JSON file per event under
+   `{events-dir}/live/<workflow-id>/`, moved to `archived/<workflow-id>/`
+   by a JVM run's archive. Decodes with the event-stream reader."
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [clojure.java.io :as io]
@@ -47,18 +41,25 @@
   (str/starts-with? (.getName f) "."))
 
 (defn ^{:stratum 0} file-ms
-  "The epoch ms the sink recorded in an event file's name, for either
-   name grammar; nil when the file is not an event file (a manifest,
-   snapshot, temp or other dot file). The one filter and ordering key of
-   this namespace."
+  "The epoch ms an event file's name records (`es/event-file-ms`); nil
+   for any other file. This namespace's one filter and ordering key."
   [^File f]
   (es/event-file-ms (.getName f)))
 
+(defn ^{:stratum 0} canonical-id
+  "The form of an event or workflow id every comparison uses, whatever
+   its source: a UUID-shaped string as the UUID, a keyword or its
+   \":name\" string as the name, anything else as its string."
+  [id]
+  (cond
+    (or (nil? id) (uuid? id)) id
+    (keyword? id) (name id)
+    :else (let [s (str id)] (or (parse-uuid s) (str/replace s #"^:" "")))))
+
 (defn ^{:stratum 0} read-event
-  "Decode one event file. nil when it cannot be read or holds no
-   :event/type. The reader returns UUIDs as strings; :event/id and
-   :workflow/id come back as UUIDs, the form a live event carries, so
-   events from both sources group and dedupe as one."
+  "Decode one event file; nil when unreadable or not an event. The
+   reader returns UUIDs as strings; :event/id and :workflow/id come back
+   as UUIDs, as a live event carries them."
   [f]
   (let [event (es/read-event-file f)
         as-uuid #(or (when (string? %) (parse-uuid %)) %)]
@@ -84,9 +85,8 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} event-files
-  "The event files directly in `dir`, in creation order (recorded ms, then
-   name). Sidecars, temp and dot files are left out before any caller
-   counts or cuts the list. Empty when `dir` does not exist."
+  "The event files in `dir` by recorded ms, then name; sidecars and temp
+   files are left out before any caller counts or cuts the list."
   [dir]
   (->> (.listFiles (io/file dir))
        (filter file-ms)
@@ -109,11 +109,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} unseen-files
-  "[names files] for workflow directory `dir`: the names of all its event
-   files, and the event files whose names are not in `seen`, in creation
-   order. The sink names each file after its event, so a name read once
-   need not be read again; a file that turns up late is read whatever
-   its name."
+  "[names files]: the names of all event files in `dir`, and those files
+   whose names are not in `seen`. A file name always holds one event."
   [dir seen]
   (let [files (event-files dir)]
     [(into #{} (map file-name) files)
@@ -128,13 +125,10 @@
     []))
 
 (defn ^{:stratum 2} newest-batches
-  "The events of `files` (a directory's event files, in creation order)
-   in batches, newest batch first. A batch holds at least `size` files
-   and is cut only between files recorded in different milliseconds, so
-   a same-millisecond group is never split; its events are in creation
-   order (ms, then :event/sequence-number). Lazy: a reader of the newest
-   `size` events decodes only the first batch, then takes the last
-   `size` of it."
+  "The events of `files` (from `event-files`), newest batch first, each
+   batch at least `size` files, cut only between different recorded ms,
+   and ordered by ms then :event/sequence-number. Lazy: the newest `size`
+   events are the last `size` of the first batch."
   [files size]
   (->> [[] (reverse (partition-by file-ms files))]
        (iterate (fn [[_ groups]] (take-groups groups size)))
