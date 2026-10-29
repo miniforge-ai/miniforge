@@ -51,7 +51,7 @@
                                :workflow/spec {:name "Old run"}}))
     dir))
 
-(defn- ^{:stratum 0} new-runs [] (atom {:known #{} :waiting {} :refresh {}}))
+(defn- ^{:stratum 0} new-runs [] (atom {:known #{} :waiting {} :refresh {} :ignored #{}}))
 
 (defn- ^{:stratum 0} row-status
   "The status of the one row `msgs` leave in a fresh TUI model."
@@ -128,12 +128,30 @@
         send! #(swap! msgs conj %)
         runs  (new-runs)
         dir   (doto (io/file (System/getProperty "java.io.tmpdir") (str "tui-layout-" (random-uuid))) .mkdirs)]
-    (file-sub/dispatch-event! send! dir runs {:event/type :workflow/phase-started :workflow/id wf-id
-                                              :workflow/phase :implement})
+    (file-sub/dispatch-event! send! dir runs {:event/type :workflow/failed :workflow/id wf-id})
     (dotimes [_ file-sub/max-bootstrap-attempts] (file-sub/retry-bootstraps! send! dir runs))
-    (is (= [[:msg/workflow-added {:workflow-id wf-id :name nil :spec nil}] :msg/phase-changed]
+    (is (= [[:msg/workflow-added {:workflow-id wf-id :name nil :spec nil}] :msg/workflow-failed]
            [(first @msgs) (first (second @msgs))])
-        "its events are not held forever")))
+        "a run with a lifecycle event: its events are not held forever")))
+
+(deftest ^{:stratum 1} a-lifecycle-free-child-trace-gets-no-row
+  (let [wf-id   (random-uuid)
+        msgs    (atom [])
+        send!   #(swap! msgs conj %)
+        runs    (new-runs)
+        dir     (doto (io/file (System/getProperty "java.io.tmpdir") (str "tui-layout-" (random-uuid))) .mkdirs)
+        lookups (atom 0)
+        lookup  es/read-layout-start-event
+        phase   (fn [p] {:event/type :workflow/phase-started :workflow/id wf-id :workflow/phase p})]
+    ;; A DAG task's sub-workflow trace: phase events, no lifecycle event.
+    (with-redefs [es/read-layout-start-event #(do (swap! lookups inc) (lookup %1 %2))]
+      (run! #(file-sub/dispatch-event! send! dir runs (phase %)) [:plan :implement :verify])
+      (is (= 1 @lookups) "only the run's first event looks on disk at once")
+      (dotimes [_ file-sub/max-bootstrap-attempts] (file-sub/retry-bootstraps! send! dir runs))
+      (file-sub/dispatch-event! send! dir runs (phase :release)))
+    (is (= [] @msgs) "no row, and its later events are dropped")
+    (is (contains? (:ignored @runs) wf-id))
+    (is (empty? (:waiting @runs)) "nothing held")))
 
 (deftest ^{:stratum 1} a-resume-queued-behind-a-completion-leaves-the-row-running
   (let [wf-id  (random-uuid)

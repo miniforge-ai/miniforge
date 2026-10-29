@@ -42,3 +42,13 @@
                                                  (io/file dir "archived" (str wf-id))))
                                     (list-files d))]
       (is (= "Moving" (get-in (sut/start-event dir wf-id) [:workflow/spec :name]))))))
+
+(deftest ^{:stratum 0} the-start-event-of-a-keyword-workflow-id-is-found
+  (let [dir    (doto (io/file (System/getProperty "java.io.tmpdir") (str "layout-reader-" (random-uuid)))
+                 .mkdirs)
+        stream (es/create-event-stream
+                {:config {:observability {:event-sinks [{:type :file :base-dir (str dir)}]}}})]
+    ;; The sink writes :canonical-sdlc under live/canonical-sdlc/.
+    (es/publish! stream (assoc (es/create-envelope stream :workflow/started :canonical-sdlc "started")
+                               :workflow/spec {:name "Keyword"}))
+    (is (= "Keyword" (get-in (sut/start-event dir :canonical-sdlc) [:workflow/spec :name])))))

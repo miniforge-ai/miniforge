@@ -194,9 +194,9 @@
    that finds none is tried once more, resolving the directory again, in
    case the run moved to archived/ meanwhile; nil when there is none."
   [events-dir wf-id]
-  (let [wf-name (str wf-id)
-        lookup  #(->> (event-files (current-dir events-dir wf-name
-                                                (io/file (sinks/live-dir events-dir) wf-name)))
+  (let [live    (sinks/live-workflow-dir events-dir wf-id)  ; the writer's name for the id
+        wf-name (.getName live)
+        lookup  #(->> (event-files (current-dir events-dir wf-name live))
                       (keep read-event)
                       (some (fn [e] (when (= :workflow/started (:event/type e)) e))))]
     (or (lookup) (lookup))))
