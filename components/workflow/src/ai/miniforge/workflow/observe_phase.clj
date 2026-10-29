@@ -279,9 +279,11 @@
         start-time (System/currentTimeMillis)]
 
     (if (empty? pr-infos)
-      ;; No PRs to observe — skip phase
+      ;; No PRs to observe — skip phase. :started-at lets the lifecycle run
+      ;; the :leave handler, which reads the gate outcome.
       (-> ctx
           (assoc-in [:phase :name] :observe)
+          (assoc-in [:phase :started-at] start-time)
           (assoc-in [:phase :status] :completed)
           (assoc-in [:phase :result]
                     (response/success {:observe/status :skipped

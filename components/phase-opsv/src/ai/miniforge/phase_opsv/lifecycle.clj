@@ -28,7 +28,8 @@
    [ai.miniforge.phase-opsv.terminal-evidence :as terminal]
    [ai.miniforge.phase-opsv.flow :as flow]
    [ai.miniforge.phase-opsv.post-actuation-checkpoint :as checkpoint]
-   [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
+   [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]
+   [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -59,25 +60,50 @@
     (phase/enter-context retained phase-key (:agent config) (:gates config)
                          (:budget config) start-time (lifecycle-result/phase-result published))))
 
-(defn- ^{:stratum 0} leave-phase
-  "A phase its gates failed publishes no success events, is not finalized and
-   completes as failed."
+(defn- ^{:stratum 0} gate-failure-result
+  "An :opsv/actuate attempt its gates failed, recorded as a failed actuation
+   that keeps its output (:opsv/phase-failure names the gate failure). The
+   terminal path then journals its events, publishes its material and
+   finalizes evidence with :outcome/success false. A result that already
+   failed is returned unchanged."
+  [phase-result]
+  (let [output (:output phase-result)
+        message (msg/t :gate/actuation-gate-failed)]
+    (if (and (map? output) (not (anomaly/any-anomaly? output)))
+      (lifecycle-result/phase-result
+       (anomaly/anomaly :unauthorized message
+                        {:opsv/phase-output
+                         (assoc output :opsv/phase-failure {:anomaly/type :unauthorized
+                                                            :anomaly/message message})}))
+      phase-result)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} leave-phase
+  "A gate failure stops success claims, never the record of what happened.
+   Phase events are journaled either way (they record effects that already
+   ran). An :opsv/actuate attempt its gates failed is finalized as a failed
+   actuation, and its post-actuation snapshot is replaced by that failed
+   output, so recovery cannot finalize it as a success. The phase completes
+   as failed."
   [ctx]
   (let [phase-key (get-in ctx [:phase :name])
         gate-failed? (phase-gate/gate-failed? (:phase ctx))
+        actuation? (= :opsv/actuate phase-key)
         raw-result (get-in ctx [:phase :result])
-        published (if gate-failed?
-                    raw-result
-                    (lifecycle-result/after-publication ctx phase-key raw-result))
-        result (terminal/complete-failure! ctx phase-key published)
-        completed-ctx (assoc-in ctx [:phase :result] result)
+        recorded (if (and gate-failed? actuation?) (gate-failure-result raw-result) raw-result)
+        recovery-ctx (if (and gate-failed? actuation? (not= recorded raw-result))
+                       (checkpoint/capture ctx phase-key
+                                           (get-in recorded [:output :anomaly/data :opsv/phase-output]))
+                       ctx)
+        published (lifecycle-result/after-publication recovery-ctx phase-key recorded)
+        result (terminal/complete-failure! recovery-ctx phase-key published)
+        completed-ctx (assoc-in recovery-ctx [:phase :result] result)
         success? (and (not gate-failed?) (phase/result-succeeded? result))
         end-time (System/currentTimeMillis)
         duration-ms (- end-time (get-in ctx [:phase :started-at]))]
     (lifecycle-result/complete-phase completed-ctx phase-key success? end-time
                                      duration-ms)))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} enter-phase
   [phase-key transform config ctx]

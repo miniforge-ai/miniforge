@@ -96,6 +96,22 @@
 (defn ^{:stratum 0} events-of [history event-type]
   (filterv #(= event-type (:event/type %)) history))
 
+(deftest ^{:stratum 0} observe-with-no-prs-still-honors-a-denying-gate-test
+  (testing "the real :observe enter skips when there are no PRs; its :leave still
+            runs and fails the phase its gate denied"
+    (let [ctx {:execution/id (random-uuid)
+               :event-stream (events/create-event-stream {:sinks []})
+               :execution/current-phase :observe
+               :execution/metrics {} :execution/errors []
+               :execution/response-chain (response/create :observe-gate)}
+          [left result] (lifecycle/execute-phase-lifecycle
+                         (phase/get-phase-interceptor {:phase :observe :gates [:review-approved]})
+                         ctx)]
+      (is (= :skipped (get-in result [:result :output :observe/status])) "precondition: no PRs")
+      (is (= :deny (get-in result [:phase/decision-envelope :envelope/decision])))
+      (is (= :failed (:status result)))
+      (is (not (some #{:observe} (get-in left [:execution :phases-completed])))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} response-chain-records-phases-test
@@ -165,7 +181,8 @@
                                           (fn [_ctx _phase result] (swap! published inc) result)]
                               (lifecycle/execute-phase-lifecycle interceptor ctx))]
           (is (= [:review-approved] (get-in interceptor [:config :gates])))
-          (is (zero? @published) "no OPSV success publication or finalization")
+          (is (= (if (= :opsv/plan phase-kw) 1 0) @published)
+              "OPSV still journals the events of what the phase did")
           (is (= :deny (get-in result [:phase/decision-envelope :envelope/decision])))
           (is (= :failed (:status result)))
           (is (not (some #{phase-kw} (get-in left [:execution :phases-completed])))))))))
