@@ -41,6 +41,11 @@
 
 (defn- ^{:stratum 0} err-rules [r] (set (map :security/rule (get-in r [:error :data :security/findings]))))
 
+(defn- ^{:stratum 0} set-env
+  "A plan's :env without its empty values."
+  [plan]
+  (into {} (remove (comp #{""} val)) (:env plan)))
+
 (deftest ^{:stratum 0} release-keeps-git-remote-until-removed-test
   (testing "the recorded remote survives a release whose container removal
             failed, so the capsule's work can still be persisted, and goes
@@ -108,7 +113,8 @@
           "env keys normalize to the schema's string->string shape")
       (is (= {"PORT" "8080" "DEBUG" "true"}
              (:env (oci-cli/build-launch-plan valid-digest
-                                              {:env {:PORT 8080 :DEBUG true}})))
+                                              {:env {:PORT 8080 :DEBUG true}
+                                               :trust-level :trusted})))
           "non-string env values stringify to their wire form")
       (is (= [{:host-path "/workspace" :container-path "/w" :read-only? false}]
              (:mounts plan)))
@@ -136,6 +142,18 @@
       (with-redefs [config/load-merged-config (constantly {:llm {:backend :cursor}})]
         (is (= {"CURSOR_API_KEY" "c"}
                (:env (oci-cli/build-launch-plan valid-digest {:env env}))))))))
+
+(deftest ^{:stratum 1} build-launch-plan-allows-only-listed-env-for-untrusted-test
+  (testing "an :untrusted plan keeps a shell's basics, LC_*, CLAUDE_CODE_*
+            knobs and :env-passthrough names, and drops every other name,
+            such as AUTHORIZATION, PASSPHRASE or CLAUDE_CODE_OAUTH_TOKEN"
+    (is (= {"PATH" "/bin" "LC_ALL" "C" "CLAUDE_CODE_MAX_OUTPUT_TOKENS" "8000" "MY_FLAG" "1"}
+           (set-env (oci-cli/build-launch-plan
+                     valid-digest
+                     {:env {"PATH" "/bin" "LC_ALL" "C" "CLAUDE_CODE_MAX_OUTPUT_TOKENS" "8000"
+                            "MY_FLAG" "1" "OTHER" "x" "AUTHORIZATION" "Bearer t"
+                            "PASSPHRASE" "p" "CLAUDE_CODE_OAUTH_TOKEN" "o"}
+                      :env-passthrough [:MY_FLAG]}))))))
 
 (deftest ^{:stratum 1} build-launch-plan-treats-unknown-trust-as-untrusted-test
   (testing "a nil or unknown :trust-level launches as :untrusted: secrets
