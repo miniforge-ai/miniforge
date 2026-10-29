@@ -42,29 +42,36 @@
    [:total-attempts nat-int?]
    [:started-at inst?]
    [:questions-answered nat-int?]
-   [:fixes-pushed nat-int?]])
+   [:fixes-pushed nat-int?]
+   ;; What the counters above are derived from (see `with-counts`).
+   [:attempts {:optional true} [:map-of :string int?]]
+   [:answered {:optional true} [:set int?]]
+   [:pushed {:optional true} [:set :string]]
+   [:floor {:optional true} [:maybe map?]]])
 
 (defn- ^{:stratum 0} validate!
   [result-schema value]
   (schema/validate result-schema value))
 
-;; Budget operations
-(defn ^{:stratum 0} record-fix-attempt
-  "Record a fix attempt for a comment. Returns updated budget state."
-  [budget comment-id]
-  (-> budget
-      (update-in [:comment-attempts comment-id] (fnil inc 0))
-      (update :total-attempts inc)))
-
-(defn ^{:stratum 0} record-question-answered
-  "Record a question answered (does not consume fix budget)."
+(defn ^{:stratum 0} with-counts
+  "`budget` with its counters derived from what it recorded by id: fix
+   attempts (:attempts, attempt id → comment id), answered comment ids
+   (:answered) and pushed-fix ids (:pushed), on top of :floor, the counts
+   saved before ids were recorded. A budget without :attempts predates ids;
+   its counters become the floor. Counting ids makes recording, merging and
+   replaying the same change idempotent."
   [budget]
-  (update budget :questions-answered inc))
-
-(defn ^{:stratum 0} record-fix-pushed
-  "Record a successful fix push."
-  [budget]
-  (update budget :fixes-pushed inc))
+  (let [b     (if (contains? budget :attempts)
+                budget
+                (assoc budget :attempts {} :answered #{} :pushed #{}
+                       :floor (select-keys budget [:total-attempts :comment-attempts
+                                                   :questions-answered :fixes-pushed])))
+        floor (:floor b)]
+    (assoc b
+           :total-attempts     (+ (get floor :total-attempts 0) (count (:attempts b)))
+           :comment-attempts   (merge-with + (get floor :comment-attempts {}) (frequencies (vals (:attempts b))))
+           :questions-answered (+ (get floor :questions-answered 0) (count (:answered b)))
+           :fixes-pushed       (+ (get floor :fixes-pushed 0) (count (:pushed b))))))
 
 (defn ^{:stratum 0} comment-attempts-remaining
   "How many fix attempts remain for a specific comment."
@@ -111,21 +118,46 @@
      :started-at (java.util.Date. 0) :questions-answered 0 :fixes-pushed 0
      :load-error load-error}))
 
-(defn ^{:stratum 0} merge-budgets
-  "`mine` with every counter at least its value in `on-disk`, each limit at
-   most its value there, and the earlier start time. The merge only moves
-   toward exhaustion: a monitor holding a stale copy or other limits cannot
-   lower what another saved or reopen a budget exhausted on disk. Attempts
-   made at once by two monitors on one PR are not summed."
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} merge-budgets
+  "The union of what `on-disk` and `mine` recorded by id (and the larger
+   :floor counts), each limit at its lower value and the earlier start time,
+   with counters derived from that. Recording is by id, so a change merged
+   or replayed twice counts once, and the merge only moves toward
+   exhaustion: a stale copy or other limits cannot lower what another
+   monitor saved or reopen a budget exhausted on disk."
   [on-disk mine]
   (if-not on-disk
-    mine
-    (-> (merge-with max (select-keys on-disk [:total-attempts :questions-answered :fixes-pushed]) mine)
-        (update :limits #(merge-with min (:limits on-disk) %))
-        (update :comment-attempts #(merge-with max (:comment-attempts on-disk) %))
-        (update :started-at #(if (neg? (compare (:started-at on-disk) %)) (:started-at on-disk) %)))))
+    (with-counts mine)
+    (let [disk (with-counts on-disk)]
+      (with-counts
+        (-> (with-counts mine)
+            (update :attempts merge (:attempts disk))
+            (update :answered (fnil into #{}) (:answered disk))
+            (update :pushed (fnil into #{}) (:pushed disk))
+            (update :floor #(merge-with (fn [a b] (if (map? a) (merge-with max a b) (max a b))) (:floor disk) %))
+            (update :limits #(merge-with min (:limits disk) %))
+            (update :started-at #(if (neg? (compare (:started-at disk) %)) (:started-at disk) %)))))))
 
-;------------------------------------------------------------------------------ Layer 1
+;; Budget operations: each records an id, so recording it again changes nothing
+(defn ^{:stratum 1} record-fix-attempt
+  "Record fix attempt `attempt-id` (default: a new id) on `comment-id`."
+  ([budget comment-id]
+   (record-fix-attempt budget comment-id (str (random-uuid))))
+  ([budget comment-id attempt-id]
+   (with-counts (assoc-in (with-counts budget) [:attempts attempt-id] comment-id))))
+
+(defn ^{:stratum 1} record-question-answered
+  "Record that the question in comment `comment-id` was answered (does not
+   consume fix budget)."
+  [budget comment-id]
+  (with-counts (update (with-counts budget) :answered (fnil conj #{}) comment-id)))
+
+(defn ^{:stratum 1} record-fix-pushed
+  "Record that fix `fix-id` (its attempt id) was pushed."
+  [budget fix-id]
+  (with-counts (update (with-counts budget) :pushed (fnil conj #{}) fix-id)))
 
 ;; Budget state
 (defn ^{:stratum 1} create-budget
@@ -146,7 +178,10 @@
       :total-attempts 0
       :started-at (java.util.Date.)
       :questions-answered 0
-      :fixes-pushed 0})))
+      :fixes-pushed 0
+      :attempts {}
+      :answered #{}
+      :pushed #{}})))
 
 (defn ^{:stratum 1} time-remaining-hours
   "Hours remaining before abandon deadline."
@@ -199,7 +234,7 @@
         loaded (if file (store/read-map file) (store/no-repo repo-slug))]
     (cond
       (nil? loaded)                    nil
-      (valid-budget? loaded pr-number) loaded
+      (valid-budget? loaded pr-number) (with-counts loaded)
       :else (exhausted-budget pr-number (:anomaly/message (if (anomaly/anomaly? loaded)
                                                             loaded
                                                             (invalid-budget file pr-number)))))))

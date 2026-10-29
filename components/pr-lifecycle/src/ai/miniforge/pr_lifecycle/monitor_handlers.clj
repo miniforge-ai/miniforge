@@ -79,14 +79,14 @@
      :exhausted-by exhausted}))
 
 (defn- ^{:stratum 0} reserve-attempt
-  "`pr-budget` with one more attempt on `comment-id`, or, when a limit is
-   already reached, an :exhausted anomaly carrying it."
-  [comment-id pr-budget]
+  "`pr-budget` with attempt `attempt-id` on `comment-id` recorded, or, when
+   a limit is already reached, an :exhausted anomaly carrying it."
+  [comment-id attempt-id pr-budget]
   (if-let [exhausted (budget/any-budget-exhausted? pr-budget comment-id)]
     (anomaly/anomaly :exhausted
                      (str "Budget exhausted for PR #" (:pr-number pr-budget) ": " (name exhausted))
                      {:budget pr-budget :exhausted-by exhausted})
-    (budget/record-fix-attempt pr-budget comment-id)))
+    (budget/record-fix-attempt pr-budget comment-id attempt-id)))
 
 (defn ^{:stratum 0} handle-question
   "Handle a question comment by generating and posting a reply."
@@ -128,7 +128,7 @@
                 (state/emit! monitor (mevents/reply-posted pr-number comment-id
                                                            :question-reply))
                 (state/change-budget! monitor pr-number (state/get-or-create-budget monitor pr-number)
-                                      budget/record-question-answered :retry)
+                                      #(budget/record-question-answered % comment-id) :retry)
                 (swap! monitor update-in [:evidence :questions-answered] conj
                        {:comment-id comment-id :at (java.util.Date.)})
                 (swap! monitor update-in [:evidence :comments-addressed] inc)
@@ -194,8 +194,9 @@
           {:success? false :reason :no-generate-fn})
         ;; Checked and recorded against the budget on disk, under its lock:
         ;; another monitor may have spent attempts since this one cached it.
-        (let [reserved (state/change-budget! monitor pr-number pr-budget
-                                             (partial reserve-attempt comment-id))]
+        (let [attempt-id (str (random-uuid))
+              reserved   (state/change-budget! monitor pr-number pr-budget
+                                               (partial reserve-attempt comment-id attempt-id))]
           (cond
             (= :exhausted (:anomaly/type reserved))
             (let [{:keys [budget exhausted-by]} (:anomaly/data reserved)]
@@ -231,7 +232,8 @@
                               :auto-resolve-comments true)]
               (if (succeeded? fix-result)
                 (let [commit-sha (:commit-sha fix-result)]
-                  (state/change-budget! monitor pr-number reserved budget/record-fix-pushed :retry)
+                  (state/change-budget! monitor pr-number reserved
+                                        #(budget/record-fix-pushed % attempt-id) :retry)
                   (state/emit! monitor (mevents/fix-pushed pr-number comment-id commit-sha))
                   (let [reply-body (str "Addressed in commit " commit-sha
                                         ".\n\n---\n*Fixed by miniforge's autonomous PR monitor.*")]
