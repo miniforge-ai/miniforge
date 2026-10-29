@@ -62,13 +62,15 @@
 (deftest ^{:stratum 1} fleet-add-cmd-no-repo-prints-error-test
   (testing "Prints error when no repo is provided"
     (let [output (with-out-str
-                   (sut/fleet-add-cmd {:repo nil} nil default-config))]
+                   (binding [*err* *out*]
+                     (sut/fleet-add-cmd {:repo nil} nil default-config)))]
       (is (.contains output "Usage")))))
 
 (deftest ^{:stratum 1} fleet-remove-cmd-no-repo-prints-error-test
   (testing "Prints error when no repo is provided"
     (let [output (with-out-str
-                   (sut/fleet-remove-cmd {:repo nil} nil default-config))]
+                   (binding [*err* *out*]
+                     (sut/fleet-remove-cmd {:repo nil} nil default-config)))]
       (is (.contains output "Usage")))))
 
 ;------------------------------------------------------------------------------ Layer 2
