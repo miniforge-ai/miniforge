@@ -476,6 +476,7 @@
     (write-discovery-file! actual-port (connect-host host))
     {:server server
      :port actual-port
+     :url (str "http://" (connect-host host) ":" actual-port)
      :state state
      :watcher-cleanup watcher-cleanup}))
 
