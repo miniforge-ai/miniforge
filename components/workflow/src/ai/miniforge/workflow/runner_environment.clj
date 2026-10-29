@@ -226,8 +226,9 @@
    runs before every commit or push). When :no-secrets denied it, or the
    scan finds a secret, nothing is committed at all: a commit would carry the secret into
    history, and the next successful phase's push sends history. When
-   another gate denied it, the work is committed but not pushed
-   (`:push? false`), and repair runs on it."
+   another gate denied it, or the worktree cannot be scanned, the work is
+   committed but not pushed (`:push? false`); the next persist that can
+   scan it and finds nothing pushes the held commits."
   [context phase-ctx]
   (let [executor (get context :execution/executor)
         env-id   (get context :execution/environment-id)
@@ -240,6 +241,10 @@
         phase    (boundary-phase phase-ctx)
         ;; The phase that just ran is the one the pre-step context was on.
         denial   (gate-denial phase-ctx (boundary-phase context))
+        ;; The :no-secrets check over what a commit or push would publish,
+        ;; run only when the persist would otherwise go ahead.
+        scan     (delay (gate/outgoing-secrets (assoc context :execution/worktree-path workdir)))
+        found?   (fn [error-type] (some #(= error-type (:type %)) (:errors @scan)))
         ;; Governed mode pushes to a remote via the capsule, so it persists with
         ;; or without a host worktree. LOCAL mode archives a git bundle of the
         ;; worktree — with NO worktree-path there is nothing to archive and the
@@ -255,10 +260,7 @@
                    ;; Whatever phase is persisting, a commit or push must not
                    ;; carry a credential an earlier phase left in the worktree
                    ;; (a redirect after a denial runs other phases over it).
-                   (some #(= :secrets-detected (:type %))
-                         (:errors (gate/outgoing-secrets
-                                   (assoc context :execution/worktree-path workdir))))
-                   :secrets-detected)]
+                   (found? :secrets-detected) :secrets-detected)]
     (if skip
       ;; A skipped persist is a silent loss of work unless it is said out
       ;; loud: trap-bench series 4/5 read an allowed implement whose fix
@@ -271,10 +273,17 @@
                             :worktree? (some? workdir)}})
           nil)
       (try
-        (let [result (dag/persist-workspace! executor env-id
+        (let [;; Unscanned work is committed but held back from the remote
+              ;; until a later persist can inspect it and finds nothing.
+              hold   (or denial (when (found? :worktree-uninspectable) :worktree-uninspectable))
+              _      (when (= :worktree-uninspectable hold)
+                       (log/warn env-logger :workflow :workflow/persist-unscanned
+                                 {:message (messages/t :env/persist-unscanned {:phase (name phase)})
+                                  :data {:phase phase :reason hold}}))
+              result (dag/persist-workspace! executor env-id
                                              (cond-> (-> (persist-opts context phase env-id)
                                                          (assoc :workdir workdir))
-                                               denial (assoc :push? false)))
+                                               hold (assoc :push? false)))
               data   (when (dag/ok? result) (dag/unwrap result))]
           (cond
             (not (dag/ok? result))
@@ -287,7 +296,7 @@
             (and (:persisted? data) (false? (:pushed? data)))
             (log/warn env-logger :workflow :workflow/persist-held
                       {:message (messages/t :env/persist-held {:phase (name phase)})
-                       :data {:phase phase :reason denial :branch (:branch data)}})
+                       :data {:phase phase :reason hold :branch (:branch data)}})
 
             (:persisted? data)
             (notifications/announce! env-logger context phase env-id data)

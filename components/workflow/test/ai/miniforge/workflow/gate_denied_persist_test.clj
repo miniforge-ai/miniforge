@@ -126,3 +126,12 @@
       (spit (str dir "/config.py") "x = 1\n")
       (is (some #(str/includes? % "git push")
                 (governed-phase! phase-test-support/runner-test-plan [] {:plan/tasks []} extra))))))
+
+(deftest ^{:stratum 2} an-unscannable-worktree-is-held-not-pushed-test
+  (testing "a later phase whose worktree git cannot read commits locally and pushes nothing"
+    (let [dir  (str (java.nio.file.Files/createTempDirectory
+                     "gate-denied-not-a-repo" (make-array java.nio.file.attribute.FileAttribute 0)))
+          cmds (governed-phase! phase-test-support/runner-test-plan [] {:plan/tasks []}
+                                {:execution/worktree-path dir})]
+      (is (some #(str/includes? % "commit") cmds))
+      (is (not-any? #(str/includes? % "push") cmds)))))
