@@ -83,5 +83,5 @@
   :model-selection/fallback
   "No model met the constraints for task type {task-type}; using fallback {model}"
 
-  :model-selection/no-local-model
-  "No local model fits task type {task-type} with strategy {strategy}; :require-local refuses {model}, which is not local"}}
+  :model-selection/constraints-unmet
+  "No model meets the constraints for task type {task-type} with strategy {strategy}; {model} fails {unmet}"}}

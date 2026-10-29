@@ -76,7 +76,8 @@
 
 (defn ^{:stratum 2} start-spec!
   "`move-spec-to-in-progress!` for a run's input, keeping its spec
-   traceable. Takes the spec file's digest before the move and returns
+   traceable. Takes the spec's digest (the one its reader recorded, else
+   the file's, before the move) and returns
    `[provenance workflow-input]`: the provenance updated as
    `move-spec-to-in-progress!` does, and the input carrying the file's
    absolute location after the move (`:spec/location`) and that digest
@@ -84,7 +85,10 @@
    can check the spec. `:spec/path` stays as given: PR provenance uses it."
   [workflow-input provenance]
   (let [spec-path (:spec/path workflow-input)
-        spec-hash (some-> spec-path workflow/spec-file-hash)
+        ;; The digest of the text that was parsed, when the reader took
+        ;; one; hashing the file now could describe an edited spec.
+        spec-hash (or (get-in workflow-input [:provenance :content-hash])
+                      (some-> spec-path workflow/spec-file-hash))
         new-path (move-spec! provenance :in-progress)
         location (or new-path spec-path)]
     [(cond-> provenance new-path (assoc :source-file new-path))

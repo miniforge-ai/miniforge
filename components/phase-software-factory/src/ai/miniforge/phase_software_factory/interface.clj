@@ -18,12 +18,13 @@
 
 (ns ai.miniforge.phase-software-factory.interface
   "Software-factory phases pack. Requiring this namespace registers
-   :explore, :plan, :implement, :verify, :review, and :release phase
+   :explore, :plan, :implement, :verify, :review, :release and :pr-monitor phase
    interceptors on the canonical phase registry (see :phase component)."
   (:require
    [ai.miniforge.phase-software-factory.explore]
    [ai.miniforge.phase-software-factory.implement]
    [ai.miniforge.phase-software-factory.plan]
+   [ai.miniforge.phase-software-factory.pr-monitor]
    [ai.miniforge.phase-software-factory.release]
    [ai.miniforge.phase-software-factory.review]
    [ai.miniforge.phase-software-factory.verify]))

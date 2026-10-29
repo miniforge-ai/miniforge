@@ -17,6 +17,11 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} spec-content-hash
+  "SHA-256 of spec text, as `spec-file-hash` takes it of a file's text."
+  [content]
+  (config/sha256-hex content))
+
 (defn ^{:stratum 0} spec-file-hash
   "SHA-256 of the file at `path`, nil when it is not a readable file. The
    one digest both the recorded hash and the resume check use."
