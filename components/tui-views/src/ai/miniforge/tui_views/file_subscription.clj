@@ -18,12 +18,15 @@
 (ns ai.miniforge.tui-views.file-subscription
   "File-based event subscription for standalone TUI mode.
 
-   Tail-follows ~/.miniforge/events/*.edn files and dispatches parsed
-   events to the TUI dispatch-fn. Enables the TUI to monitor running
-   workflows without an in-memory event stream — cross-process via
-   the filesystem protocol used by event-stream file-sink."
+   Follows the event-stream file sink's workflow directories
+   (`~/.miniforge/events/live/<id>/`, `archived/<id>/`, one transit-JSON
+   file per event) through `es/start-layout-tail!`, and still tail-follows
+   legacy ~/.miniforge/events/*.edn files. Dispatches translated events to
+   the TUI dispatch-fn, so the TUI monitors running workflows without an
+   in-memory event stream."
   (:require
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.event-stream.interface :as es]
    [clojure.java.io :as io]
    [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.tui-views.subscription :as subscription]))
@@ -75,6 +78,12 @@
       (when-let [event (persistence/safe-read-edn line)]
         (when-let [msg (subscription/translate-event event)]
           (dispatch-fn msg))))))
+
+(defn ^{:stratum 0} dispatch-event!
+  "Translate one event-stream event and dispatch the message, if any."
+  [dispatch-fn event]
+  (when-let [msg (subscription/translate-event event)]
+    (dispatch-fn msg)))
 
 (defn ^{:stratum 0} stop-subscription!
   "Stop the file-subscription polling thread."
@@ -141,15 +150,18 @@
 (defn ^{:stratum 4} subscribe-to-files!
   "Subscribe to workflow event files via tail-following.
 
-   Scans ~/.miniforge/events/ for existing .edn files, hydrates initial
-   state from all existing lines, then polls for new lines and new files
-   on a background daemon thread.
+   Follows the file sink's workflow directories with
+   `es/start-layout-tail!`: runs active at start are read in full, then
+   new events as they are written. Also scans ~/.miniforge/events/ for
+   legacy .edn files, hydrates initial state from their lines when
+   :hydrate-existing? (default true), then polls for new lines and new
+   files. Both run on background daemon threads.
 
    Arguments:
    - dispatch-fn - (fn [msg]) to send TUI messages into the Elm loop
    - opts        - {:poll-ms 500, :scan-ms 2000} polling intervals
 
-   Returns: cleanup function (fn [] ...) to call on shutdown."
+   Returns: cleanup function (fn [] ...) that stops both."
   [dispatch-fn & [opts]]
   (let [poll-ms   (get opts :poll-ms 500)
         scan-ms   (get opts :scan-ms 2000)
@@ -162,8 +174,12 @@
         thread    (doto (Thread. #(poll-loop running? tracked dispatch-fn dir poll-ms scan-ms))
                     (.setDaemon true)
                     (.setName "tui-file-subscription")
-                    (.start))]
-    (partial stop-subscription! running? thread)))
+                    (.start))
+        stop-tail (es/start-layout-tail! dir (partial dispatch-event! dispatch-fn)
+                                         {:poll-ms poll-ms :thread-name "tui-layout-tail"})]
+    (fn []
+      (stop-subscription! running? thread)
+      (stop-tail))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
