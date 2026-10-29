@@ -73,7 +73,8 @@ A public bind requires operator login (`MINIFORGE_WEB_USERNAME` and
 `MINIFORGE_WEB_PASSWORD`). The dashboard does not terminate TLS, so put a
 public bind behind a TLS proxy that sets `X-Forwarded-Proto: https`, and
 set `MINIFORGE_WEB_TRUST_PROXY=true` so the dashboard believes that
-header. Origins are then compared as `https` on port 443, and the session
+header (an explicit `:trust-proxy? false` option overrides it, and a
+loopback bind ignores forwarded headers). Origins are then compared as `https` on port 443, and the session
 cookie carries the `Secure` flag. Without the setting, X-Forwarded-Proto
 is ignored.
 

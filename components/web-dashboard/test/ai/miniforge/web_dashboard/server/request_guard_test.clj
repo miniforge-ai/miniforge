@@ -106,6 +106,13 @@
         (is (some? (upgrade "https://dashboard.example" untrusted)))
         (is (nil? (upgrade "http://dashboard.example" untrusted)))))))
 
+(deftest ^{:stratum 0} explicit-trust-proxy-false-wins-over-the-environment-test
+  (is (false? (server/trust-proxy-setting false "true")))
+  (is (true? (server/trust-proxy-setting true nil)))
+  (is (true? (server/trust-proxy-setting nil "TRUE")))
+  (is (false? (server/trust-proxy-setting nil nil)))
+  (is (false? (server/trust-proxy-setting nil "yes"))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} with-dashboard
@@ -172,6 +179,20 @@
   (testing "on another port it is not"
     (is (some? (guard/refusal (get-request "localhost")
                               {:loopback? true :port 7878 :host "127.0.0.1"})))))
+
+(deftest ^{:stratum 1} loopback-bind-ignores-forwarded-proto-test
+  (testing "with trust-proxy on a loopback listener, local http requests still pass"
+    (let [bind {:loopback? true :port 7878 :host "127.0.0.1" :trust-proxy? true}]
+      (is (nil? (guard/refusal (get-request "localhost:7878" {"x-forwarded-proto" "https"}) bind)))
+      (is (nil? (guard/refusal {:request-method :post :uri "/api/events/ingest" :scheme :http
+                                :headers {"host" "localhost:7878"
+                                          "x-forwarded-proto" "https"
+                                          "origin" "http://localhost:7878"
+                                          "content-type" "application/json"}}
+                               bind)))
+      (is (some? (guard/refusal (get-request "attacker.example:7878" {"x-forwarded-proto" "https"})
+                                bind))
+          "the Host check still applies"))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

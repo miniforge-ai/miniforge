@@ -110,9 +110,14 @@
 
 (defn ^{:stratum 1} request-origin
   "The normalized origin the request was addressed to: its external scheme
-   and its Host header."
-  [req {:keys [trust-proxy?]}]
-  (normalize-origin (str (external-scheme req trust-proxy?) "://"
+   and its Host header. A loopback bind ignores forwarded headers even with
+   `:trust-proxy?`: local clients reach it directly over plain HTTP (the
+   server has no TLS), its own origins are `http://<loopback>:<port>`, and
+   a proxy in front of it would present a host the loopback Host check
+   refuses anyway, so honouring X-Forwarded-Proto there could only turn
+   same-machine requests into 403s."
+  [req {:keys [loopback? trust-proxy?]}]
+  (normalize-origin (str (external-scheme req (and trust-proxy? (not loopback?))) "://"
                          (get-in req [:headers "host"]))))
 
 (defn ^{:stratum 1} ingest-token-valid?

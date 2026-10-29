@@ -72,6 +72,15 @@
       (and (str/includes? h ":") (not (str/starts-with? h "["))) (str "[" h "]")
       :else h)))
 
+(defn ^{:stratum 0} trust-proxy-setting
+  "Whether to trust a TLS proxy's X-Forwarded-Proto: the `:trust-proxy?`
+   option when given (an explicit false wins), else `env-value` of
+   MINIFORGE_WEB_TRUST_PROXY equal to \"true\"."
+  [option env-value]
+  (if (nil? option)
+    (= "true" (some-> env-value str/trim str/lower-case))
+    (boolean option)))
+
 (defn ^{:stratum 0} dashboard-stream
   "The stream the dashboard reads: `event-stream` when the caller supplies
    one, else a dashboard-local stream. That stream has NO file sinks, so
@@ -454,14 +463,14 @@
    - :repo-dag-manager - Repo DAG manager instance
    - :auth - Optional dashboard auth config
    - :trust-proxy? - Take the client's scheme from X-Forwarded-Proto, for a
-                     dashboard behind a TLS proxy (default
-                     MINIFORGE_WEB_TRUST_PROXY=true, else false)"
+                     public bind behind a TLS proxy; an explicit false
+                     overrides MINIFORGE_WEB_TRUST_PROXY=true (see
+                     `trust-proxy-setting`)"
   [{:keys [port host event-stream pr-train-manager repo-dag-manager auth trust-proxy?]
     :or {port (:port defaults)}} resources]
   (let [host (or host (System/getenv "MINIFORGE_WEB_HOST") (:host defaults))
-        trust-proxy? (boolean (or trust-proxy?
-                                  (= "true" (some-> (System/getenv "MINIFORGE_WEB_TRUST_PROXY")
-                                                    str/lower-case))))
+        trust-proxy? (trust-proxy-setting trust-proxy?
+                                          (System/getenv "MINIFORGE_WEB_TRUST_PROXY"))
         auth-state (assoc (auth/build-auth-state auth)
                           :public-bind? (not (loopback-host? host))
                           :trust-proxy? trust-proxy?)
