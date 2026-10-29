@@ -21,6 +21,8 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.gate.interface :as gate]
+   ;; Registers the :deploy/no-secrets-in-manifests detector.
+   [ai.miniforge.phase-deployment.manifest-credentials]
    [ai.miniforge.phase-deployment.messages :as msg]
    [ai.miniforge.phase-deployment.policy :as policy]
    [ai.miniforge.policy-pack.interface :as policy-pack])

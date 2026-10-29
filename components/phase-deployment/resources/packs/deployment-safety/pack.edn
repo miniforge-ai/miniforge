@@ -65,13 +65,15 @@
    :rule/severity :critical
    :rule/category :security
    :rule/applies-to {:phases #{:deploy}}
-   :rule/detection {:type :content-scan
-                    ;; Quoted values, then YAML plain scalars. The key must end at the
-                    ;; keyword (so passwordRef:, secretName: and secretKeyRef: do not
-                    ;; match); a plain scalar may not start with a YAML indicator or $
-                    ;; (a placeholder) and must be 8+ characters.
-                    :patterns ["(?i)(password|secret|api[_-]?key|token)\\s*[:=]\\s*[\"'][^\"']{8,}"
-                               "(?i)(password|secret|api[_-]?key|token)\\s*[:=]\\s*[^\\s\"'#{}\\[\\],&*!|>%@`$][^\\s#]{7,}"
-                               "(?i)PRIVATE KEY"]}
+   ;; Structural check on the parsed manifests: Secret data, credential-named
+   ;; env vars with a literal value, credential-named ConfigMap keys. The line
+   ;; patterns apply only to content that is not YAML.
+   :rule/detection {:type :custom
+                    :custom-fn ai.miniforge.phase-deployment.manifest-credentials/check
+                    :detector-config
+                    {:allow-secret-data? false
+                     :fallback-patterns ["(?i)(password|secret|api[_-]?key|token)\\s*[:=]\\s*[\"'][^\"']{8,}"
+                                         "(?i)(password|secret|api[_-]?key|token)\\s*[:=]\\s*[^\\s\"'#{}\\[\\],&*!|>%@`$][^\\s#]{7,}"
+                                         "(?i)PRIVATE KEY"]}}
    :rule/enforcement {:action :hard-halt
                       :message "Potential secrets detected in manifests. Use Secret Manager instead."}}]}
