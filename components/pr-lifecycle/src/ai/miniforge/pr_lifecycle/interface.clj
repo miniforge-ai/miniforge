@@ -42,6 +42,8 @@
    [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
    [ai.miniforge.pr-lifecycle.listener-registry :as listener-registry]
    [ai.miniforge.pr-lifecycle.policy-eval-responder :as policy-eval-responder]
+   [ai.miniforge.pr-lifecycle.policy-eval.fs :as policy-fs]
+   [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
    [ai.miniforge.pr-lifecycle.resume-dispatcher :as resume-dispatcher]
    [ai.miniforge.pr-lifecycle.review-scheduler :as review-scheduler]
    [ai.miniforge.pr-lifecycle.triage :as triage]
@@ -567,6 +569,28 @@
 
    Returns DAG result with the full per-pass summary."
   policy-eval-responder/respond-to-policy-comments!)
+
+;; Worktree path guards (shared with fix-loop/apply-fix-to-worktree)
+(def ^{:stratum 0} safe-worktree-path
+  "Resolve `relative-path` under `worktree-root` for a read or write.
+   Returns the canonical path, or nil when it escapes the worktree or
+   reaches git metadata: the git dir, common dir or hooks dir git reports,
+   a `.git` component, or an untracked file a symlink in that metadata
+   points at. Refuses every path when git cannot report its metadata.
+   Args: [worktree-root relative-path]."
+  policy-fs/safe-worktree-path)
+
+(def ^{:stratum 0} safe-worktree-entry-path
+  "Like `safe-worktree-path` for a delete: checks the directory entry
+   `relative-path` names without following a final symlink. Returns its
+   absolute path or nil. Args: [worktree-root relative-path]."
+  policy-fs/safe-worktree-entry-path)
+
+(def ^{:stratum 0} hooks-disabled-git-args
+  "Global git options that stop every hook from running. The fix loop
+   puts them before each git command it issues after writing generated
+   files; other writers of agent output can do the same."
+  git-dir/hooks-disabled-args)
 
 ;; Fix loop
 (def ^{:stratum 0} create-fix-context
