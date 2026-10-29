@@ -15,16 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-deployment.shell.pulumi
   "Pulumi CLI wrappers for deployment phases."
   (:require [ai.miniforge.phase-deployment.shell.exec :as exec]
             [ai.miniforge.phase-deployment.shell.timeouts :as timeouts]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pulumi wrappers
 
-(defn pulumi!
+;; Pulumi wrappers
+(defn ^{:stratum 0} pulumi!
   "Execute a Pulumi CLI command."
   [subcommand stack-dir & {:keys [stack json? yes? extra-args timeout-ms env]
                            :or {json? (contains? #{"preview" "up" "destroy" "stack"} subcommand)
@@ -43,7 +42,17 @@
       (exec/with-parsed-json result)
       result)))
 
-(defn pulumi-preview!
+(defn ^{:stratum 0} pulumi-outputs!
+  [stack-dir & {:keys [stack]}]
+  (let [args (cond-> ["stack" "output" "--json"]
+               stack (into ["--stack" stack]))]
+    (exec/with-parsed-json
+     (exec/sh-with-timeout "pulumi" args :dir stack-dir
+                           :timeout-ms (get timeouts/timeouts :pulumi-outputs-ms 30000)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} pulumi-preview!
   [stack-dir & {:keys [stack extra-args timeout-ms env]}]
   (pulumi! "preview"
            stack-dir
@@ -53,7 +62,7 @@
            :timeout-ms timeout-ms
            :env env))
 
-(defn pulumi-up!
+(defn ^{:stratum 1} pulumi-up!
   [stack-dir & {:keys [stack extra-args timeout-ms env]}]
   (pulumi! "up"
            stack-dir
@@ -63,14 +72,6 @@
            :extra-args extra-args
            :timeout-ms timeout-ms
            :env env))
-
-(defn pulumi-outputs!
-  [stack-dir & {:keys [stack]}]
-  (let [args (cond-> ["stack" "output" "--json"]
-               stack (into ["--stack" stack]))]
-    (exec/with-parsed-json
-     (exec/sh-with-timeout "pulumi" args :dir stack-dir
-                           :timeout-ms (get timeouts/timeouts :pulumi-outputs-ms 30000)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
