@@ -111,6 +111,15 @@
         p/get-config
         :backend)))
 
+(defn ^{:stratum 0} client-model
+  "Return the model id an LLM client sends, or nil when it names none (the
+   backend's default applies) or `client` is not an LLMClient."
+  [client]
+  (when (satisfies? p/LLMClient client)
+    (-> client
+        p/get-config
+        :model)))
+
 (defn ^{:stratum 0} mock-client
   "Create a mock client for testing.
 
