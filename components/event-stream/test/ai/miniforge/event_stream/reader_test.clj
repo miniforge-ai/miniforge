@@ -113,11 +113,43 @@
       (spit (io/file dir "20260420T000002Z-bad.json") "{{{ not json")
       (write-event! dir "20260420T000003Z-ok.json"
                     {"~:event/type" "~:workflow/completed"})
-      (testing "corrupt file is silently dropped, valid events still returned"
+      (testing "corrupt file is skipped, valid events still returned"
         (let [events (reader/read-workflow-events dir)]
           (is (= 2 (count events)))
           (is (= :workflow/started (:event/type (first events))))
           (is (= :workflow/completed (:event/type (last events)))))))))
+
+(deftest ^{:stratum 1} read-workflow-events-reports-unreadable-files-test
+  (testing "the skipped files are named in the result's metadata, in filename order"
+    (with-temp-dir
+      (fn [dir]
+        (write-event! dir "20260420T000001Z-good.json"
+                      {"~:event/type" "~:workflow/started"})
+        (spit (io/file dir "20260420T000002Z-bad.json") "{{{ not json")
+        (spit (io/file dir "20260420T000003Z-truncated.json") "{\"~:event/type\": \"~:workflow/comp")
+        (let [events (reader/read-workflow-events dir)]
+          (is (= 1 (count events)) "skipping still happens")
+          (is (= [(str (io/file dir "20260420T000002Z-bad.json"))
+                  (str (io/file dir "20260420T000003Z-truncated.json"))]
+                 (:event-stream/unreadable-files (meta events))))))))
+
+  (testing "a clean read reports no unreadable files"
+    (with-temp-dir
+      (fn [dir]
+        (write-event! dir "20260420T000001Z-good.json"
+                      {"~:event/type" "~:workflow/started"})
+        (is (= [] (:event-stream/unreadable-files
+                   (meta (reader/read-workflow-events dir))))))))
+
+  (testing "the metadata lists exactly the files left out of the vector"
+    (with-temp-dir
+      (fn [dir]
+        (spit (io/file dir "20260420T000001Z-false.json") "false")
+        (spit (io/file dir "20260420T000002Z-null.json") "null")
+        (let [events (reader/read-workflow-events dir)]
+          (is (= [false] events) "a parseable non-nil value stays in the vector")
+          (is (= [(str (io/file dir "20260420T000002Z-null.json"))]
+                 (:event-stream/unreadable-files (meta events)))))))))
 
 (deftest ^{:stratum 1} read-workflow-events-by-id-composes-path-test
   (with-temp-dir
@@ -132,4 +164,18 @@
             (is (= 1 (count events)))
             (is (= :workflow/started (:event/type (first events))))
             (is (= wf-id (:workflow/id (first events)))
-                "~u UUID prefix is stripped")))))))
+                "~u UUID prefix is stripped"))))))
+
+  (testing "the unreadable-files metadata reaches callers of the by-id reader"
+    (with-temp-dir
+      (fn [base-dir]
+        (let [wf-id (str (random-uuid))
+              wf-dir (doto (io/file base-dir "live" wf-id) .mkdirs)
+              bad (io/file wf-dir "20260420T000002Z-completed.json")]
+          (write-event! wf-dir "20260420T000001Z-started.json"
+                        {"~:event/type" "~:workflow/started"})
+          (spit bad "")
+          (let [events (reader/read-workflow-events-by-id base-dir wf-id)]
+            (is (= 1 (count events)))
+            (is (= [(str bad)]
+                   (:event-stream/unreadable-files (meta events))))))))))
