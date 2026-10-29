@@ -51,8 +51,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} workflow-run-examples-name-real-workflows-test
+  (testing "the miniforge product's help shows at least one `workflow run :<id>` example"
+    ;; This base test also runs in miniforge-core, whose help keeps only
+    ;; the :workflow-id placeholder: no workflow Core ships can run there
+    ;; (see projects/miniforge-core core-help-examples-test).
+    (when (= "miniforge" (app-config/binary-name))
+      (is (seq (example-workflow-ids)))))
   (testing "each `workflow run :<id>` example loads a workflow with that id"
-    (is (seq (example-workflow-ids)))
     (doseq [id (example-workflow-ids)]
       (let [loaded (setup/load-and-validate-workflow workflow/load-workflow id "latest")]
         (is (= id (:workflow/id loaded)) (str "help example names " id))))))
