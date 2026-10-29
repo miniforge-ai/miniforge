@@ -96,10 +96,15 @@
   "`move-spec-on-completion!` that also points the run's checkpoint
    manifest at the spec's new place (work/done or work/failed), so a later
    resume still finds it. The manifest is the one the pipeline wrote,
-   under the result's `:execution/id`; a run that never reached the
-   pipeline has none. Returns the new path, nil when nothing moved."
+   under the result's `:execution/id` and `:execution/checkpoint-root`;
+   a run that never reached the pipeline has none. Returns the new path, nil when nothing moved."
   [provenance result]
   (when-let [new-path (move-spec! provenance (if (phase/succeeded? result) :done :failed))]
     (when-let [run-id (:execution/id result)]
-      (workflow/record-spec-path! (str run-id) (str (fs/absolutize new-path))))
+      ;; Under the root the run checkpointed to, which a per-execution
+      ;; :checkpoint/root moves away from the default.
+      (workflow/record-spec-path! (str run-id) (str (fs/absolutize new-path))
+                                  (if-let [root (:execution/checkpoint-root result)]
+                                    {:checkpoint/root root}
+                                    {})))
     new-path))

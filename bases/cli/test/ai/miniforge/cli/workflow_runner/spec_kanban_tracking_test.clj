@@ -41,7 +41,7 @@
         (is (= (str (fs/absolutize (str root "/work/in-progress/task.spec.edn")))
                (:spec/location input)))
         (is (= digest (:spec/hash input)) "taken before the move")
-        (with-redefs [workflow/record-spec-path! (fn [id path] (reset! recorded [id path]))]
+        (with-redefs [workflow/record-spec-path! (fn [id path & _] (reset! recorded [id path]))]
           ;; The id the pipeline checkpointed under, not the CLI's own.
           (kanban/finish-spec! provenance {:execution/status :failed :execution/id "exec-1"}))
         (is (= ["exec-1" (str (fs/absolutize (str root "/work/failed/task.spec.edn")))]
@@ -57,5 +57,26 @@
         (with-redefs [workflow/record-spec-path! (fn [& args] (reset! recorded args))]
           (is (some? (kanban/finish-spec! {:source-file spec} {:execution/status :failed}))))
         (is (nil? @recorded))))))
+
+(deftest ^{:stratum 1} the-manifest-under-the-runs-own-root-follows-the-spec
+  ;; A run checkpointed under a per-execution root, not the default one.
+  (with-kanban
+    (fn [root]
+      (fs/with-temp-dir [checkpoints {:prefix "kanban-root-"}]
+        (let [spec (str root "/work/rooted.spec.edn")
+              _ (fs/create-dirs (fs/parent spec))
+              _ (spit spec "v1")
+              run-id (random-uuid)
+              manifest (fs/path checkpoints (str run-id) "manifest.edn")
+              _ (fs/create-dirs (fs/parent manifest))
+              _ (spit (str manifest) (pr-str {:workflow/id run-id
+                                              :workflow/spec-path spec
+                                              :workflow/spec-hash (workflow/spec-file-hash spec)}))]
+          (kanban/finish-spec! {:source-file spec}
+                               {:execution/status :failed
+                                :execution/id run-id
+                                :execution/checkpoint-root (str checkpoints)})
+          (is (= (str (fs/absolutize (str root "/work/failed/rooted.spec.edn")))
+                 (:workflow/spec-path (read-string (slurp (str manifest)))))))))))
 
 (comment ::spec-kanban-tracking)
