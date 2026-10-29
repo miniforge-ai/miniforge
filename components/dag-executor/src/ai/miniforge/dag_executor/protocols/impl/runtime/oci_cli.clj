@@ -44,6 +44,8 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.llm.interface :as llm]
+   [ai.miniforge.redaction.interface :as redaction]
+   [clojure.edn :as edn]
    [clojure.java.io]
    [clojure.string :as str]))
 
@@ -181,9 +183,35 @@
       (finally
         (when file (.delete ^java.io.File file))))))
 
-(def ^{:stratum 0} secret-pattern
-  "Regex matching env var names that carry sensitive values."
-  #"(?i)(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)")
+(def ^{:stratum 0} untrusted-env-names
+  "Env vars an untrusted capsule takes from env-config whatever their value:
+   what a shell and its locale need. LC_* and CLAUDE_CODE_* knobs pass by
+   prefix (`untrusted-env-allowed?`)."
+  #{"PATH" "HOME" "USER" "LOGNAME" "SHELL" "LANG" "LANGUAGE" "TERM" "COLORTERM"
+    "TZ" "TMPDIR" "CI" "NO_COLOR"})
+
+(def ^{:stratum 0} credential-word-pattern
+  "A `_`-separated word that makes a variable a credential: it keeps a
+   CLAUDE_CODE_* name out of the allowlist (CLAUDE_CODE_OAUTH_TOKEN, but not
+   the knob CLAUDE_CODE_MAX_OUTPUT_TOKENS) and blanks an image's ENV entry
+   (DEPLOY_KEY, GITHUB_PAT, MYSQL_PWD, NPM_CONFIG__AUTH)."
+  #"(?i)(?:^|_)(?:TOKEN|KEY|SECRET|PASS|PASSWORD|PASSPHRASE|PWD|PAT|AUTH|AUTHORIZATION|CREDENTIALS?|OAUTH|COOKIE|WEBHOOK)(?:_|$)")
+
+(defn- ^{:stratum 0} proxy-without-userinfo
+  "Proxy setting `v` without `user:password@`: everything from the scheme
+   to the last `@` before the path goes. A value that still holds an `@`
+   or a line break, which this cannot parse safely, becomes empty, so the
+   result is safe on argv."
+  [v]
+  (let [s (str/replace (str/trim (str v)) #"^([A-Za-z][A-Za-z0-9+.-]*://)?[^/]*@" "$1")]
+    (if (re-find #"[@\r\n]" s) "" s)))
+
+(def ^{:stratum 0} proxy-env-names
+  "Proxy variables curl and git read, in both cases. Docker adds them to a
+   container from the client's ~/.docker/config.json, and Podman from its
+   own environment, unless the launch sets the name with -e."
+  (into #{} (mapcat (juxt identity str/lower-case))
+        ["HTTP_PROXY" "HTTPS_PROXY" "FTP_PROXY" "ALL_PROXY" "NO_PROXY"]))
 
 (def ^{:stratum 0} agent-credential-names
   "Env vars N11 §8.1 injects into every capsule, whatever its trust level,
@@ -194,9 +222,7 @@
 
 (def ^{:stratum 0} git-config-env-pattern
   "GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n: one config tuple
-   whose values can carry a credential (an Authorization header), so the
-   trust filter drops all of it, not just the KEY_n names `secret-pattern`
-   matches."
+   whose values can carry a credential (an Authorization header)."
   #"GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)")
 
 (defn- ^{:stratum 0} refused-env-name?
@@ -208,10 +234,6 @@
   [n]
   (or (= "DOCKER_CUSTOM_HEADERS" n)
       (not (re-find execution-plan/env-name-pattern n))))
-
-(def ^{:stratum 0} proxy-env-pattern
-  "Proxy variables curl and git read. Their URL can carry `user:password@`."
-  #"(?i)(https?|all|ftp)_proxy")
 
 (defn ^{:stratum 0} build-mount-args
   "Build -v mount arguments from an execution plan map.
@@ -401,11 +423,19 @@
 
 (defn- ^{:stratum 0} git-config-env
   "GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n for `entries`,
-   a seq of [key value]."
-  [entries]
-  (into {"GIT_CONFIG_COUNT" (str (count entries))}
-        (mapcat (fn [i [k v]] [[(str "GIT_CONFIG_KEY_" i) k] [(str "GIT_CONFIG_VALUE_" i) v]])
-                (range) entries)))
+   a seq of [key value], numbered from `offset` (default 0); the count
+   also covers the `offset` entries before them."
+  ([entries] (git-config-env entries 0))
+  ([entries offset]
+   (into {"GIT_CONFIG_COUNT" (str (+ offset (count entries)))}
+         (mapcat (fn [i [k v]] [[(str "GIT_CONFIG_KEY_" i) k] [(str "GIT_CONFIG_VALUE_" i) v]])
+                 (iterate inc offset) entries))))
+
+(defn- ^{:stratum 0} git-config-count
+  "The GIT_CONFIG_COUNT in `env`; an empty or non-numeric one, as git reads
+   it, is 0."
+  [env]
+  (or (parse-long (get env "GIT_CONFIG_COUNT" "")) 0))
 
 (defn- ^{:stratum 0} percent-decode
   "Decode %XX escapes in a URL component; `+` stays a plus."
@@ -458,12 +488,46 @@
 
 (defn- ^{:stratum 0} git-config-entries
   "The [key value] pairs GIT_CONFIG_COUNT / KEY_n / VALUE_n in `env` set,
-   in order."
+   in order. An empty or non-numeric count, as git reads it, sets none."
   [env]
-  (for [i (range (parse-long (get env "GIT_CONFIG_COUNT" "0")))]
+  (for [i (range (or (parse-long (get env "GIT_CONFIG_COUNT" "")) 0))]
     [(get env (str "GIT_CONFIG_KEY_" i)) (get env (str "GIT_CONFIG_VALUE_" i))]))
 
+(def ^{:stratum 0} env-inspect-format
+  "`inspect --format` template printing each Config.Env entry as a JSON
+   string on its own line, so a value with a line break stays one entry."
+  "{{range .Config.Env}}{{json .}}{{println}}{{end}}")
+
+(defn- ^{:stratum 0} parse-inspected-env
+  "{name value} from `env-inspect-format` output: each line is a JSON string,
+   which the EDN reader reads, split once at the first `=`."
+  [out]
+  (into {} (map #(let [[k v] (str/split (edn/read-string %) #"=" 2)] [k (or v "")]))
+        (remove str/blank? (str/split-lines out))))
+
+(def ^{:stratum 0} git-trace-off-env
+  "Env that keeps git's tracing from recording the Authorization header:
+   header redaction forced on, over an inherited GIT_TRACE_REDACT=0, and
+   each trace target empty, which git reads as off. GIT_CURL_VERBOSE stays
+   as inherited: git only checks that it is set, so an empty value would
+   turn it on; its stderr output goes through the same redaction."
+  (into {"GIT_TRACE_REDACT" "1"}
+        (map vector ["GIT_TRACE" "GIT_TRACE_CURL" "GIT_TRACE_PACKET" "GIT_TRACE_PACK_ACCESS"
+                     "GIT_TRACE_PERFORMANCE" "GIT_TRACE_SETUP" "GIT_TRACE_SHALLOW"
+                     "GIT_TRACE2" "GIT_TRACE2_EVENT" "GIT_TRACE2_PERF"]
+             (repeat ""))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} untrusted-env-allowed?
+  "True when an untrusted capsule may take env var `n` from env-config:
+   `untrusted-env-names`, LC_*, or a CLAUDE_CODE_* knob with no
+   `credential-word-pattern` word."
+  [n]
+  (or (contains? untrusted-env-names n)
+      (str/starts-with? n "LC_")
+      (and (str/starts-with? n "CLAUDE_CODE_")
+           (not (re-find credential-word-pattern n)))))
 
 (defn ^{:stratum 1} prepare-runtime-env!
   "Deliver env-map to the container without putting its values on the
@@ -600,37 +664,6 @@
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out "" :out-bytes (byte-array 0) :err-bytes (byte-array 0)})))
 
-(defn ^{:stratum 1} filter-env-by-trust
-  "Return env-map with sensitive entries removed unless trust-level is
-   :trusted or :privileged; :untrusted, nil and any unknown level all filter.
-   `build-launch-plan` applies it to the container env, which every process
-   in the capsule inherits; host-side callers that need a secret for one
-   command (release's GH_TOKEN for `gh`) pass it on that exec instead.
-
-   A var is considered sensitive when its name contains any of:
-   KEY, SECRET, TOKEN, PASSWORD, CREDENTIAL (case-insensitive) or belongs to
-   a GIT_CONFIG_* tuple (`git-config-env-pattern`) or is GIT_CONFIG_PARAMETERS
-   (`git -c` config, which can hold an extraheader), except the agent's own
-   credentials (`agent-credential-names`, or `keep-names` when given), which
-   N11 §8.1 injects at every trust level. A proxy URL (`proxy-env-pattern`) keeps its address but
-   loses any `user:password@`, so an authenticating proxy needs a trusted
-   launch."
-  ([env-map trust-level] (filter-env-by-trust env-map trust-level agent-credential-names))
-  ([env-map trust-level keep-names]
-   (if (contains? #{:trusted :privileged} trust-level)
-     env-map
-     (into {} (keep (fn [[k v :as entry]]
-                      (let [n (name k)]
-                        (cond
-                          (contains? keep-names n) entry
-                          (or (re-find secret-pattern n)
-                              (re-matches git-config-env-pattern n)
-                              (= "GIT_CONFIG_PARAMETERS" n)) nil
-                          (re-matches proxy-env-pattern n)
-                          [k (str/replace (str v) #"^([A-Za-z][A-Za-z0-9+.-]*://)?[^/@]*@" "$1")]
-                          :else entry))))
-           env-map))))
-
 (defn ^{:stratum 1} build-resource-args
   "Build resource limit arguments.
    Merges provided resources with the runtime's per-kind defaults from the
@@ -686,6 +719,52 @@
   (into {} (remove (fn [[k _]] (re-matches git-config-env-pattern (name k)))) env))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} untrusted-env-blanks
+  "Empty values that override, in an untrusted capsule, what it would get
+   from outside env-config: every proxy variable (`proxy-env-names`), and
+   each entry of `image-env` (the image's ENV, {name value}) whose name the
+   redaction policy calls a secret or has a `credential-word-pattern` word,
+   whose value has a secret's shape (`redaction/secret-string?`: a token,
+   a URL with `user:password@`), or that is GIT_CONFIG_PARAMETERS or in a
+   GIT_CONFIG_* tuple, unless `keep-names` or `untrusted-env-allowed?`
+   allow it. The image's own toolchain settings (JAVA_HOME and the like)
+   are left alone, so this side is a denylist."
+  [image-env keep-names]
+  (into (zipmap proxy-env-names (repeat ""))
+        (for [[n v] image-env
+              :when (and (not (contains? keep-names n))
+                         (not (untrusted-env-allowed? n))
+                         (or (redaction/secret-key? n)
+                             (re-find credential-word-pattern n)
+                             (redaction/secret-string? v)
+                             (re-matches git-config-env-pattern n)
+                             (= "GIT_CONFIG_PARAMETERS" n)))]
+          [n ""])))
+
+(defn ^{:stratum 2} filter-env-by-trust
+  "Return env-map as an untrusted capsule may have it, unless trust-level is
+   :trusted or :privileged; :untrusted, nil and any unknown level all filter.
+   `build-launch-plan` applies it to the container env, which every process
+   in the capsule inherits; host-side callers that need a secret for one
+   command (release's GH_TOKEN for `gh`) pass it on that exec instead.
+
+   Default deny: an entry stays only when its name is in `keep-names` (the
+   agent's own credentials, `agent-credential-names` unless given, which
+   N11 §8.1 injects at every trust level) or `untrusted-env-allowed?`. A
+   proxy variable (`proxy-env-names`) stays without any `user:password@`
+   (`proxy-without-userinfo`), so an authenticating proxy needs a trusted
+   launch."
+  ([env-map trust-level] (filter-env-by-trust env-map trust-level agent-credential-names))
+  ([env-map trust-level keep-names]
+   (if (contains? #{:trusted :privileged} trust-level)
+     env-map
+     (into {} (keep (fn [[k v :as entry]]
+                      (let [n (name k)]
+                        (cond
+                          (contains? proxy-env-names n) [k (proxy-without-userinfo v)]
+                          (or (contains? keep-names n) (untrusted-env-allowed? n)) entry))))
+           env-map))))
 
 (defn- ^{:stratum 2} git-remote
   "The repo to bootstrap, from env-config: {:repo-url :https-url :host-kind},
@@ -832,15 +911,33 @@
   (let [result (run-runtime-timed default-release-timeout-ms descriptor "rm" "-f" container-id)]
     (result/ok {:released? (zero? (:exit result))})))
 
-(defn- ^{:stratum 2} remote-credential-env
-  "Credential env for the git remote recorded when `environment-id` was
-   bootstrapped, or {} when none was recorded."
-  [git-remotes environment-id]
-  (if-let [remote (some-> git-remotes deref (get environment-id))]
-    (git-credential-env (:https-url remote) (git-auth remote))
-    {}))
+(defn- ^{:stratum 2} container-git-count
+  "The GIT_CONFIG_COUNT of the container's own environment: its image ENV
+   and launch env as the runtime recorded them, which no process in the
+   capsule can change. Each entry is read whole (`parse-inspected-env`), so
+   a multi-line value cannot fake a count. 0 when none is set or inspect
+   fails."
+  [descriptor container-id]
+  (let [r (run-runtime-timed default-exec-timeout-ms descriptor "inspect" "--format"
+                             env-inspect-format container-id)]
+    (try
+      (if (zero? (:exit r)) (git-config-count (parse-inspected-env (:out r))) 0)
+      (catch Exception _ 0))))
 
-(defn ^{:stratum 2} build-launch-plan
+(defn- ^{:stratum 2} combine-git-env
+  "`base` then `extra`: `extra`'s GIT_CONFIG_* entries are numbered after
+   base's GIT_CONFIG_COUNT, so they apply later and win, and base's entries
+   stay as they are, including ones it counts but does not hold (the
+   container's own, which its env keeps). Other variables merge, `extra`
+   winning."
+  [base extra]
+  (let [entries (git-config-entries extra)]
+    (cond-> (merge base (without-git-config extra))
+      (seq entries) (merge (git-config-env entries (git-config-count base))))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} build-launch-plan
   "Assemble the execution plan for a pending launch from what the launch site
    actually knows: the resolved image digest, the caller's mounts / env /
    trust level from env-config, and the capsule's keep-alive command. Optional
@@ -852,52 +949,67 @@
    :trust-level becomes :untrusted, so neither the secret filter nor the
    read-only mount rule can be skipped by a malformed value. The filter keeps
    the agent's credentials: `agent-credential-names` and those of the agent
-   backend, env-config's :agent-backend or else the configured [:llm :backend].
+   backend, env-config's :agent-backend or else the configured [:llm :backend],
+   plus the names env-config's :env-passthrough lists. An :untrusted plan
+   also sets `untrusted-env-blanks` for `image-env`, the image's ENV as
+   {name value}, under any value env-config gives.
 
    This one plan is both what `check-plan-security` inspects and what
    `create-container` receives as :execution-plan, so the plan the gate
    checked is the plan that runs."
-  [image-digest env-config]
-  (let [trust-level (get execution-plan/trust-levels (:trust-level env-config) :untrusted)
-        ;; `or`, not a get default: the user config is read only when
-        ;; env-config names no backend.
-        backend     (or (:agent-backend env-config)
-                        (get-in (config/load-merged-config) [:llm :backend]))]
-    (cond-> {:image-digest image-digest
-             :command      ["sleep" "infinity"]
-             :mounts       (get env-config :mounts [])
-             :env          (filter-env-by-trust
-                            (normalize-plan-env (get env-config :env {}))
-                            trust-level
-                            (into agent-credential-names (llm/backend-credential-env backend)))
-             :trust-level  trust-level}
-      (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
-      (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))
-      (:network-profile env-config) (assoc :network-profile (:network-profile env-config))
-      (:secrets-refs env-config)    (assoc :secrets-refs (:secrets-refs env-config)))))
-
-(defn- ^{:stratum 2} combine-git-env
-  "`base` then `extra`, with their GIT_CONFIG_* entries renumbered into one
-   block, `extra`'s after `base`'s so its settings win, and their other
-   variables merged, `extra` winning."
-  [base extra]
-  (let [entries (concat (git-config-entries base) (git-config-entries extra))]
-    (cond-> (merge (without-git-config base) (without-git-config extra))
-      (seq entries) (merge (git-config-env entries)))))
-
-;------------------------------------------------------------------------------ Layer 3
+  ([image-digest env-config] (build-launch-plan image-digest env-config {}))
+  ([image-digest env-config image-env]
+   (let [trust-level (get execution-plan/trust-levels (:trust-level env-config) :untrusted)
+         ;; `or`, not a get default: the user config is read only when
+         ;; env-config names no backend.
+         backend     (or (:agent-backend env-config)
+                         (get-in (config/load-merged-config) [:llm :backend]))
+         keep-names  (-> agent-credential-names
+                         (into (llm/backend-credential-env backend))
+                         (into (map name) (:env-passthrough env-config)))
+         env         (filter-env-by-trust (normalize-plan-env (get env-config :env {}))
+                                          trust-level keep-names)]
+     (cond-> {:image-digest image-digest
+              :command      ["sleep" "infinity"]
+              :mounts       (get env-config :mounts [])
+              :env          (cond->> env
+                              (= :untrusted trust-level)
+                              (merge (untrusted-env-blanks image-env keep-names)))
+              :trust-level  trust-level}
+       (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
+       (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))
+       (:network-profile env-config) (assoc :network-profile (:network-profile env-config))
+       (:secrets-refs env-config)    (assoc :secrets-refs (:secrets-refs env-config))))))
 
 (defn- ^{:stratum 3} with-git-credentials
-  "execute! opts: when they ask for :git-credentials?, the recorded remote's
-   credential env joins :env. Release's in-capsule fetch and push use this;
-   since origin carries no credential, they are unauthenticated without it.
-   The two GIT_CONFIG_* blocks are combined (`combine-git-env`), the
-   caller's last, so a caller's own git config, such as release's push
-   retry, is kept and wins."
-  [opts git-remotes environment-id]
-  (if (:git-credentials? opts)
-    (update opts :env #(combine-git-env (remote-credential-env git-remotes environment-id) %))
-    opts))
+  "execute! opts: when they ask for :git-credentials?, `cred-env` (a delay
+   of the recorded remote's credential env) joins :env. Release's
+   in-capsule fetch and push use this; since origin carries no credential,
+   they are unauthenticated without it. The two GIT_CONFIG_* blocks are
+   combined (`combine-git-env`), the caller's last, so a caller's own git
+   config, such as release's push retry, is kept and wins. An env left
+   holding GIT_CONFIG_* entries gets `git-trace-off-env` last, so a
+   caller's own header is not traced when no credential resolved."
+  [opts cred-env]
+  (let [opts (cond-> opts
+               (:git-credentials? opts) (update :env #(combine-git-env @cred-env %)))]
+    (cond-> opts
+      (seq (git-config-entries (:env opts))) (update :env merge git-trace-off-env))))
+
+(defn- ^{:stratum 3} capsule-credential-env
+  "`git-credential-env` for one command in `container-id`, its GIT_CONFIG_*
+   entries numbered after the container's own (`container-git-count`), so
+   a trusted launch's or image's tuple (an http.proxy) stays in effect from
+   the container env, unsent, and the credential's come last and win.
+   `git-trace-off-env` keeps an inherited trace setting from writing the
+   header to a file the capsule can read."
+  [descriptor container-id https-url auth]
+  (let [cred (git-credential-env https-url auth)]
+    (if (seq cred)
+      (merge (combine-git-env {"GIT_CONFIG_COUNT" (str (container-git-count descriptor container-id))}
+                              cred)
+             git-trace-off-env)
+      cred)))
 
 ;; ============================================================================
 ;; Container Operations
@@ -914,6 +1026,11 @@
    ai.miniforge.dag-executor.execution-plan/ExecutionPlanSchema, while this
    compatibility boundary also accepts partial plan maps.
 
+   An :untrusted plan's proxy variables go on argv as `-e`: Docker adds the
+   client's configured proxies for any name -e does not set, even one the
+   env file sets. The plan holds them without credentials
+   (`filter-env-by-trust`) or empty (`untrusted-env-blanks`).
+
    Returns {:container-id string :container-name string} on success."
   [descriptor container-name image workdir env-map resources network
    & {:keys [execution-plan]}]
@@ -921,7 +1038,9 @@
                                (contains? execution-plan :env))
                         (:env execution-plan)
                         env-map)
-        env           (prepare-runtime-env! effective-env)
+        argv-env      (when (= :untrusted (:trust-level execution-plan))
+                        (select-keys effective-env proxy-env-names))
+        env           (prepare-runtime-env! (apply dissoc effective-env (keys argv-env)))
         resource-args (build-resource-args
                        descriptor resources
                        {:omit-memory? (some? (:memory-limit-mb execution-plan))})
@@ -946,6 +1065,7 @@
                               security-args
                               runtime-fs-args
                               mount-args
+                              (mapcat (fn [[k v]] ["-e" (str k "=" v)]) (sort argv-env))
                               (:args env)
                               resource-args
                               (into [image] (get execution-plan :command ["sleep" "infinity"])))
@@ -993,6 +1113,16 @@
                               "--format" "{{.Id}}")]
       (when (zero? (:exit result))
         (normalize-image-id (:out result))))
+    (catch Exception _ nil)))
+
+(defn ^{:stratum 3} image-env
+  "The ENV of local image `image` as {name value} (`parse-inspected-env`),
+   or nil on failure."
+  [descriptor image]
+  (try
+    (let [result (run-runtime descriptor "image" "inspect" image "--format" env-inspect-format)]
+      (when (zero? (:exit result))
+        (parse-inspected-env (:out result))))
     (catch Exception _ nil)))
 
 (defn ^{:stratum 3} image-exists?
@@ -1079,7 +1209,9 @@
                         :exit (get-in r [:data :exit-code])}))
          r)))))
 
-(defn ^{:stratum 3} security-gate-check
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} security-gate-check
   "Run the capsule-isolation security gate for a pending launch. Resolves the
    image's content-addressed digest via `digest-fn` (injected for testing),
    builds the launch plan the gate inspects via `build-launch-plan`, and
@@ -1100,27 +1232,37 @@
    A plan env name `refused-env-name?` flags is a hard-stop at every
    trust level: such a name is not one env-file assignment, and Podman
    reads `*` or a trailing `*` in `-e NAME` as a pattern that copies every
-   matching variable of its own environment into the container."
-  [descriptor image env-config digest-fn]
-  (let [plan            (build-launch-plan (digest-fn descriptor image) env-config)
-        security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
-                         :rootless-action     plan-security/default-rootless-action}
-        decision        (plan-security/check-plan-security plan descriptor security-config)
-        bad-names       (filter refused-env-name? (keys (:env plan)))]
-    (cond
-      (response/anomaly-map? decision)
-      (result/err :security-policy-violation
-                  (:anomaly/message decision)
-                  {:security/findings (:security/findings decision)})
+   matching variable of its own environment into the container.
 
-      (seq bad-names)
-      (result/err :security-policy-violation
-                  (messages/t :oci/env-name-refused {:names (str/join ", " (map pr-str bad-names))}))
+   `image-env-fn` (injected; by default it reports an empty ENV) gives the
+   pinned image's ENV, whose secrets an :untrusted plan blanks
+   (`untrusted-env-blanks`). An :untrusted launch whose image ENV cannot be
+   read fails closed."
+  ([descriptor image env-config digest-fn]
+   (security-gate-check descriptor image env-config digest-fn (constantly {})))
+  ([descriptor image env-config digest-fn image-env-fn]
+   (let [digest          (digest-fn descriptor image)
+         image-env       (when digest (image-env-fn descriptor digest))
+         plan            (build-launch-plan digest env-config image-env)
+         security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
+                          :rootless-action     plan-security/default-rootless-action}
+         decision        (plan-security/check-plan-security plan descriptor security-config)
+         bad-names       (filter refused-env-name? (keys (:env plan)))]
+     (cond
+       (response/anomaly-map? decision)
+       (result/err :security-policy-violation
+                   (:anomaly/message decision)
+                   {:security/findings (:security/findings decision)})
 
-      :else
-      (result/ok (assoc (:output decision) :launch-plan plan)))))
+       (seq bad-names)
+       (result/err :security-policy-violation
+                   (messages/t :oci/env-name-refused {:names (str/join ", " (map pr-str bad-names))}))
 
-;------------------------------------------------------------------------------ Layer 4
+       (and (= :untrusted (:trust-level plan)) (nil? image-env))
+       (result/err :security-policy-violation (messages/t :oci/image-env-unreadable {:image image}))
+
+       :else
+       (result/ok (assoc (:output decision) :launch-plan plan))))))
 
 (defn ^{:stratum 4} resolve-image-digest!
   "Resolve the pinned `sha256:<64hex>` digest for `image`, pulling it first when
@@ -1154,6 +1296,14 @@
     (result/err :unknown-image-key {:key image-key
                                     :available (keys task-runner-images)})))
 
+(defn- ^{:stratum 4} remote-credential-env
+  "Credential env (`capsule-credential-env`) for the git remote recorded
+   when `environment-id` was bootstrapped, or {} when none was recorded."
+  [descriptor git-remotes environment-id]
+  (if-let [remote (some-> git-remotes deref (get environment-id))]
+    (capsule-credential-env descriptor environment-id (:https-url remote) (git-auth remote))
+    {}))
+
 (defn- ^{:stratum 4} bootstrap-workspace!
   "Clone a git repository into the container workspace after creation.
    Runs git clone, configures git identity, and checks out the target branch.
@@ -1162,7 +1312,7 @@
    Uses config-based token resolution (profile + env fallback) rather than
    URL-guessing. With a credential, checks the image's git can take it
    (`credential-git-check`), clones the plain URL and hands the credential
-   to the clone command alone (`git-credential-env`): origin's URL in the
+   to the clone command alone (`capsule-credential-env`): origin's URL in the
    capsule carries none, and no push URL is set. Clones every branch, so
    release can compare against a base other than the checked-out branch."
   [descriptor container-name workdir env-config]
@@ -1176,7 +1326,8 @@
                                     :sanitize? true)
           clone-cmd ["git" "clone" "--branch" (str branch) "--" clone-url workdir]
           result (-> (if auth (credential-git-check (exec! ["git" "--version"])) (result/ok nil))
-                     (chain-container-command #(exec! clone-cmd (git-credential-env https-url auth)))
+                     (chain-container-command
+                      #(exec! clone-cmd (capsule-credential-env descriptor container-name https-url auth)))
                      ;; Use --local (not --global) since container rootfs is read-only
                      (chain-container-command
                       #(exec! ["git" "-C" workdir "config" "user.email" "miniforge@miniforge.ai"]))
@@ -1259,7 +1410,8 @@
         ;; Capsule security gate (runtime-* policies): resolve the pinned image
         ;; digest and check the plan BEFORE launch. A hard-stop (forbidden)
         ;; aborts the acquire without creating a container.
-        (let [gate-result (security-gate-check descriptor image env-config resolve-image-digest!)]
+        (let [gate-result (security-gate-check descriptor image env-config
+                                               resolve-image-digest! image-env)]
           (if (result/err? gate-result)
             gate-result
             (let [container-name (str container-name-prefix
@@ -1311,7 +1463,8 @@
   (execute! [_this environment-id command opts]
     (try
       (exec-in-container descriptor environment-id command
-                         (with-git-credentials opts git-remotes environment-id))
+                         (with-git-credentials
+                           opts (delay (remote-credential-env descriptor git-remotes environment-id))))
       (catch Exception e
         (result/err :exec-failed (.getMessage e)))))
 
@@ -1346,13 +1499,13 @@
         (result/ok {:status :unknown :error (.getMessage e)}))))
 
   (persist-workspace! [_this environment-id opts]
-    (let [cred-env (delay (remote-credential-env git-remotes environment-id))
+    (let [cred-env (delay (remote-credential-env descriptor git-remotes environment-id))
           exec!    (workspace-exec-fn descriptor environment-id
                                       (get opts :workdir default-workdir) cred-env)]
       (workspace/git-persist! exec! (workspace-opts opts git-remotes environment-id))))
 
   (restore-workspace! [_this environment-id opts]
-    (let [cred-env (delay (remote-credential-env git-remotes environment-id))
+    (let [cred-env (delay (remote-credential-env descriptor git-remotes environment-id))
           exec!    (workspace-exec-fn descriptor environment-id
                                       (get opts :workdir default-workdir) cred-env)]
       (workspace/git-restore! exec! (workspace-opts opts git-remotes environment-id)))))

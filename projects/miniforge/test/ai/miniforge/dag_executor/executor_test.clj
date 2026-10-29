@@ -168,8 +168,11 @@
             task-id (random-uuid)]
 
         (testing "acquire environment creates container"
+          ;; An untrusted capsule takes only allowlisted env, so the test
+          ;; variable is passed through explicitly.
           (let [env-result (executor/acquire-environment! exec task-id
-                                                          {:env {:TEST_VAR "hello"}})]
+                                                          {:env {:TEST_VAR "hello"}
+                                                           :env-passthrough [:TEST_VAR]})]
             (is (result/ok? env-result))
             (let [env (:data env-result)
                   env-id (:environment-id env)]
@@ -271,7 +274,8 @@
             task-id (random-uuid)]
         (executor/with-environment exec task-id
           {:env {:MY_VAR "my_value"
-                 :ANOTHER "another_value"}}
+                 :ANOTHER "another_value"}
+           :env-passthrough [:MY_VAR :ANOTHER]}
           (fn [env]
             (let [result (executor/execute! exec (:environment-id env)
                                             "echo $MY_VAR:$ANOTHER" {})]
