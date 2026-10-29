@@ -194,7 +194,7 @@
         (display/print-error
          (messages/t :run/usage
                      {:command (app-config/command-string "run <spec-file> [--interactive] [--resume <workflow-id>]")}))
-        (shared/exit! 1))
+        (shared/exit! shared/usage-exit-code))
 
       ;; File not found
       (not (fs/exists? spec))
