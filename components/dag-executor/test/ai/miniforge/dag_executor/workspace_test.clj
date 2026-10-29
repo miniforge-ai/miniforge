@@ -286,3 +286,24 @@
                             "git rev-parse" (shell-result head-sha)})]
       (is (true? (:pushed? (result/unwrap (sut/git-persist! exec-fn {:branch "task/x"})))))
       (is (some #(cmd-has? % "git push") @calls)))))
+
+(deftest ^{:stratum 2} git-persist!-pushes-a-held-commit-from-a-clean-worktree-test
+  (testing "a held commit followed by a clean, allowed persist is pushed"
+    (let [[held-exec held-calls] (recording-exec-fn {"git status"    (shell-result " M src/a.clj")
+                                                     "git rev-parse" (shell-result head-sha)})
+          [clean-exec calls]     (recording-exec-fn {"git status"    (shell-result "")
+                                                     "git rev-list"  (shell-result "1\n")
+                                                     "git rev-parse" (shell-result head-sha)})
+          held  (sut/git-persist! held-exec {:branch "task/x" :push? false})
+          later (sut/git-persist! clean-exec {:branch "task/x"})]
+      (is (false? (:pushed? (result/unwrap held))))
+      (is (not-any? #(cmd-has? % "push") @held-calls))
+      (is (= {:persisted? true :pushed? true :commit-sha head-sha :branch "task/x"}
+             (result/unwrap later)))
+      (is (some #(cmd-has? % "git push") @calls))
+      (is (not-any? #(cmd-has? % "commit") @calls) "nothing new to commit")))
+  (testing "a clean worktree with nothing pending is still a no-op"
+    (let [[exec-fn calls] (recording-exec-fn {"git status"   (shell-result "")
+                                              "git rev-list" (shell-result "0\n")})]
+      (is (true? (:no-changes? (result/unwrap (sut/git-persist! exec-fn {:branch "task/x"})))))
+      (is (not-any? #(cmd-has? % "push") @calls)))))

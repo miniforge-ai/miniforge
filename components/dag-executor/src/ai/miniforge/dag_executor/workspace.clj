@@ -59,7 +59,9 @@
               cmd may be a string (passed to sh -c) or a vector (exec'd directly,
               no shell — preferred for user-supplied values to avoid injection)
    - opts: {:branch string, :message string, :push? bool}
-     :push? false commits without pushing (default true).
+     :push? false commits without pushing (default true). A later call
+     with :push? true pushes such held commits even when the worktree is
+     clean.
 
    Returns result monad with {:persisted? bool :pushed? bool :commit-sha
    string :branch string}.
@@ -71,16 +73,24 @@
     (try
       (let [add-r (exec-fn "git add -A")
             status-r (when-not (failed-step add-r "") (exec-fn "git status --porcelain"))
-            has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))]
+            has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))
+            ;; A commit an earlier :push? false call held back is still
+            ;; owed to the remote when the worktree is clean: count the
+            ;; commits no remote-tracking ref has yet.
+            pending-r (when (and push? (not has-changes?) (not (failed-step status-r "")))
+                        (exec-fn ["git" "rev-list" "--count" "HEAD" "--not" "--remotes"]))
+            pending? (and pending-r (not (failed-step pending-r ""))
+                          (pos? (or (parse-long (str/trim (get-in pending-r [:data :stdout] ""))) 0)))]
         (cond
           (failed-step add-r "") (result/err :persist-add-failed (failed-step add-r "git add failed"))
           (failed-step status-r "") (result/err :persist-status-failed (failed-step status-r "git status failed"))
-          (not has-changes?)
+          (and (not has-changes?) (not pending?))
           (result/ok {:persisted? false :commit-sha nil :no-changes? true :branch branch})
           :else
           ;; Unsigned: a scratch-worktree commit must not depend on the
           ;; operator's signing agent (see worktree tier commit-staged!).
-          (let [commit-r (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)])
+          (let [commit-r (when has-changes?
+                           (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)]))
                 push-r (when (and push? (not (failed-step commit-r "")))
                          (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"]))
                 sha-r (when (and (not (failed-step commit-r ""))
