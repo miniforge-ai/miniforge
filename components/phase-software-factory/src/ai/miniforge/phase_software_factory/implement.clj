@@ -804,6 +804,11 @@
         {:keys [task rules-manifest codex-outcome]} (build-implement-task ctx)
         ;; Cache loaded files and context pack for subsequent retries
         ctx (cond-> ctx
+              ;; Resolved once and carried: the artifact collector, the
+              ;; :no-secrets gate and every later persistence boundary
+              ;; measure the change from the same resume-aware base.
+              (not (get ctx :execution/task-base-refs))
+              (assoc :execution/task-base-refs (base-ref-candidates ctx))
               (not (get-in ctx [:execution/cached-files]))
               (assoc-in [:execution/cached-files] (:task/existing-files task))
               (and (:task/context-pack task) (not (get-in ctx [:execution/pack-context])))
@@ -875,7 +880,7 @@
             :executor (get ctx :execution/executor)
             :execute-fn (get ctx :execution/execute-fn)
             :pre-session-snapshot (get ctx :execution/pre-session-snapshot)
-            :base-refs (base-ref-candidates ctx)
+            :base-refs (get ctx :execution/task-base-refs)
             :intent-scope (get-in ctx [:execution/input :intent :scope])
             :spec-description (get-in ctx [:execution/input :description])
             :llm-client (get ctx :llm-backend)
@@ -997,7 +1002,7 @@
         ;; same task base rather than from HEAD.
         result (cond-> result
                  (map? (:output result))
-                 (assoc-in [:output :code/base-refs] (base-ref-candidates ctx)))]
+                 (assoc-in [:output :code/base-refs] (get ctx :execution/task-base-refs)))]
     (-> (phase/enter-context ctx :implement :implementer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest)
         (assoc-in [:phase :watchdog-state]

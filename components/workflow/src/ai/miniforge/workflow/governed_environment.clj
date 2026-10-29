@@ -11,6 +11,9 @@
 (defn- ^{:stratum 0} attach-capsule [worktree executor workflow-id mode config ports]
   (when-let [capsule (records/build executor workflow-id mode config ports)]
     (assoc capsule
+           ;; The checkout inside the capsule, where capsule-side git runs;
+           ;; :worktree-path below is the host worktree.
+           :capsule-workdir (:worktree-path capsule)
            :worktree-path (:worktree-path worktree)
            :worktree-executor (:executor worktree)
            :worktree-environment-id (:environment-id worktree))))

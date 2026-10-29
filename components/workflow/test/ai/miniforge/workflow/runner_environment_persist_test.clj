@@ -101,3 +101,17 @@
               [:workflow/persist-held :worktree-uninspectable]]
              (events-of sink))
           "a warning names the reason"))))
+
+(deftest ^{:stratum 1} the-persist-scan-uses-the-carried-task-base
+  (testing "the implement phase's recorded base refs reach the scan, ahead of the environment base"
+    (let [seen (atom nil)]
+      (with-redefs [env/env-logger (capturing-logger (atom []))
+                    gate/outgoing-secrets (fn [ctx] (reset! seen ctx) {:passed? true})
+                    dag/persist-workspace! (fn [& _] (result/ok {:persisted? false :no-changes? true}))]
+        (env/persist-workspace-at-phase-boundary!
+         {:execution/executor ::stub :execution/environment-id (random-uuid)
+          :execution/worktree-path "/tmp/wt"
+          :execution/environment-metadata {:base-sha "restored-head"}}
+         {:execution/current-phase :plan
+          :execution/phase-results {:implement {:artifact {:code/base-refs ["task-base"]}}}})
+        (is (= ["task-base"] (:execution/task-base-refs @seen)))))))
