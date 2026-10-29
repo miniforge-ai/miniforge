@@ -27,8 +27,8 @@ The physical checkpoint regression first reproduced the missing transition on a
 restored completed run. After wiring, it confirms refusal survives disk
 save/reopen as failed while retaining run identity and the completed phase result.
 Reachability assertions now allow completed-to-failed but still prohibit reaching
-active work. All three workflow consumers passed serially (1m31s); rebuilt CLI
-39,198,061 bytes; isolated package 42 tests / 281 assertions passed using only the
+active work. All three workflow consumers passed serially (1m31s). Rebuilt CLI:
+39,198,061 bytes. Isolated package 42 tests / 281 assertions passed using only the
 jar and workflow/phase test fixtures, without production source overlays.
 
 Adversarial review traced compile, terminal transition, projection, snapshot and

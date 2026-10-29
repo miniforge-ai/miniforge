@@ -45,8 +45,8 @@ After #2050 merged, added a runner-level entry test using a real journal and the
 actual phase loop, callbacks, and publisher. Only external environment/checkpoint
 effects and unrelated lifecycle emissions are stubbed. Shared journal fixtures
 avoid duplicating ownership and reopen setup across the acceptance tests.
-The refreshed three-product workflow suites passed (1m30s), and the composed CLI
-package passed 15 tests and 68 assertions, including actual runner entry and the
+The refreshed three-product workflow suites passed (1m30s). The composed CLI
+package passed 15 tests and 68 assertions. Coverage includes actual runner entry and the
 executing configuration's phase/agent precedence over stale legacy fields.
 
 ## Scope boundary

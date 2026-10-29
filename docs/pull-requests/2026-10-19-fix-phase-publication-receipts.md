@@ -9,7 +9,7 @@
 ## Purpose and layer
 
 Workflow application integration for N3 section 9.1: current-profile phase
-publication failures must reach the execution boundary, not disappear behind
+publication failures must reach the execution boundary. They must not disappear behind
 best-effort printing, heartbeats, or user observer callbacks.
 
 ## Dependencies and scope
@@ -32,7 +32,7 @@ missing workflow intent, phase artifacts, or terminal evidence.
 ## Verification
 
 All three product workflow suites passed serially (1m27s). The isolated rebuilt
-CLI passed 27 tests and 155 assertions covering real closed journals, invalid
+CLI passed 27 tests and 155 assertions. Coverage includes real closed journals, invalid
 drafts, durable reopen, nonfatal exceptions, interruption, callback ordering,
 legacy compatibility, and the execution refusal boundary. Inferred strata are
 unchanged and lint reports zero warnings or errors.

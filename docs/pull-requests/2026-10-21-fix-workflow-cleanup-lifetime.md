@@ -45,7 +45,7 @@ heartbeat warnings rather than duplicating critical-cause policy. JVM lifetime,
 heartbeat and terminal regressions still pass twelve tests/61 assertions.
 
 After alignment with main, a new regression failed when a fatal phase-boundary
-stop succeeded on cleanup retry: the execution wrapper had converted the original
+stop succeeded on cleanup retry. The execution wrapper had converted the original
 fatal error into an ordinary failure result. Critical causes now escape that
 conversion and reach lifetime cleanup unchanged. The regression passes, all three
 consumer suites pass (1m26s), and the rebuilt CLI (39,229,236 bytes) passes fifteen

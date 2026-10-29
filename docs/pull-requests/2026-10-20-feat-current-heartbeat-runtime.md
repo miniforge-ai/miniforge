@@ -44,7 +44,7 @@ and the corrected documentation author header.
 
 Runtime measurements identified journal scenarios at 102–289 ms. Those scenarios
 now live in the miniforge project integration suite and are registered with the
-integration runner; the fast boundary/fence tests remain in the brick. Project
+integration runner. The fast boundary/fence tests remain in the brick. Project
 test composition includes the shared event-stream fixtures. This enforces the
 Polylith 100 ms placement rule without duplicating fixtures or losing CI coverage.
 After relocation, the real project JVM passed four tests/33 assertions, and the
@@ -58,7 +58,7 @@ ordering and passes with this fix. Cancellation failure still preserves closure
 and attempts executor cleanup. No cleanup policy is duplicated.
 
 After this fix, all four consumer suites passed (1m32s), the rebuilt CLI is
-39,214,062 bytes, the real project JVM passed 11 tests/77 assertions, and isolated
+39,214,062 bytes. The real project JVM passed 11 tests/77 assertions, and isolated
 package tests passed 17 tests/90 assertions without production source overlays.
 The standards scan reports no violations. The whole PR is 445 reportable code
 lines before this documentation update; the review fix remains a normal-budget

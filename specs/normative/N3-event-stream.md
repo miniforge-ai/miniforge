@@ -376,7 +376,7 @@ sources and correlate observations to the exact workflow, phase and activation.
 Heartbeat ticks, repeated delivery of one observation, foreign activations and
 maintenance/status messages that merely assert liveness MUST NOT advance progress.
 
-Elapsed and gap durations MUST use a monotonic clock within the process; wall
+Elapsed and gap durations MUST use a monotonic clock within the process. Wall
 clock adjustments MUST NOT make them negative or reset a stalled phase's gap.
 Instants are recorded wall-clock observations, not the source of elapsed duration.
 The attempt counter MAY have gaps when publication fails; it MUST NOT be used
@@ -386,8 +386,8 @@ MUST create a fresh activation ID, never reconstruct monotonic durations from
 retained wall-clock instants.
 
 The phase lifecycle owner MUST start periodic observation at its configured
-positive interval after phase entry and stop it when that activation leaves,
-including failure, cancellation and cleanup. A heartbeat MUST NOT reactivate a
+positive interval after phase entry. It MUST stop observation when that activation
+leaves, including failure, cancellation and cleanup. A heartbeat MUST NOT reactivate a
 terminal phase. Publication failure follows the ephemeral policy in §9: count
 the drop, preserve progress state, and do not manufacture an acknowledgment.
 
