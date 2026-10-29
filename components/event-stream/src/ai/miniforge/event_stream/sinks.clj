@@ -49,6 +49,7 @@
   (:import
    [java.io ByteArrayOutputStream]
    [java.net.http HttpClient HttpResponse$BodyHandlers]
+   [java.nio.file Files StandardCopyOption]
    [java.time Instant ZonedDateTime ZoneOffset]
    [java.time.format DateTimeFormatter]))
 
@@ -265,7 +266,9 @@
 
 (defn ^{:stratum 1} cleanup-stale-events!
   "Delete event files older than TTL from the events directory.
-   Walks all subdirectories (per-workflow and operator).
+   Walks all subdirectories (per-workflow and operator). Also removes
+   `.transit.tmp` files of the same age: a writer killed between its
+   temp write and the rename leaves one, and no reader ever picks it up.
 
    Arguments:
      opts - Map with optional:
@@ -281,7 +284,8 @@
     (if (.isDirectory events-dir)
       (let [stale-files (->> (file-seq events-dir)
                              (filter #(and (.isFile %)
-                                           (str/ends-with? (.getName %) ".json")
+                                           (or (str/ends-with? (.getName %) ".json")
+                                               (str/ends-with? (.getName %) ".transit.tmp"))
                                            (< (.lastModified %) cutoff))))]
         (doseq [f stale-files] (.delete f))
         (count stale-files))
@@ -475,11 +479,23 @@
             file-path (if-let [workflow-id (:workflow/id event)]
                         (event-file-path base-dir workflow-id event)
                         (operator-event-file-path base-dir event))]
-        (ensure-parent-dir! file-path)
-        ;; Explicit UTF-8: payload strings can carry non-ASCII and these
-        ;; files are a cross-language contract surface — platform default
-        ;; encoding must never decide the on-disk bytes.
-        (spit file-path (event->transit-json event) :encoding "UTF-8"))
+        (let [f   (io/file file-path)
+              dir (or (.getParentFile f) (io/file "."))
+              _   (.mkdirs dir)
+              tmp (java.io.File/createTempFile ".es-" ".transit.tmp" dir)]
+          (try
+            ;; Explicit UTF-8: payload strings can carry non-ASCII and these
+            ;; files are a cross-language contract surface — platform default
+            ;; encoding must never decide the on-disk bytes.
+            (spit tmp (event->transit-json event) :encoding "UTF-8")
+            (Files/move (.toPath tmp) (.toPath f)
+                        (into-array StandardCopyOption
+                                    [StandardCopyOption/ATOMIC_MOVE
+                                     StandardCopyOption/REPLACE_EXISTING]))
+            (catch Throwable e
+              (try (Files/deleteIfExists (.toPath tmp))
+                   (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
+              (throw e)))))
       (catch Exception e
         ;; Log to stderr so failures are visible without breaking the event stream
         (binding [*out* *err*]
