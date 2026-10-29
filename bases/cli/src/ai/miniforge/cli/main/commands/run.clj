@@ -145,9 +145,11 @@
   (let [{:keys [spec interactive]} opts
         resume-id (:resume opts)]
     (cond
-      ;; Resume mode
+      ;; Resume mode. resume-workflow returns nil only after reporting the
+      ;; run already complete (its failures throw), so nil is a no-op
+      ;; success here, not the invalid-spec nil finish! rejects.
       resume-id
-      (finish! (resume/resume-workflow resume-id opts))
+      (some-> (resume/resume-workflow resume-id opts) finish!)
 
       ;; Interactive mode
       interactive

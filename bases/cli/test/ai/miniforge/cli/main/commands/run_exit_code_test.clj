@@ -75,6 +75,8 @@
       (is (= :no-exit (exit-code {:spec plan} {:success? true :tasks-failed 0}))))
     (testing "a resumed run that ends failed exits 1"
       (is (= 1 (exit-code {:resume "wf-1"} {:execution/status :failed}))))
+    (testing "resuming a run that is already complete is a no-op, not a failure"
+      (is (= :no-exit (exit-code {:resume "wf-1"} nil))))
     (testing "usage errors exit 1"
       (is (= 1 (exit-code {} nil)) "no spec argument")
       (is (= 1 (exit-code {:spec "/nonexistent/spec.md"} nil)) "missing file")
