@@ -42,11 +42,9 @@
      :grant-breach-dir (tmp "registry-grants")}))
 
 (defn- ^{:stratum 0} github
-  "Answer the read-only gh calls a merge attempt makes."
-  [args _worktree]
-  (if (some #{"headRefOid"} args)
-    (dag/ok {:output "0123456789abcdef0123456789abcdef01234567"})
-    (dag/ok {:output "{\"state\":\"OPEN\",\"mergeCommit\":null}"})))
+  "Answer the read-only gh calls a merge attempt makes: an open PR."
+  [_args _worktree]
+  (dag/ok {:output "{\"headRefOid\":\"0123456789abcdef0123456789abcdef01234567\",\"state\":\"OPEN\",\"mergeCommit\":null}"}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
