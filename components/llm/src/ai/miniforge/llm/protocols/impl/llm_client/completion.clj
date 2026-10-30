@@ -107,17 +107,24 @@
    - execute-fn  - function [executor env-id command opts] -> result map
    - executor    - TaskExecutor instance
    - env-id      - environment/container ID
-   - workdir     - workspace directory inside capsule"
+   - workdir     - workspace directory inside capsule
+
+   The returned fn takes exec opts as a second argument and passes their
+   `:env` entries (an OpenCode call's inline config) to the capsule
+   command, so a governed call keeps them. The executor has no stdin."
   [execute-fn executor env-id workdir]
-  (fn [cmd]
-    (let [result (execute-fn executor env-id cmd {:workdir workdir})]
-      (if (and (map? result) (:data result))
-        {:out (get-in result [:data :stdout] "")
-         :err (get-in result [:data :stderr] "")
-         :exit (get-in result [:data :exit-code] 0)}
-        {:out ""
-         :err (str "Capsule exec error: " result)
-         :exit 1}))))
+  (fn capsule-exec
+    ([cmd] (capsule-exec cmd {}))
+    ([cmd {:keys [env]}]
+     (let [result (execute-fn executor env-id cmd (cond-> {:workdir workdir}
+                                                     (seq env) (assoc :env env)))]
+       (if (and (map? result) (:data result))
+         {:out (get-in result [:data :stdout] "")
+          :err (get-in result [:data :stderr] "")
+          :exit (get-in result [:data :exit-code] 0)}
+         {:out ""
+          :err (str "Capsule exec error: " result)
+          :exit 1})))))
 
 (defn ^{:stratum 0} mock-exec-fn [output & {:keys [exit] :or {exit 0}}]
   (fn

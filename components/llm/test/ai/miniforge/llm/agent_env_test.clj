@@ -79,6 +79,15 @@
         (is (some #{"--pure"} cmd))
         (is (contains? (:env opts) "OPENCODE_CONFIG_CONTENT"))))))
 
+(deftest ^{:stratum 0} capsule-exec-carries-env-entries-test
+  (testing "a governed call's env entries reach the capsule command"
+    (let [seen (atom nil)
+          exec (impl/capsule-exec-fn (fn [_executor _env-id _cmd opts] (reset! seen opts) {:data {:stdout "ok"}})
+                                     :executor "env-1" "/workspace")]
+      (is (= "ok" (:out (exec ["opencode" "run" "p"] {:env {"OPENCODE_CONFIG_CONTENT" "{}"}}))))
+      (is (= {"OPENCODE_CONFIG_CONTENT" "{}"} (:env @seen)))
+      (is (= "/workspace" (:workdir @seen))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} backend-env-entries-reach-the-process-test

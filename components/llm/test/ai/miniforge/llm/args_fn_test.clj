@@ -25,6 +25,7 @@
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
    [ai.miniforge.llm.protocols.impl.llm-client.cli-args :as cli-args]
    [ai.miniforge.llm.protocols.impl.llm-client.completion :as completion]
+   [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]
    [cheshire.core :as json]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -314,11 +315,28 @@
       (is (= ["run" "explain"] args)))))
 
 (deftest ^{:stratum 1} opencode-call-outside-a-session-is-isolated-test
-  (testing "a call with no hook settings runs without external plugins and with every permission denied"
-    (is (= ["run" "--pure" "explain"] ((private-fn 'opencode-args) {:prompt "explain"})))
-    (let [config (json/parse-string (get (cli-args/opencode-env {:prompt "explain"}) "OPENCODE_CONFIG_CONTENT"))]
-      (is (= "deny" (get-in config ["permission" "*"])))
-      (is (every? #{"deny"} (vals (get config "permission"))))))
+  (testing "a call with no hook settings runs without external plugins, as an agent that may use no tool"
+    (let [args   ((private-fn 'opencode-args) {:prompt "explain" :agent "build"})
+          agent  (nth args 3)
+          env    (cli-args/opencode-env {:prompt "explain"})
+          config (json/parse-string (get env "OPENCODE_CONFIG_CONTENT"))]
+      (is (= ["run" "--pure" "--agent"] (take 3 args)))
+      (is (re-matches #"miniforge-isolated-[0-9a-f]{8}" agent))
+      (is (= ["explain"] (drop 4 args)) "the request's own agent is not used")
+      (is (= "1" (get env "OPENCODE_PURE")))
+      (is (every? #{"deny"} (vals (get config "permission"))))
+      (is (= "primary" (get-in config ["agent" agent "mode"])))
+      (is (every? #{"deny"} (vals (get-in config ["agent" agent "permission"]))))))
+  (testing "the operator's own inline config is kept; only its permissions are replaced"
+    (with-redefs [settings/getenv-value (fn [k] (when (= "OPENCODE_CONFIG_CONTENT" k)
+                                                  "{\"model\":\"openrouter/m\",\"permission\":{\"bash\":\"allow\"},\"agent\":{\"mine\":{\"mode\":\"primary\"}}}"))]
+      (let [config (json/parse-string (get (cli-args/opencode-env {:prompt "p"}) "OPENCODE_CONFIG_CONTENT"))]
+        (is (= "openrouter/m" (get config "model")))
+        (is (= "deny" (get-in config ["permission" "bash"])))
+        (is (contains? (get config "agent") "mine")))))
+  (testing "an isolated call may not attach to a running server, whose own config decides its tools"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 ((private-fn 'opencode-args) {:prompt "p" :attach "http://localhost:4096"}))))
   (testing "isolated? does the same for a session call"
     (is (some #{"--pure"} ((private-fn 'opencode-args) (merge supervised {:prompt "p" :isolated? true}))))
     (is (some? (cli-args/opencode-env (merge supervised {:isolated? true})))))
@@ -326,9 +344,10 @@
     (is (nil? (cli-args/opencode-env supervised)))))
 
 (deftest ^{:stratum 1} opencode-args-model-and-agent-test
-  (testing "model and agent pass through to OpenCode"
+  (testing "in a session, model and agent pass through to OpenCode"
     (let [args ((private-fn 'opencode-args)
                 {:prompt "fix it"
+                 :supervision {:settings-path "/tmp/s.json"}
                  :model "anthropic/claude-sonnet-4-5"
                  :agent "miniforge-implementer"})]
       (is (= "run" (first args)))

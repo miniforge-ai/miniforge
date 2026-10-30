@@ -259,7 +259,8 @@
                         {:worktree-path "/tmp/runtime-worktree"}))))
           {:keys [cmd stdin env]} @seen]
       (is (str/includes? output "Backend: opencode"))
-      (is (= ["/opt/homebrew/bin/opencode" "run" "--pure" "Reply with exactly {\"ok\":true}"] cmd))
+      (is (= ["/opt/homebrew/bin/opencode" "run" "--pure" "--agent"] (take 4 cmd)))
+      (is (= "Reply with exactly {\"ok\":true}" (last cmd)))
       (is (nil? stdin))
       (is (contains? env "OPENCODE_CONFIG_CONTENT")))))
 
