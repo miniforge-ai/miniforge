@@ -42,6 +42,8 @@
   "Merge readiness check blocked the merge: {reason}"
   :merge/head-unavailable
   "Could not read the pull request head commit"
+  :merge/effect-unsettled
+  "An earlier attempt at this merge was proposed but never committed; reconcile it before retrying"
   :merge/grant-substituted
   "The merge proposal names a grant this attempt did not issue"
   :controller/lifecycle-starting
