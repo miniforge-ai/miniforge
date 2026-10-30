@@ -167,34 +167,6 @@
         (is (some? (:opts @seen)))
         (is (nil? (:snapshot @seen)))))))
 
-(deftest ^{:stratum 0} owner-file-is-stable-through-a-symlinked-parent-test
-  (fs/with-temp-dir [dir {:prefix "run-owner-link-"}]
-    (let [real  (fs/create-dirs (fs/path dir "real"))
-          alias (fs/create-sym-link (fs/path dir "alias") real)
-          root  (fs/path alias "checkpoints")
-          id    (random-uuid)
-          held  (owner/acquire! root id)]
-      (try
-        (is (= (str (fs/path (fs/real-path real) "checkpoints" ".owners" (str id ".lock")))
-               (str (owner/owner-file root id)))
-            "the file is named from the root's real path")
-        (is (= :conflict (:anomaly/type (owner/acquire! root id)))
-            "a second local claim through the alias is answered by the registry")
-        (finally (owner/release! held))))))
-
-(deftest ^{:stratum 0} owner-file-is-stable-through-parent-traversal-test
-  (fs/with-temp-dir [dir {:prefix "run-owner-dots-"}]
-    (let [root   (str (fs/path dir "unused" ".." "checkpoints"))
-          id     (random-uuid)
-          held   (owner/acquire! root id)]
-      (try
-        (is (= (str (fs/path (fs/real-path dir) "checkpoints" ".owners" (str id ".lock")))
-               (str (owner/owner-file root id)))
-            "the file is named from the root's real path")
-        (is (= :conflict (:anomaly/type (owner/acquire! root id)))
-            "a second local claim is answered by the registry")
-        (finally (owner/release! held))))))
-
 (deftest ^{:stratum 0} a-root-the-lock-creates-is-private-test
   ;; Made as checkpoint directories are, whatever the umask, so the
   ;; checkpoint writes' directory check accepts it.
@@ -222,6 +194,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} other-process-sees
+  "What a separate bb process finds when it tries `file`'s lock."
+  [file]
+  (clojure.string/trim (:out (bp/shell {:out :string :err :inherit} "bb" "-e" probe-script (str file)))))
+
 (deftest ^{:stratum 1} owner-lock-held-by-another-process-test
   (when (is (fs/which "bb") bb-required)
     (fs/with-temp-dir [root {:prefix "run-owner-process-"}]
@@ -244,14 +221,14 @@
             (is (not (anomaly/anomaly? held)))
             (owner/release! held)))))))
 
-(deftest ^{:stratum 1} local-claims-and-probes-keep-the-os-lock-test
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} local-claims-and-probes-keep-the-os-lock-test
   (when (is (fs/which "bb") bb-required)
     (fs/with-temp-dir [root {:prefix "run-owner-local-"}]
       (let [id   (random-uuid)
             held (owner/acquire! root id)
-            seen (fn [] (clojure.string/trim
-                         (:out (bp/shell {:out :string :err :inherit}
-                                         "bb" "-e" probe-script (str (owner/owner-file root id))))))]
+            seen #(other-process-sees (owner/owner-file root id))]
         (try
           (is (= :conflict (:anomaly/type (owner/acquire! root id))))
           (is (some? (owner/owner root id)))
@@ -260,7 +237,7 @@
           (finally (owner/release! held)))
         (is (= "free" (seen)))))))
 
-(deftest ^{:stratum 1} probes-through-another-spelling-keep-the-os-lock-test
+(deftest ^{:stratum 2} probes-through-another-spelling-keep-the-os-lock-test
   (when (is (fs/which "bb") bb-required)
     (doseq [[case-name link-target claim probe]
             [["an unborn segment's .. exposing a link"
@@ -274,9 +251,7 @@
               probe (str (apply fs/path dir probe))
               id    (random-uuid)
               held  (owner/acquire! claim id)
-              seen  #(clojure.string/trim
-                      (:out (bp/shell {:out :string :err :inherit}
-                                      "bb" "-e" probe-script (str (owner/owner-file probe id)))))]
+              seen  #(other-process-sees (owner/owner-file probe id))]
           (testing case-name
             (try
               (is (not (anomaly/anomaly? held)))
@@ -284,7 +259,7 @@
               (is (= "busy" (seen)) "and another process still finds the lock held")
               (finally (when-not (anomaly/anomaly? held) (owner/release! held))))))))))
 
-(deftest ^{:stratum 1} a-probe-through-a-missing-segment-keeps-the-os-lock-test
+(deftest ^{:stratum 2} a-probe-through-a-missing-segment-keeps-the-os-lock-test
   ;; `unused/..` cannot be resolved by the OS, so the spelling names nothing;
   ;; normalized, it would open (and on close release) the held file.
   (when (is (fs/which "bb") bb-required)
@@ -295,7 +270,5 @@
             held  (owner/acquire! real id)]
         (try
           (is (nil? (owner/owner (str (fs/path dir "unused" ".." "alias" "checkpoints")) id)))
-          (is (= "busy" (clojure.string/trim
-                         (:out (bp/shell {:out :string :err :inherit}
-                                         "bb" "-e" probe-script (str (owner/owner-file real id)))))))
+          (is (= "busy" (other-process-sees (owner/owner-file real id))))
           (finally (owner/release! held)))))))

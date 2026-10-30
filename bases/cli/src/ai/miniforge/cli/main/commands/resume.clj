@@ -297,12 +297,9 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} refuse-live-run!
-  "Throw when run `workflow-id` is still running: its runner holds the
-   run's owner lock (see run-pipeline) under its checkpoint root. A root or
-   lock that cannot be looked up refuses the resume too, except that with
-   `force?` a root that cannot be looked up is checked at the default root,
-   after a warning. The runner takes the lock itself before it starts, so
-   this is the early, readable refusal."
+  "Throw when run `workflow-id` is still running (its runner holds the
+   owner lock under its checkpoint root) or when the root or lock cannot be
+   looked up; with `force?`, an unknown root is checked at the default root."
   [workflow-id force?]
   (let [run-id (str workflow-id)
         found  (workflow/run-checkpoint-root run-id events-dir)
