@@ -335,9 +335,15 @@
         (is (= "openrouter/m" (get config "model")))
         (is (= "deny" (get-in config ["permission" "bash"])))
         (is (contains? (get config "agent") "mine")))))
-  (testing "an isolated call may not attach to a running server, whose own config decides its tools"
-    (is (thrown? clojure.lang.ExceptionInfo
-                 ((private-fn 'opencode-args) {:prompt "p" :attach "http://localhost:4096"}))))
+  (testing "an isolated call may not attach, run a configured command, or resume a session"
+    (doseq [option [{:attach "http://localhost:4096"} {:command "review"} {:session "ses_1"}
+                    {:continue? true} {:fork? true}]]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   ((private-fn 'opencode-args) (merge {:prompt "p"} option)))
+          (pr-str option))))
+  (testing "an operator inline config that is not plain JSON fails rather than being dropped"
+    (with-redefs [settings/getenv-value (fn [k] (when (= "OPENCODE_CONFIG_CONTENT" k) "{\"model\": \"m\", // jsonc\n}"))]
+      (is (thrown? clojure.lang.ExceptionInfo (cli-args/opencode-env {:prompt "p"})))))
   (testing "isolated? does the same for a session call"
     (is (some #{"--pure"} ((private-fn 'opencode-args) (merge supervised {:prompt "p" :isolated? true}))))
     (is (some? (cli-args/opencode-env (merge supervised {:isolated? true})))))

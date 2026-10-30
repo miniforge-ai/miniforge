@@ -82,10 +82,11 @@
 (deftest ^{:stratum 0} capsule-exec-carries-env-entries-test
   (testing "a governed call's env entries reach the capsule command"
     (let [seen (atom nil)
-          exec (impl/capsule-exec-fn (fn [_executor _env-id _cmd opts] (reset! seen opts) {:data {:stdout "ok"}})
+          exec (impl/capsule-exec-fn (fn [_executor _env-id cmd opts] (reset! seen (assoc opts :cmd cmd)) {:data {:stdout "ok"}})
                                      :executor "env-1" "/workspace")]
-      (is (= "ok" (:out (exec ["opencode" "run" "p"] {:env {"OPENCODE_CONFIG_CONTENT" "{}"}}))))
-      (is (= {"OPENCODE_CONFIG_CONTENT" "{}"} (:env @seen)))
+      (is (= "ok" (:out (exec ["opencode" "run" "p"] {:env {"OPENCODE_CONFIG_CONTENT" "{}" "OPENCODE_PURE" "1"}}))))
+      (is (= ["env" "OPENCODE_CONFIG_CONTENT={}" "OPENCODE_PURE=1" "opencode" "run" "p"] (:cmd @seen))
+          "as an env prefix, which every executor runs, not only one that honours :env")
       (is (= "/workspace" (:workdir @seen))))))
 
 ;------------------------------------------------------------------------------ Layer 1

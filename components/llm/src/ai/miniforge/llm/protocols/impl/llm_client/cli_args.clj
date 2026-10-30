@@ -120,12 +120,20 @@
 
 (defn ^{:stratum 0} operator-opencode-config
   "The OPENCODE_CONFIG_CONTENT the operator set, parsed, so an isolated
-   call keeps its provider, model and endpoint settings; {} when unset or
-   not a JSON object."
+   call keeps its provider, model and endpoint settings; {} when unset.
+   Throws an :anomalies/incorrect anomaly when it is set but is not a
+   plain JSON object: OpenCode also reads JSONC, which miniforge cannot
+   rewrite without dropping the operator's settings."
   []
-  (let [parsed (try+ (some-> (settings/getenv-value "OPENCODE_CONFIG_CONTENT") json/parse-string)
-                     (catch Object _ nil))]
-    (if (map? parsed) parsed {})))
+  (let [raw (settings/getenv-value "OPENCODE_CONFIG_CONTENT")]
+    (if (str/blank? raw)
+      {}
+      (let [parsed (try+ (json/parse-string raw) (catch Object _ nil))]
+        (if (map? parsed)
+          parsed
+          (response/throw-anomaly! :anomalies/incorrect
+                                   "OPENCODE_CONFIG_CONTENT must be a plain JSON object for miniforge to set an OpenCode call's permissions"
+                                   {}))))))
 
 (defn ^{:stratum 0} echo-args
   "Build CLI arguments for the echo (test) backend."
@@ -149,15 +157,18 @@
    A call outside an artifact session, or one that asks to be
    `:isolated?`, runs `--pure` (no external plugins) as `isolation-agent`,
    whose permissions `opencode-env` denies; the request's own `:agent` is
-   not used. Such a call may not `:attach` to a running server, whose own
-   config would decide its tools."
+   not used. Such a call may not `:attach` to a running server (its own
+   config decides its tools), run a configured `:command` (one can expand
+   shell expressions and name its own agent), or resume a session with
+   `:session`, `:continue?` or `:fork?` (a session's saved permission
+   rules apply after the agent's)."
   [{:keys [prompt model agent attach command session continue? fork? files format
-           supervision isolated?]}]
+           supervision isolated?] :as request}]
   (let [isolate? (or isolated? (not (:settings-path supervision)))]
-    (when (and isolate? attach)
+    (when-let [refused (and isolate? (seq (filter #(get request %) [:attach :command :session :continue? :fork?])))]
       (response/throw-anomaly! :anomalies/incorrect
-                               "An isolated OpenCode call cannot attach to a running server"
-                               {:attach attach}))
+                               "An isolated OpenCode call cannot attach, run a configured command, or resume a session"
+                               {:refused (vec refused)}))
     (cond-> ["run"]
       isolate?                  (into ["--pure" "--agent" @isolation-agent])
       attach                    (into ["--attach" attach])
