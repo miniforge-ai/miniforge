@@ -12,7 +12,8 @@
    otherwise encode alike.
    A map or set holding two entries that would encode alike (an Instant
    and a Date at the same moment, say) is refused rather than collapsed,
-   so two distinct values never share an encoding."
+   so two distinct values never share an encoding. Each key and value is
+   encoded once, so the work is linear in the size of the value."
   (:require
    [clojure.string :as str])
   (:import
@@ -60,9 +61,10 @@
     (letfn [(enc [v]
               (cond
                 (map? v)
-                (let [ks (distinct-sorted v (map (comp enc key) v) (count v))
-                      by-key (into {} (map (fn [[k item]] [(enc k) (enc item)])) v)]
-                  (str "{" (str/join ", " (map #(str % " " (by-key %)) ks)) "}"))
+                (let [entries (mapv (fn [[k item]] [(enc k) item]) v)
+                      by-key (into {} entries)
+                      ks (distinct-sorted v (map first entries) (count v))]
+                  (str "{" (str/join ", " (map #(str % " " (enc (by-key %))) ks)) "}"))
 
                 (set? v) (str "#{" (str/join " " (distinct-sorted v (map enc v) (count v))) "}")
                 (sequential? v) (str "[" (str/join " " (map enc v)) "]")

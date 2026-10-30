@@ -89,6 +89,11 @@
     (is (thrown? Exception (signing/sign k {:x (str (char 0xd800))}))
         "malformed text is refused, not replaced with ?")
     (is (false? (signing/signed? k {:x (str (char 0xd800))} (signing/sign k {:x "?"}))))
+    (let [nested (reduce (fn [inner _] {inner 1}) {:leaf 1} (range 30))
+          started (System/nanoTime)]
+      (is (string? (signing/sign k nested)))
+      (is (< (- (System/nanoTime) started) 5000000000)
+          "map keys nested 30 deep sign in linear, not exponential, time"))
     (is (thrown? IllegalArgumentException
                  (signing/sign k #{at (java.util.Date/from at)}))
         "entries that would encode alike are refused, not collapsed")
