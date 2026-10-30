@@ -90,6 +90,24 @@
             :namespace "miniforge"
             :deployment-name "miniforge-api"}))
 
+(def ^{:stratum 1} push-request
+  (request workflow-run-id effect-id :effect/push :preflight/push-readiness
+           {:git/remote-url "https://github.com/miniforge-ai/miniforge.git"
+            :git/branch "task/abc"
+            :git/sha "0123456789abcdef0123456789abcdef01234567"
+            :git/force? false}))
+
+(def ^{:stratum 1} comment-request
+  (request workflow-run-id effect-id :effect/comment :preflight/comment-readiness
+           {:pr/repo "miniforge-ai/miniforge" :pr/number 1702
+            :github/action :reply
+            :github/payload-hash (apply str (repeat 64 "a"))}))
+
+(def ^{:stratum 1} provision-request
+  (request workflow-run-id effect-id :effect/provision :preflight/provision-plan
+           {:pulumi/stack "dev" :pulumi/stack-dir "infra/gcp"
+            :pulumi/plan-hash (apply str (repeat 64 "b"))}))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} issuer-input-is-closed-and-preflight-gated-test
@@ -198,3 +216,19 @@
   (let [g (issue merge-request (Date/from now))]
     (is (= now (:grant/issued-at g)))
     (is (= (.plusSeconds now (* 15 60)) (:grant/expires-at g)))))
+
+(deftest ^{:stratum 2} push-comment-and-provision-grants-bind-their-exact-target-test
+  (doseq [[r target-keys] [[push-request [:git/remote-url :git/branch :git/sha :git/force?]]
+                           [comment-request [:pr/repo :pr/number :github/action :github/payload-hash]]
+                           [provision-request [:pulumi/stack :pulumi/stack-dir :pulumi/plan-hash]]]]
+    (let [g (issue r)]
+      (is (grant/valid? g) (pr-str (:effect/class r)))
+      (is (= (:effect/class r) (:grant/effect-class g)))
+      (is (= (select-keys r (into [:effect/id :workflow-run/id] target-keys))
+             (:grant/scope g)))
+      (is (= {:constraint/max-count 1} (:grant/constraints g)))
+      (doseq [field target-keys]
+        (is (= :invalid-input (:anomaly/type (issue (dissoc r field))))
+            (str "missing " field)))
+      (is (= :unauthorized
+             (:anomaly/type (issue (assoc-in r [:effect/preflight :preflight/result] :deny))))))))

@@ -9,7 +9,7 @@
             [ai.miniforge.cli.main.commands.doctor.checks :as sut]
             [ai.miniforge.workflow.interface :as workflow]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 

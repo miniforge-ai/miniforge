@@ -92,16 +92,25 @@
        :errors quality-issues})))
 
 (defn ^{:stratum 0} check-release-ready
-  "Check release readiness."
+  "Check release readiness.
+
+   Reads `:release/readiness` from the release phase output, where the
+   release phase records it from the verify and review outcomes. Passes
+   only on `:ready? true`; an absent, false or non-boolean value fails. A
+   skipped release (nothing to publish) passes. The gate runner passes the
+   phase `:output` as the artifact."
   [artifact _ctx]
-  (let [ready? (or (get-in artifact [:metadata :release-ready])
-                   (get-in artifact [:release :ready])
-                   true)]  ; Default to ready
-    (if ready?
+  (let [readiness (:release/readiness artifact)
+        {:keys [ready? checks]} readiness]
+    (if (or (true? ready?) (true? (:skipped artifact)))
       {:passed? true}
       {:passed? false
-       :errors [{:type :not-release-ready
-                 :message "Artifact not ready for release"}]})))
+       :errors [{:type    :not-release-ready
+                 :message (if (map? readiness)
+                            (msg/t :release/not-ready
+                                   {:checks (pr-str (remove :passed? checks))})
+                            (msg/t :release/no-readiness))
+                 :checks  (vec checks)}]})))
 
 ;; Policy Pack Gate (classifies by enforcement action, via policy-pack)
 (defn ^{:stratum 0} check-policy-pack
