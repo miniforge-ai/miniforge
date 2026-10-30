@@ -27,6 +27,7 @@
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix-loop]
    [ai.miniforge.pr-lifecycle.monitor-budget :as budget]
+   [ai.miniforge.pr-lifecycle.monitor-fix-guard :as fix-guard]
    [ai.miniforge.pr-lifecycle.monitor-handlers :as handlers]
    [ai.miniforge.pr-lifecycle.monitor-loop :as monitor-loop]
    [ai.miniforge.pr-lifecycle.monitor-state :as state]
@@ -146,8 +147,9 @@
     (fs/create-dirs (fs/parent file))
     (spit (str file) "[]")
     (with-redefs [fix-loop/run-fix-loop (fn [& _] (swap! fixes inc) {:success? true :commit-sha "abc123"})
+                  fix-guard/checked-out-branch (constantly "feat/x")
                   poller/post-comment   (fn [& _] (dag/ok {:comment-posted true}))]
-      (let [result (handlers/handle-change-request monitor {:pr/number 42}
+      (let [result (handlers/handle-change-request monitor {:pr/number 42 :pr/branch "feat/x"}
                                                    {:category :change-request
                                                     :comment (review-comment 9 "2026-10-01T00:00:00Z")})]
         (testing "an attempt whose budget cannot be saved does not run"
@@ -171,13 +173,14 @@
                                                (state/get-or-create-budget monitor-b 43)
                                                ["f1" "f2" "f3" "f4"]))
     (with-redefs [fix-loop/run-fix-loop (fn [& _] (swap! fixes inc) {:success? true :commit-sha "abc123"})
+                  fix-guard/checked-out-branch (constantly "feat/x")
                   poller/post-comment   (fn [& _] (dag/ok {:comment-posted true}))]
       (testing "a monitor whose cached budget is stale does not start a fix once another spent it"
-        (is (= :budget-exhausted (:reason (handlers/handle-change-request monitor-a {:pr/number 42} change))))
+        (is (= :budget-exhausted (:reason (handlers/handle-change-request monitor-a {:pr/number 42 :pr/branch "feat/x"} change))))
         (is (zero? @fixes))
         (is (= 10 (:total-attempts (saved-42)))))
       (testing "a pushed fix is counted on top of what the other monitor saved"
-        (handlers/handle-change-request monitor-a {:pr/number 43} change)
+        (handlers/handle-change-request monitor-a {:pr/number 43 :pr/branch "feat/x"} change)
         (is (= 1 @fixes))
         (is (= 5 (:fixes-pushed (budget/load-budget "acme/app" 43))))))))
 
@@ -189,11 +192,12 @@
     (state/update-budget! monitor-b 42 (reduce budget/record-fix-attempt
                                                (state/get-or-create-budget monitor-b 42) [1 2]))
     (with-redefs [fix-loop/run-fix-loop (fn [& _] (swap! fixes inc) {:success? true :commit-sha "abc123"})
+                  fix-guard/checked-out-branch (constantly "feat/x")
                   poller/post-comment   (fn [& _] (dag/ok {:comment-posted true}))]
       (testing "a budget exhausted under another monitor's lower limit stays exhausted"
         (is (= :budget-exhausted
                (:reason (handlers/handle-change-request
-                         monitor-a {:pr/number 42}
+                         monitor-a {:pr/number 42 :pr/branch "feat/x"}
                          {:category :change-request :comment (review-comment 9 "2026-10-01T00:00:00Z")}))))
         (is (zero? @fixes))))))
 
