@@ -75,4 +75,12 @@
 
   ;; ci-monitor — CI failed but no failed-job log could be fetched
   :ci/logs-unavailable
-  "No failed-job logs for failing CI checks"}}
+  "No failed-job logs for failing CI checks"
+
+  ;; fix-loop — heading above the failed-job logs in the CI fixer's prompt
+  :fix/ci-logs-heading
+  "Failed job logs:"
+
+  ;; fix-loop — CI fix refused because there is no log text to fix from
+  :fix/ci-logs-missing
+  "CI failed but no failed-job logs were fetched; the fixer is not run without them"}}
