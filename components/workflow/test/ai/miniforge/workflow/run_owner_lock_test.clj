@@ -178,6 +178,15 @@
         (is (= "rwx------" (fs/posix->str (fs/posix-file-permissions root))))
         (finally (owner/release! held))))))
 
+(deftest ^{:stratum 0} an-unreadable-owners-directory-is-not-no-owner-test
+  (fs/with-temp-dir [root {:prefix "run-owner-denied-"}]
+    (let [id     (random-uuid)
+          owners (fs/parent (owner/owner-file root id))]
+      (owner/release! (owner/acquire! root id))
+      (fs/set-posix-file-permissions owners "---------")
+      (try (is (anomaly/anomaly? (owner/owner root id)))
+           (finally (fs/set-posix-file-permissions owners "rwx------"))))))
+
 (deftest ^{:stratum 0} a-claim-tries-again-past-a-probe-test
   ;; Another process's probe holds the lock for an instant; a claim that
   ;; meets it tries once more before refusing the run.

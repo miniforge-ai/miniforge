@@ -204,12 +204,13 @@
   (let [path (owner-file checkpoint-root run-id)]
     (locking local-owners
       (or (get @local-owners (str path))
+          ;; Opened without an existence check: one that cannot stat the
+          ;; file (permission denied) reads as missing, and a held lock as free.
           (try+
-            (when (fs/exists? path {:nofollow-links true})
-              (with-open [channel (open-channel path false)]
-                (if-let [lock (try-lock channel)]
-                  (do (.close lock) nil)
-                  (read-owner channel))))
+            (with-open [channel (open-channel path false)]
+              (if-let [lock (try-lock channel)]
+                (do (.close lock) nil)
+                (read-owner channel)))
             (catch java.nio.file.NoSuchFileException _ nil)
             (catch Exception e
               (failed run-id path e)))))))

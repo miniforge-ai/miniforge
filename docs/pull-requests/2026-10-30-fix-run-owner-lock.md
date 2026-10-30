@@ -27,7 +27,8 @@ one run and write the same checkpoints.
    any descriptor of a file releases the process's POSIX locks on it. Another process's probe holds
    the lock for an instant, so a claim that meets it tries once more before refusing. A symlinked
    lock file or directory is refused. An interruption while taking the lock sets the interrupt flag
-   again.
+   again. A probe opens the file without an existence check first: a file it cannot stat
+   (permission denied) is an `:unavailable` anomaly, not a free lock.
 2. Paths: `acquire!` makes the root with the checkpoint directory helper (`directory/prepare!`:
    private, protected ancestry, not the process umask) and names the lock file from the root's
    real path, so any spelling of a root (links, `..`) locks one file. A root that does not exist as
@@ -53,8 +54,9 @@ one run and write the same checkpoints.
 1. Recovery scenario, `components/workflow/test/ai/miniforge/workflow/run_owner_lock_test.clj`: a
    claim held in this process or in a separate `bb` process is refused and allowed once released;
    probes through other spellings of the root keep another process's view of the lock; a root the
-   lock creates is private; a probe through a spelling with a missing segment opens nothing; a
-   claim that meets a probe tries again; `run-pipeline` refuses a
+   lock creates is private; a probe through a spelling with a missing segment opens nothing; an
+   unreadable owners directory is an anomaly, not "no owner"; a claim that meets a probe tries
+   again; `run-pipeline` refuses a
    running run and pins the physical root. The cross-process cases fail, not skip, when `bb` is
    not on PATH.
 2. `resume_test/a-running-run-is-not-resumed-test` fails on main (the resume proceeded); it also
