@@ -80,6 +80,27 @@
 (defn- ^{:stratum 0} fallback-logger-must-not-be-built []
   (throw (ex-info "stderr fallback logger built although :logger was supplied" {})))
 
+(deftest ^{:stratum 0} probe-process-gets-the-agent-env-test
+  (let [names (fn [result]
+                (->> (:out result) str/split-lines (keep #(first (str/split % #"=" 2))) set))]
+    (testing "with :env the process gets exactly that environment"
+      (let [seen (names (process/run-cli-command ["env"] 10000
+                                                 :env {"PATH" (System/getenv "PATH") "ANTHROPIC_API_KEY" "k"}))]
+        (is (contains? seen "ANTHROPIC_API_KEY"))
+        (is (not (contains? seen "HOME")) "the JVM's own environment is not passed")))
+    (testing "without :env a host-side check such as `gh auth status` keeps miniforge's environment"
+      (is (contains? (names (process/run-cli-command ["env"] 10000)) "HOME")))
+    (testing "every backend probe passes the llm client's agent environment"
+      (let [seen  (atom [])
+            agent {"PATH" "/bin" "MARK" "agent-env"}]
+        (with-redefs [llm/agent-env           (constantly agent)
+                      process/run-cli-command (fn [_cmd _timeout-ms & {:keys [env]}]
+                                                (swap! seen conj env)
+                                                {:out "{\"ok\":true}" :err "" :exit 0})]
+          (#'probe/read-cli-version "/opt/homebrew/bin/claude")
+          (#'probe/run-claude-backend-preflight "/opt/homebrew/bin/claude" "/tmp/runtime-worktree"))
+        (is (= [agent agent] @seen))))))
+
 (deftest ^{:stratum 0} backend-preflight-attempts-clamps-to-at-least-one-test
   (testing "a zero or negative configured attempt count still means one probe"
     (doseq [configured [0 -2]]
@@ -219,14 +240,15 @@
         (is (= "Reply with exactly {\"ok\":true}" stdin))))))
 
 (deftest ^{:stratum 0} run-backend-preflight-keeps-argv-backend-prompt-in-argv-test
-  (testing "a backend declaring :prompt-via :argv still carries the prompt as an argument, with no stdin"
+  (testing "a backend declaring :prompt-via :argv still carries the prompt as an argument, with no
+            stdin; the OpenCode probe runs isolated, as a real call outside a session does"
     (let [llm-client (llm/create-client {:backend :opencode})
           seen (atom nil)
           output (with-out-str
                    (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/opencode")
                                     #'probe/read-cli-version (fn [_] {:success true :version "0.4.1"})
-                                    #'process/run-cli-command (fn [cmd _timeout-ms & {:keys [stdin]}]
-                                                            (reset! seen {:cmd cmd :stdin stdin})
+                                    #'process/run-cli-command (fn [cmd _timeout-ms & {:keys [stdin env]}]
+                                                            (reset! seen {:cmd cmd :stdin stdin :env env})
                                                             {:out "{\"ok\":true}"
                                                              :err ""
                                                              :exit 0})}
@@ -235,10 +257,11 @@
                         false
                         llm-client
                         {:worktree-path "/tmp/runtime-worktree"}))))
-          {:keys [cmd stdin]} @seen]
+          {:keys [cmd stdin env]} @seen]
       (is (str/includes? output "Backend: opencode"))
-      (is (= ["/opt/homebrew/bin/opencode" "run" "Reply with exactly {\"ok\":true}"] cmd))
-      (is (nil? stdin)))))
+      (is (= ["/opt/homebrew/bin/opencode" "run" "--pure" "Reply with exactly {\"ok\":true}"] cmd))
+      (is (nil? stdin))
+      (is (contains? env "OPENCODE_CONFIG_CONTENT")))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

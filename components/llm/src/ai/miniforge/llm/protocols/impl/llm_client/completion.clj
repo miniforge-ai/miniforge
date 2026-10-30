@@ -141,7 +141,7 @@
   (let [{:keys [config logger exec-fn]} client
         {:keys [backend]} config
         backend-config (get backend-registry/backends backend)
-        {:keys [cmd args-fn]} backend-config
+        {:keys [cmd args-fn env-fn]} backend-config
         request-with-model (with-client-config request config)]
     (log-prompt-sent logger backend (prompts/build-request-prompt request))
 
@@ -159,7 +159,8 @@
                                      :prompt-via prompt-via))
             full-cmd (into [cmd] args)
             opts     (cond-> (prompts/exec-opts-for-prompt-via prompt-via prompt)
-                       (:workdir request) (assoc :workdir (:workdir request)))
+                       (:workdir request) (assoc :workdir (:workdir request))
+                       env-fn             (assoc :env (env-fn request-with-model)))
             result   (run-cli-exec exec-fn full-cmd opts)
             response (cli-output/parse-cli-output (:out result) (:exit result) (:err result))]
         (log-response logger response)
