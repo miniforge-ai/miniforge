@@ -28,6 +28,7 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.agent.artifact-session :as session]
+   [ai.miniforge.agent.artifact-session.cli-config :as cli-config]
    [ai.miniforge.agent.protocols.records.specialized :as specialized]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -151,6 +152,21 @@
     (if (and (sequential? groups) (seq groups))
       (vec (mapcat matcher-group-problems groups))
       ["no PreToolUse array"])))
+
+(deftest ^{:stratum 1} session-settings-allow-only-the-roles-tools-test
+  (testing "a capsule reviewer session's settings allow the reviewer's tools and no write or shell tool"
+    (let [allow (set (get-in (capsule-settings) ["permissions" "allow"]))]
+      (is (contains? allow "mcp__context__context_read"))
+      (is (not-any? allow ["Write" "Edit" "Bash" "mcp__context__context_write"]))))
+  (testing "a host implementer session's settings file allows its write and shell tools"
+    (let [dir  (str (java.nio.file.Files/createTempDirectory
+                     "claude-settings" (make-array java.nio.file.attribute.FileAttribute 0)))
+          path (cli-config/write-claude-settings! dir :implementer dir)
+          allow (set (get-in (json/parse-string (slurp path)) ["permissions" "allow"]))]
+      (is (every? allow ["Bash" "Write" "mcp__context__context_write"]))))
+  (testing "a role the policy does not list is allowed nothing"
+    (is (= [] (get-in (cli-config/pre-tool-use-settings "true" (cli-config/role-allowed-tools :unlisted))
+                      ["permissions" "allow"])))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -56,9 +56,6 @@
       (is (= "deny" (get output "permissionDecision")))
       (is (not (str/blank? (get output "permissionDecisionReason")))))))
 
-(deftest ^{:stratum 1} allow-is-an-explicit-decision-test
-  (testing "an allowed tool call gets permissionDecision allow: the session's
-            dontAsk mode refuses any tool the hook does not allow"
-    (is (= {"hookSpecificOutput" {"hookEventName" "PreToolUse"
-                                  "permissionDecision" "allow"}}
-           (hook-reply :implementer "Write" {:file_path "x.clj"})))))
+(deftest ^{:stratum 1} allow-reports-no-decision-test
+  (testing "an allowed tool call gets an empty object, so Claude's permission flow applies"
+    (is (= {} (hook-reply :implementer "Write" {:file_path "x.clj"})))))
