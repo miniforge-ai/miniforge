@@ -29,11 +29,20 @@
    persistence pushes them, and a resume starts from one). Backend-neutral: the caller supplies how to run git (host
    or capsule).
 
-   Split out of `release` (rule 210)."
+   Split out of `release` (rule 210); the entries it builds are in
+   `release-unpushed-entries`."
   (:require [ai.miniforge.agent.interface :as agent]
-            [clojure.string :as str]))
+            [ai.miniforge.phase-software-factory.release-unpushed-entries :as entries]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} head-command
+  "Whether HEAD names a commit; with `--quiet` it exits 1 when it does not."
+  ["git" "rev-parse" "--verify" "--quiet" "HEAD"])
+
+(def ^{:stratum 0} origin-command
+  "Whether the worktree has an origin to publish to."
+  ["git" "remote" "get-url" "origin"])
 
 (defn ^{:stratum 0} log-command
   "The paths that commits on HEAD and on no origin ref (save the
@@ -45,32 +54,12 @@
               (distinct (remove nil? excluded-branches)))
         "--remotes=origin"))
 
-(defn ^{:stratum 0} nul-fields
-  "`out` split on NUL, keeping every non-empty field as it is: a path of
-   spaces is a path."
-  [out]
-  (vec (remove empty? (str/split (or out "") #"\u0000"))))
-
-(defn- ^{:stratum 0} failure
-  [command {:keys [exit err]}]
-  {:failure {:detail (or (not-empty (str/trim (str err)))
-                         (str (str/join " " command) " exited " exit))
-             :data   {:command (str/join " " command) :exit exit :stderr err}}})
+(defn- ^{:stratum 0} answered? [result]
+  (= 0 (:exit result)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} tree-entries
-  "`git ls-tree -z` output as {path {:type t :object sha}}."
-  [out]
-  (into {}
-        (keep (fn [entry]
-                (when-let [[_ type object path] (re-matches #"(?s)\d+ (\S+) (\S+)\t(.*)" entry)]
-                  [path {:type type :object object}])))
-        (nul-fields out)))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} unpushed-files
+(defn ^{:stratum 1} unpushed-files
   "The files unpublished commits change, as :code/files entries with their
    content at HEAD, in {:files [...]}: a path HEAD lacks is a deletion, a
    submodule's is its commit. No commit yet is nothing to release. A
@@ -80,38 +69,25 @@
    `run` runs a git argv in the worktree and returns {:exit :out :err};
    `run-branches` are the run's own branches (release and checkpoint)."
   [run run-branches]
-  (let [origin-cmd ["git" "remote" "get-url" "origin"]
-        log-cmd    (log-command run-branches)
-        head-cmd   ["git" "rev-parse" "--verify" "--quiet" "HEAD"]
-        head       (run head-cmd)]
+  (let [head     (run head-command)
+        origin   (when (answered? head) (run origin-command))
+        log-cmd  (log-command run-branches)
+        log      (when (answered? origin) (run log-cmd))
+        paths    (when (answered? log)
+                   (filterv #(agent/substantive-file? {:path %}) (distinct (entries/nul-fields (:out log)))))
+        tree-cmd (into ["git" "ls-tree" "-z" "HEAD" "--"] paths)
+        tree     (when (seq paths) (run tree-cmd))
+        found    (when (answered? tree) (entries/tree-entries (:out tree)))
+        files    (when found (mapv #(entries/file-entry run found %) paths))]
     (cond
       ;; Exit 1 with --quiet: HEAD names no commit yet. Anything else
       ;; but 0 (a timeout, a capsule error) is a scan that did not answer.
       (= 1 (:exit head))       {:files []}
-      (not= 0 (:exit head))    (failure head-cmd head)
-      :else
-      (let [origin (run origin-cmd)
-            log    (when (= 0 (:exit origin)) (run log-cmd))
-            paths  (filterv #(agent/substantive-file? {:path %}) (distinct (nul-fields (:out log))))
-            tree-cmd (into ["git" "ls-tree" "-z" "HEAD" "--"] paths)
-            tree   (when (and (= 0 (:exit log)) (seq paths)) (run tree-cmd))]
-        (cond
-          (not= 0 (:exit origin)) (failure origin-cmd origin)
-          (not= 0 (:exit log))    (failure log-cmd log)
-          (empty? paths)          {:files []}
-          (not= 0 (:exit tree))   (failure tree-cmd tree)
-          :else
-          (let [entries (tree-entries (:out tree))
-                files   (for [path paths
-                              :let [{:keys [type object]} (get entries path)]]
-                          (case type
-                            nil      {:path path :content "" :action :delete}
-                            "commit" {:path path :content (str "Subproject commit " object)
-                                      :action :modify}
-                            (let [cmd   ["git" "cat-file" "-p" object]
-                                  shown (run cmd)]
-                              (if (= 0 (:exit shown))
-                                {:path path :content (:out shown) :action :modify}
-                                (failure cmd shown)))))]
-            (or (some #(when (:failure %) %) files)
-                {:files (vec files)})))))))
+      (not (answered? head))   (entries/failure head-command head)
+      (not (answered? origin)) (entries/failure origin-command origin)
+      (not (answered? log))    (entries/failure log-cmd log)
+      (empty? paths)           {:files []}
+      (not (answered? tree))   (entries/failure tree-cmd tree)
+      :else                    (or (some #(when (:failure %) %) files) {:files files}))))
+
+(comment ::release-unpushed)

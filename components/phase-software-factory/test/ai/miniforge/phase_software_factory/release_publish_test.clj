@@ -19,6 +19,7 @@
   (:require
    [ai.miniforge.phase-software-factory.release-publish :as release-publish]
    [ai.miniforge.phase-software-factory.release-unpushed :as release-unpushed]
+   [ai.miniforge.phase-software-factory.release-unpushed-entries :as entries]
    [ai.miniforge.release-executor.interface :as release-executor]
    [clojure.test :refer [deftest is testing]]))
 
@@ -72,11 +73,11 @@
 (deftest ^{:stratum 0} scan-output-parsing-test
   (testing "NUL fields keep a path of spaces; only empty fields are separators"
     (is (= ["  " "a b.txt" "src/x.clj"]
-           (release-unpushed/nul-fields "  \u0000a b.txt\u0000\u0000src/x.clj\u0000"))))
+           (entries/nul-fields "  \u0000a b.txt\u0000\u0000src/x.clj\u0000"))))
   (testing "ls-tree entries by path, a submodule as a commit"
     (is (= {"src/a.clj" {:type "blob" :object "abc"}
             "standards/miniforge" {:type "commit" :object "def"}}
-           (release-unpushed/tree-entries
+           (entries/tree-entries
             (str "100644 blob abc\tsrc/a.clj\u0000"
                  "160000 commit def\tstandards/miniforge\u0000"))))))
 
