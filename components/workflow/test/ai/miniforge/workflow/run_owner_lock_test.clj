@@ -173,6 +173,17 @@
             "a second local claim is answered by the registry")
         (finally (owner/release! held))))))
 
+(deftest ^{:stratum 0} a-root-the-lock-creates-is-private-test
+  ;; Made as checkpoint directories are, whatever the umask, so the
+  ;; checkpoint writes' directory check accepts it.
+  (fs/with-temp-dir [dir {:prefix "run-owner-private-"}]
+    (let [root (fs/path dir "checkpoints")
+          held (owner/acquire! root (random-uuid))]
+      (try
+        (is (not (anomaly/anomaly? held)))
+        (is (= "rwx------" (fs/posix->str (fs/posix-file-permissions root))))
+        (finally (owner/release! held))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} owner-lock-held-by-another-process-test
@@ -214,3 +225,22 @@
             (is (= "busy" (seen))))
           (finally (owner/release! held)))
         (is (= "free" (seen)))))))
+
+(deftest ^{:stratum 1} probes-through-another-spelling-keep-the-os-lock-test
+  (if-not (fs/which "bb")
+    (println "SKIP cross-process owner lock test: bb is not on PATH")
+    (fs/with-temp-dir [dir {:prefix "run-owner-spelling-"}]
+      (let [real  (fs/create-dirs (fs/path dir "real"))
+            _     (fs/create-sym-link (fs/path dir "alias") real)
+            claim (str (fs/path dir "unused" ".." "alias" "checkpoints"))
+            probe (str (fs/path real "checkpoints"))
+            id    (random-uuid)
+            held  (owner/acquire! claim id)
+            seen  #(clojure.string/trim
+                    (:out (bp/shell {:out :string :err :inherit}
+                                    "bb" "-e" probe-script (str (owner/owner-file probe id)))))]
+        (try
+          (is (= (str (owner/owner-file claim id)) (str (owner/owner-file probe id))))
+          (is (some? (owner/owner probe id)) "the probe is answered by the registry")
+          (is (= "busy" (seen)) "and another process still finds the lock held")
+          (finally (owner/release! held)))))))

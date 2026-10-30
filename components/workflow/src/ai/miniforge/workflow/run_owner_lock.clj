@@ -36,6 +36,7 @@
    the locks held here answers claims and probes for them."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.workflow.boundary.checkpoint-directory :as directory]
    [ai.miniforge.workflow.messages :as messages]
    [babashka.fs :as fs]
    [clojure.edn :as edn]
@@ -57,14 +58,18 @@
    path of the root's deepest existing ancestor plus the rest, normalized,
    so every path to one root names one file, before and after the root is
    created. Normalizing is exact there: no segment past that ancestor
-   exists, so none is a link a `..` would have to resolve through."
+   exists, so none is a link a `..` would have to resolve through. It can
+   expose an existing directory again (`<dir>/unused/../alias`), so the
+   result is resolved a second time; that pass finds no `..` to drop."
   [checkpoint-root run-id]
-  (let [root (loop [path (fs/absolutize checkpoint-root)
-                    missing ()]
-               (cond
-                 (fs/exists? path) (fs/normalize (reduce fs/path (fs/real-path path) missing))
-                 (fs/parent path)  (recur (fs/parent path) (cons (str (fs/file-name path)) missing))
-                 :else             (fs/normalize (reduce fs/path path missing))))]
+  (let [resolve (fn [start]
+                  (loop [path (fs/absolutize start)
+                         missing ()]
+                    (cond
+                      (fs/exists? path) (fs/normalize (reduce fs/path (fs/real-path path) missing))
+                      (fs/parent path)  (recur (fs/parent path) (cons (str (fs/file-name path)) missing))
+                      :else             (fs/normalize (reduce fs/path path missing)))))
+        root (resolve (resolve checkpoint-root))]
     (fs/path root ".owners" (str run-id ".lock"))))
 
 (defn- ^{:stratum 0} try-lock
@@ -115,11 +120,14 @@
 
 (defn- ^{:stratum 0} open-channel
   "Open `path` for read and write, creating it (and its directory) when
-   `create?`. Refuses a symlinked file or directory."
+   `create?`. Refuses a symlinked file or directory. Directories are made
+   as checkpoint directories are (private, protected ancestry), not with
+   the process umask: a root this creates must pass the checkpoint
+   writes' own directory check."
   ^FileChannel [path create?]
   (when (or (fs/sym-link? (fs/parent path)) (fs/sym-link? path))
     (throw (ex-info "owner lock path is a symbolic link" {:path (str path)})))
-  (when create? (fs/create-dirs (fs/parent path)))
+  (when create? (directory/prepare! (fs/parent path)))
   (FileChannel/open path (into-array OpenOption
                                      (cond-> [StandardOpenOption/READ StandardOpenOption/WRITE
                                               LinkOption/NOFOLLOW_LINKS]
