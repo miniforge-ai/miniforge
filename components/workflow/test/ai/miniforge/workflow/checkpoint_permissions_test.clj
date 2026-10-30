@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.checkpoint-permissions-test
-  (:require [ai.miniforge.workflow.boundary.checkpoint-permissions :as permissions]
+  (:require [ai.miniforge.workflow.boundary.checkpoint-file :as checkpoint-file]
+            [ai.miniforge.workflow.boundary.checkpoint-permissions :as permissions]
             [ai.miniforge.workflow.checkpoint-temporary-support :as support]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [babashka.fs :as fs]
@@ -47,8 +48,8 @@
 (defn- ^{:stratum 1} verify-permissions [root]
   (let [target (fs/path root "snapshot.edn")
         observed (atom [])
-        write! (partial support/observe-permissions! spit observed)]
-    (with-redefs [spit write!]
+        write! (partial support/observe-permissions! checkpoint-file/fill! observed)]
+    (with-redefs [checkpoint-file/fill! write!]
       (support/write! target :original)
       (is (= permissions/private-permissions (support/permission-mode target)))
       (fs/set-posix-file-permissions target shared-permissions)

@@ -23,15 +23,20 @@
    remote."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [babashka.fs :as fs]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} initial-state
-  "One dirty worktree on main, an origin with main only, no PRs."
+  "One dirty worktree on main, an origin with main only, no PRs, and an
+   empty effect store of its own (the release's durable effect records
+   belong to the same world, and must never reach the real miniforge
+   home)."
   []
   {:branches #{"main"} :head "main" :dirty? true :commits 0
-   :pushed {} :prs []})
+   :pushed {} :prs []
+   :effect-store-dir (str (fs/create-temp-dir {:prefix "release-effects-"}))})
 
 (defn- ^{:stratum 0} command-line [command]
   (if (string? command) command (str/join " " command)))
@@ -83,6 +88,13 @@
       (str/starts-with? line "git rev-parse HEAD") (ok sha)
       (str/starts-with? line "git push -u origin ")
       (do (swap! state assoc-in [:pushed (last-word line)] sha) (ok))
+      (str/starts-with? line "git remote get-url --push")
+      (ok (get @state :push-url (get @state :origin-url "git@github.com:o/r.git")))
+      (str/starts-with? line "git remote get-url")
+      (ok (get @state :origin-url "git@github.com:o/r.git"))
+      (str/starts-with? line "git ls-remote origin refs/heads/")
+      (let [b (str/replace (last-word line) "refs/heads/" "")]
+        (ok (if-let [pushed (get-in @state [:pushed b])] (str pushed "\trefs/heads/" b) "")))
       (and (:gh-down? @state) (str/starts-with? line "gh pr list"))
       (fail "error connecting to api.github.com")
       (str/starts-with? line "gh pr list --head ")
@@ -98,19 +110,27 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} executor
-  "A TaskExecutor over `state` (an atom from initial-state). `intercept`, a
-   fn of [state command] called before each command, can throw to stand
-   for a crash at that command."
-  ([state] (executor state (fn [_ _])))
-  ([state intercept]
+  "A TaskExecutor over `state` (an atom from initial-state). `before` and
+   `after`, fns of [state command-line] called before a command runs and
+   after it took effect, can throw to stand for a crash at that point. A
+   map `before` returns is the command's reply instead (a command that
+   fails without taking effect)."
+  ([state] (executor state (fn [_ _]) (fn [_ _])))
+  ([state before] (executor state before (fn [_ _])))
+  ([state before after]
    (reify
      dag/TaskExecutor
      (executor-type [_] :fake-remote)
      (available? [_] (dag/ok {:available? true}))
      (acquire-environment! [_ _ _] (dag/ok {:environment-id "fake-env"}))
      (execute! [_ _env-id command _opts]
-       (intercept state command)
-       (dag/ok (answer! state command)))
+       (let [line  (command-line command)
+             reply (before state line)]
+         (if (map? reply)
+           (dag/ok reply)
+           (let [reply (answer! state command)]
+             (after state line)
+             (dag/ok reply)))))
      (copy-to! [_ _ _ _] (dag/ok {}))
      (copy-from! [_ _ _ _] (dag/ok {}))
      (release-environment! [_ _] (dag/ok {:released? true}))

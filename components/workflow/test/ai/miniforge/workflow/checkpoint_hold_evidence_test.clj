@@ -9,6 +9,7 @@
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.workflow.checkpoint-store :as store]
             [ai.miniforge.workflow.checkpoint-store-gc :as gc]
+            [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.context :as context]
             [ai.miniforge.workflow.monitoring :as monitoring]
             [ai.miniforge.workflow.runner :as runner]
@@ -58,7 +59,7 @@
               written (filter #(= :workflow/machine-snapshot-written (:event/type %))
                               (es/get-events stream))]
           (is (= 1 (count written)))
-        (is (= (str (fs/path (fs/real-path root) (str (:execution/id ctx)) "machine-snapshot.edn"))
+        (is (= (:snapshot (fixture/recorded-paths root (:execution/id ctx)))
                  (:snapshot/path (first written)))))
         (finally (es/close-current-event-stream! stream))))))
 

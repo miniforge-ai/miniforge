@@ -61,7 +61,8 @@
   (core/execute-release-phase
    {:workflow/artifacts [] :workflow/spec {:spec/description "Add the feature"}}
    {:executor (remote/executor state) :environment-id "fake-env"
-    :worktree-path "/tmp/wt" :create-pr? true :provenance {:workflow run-id}}
+    :worktree-path "/tmp/wt" :create-pr? true :provenance {:workflow run-id}
+    :effect-store-dir (:effect-store-dir @state)}
    {:release-meta release-meta}))
 
 (deftest ^{:stratum 1} resumed-attempt-under-a-new-run-id-reuses-the-branch-test
@@ -73,7 +74,8 @@
                      {:workflow/artifacts [] :workflow/spec {:spec/description "Add the feature"}}
                      {:executor (remote/executor state) :environment-id "fake-env"
                       :worktree-path "/tmp/wt" :create-pr? true
-                      :provenance {:workflow run-id :origin origin}}
+                      :provenance {:workflow run-id :origin origin}
+                      :effect-store-dir (:effect-store-dir @state)}
                      {:release-meta release-meta}))
           a (attempt (random-uuid))
           b (attempt (random-uuid))]

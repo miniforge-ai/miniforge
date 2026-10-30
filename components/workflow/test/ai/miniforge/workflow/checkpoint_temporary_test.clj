@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.checkpoint-temporary-test
-  (:require [ai.miniforge.workflow.checkpoint-temporary-support :as support]
+  (:require [ai.miniforge.workflow.boundary.checkpoint-file :as checkpoint-file]
+            [ai.miniforge.workflow.checkpoint-temporary-support :as support]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [babashka.fs :as fs]
             [clojure.edn :as edn]
@@ -14,9 +15,9 @@
 (defn- ^{:stratum 0} verify-failed-write [root]
   (let [target (str (fs/path root "snapshot.edn"))
         failure (IOException. "injected partial write")
-        fail-write! (partial support/partial-write! spit failure)]
+        fail-write! (partial support/partial-write! checkpoint-file/fill! failure)]
     (support/write! target :original)
-    (with-redefs [spit fail-write!]
+    (with-redefs [checkpoint-file/fill! fail-write!]
       (is (identical? failure (support/attempt-write! target :replacement))))
     (is (= :original (edn/read-string (slurp target))))
     (is (= ["snapshot.edn"] (mapv fs/file-name (fs/list-dir root))))))
@@ -24,8 +25,8 @@
 (defn- ^{:stratum 0} verify-interleaving [root]
   (let [target (str (fs/path (fs/real-path root) "snapshot.edn"))
         paths (atom [])
-        interleaved-write! (partial support/interleave! spit (atom false) target paths)]
-    (with-redefs [spit interleaved-write!]
+        interleaved-write! (partial support/interleave! checkpoint-file/fill! (atom false) target paths)]
+    (with-redefs [checkpoint-file/fill! interleaved-write!]
       (is (= target (support/attempt-write! target :outer))))
     (is (= :outer (edn/read-string (slurp target))))
     (is (= 2 (count (distinct @paths))))

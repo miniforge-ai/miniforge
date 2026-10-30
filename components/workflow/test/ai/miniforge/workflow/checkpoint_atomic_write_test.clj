@@ -39,7 +39,10 @@
         reopened (workflow/load-checkpoint-data run-id opts)]
     (is (map? first-write))
     (is (= run-id (get-in first-read [:machine-snapshot :execution/id])))
-    (is (= first-write replacement))
+    (is (= (:checkpoint/manifest-path first-write) (:checkpoint/manifest-path replacement)))
+    (is (not= (:checkpoint/machine-snapshot-path first-write)
+              (:checkpoint/machine-snapshot-path replacement))
+        "each write is a new generation")
     (is (= 1 (get-in reopened [:machine-snapshot :execution/redirect-count])))
     (is (empty? (fs/glob root "**/*.tmp")))))
 
