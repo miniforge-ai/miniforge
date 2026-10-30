@@ -41,4 +41,12 @@
                                       :expires-at (.plusSeconds now 300)}
                               now)]
     (is (grant/signed? child))
-    (is (not= (:grant/signature parent) (:grant/signature child)))))
+    (is (not= (:grant/signature parent) (:grant/signature child)))
+    (is (= :unauthorized
+           (:anomaly/type (grant/delegate (dissoc parent :grant/signature)
+                                          {:principal "agent:reviewer"
+                                           :scope (:grant/scope parent)
+                                           :constraints {:constraint/max-count 1}
+                                           :expires-at (.plusSeconds now 300)}
+                                          now)))
+        "a parent the runtime did not sign is not delegated from")))

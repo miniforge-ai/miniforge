@@ -21,23 +21,26 @@ contents, so a process that can write those stores can write authority.
 
 ## Changes in Detail
 
-1. `sign` returns the hex HMAC-SHA256 of `canonical/encode` of a value. The encoder sorts map entries and set members by
-  their own encodings, prints strings readably under any caller printer binding, and refuses (throws) a map or set whose
+1. `sign` returns the hex HMAC-SHA256 of `canonical/encode` of a value; the encoder refuses values nested deeper than 64
+  levels, so untrusted input cannot overflow a verifier's stack. The encoder sorts map entries and set members by their
+  own encodings, prints strings readably under any caller printer binding, and refuses (throws) a map or set whose
   entries would encode alike instead of collapsing them, so distinct values never share an encoding. `signed?` compares
   in constant time and returns false instead of throwing on untrusted input.
 2. `load-or-create-key!` reads `<miniforge-home>/keys/runtime-signing.key` (or a given file), creating it when absent:
    1. The 32-byte key is written to a temporary file that `Files/createTempFile` creates `rw-------` (a `java.io.File`
      write would apply the umask), forced to disk, then hard-linked into place. An existing or concurrently created key
      is never replaced.
-   2. Refused with an anomaly: a key directory that is a link, owned by another user, or writable by group or others; a
-     key file that is a link, owned by another user, or open to other users; a file over 256 bytes or not exactly 64 hex
-     characters after trimming. The file is read to EOF through a channel opened with NOFOLLOW_LINKS.
+   2. Refused with an anomaly: a key directory that is a link, not owned by this process's owner, or writable by group
+     or others; a key file that is a link, not a regular file (a FIFO would block the read), not owned by this process's
+     owner, or open to other users; a file over 256 bytes or not exactly 64 hex characters after trimming. The file is
+     read to EOF through a channel opened with NOFOLLOW_LINKS. "This process's owner" is the owner of a temporary file
+     the process creates, compared as a principal, so a container run as a bare UID with no passwd entry still works.
    3. On a file system without POSIX permissions the key is created without them.
 3. Registered on the dev and test classpaths. Projects pick it up when execution-grant depends on it.
 
-Limit, stated in the namespace docstring: a worker that can write the grant or effect stores but cannot read the key
-file cannot forge authority. A process running as the same user can read the key, so this alone does not contain
-local-mode agents.
+Limits, stated in the namespace docstrings: only POSIX owner and mode bits are checked, so an ACL granting another user
+access is not detected. And a worker that can write the grant or effect stores but cannot read the key file cannot forge
+authority. A process running as the same user can read the key, so this alone does not contain local-mode agents.
 
 ## Testing Plan
 

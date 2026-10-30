@@ -19,6 +19,15 @@
    :grant/scope {:pr/repo "miniforge-ai/miniforge" :pr/number 7}
    :grant/expires-at (Instant/parse "2026-10-29T00:15:00Z")})
 
+(def ^{:stratum 0} linear-time-budget-ns
+  "Five seconds. Encoding 30 levels of nested map keys takes milliseconds;
+   the earlier double encoding of each key took minutes."
+  5000000000)
+
+(def ^{:stratum 0} fifo-wait-ms
+  "How long a key load may take on a FIFO before the test counts it as hung."
+  5000)
+
 (defn- ^{:stratum 0} key-file []
   (io/file (.toFile (Files/createTempDirectory "signing" (into-array FileAttribute [])))
            "keys" "runtime-signing.key"))
@@ -60,7 +69,7 @@
     (let [file (key-file)]
       (.mkdirs (.getParentFile file))
       (.waitFor (.start (ProcessBuilder. ["mkfifo" (str file)])))
-      (is (anomaly/anomaly? (deref (future (signing/load-or-create-key! file)) 5000 :hung)))))
+      (is (anomaly/anomaly? (deref (future (signing/load-or-create-key! file)) fifo-wait-ms :hung)))))
   (testing "given malformed key text → refused"
     (let [file (key-file)]
       (signing/load-or-create-key! file)
@@ -97,7 +106,7 @@
     (let [nested (reduce (fn [inner _] {inner 1}) {:leaf 1} (range 30))
           started (System/nanoTime)]
       (is (string? (signing/sign k nested)))
-      (is (< (- (System/nanoTime) started) 5000000000)
+      (is (< (- (System/nanoTime) started) linear-time-budget-ns)
           "map keys nested 30 deep sign in linear, not exponential, time"))
     (let [deep (reduce (fn [inner _] [inner]) 1 (range 100000))]
       (is (thrown? IllegalArgumentException (signing/sign k deep)))

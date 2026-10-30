@@ -34,11 +34,16 @@
   "Any of these on the key directory lets another user swap the key file."
   #{PosixFilePermission/GROUP_WRITE PosixFilePermission/OTHERS_WRITE})
 
-(defn ^{:stratum 0} owned-by-process-user?
-  "True when the process user owns `path` itself (links not followed)."
-  [^Path path]
-  (= (System/getProperty "user.name")
-     (.getName (Files/getOwner path (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])))))
+(def ^{:stratum 0} process-owner
+  "The owner this process creates files as: the owner of a temporary file
+   it creates once. Comparing owners, not the `user.name` property, holds
+   when the UID has no passwd entry (a container run as a bare UID) or
+   `user.name` is overridden."
+  (delay
+    (let [probe (Files/createTempFile "miniforge-owner-" ".probe" (into-array FileAttribute []))]
+      (try
+        (Files/getOwner probe (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
+        (finally (Files/deleteIfExists probe))))))
 
 (defn ^{:stratum 0} posix-file-system? [^Path path]
   (contains? (.supportedFileAttributeViews (.getFileSystem path)) "posix"))
@@ -62,7 +67,22 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} exposed?
+(defn ^{:stratum 1} owned-by-process-user?
+  "True when this process's owner owns `path` itself (links not followed)."
+  [^Path path]
+  (= @process-owner
+     (Files/getOwner path (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))))
+
+(defn ^{:stratum 1} fresh-key-text
+  "New random key material as hex."
+  []
+  (let [key-bytes (byte-array key-length)]
+    (.nextBytes (SecureRandom.) key-bytes)
+    (hmac/hex key-bytes)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} exposed?
   "True when another user owns the file at `path` or holds any permission
    on it."
   [posix? ^Path path]
@@ -71,7 +91,7 @@
            (boolean (some exposing-permissions
                           (Files/getPosixFilePermissions path no-follow))))))
 
-(defn ^{:stratum 1} safe-directory?
+(defn ^{:stratum 2} safe-directory?
   "True when `dir` is a real directory that only the process user can
    write. POSIX ownership is not checked where POSIX modes do not exist."
   [posix? ^Path dir]
@@ -80,13 +100,6 @@
            (and (owned-by-process-user? dir)
                 (not-any? writable-by-others
                           (Files/getPosixFilePermissions dir no-follow))))))
-
-(defn ^{:stratum 1} fresh-key-text
-  "New random key material as hex."
-  []
-  (let [key-bytes (byte-array key-length)]
-    (.nextBytes (SecureRandom.) key-bytes)
-    (hmac/hex key-bytes)))
 
 (comment
   (parse-key (fresh-key-text)))
