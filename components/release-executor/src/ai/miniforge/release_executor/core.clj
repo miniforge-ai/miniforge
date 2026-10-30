@@ -490,11 +490,17 @@
    commits-ahead-of-base (git rev-list --count --right-only
    origin/<base>...HEAD — the three-dot merge-base form) detects this
    carry-forward case and treats it as success — step-commit will skip
-   cleanly and step-push will ship the existing commits."
+   cleanly and step-push will ship the existing commits.
+
+   A run released before whose PR has since merged has nothing staged and
+   nothing ahead (the fetched base holds the release). When the run's
+   branch has a merged PR at HEAD, that is the same release, carried on as
+   above, not an empty one."
   [state]
   (if (failed? state)
     state
-    (let [{:keys [host-mode? worktree-path executor environment-id base-branch]} state
+    (let [{:keys [host-mode? worktree-path executor environment-id base-branch
+                  branch provenance create-pr?]} state
           stage-r (if host-mode?
                     (git/stage-files! worktree-path :all)
                     (sandbox/stage-files! executor environment-id :all))
@@ -525,6 +531,19 @@
                       (git/commits-ahead-of-base worktree-path base-branch)
                       (sandbox/commits-ahead-of-base executor environment-id base-branch))]
           (and ahead (pos? ahead)))
+        (assoc state :write-metrics {:total-operations 0 :files-written 0
+                                     :preexisting-commits true})
+
+        (and create-pr? (:workflow provenance)
+             (let [head  (if host-mode?
+                           (git/exec! worktree-path ["git" "rev-parse" "HEAD"])
+                           (sandbox/exec! executor environment-id "git rev-parse HEAD"))
+                   found (if host-mode?
+                           (git/find-pr! worktree-path branch (:github-token state))
+                           (sandbox/find-pr! executor environment-id branch (gh-exec-opts state)))]
+               (and (result/succeeded? head)
+                    (= "MERGED" (get-in found [:pr :pr-state]))
+                    (= (str/trim (str (:output head))) (get-in found [:pr :pr-head-sha])))))
         (assoc state :write-metrics {:total-operations 0 :files-written 0
                                      :preexisting-commits true})
 
@@ -806,11 +825,13 @@
    Dispatches git backend based on :host-mode?.
 
    Runs after step-create-pr so PR number/URL are available.
-   Skipped when :create-pr? is false."
+   Skipped when :create-pr? is false, and for a merged PR: amending and
+   force-pushing its branch would put a commit no PR holds."
   [state]
   (cond
     (failed? state)           state
     (not (:create-pr? state)) state
+    (:pr-merged? state)       state
     :else
     (let [{:keys [release-meta pr-number pr-url branch
                   host-mode? worktree-path executor environment-id
@@ -929,7 +950,8 @@
         (assoc state
                :pr-number  (:pr-number existing)
                :pr-url     (:pr-url existing)
-               :pr-reused? true)
+               :pr-reused? true
+               :pr-merged? (= "MERGED" (:pr-state existing)))
 
         :else
         (let [pr-opts {:title       (:release/pr-title release-meta)
@@ -954,6 +976,7 @@
     (not (:create-pr? state))                     state
     (not (:pr-number state))                      state
     (not (pr-body-needs-update? (:release-meta state))) state
+    (:pr-merged? state)                           state
     :else
     (let [{:keys [release-meta pr-number host-mode? worktree-path
                   executor environment-id logger

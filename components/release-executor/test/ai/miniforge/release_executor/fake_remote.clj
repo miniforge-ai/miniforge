@@ -59,7 +59,7 @@
   "Apply one command to `state` (an atom) and return the executor's reply."
   [state command]
   (let [line (command-line command)
-        {:keys [branches head dirty? commits prs]} @state
+        {:keys [branches head dirty? commits prs]} (swap! state update :log (fnil conj []) line)
         sha (str "sha-" commits)]
     (cond
       (str/starts-with? line "git symbolic-ref") (ok "refs/remotes/origin/main")
@@ -74,7 +74,8 @@
       (str/starts-with? line "git checkout ")
       (do (swap! state assoc :head (last-word line)) (ok))
       (str/starts-with? line "git diff --cached --name-only") (ok (if dirty? "src/a.clj" ""))
-      (str/starts-with? line "git rev-list --count") (ok (str commits))
+      (str/starts-with? line "git rev-list --count")
+      (ok (if (:merged-into-base? @state) "0" (str commits)))
       (str/includes? line "--numstat") (ok "1\t0\tsrc/a.clj")
       (str/includes? line "-U0") (ok "+(ns a)")
       (str/starts-with? line "git commit -m")
