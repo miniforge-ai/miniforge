@@ -28,6 +28,7 @@
                  :effect-class :effect/pr-create
                  :grant-id grant-id
                  :envelope-id (:envelope/id decision)
+                 :envelope decision
                  :proposal prepared}]
     (effect/propose! dir options now)))
 

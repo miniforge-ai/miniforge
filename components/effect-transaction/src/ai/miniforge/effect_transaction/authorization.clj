@@ -18,6 +18,7 @@
 (ns ai.miniforge.effect-transaction.authorization
   "Authorization derived exclusively from a durable effect proposal."
   (:require
+   [ai.miniforge.effect-transaction.envelope-signature :as envelope]
    [ai.miniforge.effect-transaction.messages :as msg]
    [ai.miniforge.effect-transaction.record :as record]
    [ai.miniforge.execution-grant.interface :as grant])
@@ -51,13 +52,16 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} evaluate
-  "Check the named grant's runtime signature, then its scope against the
-   durable proposal and a one-operation usage. An unsigned or altered
-   grant is denied as `:unsigned`."
+  "Check the named grant's runtime signature, the proposal's signed
+   allowing envelope, then the grant's scope against the durable proposal
+   and a one-operation usage. An unsigned or altered grant is denied as
+   `:unsigned`; a missing, mismatched, refusing or unsigned envelope as
+   `:envelope-unsigned`."
   [t grant-record ^Instant now]
   (or (grant-conflict t grant-record)
       (when-not (grant/signed? grant-record)
         {:grant/outcome :unsigned :grant/id (:grant/id grant-record)})
+      (envelope/refusal t)
       (grant/authorize grant-record
                        {:effect/scope (effect-scope t)
                         :usage/count 1}

@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.gate.interface :as gate]
    ;; Registers the :deploy/no-secrets-in-manifests detector.
@@ -230,7 +231,8 @@
                              {:effect/scope (effect-scope request)
                               :usage/count 1}
                              now)
-              envelope (gate/decide classification deployment-policy-pins
-                                    authorization)]
+              envelope (fx/sign-envelope
+                        (gate/decide classification deployment-policy-pins
+                                      authorization))]
           (authority-record request classification grant-record authorization
                             envelope preflight))))))

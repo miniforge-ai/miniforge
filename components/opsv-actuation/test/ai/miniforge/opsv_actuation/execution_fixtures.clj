@@ -22,10 +22,13 @@
 (defn ^{:stratum 0} tmp-dir []
   (.getCanonicalPath (.toFile (Files/createTempDirectory "opsv-commit-" (make-array FileAttribute 0)))))
 
-(defn ^{:stratum 0} allowing-envelope []
-  (envelope/envelope [] [] {:pins/pack-revision "opsv-test"
-                            :pins/rule-ids [:opsv/actuation]
-                            :pins/event-watermark 1}))
+(defn ^{:stratum 0} allowing-envelope
+  "An allowing envelope signed by the runtime, as OPSV governance mints it."
+  []
+  (effect/sign-envelope
+   (envelope/envelope [] [] {:pins/pack-revision "opsv-test"
+                             :pins/rule-ids [:opsv/actuation]
+                             :pins/event-watermark 1})))
 
 (defn ^{:stratum 0} effect-report [calls record payload]
   (swap! calls conj [record payload])

@@ -23,8 +23,8 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} ^:private instant-keys
-  [:effect/at :effect/updated-at])
+(def ^{:stratum 0} ^:private instant-paths
+  [[:effect/at] [:effect/updated-at] [:effect/envelope :envelope/at]])
 
 (defn- ^{:stratum 0} ->iso
   ^String [v]
@@ -32,28 +32,28 @@
     (.toString ^Instant v)
     (.toString (.toInstant ^Date v))))
 
-(defn- ^{:stratum 0} decode-instant-key
-  [record k]
-  (if-let [v (get record k)]
-    (assoc record k (Instant/parse v))
+(defn- ^{:stratum 0} decode-instant-path
+  [record path]
+  (if-let [v (get-in record path)]
+    (assoc-in record path (Instant/parse v))
     record))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} encode-instant-key
-  [record k]
-  (if (some? (get record k))
-    (assoc record k (->iso (get record k)))
+(defn- ^{:stratum 1} encode-instant-path
+  [record path]
+  (if (some? (get-in record path))
+    (assoc-in record path (->iso (get-in record path)))
     record))
 
 (defn ^{:stratum 1} <-wire
   "EDN map -> transaction record."
   [record]
-  (reduce decode-instant-key record instant-keys))
+  (reduce decode-instant-path record instant-paths))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} ->wire
   "Record -> EDN-safe map."
   [record]
-  (reduce encode-instant-key record instant-keys))
+  (reduce encode-instant-path record instant-paths))

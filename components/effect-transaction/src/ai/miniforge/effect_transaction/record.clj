@@ -92,7 +92,7 @@
                           (msg/t :proposal/no-store)
                           {})
      (propose! dir opts (Instant/now))))
-  ([dir {:keys [effect-id effect-class grant-id envelope-id proposal]} ^Instant now]
+  ([dir {:keys [effect-id effect-class grant-id envelope-id envelope proposal]} ^Instant now]
    (let [at (normalize-instant now)
          t {:effect/id (if (some? effect-id) effect-id (random-uuid))
             :effect/class effect-class
@@ -101,7 +101,8 @@
             :effect/proposal (if proposal proposal {})
             :effect/state :proposed
             :effect/at at
-            :effect/updated-at at}]
+            :effect/updated-at at}
+         t (cond-> t envelope (assoc :effect/envelope envelope))]
      (if (valid? t)
        (store/create! dir t)
        (invalid (msg/t :record/input-invalid) t)))))

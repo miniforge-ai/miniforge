@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.pr-lifecycle.messages :as messages])
@@ -132,8 +133,9 @@
                                            {:effect/scope scope
                                             :usage/count 1}
                                            now)
-            envelope (gate/decide (readiness-classification readiness)
-                                  unpinned-policy
-                                  authorization)]
+            envelope (fx/sign-envelope
+                      (gate/decide (readiness-classification readiness)
+                                    unpinned-policy
+                                    authorization))]
         (authority-record request merge-method grant-record
                           authorization envelope)))))

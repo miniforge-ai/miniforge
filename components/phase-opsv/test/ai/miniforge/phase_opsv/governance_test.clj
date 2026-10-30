@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.governance-test
   (:require [ai.miniforge.decision-envelope.interface :as envelope]
+            [ai.miniforge.effect-transaction.interface :as effect]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.opsv.interface :as opsv]
@@ -90,7 +91,10 @@
                       decision))]
       (let [output (phase/actuate (fixture/context))]
         (is (= 1 (count @created)))
-        (is (= (first @created) (:opsv/decision-envelope output)))))))
+        (is (= (first @created)
+               (dissoc (:opsv/decision-envelope output) :envelope/signature)))
+        (is (effect/envelope-signed? (:opsv/decision-envelope output))
+            "the minted envelope carries the runtime signature")))))
 
 (deftest ^{:stratum 0} missing-policy-and-missing-pack-have-distinct-reasons-test
   (let [context (fixture/context)

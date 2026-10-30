@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.governance
   "Evaluate OPSV gates from trusted runtime policy, never caller verdicts."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.effect-transaction.interface :as effect]
             [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.messages :as msg]
@@ -31,10 +32,11 @@
                     (update :results conj
                             {:gate :opsv/runtime-policy :passed? false
                              :errors [{:message (msg/ts :governance/missing-policy)}]}))]
-    (gate/gates->envelope evaluated artifact-nil?
-                          {:pins/pack-revision (:policy/revision policy)
-                           :pins/rule-ids (mapv :gate (:results checks))
-                           :pins/event-watermark (:policy/event-watermark policy)})))
+    (effect/sign-envelope
+     (gate/gates->envelope evaluated artifact-nil?
+                           {:pins/pack-revision (:policy/revision policy)
+                            :pins/rule-ids (mapv :gate (:results checks))
+                            :pins/event-watermark (:policy/event-watermark policy)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
