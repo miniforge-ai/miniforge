@@ -24,12 +24,14 @@
    [clojure.string :as str]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.commands.pr-monitor :as pr-monitor]
    [ai.miniforge.cli.main.commands.pr-review :as pr-review]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
+   [ai.miniforge.cli.workflow-runner.execution-mode :as execution-mode]
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -203,10 +205,27 @@
                    {:command (app-config/command-string "pr review <pr-url>")})))))
 
 (defn ^{:stratum 2} pr-respond-cmd
+  "Check out the PR at `url`, fix its review comments in this checkout, and
+   push. Runs local only: refused, before anything is checked out, when
+   `--execution-mode` or the config asks for governed execution, since the
+   governed flow does not push to the PR branch yet."
   [opts]
-  (let [{:keys [url]} opts]
-    (if-not url
+  (let [{:keys [url]} opts
+        mode (execution-mode/resolve-mode opts (config/load-config))]
+    (cond
+      (not url)
       (display/print-error (messages/t :pr/respond-usage {:command (app-config/command-string "pr respond <pr-url>")}))
+
+      (contains? mode :unknown)
+      (do (display/print-error (messages/t :workflow-runner/unknown-execution-mode
+                                           {:mode (pr-str (:unknown mode))}))
+          (shared/exit! 1))
+
+      (not= {:execution-mode :local} mode)
+      (do (display/print-error (messages/t :pr/respond-governed-unsupported))
+          (shared/exit! 1))
+
+      :else
       (let [{:keys [number]} (pr-lifecycle/parse-pr-url url)]
         (when-not number
           (display/print-error (messages/t :pr/respond-bad-url))
@@ -220,12 +239,8 @@
           (let [cwd (System/getProperty "user.dir")
                 result (pr-lifecycle/respond-to-comments!
                         url cwd
-                        ;; The fix run gets this command's --execution-mode,
-                        ;; and the PR branch, which a governed capsule clones.
                         (fn [spec run-opts]
-                          (workflow-runner/run-workflow-from-spec!
-                           (assoc spec :spec/branch branch)
-                           (merge {:quiet true} run-opts (select-keys opts [:execution-mode]))))
+                          (workflow-runner/run-workflow-from-spec! spec (merge {:quiet true} run-opts)))
                         push!
                         opts)]
             (if (anomaly/anomaly? result)

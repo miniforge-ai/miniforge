@@ -4,59 +4,81 @@
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
 
-# fix(cli): a config key that refuses local execution; pr respond honours the mode
+# fix(cli,workflow): a config key that refuses local execution; pr respond honours it
 
 ## Overview
 
-Adds `[:execution :require-governed?]` to the user config. When true, runs default to
-governed (container capsule) execution and any run that would execute in another mode
-is refused before it sets anything up. `mf pr respond` now takes `--execution-mode`
-and passes it, with the PR branch, to the fix run.
+Adds `[:execution :require-governed?]` to the user config. When set, runs default to
+governed (container capsule) execution, and a run that would execute locally is
+refused: early in the CLI with a clear message, and again where the workflow runner
+acquires every run's environment. `mf pr respond`, which cannot run governed yet,
+refuses a governed request before it checks anything out.
 
 ## Motivation
 
 Execution mode was only the `--execution-mode` flag, defaulting to `:local`: the agent
 runs in a host worktree with the operator's privileges. An operator had no way to make
-unisolated runs impossible, only to remember the flag on each run. `mf pr respond` had
-no flag at all, so its fix runs were always local.
+unisolated runs impossible, only to remember the flag on each run.
 
 ## Changes in Detail
 
-1. `workflow-runner.execution-mode` (new): `resolve-mode` (explicit flag, else governed
-   when required, else local; refuses a non-governed mode when required) and
-   `allowed-mode!`, which reads the user config and throws an `:anomalies/forbidden`
-   anomaly on refusal.
-2. `run-workflow-from-spec!` resolves the mode first and uses it for the branch choice
-   and the context. `run-workflow!` (named workflows, which always run locally) is
+1. `config.execution/governed-required?` (config interface): fails closed; any value
+   other than false or nil (a hand-edited `"true"`, `"yes"`, `1`) counts as required.
+2. `workflow-runner.execution-mode` (CLI): `resolve-mode` takes the explicit mode (a
+   keyword or its name), else governed when required, else local; a value outside
+   `#{:local :governed}` is unknown. `allowed-mode!` throws `:anomalies/incorrect` for an
+   unknown mode and `:anomalies/forbidden` for a refused one.
+3. `run-workflow-from-spec!` resolves the mode before workflow setup and uses it for the
+   branch choice and the context; `run-workflow!` (named workflows, always local) is
    refused when governed execution is required.
-3. `mf pr respond --execution-mode <m>`: the fix run gets the mode and
-   `:spec/branch` set to the checked-out PR branch, which a governed capsule clones
-   (without it a capsule would clone main).
-4. Config: the key in `default-user-config.edn` and its fallback (false), in the
-   config schema as a boolean, and the refusal message.
+4. Backstop: `acquire-execution-environment!` refuses a non-governed run when the config
+   requires governed execution. Every run path reaches it, so chain steps, plan and DAG
+   files, resumed runs and DAG child tasks are covered. The check sits before the
+   function's `try`, which would otherwise turn the refusal into a warning and a local
+   run.
+5. `mf pr respond --execution-mode <m>`: governed (requested or required by the config)
+   and unknown modes exit 1 before `gh pr checkout`. The governed flow persists to a
+   task branch and would not reach the PR branch, while the responder would still
+   reply "fixed" and resolve the threads.
+6. Config: the key in `default-user-config.edn` and its fallback (false), in the CLI
+   config schema as a boolean, and the messages.
 
 ## Testing Plan
 
-1. `execution-mode-test`: the mode table; a spec run asked for `:local` and a named
-   workflow run are refused under the key, before workflow setup; `pr respond` hands
-   the fix run its mode and PR branch.
-2. `config-schema-test` (every literal config path the code reads is in the schema),
-   plus the runner provenance, error-message, dashboard-stream and JSON-output tests.
+1. `config.execution-test`: the fail-closed table.
+2. `execution-mode-test`: the mode table (keywords, names, unknown values); spec runs,
+   named workflow runs and unknown modes are refused before workflow setup; `pr respond`
+   exits 1 without checking out for a governed request or a governed-only config, and
+   checks out for a local run.
+3. `runner-environment-governed-required-test`: the backstop refuses no-mode and
+   `:local` runs, and lets a governed run through to capsule acquisition.
+4. The runner-environment, governed-environment, config, config-schema and runner
+   output tests (86 tests).
 
 ## Deployment Plan
 
-Ships with the next release. The default (false) keeps today's behavior; operators
-opt in with `mf config set execution.require-governed? true`.
+Ships with the next release. The default (false) keeps today's behavior; operators opt
+in with `mf config set execution.require-governed? true`.
+
+## Known limits
+
+1. DAG child tasks do not inherit the parent's execution mode (`dag-sub-workflow/task-sub-opts`),
+   so under `--execution-mode governed` they run locally today. With the key set they
+   are refused by the backstop instead, so a plan that fans out into tasks fails until
+   children run governed. Follow-up.
+2. `pr respond` refuses governed runs until the governed flow pushes the fix to the PR
+   branch.
+3. Tests that run a pipeline read the operator's user config; with the key set on a
+   developer machine they are refused. CI has no user config.
+4. Both CLI runners run their GC pass before the mode check.
 
 ## Related Issues/PRs
 
-1. Not covered: other entry points that start workflows outside the CLI runner (the
-   TUI and dashboard), and whether a governed `pr respond` fix run pushes from the
-   capsule as the local run pushes from the host checkout. Both need a runtime check.
+1. Default-deny tool hook (#2251) and the worker-containment follow-ups.
 
 ## Checklist
 
 - [x] Tests fail on main and pass here
 - [x] Config schema and both default files updated
-- [ ] Independent review
+- [x] Independent review; findings fixed or listed above
 - [ ] CI green, Copilot comments resolved
