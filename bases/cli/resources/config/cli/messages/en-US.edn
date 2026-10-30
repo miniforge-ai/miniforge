@@ -736,6 +736,7 @@
   :workflow-runner/auto-selected-reason "   Reason: {reasoning}"
   :workflow-runner/auto-selected-confidence "   Confidence: {confidence}"
   :workflow-runner/auto-selected-override "   Override with :spec/workflow-type in your spec\n"
+  :workflow-runner/spec-path-not-recorded "Warning: the run's checkpoint still points at the spec's old place; a resume will not find it at {path}: {error}"
   :workflow-runner/stopped "Workflow stopped: {error}"
   :workflow-runner/cancelled "Workflow cancelled"
   :workflow-runner/process-terminated "Process terminated"

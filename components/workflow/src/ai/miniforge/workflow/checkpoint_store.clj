@@ -133,6 +133,12 @@
                              data
                              e))
 
+(defn- ^{:stratum 0} interrupted-anomaly?
+  "True when `result` is an anomaly the checkpoint lock made of an
+   interrupt: its wait consumed the interrupt flag."
+  [result]
+  (= (.getName InterruptedException) (get-in result [:anomaly/data :anomaly/ex-class])))
+
 (defn- ^{:stratum 0} write-edn-atomically!
   [target-path data]
   (checkpoint-file/write! target-path data))
@@ -323,18 +329,45 @@
   "Point a run's manifest at where its spec file now lives (the CLI moves
    a work spec to work/done or work/failed when the run ends), keeping the
    recorded hash. Returns the manifest path; nil when the run has no
-   readable manifest; an anomaly when it cannot be written."
+   readable manifest; an anomaly when it cannot be written or the run's
+   lock stays busy. It holds the run's lock: a checkpoint write between
+   its read and its write would otherwise be undone, leaving a manifest
+   that names a generation the write pruned."
   ([workflow-run-id spec-path]
    (record-spec-path! workflow-run-id spec-path {}))
   ([workflow-run-id spec-path opts]
-   (let [path (checkpoint-paths/manifest-path (checkpoint-paths/resolve-checkpoint-root opts)
-                                              workflow-run-id)
-         manifest (read-checkpoint-file path)]
-     (when (and (map? manifest) (not (anomaly/anomaly? manifest)))
-       (try+
-         (write-edn-atomically! path (assoc manifest :workflow/spec-path (str spec-path)))
-         (catch Exception e
-           (write-failure (checkpoint-paths/resolve-checkpoint-root opts) workflow-run-id nil e)))))))
+   (let [requested-root (checkpoint-paths/resolve-checkpoint-root opts)
+         ;; As in persist-execution-state!: a pending interrupt is held off
+         ;; for the lock wait and the write, and kept.
+         interrupted? (Thread/interrupted)]
+     (try+
+       (let [;; As in persist-execution-state!: the root is resolved once,
+             ;; and the lock and the manifest both come from it, so an alias
+             ;; retargeted meanwhile cannot split them. The path as given is
+             ;; checked first (its ancestry and links), as a checkpoint write
+             ;; checks it; the run directory too.
+             checkpoint-root (if (fs/exists? requested-root)
+                               (str (directory/existing! requested-root))
+                               requested-root)
+             recorded (checkpoint-lock/with-run-lock
+                       checkpoint-root workflow-run-id
+                       (fn []
+                         (let [run-dir (checkpoint-paths/workflow-checkpoint-dir checkpoint-root workflow-run-id)
+                               path (str (fs/path (if (fs/exists? run-dir) (directory/existing! run-dir) run-dir)
+                                                  checkpoint-paths/manifest-filename))
+                               manifest (read-checkpoint-file path)]
+                           (when (and (map? manifest) (not (anomaly/anomaly? manifest)))
+                             (write-edn-atomically! path (assoc manifest :workflow/spec-path (str spec-path)))))))]
+         (when (interrupted-anomaly? recorded)
+           (.interrupt (Thread/currentThread)))
+         recorded)
+       (catch InterruptedException e
+         (.interrupt (Thread/currentThread))
+         (write-failure requested-root workflow-run-id nil e))
+       (catch Exception e
+         (write-failure requested-root workflow-run-id nil e))
+       (finally
+         (when interrupted? (.interrupt (Thread/currentThread))))))))
 
 (defn ^{:stratum 2} persist-execution-state!
   "Persist a machine snapshot, manifest, and current phase checkpoint,
@@ -463,6 +496,10 @@
                            phase-path
                            (assoc :checkpoint/phase phase-name
                                   :checkpoint/phase-path phase-path))))))))]
+          ;; The lock wait turns an interrupt into its anomaly, clearing
+          ;; the flag: set it again so the cancel is not lost.
+          (when (interrupted-anomaly? written)
+            (.interrupt (Thread/currentThread)))
           (if (anomaly/anomaly? written)
             (assoc-in written [:anomaly/data :phase/name] phase-name)
             written))
