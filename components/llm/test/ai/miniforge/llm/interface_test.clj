@@ -1671,7 +1671,8 @@
       (llm/complete client supervised)
       (llm/complete-stream client supervised (fn [_chunk] nil))
       (is (<= 2 (count @cmds)))
-      (is (every? #(not-any? #{"--tools" "--setting-sources"} %) @cmds)))))
+      (is (every? #(not-any? #{"--tools" "--disable-slash-commands"} %) @cmds))
+      (is (every? #(some #{"dontAsk"} %) @cmds)))))
 
 (deftest ^{:stratum 1} stagnation-fires-on-silence-without-keepalive-test
   (testing "without keepalive, a silent monitor stagnates after the threshold"
