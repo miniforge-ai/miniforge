@@ -56,6 +56,11 @@
   [context]
   (get context :clock #(Instant/now)))
 
+(defn ^{:stratum 0} current-time
+  "A fresh reading of the context's clock, else the system's."
+  [context]
+  ((get context :clock #(Instant/now))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} store-dir

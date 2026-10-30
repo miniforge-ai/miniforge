@@ -112,9 +112,11 @@
                    :server-dry-run (:server-dry-run state)
                    :app-label (get-in state [:target :app-label])}
         prepared (authority/prepare (:context state) (random-uuid)
-                                    (:target state) preflight (:now state))]
+                                    (:target state) preflight (:now state))
+        revocation (get-in prepared [:anomaly/data :grant/revocation])]
     (if (anomaly/anomaly? prepared)
-      (fail state :authority (:anomaly/message prepared))
+      (cond-> (fail state :authority (:anomaly/message prepared))
+        (anomaly/anomaly? revocation) (assoc :grant/revocation-failure revocation))
       (assoc state :authority prepared))))
 
 (defn- ^{:stratum 1} propose-effect
@@ -152,7 +154,8 @@
   [state]
   (let [reconciled (transaction/reconcile!
                     (:context state) (:transaction state)
-                    (:operations state) (:now state))]
+                    (:operations state)
+                    (transaction/current-time (:context state)))]
     (if (anomaly/anomaly? reconciled)
       (fail state :observe (:anomaly/message reconciled))
       (assoc state :transaction reconciled))))

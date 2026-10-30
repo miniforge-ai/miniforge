@@ -18,6 +18,7 @@
 (ns ai.miniforge.phase-deployment.deploy-governed-test
   "Granted deployment behavior at the provider and durable-record seams."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.phase-deployment.deploy-authority :as authority]
@@ -207,3 +208,23 @@
     (is (= :revocation/operator
            (:grant/revocation-reason
             (grant/current (:grant-breach-dir ctx) (:deploy/grant-id result)))))))
+
+(deftest ^{:stratum 2} reconcile-never-moves-the-record-backwards-test
+  (let [later (.plusSeconds now 60)
+        ctx (assoc (context) :clock (constantly later))
+        result (governed/transact! ctx deploy-config
+                                   (recording-operations (atom [])) now)
+        record (first (fx/list-records (:effect-store-dir ctx)))]
+    (is (= :success (:deploy/status result)))
+    (is (= later (:effect/updated-at record)))))
+
+(deftest ^{:stratum 2} a-failed-revocation-is-reported-test
+  (let [ctx (assoc (context) :execution/opts
+                   {:control-state (atom {:paused false :stopped true})})]
+    (with-redefs [grant/revoke-stored!
+                  (fn [& _] (anomaly/anomaly :unavailable "registry unwritable" {}))]
+      (let [result (governed/transact! ctx deploy-config
+                                       (recording-operations (atom [])) now)]
+        (is (= :failed (:deploy/status result)))
+        (is (uuid? (:deploy/grant-id result)))
+        (is (anomaly/anomaly? (:deploy/revocation-failure result)))))))

@@ -147,3 +147,17 @@
                            #(get-in % [:authority/grant :grant/id])
                            #(get-in % [:authority/envelope :envelope/id]))
                      prepared)))))))
+
+(deftest ^{:stratum 2} a-failed-registration-revokes-the-issued-grant-test
+  (let [ctx (context)
+        register grant/register!]
+    (with-redefs [grant/register!
+                  (fn [dir issued]
+                    (register dir issued)
+                    (anomaly/anomaly :unavailable "publication not confirmed" {}))]
+      (let [refused (authority/prepare ctx (random-uuid) target preflight now)
+            grant-id (get-in refused [:anomaly/data :grant/id])]
+        (is (anomaly/anomaly? refused))
+        (is (= :revocation/superseded
+               (:grant/revocation-reason
+                (grant/current (:grant-breach-dir ctx) grant-id))))))))

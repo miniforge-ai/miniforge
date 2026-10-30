@@ -131,12 +131,17 @@
 
 (defn- ^{:stratum 0} issue-registered
   "Issue a grant and register it in `dir`, so commit can re-read and
-   revoke it."
+   revoke it. Registration can fail after the record became readable, so
+   a failure revokes the issued id and reports both."
   [dir request now]
-  (let [issued (grant/issue-for-effect dir request now)]
-    (if (anomaly/anomaly? issued)
-      issued
-      (grant/register! dir issued))))
+  (let [issued (grant/issue-for-effect dir request now)
+        registered (if (anomaly/anomaly? issued) issued (grant/register! dir issued))]
+    (if (and (anomaly/anomaly? registered) (not (anomaly/anomaly? issued)))
+      (update registered :anomaly/data assoc
+              :grant/id (:grant/id issued)
+              :grant/revocation (grant/revoke-stored! dir (:grant/id issued)
+                                                      :revocation/superseded now))
+      registered)))
 
 (defn ^{:stratum 0} request
   "Build the closed runtime request for one deployment of `target`."
