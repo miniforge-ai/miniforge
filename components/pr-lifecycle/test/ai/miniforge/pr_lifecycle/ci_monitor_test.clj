@@ -707,3 +707,24 @@
                     (dag/err :gh-command-failed "not found"))]
       (let [result (checks/get-pr-status "/tmp/repo" 999)]
         (is (dag/err? result))))))
+
+;------------------------------------------------------------------------------ Failure while other checks run
+(deftest ^{:stratum 0} failure-waits-for-logs-while-checks-run-test
+  (let [checks [{:name "Structure" :state "FAILURE" :bucket "fail"
+                 :link "https://github.com/o/r/actions/runs/1/job/2"}
+                {:name "Test" :state "IN_PROGRESS" :bucket "pending"
+                 :link "https://github.com/o/r/actions/runs/1/job/3"}]
+        poll (fn [logs]
+               (with-redefs [checks/get-pr-checks (fn [_ _] (dag/ok {:checks checks}))
+                             checks/get-check-logs (fn [_ _] logs)]
+                 (ci/poll-ci-status (ci/create-ci-monitor (random-uuid) (random-uuid) (random-uuid)
+                                                          42 "/tmp/repo")
+                                    nil)))]
+    (testing "gh has no log yet (run still in progress): keep polling"
+      (let [result (poll {:ci/logs nil :ci/log-errors [{:run-id "1" :error {:message "run 1 is still in progress"}}]})]
+        (is (= :pending (:status result)))
+        (is (nil? (:event result)))))
+    (testing "the log is available: the failure is terminal and carries it"
+      (let [result (poll {:ci/logs "Structure\tcheck\tboom" :ci/log-errors []})]
+        (is (= :failure (:status result)))
+        (is (= "Structure\tcheck\tboom" (:ci/logs result)))))))

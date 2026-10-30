@@ -79,17 +79,15 @@
          :polls 0
          :running? false}))
 
-(defn ^{:stratum 0} fetch-failure-logs
-  "Failed-job logs for a :failure poll; logs a warning when none came back."
-  [worktree-path pr-number computed logger]
-  (let [logs (ci-checks/get-check-logs worktree-path (:failed computed))]
-    (when (and logger (nil? (:ci/logs logs)))
-      (log/warn logger :pr-lifecycle :ci/logs-unavailable
-                {:message (messages/system-t :ci/logs-unavailable)
-                 :data {:pr-number pr-number
-                        :failed (mapv :name (:failed computed))
-                        :errors (:ci/log-errors logs)}}))
-    logs))
+(defn ^{:stratum 0} warn-logs-unavailable!
+  "Log that CI failed with no failed-job log to show for it."
+  [logger pr-number computed logs]
+  (when logger
+    (log/warn logger :pr-lifecycle :ci/logs-unavailable
+              {:message (messages/system-t :ci/logs-unavailable)
+               :data {:pr-number pr-number
+                      :failed (mapv :name (:failed computed))
+                      :errors (:ci/log-errors logs)}})))
 
 (defn ^{:stratum 0} stop-ci-monitor
   "Stop a running CI monitor."
@@ -106,7 +104,10 @@
    - logger: Optional logger
 
    On :failure, also fetches the failed jobs' logs into :ci/logs (nil
-   when none could be fetched) and :ci/log-errors.
+   when none could be fetched) and :ci/log-errors. gh serves a run's
+   failed-job log only once the whole run has finished, so while other
+   checks are still pending and no log is available yet, a failure polls
+   as :pending and is fetched again on the next poll.
 
    Returns {:status keyword :checks [...] :event event-or-nil}"
   [monitor logger]
@@ -129,11 +130,17 @@
       (let [{:keys [checks pending?]} (:data checks-result)
             computed (cond-> (ci-checks/compute-ci-status checks)
                        pending? (assoc :status :pending))
-            status (:status computed)
+            logs (when (= :failure (:status computed))
+                   (ci-checks/get-check-logs worktree-path (:failed computed)))
+            logs-not-ready? (and logs (nil? (:ci/logs logs)) (seq (:pending computed)))
+            status (if logs-not-ready? :pending (:status computed))
             prev-status (:status @monitor)]
 
         ;; Update monitor state
         (swap! monitor assoc :status status :last-checks computed)
+
+        (when (and (= :failure status) (nil? (:ci/logs logs)))
+          (warn-logs-unavailable! logger pr-number computed logs))
 
         ;; Generate event if status changed to terminal
         (when (and (not= prev-status status)
@@ -155,7 +162,7 @@
                                                    (str/join ", "
                                                              (map :name (:failed computed)))))))}
           (= :failure status)
-          (merge (fetch-failure-logs worktree-path pr-number computed logger)))))))
+          (merge logs))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
