@@ -148,6 +148,7 @@
     (spit (str file) "[]")
     (with-redefs [fix-loop/run-fix-loop (fn [& _] (swap! fixes inc) {:success? true :commit-sha "abc123"})
                   fix-guard/checked-out-branch (constantly {:branch "feat/x" :sha "c1"})
+                  fix-guard/head-builds-on? (constantly true)
                   poller/post-comment   (fn [& _] (dag/ok {:comment-posted true}))]
       (let [result (handlers/handle-change-request monitor {:pr/number 42 :pr/branch "feat/x" :pr/sha "c1"}
                                                    {:category :change-request
@@ -174,6 +175,7 @@
                                                ["f1" "f2" "f3" "f4"]))
     (with-redefs [fix-loop/run-fix-loop (fn [& _] (swap! fixes inc) {:success? true :commit-sha "abc123"})
                   fix-guard/checked-out-branch (constantly {:branch "feat/x" :sha "c1"})
+                  fix-guard/head-builds-on? (constantly true)
                   poller/post-comment   (fn [& _] (dag/ok {:comment-posted true}))]
       (testing "a monitor whose cached budget is stale does not start a fix once another spent it"
         (is (= :budget-exhausted (:reason (handlers/handle-change-request monitor-a {:pr/number 42 :pr/branch "feat/x" :pr/sha "c1"} change))))
@@ -193,6 +195,7 @@
                                                (state/get-or-create-budget monitor-b 42) [1 2]))
     (with-redefs [fix-loop/run-fix-loop (fn [& _] (swap! fixes inc) {:success? true :commit-sha "abc123"})
                   fix-guard/checked-out-branch (constantly {:branch "feat/x" :sha "c1"})
+                  fix-guard/head-builds-on? (constantly true)
                   poller/post-comment   (fn [& _] (dag/ok {:comment-posted true}))]
       (testing "a budget exhausted under another monitor's lower limit stays exhausted"
         (is (= :budget-exhausted

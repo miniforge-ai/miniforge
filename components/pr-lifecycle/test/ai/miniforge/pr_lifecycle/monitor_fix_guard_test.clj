@@ -34,36 +34,43 @@
   [calls]
   {:worktree-path "/repo" :generate-fn (fn [& _] (swap! calls inc) nil)})
 
-(deftest ^{:stratum 0} checked-out-branch-reads-a-real-checkout-test
-  (testing "branch name and head commit of a git checkout"
-    (let [dir (str (fs/create-temp-dir))
-          git #(apply process/sh {:dir dir} "git" %&)]
-      (try
-        (git "init" "-q" "-b" "feat/x")
-        (git "-c" "user.email=t@example.com" "-c" "user.name=t" "-c" "commit.gpgsign=false"
-             "commit" "-q" "--allow-empty" "-m" "init")
-        (is (= {:branch "feat/x" :sha (.trim ^String (:out (git "rev-parse" "HEAD")))}
-               (sut/checked-out-branch dir)))
-        (finally (fs/delete-tree dir))))))
+(defn ^{:stratum 0} git!
+  "Run git in `dir` with a throwaway identity and no signing; return stdout trimmed."
+  [dir & args]
+  (.trim ^String (:out (apply process/sh {:dir dir} "git"
+                              "-c" "user.email=t@example.com" "-c" "user.name=t"
+                              "-c" "commit.gpgsign=false" args))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} temp-repo
+  "A git repository on branch feat/x with one commit; returns its path."
+  []
+  (let [dir (str (fs/create-temp-dir))]
+    (git! dir "init" "-q" "-b" "feat/x")
+    (git! dir "commit" "-q" "--allow-empty" "-m" "pr head")
+    dir))
 
 (deftest ^{:stratum 1} fix-refusal-test
   (let [calls (atom 0)]
     (testing "no generate-fn"
       (is (= :no-generate-fn (:reason (sut/fix-refusal {:worktree-path "/repo"} {:pr/branch "feat/x"})))))
     (testing "another branch checked out"
-      (with-redefs [sut/checked-out-branch (constantly {:branch "main" :sha "c1"})]
-        (is (= {:success? false :reason :worktree-not-on-pr-branch
-                :pr/branch "feat/x" :pr/sha "c1" :checked-out {:branch "main" :sha "c1"}}
-               (sut/fix-refusal (config calls) {:pr/branch "feat/x" :pr/sha "c1"})))))
-    (testing "the PR's branch name at another commit (a fork's PR from a same-named branch)"
-      (with-redefs [sut/checked-out-branch (constantly {:branch "main" :sha "upstream-tip"})]
+      (with-redefs [sut/checked-out-branch (constantly {:branch "main" :sha "c1"})
+                    sut/head-builds-on? (constantly true)]
+        (let [refusal (sut/fix-refusal (config calls) {:pr/branch "feat/x" :pr/sha "c1"})]
+          (is (false? (:success? refusal)))
+          (is (= :worktree-not-on-pr-branch (:reason refusal))))))
+    (testing "the PR's branch name, but HEAD does not build on the PR's head (a fork's same-named branch)"
+      (with-redefs [sut/checked-out-branch (constantly {:branch "main" :sha "upstream-tip"})
+                    sut/head-builds-on? (constantly false)]
         (is (= :worktree-not-on-pr-branch
                (:reason (sut/fix-refusal (config calls) {:pr/branch "main" :pr/sha "fork-tip"}))))))
-    (testing "the PR's branch checked out"
-      (with-redefs [sut/checked-out-branch (constantly {:branch "feat/x" :sha "c1"})]
-        (is (nil? (sut/fix-refusal (config calls) {:pr/branch "feat/x" :pr/sha "c1"})))))))
+    (testing "the PR's branch at or after its head"
+      (with-redefs [sut/checked-out-branch (constantly {:branch "feat/x" :sha "c2"})
+                    sut/head-builds-on? (constantly true)]
+        (is (nil? (sut/fix-refusal (config calls) {:pr/branch "feat/x" :pr/sha "c1"})))))
+    (is (zero? @calls))))
 
 (deftest ^{:stratum 1} change-request-on-wrong-branch-is-not-fixed-test
   (testing "the handler refuses before spending budget or calling generate-fn"
@@ -79,3 +86,24 @@
                          {:comment {:comment/id 1 :comment/body "Please rename foo"}})))))
       (is (zero? @calls))
       (is (false? @budget-changed)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} real-checkout-test
+  (let [dir (temp-repo)
+        pr-sha (git! dir "rev-parse" "HEAD")]
+    (try
+      (testing "branch and commit are read from the checkout"
+        (is (= {:branch "feat/x" :sha pr-sha} (sut/checked-out-branch dir))))
+      (testing "a second fix in the same cycle: HEAD has moved past the PR's head and still builds on it"
+        (git! dir "commit" "-q" "--allow-empty" "-m" "first fix")
+        (is (sut/head-builds-on? dir pr-sha))
+        (is (nil? (sut/fix-refusal {:worktree-path dir :generate-fn (fn [& _])}
+                                   {:pr/branch "feat/x" :pr/sha pr-sha}))))
+      (testing "a commit HEAD does not contain, or one git does not have, is refused"
+        (git! dir "checkout" "-q" "--orphan" "other")
+        (git! dir "commit" "-q" "--allow-empty" "-m" "unrelated")
+        (is (not (sut/head-builds-on? dir pr-sha)))
+        (is (not (sut/head-builds-on? dir "0000000000000000000000000000000000000000")))
+        (is (not (sut/head-builds-on? dir ""))))
+      (finally (fs/delete-tree dir)))))

@@ -18,56 +18,69 @@
 (ns ai.miniforge.pr-lifecycle.monitor-fix-guard
   "Whether the PR monitor may start a change-request fix. The fix loop
    writes and commits in the monitor's worktree and then pushes the PR's
-   head branch by name, so the worktree must have that branch checked out
-   at the PR's head commit. A matching name alone is not enough: a fork's
-   PR from its own `main` would then commit onto, and push to, this
-   repository's `main`."
+   head branch by name, so the worktree must have that branch checked out,
+   at the PR's head commit or a commit built on it (an earlier fix this
+   cycle). A matching name alone is not enough: a fork's PR from its own
+   `main` would then commit onto, and push to, this repository's `main`."
   (:require
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.pr-lifecycle.messages :as messages]
+   [ai.miniforge.schema.interface :as schema]
    [babashka.process :as process]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} checked-out-branch
-  "{:branch :sha} checked out in `worktree-path`, or nil when git cannot
-   say."
-  [worktree-path]
-  (let [git (fn [& args]
-              (let [{:keys [exit out]} (apply process/sh {:dir (str worktree-path)} "git" args)]
-                (when (zero? exit) (str/trim out))))
-        branch (git "rev-parse" "--abbrev-ref" "HEAD")
-        sha (git "rev-parse" "HEAD")]
-    (when (and branch sha)
-      {:branch branch :sha sha})))
+(defn ^{:stratum 0} git-output
+  "Trimmed stdout of `git args` run in `dir`, or nil when git fails."
+  [dir & args]
+  (let [{:keys [exit out]} (apply process/sh {:dir (str dir)} "git" args)]
+    (when (zero? exit)
+      (str/trim out))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} fix-refusal
+(defn ^{:stratum 1} checked-out-branch
+  "{:branch :sha} checked out in `worktree-path`, or nil when git cannot
+   say."
+  [worktree-path]
+  (let [branch (git-output worktree-path "rev-parse" "--abbrev-ref" "HEAD")
+        sha (git-output worktree-path "rev-parse" "HEAD")]
+    (when (and branch sha)
+      {:branch branch :sha sha})))
+
+(defn ^{:stratum 1} head-builds-on?
+  "True when commit `sha` is HEAD or an ancestor of it in `worktree-path`.
+   False for a blank sha or one git does not have."
+  [worktree-path sha]
+  (boolean (and (not (str/blank? sha))
+                (git-output worktree-path "merge-base" "--is-ancestor" sha "HEAD"))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} fix-refusal
   "Nil when a change-request fix may start for `pr-info`; otherwise the
-   handler result explaining why not, after logging it. `config` is the
-   monitor config (:worktree-path :generate-fn :logger)."
+   handler result (a schema/failure carrying :reason) explaining why not,
+   after logging it. `config` is the monitor config (:worktree-path
+   :generate-fn :logger)."
   [{:keys [worktree-path generate-fn logger]} pr-info]
-  (let [branch (:pr/branch pr-info)
-        head (when generate-fn (checked-out-branch worktree-path))
-        checked-out (:branch head)]
+  (let [{branch :pr/branch sha :pr/sha} pr-info
+        head (when generate-fn (checked-out-branch worktree-path))]
     (cond
       (not generate-fn)
-      (do (when logger
-            (log/warn logger :pr-monitor :handler/no-generate-fn
-                      {:message (messages/system-t :monitor/fix-without-generate-fn)}))
-          {:success? false :reason :no-generate-fn})
+      (let [message (messages/system-t :monitor/fix-without-generate-fn)]
+        (when logger
+          (log/warn logger :pr-monitor :handler/no-generate-fn {:message message}))
+        (schema/failure :fix message {:reason :no-generate-fn}))
 
       (or (str/blank? branch)
-          (not= branch checked-out)
-          (not= (:pr/sha pr-info) (:sha head)))
-      (do (when logger
-            (log/warn logger :pr-monitor :handler/worktree-not-on-pr-branch
-                      {:message (messages/system-t :monitor/worktree-not-on-pr-branch
-                                                   {:branch branch :checked-out checked-out
-                                                    :sha (:pr/sha pr-info) :head (:sha head)
-                                                    :path worktree-path})
-                       :data {:pr-number (:pr/number pr-info)}}))
-          {:success? false :reason :worktree-not-on-pr-branch
-           :pr/branch branch :pr/sha (:pr/sha pr-info) :checked-out head}))))
+          (not= branch (:branch head))
+          (not (head-builds-on? worktree-path sha)))
+      (let [message (messages/system-t :monitor/worktree-not-on-pr-branch
+                                       {:branch branch :checked-out (:branch head)
+                                        :sha sha :head (:sha head) :path worktree-path})]
+        (when logger
+          (log/warn logger :pr-monitor :handler/worktree-not-on-pr-branch
+                    {:message message :data {:pr-number (:pr/number pr-info)}}))
+        (schema/failure :fix message {:reason :worktree-not-on-pr-branch
+                                      :pr/branch branch :pr/sha sha :checked-out head})))))
