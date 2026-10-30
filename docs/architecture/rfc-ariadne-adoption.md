@@ -236,8 +236,10 @@ or "attested", this is what is built.
    targets.
 5. **Limits.** A process running as the same user can read the key,
    so local-mode agents are not contained by signatures alone. Deleting
-   a grant's revocation marker, or restoring an older signed record
-   before it expires, is not detected.
+   a grant's revocation marker, restoring an older signed record, or
+   resetting a record's lifecycle state (`:effect/state`) before its
+   grant expires is not detected. The observed result
+   (`:effect/observed`) is outside the binding signature.
 
 ## Suggested adoption order
 

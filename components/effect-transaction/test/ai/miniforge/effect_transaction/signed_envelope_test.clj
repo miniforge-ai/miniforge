@@ -89,3 +89,19 @@
         t (propose-with! dir g (:envelope/id envelope) envelope)]
     (is (fx/envelope-signed? (:effect/envelope (fx/read-record dir (:effect/id t))))
         "the envelope's instant round-trips the store without breaking its signature")))
+
+(deftest ^{:stratum 1} a-proposal-that-cannot-be-signed-is-refused-test
+  (doseq [[label value] [[:char \x] [:lone-surrogate (str (char 0xD800))]]]
+    (testing (name label)
+      (let [dir (fixture/tmp-dir)
+            g (fixture/merge-grant)
+            envelope (fx/sign-envelope allowing)
+            refused (fx/propose! dir {:effect-id (get-in g [:grant/scope :effect/id])
+                                      :effect-class :effect/merge
+                                      :grant-id (:grant/id g)
+                                      :envelope-id (:envelope/id envelope)
+                                      :envelope envelope
+                                      :proposal (assoc fixture/merge-proposal :pr/title value)}
+                                 fixture/now)]
+        (is (= :invalid-input (:anomaly/type refused)) "an anomaly, not a thrown exception")
+        (is (empty? (fx/list-records dir)) "nothing is recorded")))))

@@ -105,6 +105,7 @@
             :effect/updated-at at}
          t (cond-> t envelope (-> (assoc :effect/envelope envelope)
                                   envelope-signature/bind))]
-     (if (valid? t)
-       (store/create! dir t)
-       (invalid (msg/t :record/input-invalid) t)))))
+     (cond
+       (anomaly/anomaly? t) t
+       (valid? t) (store/create! dir t)
+       :else (invalid (msg/t :record/input-invalid) t)))))

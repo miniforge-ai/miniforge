@@ -13,6 +13,7 @@
    record, or a proposal changed after it was recorded, does not commit."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.effect-transaction.messages :as msg]
    [ai.miniforge.runtime-signing.interface :as signing]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -41,12 +42,18 @@
 
 (defn ^{:stratum 1} bind
   "`t` carrying the runtime signature over its binding fields, or `t`
-   unchanged when the key cannot load (commit then refuses it)."
+   unchanged when the key cannot load (commit then refuses it). A binding
+   the signer cannot encode losslessly (a char, a path, a lone surrogate,
+   nesting past its depth bound) is an `:invalid-input` anomaly."
   [t]
   (let [key-bytes (signing/load-or-create-key!)]
     (if (anomaly/anomaly? key-bytes)
       t
-      (assoc t :effect/signature (signing/sign key-bytes (select-keys t binding-keys))))))
+      (try
+        (assoc t :effect/signature (signing/sign key-bytes (select-keys t binding-keys)))
+        (catch Exception e
+          (anomaly/anomaly :invalid-input (msg/t :record/unencodable)
+                           {:effect/id (:effect/id t) :error (ex-message e)}))))))
 
 (defn ^{:stratum 1} binding-signed?
   "True only when `t` carries this runtime's signature over its binding."

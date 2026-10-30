@@ -37,9 +37,13 @@ never looked at the envelope, so the record did not show that the runtime ever d
   checked, as before.
 6. Mint sites: merge and deploy sign the envelope `gate/decide` returns in their authority `prepare`; OPSV governance
   signs the envelope it mints. Each passes the envelope to `propose!`.
-7. `docs/architecture/rfc-ariadne-adoption.md` gains an implementation-status section: what "runtime-signed" means as
+7. `propose!` returns an `:invalid-input` anomaly, recording nothing, when the binding cannot be encoded losslessly (a
+  char, a path, a lone surrogate, nesting past 64 levels), instead of throwing; merge and deploy then take their anomaly
+  path and revoke the grant they issued.
+8. `docs/architecture/rfc-ariadne-adoption.md` gains an implementation-status section: what "runtime-signed" means as
   built (one HMAC key, not public-key signatures), what is signed and where it is verified, which "attested" items
-  remain targets, and the known limits.
+  remain targets, and the known limits, including that `:effect/state` and `:effect/observed` are outside the binding
+  signature.
 
 ## Testing Plan
 
@@ -47,7 +51,8 @@ never looked at the envelope, so the record did not show that the runtime ever d
   and one altered from deny to allow after signing all record `:failed` with outcome `envelope-unsigned` without running
   the effect; a record whose proposal is swapped, or whose envelope is replaced by another signed one, in the store
   after propose is refused the same way; a signed allowing envelope commits (positive control); a signed envelope with
-  an `Instant` survives the store and still verifies.
+  an `Instant` survives the store and still verifies; a proposal whose title is a char or a lone surrogate returns
+  `:invalid-input` and records nothing.
 2. Updated fixtures to propose with a signed allowing envelope: effect-transaction `fixtures/propose-merge!`,
   opsv-actuation `execution_fixtures/allowing-envelope`, and the `opsv-provider-test` fixture CI runs explicitly.
   `phase-opsv/governance_test` now also asserts the minted envelope is signed.
