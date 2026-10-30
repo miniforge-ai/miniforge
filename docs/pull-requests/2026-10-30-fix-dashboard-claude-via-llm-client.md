@@ -31,13 +31,25 @@ to run a command could get it run on the operator's machine.
 ## Testing Plan
 
 1. `pr-chat-and-summary-run-claude-isolated-test`: both calls reach the Claude CLI with
-   `--tools ""` and `--setting-sources ""` (fails on main, which runs `claude -p`
-   directly).
+   the four isolation flags and the prompt on stdin (fails on main, which runs
+   `claude -p` directly); a failed call keeps its error prefix.
 2. CLI web tests pass.
+3. Independent adversarial review; findings fixed or listed below.
 
 ## Deployment Plan
 
-Ships with the next release. The answers are text, as before.
+Ships with the next release. The answers are text, as before. A call now times out
+after 600 s (it had no limit); a blank error reads "Unknown".
+
+## Known limits
+
+1. As for every Claude call outside an artifact session (#2282), the operator's
+   `~/.claude/settings.json` is not read: its `model`, `env` and `apiKeyHelper` do not
+   apply. OAuth and environment variables do.
+2. The llm client reports a successful answer as a rate-limit error when the answer
+   itself mentions `429` or "rate limit" (`cli-output/rate-limited?` scans the whole
+   answer). A summary of a PR about rate limiting can show as an error. That check is
+   shared by every CLI backend; narrowing it is a separate change.
 
 ## Related Issues/PRs
 

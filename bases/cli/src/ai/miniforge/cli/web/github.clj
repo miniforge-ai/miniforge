@@ -55,11 +55,12 @@
    of the operator's Claude Code settings, hooks or plugins, so a PR
    title, body or diff in the prompt cannot get a tool run."
   [prompt]
-  (let [result (llm/complete (llm/create-client {:backend :claude}) {:prompt prompt})
-        error  (llm/get-error result)]
+  (let [result  (llm/complete (llm/create-client {:backend :claude}) {:prompt prompt})
+        error   (llm/get-error result)
+        message (str (if (map? error) (:message error) error))]
     (if (llm/success? result)
       {:success true :text (str/trim (str (llm/get-content result)))}
-      {:success false :text (str (if (map? error) (get error :message "Unknown") (or error "Unknown")))})))
+      {:success false :text (if (str/blank? message) "Unknown" message)})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
