@@ -54,7 +54,8 @@
    id or a :failed one is claimed, set :in-flight, and the claim carries
    how many of its events are already :published. An :in-flight or :done
    id is not claimed; the claim carries its :status. A new id evicts the
-   oldest beyond `recent-delivery-capacity`."
+   oldest beyond `recent-delivery-capacity` that are not :in-flight, so a
+   delivery still publishing is never claimed a second time."
   [{:keys [deliveries order] :as s} id]
   (let [{:keys [status published]} (get deliveries id)]
     (case status
@@ -66,10 +67,13 @@
        {:claimed? true :published published}]
 
       (let [order (conj order id)
-            evicted (take (max 0 (- (count order) recent-delivery-capacity)) order)]
+            evicted (->> order
+                         (remove #(= :in-flight (get-in deliveries [% :status])))
+                         (take (max 0 (- (count order) recent-delivery-capacity)))
+                         set)]
         [{:deliveries (assoc (apply dissoc deliveries evicted)
                              id {:status :in-flight :published 0})
-          :order (vec (drop (count evicted) order))}
+          :order (vec (remove evicted order))}
          {:claimed? true :published 0}]))))
 
 ;------------------------------------------------------------------------------ Layer 2

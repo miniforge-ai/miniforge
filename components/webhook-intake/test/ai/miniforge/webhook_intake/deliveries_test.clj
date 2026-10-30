@@ -41,7 +41,18 @@
   (testing "past capacity the oldest delivery is forgotten, from both the order and the map"
     (let [seen (sut/new-seen)]
       (doseq [i (range (inc sut/recent-delivery-capacity))]
-        (sut/claim! seen (str "d-" i)))
+        (sut/claim! seen (str "d-" i))
+        (sut/record! seen (str "d-" i) {:status :done}))
       (is (= sut/recent-delivery-capacity (count (:order @seen)) (count (:deliveries @seen))))
       (is (not (contains? (:deliveries @seen) "d-0")))
       (is (= {:claimed? true :published 0} (sut/claim! seen "d-0"))))))
+
+(deftest ^{:stratum 0} in-flight-deliveries-are-not-evicted-test
+  (testing "a delivery still publishing survives capacity eviction"
+    (let [seen (sut/new-seen)]
+      (sut/claim! seen "slow")
+      (doseq [i (range sut/recent-delivery-capacity)]
+        (sut/claim! seen (str "d-" i))
+        (sut/record! seen (str "d-" i) {:status :done}))
+      (is (= {:claimed? false :status :in-flight} (sut/claim! seen "slow")))
+      (is (not (contains? (:deliveries @seen) "d-0")) "the oldest finished delivery went instead"))))
