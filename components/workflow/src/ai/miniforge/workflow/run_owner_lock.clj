@@ -53,12 +53,16 @@
   (atom {}))
 
 (defn ^{:stratum 0} owner-file
-  "Run `run-id`'s owner lock file under `checkpoint-root`, from the root's
-   real path when it exists, so every path to one root names one file."
+  "Run `run-id`'s owner lock file under `checkpoint-root`, from the real
+   path of the root's deepest existing ancestor plus the rest, so every
+   path to one root names one file, before and after the root is created."
   [checkpoint-root run-id]
-  (let [root (if (fs/exists? checkpoint-root)
-               (fs/real-path checkpoint-root)
-               (fs/absolutize checkpoint-root))]
+  (let [root (loop [path (fs/absolutize checkpoint-root)
+                    missing ()]
+               (cond
+                 (fs/exists? path) (reduce fs/path (fs/real-path path) missing)
+                 (fs/parent path)  (recur (fs/parent path) (cons (str (fs/file-name path)) missing))
+                 :else             (reduce fs/path path missing)))]
     (fs/path root ".owners" (str run-id ".lock"))))
 
 (defn- ^{:stratum 0} try-lock

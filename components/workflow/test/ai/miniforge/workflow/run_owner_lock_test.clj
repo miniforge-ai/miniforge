@@ -127,6 +127,21 @@
         (is (= (str (:id @seen)) (get-in @seen [:owner :owner/run-id])))
         (is (nil? (owner/owner root (:id @seen))) "released when the run ends")))))
 
+(deftest ^{:stratum 0} owner-file-is-stable-through-a-symlinked-parent-test
+  (fs/with-temp-dir [dir {:prefix "run-owner-link-"}]
+    (let [real  (fs/create-dirs (fs/path dir "real"))
+          alias (fs/create-sym-link (fs/path dir "alias") real)
+          root  (fs/path alias "checkpoints")
+          id    (random-uuid)
+          before (owner/owner-file root id)
+          held  (owner/acquire! root id)]
+      (try
+        (is (= (str before) (str (owner/owner-file root id)))
+            "the same file before and after the root exists")
+        (is (= :conflict (:anomaly/type (owner/acquire! root id)))
+            "a second local claim through the alias is answered by the registry")
+        (finally (owner/release! held))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} owner-lock-held-by-another-process-test
