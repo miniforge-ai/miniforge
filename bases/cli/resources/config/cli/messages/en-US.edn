@@ -602,6 +602,7 @@
   :pr/monitor-starting "Starting PR monitor for author: {author}"
   :pr/monitor-polling "Polling every {seconds}s in {dir}"
   :pr/monitor-stop-hint "Press Ctrl+C to stop."
+  :pr/monitor-text-backend-unsafe "LLM backend {backend} runs an agent that can edit files, so the monitor will not send it review comments to classify or questions to answer: comments are classified by keyword and questions go unanswered. Change requests are still fixed. Configure an API backend (anthropic-api, openai-api, ...) to enable both."
   :pr/monitor-stopping "Stopping monitor..."
   :pr/monitor-stopped "Monitor stopped. Evidence: {evidence}"
   :pr/monitor-interval-bounds "Poll interval must be {min}-{max} seconds, got {value}. Using default."
