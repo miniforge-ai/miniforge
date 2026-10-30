@@ -18,15 +18,21 @@ GitHub webhooks into `workflow/create-event-trigger`.
 ## Changes in Detail
 
 1. `webhook-intake/listener/start!`: http-kit on 127.0.0.1 unless a host is given, bodies capped at
-   5 MiB, refuses to start without a webhook secret. GitHub cannot send a custom token header, so the
+   5 MiB, refuses to start without a webhook secret; stop waits up to 5 s for requests in flight. GitHub cannot send a
+     custom token header, so the
    signature is the token required for a public bind (the dashboard's rule from #2096 and #2226).
-2. `mf webhook serve --triggers rules.edn [--host] [--port] [--secret-file]`: rules use
-   `create-event-trigger`'s `{:triggers [...]}` format; each must name `:on` and `:run :workflow-id`.
-   The secret comes from `MINIFORGE_GITHUB_WEBHOOK_SECRET` or `--secret-file`, never argv. The
-   intake (default 127.0.0.1:8788) and the trigger share one event stream; triggered workflows get
-   the options `mf run` passes `run-pipeline` (artifact store, event stream). Runs until
-   SIGINT/SIGTERM, then stops the intake and trigger and closes the store.
-3. The intake interface exports `sign` for clients and tests.
+2. `mf webhook serve --triggers rules.edn --secret-file F [--host] [--port]`: rules use
+   `create-event-trigger`'s `{:triggers [...]}` format. Each must be `:on` an event type the intake
+   publishes (`:pr/merged`, `:pr/opened`, `:pr/ci-failed`), name its `:repo` (a rule without one
+   would act on every repository delivering to the hook), have a `:branch-pattern` that compiles if
+   given, and name `:run :workflow-id` (`webhook-triggers` namespace). The secret comes only from
+   `--secret-file`: not argv, which other users can read, nor an environment variable, which every
+   subprocess of a triggered workflow would inherit. The trigger subscribes before the intake starts
+   listening, so no delivery is accepted with no trigger; on SIGINT/SIGTERM the intake stops first.
+   The shared event stream uses bounded retention. Triggered workflows get the options `mf run`
+   passes `run-pipeline` (artifact store, event stream).
+3. `bb.edn`: the `miniforge` task's classpath includes the component, so `bb miniforge` loads.
+4. The intake interface exports `sign` for clients and tests.
 
 ## Known limits
 
@@ -37,15 +43,17 @@ narrow (`:repo`, `:branch-pattern`).
 
 ## Testing Plan
 
-`listener-test`: refuses a blank secret, binds loopback, signed and unsigned deliveries over real
-HTTP. `webhook-serve-test`: trigger-file validation, exit 1 without a file, with a bad file, or
-without a secret; end to end, a signed delivery POSTed to the running intake reaches the stream the
+`listener-test`: refuses a blank secret, tells http-kit to bind 127.0.0.1, signed and unsigned
+deliveries over real HTTP. `webhook-serve-test`: rule validation (event type, repo, pattern,
+workflow), exit 1 without a file, with a bad or missing file, or without a secret file; end to end, a signed delivery
+POSTed to the running intake reaches the stream the
 trigger subscribes to (trigger stubbed, stream without sinks).
 
 ## Deployment Plan
 
-Configure a GitHub webhook with content type `application/json` and the shared secret, pointed at a
-tunnel or reverse proxy in front of the loopback listener.
+Configure a GitHub webhook with content type `application/json` and the shared secret (kept in a
+file readable only by the operator), pointed at a tunnel or reverse proxy in front of the loopback
+listener.
 
 ## Related Issues/PRs
 

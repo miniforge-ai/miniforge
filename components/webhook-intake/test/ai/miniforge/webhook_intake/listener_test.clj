@@ -26,6 +26,7 @@
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [org.httpkit.client :as http-client]
+   [org.httpkit.server :as http]
    [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -62,9 +63,15 @@
     (let [stream (event-stream/create-event-stream {:sinks []})
           published (atom [])
           _ (event-stream/subscribe! stream :collector #(swap! published conj %))
-          {:keys [host port stop-fn]} (sut/start! {:secret secret :stream stream})]
+          bound (atom nil)
+          real-run-server http/run-server
+          {:keys [host port stop-fn]} (with-redefs [http/run-server (fn [handler opts]
+                                                                      (reset! bound opts)
+                                                                      (real-run-server handler opts))]
+                                        (sut/start! {:secret secret :stream stream}))]
       (try
         (is (= sut/default-host host))
+        (is (= "127.0.0.1" (:ip @bound)) "run-server is told to bind loopback")
         (let [url (str "http://127.0.0.1:" port handler/github-path)
               response @(http-client/post url {:headers (signed-headers merged-body "d-1")
                                                :body merged-body})

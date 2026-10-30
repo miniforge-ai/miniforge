@@ -36,6 +36,11 @@
    or reverse proxy."
   "127.0.0.1")
 
+(def ^{:stratum 0} stop-timeout-ms
+  "How long stop waits for requests in flight to finish (5 s), so a
+   delivery being handled is not cut off when the trigger is stopped."
+  5000)
+
 (def ^{:stratum 0} max-body-bytes
   "Largest request body accepted (5 MiB; http-kit answers 413 above it).
    GitHub caps payloads at 25 MB, but the deliveries mapped here are a few
@@ -58,4 +63,5 @@
                                  :legacy-return-value? false})]
     {:host host
      :port (http/server-port server)
-     :stop-fn #(http/server-stop! server)}))
+     :stop-fn #(deref (http/server-stop! server {:timeout stop-timeout-ms})
+                      (* 2 stop-timeout-ms) nil)}))
