@@ -35,6 +35,7 @@
   (:require
    [ai.miniforge.pr-lifecycle.controller :as controller]
    [ai.miniforge.pr-lifecycle.ci-monitor :as ci]
+   [ai.miniforge.pr-lifecycle.ci-checks :as ci-checks]
    [ai.miniforge.pr-lifecycle.classifier :as classifier]
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
@@ -254,7 +255,7 @@
 (def ^{:stratum 0} compute-ci-status
   "Compute overall CI status from individual checks.
    Returns {:status keyword :passed [] :failed [] :pending []}"
-  ci/compute-ci-status)
+  ci-checks/compute-ci-status)
 
 ;; Review monitoring
 (def ^{:stratum 0} create-review-monitor
@@ -655,24 +656,6 @@
    Example:
      (evaluate-merge-readiness \"/path/to/repo\" 123 default-merge-policy)"
   merge/evaluate-merge-readiness)
-
-(def ^{:stratum 0} merge-pr!
-  "Merge a PR using gh CLI.
-
-   Options:
-   - :policy - Merge policy map
-
-   Example:
-     (merge-pr! \"/path/to/repo\" 123 :policy {:method :squash})"
-  merge/merge-pr!)
-
-(def ^{:stratum 0} enable-auto-merge!
-  "Enable auto-merge for a PR."
-  merge/enable-auto-merge!)
-
-(def ^{:stratum 0} disable-auto-merge!
-  "Disable auto-merge for a PR."
-  merge/disable-auto-merge!)
 
 (def ^{:stratum 0} rebase-pr!
   "Rebase a PR onto the latest base branch."

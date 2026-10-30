@@ -103,6 +103,11 @@
   (and (string? value)
        (re-matches #"[^/\s]+/[^/\s]+" value)))
 
+(defn- ^{:stratum 0} commit-id?
+  [value]
+  (and (string? value)
+       (re-matches #"[0-9a-f]{40}|[0-9a-f]{64}" value)))
+
 ;; Conflict-resolution dispatch (Stage 3d, spec §6.4)
 (defn- ^{:stratum 0} parse-gh-json
   "Parse `gh --json` output as JSON via Cheshire. Returns the parsed
@@ -181,6 +186,19 @@
                  (messages/t :merge/repository-unavailable))))))
 
 ;; Merge execution
+(defn ^{:stratum 1} read-pr-head
+  "Read the full commit id at the pull request's head from GitHub."
+  [worktree-path pr-number]
+  (dag/when-let-ok
+   [result (run-gh-command
+            ["gh" "pr" "view" (str pr-number) "--json" "headRefOid"
+             "--jq" ".headRefOid"]
+            worktree-path)]
+    (let [sha (:output (:data result))]
+      (if (commit-id? sha)
+        (dag/ok {:pr/head-sha sha})
+        (dag/err :head-unavailable (messages/t :merge/head-unavailable))))))
+
 (defn ^{:stratum 1} merge-pr!
   "Merge a PR using gh CLI.
 
@@ -188,9 +206,12 @@
    - worktree-path: Path to git worktree
    - pr-number: PR number
    - policy: Merge policy (or use defaults)
+   - head-sha: when given, merge now and only if the PR head is this
+     commit. Without it the merge is deferred with `--auto`, which
+     `--match-head-commit` would check only when auto-merge is enabled.
 
    Returns result with merge information."
-  [worktree-path pr-number & {:keys [policy]
+  [worktree-path pr-number & {:keys [policy head-sha]
                               :or {policy default-merge-policy}}]
   (let [method-flag (case (:method policy :squash)
                       :squash "--squash"
@@ -198,45 +219,15 @@
                       :merge "--merge")
         delete-flag (when (:delete-branch-after-merge? policy)
                       "--delete-branch")
-        args (cond-> ["gh" "pr" "merge" (str pr-number) method-flag "--auto"]
-               delete-flag (conj delete-flag))
+        args (cond-> ["gh" "pr" "merge" (str pr-number) method-flag]
+               (nil? head-sha) (conj "--auto")
+               delete-flag (conj delete-flag)
+               head-sha (into ["--match-head-commit" head-sha]))
         result (run-gh-command args worktree-path)]
     (if (dag/ok? result)
       (dag/ok {:merged? true
                :method (:method policy)
                :output (:output (:data result))})
-      result)))
-
-(defn ^{:stratum 1} enable-auto-merge!
-  "Enable auto-merge for a PR (merges when all checks pass).
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: PR number
-   - policy: Merge policy
-
-   Returns result."
-  [worktree-path pr-number & {:keys [policy]
-                              :or {policy default-merge-policy}}]
-  (let [method-flag (case (:method policy :squash)
-                      :squash "--squash"
-                      :rebase "--rebase"
-                      :merge "--merge")
-        result (run-gh-command
-                ["gh" "pr" "merge" (str pr-number) method-flag "--auto"]
-                worktree-path)]
-    (if (dag/ok? result)
-      (dag/ok {:auto-merge-enabled? true})
-      result)))
-
-(defn ^{:stratum 1} disable-auto-merge!
-  "Disable auto-merge for a PR."
-  [worktree-path pr-number]
-  (let [result (run-gh-command
-                ["gh" "pr" "merge" (str pr-number) "--disable-auto"]
-                worktree-path)]
-    (if (dag/ok? result)
-      (dag/ok {:auto-merge-disabled? true})
       result)))
 
 (defn ^{:stratum 1} rebase-pr!
@@ -392,6 +383,7 @@
               :check-branch check-branch-status
               :check-threads check-unresolved-threads})
     :run-gh run-gh-command :merge-pr merge-pr! :read-repository read-repository
+    :read-head read-pr-head
     :fetch-labels fetch-pr-labels! :fetch-branch fetch-pr-branch
     :rebase-pr rebase-pr! :pr-info pr-info-from-gh :normalize-resolution normalize-resolution-outcome}
    worktree-path pr-number policy context))
@@ -407,9 +399,6 @@
   ;; Merge a PR
   (merge-pr! "/path/to/repo" 123 :policy {:method :squash
                                           :delete-branch-after-merge? true})
-
-  ;; Enable auto-merge
-  (enable-auto-merge! "/path/to/repo" 123)
 
   ;; Rebase a PR
   (rebase-pr! "/path/to/repo" "feat/my-feature")

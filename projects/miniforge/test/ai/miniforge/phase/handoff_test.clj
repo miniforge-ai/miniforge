@@ -248,7 +248,7 @@
         (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                       agent/invoke (mock-agent-invoke :implementer nil)
                       ;; Mock release-executor to avoid real git operations
-                      release-executor/execute-release-phase
+                      release-executor/prepare-release
                       (fn [workflow-state _exec-context _opts]
                         ;; Verify workflow-state contains artifacts discovered from worktree
                         (is (some? (:workflow/artifacts workflow-state))
@@ -300,7 +300,7 @@
                                        :else
                                        (response/success {:result :ok} {:tokens 0 :duration-ms 0})))
                       ;; Mock release-executor
-                      release-executor/execute-release-phase
+                      release-executor/prepare-release
                       (fn [workflow-state _exec-context _opts]
                         (is (some? (:workflow/artifacts workflow-state))
                             "Release should receive artifacts")
@@ -308,7 +308,10 @@
                          :artifacts [{:artifact/id (random-uuid)
                                       :artifact/type :release
                                       :artifact/content {:files-written 2}}]
-                         :metrics {:tokens 100 :duration-ms 500}})]
+                         :prepared {}
+                         :metrics {:tokens 100 :duration-ms 500}})
+                      release-executor/publish-release
+                      (constantly {:success? true :artifacts [] :metrics {}})]
 
           ;; Mock verify phase test runner to prevent subprocess spawning
           (with-mocked-test-runner
