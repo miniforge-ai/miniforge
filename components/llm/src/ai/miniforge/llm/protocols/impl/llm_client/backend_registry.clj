@@ -78,7 +78,8 @@
    :codex {:stream-parser cli-output/parse-codex-stream-line
            :args-fn cli-args/codex-args}
    :cursor {:args-fn cli-args/cursor-args}
-   :opencode {:args-fn cli-args/opencode-args}
+   :opencode {:args-fn cli-args/opencode-args
+              :env-fn cli-args/opencode-env}
    :echo {:args-fn cli-args/echo-args}})
 
 ;------------------------------------------------------------------------------ Layer 1

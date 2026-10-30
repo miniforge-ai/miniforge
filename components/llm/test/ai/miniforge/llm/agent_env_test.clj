@@ -22,6 +22,7 @@
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
    [ai.miniforge.llm.protocols.impl.llm-client.stream-exec :as stream-exec]
    [ai.miniforge.llm.protocols.impl.llm-client.subprocess :as subprocess]))
@@ -67,7 +68,26 @@
            (subprocess/allowed-env {:allow ["PATH"] :allow-prefixes ["GH"] :deny-prefixes ["GH_"]}
                                    {"Path" "C:\\Windows" "gh_token" "x"})))))
 
+(deftest ^{:stratum 0} opencode-call-carries-its-deny-config-test
+  (testing "an OpenCode call outside a session reaches exec with --pure and the deny-all config"
+    (let [calls  (atom [])
+          record (fn [cmd opts] (swap! calls conj [cmd opts]) {:out "ok" :err "" :exit 0})
+          client (llm/create-client {:backend :opencode
+                                     :exec-fn (fn ([cmd] (record cmd nil)) ([cmd opts] (record cmd opts)))})]
+      (llm/complete client {:prompt "hi"})
+      (let [[cmd opts] (first @calls)]
+        (is (some #{"--pure"} cmd))
+        (is (contains? (:env opts) "OPENCODE_CONFIG_CONTENT"))))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} backend-env-entries-reach-the-process-test
+  (testing "env entries a backend adds are set on top of the agent environment"
+    (with-redefs [subprocess/host-env (constantly operator-env)]
+      (let [names (env-names (:out (impl/default-exec-fn ["env"] {:env {"OPENCODE_CONFIG_CONTENT" "{}"}})))]
+        (is (contains? names "OPENCODE_CONFIG_CONTENT"))
+        (is (contains? names "ANTHROPIC_API_KEY"))
+        (is (not-any? names withheld-names))))))
 
 (deftest ^{:stratum 1} agent-env-keeps-only-allowed-names-test
   (testing "the shipped allowlist keeps the basics and provider keys and drops miniforge's credentials"

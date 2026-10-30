@@ -23,13 +23,19 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
-   [ai.miniforge.llm.protocols.impl.llm-client.completion :as completion]))
+   [ai.miniforge.llm.protocols.impl.llm-client.cli-args :as cli-args]
+   [ai.miniforge.llm.protocols.impl.llm-client.completion :as completion]
+   [cheshire.core :as json]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Private fn accessor
 (defn- ^{:stratum 0} private-fn [sym]
   (var-get (ns-resolve 'ai.miniforge.llm.protocols.impl.llm-client sym)))
+
+(def ^{:stratum 0} ^:private supervised
+  "Hook settings, as an artifact session passes them."
+  {:supervision {:settings-path "/tmp/s.json"}})
 
 (deftest ^{:stratum 0} claude-mcp-allowlist-string-test
   (testing "keyword server + tool → mcp__<server>__<tool>"
@@ -303,9 +309,21 @@
 ;; opencode-args
 ;; ============================================================================
 (deftest ^{:stratum 1} opencode-args-minimal-test
-  (testing "minimal prompt invokes non-interactive run"
-    (let [args ((private-fn 'opencode-args) {:prompt "explain"})]
+  (testing "minimal prompt in a session invokes non-interactive run"
+    (let [args ((private-fn 'opencode-args) (merge supervised {:prompt "explain"}))]
       (is (= ["run" "explain"] args)))))
+
+(deftest ^{:stratum 1} opencode-call-outside-a-session-is-isolated-test
+  (testing "a call with no hook settings runs without external plugins and with every permission denied"
+    (is (= ["run" "--pure" "explain"] ((private-fn 'opencode-args) {:prompt "explain"})))
+    (let [config (json/parse-string (get (cli-args/opencode-env {:prompt "explain"}) "OPENCODE_CONFIG_CONTENT"))]
+      (is (= "deny" (get-in config ["permission" "*"])))
+      (is (every? #{"deny"} (vals (get config "permission"))))))
+  (testing "isolated? does the same for a session call"
+    (is (some #{"--pure"} ((private-fn 'opencode-args) (merge supervised {:prompt "p" :isolated? true}))))
+    (is (some? (cli-args/opencode-env (merge supervised {:isolated? true})))))
+  (testing "a session call gets neither"
+    (is (nil? (cli-args/opencode-env supervised)))))
 
 (deftest ^{:stratum 1} opencode-args-model-and-agent-test
   (testing "model and agent pass through to OpenCode"
@@ -324,6 +342,7 @@
   (testing "session reuse and serve attachment flags are preserved"
     (let [args ((private-fn 'opencode-args)
                 {:prompt "continue"
+                 :supervision {:settings-path "/tmp/s.json"}
                  :attach "http://localhost:4096"
                  :session "sess_123"
                  :fork? true})]
@@ -338,6 +357,7 @@
   (testing "attached files expand into repeated --file flags"
     (let [args ((private-fn 'opencode-args)
                 {:prompt "review"
+                 :supervision {:settings-path "/tmp/s.json"}
                  :files ["README.md" "src/core.clj"]})]
       (is (= ["run"
               "--file" "README.md"

@@ -113,9 +113,14 @@
    OpenCode owns provider credentials, model aliases, project config,
    agent profiles, MCP config, and permissions. Miniforge passes the
    selected model/profile knobs through and treats OpenCode as the
-   common provider wrapper instead of handling API keys directly."
-  [{:keys [prompt model agent attach command session continue? fork? files format]}]
+   common provider wrapper instead of handling API keys directly.
+
+   A call outside an artifact session also gets `--pure` (no external
+   plugins); `opencode-env` denies it every tool."
+  [{:keys [prompt model agent attach command session continue? fork? files format
+           supervision isolated?]}]
   (cond-> ["run"]
+    (or isolated? (not (:settings-path supervision))) (conj "--pure")
     attach    (into ["--attach" attach])
     command   (into ["--command" command])
     continue? (conj "--continue")
@@ -126,6 +131,18 @@
     (seq files) (into (mapcat (fn [file] ["--file" file]) files))
     format    (into ["--format" format])
     true      (conj prompt)))
+
+(defn ^{:stratum 0} opencode-env
+  "Environment entries for an OpenCode call. A call outside an artifact
+   session (no hook settings under `:supervision`), or one that asks to be
+   `:isolated?`, gets OPENCODE_CONFIG_CONTENT with every permission denied
+   (`[:opencode :deny-all-permission]` in llm/client-defaults.edn), which
+   OpenCode applies over its global and project config. nil otherwise."
+  [{:keys [supervision isolated?]}]
+  (when (or isolated? (not (:settings-path supervision)))
+    {"OPENCODE_CONFIG_CONTENT"
+     (json/generate-string
+      {"permission" (settings/client-default [:opencode :deny-all-permission])})}))
 
 (defn ^{:stratum 0} echo-args
   "Build CLI arguments for the echo (test) backend."

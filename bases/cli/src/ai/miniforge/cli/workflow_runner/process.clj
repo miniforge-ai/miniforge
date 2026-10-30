@@ -74,11 +74,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} start-cli-process
-  [cmd workdir]
+  "Start `cmd` with `cli-process-env` plus `extra-env`, the backend's own
+   entries (OpenCode's inline config)."
+  [cmd workdir extra-env]
   (let [builder (ProcessBuilder. ^java.util.List cmd)]
     (let [env (.environment builder)]
       (.clear env)
-      (doseq [[k v] (cli-process-env)]
+      (doseq [[k v] (merge (cli-process-env) extra-env)]
         (.put env k v)))
     (when workdir
       (.directory builder (java.io.File. workdir)))
@@ -87,11 +89,11 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} run-cli-command
-  [cmd timeout-ms & {:keys [workdir stdin]}]
+  [cmd timeout-ms & {:keys [workdir stdin env]}]
   (when (and (some? stdin) (not (string? stdin)))
     (throw (ex-info "run-cli-command :stdin must be a string"
                     {:stdin-type (type stdin)})))
-  (let [^Process process (start-cli-process cmd workdir)
+  (let [^Process process (start-cli-process cmd workdir env)
         in-future (stream-writer (.getOutputStream process) stdin)
         out-future (stream-reader (.getInputStream process))
         err-future (stream-reader (.getErrorStream process))

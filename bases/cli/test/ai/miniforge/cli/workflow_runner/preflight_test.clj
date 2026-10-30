@@ -229,14 +229,15 @@
         (is (= "Reply with exactly {\"ok\":true}" stdin))))))
 
 (deftest ^{:stratum 0} run-backend-preflight-keeps-argv-backend-prompt-in-argv-test
-  (testing "a backend declaring :prompt-via :argv still carries the prompt as an argument, with no stdin"
+  (testing "a backend declaring :prompt-via :argv still carries the prompt as an argument, with no
+            stdin; the OpenCode probe runs isolated, as a real call outside a session does"
     (let [llm-client (llm/create-client {:backend :opencode})
           seen (atom nil)
           output (with-out-str
                    (with-redefs-fn {#'paths/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/opencode")
                                     #'probe/read-cli-version (fn [_] {:success true :version "0.4.1"})
-                                    #'process/run-cli-command (fn [cmd _timeout-ms & {:keys [stdin]}]
-                                                            (reset! seen {:cmd cmd :stdin stdin})
+                                    #'process/run-cli-command (fn [cmd _timeout-ms & {:keys [stdin env]}]
+                                                            (reset! seen {:cmd cmd :stdin stdin :env env})
                                                             {:out "{\"ok\":true}"
                                                              :err ""
                                                              :exit 0})}
@@ -245,10 +246,11 @@
                         false
                         llm-client
                         {:worktree-path "/tmp/runtime-worktree"}))))
-          {:keys [cmd stdin]} @seen]
+          {:keys [cmd stdin env]} @seen]
       (is (str/includes? output "Backend: opencode"))
-      (is (= ["/opt/homebrew/bin/opencode" "run" "Reply with exactly {\"ok\":true}"] cmd))
-      (is (nil? stdin)))))
+      (is (= ["/opt/homebrew/bin/opencode" "run" "--pure" "Reply with exactly {\"ok\":true}"] cmd))
+      (is (nil? stdin))
+      (is (contains? env "OPENCODE_CONFIG_CONTENT")))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
