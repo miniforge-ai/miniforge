@@ -139,8 +139,8 @@
   "\\bgh\\s+auth\\s+(token|status)\\b"
   "\\bgh\\s+(gist|secret|ssh-key|gpg-key|api)\\b"
   "\\bprintenv\\b"
-  "(?m)(^|[;&|(`])\\s*(env|export|declare|typeset)(\\s+-[a-zA-Z0-9]+){0,4}\\s*($|[|;&>)`])"
-  "(?m)(^|[;&|(`])\\s*set\\s*($|[|;&>)`])"
+  "(?m)(^|[;&|(`])[ \\t]*(env|export|declare|typeset)(\\s+-[a-zA-Z0-9]+){0,4}\\s*($|[|;&>)`])"
+  "(?m)(^|[;&|(`])[ \\t]*set[ \\t]*($|[|;&>)`])"
   "\\$\\{?[A-Z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|PRIVATE_KEY)[A-Z0-9_]*"
   "\\$\\{?AWS_[A-Z0-9_]+"
   "\\bgit\\s+credential\\b"
@@ -149,7 +149,7 @@
   "\\bgcloud\\s+auth\\s+print-"
   ;; Network clients where a command starts (not inside an argument such as
   ;; a commit message). Build tools still fetch their dependencies.
-  "(?m)(^|[;&|(`]|\\$\\(|\\b(then|do|else|xargs|exec|command|nohup|time|sudo)\\b)\\s*(\\S{0,200}/)?(curl|wget|nc|ncat|netcat|socat|telnet|ftp|tftp|sftp|scp|ssh|rsync)(\\s|$)"
+  "(?m)(^|[;&|(`]|\\$\\(|\\b(then|do|else|xargs|exec|command|nohup|time|sudo)\\b)[ \\t]*(\\S{0,200}/)?(curl|wget|nc|ncat|netcat|socat|telnet|ftp|tftp|sftp|scp|ssh|rsync)(\\s|$)"
   "/dev/(tcp|udp)/"
   ;; Git commands that reach a remote the run did not configure, publish,
   ;; or change git's own behaviour. miniforge's release step pushes; the

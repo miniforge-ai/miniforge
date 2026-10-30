@@ -233,6 +233,16 @@
     (is (= "deny" (decision :implementer "Bash" {:command (apply str "echo " (repeat 40000 "a"))})))
     (is (= "allow" (decision :implementer "Bash" {:command (apply str "echo " (repeat 20000 "a"))})))))
 
+(deftest ^{:stratum 2} deny-patterns-stay-linear-test
+  (testing "whitespace at line starts cannot make the patterns scan quadratically and time the hook out"
+    (doseq [command [(str (apply str (repeat 32760 "\n")) "true")
+                     (apply str (repeat 16380 "\n "))]]
+      (let [start (System/nanoTime)
+            d     (decision :implementer "Bash" {:command command})
+            ms    (quot (- (System/nanoTime) start) 1000000)]
+        (is (= "allow" d))
+        (is (< ms 2000) (str ms " ms"))))))
+
 (deftest ^{:stratum 2} only-loaded-agent-config-is-protected-test
   (testing "config a later session loads is refused"
     (doseq [path [".claude/settings.json" ".claude/settings.local.json" ".codex/config.toml"
