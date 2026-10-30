@@ -13,6 +13,7 @@
                        "components/buzzword-bingo/resources"
                        "components/content-hash/src"
                        "components/runtime-signing/src"
+                       "components/runtime-signing/resources"
                        "components/file-durability/src"
                        "components/file-durability/resources"
                        "components/resource-cleanup/src"

@@ -1,0 +1,66 @@
+;; Title: Miniforge.ai
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;; Licensed under the Apache License, Version 2.0.
+(ns ai.miniforge.runtime-signing.key-material
+  "Pure helpers for the runtime signing key: generation, parsing, and the
+   file permissions that keep it owner-only."
+  (:require
+   [ai.miniforge.runtime-signing.hmac :as hmac]
+   [clojure.string :as str])
+  (:import
+   [java.nio.file Files LinkOption Path]
+   [java.nio.file.attribute FileAttribute PosixFilePermission PosixFilePermissions]
+   [java.security SecureRandom]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} key-length
+  "Bytes of key material: 256 bits."
+  32)
+
+(def ^{:stratum 0} no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
+
+(def ^{:stratum 0} exposing-permissions
+  "Any of these on the key file lets another user read or replace it."
+  #{PosixFilePermission/GROUP_READ PosixFilePermission/GROUP_WRITE
+    PosixFilePermission/GROUP_EXECUTE PosixFilePermission/OTHERS_READ
+    PosixFilePermission/OTHERS_WRITE PosixFilePermission/OTHERS_EXECUTE})
+
+(defn ^{:stratum 0} posix-file-system? [^Path path]
+  (contains? (.supportedFileAttributeViews (.getFileSystem path)) "posix"))
+
+(defn ^{:stratum 0} owner-only
+  "Creation attributes for `posix-mode`; none where POSIX modes do not exist."
+  [posix? posix-mode]
+  (into-array FileAttribute
+              (if posix?
+                [(PosixFilePermissions/asFileAttribute
+                  (PosixFilePermissions/fromString posix-mode))]
+                [])))
+
+(defn ^{:stratum 0} parse-key
+  "Key bytes from 64 lowercase hex characters, or nil."
+  [text]
+  (let [trimmed (str/trim text)]
+    (when (re-matches #"[0-9a-f]{64}" trimmed)
+      (byte-array (map #(unchecked-byte (Integer/parseInt (apply str %) 16))
+                       (partition 2 trimmed))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} exposed?
+  "True when other users hold any permission on the file at `path`."
+  [posix? ^Path path]
+  (and posix?
+       (boolean (some exposing-permissions
+                      (Files/getPosixFilePermissions path no-follow)))))
+
+(defn ^{:stratum 1} fresh-key-text
+  "New random key material as hex."
+  []
+  (let [key-bytes (byte-array key-length)]
+    (.nextBytes (SecureRandom.) key-bytes)
+    (hmac/hex key-bytes)))
+
+(comment
+  (parse-key (fresh-key-text)))
