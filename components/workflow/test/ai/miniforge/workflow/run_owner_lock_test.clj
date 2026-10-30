@@ -126,6 +126,21 @@
         (is (uuid? (:id @seen)))
         (is (= (str (:id @seen)) (get-in @seen [:owner :owner/run-id])))
         (is (nil? (owner/owner root (:id @seen))) "released when the run ends")))
+    (testing "the run pins its root's physical path for the lock, the context and a restored snapshot"
+      (let [real (fs/create-dirs (fs/path root "real-root"))
+            alias (fs/create-sym-link (fs/path root "alias-root") real)
+            seen (atom nil)]
+        (with-redefs-fn {#'ai.miniforge.workflow.runner/acquire-environment
+                         (fn [_ _ opts] (reset! seen opts) (throw (ex-info "stop here" {})))}
+          #(try (runner/run-pipeline {:workflow/id :owner-test :workflow/pipeline []} {}
+                                     {:checkpoint/root (str alias)
+                                      :resume-machine-snapshot {:execution/id (random-uuid)
+                                                                :execution/checkpoint-root (str alias)}
+                                      :resume-phase-results {}})
+                (catch clojure.lang.ExceptionInfo _ nil)))
+        (is (= (str (fs/real-path real)) (:checkpoint/root @seen)))
+        (is (= (str (fs/real-path real))
+               (get-in @seen [:resume-machine-snapshot :execution/checkpoint-root])))))
     (testing "a snapshot without phase results is not restored: the options' root is locked"
       (let [id (random-uuid)
             snapshot-root (str (fs/create-dirs (fs/path root "snapshot-root")))
@@ -229,18 +244,24 @@
 (deftest ^{:stratum 1} probes-through-another-spelling-keep-the-os-lock-test
   (if-not (fs/which "bb")
     (println "SKIP cross-process owner lock test: bb is not on PATH")
-    (fs/with-temp-dir [dir {:prefix "run-owner-spelling-"}]
-      (let [real  (fs/create-dirs (fs/path dir "real"))
-            _     (fs/create-sym-link (fs/path dir "alias") real)
-            claim (str (fs/path dir "unused" ".." "alias" "checkpoints"))
-            probe (str (fs/path real "checkpoints"))
-            id    (random-uuid)
-            held  (owner/acquire! claim id)
-            seen  #(clojure.string/trim
-                    (:out (bp/shell {:out :string :err :inherit}
-                                    "bb" "-e" probe-script (str (owner/owner-file probe id)))))]
-        (try
-          (is (= (str (owner/owner-file claim id)) (str (owner/owner-file probe id))))
-          (is (some? (owner/owner probe id)) "the probe is answered by the registry")
-          (is (= "busy" (seen)) "and another process still finds the lock held")
-          (finally (owner/release! held)))))))
+    (doseq [[case-name link-target claim probe]
+            [["an unborn segment's .. exposing a link"
+              "real" ["unused" ".." "alias" "checkpoints"] ["real" "checkpoints"]]
+             ["a .. after a link resolves through the link's target"
+              "real/child" ["unused" ".." "alias" ".." "checkpoints"] ["real" "checkpoints"]]]]
+      (fs/with-temp-dir [dir {:prefix "run-owner-spelling-"}]
+        (let [_     (fs/create-dirs (fs/path dir link-target))
+              _     (fs/create-sym-link (fs/path dir "alias") (fs/path dir link-target))
+              claim (str (apply fs/path dir claim))
+              probe (str (apply fs/path dir probe))
+              id    (random-uuid)
+              held  (owner/acquire! claim id)
+              seen  #(clojure.string/trim
+                      (:out (bp/shell {:out :string :err :inherit}
+                                      "bb" "-e" probe-script (str (owner/owner-file probe id)))))]
+          (testing case-name
+            (try
+              (is (not (anomaly/anomaly? held)))
+              (is (some? (owner/owner probe id)) "the probe is answered by the registry")
+              (is (= "busy" (seen)) "and another process still finds the lock held")
+              (finally (when-not (anomaly/anomaly? held) (owner/release! held))))))))))

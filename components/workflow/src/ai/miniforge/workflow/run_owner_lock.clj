@@ -147,31 +147,49 @@
   "Take run `run-id`'s owner lock under `checkpoint-root` without waiting,
    and record this process as the owner. Returns the held lock (for
    release!), a :conflict anomaly naming the live owner when it is held,
-   or an :unavailable anomaly on an I/O error."
+   or an :unavailable anomaly on an I/O error.
+
+   The root is made first, as checkpoint directories are, and the lock
+   file named from its real path: the file is the one the OS resolves the
+   root to, whatever mix of links and `..` it is spelled with."
   [checkpoint-root run-id]
-  (let [path (owner-file checkpoint-root run-id)
+  (let [root (try+ (directory/prepare! checkpoint-root)
+                   (catch Exception e (failed run-id checkpoint-root e)))
+        path (when-not (anomaly/anomaly? root) (owner-file root run-id))
         file (str path)]
-    (locking local-owners
-      (if-let [record (get @local-owners file)]
-        (busy run-id record)
-        (try+
-          (let [channel (open-channel path true)]
-            (try+
-              (if-let [lock (try-lock channel)]
-                (let [record {:owner/run-id (str run-id)
-                              :owner/pid (.pid (java.lang.ProcessHandle/current))
-                              :owner/started-at (str (Instant/now))}]
-                  (write-owner! channel record)
-                  (swap! local-owners assoc file record)
-                  {:owner/channel channel :owner/lock lock :owner/run-id run-id :owner/file file})
-                (let [owner (read-owner channel)]
+    (if (anomaly/anomaly? root)
+      root
+      (locking local-owners
+        (if-let [record (get @local-owners file)]
+          (busy run-id record)
+          (try+
+            (let [channel (open-channel path true)]
+              (try+
+                (if-let [lock (try-lock channel)]
+                  (let [record {:owner/run-id (str run-id)
+                                :owner/pid (.pid (java.lang.ProcessHandle/current))
+                                :owner/started-at (str (Instant/now))}]
+                    (write-owner! channel record)
+                    (swap! local-owners assoc file record)
+                    {:owner/channel channel :owner/lock lock :owner/run-id run-id :owner/file file})
+                  (let [owner (read-owner channel)]
+                    (.close channel)
+                    (busy run-id owner)))
+                (catch Exception e
                   (.close channel)
-                  (busy run-id owner)))
-              (catch Exception e
-                (.close channel)
-                (throw e))))
-          (catch Exception e
-            (failed run-id path e)))))))
+                  (throw e))))
+            (catch Exception e
+              (failed run-id path e))))))))
+
+(defn ^{:stratum 1} physical-root
+  "`checkpoint-root`'s real path, the directory made as checkpoint
+   directories are (private, protected ancestry) when missing; an
+   :unavailable anomaly naming run `run-id` when it cannot be. A run pins
+   it at start, so an alias of the root retargeted mid-run cannot move
+   its checkpoints away from its lock."
+  [run-id checkpoint-root]
+  (try+ (str (directory/prepare! checkpoint-root))
+        (catch Exception e (failed run-id checkpoint-root e))))
 
 (defn ^{:stratum 1} owner
   "The live owner of run `run-id` under `checkpoint-root` (its record, {}

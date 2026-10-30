@@ -17,7 +17,8 @@
 ;; limitations under the License.
 (ns ai.miniforge.workflow.runner
   "Compose workflow setup, bounded execution, lifecycle publication, and cleanup."
-  (:require [ai.miniforge.workflow.boundary.runner-lifetime :as lifetime]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.workflow.boundary.runner-lifetime :as lifetime]
             [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
             [ai.miniforge.workflow.run-owner-lock :as owner]
             [ai.miniforge.workflow.runner-callbacks :as callbacks]
@@ -26,7 +27,8 @@
             [ai.miniforge.workflow.runner-iteration :as iteration]
             [ai.miniforge.workflow.runner-outcome :as outcome]
             [ai.miniforge.workflow.runner-preparation :as preparation]
-            [ai.miniforge.workflow.runner-session :as session]))
+            [ai.miniforge.workflow.runner-session :as session]
+            [slingshot.slingshot :refer [throw+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -93,11 +95,19 @@
    ;; anomaly is thrown) before anything is acquired. The root is the one
    ;; the run checkpoints under: the snapshot's when the context is
    ;; restored (snapshot and phase results both given), else the options'.
+   ;; Its physical path is pinned here for the lock, the context and a
+   ;; restored snapshot alike: an alias of the root retargeted mid-run
+   ;; cannot move the checkpoints away from the lock.
    (let [run-id (effective-run-id opts)
-         restored? (and (:resume-machine-snapshot opts) (:resume-phase-results opts))]
+         restored? (and (:resume-machine-snapshot opts) (:resume-phase-results opts))
+         root (owner/physical-root run-id (checkpoint-paths/resolve-checkpoint-root
+                                           (cond-> opts
+                                             restored? (merge (:resume-machine-snapshot opts)))))
+         _ (when (anomaly/anomaly? root) (throw+ root))
+         opts (cond-> (assoc opts :checkpoint/root root)
+                restored? (assoc-in [:resume-machine-snapshot :execution/checkpoint-root] root))]
      (owner/with-run-owner
-      (checkpoint-paths/resolve-checkpoint-root (cond-> opts
-                                                  restored? (merge (:resume-machine-snapshot opts))))
+      root
       run-id
       (fn []
         (let [[acquired-env opts] (acquire-environment workflow input (assoc opts :workflow-id run-id))
