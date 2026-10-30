@@ -26,12 +26,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} CheckpointWritten
-  [:and Phase [:map [:checkpoint/path :string] [:checkpoint/size-bytes Size]
-               [:checkpoint/root :string]]])
+  [:and Phase [:map [:checkpoint/path :string] [:checkpoint/size-bytes Size]]])
 
 (def ^{:stratum 1} SnapshotWritten
-  [:and Machine [:map [:snapshot/path :string] [:snapshot/size-bytes Size]
-                 [:checkpoint/root :string]]])
+  [:and Machine [:map [:snapshot/path :string] [:snapshot/size-bytes Size]]])
 
 (def ^{:stratum 1} CheckpointFailed [:and Phase Failure])
 

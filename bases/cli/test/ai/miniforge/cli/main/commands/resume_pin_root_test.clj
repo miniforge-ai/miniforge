@@ -27,7 +27,7 @@
    for a checkpoint under `root`."
   [events-dir root id]
   (let [event (es/checkpoint-written (es/create-event-stream {:sinks []}) id :plan
-                                     (str (fs/path root (str id) "phases" "plan.edn")) 1 (str root))
+                                     (str (fs/path root (str id) "phases" "plan.edn")) 1)
         file (io/file (str events-dir) "archived" (str id) "0000000000000001__000000000000.transit.json")]
     (io/make-parents file)
     (spit file (es/serialize-event event))))

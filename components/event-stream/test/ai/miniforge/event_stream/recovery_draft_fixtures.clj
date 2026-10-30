@@ -10,10 +10,8 @@
   (let [phase {:phase/name :plan}
         machine {:machine/state :phase-0-plan}
         failure {:error/message "Disk full" :failure/class :failure.class/resource}
-        checkpoint (assoc phase :checkpoint/path "plan.edn" :checkpoint/size-bytes 128
-                          :checkpoint/root "checkpoints")
-        snapshot (assoc machine :snapshot/path "machine.edn" :snapshot/size-bytes 256
-                        :checkpoint/root "checkpoints")
+        checkpoint (assoc phase :checkpoint/path "plan.edn" :checkpoint/size-bytes 128)
+        snapshot (assoc machine :snapshot/path "machine.edn" :snapshot/size-bytes 256)
         checkpoint-failure (merge phase failure)
         snapshot-failure (merge machine failure)]
     {:workflow/checkpoint-written checkpoint

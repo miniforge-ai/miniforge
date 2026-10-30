@@ -68,7 +68,7 @@
       (let [id (snapshot-only-run! (str alternate))
             path (str (fs/path alternate (str id) "machine-snapshot.edn"))]
         (archive-event! (fs/file events-dir) id 1
-                        (es/machine-snapshot-written (legacy-stream) id :running path 1 (str alternate)))
+                        (es/machine-snapshot-written (legacy-stream) id :running path 1))
         (is (true? (es/retention-hold ::gc/checkpoint (str id) (fs/file events-dir))))))))
 
 (deftest ^{:stratum 1} the-scan-stops-at-the-newest-announced-write
@@ -84,7 +84,7 @@
           (archive-event! (fs/file events-dir) id n (es/workflow-resumed (legacy-stream) id :x :plan [])))
         ;; Newest: the write, under a root whose checkpoint is already gone.
         (archive-event! (fs/file events-dir) id 40
-                        (es/checkpoint-written (legacy-stream) id :plan gone 1 (str alternate)))
+                        (es/checkpoint-written (legacy-stream) id :plan gone 1))
         (with-redefs [es/read-event-file (fn [f] (swap! reads inc) (read-event-file f))]
           (testing "the newest write answers: its checkpoint is gone, so nothing holds"
             (is (false? (es/retention-hold ::gc/checkpoint (str id) (fs/file events-dir)))))

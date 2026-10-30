@@ -51,11 +51,9 @@
 (defn- ^{:stratum 0} announced-run-dir
   "The checkpoint run directory a run's own events last announced writing
    to, scanning its event files newest first and stopping at the first
-   announcement: the run's directory under the `:checkpoint/root` it
-   names. An announcement written before events carried the root names
-   only a file; the run directory is then the one above that phase file
-   or snapshot. `:unknown` when a file that does not read comes first (it
-   may be the announcement); nil when no event announces a write."
+   announcement: the run directory above the phase file or snapshot it
+   names. `:unknown` when a file that does not read comes first (it may
+   be the announcement); nil when no event announces a write."
   [events-dir workflow-id]
   (let [dir (es/workflow-events-dir events-dir workflow-id)
         files (when dir
@@ -67,10 +65,6 @@
               (let [event (es/read-event-file (fs/file file))]
                 (cond
                   (nil? event) (reduced :unknown)
-                  (and (#{:workflow/checkpoint-written :workflow/machine-snapshot-written}
-                        (:event/type event))
-                       (string? (:checkpoint/root event)))
-                  (reduced (fs/path (:checkpoint/root event) (str workflow-id)))
                   (= :workflow/checkpoint-written (:event/type event))
                   (reduced (some-> (:checkpoint/path event) fs/parent fs/parent))
                   (= :workflow/machine-snapshot-written (:event/type event))

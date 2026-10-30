@@ -44,7 +44,6 @@
            [:workflow/machine-snapshot-write-failed :machine/state "failed"]
            [:workflow/resumed :skipping [:plan "implement"]]
            [:workflow/checkpoint-written :checkpoint/path "AKIAIOSFODNN7EXAMPLE"]
-           [:workflow/checkpoint-written :checkpoint/root "AKIAIOSFODNN7EXAMPLE"]
            [:workflow/machine-snapshot-written :snapshot/path "AKIAIOSFODNN7EXAMPLE"]
            [:workflow/spec-hash-mismatch :expected-hash "AKIAIOSFODNN7EXAMPLE"]]]
       (let [draft (fixture/draft workflow-id event-type)]

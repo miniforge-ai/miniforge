@@ -2370,7 +2370,6 @@ originating `control-action/requested` (§3.15).
  :phase/name keyword
  :checkpoint/path string
  :checkpoint/size-bytes long
- :checkpoint/root string   ; root the run checkpoints under; the path need not sit below it
 
  :message "Checkpoint written for phase {phase/name}"}
 ```
@@ -2395,7 +2394,6 @@ originating `control-action/requested` (§3.15).
  :machine/state keyword
  :snapshot/path string
  :snapshot/size-bytes long
- :checkpoint/root string   ; root the run checkpoints under; the path need not sit below it
 
  :message "Machine snapshot written at state {machine/state}"}
 ```

@@ -38,21 +38,18 @@
 
 (defn- ^{:stratum 0} write-event
   "The event announcing what `written` (the store's result) wrote, with
-   its absolute path and the checkpoint root it wrote under:
-   `:workflow/checkpoint-written` for a phase checkpoint, else
-   `:workflow/machine-snapshot-written` for the snapshot (a checkpoint
-   taken before any phase result has only that). The root travels on its
-   own: a published path need not sit under it (a symlinked directory)."
-  [stream context {:checkpoint/keys [root phase phase-path machine-snapshot-path]}]
-  (let [root (str (fs/absolutize root))]
-    (if phase-path
-      (let [path (str (fs/absolutize phase-path))]
-        (es/checkpoint-written stream (:execution/id context) phase path (fs/size path) root))
-      (let [path (str (fs/absolutize machine-snapshot-path))
-            state (workflow-fsm/current-state (:execution/fsm-state context))]
-        (es/machine-snapshot-written stream (:execution/id context)
-                                     (if (keyword? state) state (:execution/status context))
-                                     path (fs/size path) root)))))
+   its absolute path: `:workflow/checkpoint-written` for a phase
+   checkpoint, else `:workflow/machine-snapshot-written` for the snapshot
+   (a checkpoint taken before any phase result has only that)."
+  [stream context {:checkpoint/keys [phase phase-path machine-snapshot-path]}]
+  (if phase-path
+    (let [path (str (fs/absolutize phase-path))]
+      (es/checkpoint-written stream (:execution/id context) phase path (fs/size path)))
+    (let [path (str (fs/absolutize machine-snapshot-path))
+          state (workflow-fsm/current-state (:execution/fsm-state context))]
+      (es/machine-snapshot-written stream (:execution/id context)
+                                   (if (keyword? state) state (:execution/status context))
+                                   path (fs/size path)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
