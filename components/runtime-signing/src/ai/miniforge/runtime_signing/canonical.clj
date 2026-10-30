@@ -54,22 +54,26 @@
 
 (defn ^{:stratum 2} encode
   "The encoding of `x`. Throws IllegalArgumentException for a value it
-   cannot encode losslessly."
+   cannot encode losslessly, or one nested deeper than 64 levels: untrusted
+   input must not overflow the stack of a verifier."
   [x]
   (binding [*print-length* nil *print-level* nil *print-meta* false
             *print-namespace-maps* false *print-dup* false *print-readably* true]
-    (letfn [(enc [v]
-              (cond
-                (map? v)
-                (let [entries (mapv (fn [[k item]] [(enc k) item]) v)
-                      by-key (into {} entries)
-                      ks (distinct-sorted v (map first entries) (count v))]
-                  (str "{" (str/join ", " (map #(str % " " (enc (by-key %))) ks)) "}"))
+    (letfn [(enc [v depth]
+              (let [child #(enc % (inc depth))]
+                (cond
+                  (< 64 depth) (refuse! v)
 
-                (set? v) (str "#{" (str/join " " (distinct-sorted v (map enc v) (count v))) "}")
-                (sequential? v) (str "[" (str/join " " (map enc v)) "]")
-                :else (scalar v)))]
-      (enc x))))
+                  (map? v)
+                  (let [entries (mapv (fn [[k item]] [(child k) item]) v)
+                        by-key (into {} entries)
+                        ks (distinct-sorted v (map first entries) (count v))]
+                    (str "{" (str/join ", " (map #(str % " " (child (by-key %))) ks)) "}"))
+
+                  (set? v) (str "#{" (str/join " " (distinct-sorted v (map child v) (count v))) "}")
+                  (sequential? v) (str "[" (str/join " " (map child v)) "]")
+                  :else (scalar v))))]
+      (enc x 0))))
 
 (comment
   (encode {:b #{1 1.0} :a "x"}))
