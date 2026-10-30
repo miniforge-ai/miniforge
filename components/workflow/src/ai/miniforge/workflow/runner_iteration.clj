@@ -11,7 +11,8 @@
             [ai.miniforge.workflow.runner-checkpoint :as runner-checkpoint]
             [ai.miniforge.workflow.runner-defaults :as defaults]
             [ai.miniforge.workflow.runner-outcome :as outcome]
-            [ai.miniforge.workflow.runner-phase-step :as phase-step]))
+            [ai.miniforge.workflow.runner-phase-step :as phase-step]
+            [ai.miniforge.workflow.stop-signal :as stop-signal]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -72,7 +73,12 @@
   (await-resume! control-state)
   (let [result (if-let [stop-anomaly (check-stopped control-state)]
                  (apply-dashboard-stop context stop-anomaly)
-                 (execute-supervised pipeline context callbacks iteration))]
+                 ;; A cancel during the phase interrupts it (and the agent
+                 ;; CLI it waits on); the stop is acted on at the next
+                 ;; boundary.
+                 (stop-signal/interrupting-on-stop
+                  control-state
+                  #(execute-supervised pipeline context callbacks iteration)))]
     ;; A failed write is warned about and published, never thrown, so
     ;; the run goes on without that checkpoint.
     (runner-checkpoint/checkpoint! result)
