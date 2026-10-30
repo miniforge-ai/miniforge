@@ -102,7 +102,8 @@
                                "keyword tool name"        (assoc-in shipped [:roles :implementer] #{:Bash})
                                "missing length limit"     (dissoc shipped :bash/max-command-length)
                                "zero length limit"        (assoc shipped :bash/max-command-length 0)
-                               "path keys not keywords"   (assoc-in shipped [:tool/path-keys "Read"] ["file_path"])}]
+                               "path keys not keywords"   (assoc-in shipped [:tool/path-keys "Read"] ["file_path"])
+                               "missing managed paths"    (dissoc shipped :tool/managed-config-paths)}]
         (is (thrown? clojure.lang.ExceptionInfo (policy/read-tool-policy (pr-str broken))) defect)))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -133,6 +134,28 @@
                                                         "Write" {:file_path (str dir "/.claude/settings.local.json")}))))
         (finally
           (run! #(java.nio.file.Files/deleteIfExists (.toPath ^java.io.File %)) (reverse (file-seq dir))))))))
+
+(deftest ^{:stratum 1} linked-config-target-stays-protected-test
+  (let [root (java.nio.file.Files/createTempDirectory "linked-target" (make-array java.nio.file.attribute.FileAttribute 0))
+        dir  (.toFile root)
+        link (fn [from to] (java.nio.file.Files/createSymbolicLink (.resolve root ^String from) (.resolve root ^String to)
+                                                                   (make-array java.nio.file.attribute.FileAttribute 0)))
+        write-decision (fn [rel] (:decision (sut/evaluate-tool-use {:role :implementer :root (str dir) :path-ok? stub-path-ok?}
+                                                                   "Write" {:file_path (str dir "/" rel)})))]
+    (try
+      (.mkdirs (io/file dir "shared-config"))
+      (.mkdirs (io/file dir "cfg"))
+      (spit (io/file dir "cfg" "mcp.json") "{}")
+      (link ".claude" "shared-config")
+      (link ".mcp.json" "cfg/mcp.json")
+      (testing "a write to the target of a linked config directory or file is refused"
+        (is (= "deny" (write-decision "shared-config/settings.local.json")))
+        (is (= "deny" (write-decision "cfg/mcp.json"))))
+      (testing "other files in the linked directory stay writable"
+        (is (= "allow" (write-decision "shared-config/skills/x/SKILL.md")))
+        (is (= "allow" (write-decision "cfg/other.json"))))
+      (finally
+        (run! #(java.nio.file.Files/deleteIfExists (.toPath ^java.io.File %)) (reverse (file-seq dir)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
