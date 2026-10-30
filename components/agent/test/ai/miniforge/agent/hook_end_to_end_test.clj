@@ -33,6 +33,24 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} ^:private env-override?
+  "MINIFORGE_CMD makes the session's hook run an installed miniforge rather
+   than this checkout's, so the test skips when it is set."
+  (some? (System/getenv "MINIFORGE_CMD")))
+
+(defn- ^{:stratum 0} matches-tool?
+  "True when a PreToolUse matcher group's `matcher` selects `tool`, as
+   Claude reads it: blank or \"*\" selects every tool, anything else is a
+   pattern over the tool name."
+  [matcher tool]
+  (or (contains? #{nil "" "*"} matcher)
+      (boolean (re-matches (re-pattern matcher) tool))))
+
+(defn- ^{:stratum 0} decision-of
+  "The permissionDecision a hook run printed, or nil."
+  [{:keys [out]}]
+  (get-in (json/parse-string out) ["hookSpecificOutput" "permissionDecision"]))
+
 (defn- ^{:stratum 0} flag-value
   "The argument after `flag` in `cmd`, or nil."
   [cmd flag]
@@ -55,8 +73,10 @@
   "A fresh git repository to act as the session's worktree."
   []
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory
-                      "hook-e2e" (make-array java.nio.file.attribute.FileAttribute 0)))]
-    (shell/sh "git" "init" "-q" (str dir))
+                      "hook-e2e" (make-array java.nio.file.attribute.FileAttribute 0)))
+        init (shell/sh "git" "init" "-q" (str dir))]
+    (when-not (zero? (:exit init))
+      (throw (ex-info "git init failed for the test worktree" init)))
     dir))
 
 (defn- ^{:stratum 0} write-through-session!
@@ -73,13 +93,16 @@
 
 (defn- ^{:stratum 1} stub-claude
   "An exec-fn standing in for the Claude CLI. For one Write of `target`
-   it runs every PreToolUse hook in the --settings file and writes the
-   file only when all of them allow it. Each call is recorded in `calls`."
+   it runs every command hook whose matcher selects Write in the
+   --settings file and writes the file only when all of them allow it.
+   Each call is recorded in `calls`."
   [target calls]
   (fn [cmd & _]
     (let [settings (json/parse-string (slurp (flag-value cmd "--settings")))
           hooks    (for [group (get-in settings ["hooks" "PreToolUse"])
-                         hook  (get group "hooks")]
+                         :when (matches-tool? (get group "matcher") "Write")
+                         hook  (get group "hooks")
+                         :when (= "command" (get hook "type"))]
                      (get hook "command"))
           request  (json/generate-string {"hook_event_name" "PreToolUse"
                                           "tool_name" "Write"
@@ -96,24 +119,29 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} denied-tool-is-blocked-end-to-end-test
-  (testing "the reviewer's hook refuses Write, so the stub CLI writes nothing"
-    (let [dir (temp-repo!)]
-      (try
-        (let [calls (atom [])]
-          (write-through-session! :reviewer dir (stub-claude (io/file dir "x.txt") calls))
-          (is (= 1 (count @calls)))
-          (is (seq (:runs (first @calls))) "the session's settings carry a PreToolUse hook")
-          (is (not (.exists (io/file dir "x.txt")))))
-        (finally (delete-tree! dir)))))
+  (if env-override?
+    (println "skipping denied-tool-is-blocked-end-to-end-test: MINIFORGE_CMD is set")
+    (do
+      (testing "the reviewer's hook answers Write with a deny, so the stub CLI writes nothing"
+        (let [dir (temp-repo!)]
+          (try
+            (let [calls (atom [])]
+              (write-through-session! :reviewer dir (stub-claude (io/file dir "x.txt") calls))
+              (let [runs (:runs (first @calls))]
+                (is (= 1 (count @calls)))
+                (is (seq runs) "the session's settings carry a PreToolUse hook that selects Write")
+                (is (every? #(and (zero? (:exit %)) (= "deny" (decision-of %))) runs) (pr-str runs))
+                (is (not (.exists (io/file dir "x.txt"))))))
+            (finally (delete-tree! dir)))))
 
-  (testing "the implementer's hook allows the same Write"
-    (let [dir (temp-repo!)]
-      (try
-        (let [calls (atom [])]
-          (write-through-session! :implementer dir (stub-claude (io/file dir "x.txt") calls))
-          (is (= 1 (count @calls)))
-          (is (.exists (io/file dir "x.txt"))))
-        (finally (delete-tree! dir))))))
+      (testing "the implementer's hook allows the same Write"
+        (let [dir (temp-repo!)]
+          (try
+            (let [calls (atom [])]
+              (write-through-session! :implementer dir (stub-claude (io/file dir "x.txt") calls))
+              (is (= 1 (count @calls)))
+              (is (.exists (io/file dir "x.txt")) (pr-str (:runs (first @calls)))))
+            (finally (delete-tree! dir))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

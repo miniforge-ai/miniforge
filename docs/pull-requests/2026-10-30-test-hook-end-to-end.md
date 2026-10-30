@@ -31,6 +31,12 @@ dropped from the arguments would each pass every unit test and leave tools unche
 ## Testing Plan
 
 1. The test passes; it runs `bb ... miniforge hook-eval` twice (about 2.5 s each).
+2. The deny case requires the hook to exit 0 with `permissionDecision: deny`, so a
+   crash cannot pass as a refusal. The stub runs only command hooks whose matcher
+   selects Write, as Claude does.
+3. It skips when `MINIFORGE_CMD` is set (the hook would run an installed miniforge).
+4. PR CI runs it when the agent brick changes; a change only to the CLI's hook-eval or
+   pr-lifecycle's guard reaches it on the main build.
 
 ## Deployment Plan
 
