@@ -69,9 +69,17 @@
       (refused :merge-commit-refused :merge/commit-refused
                {:commit/result committed} (revoke! context prepared now))
 
+      ;; Refused at the commit-time recheck: no gh command ran.
+      (and (= :failed (:effect/state committed))
+           (not= :granted (:effect/authority committed)))
+      (refused :merge-commit-refused :merge/commit-refused
+               {:commit/result committed} (revoke! context prepared now))
+
       (= :failed (:effect/state committed))
-      (do (revoke! context prepared now)
-          (dag/ok committed))
+      (let [revoked (revoke! context prepared now)]
+        (dag/ok (cond-> committed
+                  (anomaly/anomaly? revoked)
+                  (assoc :grant/revocation-failure revoked))))
 
       :else (dag/ok committed))))
 

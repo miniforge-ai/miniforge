@@ -59,8 +59,8 @@
            :context context}))))))
 
 (defn- ^{:stratum 0} merge-ready!
-  "Merge the head read before readiness ran. A push after that read moves
-   the head, and GitHub then refuses the merge's `--match-head-commit`."
+  "Merge the head read before readiness ran. `--match-head-commit` makes
+   GitHub refuse the merge request if the head moved after that read."
   [operations worktree-path pr-number policy context readiness head-result]
   (dag/when-let-ok
    [head head-result

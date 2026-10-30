@@ -206,7 +206,9 @@
    - worktree-path: Path to git worktree
    - pr-number: PR number
    - policy: Merge policy (or use defaults)
-   - head-sha: when given, GitHub refuses unless the PR head is this commit
+   - head-sha: when given, merge now and only if the PR head is this
+     commit. Without it the merge is deferred with `--auto`, which
+     `--match-head-commit` would check only when auto-merge is enabled.
 
    Returns result with merge information."
   [worktree-path pr-number & {:keys [policy head-sha]
@@ -217,7 +219,8 @@
                       :merge "--merge")
         delete-flag (when (:delete-branch-after-merge? policy)
                       "--delete-branch")
-        args (cond-> ["gh" "pr" "merge" (str pr-number) method-flag "--auto"]
+        args (cond-> ["gh" "pr" "merge" (str pr-number) method-flag]
+               (nil? head-sha) (conj "--auto")
                delete-flag (conj delete-flag)
                head-sha (into ["--match-head-commit" head-sha]))
         result (run-gh-command args worktree-path)]

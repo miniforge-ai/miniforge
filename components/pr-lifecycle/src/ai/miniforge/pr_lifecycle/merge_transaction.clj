@@ -18,8 +18,10 @@
 (ns ai.miniforge.pr-lifecycle.merge-transaction
   "PR merge as a transacted effect (Ariadne step 2d, part 1).
 
-   What this fixes. `merge-pr!` appends `--auto` UNCONDITIONALLY, so a
-   zero exit means auto-merge was ENABLED, not that anything merged.
+   What this fixes. `merge-pr!` without a head commit appends `--auto`,
+   so a zero exit means auto-merge was ENABLED, not that anything merged.
+   The governed path binds the head commit and merges at once, but a
+   merge queue can still accept a request it merges later.
    The old path read that as `{:merged? true}` and published a merged
    event carrying a SHA from `git rev-parse HEAD` in the local worktree
    — the branch tip, not the squash commit on base. Two claims the code

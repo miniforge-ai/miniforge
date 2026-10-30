@@ -84,7 +84,8 @@
                (grant/revoke-stored! dir (:grant/id issued)
                                      :revocation/operator (Instant/now))
                registered)))]
-      (is (= :merge-failed (get-in result [:error :code])))
+      (is (= :merge-commit-refused (get-in result [:error :code]))
+          "a refused recheck is not reported as a failed gh command")
       (is (= [:failed] (mapv :effect/state records))
           "the refused commit is recorded, not silently dropped")
       (is (zero? merge-calls)))))

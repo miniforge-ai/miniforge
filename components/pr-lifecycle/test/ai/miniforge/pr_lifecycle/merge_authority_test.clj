@@ -18,6 +18,7 @@
 (ns ai.miniforge.pr-lifecycle.merge-authority-test
   "Provider-effect tests for granted and denied pull-request merges."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.execution-grant.interface :as grant]
@@ -210,7 +211,9 @@
                                       @calls))]
         (is (= ["--match-head-commit" head-sha] (take-last 2 merge-call))
             (str "gh pr merge must name the authorized head, saw: "
-                 (pr-str merge-call)))))))
+                 (pr-str merge-call)))
+        (is (not-any? #{"--auto"} merge-call)
+            "a deferred auto-merge would not stay bound to the head")))))
 
 (deftest ^{:stratum 2} denied-authority-never-invokes-merge-test
   (testing "an absent grant cannot be registered, so nothing fires"
@@ -226,6 +229,14 @@
                                        (.plusSeconds now 60)))
           {:keys [result merge-calls]} (attempt-with-issuer issuer)]
       (is (dag/err? result))
+      (is (= :merge-authority-denied (get-in result [:error :code])))
+      (is (zero? merge-calls))))
+  (testing "a grant bound to another head commit denies before the provider mutation"
+    (let [issuer (fn [_ request now]
+                   (issued-merge-grant request now
+                                       {:pr/head-sha (apply str (repeat 40 "f"))}
+                                       (.plusSeconds now 60)))
+          {:keys [result merge-calls]} (attempt-with-issuer issuer)]
       (is (= :merge-authority-denied (get-in result [:error :code])))
       (is (zero? merge-calls))))
   (testing "an expired grant denies before the provider mutation"
@@ -272,3 +283,16 @@
                                  (:grant/id @issued)))))
       (is (empty? (fx/list-records (:effect-store-dir context)))
           "a denied merge writes no proposal"))))
+
+(deftest ^{:stratum 2} a-failed-revocation-is-reported-test
+  (with-redefs [readiness/evaluate ready-result
+                merge/read-pr-head head-result
+                merge/read-repository repository-result
+                merge/merge-pr! (fn [& _] (dag/err :gh-command-failed "closed"))
+                grant/revoke-stored!
+                (fn [& _] (anomaly/anomaly :unavailable "registry unwritable" {}))]
+    (let [result (merge/attempt-merge "/tmp" 123 merge/default-merge-policy
+                                      (merge-context))]
+      (is (= :merge-failed (get-in result [:error :code])))
+      (is (anomaly/anomaly?
+           (get-in result [:error :data :grant/revocation-failure]))))))
