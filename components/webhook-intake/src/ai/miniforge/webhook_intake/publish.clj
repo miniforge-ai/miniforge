@@ -22,6 +22,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.webhook-intake.deliveries :as deliveries]
+   [ai.miniforge.webhook-intake.github :as github]
    [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -62,3 +63,23 @@
           (let [status (if (= :refused outcome) :failed :unknown)]
             (deliveries/record! seen id {:status status :published i})
             status))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} delivery-response
+  "[status body] for a verified, parsed `delivery` (see
+   github/delivery->events). A redelivery of a published delivery is 200;
+   one still being published, or whose publish threw (its event may
+   already have started a workflow), is 409; one after a refused publish
+   resumes from the first unpublished event."
+  [{:keys [stream seen]} {:keys [delivery-id] :as delivery}]
+  (let [{:keys [claimed? status published]} (deliveries/claim! seen delivery-id)
+        events (github/delivery->events delivery)]
+    (cond
+      (= :done status) [200 {:duplicate true}]
+      (= :unknown status) [409 {:error "publish-outcome-unknown"}]
+      (not claimed?) [409 {:error "delivery-in-progress"}]
+      :else (case (publish-delivery! stream seen delivery-id events published)
+              :done [202 {:events (mapv :event/type events)}]
+              :failed [500 {:error "publish-failed"}]
+              [500 {:error "publish-outcome-unknown"}]))))
