@@ -25,17 +25,12 @@
 (defn- ^{:stratum 0} deployment
   [state status stage data]
   (merge {:deploy/status status :deploy/stage stage
-          :deploy/rollback-info (or (:rollback-info state)
-                                    (get-in state [:transaction :effect/proposal :deploy/rollback-info]))
-          :deploy/rendered-yaml (or (:rendered-yaml state)
-                                    (get-in state [:transaction :effect/proposal :deploy/rendered-yaml]))
-          :deploy/effect-id (get-in state [:authority :effect/id]
-                                    (get-in state [:transaction :effect/id]))
-          :deploy/grant-id (or (get-in state [:authority :authority/grant :grant/id])
-                               (:grant/id state)
-                               (get-in state [:transaction :effect/grant-id]))
-          :deploy/envelope-id (or (get-in state [:authority :authority/envelope :envelope/id])
-                                  (get-in state [:transaction :effect/envelope-id]))}
+          :deploy/rollback-info (:rollback-info state)
+          :deploy/rendered-yaml (:rendered-yaml state)
+          :deploy/effect-id (get-in state [:authority :effect/id])
+          :deploy/grant-id (get-in state [:authority :authority/grant :grant/id]
+                                  (:grant/id state))
+          :deploy/envelope-id (get-in state [:authority :authority/envelope :envelope/id])}
          data))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -57,8 +52,7 @@
            (:effect/matched? effect))
       (deployment state :success :observe {:deploy/pod-state pod-state})
 
-      (or (= :reconciled (:effect/state effect))
-          (false? (:deployment/ready? observed)))
+      (= :reconciled (:effect/state effect))
       (deployment state :failed :observe
                   {:deploy/pod-state pod-state
                    :deploy/failure (:deployment/failure observed)})

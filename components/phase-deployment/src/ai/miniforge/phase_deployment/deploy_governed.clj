@@ -45,9 +45,8 @@
            (msg/t fallback-key))))
 
 (defn- ^{:stratum 0} advance
-  "Run `step` unless the flow failed or is answering for an earlier attempt."
   [state step]
-  (if (or (:flow/failure state) (:attempt/existing state)) state (step state)))
+  (if (:flow/failure state) state (step state)))
 
 (defn- ^{:stratum 0} effect-basis
   "What fixes this deploy's effect id: run, exact target, and the digest
@@ -79,21 +78,20 @@
       (assoc state :target (:target result)))))
 
 (defn- ^{:stratum 1} open-attempt
-  "Take this deploy's fixed effect id, or answer for the earlier attempt
-   at it: one still in flight is reconciled first. A context with no run
-   gets a fresh id; authority then refuses it."
+  "Take the next free attempt at this run, target and manifest digest as
+   the effect id. Ids repeat across processes, so two racing for one
+   attempt collide on its record. Re-applying the same manifests is
+   idempotent, so a retry applies again rather than replaying an earlier
+   record. A context with no run gets a fresh id; authority then refuses
+   it."
   [state]
-  (if-not (uuid? (get-in state [:context :execution/id]))
-    (assoc state :effect-id (random-uuid))
-    (let [context (:context state)
-          opened (fx/open-attempt (transaction/store-dir context) (effect-basis state))
-          t (:effect/existing opened)]
-      (cond
-        (anomaly/anomaly? opened) (fail state :proposal (:anomaly/message opened))
-        (nil? t) (assoc state :effect-id (:effect/id opened))
-        :else (let [r (transaction/reconcile! context t (:operations state)
-                                              (transaction/current-time context))]
-                (assoc state :attempt/existing (if (anomaly/anomaly? r) t r)))))))
+  (let [effect-id (if (uuid? (get-in state [:context :execution/id]))
+                    (fx/free-attempt-id (transaction/store-dir (:context state))
+                                        (effect-basis state))
+                    (random-uuid))]
+    (if (anomaly/anomaly? effect-id)
+      (fail state :proposal (:anomaly/message effect-id))
+      (assoc state :effect-id effect-id))))
 
 (defn- ^{:stratum 1} render-manifests
   [state]
@@ -190,16 +188,6 @@
       (fail state :observe (:anomaly/message reconciled))
       (assoc state :transaction reconciled))))
 
-(defn- ^{:stratum 1} settle-existing
-  "Report an earlier attempt instead of deploying again; refuse one
-   proposed but never committed."
-  [state]
-  (if-let [t (:attempt/existing state)]
-    (if (= :proposed (:effect/state t))
-      (fail state :proposal (msg/t :deploy/effect-unsettled))
-      (assoc state :transaction t))
-    state))
-
 (defn- ^{:stratum 1} revoke-abandoned
   "Revoke the grant of a deploy that ended before it could reach the
    cluster, so the grant cannot authorize a later attempt."
@@ -220,9 +208,8 @@
 
 (defn ^{:stratum 2} transact!
   "Resolve, render, check manifest policy, preflight, authorize, persist,
-   commit, and reconcile one deploy. The effect id is fixed per run and
-   target, so an earlier attempt that did not definitely fail is settled
-   rather than deployed again. A deploy that ends before it could reach
+   commit, and reconcile one deploy under the next free attempt id for its
+   run, target and manifests. A deploy that ends before it could reach
    the cluster revokes its grant."
   [context deploy-config operations ^Instant now]
   (-> {:context context
@@ -241,6 +228,5 @@
       (advance check-stop)
       (advance commit-effect)
       (advance reconcile-effect)
-      settle-existing
       revoke-abandoned
       outcome/from-state))

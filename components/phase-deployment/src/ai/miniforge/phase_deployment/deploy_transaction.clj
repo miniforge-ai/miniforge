@@ -111,30 +111,13 @@
                       #(apply-report operations (:effect/proposal %))))
 
 (defn ^{:stratum 2} reconcile!
-  "Observe the cluster and settle the record once the rollout is healthy.
-   An unhealthy observation (a slow rollout, a failed read) settles
-   nothing: the record stays reconcilable for a later attempt, and the
-   returned copy carries the observation for this attempt's outcome. The
-   provider call runs inside `fx/reconcile!`, so one that throws leaves
-   the record reconcilable and returns its anomaly.
-
-   Limit: a healthy rollout is taken as this proposal's. A process that
-   died after claiming the commit but before applying leaves the old,
-   healthy deployment in place, and reconciliation reads it as applied.
-   Telling them apart needs cluster evidence tied to the proposal."
   [context transaction operations now]
   (if-not (contains? fx/reconcilable-states (:effect/state transaction))
     transaction
     (let [dir (store-dir context)
-          durable (fx/read-record dir (:effect/id transaction))
-          seen (atom nil)
-          healthy-only (fn [t]
-                         (let [answer (probe-answer operations (:effect/proposal durable) t)]
-                           (reset! seen answer)
-                           (when (:effect/matched? answer) answer)))]
+          durable (fx/read-record dir (:effect/id transaction))]
       (if (anomaly/anomaly? durable)
         durable
-        (let [reconciled (fx/reconcile! dir transaction healthy-only now)]
-          (if (and (anomaly/anomaly? reconciled) @seen)
-            (assoc transaction :effect/observed (:effect/observed @seen))
-            reconciled))))))
+        (fx/reconcile! dir transaction
+                       (partial probe-answer operations (:effect/proposal durable))
+                       now)))))
