@@ -39,6 +39,7 @@
    [ai.miniforge.pr-lifecycle.classifier :as classifier]
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
+   [ai.miniforge.pr-lifecycle.fix-prompt :as fix-prompt]
    [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
    [ai.miniforge.pr-lifecycle.listener-registry :as listener-registry]
@@ -610,7 +611,7 @@
 
 (def ^{:stratum 0} build-fix-prompt
   "Build a prompt for the fix agent based on failure type."
-  fix/build-fix-prompt)
+  fix-prompt/build-fix-prompt)
 
 (def ^{:stratum 0} generate-fix
   "Generate a fix using the inner loop.

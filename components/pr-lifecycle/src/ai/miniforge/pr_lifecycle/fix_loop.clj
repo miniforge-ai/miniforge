@@ -23,14 +23,17 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.events :as events]
+   [ai.miniforge.pr-lifecycle.fix-prompt :as fix-prompt]
    [ai.miniforge.pr-lifecycle.fix-stage :as fix-stage]
    [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
+   [ai.miniforge.pr-lifecycle.messages :as messages]
    [ai.miniforge.pr-lifecycle.policy-eval.fs :as policy-fs]
    [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.release-executor.interface :as release]
+   [ai.miniforge.schema.interface :as schema]
    [clojure.java.io :as io]
    [clojure.string :as str]))
 
@@ -58,6 +61,7 @@
 
    ;; Failure details
    :fix/failure-summary (:summary failure-info)
+   :fix/ci-logs (:logs failure-info)
    :fix/failing-tests (:test-failures failure-info)
    :fix/lint-errors (:lint-errors failure-info)
    :fix/build-errors (:build-errors failure-info)
@@ -83,59 +87,21 @@
 
    :fix/created-at (java.util.Date.)})
 
-(defn ^{:stratum 0} build-fix-prompt
-  "Build a prompt for the fix agent based on failure type.
-
-   Arguments:
-   - fix-context: Context from create-fix-context
-
-   Returns string prompt for the agent."
-  [fix-context]
-  (let [fix-type (:fix/type fix-context)
-        task-id (:fix/task-id fix-context)
-        summary (:fix/failure-summary fix-context)
-        affected-files (str/join ", " (:fix/affected-files fix-context))]
-    (case fix-type
-      :ci-failure
-      (str "Fix CI failures for task " task-id ".\n\n"
-           "Summary: " summary "\n\n"
-           "Affected files: " affected-files "\n\n"
-           (when-let [tests (:fix/failing-tests fix-context)]
-             (str "Failing tests:\n" (str/join "\n" (take 10 tests)) "\n\n"))
-           (when-let [lint (:fix/lint-errors fix-context)]
-             (str "Lint errors:\n" (str/join "\n" (take 10 lint)) "\n\n"))
-           (when-let [build (:fix/build-errors fix-context)]
-             (str "Build errors:\n" (str/join "\n" (take 5 build)) "\n\n"))
-           "Generate fixes to resolve these issues while maintaining the original intent.")
-
-      :review-changes
-      (str "Address review feedback for task " task-id ".\n\n"
-           "Requested changes:\n"
-           (str/join "\n\n"
-                     (->> (:fix/review-comments fix-context)
-                          (map (fn [c]
-                                 (str "- " (:file c) (when (:line c) (str ":" (:line c)))
-                                      "\n  " (:change c))))
-                          (take 10)))
-           "\n\nGenerate fixes that address these specific concerns.")
-
-      :conflict
-      (str "Resolve merge conflicts for task " task-id ".\n\n"
-           "Conflicting files: " affected-files "\n\n"
-           "Resolve the conflicts while preserving the intent of both changes.")
-
-      ;; Default
-      (str "Fix issues for task " task-id ".\n\n"
-           "Summary: " summary "\n\n"
-           "Affected files: " affected-files))))
-
 ;; Fix generation
+(defn ^{:stratum 0} blank-logs?
+  "True when CI logs (a string or a seq of lines) carry no text."
+  [logs]
+  (if (string? logs)
+    (str/blank? logs)
+    (every? str/blank? logs)))
+
 (defn ^{:stratum 0} generate-fix
   "Generate a fix using the inner loop.
 
    Arguments:
    - fix-context: Context from create-fix-context
-   - generate-fn: Generation function for the agent
+   - generate-fn: Generation function for the agent; receives a fix task
+     whose :description is fix-prompt/build-fix-prompt of the fix context
    - context: Execution context with :logger etc.
 
    Options:
@@ -147,7 +113,8 @@
                                        :or {max-iterations 3}}]
   (let [logger (:logger context)
         task {:task/id (:fix/task-id fix-context)
-              :task/type :fix}
+              :task/type :fix
+              :description (fix-prompt/build-fix-prompt fix-context)}
         loop-context (merge context
                             {:max-iterations max-iterations
                              :fix-context fix-context})]
@@ -478,18 +445,25 @@
    Arguments:
    - task: Task definition
    - pr-info: PR information
-   - ci-logs: CI failure logs
+   - ci-logs: CI failure logs (string or seq of lines)
    - generate-fn: Agent generation function
    - context: Execution context with :worktree-path
 
+   Without log text there is nothing to fix from, so generate-fn is not
+   called and the result is a failure with :reason :ci-logs-unavailable.
+
    Returns fix result."
   [task pr-info ci-logs generate-fn context]
-  (let [parsed-failure (triage/parse-ci-failure ci-logs)
-        failure-info (assoc parsed-failure
-                            :type :ci-failure
-                            :summary (:actionable-summary parsed-failure))]
-    (run-fix-loop task pr-info failure-info generate-fn context
-                  :worktree-path (:worktree-path context))))
+  (if (blank-logs? ci-logs)
+    (schema/failure :commit-sha (messages/system-t :fix/ci-logs-missing)
+                    {:reason :ci-logs-unavailable :attempts 0})
+    (let [parsed-failure (triage/parse-ci-failure ci-logs)
+          failure-info (assoc parsed-failure
+                              :type :ci-failure
+                              :summary (:actionable-summary parsed-failure)
+                              :logs (if (string? ci-logs) ci-logs (str/join "\n" ci-logs)))]
+      (run-fix-loop task pr-info failure-info generate-fn context
+                    :worktree-path (:worktree-path context)))))
 
 (defn ^{:stratum 2} fix-review-feedback
   "Convenience function for fixing review feedback.
@@ -555,7 +529,7 @@
   (:fix/type fix-ctx)  ; => :ci-failure
 
   ;; Build prompt
-  (build-fix-prompt fix-ctx)
+  (fix-prompt/build-fix-prompt fix-ctx)
 
   ;; Parse CI failure
   (triage/parse-ci-failure
