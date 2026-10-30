@@ -244,8 +244,9 @@
        (invalid :grant/input-invalid schema/IssueArguments arguments)))))
 
 (defn ^{:stratum 1} delegate
-  "Cut an attenuated child grant from a parent, or refuse with a
-   `:unauthorized` anomaly naming the widened axis."
+  "Cut an attenuated child grant from a runtime-signed parent, or refuse
+   with a `:unauthorized` anomaly naming the widened axis. A parent the
+   runtime did not sign is refused: signing its child would launder it."
   ([parent opts] (delegate parent opts (Instant/now)))
   ([parent opts now]
    (let [arguments [opts now]]
@@ -255,6 +256,10 @@
 
        (not (valid-input? schema/DelegationArguments arguments))
        (invalid :grant/delegated-invalid schema/DelegationArguments arguments)
+
+       (not (signature/signed? parent))
+       (anomaly/anomaly :unauthorized (msg/t :grant/parent-unsigned)
+                        {:grant/id (:grant/id parent)})
 
        :else (let [child (core/delegate parent opts now)]
                (if (anomaly/anomaly? child) child (signature/sign child)))))))

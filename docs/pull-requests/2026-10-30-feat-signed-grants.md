@@ -25,9 +25,10 @@ ceilings were edited after issue, authorized an effect exactly like one the runt
   fields are outside the signature because the store records revocation as a separate marker after issue; a revoked
   grant still verifies as the grant the runtime issued. A runtime key that cannot load fails issuance with its anomaly.
 3. `grant/signed?` verifies a grant against the runtime key; false when the key cannot load.
-4. `effect-transaction` authorization checks the signature before scope and ceilings, on both commit paths. An unsigned
+4. `grant/delegate` refuses a parent the runtime did not sign, so a forged parent cannot get a signed child.
+5. `effect-transaction` authorization checks the signature before scope and ceilings, on both commit paths. An unsigned
   or altered grant is denied with outcome `:unsigned`, and the record goes to `:failed` without running the effect.
-5. runtime-signing joins the projects that include execution-grant (miniforge, miniforge-core, miniforge-tui,
+6. runtime-signing joins the projects that include execution-grant (miniforge, miniforge-core, miniforge-tui,
   data-foundry), the `bb miniforge` task classpath, and the conformance alias.
 
 Known limit: deleting a grant's revocation marker file is not detected by the signature; the grant reads as live again.
@@ -39,7 +40,8 @@ Detecting that needs an append-only or signed revocation record.
   with a foreign signature never runs the effect and records `:failed`; a runtime-signed grant commits. Fails on main (5
   failures): the effect runs.
 2. `execution-grant/signature_test`: issued grants are signed; a changed scope or a removed signature does not verify;
-  revocation keeps the signature valid; a delegated child gets its own signature.
+  revocation keeps the signature valid; a delegated child gets its own signature; an unsigned parent is not delegated
+  from.
 3. Ran locally: every test namespace in execution-grant, effect-transaction, opsv-actuation, phase-opsv,
   phase-deployment, and pr-lifecycle's merge tests, 413 tests, 0 failures, plus the two new namespaces. Pre-commit
   graalvm suite passes (execution-grant now loads runtime-signing under bb).
