@@ -80,6 +80,16 @@
 (defn- ^{:stratum 0} fallback-logger-must-not-be-built []
   (throw (ex-info "stderr fallback logger built although :logger was supplied" {})))
 
+(deftest ^{:stratum 0} probe-process-gets-the-agent-env-test
+  (testing "a backend CLI probe runs with the llm client's allowlisted environment, not the JVM's"
+    (with-redefs [llm/agent-env (constantly {"PATH" (System/getenv "PATH") "ANTHROPIC_API_KEY" "k"})]
+      (let [names (->> (:out (process/run-cli-command ["env"] 10000))
+                       str/split-lines
+                       (keep #(first (str/split % #"=" 2)))
+                       set)]
+        (is (contains? names "ANTHROPIC_API_KEY"))
+        (is (not (contains? names "HOME")) "the JVM's own environment is not passed")))))
+
 (deftest ^{:stratum 0} backend-preflight-attempts-clamps-to-at-least-one-test
   (testing "a zero or negative configured attempt count still means one probe"
     (doseq [configured [0 -2]]

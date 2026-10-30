@@ -22,14 +22,17 @@
    measured 10 real layers, max 3; each concern moves to its own
    layer-coherent file)."
   (:require
-   [ai.miniforge.cli.messages :as messages]))
+   [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.llm.interface :as llm]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} cli-process-env
+  "The environment a backend CLI probe gets: the allowlist the llm client
+   gives an agent CLI call (`llm/agent-env`), so a probe passes only where
+   the run will."
   []
-  (when (System/getenv "CLAUDECODE")
-    (into {} (remove (fn [[k _]] (= k "CLAUDECODE"))) (System/getenv))))
+  (llm/agent-env))
 
 (defn- ^{:stratum 0} stream-reader
   [stream]
@@ -73,11 +76,10 @@
 (defn- ^{:stratum 1} start-cli-process
   [cmd workdir]
   (let [builder (ProcessBuilder. ^java.util.List cmd)]
-    (when-let [process-env (cli-process-env)]
-      (let [env (.environment builder)]
-        (.clear env)
-        (doseq [[k v] process-env]
-          (.put env k v))))
+    (let [env (.environment builder)]
+      (.clear env)
+      (doseq [[k v] (cli-process-env)]
+        (.put env k v)))
     (when workdir
       (.directory builder (java.io.File. workdir)))
     (.start builder)))

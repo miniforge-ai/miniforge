@@ -50,15 +50,26 @@
 (defn ^{:stratum 0} allowed-env
   "The entries of `env` whose names `policy` (the :agent-env client
    default) allows: listed in :allow or starting with one of
-   :allow-prefixes, and starting with none of :deny-prefixes."
+   :allow-prefixes, and starting with none of :deny-prefixes. Names are
+   compared upper-cased, so Windows' `Path` matches PATH and a
+   lower-case `gh_token` still matches the GH_ deny prefix."
   [{:keys [allow allow-prefixes deny-prefixes]} env]
-  (let [listed?  (set allow)
-        prefixed? (fn [k prefixes] (some #(str/starts-with? k %) prefixes))]
+  (let [listed?   (set (map str/upper-case allow))
+        prefixed? (fn [k prefixes] (some #(str/starts-with? k (str/upper-case %)) prefixes))]
     (into {}
           (filter (fn [[k _]]
-                    (and (or (listed? k) (prefixed? k allow-prefixes))
-                         (not (prefixed? k deny-prefixes)))))
+                    (let [k (str/upper-case k)]
+                      (and (or (listed? k) (prefixed? k allow-prefixes))
+                           (not (prefixed? k deny-prefixes))))))
           env)))
+
+(defn ^{:stratum 0} operator-allowed-names
+  "Names the operator adds to the allowlist, comma-separated, in
+   MINIFORGE_AGENT_ENV_ALLOW of `env`."
+  [env]
+  (->> (str/split (str (get env "MINIFORGE_AGENT_ENV_ALLOW")) #",")
+       (map str/trim)
+       (remove str/blank?)))
 
 (defn- ^{:stratum 0} ->stdin-stream
   "Build the InputStream passed as the subprocess's stdin. A non-blank
@@ -108,11 +119,15 @@
 
 (defn ^{:stratum 1} agent-env
   "The environment an agent CLI process gets: `host-env` filtered by the
-   :agent-env client default. Credentials miniforge itself holds
-   (GH_TOKEN, AWS_*, SSH_AUTH_SOCK) stay out, and so does CLAUDECODE,
+   :agent-env client default plus the names in MINIFORGE_AGENT_ENV_ALLOW.
+   Credentials miniforge itself holds in its environment (GH_TOKEN,
+   AWS_*, SSH_AUTH_SOCK) are not passed, and neither is CLAUDECODE,
    which would make a nested Claude CLI refuse to start."
   []
-  (allowed-env (settings/client-default [:agent-env]) (host-env)))
+  (let [env (host-env)]
+    (allowed-env (update (settings/client-default [:agent-env]) :allow
+                         into (operator-allowed-names env))
+                 env)))
 
 (defn ^{:stratum 1} write-process-stdin!
   [^Process process stdin-str]

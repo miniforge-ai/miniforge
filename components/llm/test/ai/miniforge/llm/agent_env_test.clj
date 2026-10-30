@@ -61,12 +61,27 @@
                                     :deny-prefixes ["AWS_" "GH_"]}
                                    {"PATH" "/bin" "GH_TOKEN" "x" "AWS_REGION" "us-east-1"})))))
 
+(deftest ^{:stratum 0} names-match-without-case-test
+  (testing "Windows' Path is kept, and a lower-case name still meets the deny prefixes"
+    (is (= {"Path" "C:\\Windows"}
+           (subprocess/allowed-env {:allow ["PATH"] :allow-prefixes ["GH"] :deny-prefixes ["GH_"]}
+                                   {"Path" "C:\\Windows" "gh_token" "x"})))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} agent-env-keeps-only-allowed-names-test
   (testing "the shipped allowlist keeps the basics and provider keys and drops miniforge's credentials"
     (with-redefs [subprocess/host-env (constantly operator-env)]
       (is (= kept-names (set (keys (subprocess/agent-env))))))))
+
+(deftest ^{:stratum 1} operator-can-add-names-test
+  (testing "MINIFORGE_AGENT_ENV_ALLOW adds names, but cannot let a denied prefix through"
+    (with-redefs [subprocess/host-env (constantly (assoc operator-env
+                                                         "MINIFORGE_AGENT_ENV_ALLOW" " SOME_PROVIDER_KEY ,GH_TOKEN"
+                                                         "SOME_PROVIDER_KEY" "k"))]
+      (let [env (subprocess/agent-env)]
+        (is (= "k" (get env "SOME_PROVIDER_KEY")))
+        (is (not (contains? env "GH_TOKEN")))))))
 
 (deftest ^{:stratum 1} agent-cli-processes-see-only-allowed-env-test
   (with-redefs [subprocess/host-env (constantly operator-env)]
