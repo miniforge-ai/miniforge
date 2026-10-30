@@ -28,7 +28,9 @@
      with no :pr/id when it lists none
 
    A pull request from a fork is not mapped: its branch and code come from
-   outside the repository, and a trigger would run a workflow on them.
+   outside the repository, and a trigger would run a workflow on them. A
+   check suite with no head branch is not mapped either: GitHub reports
+   fork-associated suites that way.
    Every other delivery (ping included) maps to no events."
   (:require
    [clojure.string :as str]))
@@ -103,6 +105,7 @@
                 :ci/conclusion (:conclusion check_suite)}]
     (cond
       (nil? event-type) []
+      (str/blank? (:head_branch check_suite)) []
       (empty? (:pull_requests check_suite)) [(delivery-event event-type delivery fields)]
       :else (mapv #(delivery-event event-type delivery (assoc fields :pr/id (:number %)))
                   (:pull_requests check_suite)))))

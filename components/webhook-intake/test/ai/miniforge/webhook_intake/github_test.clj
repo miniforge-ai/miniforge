@@ -83,6 +83,12 @@
                                   #(assoc-in % [:check_suite :pull_requests]
                                              [{:number 2244} {:number 2251}]))))))))
 
+(deftest ^{:stratum 1} fork-check-suite-test
+  (testing "a suite with no head branch (how GitHub reports fork suites) maps to nothing"
+    (is (empty? (sut/delivery->events
+                 (delivery "check_suite" "check_suite.completed.failure"
+                           #(assoc-in % [:check_suite :head_branch] nil)))))))
+
 (deftest ^{:stratum 1} ignored-deliveries-test
   (testing "suites still running, neutral suites, and other events map to nothing"
     (is (empty? (sut/delivery->events
