@@ -306,6 +306,31 @@
       (is (= :release/not-prepared
              (get-in left [:phase :result :error :data :type]))))))
 
+(defn- ^{:stratum 0} enter-already-implemented
+  "Enter the release for an :already-implemented run over `worktree`, with
+   prepare stubbed. Returns {:skipped? bool :paths #{...}}, or the thrown
+   ex-data when enter fails."
+  [worktree]
+  (let [seen (atom nil)
+        ctx  {:execution/id #uuid "00000000-0000-0000-0000-00000000c2d4"
+              :execution/input {:description "Already done" :title "Noop"}
+              :execution/metrics {:tokens 0 :duration-ms 0}
+              :execution/phase-results {:implement {:result {:status :already-implemented}}}
+              :worktree-path worktree
+              :phase-config {:phase :release}}]
+    (try
+      (with-redefs [release-executor/prepare-release
+                    (fn [workflow-state _ _]
+                      (reset! seen workflow-state)
+                      {:success? true :artifacts [] :prepared {} :metrics {}})]
+        (let [result ((:enter (phase/get-phase-interceptor {:phase :release})) ctx)]
+          {:skipped? (true? (get-in result [:phase :result :output :skipped]))
+           :paths (->> (:workflow/artifacts @seen)
+                       (mapcat (comp :code/files :artifact/content))
+                       (map :path)
+                       set)}))
+      (catch clojure.lang.ExceptionInfo e (ex-data e)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} release-readiness-test
@@ -508,6 +533,42 @@
                       :phase-config {:phase :release}}
               result ((:enter (phase/get-phase-interceptor {:phase :release})) ctx)]
           (is (true? (get-in result [:phase :result :output :skipped]))))))))
+
+(deftest ^{:stratum 3} unpublished-work-is-never-skipped-test
+  (testing "the run's release branch is pushed but no PR opened: not done"
+    (with-test-worktree
+      (fn [worktree]
+        (publish-head! worktree)
+        (write-and-commit-mock-files! worktree)
+        (let [branch (release-executor/release-branch-name
+                      #uuid "00000000-0000-0000-0000-00000000c2d4" nil "Already done")]
+          (sh-must-succeed! worktree ["git" "push" "-q" "--no-verify" "origin" (str "HEAD:refs/heads/" branch)])
+          (sh-must-succeed! worktree ["git" "fetch" "-q" "origin"]))
+        (is (= {:skipped? false :paths #{"src/feature.clj" "test/feature_test.clj"}}
+               (enter-already-implemented worktree))))))
+  (testing "the work is on another remote, not on origin: not published"
+    (with-test-worktree
+      (fn [worktree]
+        (publish-head! worktree)
+        (write-and-commit-mock-files! worktree)
+        (sh-must-succeed! worktree ["git" "update-ref" "refs/remotes/upstream/main" "HEAD"])
+        (is (false? (:skipped? (enter-already-implemented worktree)))))))
+  (testing "an unpushed merge of work already on origin: its changes count"
+    (with-test-worktree
+      (fn [worktree]
+        (publish-head! worktree)
+        (sh-must-succeed! worktree ["git" "checkout" "-q" "-b" "side"])
+        (write-and-commit-mock-files! worktree)
+        (sh-must-succeed! worktree ["git" "push" "-q" "--no-verify" "origin" "side"])
+        (sh-must-succeed! worktree ["git" "checkout" "-q" "-"])
+        (sh-must-succeed! worktree ["git" "merge" "-q" "--no-ff" "--no-verify" "-m" "merge" "side"])
+        (sh-must-succeed! worktree ["git" "fetch" "-q" "origin"])
+        (is (false? (:skipped? (enter-already-implemented worktree)))))))
+  (testing "commits but no origin: whether they are published is unknown"
+    (with-test-worktree
+      (fn [worktree]
+        (write-and-commit-mock-files! worktree)
+        (is (= :release/git-status-failed (:type (enter-already-implemented worktree))))))))
 
 (deftest ^{:stratum 3} release-releases-unpushed-commits-test
   (testing "a clean worktree whose work sits in unpushed commits is released,
