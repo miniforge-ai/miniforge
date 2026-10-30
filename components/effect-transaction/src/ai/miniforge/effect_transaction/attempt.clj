@@ -49,24 +49,5 @@
           (nil? t) id
           :else (recur (inc n)))))))
 
-(defn ^{:stratum 1} open
-  "The first attempt at `basis` that may still run, read from `dir`:
-   `{:effect/id id}` for an attempt with no record, or
-   `{:effect/existing record}` for the first one whose record is in any
-   state but :failed. A :failed attempt definitely did not happen and is
-   skipped. Returns a storage anomaly, or :exhausted once
-   `max-attempts` attempts have all failed."
-  [dir basis]
-  (loop [n 0]
-    (if (= n max-attempts)
-      (anomaly/anomaly :exhausted (msg/t :attempt/exhausted) {:effect/basis basis})
-      (let [id (attempt-id basis n)
-            t (store/read-record dir id)]
-        (cond
-          (anomaly/anomaly? t) t
-          (nil? t) {:effect/id id}
-          (= :failed (:effect/state t)) (recur (inc n))
-          :else {:effect/existing t})))))
-
 (comment
   (attempt-id [:effect/merge (random-uuid)] 0))
