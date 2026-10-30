@@ -131,8 +131,14 @@ contract for anyone embedding the runtime:
   `:policy-verify` and `:policy-review` evaluate the shipped standards pack,
   and `:policy-pack` blocks.
 - `:checkpoint/root` is where checkpoints are written. The default is the
-  configured root under the user's home, which `MINIFORGE_HOME` does not move.
+  configured root, which defaults under `MINIFORGE_HOME` (otherwise `~/.miniforge`).
   Tests and embedders that must not touch it pass an explicit root.
+  On POSIX filesystems, new checkpoint directories are private (`0700`).
+  Existing directories retain their permissions, including read-only sharing.
+  Writes require trusted directory ownership and protection against entry replacement throughout the resolved ancestry.
+  Group/world-writable checkpoint directories are rejected; sticky ancestors such as `/tmp` remain supported.
+  New files are private (`0600`); replacements preserve existing POSIX permission bits.
+  A rejected checkpoint is reported through the runner's existing failure handling.
 
 Options copied onto the context are listed in
 `workflow.context/execution-passthrough-option-keys`. An option missing from

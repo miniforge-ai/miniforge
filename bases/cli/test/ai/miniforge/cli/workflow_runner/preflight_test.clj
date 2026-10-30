@@ -271,6 +271,16 @@
    :exit -1
    :timeout-ms stubbed-probe-timeout-ms})
 
+(deftest ^{:stratum 1} claude-preflight-runs-isolated-test
+  (testing "the claude health probe runs with no tools and none of the operator's setup"
+    (let [cmds (atom [])]
+      (with-redefs-fn {#'process/run-cli-command (fn [cmd _timeout-ms & _]
+                                                   (swap! cmds conj cmd)
+                                                   ok-claude-process-result)}
+        (fn [] (#'probe/run-claude-backend-preflight "/opt/homebrew/bin/claude" "/tmp/runtime-worktree")))
+      (is (= ["--tools" "" "--setting-sources" "" "--disable-slash-commands" "--strict-mcp-config"]
+             (->> (first @cmds) (drop-while #(not= "--tools" %)) (take 6)))))))
+
 (deftest ^{:stratum 1} run-backend-preflight-succeeds-first-time-without-retry-log-test
   (testing "a probe that succeeds on the first attempt runs once and logs no retry"
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})

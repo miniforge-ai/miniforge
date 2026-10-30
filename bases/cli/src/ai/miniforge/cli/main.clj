@@ -640,7 +640,8 @@
            :out       {:default "table"}
            :post      {:coerce :boolean}
            :pr-number {:coerce :long}}}
-   {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]}
+   {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]
+    :spec {:execution-mode {:coerce :keyword :alias :m}}}
    {:cmds ["pr" "merge"]   :fn pr-merge-cmd   :args->opts [:url]}
    {:cmds ["pr" "monitor"] :fn pr-monitor-cmd :restrict true
     :spec {:author        {:alias :a}

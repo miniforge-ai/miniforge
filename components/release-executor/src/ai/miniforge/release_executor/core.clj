@@ -452,13 +452,19 @@
           (fail state :metadata-generation-failed (msg/t :step/metadata-generation-failed)))))))
 
 (defn ^{:stratum 1} step-create-branch
-  "Create the release branch.  Dispatches git backend based on :host-mode?."
+  "Create the release branch.  Dispatches git backend based on :host-mode?.
+
+   With a run id in :provenance the branch is the run's fixed one
+   (metadata/release-branch-name), not the releaser's choice, so a retry
+   or resume reuses the branch and its PR."
   [state]
   (if (failed? state)
     state
     (let [{:keys [release-meta host-mode? worktree-path executor environment-id
-                  base-branch-override logger]} state
-          branch-name (:release/branch-name release-meta)
+                  base-branch-override logger provenance task-description]} state
+          branch-name (if-let [run-id (:workflow provenance)]
+                        (metadata/release-branch-name run-id (:task provenance) task-description)
+                        (:release/branch-name release-meta))
           result (if host-mode?
                    (git/create-branch! worktree-path branch-name)
                    (sandbox/create-branch! executor environment-id branch-name))]
@@ -481,7 +487,9 @@
             (log/warn logger :release-executor :base-branch-fetch-degraded
                       {:message (str "Could not fetch base branch " base-branch-override
                                      "; PR targets " detected " instead of stacking.")}))
-          (assoc state :branch (:branch result) :base-branch base))))))
+          (-> state
+              (assoc :branch (:branch result) :base-branch base)
+              (assoc-in [:release-meta :release/branch-name] (:branch result))))))))
 
 (defn ^{:stratum 1} step-stage-dirty-files
   "Stage all dirty files.  Dispatches git backend based on :host-mode?.
@@ -491,11 +499,17 @@
    commits-ahead-of-base (git rev-list --count --right-only
    origin/<base>...HEAD — the three-dot merge-base form) detects this
    carry-forward case and treats it as success — step-commit will skip
-   cleanly and step-push will ship the existing commits."
+   cleanly and step-push will ship the existing commits.
+
+   A run released before whose PR has since merged has nothing staged and
+   nothing ahead (the fetched base holds the release). When the run's
+   branch has a merged PR at HEAD, that is the same release, carried on as
+   above, not an empty one."
   [state]
   (if (failed? state)
     state
-    (let [{:keys [host-mode? worktree-path executor environment-id base-branch]} state
+    (let [{:keys [host-mode? worktree-path executor environment-id base-branch
+                  branch provenance create-pr?]} state
           stage-r (if host-mode?
                     (git/stage-files! worktree-path :all)
                     (sandbox/stage-files! executor environment-id :all))
@@ -504,7 +518,18 @@
                        (git/exec! worktree-path ["git" "diff" "--cached" "--name-only"])
                        (sandbox/exec! executor environment-id "git diff --cached --name-only")))
           staged-output (get staged-r :output "")
-          staged-count (count (remove str/blank? (str/split-lines staged-output)))]
+          staged-count (count (remove str/blank? (str/split-lines staged-output)))
+          ;; Only asked once nothing is staged or ahead: the run's branch
+          ;; and its PR, to recognize a release that has since merged.
+          merged (delay
+                   (when (and create-pr? (:workflow provenance))
+                     {:head  (if host-mode?
+                               (git/exec! worktree-path ["git" "rev-parse" "HEAD"])
+                               (sandbox/exec! executor environment-id "git rev-parse HEAD"))
+                      :found (if host-mode?
+                               (git/find-pr! worktree-path branch (:github-token state))
+                               (sandbox/find-pr! executor environment-id branch
+                                                 (gh-exec-opts state)))}))]
       (cond
         (not (result/succeeded? stage-r))
         (fail state :stage-failed (:error stage-r))
@@ -526,6 +551,18 @@
                       (git/commits-ahead-of-base worktree-path base-branch)
                       (sandbox/commits-ahead-of-base executor environment-id base-branch))]
           (and ahead (pos? ahead)))
+        (assoc state :write-metrics {:total-operations 0 :files-written 0
+                                     :preexisting-commits true})
+
+        ;; A lookup that failed says nothing about an empty worktree.
+        (and @merged (not (result/succeeded? (:found @merged))))
+        (fail state :pr-lookup-failed (msg/t :pr/lookup-failed {:branch branch
+                                                                :error  (:error (:found @merged))}))
+
+        (let [{:keys [head found]} @merged]
+          (and head (result/succeeded? head)
+               (= "MERGED" (get-in found [:pr :pr-state]))
+               (= (str/trim (str (:output head))) (get-in found [:pr :pr-head-sha]))))
         (assoc state :write-metrics {:total-operations 0 :files-written 0
                                      :preexisting-commits true})
 
@@ -807,11 +844,13 @@
    Dispatches git backend based on :host-mode?.
 
    Runs after step-create-pr so PR number/URL are available.
-   Skipped when :create-pr? is false."
+   Skipped when :create-pr? is false, and for a merged PR: amending and
+   force-pushing its branch would put a commit no PR holds."
   [state]
   (cond
     (failed? state)           state
     (not (:create-pr? state)) state
+    (:pr-merged? state)       state
     :else
     (let [{:keys [release-meta pr-number pr-url branch
                   host-mode? worktree-path executor environment-id
@@ -894,29 +933,58 @@
 ;------------------------------------------------------------------------------ Layer 4
 
 (defn ^{:stratum 4} step-create-pr
-  "Create the pull request.  Dispatches git backend based on :host-mode?.
+  "Create the pull request, unless the branch already has one.  Dispatches
+   git backend based on :host-mode?.
 
-   git/create-pr! carries the same duplicate-PR reuse logic as
-   sandbox/create-pr! — retry-safe on both backends."
+   Looks the branch's PR up first, in any state: an open PR is reused (a
+   retried or resumed release), and so is a merged one whose head is this
+   release's commit. A merged PR of another commit, or a closed PR, fails
+   the release rather than opening another or reporting work no PR holds;
+   a failed lookup fails it too, since creating blind could duplicate.
+   git/create-pr! and sandbox/create-pr! also reuse a PR that gh reports
+   as already existing."
   [state]
   (cond
     (failed? state)           state
     (not (:create-pr? state)) state
     :else
     (let [{:keys [release-meta base-branch host-mode? worktree-path
-                  executor environment-id]} state
-          pr-opts {:title       (:release/pr-title release-meta)
-                   :body        (with-provenance (:release/pr-body release-meta) state)
-                   :base-branch base-branch}
-          result (if host-mode?
-                   (git/create-pr! worktree-path pr-opts (:github-token state))
-                   (sandbox/create-pr! executor environment-id pr-opts
-                                       (gh-exec-opts state)))]
-      (if (result/succeeded? result)
+                  executor environment-id branch commit-sha]} state
+          found    (if host-mode?
+                     (git/find-pr! worktree-path branch (:github-token state))
+                     (sandbox/find-pr! executor environment-id branch (gh-exec-opts state)))
+          existing (:pr found)]
+      (cond
+        (not (result/succeeded? found))
+        (fail state :pr-lookup-failed (msg/t :pr/lookup-failed {:branch branch
+                                                                :error  (:error found)}))
+
+        (= "CLOSED" (:pr-state existing))
+        (fail state :pr-closed (msg/t :pr/closed {:branch branch :pr-url (:pr-url existing)}))
+
+        (and (= "MERGED" (:pr-state existing)) (not= commit-sha (:pr-head-sha existing)))
+        (fail state :pr-merged (msg/t :pr/merged-other {:branch branch :pr-url (:pr-url existing)}))
+
+        existing
         (assoc state
-               :pr-number (:pr-number result)
-               :pr-url    (:pr-url result))
-        (fail state :pr-create-failed (:error result))))))
+               :pr-number  (:pr-number existing)
+               :pr-url     (:pr-url existing)
+               :pr-reused? true
+               :pr-merged? (= "MERGED" (:pr-state existing)))
+
+        :else
+        (let [pr-opts {:title       (:release/pr-title release-meta)
+                       :body        (with-provenance (:release/pr-body release-meta) state)
+                       :base-branch base-branch}
+              result (if host-mode?
+                       (git/create-pr! worktree-path pr-opts (:github-token state))
+                       (sandbox/create-pr! executor environment-id pr-opts
+                                           (gh-exec-opts state)))]
+          (if (result/succeeded? result)
+            (assoc state
+                   :pr-number (:pr-number result)
+                   :pr-url    (:pr-url result))
+            (fail state :pr-create-failed (:error result))))))))
 
 (defn ^{:stratum 4} step-update-pr-body
   "Update the GitHub PR body when the initial body was missing or degraded.
@@ -927,6 +995,7 @@
     (not (:create-pr? state))                     state
     (not (:pr-number state))                      state
     (not (pr-body-needs-update? (:release-meta state))) state
+    (:pr-merged? state)                           state
     :else
     (let [{:keys [release-meta pr-number host-mode? worktree-path
                   executor environment-id logger

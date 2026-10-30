@@ -358,6 +358,19 @@
       (testing "create-branch! rejects an option-injection name before any git call"
         (let [r (git/create-branch! dir "-rf")]
           (is (not (:success? r)))))
+      (testing "an existing branch that contains HEAD is reused, not renamed"
+        (let [r (git/create-branch! dir "release/x")]
+          (is (:success? r))
+          (is (= "release/x" (:branch r)))
+          (is (:reused? r))))
+      (testing "an existing branch that does not contain HEAD is refused"
+        (sh! dir "git" "checkout" "-q" "-b" "work")
+        (spit (str (fs/path dir "new.txt")) "new\n")
+        (sh! dir "git" "add" ".")
+        (sh! dir "git" "commit" "-q" "-m" "new work")
+        (let [r (git/create-branch! dir "release/x")]
+          (is (not (:success? r)))
+          (is (re-find #"does not contain HEAD" (str (:error r))))))
       (finally (fs/delete-tree dir)))))
 
 (deftest ^{:stratum 2} range-fns-reject-unsafe-base-test

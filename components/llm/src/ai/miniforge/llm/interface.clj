@@ -77,6 +77,11 @@
    - :model   - Optional model id passed through to the backend
    - :api-key - Optional API key for the direct HTTP providers;
                 falls back to the backend's :api-key-env variable
+   - :isolated? - Optional; true keeps every call off the operator's
+                Claude Code setup (no built-in tools, user settings,
+                hooks, plugins, or skills). For single-turn completions
+                that need no tools; claude backend only. A claude call
+                outside an artifact session is isolated without it.
    - :logger  - Optional logger for request/response logging
 
    Example:
