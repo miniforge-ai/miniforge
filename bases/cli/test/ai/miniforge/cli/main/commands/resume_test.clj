@@ -392,6 +392,28 @@
         (is (= [{:phase :plan} {:phase :implement} {:phase :verify}] (:workflow/pipeline workflow)))
         (is (nil? (:resume-phase-results opts)))))))
 
+(deftest ^{:stratum 1} a-running-run-is-not-resumed-test
+  (testing "the run's owner lock is held: the resume is refused before anything runs"
+    (let [ran (atom false)]
+      (with-redefs [workflow/run-owner (constantly {:owner/pid 4242
+                                                    :owner/started-at "2026-10-29T00:00:00Z"})
+                    sut/run-pipeline (fn [& _] (reset! ran true) {:execution/status :completed})]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"still running \(process 4242"
+                              (resume-with {:completed-phases [:plan]
+                                            :machine-snapshot {:execution/id (random-uuid)}}
+                                           {}))))
+      (is (false? @ran))))
+  (testing "a root that cannot be looked up refuses the resume; --force checks the default root"
+    (let [roots (atom [])
+          unknown (anomaly/anomaly :unavailable "events unreadable" {})
+          recorded {:completed-phases [:plan] :machine-snapshot {:execution/id (random-uuid)}}]
+      (with-redefs [workflow/run-checkpoint-root (constantly unknown)
+                    workflow/run-owner (fn [_ root] (swap! roots conj root) nil)]
+        (is (thrown? clojure.lang.ExceptionInfo (resume-with recorded {})))
+        (is (= [] @roots) "no lock is looked up under an unknown root")
+        (is (map? (resume-with recorded {:force true})))
+        (is (= [nil] @roots) "with --force the default root is checked")))))
+
 (deftest ^{:stratum 1} new-attempt-keeps-the-run-lineage-test
   (let [snapshot-id (random-uuid)
         snapshotted {:completed-phases [:plan]

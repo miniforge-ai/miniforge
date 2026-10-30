@@ -168,11 +168,15 @@
   :checkpoint/gc-delete-failed "Could not delete checkpoint {path}: {error}"
   :checkpoint/gc-outside-home "Refusing to collect checkpoints under {root}: MINIFORGE_HOME is {home} and that root is outside it. Pass --root {root} to collect it anyway."
   :checkpoint/lock-busy      "The checkpoint of run {run-id} is locked by another process"
+  :run/owner-busy            "Run {run-id} is already running (process {pid}, started {started-at}); not starting it again"
+  :run/owner-lock-failed     "Could not take the owner lock of run {run-id}: {error}"
+  :run/owner-lock-symlink    "Refusing the owner lock file {path}: it or its directory is a symbolic link"
   :checkpoint/lock-failed    "Could not take the checkpoint lock of run {run-id}: {error}"
   :checkpoint/lock-symlink   "Refusing the checkpoint lock of run {run-id}: {path} or its directory is a symbolic link"
   :checkpoint/pin-no-manifest "Run {run-id} has no checkpoint manifest to pin."
   :checkpoint/pin-failed     "Could not pin the checkpoint of run {run-id}: {error}"
   :checkpoint/root-lookup-failed "Could not find where run {run-id} is checkpointed: {error}"
+  :checkpoint/root-unknown   "Cannot tell where run {run-id} is checkpointed: none of its events that would name the root can be read."
   :warn/checkpoint-announce-failed "Warning: The checkpoint for phase {phase} was written, but announcing it failed: {error}"
 
   ;; Environment lifecycle

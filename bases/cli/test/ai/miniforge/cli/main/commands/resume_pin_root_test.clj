@@ -4,7 +4,7 @@
 (ns ai.miniforge.cli.main.commands.resume-pin-root-test
   "`mf resume <id> --pin` pins the run where its checkpoint lives: under
    the root its events announce when the default root does not hold it. A
-   failed lookup is a pin warning, and the resume goes on."
+   failed lookup refuses the resume: it also hides the run's owner lock."
   (:require [ai.miniforge.automation-edge-correlator.interface :as correlator]
             [ai.miniforge.cli.main.commands.resume :as sut]
             [ai.miniforge.cli.main.display :as display]
@@ -17,7 +17,6 @@
             [ai.miniforge.workflow-resume.interface :as wr]
             [babashka.fs :as fs]
             [clojure.java.io :as io]
-            [clojure.string :as str]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -32,7 +31,7 @@
     (io/make-parents file)
     (spit file (es/serialize-event event))))
 
-(deftest ^{:stratum 0} an-unlistable-run-directory-warns-and-the-resume-goes-on
+(deftest ^{:stratum 0} an-unlistable-run-directory-refuses-the-resume
   (fs/with-temp-dir [root {:prefix "pin-root-"}]
     (fs/with-temp-dir [events-dir {:prefix "pin-root-events-"}]
       (let [id (random-uuid)
@@ -48,9 +47,12 @@
                           config/load-merged-config (constantly {:workflow {:checkpoint-root (str root)}})
                           wr/reconstruct-context (fn [_ _] {:completed? true})
                           display/print-info (fn [message] (swap! printed conj message))]
-              (sut/resume-workflow (str id) {:pin true :quiet true}))
-            (is (some #(str/includes? % (str "could not pin the checkpoint of run " id)) @printed))
-            (is (some #{"Workflow already completed successfully."} @printed)))
+              ;; Where the run checkpoints cannot be found, so neither can
+              ;; its owner lock: a live run is not ruled out (C3).
+              (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                    #"Could not find where run .* is checkpointed"
+                                    (sut/resume-workflow (str id) {:pin true :quiet true}))))
+            (is (not-any? #{"Workflow already completed successfully."} @printed)))
           (finally (fs/set-posix-file-permissions dir "rwx------")))))))
 
 ;------------------------------------------------------------------------------ Layer 1

@@ -779,6 +779,8 @@
   :resume/rewind-without-results "Cannot resume from phase {phase}: the run has no checkpointed result for {phases}, which the re-run would build on."
   :resume/not-a-uuid "{flag} must be a UUID (got {value})."
   :resume/run-id-taken "Cannot resume under run id {run-id}: a run with that id already exists."
+  :resume/run-live "Cannot resume run {run-id}: it is still running (process {pid}, started {started-at})."
+  :resume/root-unknown-forced "Warning: {error} Checking the default checkpoint root for a live run instead, because of --force."
   :resume/run-id-archived "Cannot resume under run id {run-id}: that run has ended or is archived (or in the legacy layout), so readers of the id may not see this attempt's events. Omit --run-id to resume it under a new one."
   :resume/run-id-unchecked "Cannot resume under run id {run-id}: checking whether that id is already taken failed: {error}"
   :resume/pinned "Pinned the checkpoint of run {run-id}: checkpoint GC will keep it."
