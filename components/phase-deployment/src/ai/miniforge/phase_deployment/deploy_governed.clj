@@ -79,29 +79,21 @@
       (assoc state :target (:target result)))))
 
 (defn- ^{:stratum 1} open-attempt
-  "Take this deploy's fixed effect id. An earlier attempt still in flight
-   is reconciled first; one that turns out spent (it failed, or a healthy
-   rollout ran other images) gives way to a fresh attempt, and any other
-   is answered for instead of deploying again. A context with no run gets
-   a fresh id; authority then refuses it."
+  "Take this deploy's fixed effect id, or answer for the earlier attempt
+   at it: one still in flight is reconciled first. A context with no run
+   gets a fresh id; authority then refuses it."
   [state]
   (if-not (uuid? (get-in state [:context :execution/id]))
     (assoc state :effect-id (random-uuid))
     (let [context (:context state)
-          open #(fx/open-attempt (transaction/store-dir context) (effect-basis state)
-                                 transaction/spent?)
-          settle (fn [t]
-                   (let [r (transaction/reconcile! context t (:operations state)
-                                                   (transaction/current-time context))]
-                     (if (anomaly/anomaly? r) t r)))]
-      (loop [opened (open) reconciled? false]
-        (let [t (:effect/existing opened)
-              settled (when (and t (not reconciled?)) (settle t))]
-          (cond
-            (anomaly/anomaly? opened) (fail state :proposal (:anomaly/message opened))
-            (nil? t) (assoc state :effect-id (:effect/id opened))
-            (and settled (transaction/spent? settled)) (recur (open) true)
-            :else (assoc state :attempt/existing (or settled t))))))))
+          opened (fx/open-attempt (transaction/store-dir context) (effect-basis state))
+          t (:effect/existing opened)]
+      (cond
+        (anomaly/anomaly? opened) (fail state :proposal (:anomaly/message opened))
+        (nil? t) (assoc state :effect-id (:effect/id opened))
+        :else (let [r (transaction/reconcile! context t (:operations state)
+                                              (transaction/current-time context))]
+                (assoc state :attempt/existing (if (anomaly/anomaly? r) t r)))))))
 
 (defn- ^{:stratum 1} render-manifests
   [state]
