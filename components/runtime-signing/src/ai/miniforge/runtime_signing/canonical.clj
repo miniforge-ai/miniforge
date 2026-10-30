@@ -22,6 +22,12 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} max-depth
+  "Deepest nesting the encoder accepts. Grants and envelopes nest a few
+   levels; the bound keeps untrusted input from overflowing a verifier's
+   stack, which `signed?` could not catch as an Exception."
+  64)
+
 (defn- ^{:stratum 0} refuse! [x]
   (throw (IllegalArgumentException.
           (str "cannot encode for signing: " (.getName (class x))))))
@@ -54,15 +60,14 @@
 
 (defn ^{:stratum 2} encode
   "The encoding of `x`. Throws IllegalArgumentException for a value it
-   cannot encode losslessly, or one nested deeper than 64 levels: untrusted
-   input must not overflow the stack of a verifier."
+   cannot encode losslessly, or one nested deeper than `max-depth`."
   [x]
   (binding [*print-length* nil *print-level* nil *print-meta* false
             *print-namespace-maps* false *print-dup* false *print-readably* true]
     (letfn [(enc [v depth]
               (let [child #(enc % (inc depth))]
                 (cond
-                  (< 64 depth) (refuse! v)
+                  (< max-depth depth) (refuse! v)
 
                   (map? v)
                   (let [entries (mapv (fn [[k item]] [(child k) item]) v)
