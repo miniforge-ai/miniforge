@@ -9,6 +9,7 @@
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.workflow.checkpoint-store :as store]
             [ai.miniforge.workflow.checkpoint-store-gc :as gc]
+            [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.context :as context]
             [ai.miniforge.workflow.monitoring :as monitoring]
             [ai.miniforge.workflow.runner :as runner]
@@ -58,7 +59,7 @@
               written (filter #(= :workflow/machine-snapshot-written (:event/type %))
                               (es/get-events stream))]
           (is (= 1 (count written)))
-        (is (= (str (fs/path (fs/real-path root) (str (:execution/id ctx)) "machine-snapshot.edn"))
+        (is (= (:snapshot (fixture/recorded-paths root (:execution/id ctx)))
                  (:snapshot/path (first written)))))
         (finally (es/close-current-event-stream! stream))))))
 
@@ -68,7 +69,7 @@
       (let [id (snapshot-only-run! (str alternate))
             path (str (fs/path alternate (str id) "machine-snapshot.edn"))]
         (archive-event! (fs/file events-dir) id 1
-                        (es/machine-snapshot-written (legacy-stream) id :running path 1))
+                        (es/machine-snapshot-written (legacy-stream) id :running path 1 (str alternate)))
         (is (true? (es/retention-hold ::gc/checkpoint (str id) (fs/file events-dir))))))))
 
 (deftest ^{:stratum 1} the-scan-stops-at-the-newest-announced-write
@@ -84,7 +85,7 @@
           (archive-event! (fs/file events-dir) id n (es/workflow-resumed (legacy-stream) id :x :plan [])))
         ;; Newest: the write, under a root whose checkpoint is already gone.
         (archive-event! (fs/file events-dir) id 40
-                        (es/checkpoint-written (legacy-stream) id :plan gone 1))
+                        (es/checkpoint-written (legacy-stream) id :plan gone 1 (str alternate)))
         (with-redefs [es/read-event-file (fn [f] (swap! reads inc) (read-event-file f))]
           (testing "the newest write answers: its checkpoint is gone, so nothing holds"
             (is (false? (es/retention-hold ::gc/checkpoint (str id) (fs/file events-dir)))))

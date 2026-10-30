@@ -48,7 +48,7 @@
             types (mapv :event/type (es/get-events stream))]
         (is (= :running (:execution/status admitted)))
         (is (= [:workflow/started :workflow/machine-snapshot-written] types))
-        (is (= (str (fs/path (fs/real-path root) (str (:execution/id ctx)) "machine-snapshot.edn"))
+        (is (= (:snapshot (fixture/recorded-paths root (:execution/id ctx)))
                (:snapshot/path (second (es/get-events stream)))))))))
 
 (deftest ^{:stratum 1} a-failed-start-checkpoint-warns-and-the-run-starts

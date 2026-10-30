@@ -37,6 +37,7 @@
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.redaction.interface :as redaction]
+   [ai.miniforge.release-executor.effects :as effects]
    [ai.miniforge.release-executor.git :as git]
    [ai.miniforge.release-executor.messages :as msg]
    [ai.miniforge.release-executor.metadata :as metadata]
@@ -273,6 +274,25 @@
                   :commit-sha commit-sha
                   :branch     branch})))))))
 
+(defn- ^{:stratum 0} effect-key
+  "The key of this release's `effect-class` on `subject`: the run's lineage
+   and task from :provenance. nil for a release with no run id, whose
+   effects then run untransacted (no fixed key exists)."
+  [{:keys [provenance]} effect-class subject]
+  (when-let [origin (or (:origin provenance) (:workflow provenance))]
+    {:effect-class effect-class :origin origin :task (:task provenance) :subject subject}))
+
+(defn- ^{:stratum 0} effect-report
+  "An effect transaction report from a shell result: success, an unknown
+   outcome when the call timed out or was interrupted, else a definite
+   failure."
+  [result observed]
+  (cond
+    (result/succeeded? result) {:effect/outcome :succeeded :effect/observed observed}
+    (or (:timed-out? result) (:interrupted? result))
+    {:effect/outcome :accepted :effect/failure (str (:error result))}
+    :else                      {:effect/outcome :failed :effect/failure (str (:error result))}))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} prepare->result
@@ -456,13 +476,14 @@
 
    With a run id in :provenance the branch is the run's fixed one
    (metadata/release-branch-name), not the releaser's choice, so a retry
-   or resume reuses the branch and its PR."
+   or resume reuses the branch and its PR. :origin, the run's lineage
+   across resume attempts, wins over :workflow."
   [state]
   (if (failed? state)
     state
     (let [{:keys [release-meta host-mode? worktree-path executor environment-id
                   base-branch-override logger provenance task-description]} state
-          branch-name (if-let [run-id (:workflow provenance)]
+          branch-name (if-let [run-id (or (:origin provenance) (:workflow provenance))]
                         (metadata/release-branch-name run-id (:task provenance) task-description)
                         (:release/branch-name release-meta))
           result (if host-mode?
@@ -649,20 +670,48 @@
         (fail state :commit-failed (:error result))))))
 
 (defn ^{:stratum 1} step-push
-  "Push branch to origin.  Dispatches git backend based on :host-mode?."
+  "Push branch to origin.  Dispatches git backend based on :host-mode?.
+
+   With a run id the push is an effect transaction keyed on the run and the
+   commit (see effects): a push already done for this commit is skipped,
+   and one an earlier attempt left mid-effect is settled by asking origin
+   where the branch points (git ls-remote)."
   [state]
   (cond
     (failed? state)           state
     (not (:create-pr? state)) state
     :else
-    (let [{:keys [branch host-mode? worktree-path executor environment-id]} state
-          result (if host-mode?
+    (let [{:keys [branch host-mode? worktree-path executor environment-id commit-sha]} state
+          push (fn []
+                 (if host-mode?
                    (git/push-branch! worktree-path branch (:github-token state))
                    (sandbox/push-branch! executor environment-id branch
-                                         (gh-exec-opts state)))]
-      (if (result/succeeded? result)
-        state
-        (fail state :push-failed (:error result))))))
+                                         (gh-exec-opts state))))
+          probe (fn [_]
+                  (let [r (if host-mode?
+                            (git/remote-branch-sha! worktree-path branch (:github-token state))
+                            (sandbox/remote-branch-sha! executor environment-id branch
+                                                        (gh-exec-opts state)))]
+                    (when (result/succeeded? r)
+                      {:effect/observed {:branch branch :sha (:sha r)}
+                       :effect/matched? (= commit-sha (:sha r))})))]
+      (if-let [key (effect-key state effects/push-class commit-sha)]
+        (let [{:keys [outcome failure detail]}
+              (if (nil? commit-sha)
+                {:outcome :failed :failure (msg/t :push/no-commit {:branch branch})}
+                (effects/transact! (effects/store-dir (:context state)) key
+                                   {:branch branch :commit-sha commit-sha}
+                                   #(effect-report (push) {:branch branch :sha commit-sha})
+                                   probe))]
+          (case outcome
+            :done   state
+            :failed (fail state :push-failed failure)
+            (fail state :push-unresolved (msg/t :push/unresolved {:branch branch
+                                                                  :detail (pr-str detail)}))))
+        (let [result (push)]
+          (if (result/succeeded? result)
+            state
+            (fail state :push-failed (:error result))))))))
 
 (defn- ^{:stratum 1} render-pr-doc-full
   "Render a comprehensive docs/pull-requests/ markdown file.
@@ -942,7 +991,14 @@
    the release rather than opening another or reporting work no PR holds;
    a failed lookup fails it too, since creating blind could duplicate.
    git/create-pr! and sandbox/create-pr! also reuse a PR that gh reports
-   as already existing."
+   as already existing.
+
+   With a run id, opening the PR is an effect transaction keyed on the run
+   and the branch (see effects). A creation an earlier attempt left
+   mid-effect is settled by the lookup: a listed PR is judged as above,
+   none means it never opened and it is opened now. (GitHub keeps one open
+   PR per head branch, and create-pr! reuses it on \"already exists\", so
+   a lookup that lags a real creation cannot produce a second PR.)"
   [state]
   (cond
     (failed? state)           state
@@ -950,41 +1006,87 @@
     :else
     (let [{:keys [release-meta base-branch host-mode? worktree-path
                   executor environment-id branch commit-sha]} state
-          found    (if host-mode?
-                     (git/find-pr! worktree-path branch (:github-token state))
-                     (sandbox/find-pr! executor environment-id branch (gh-exec-opts state)))
-          existing (:pr found)]
+          lookup   #(if host-mode?
+                      (git/find-pr! worktree-path branch (:github-token state))
+                      (sandbox/find-pr! executor environment-id branch (gh-exec-opts state)))
+          found    (lookup)
+          existing (:pr found)
+          key      (effect-key state effects/pr-create-class branch)
+          dir      (effects/store-dir (:context state))
+          pr-observed (fn [pr] (cond-> {:pr/number (:pr-number pr) :pr/url (:pr-url pr)}
+                                 (:pr-state pr) (assoc :pr/state (:pr-state pr)
+                                                       :pr/head-sha (:pr-head-sha pr))))
+          ;; A listed PR this release must not claim: closed, or merged at
+          ;; another commit. Applied to every PR a lookup lists.
+          refusal  (fn [pr]
+                     (cond
+                       (= "CLOSED" (:pr-state pr))
+                       (fail state :pr-closed (msg/t :pr/closed {:branch branch :pr-url (:pr-url pr)}))
+                       (and (= "MERGED" (:pr-state pr)) (not= commit-sha (:pr-head-sha pr)))
+                       (fail state :pr-merged (msg/t :pr/merged-other {:branch branch
+                                                                       :pr-url (:pr-url pr)}))))
+          reuse    (fn [pr] (assoc state
+                                   :pr-number  (:pr-number pr)
+                                   :pr-url     (:pr-url pr)
+                                   :pr-reused? true
+                                   :pr-merged? (= "MERGED" (:pr-state pr))))
+          refused  (some-> existing refusal)]
       (cond
         (not (result/succeeded? found))
         (fail state :pr-lookup-failed (msg/t :pr/lookup-failed {:branch branch
                                                                 :error  (:error found)}))
 
-        (= "CLOSED" (:pr-state existing))
-        (fail state :pr-closed (msg/t :pr/closed {:branch branch :pr-url (:pr-url existing)}))
-
-        (and (= "MERGED" (:pr-state existing)) (not= commit-sha (:pr-head-sha existing)))
-        (fail state :pr-merged (msg/t :pr/merged-other {:branch branch :pr-url (:pr-url existing)}))
+        refused refused
 
         existing
-        (assoc state
-               :pr-number  (:pr-number existing)
-               :pr-url     (:pr-url existing)
-               :pr-reused? true
-               :pr-merged? (= "MERGED" (:pr-state existing)))
+        (do (when key
+              (effects/settle-pending! dir key (constantly {:effect/observed (pr-observed existing)
+                                                            :effect/matched? true})))
+            (reuse existing))
 
         :else
         (let [pr-opts {:title       (:release/pr-title release-meta)
                        :body        (with-provenance (:release/pr-body release-meta) state)
                        :base-branch base-branch}
-              result (if host-mode?
-                       (git/create-pr! worktree-path pr-opts (:github-token state))
-                       (sandbox/create-pr! executor environment-id pr-opts
-                                           (gh-exec-opts state)))]
-          (if (result/succeeded? result)
-            (assoc state
-                   :pr-number (:pr-number result)
-                   :pr-url    (:pr-url result))
-            (fail state :pr-create-failed (:error result))))))))
+              create  #(if host-mode?
+                         (git/create-pr! worktree-path pr-opts (:github-token state))
+                         (sandbox/create-pr! executor environment-id pr-opts
+                                             (gh-exec-opts state)))
+              {:keys [outcome observed failure detail ran?]}
+              (if key
+                (effects/transact!
+                 dir key {:branch branch :base base-branch}
+                 #(let [r (create)] (effect-report r (pr-observed r)))
+                 (fn [_] (let [f (lookup)]
+                           (when (result/succeeded? f)
+                             {:effect/observed (some-> (:pr f) pr-observed)
+                              :effect/matched? (some? (:pr f))}))))
+                (let [r (create)]
+                  (if (result/succeeded? r)
+                    {:outcome :done :observed (pr-observed r) :ran? true}
+                    {:outcome :failed :failure (:error r)})))]
+          (cond
+            (and (= :done outcome) ran?)
+            (assoc state :pr-number (:pr/number observed) :pr-url (:pr/url observed))
+
+            ;; Opened by an earlier attempt whose record (or the reconciling
+            ;; lookup) names the PR: the lookup above can lag. Judged like
+            ;; any listed PR.
+            (and (= :done outcome) (:pr/url observed))
+            (let [pr {:pr-number (:pr/number observed) :pr-url (:pr/url observed)
+                      :pr-state (:pr/state observed) :pr-head-sha (:pr/head-sha observed)}]
+              (or (refusal pr) (reuse pr)))
+
+            ;; Recorded as opened, yet nothing names the PR: do not claim it.
+            (= :done outcome)
+            (fail state :pr-unconfirmed (msg/t :pr/recorded-not-found {:branch branch}))
+
+            (= :failed outcome)
+            (fail state :pr-create-failed failure)
+
+            :else
+            (fail state :pr-unresolved (msg/t :pr/unresolved {:branch branch
+                                                              :detail (pr-str detail)}))))))))
 
 (defn ^{:stratum 4} step-update-pr-body
   "Update the GitHub PR body when the initial body was missing or degraded.

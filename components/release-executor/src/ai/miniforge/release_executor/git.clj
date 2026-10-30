@@ -445,6 +445,11 @@
       (if (zero? (:exit r))
         (result/shell-success {:output (get r :out "")})
         (result/shell-failure (get r :err "") (timeout-data r))))
+    ;; Interrupted mid-push, it may have reached origin: :interrupted?
+    ;; marks the outcome unknown, and the flag is set again.
+    (catch InterruptedException e
+      (.interrupt (Thread/currentThread))
+      (result/shell-failure (.getMessage e) {:interrupted? true}))
     (catch Exception e
       (result/shell-failure (.getMessage e)))))
 
@@ -463,7 +468,10 @@
    Shared by push-branch! and force-push!."
   [worktree-path github-token push!]
   (let [result (push! nil)]
-    (if (or (result/succeeded? result) (not github-token))
+    ;; A push stopped at its deadline or interrupted may have reached
+    ;; origin: retrying it would hide that unknown outcome behind the retry's.
+    (if (or (result/succeeded? result) (not github-token)
+            (:timed-out? result) (:interrupted? result))
       result
       (let [lines    (fn [args]
                        (let [r (exec! worktree-path args)]
@@ -557,6 +565,29 @@
                               (merge {:pr-url nil :pr-number nil} (timeout-data r)))))
     (catch Exception e
       (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil}))))
+
+(defn ^{:stratum 1} remote-branch-sha!
+  "The commit origin's `branch` points at, via `git ls-remote` on the host:
+   {:success? true :sha sha-or-nil} (nil: no such branch), or a failure
+   when the remote did not answer."
+  [worktree-path branch github-token]
+  (or
+   (validate-safe-branch-name branch)
+   (let [fetch  (exec! worktree-path ["git" "remote" "get-url" "origin"])
+         pushes (exec! worktree-path ["git" "remote" "get-url" "--push" "--all" "origin"])]
+     ;; ls-remote asks origin's fetch URL; it speaks for the push only when
+     ;; the push goes there and nowhere else.
+     (if-not (and (result/succeeded? fetch) (result/succeeded? pushes)
+                  (= [(:output fetch)] (remove str/blank? (str/split-lines (:output pushes)))))
+       (result/shell-failure (msg/t :push/probe-destination-differs))
+       (try
+         (let [r (shell/run-bounded ["git" "ls-remote" "origin" (str "refs/heads/" branch)]
+                                    (gh-shell-opts worktree-path github-token))]
+           (if (zero? (:exit r))
+             (result/shell-success {:sha (-> (str/trim (get r :out "")) (str/split #"\s+") first not-empty)})
+             (result/shell-failure (get r :err "") (timeout-data r))))
+         (catch Exception e
+           (result/shell-failure (.getMessage e))))))))
 
 (defn ^{:stratum 1} find-pr!
   "Look up the PR `branch` already has, in any state, via gh on the host
@@ -672,5 +703,10 @@
             :else
             (result/shell-failure (get result :err "")
                                   (merge {:pr-url nil :pr-number nil} (timeout-data result)))))
+        ;; Interrupted mid-create, the PR may exist: :interrupted? marks the
+        ;; outcome unknown, and the flag is set again.
+        (catch InterruptedException e
+          (.interrupt (Thread/currentThread))
+          (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil :interrupted? true}))
         (catch Exception e
           (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil})))))))
