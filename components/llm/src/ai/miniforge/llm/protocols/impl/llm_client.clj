@@ -457,12 +457,14 @@
 
    2-arity opts map supports:
    - `:stdin`  — string piped to the subprocess's stdin
-   - `:workdir` — directory where the subprocess runs"
+   - `:workdir` — directory where the subprocess runs
+   - `:env`    — entries added to the agent environment"
   ([cmd] (default-exec-fn cmd {}))
-  ([cmd {:keys [stdin workdir]}]
+  ([cmd {:keys [stdin workdir env]}]
    (let [timeout-ms 600000
          process (start-capture-process! cmd {:stdin stdin
-                                              :workdir workdir})]
+                                              :workdir workdir
+                                              :env env})]
      (stop-capture-process! process timeout-ms))))
 
 (defn ^{:stratum 2} complete-stream-impl [client request on-chunk]

@@ -65,15 +65,26 @@
    probe only happens when the caller actually passes opts; pure
    1-arity invocations stay one indirection.
 
+   A 1-arity fn cannot receive opts, so a call whose opts carry `:env`
+   entries (an OpenCode call's inline config, which holds its
+   permissions) gets an error result instead of running without them.
+
    Returns a fn equivalent to `f` for callers that already accept
    both arities."
   [f]
-  (let [arity (atom :unknown)]
+  (let [arity (atom :unknown)
+        one   (fn [cmd opts]
+                (if (seq (:env opts))
+                  {:out ""
+                   :err (str "exec-fn takes no exec opts, so it cannot pass this call's environment entries "
+                             (vec (sort (keys (:env opts)))))
+                   :exit 1}
+                  (f cmd)))]
     (fn
       ([cmd] (f cmd))
       ([cmd opts]
        (case @arity
-         :one (f cmd)
+         :one (one cmd opts)
          :two (f cmd opts)
          (try
            (let [r (f cmd opts)]
@@ -81,7 +92,7 @@
              r)
            (catch clojure.lang.ArityException _
              (reset! arity :one)
-             (f cmd))))))))
+             (one cmd opts))))))))
 
 (defn ^{:stratum 0} log-prompt-sent [logger backend prompt]
   (when logger
@@ -107,17 +118,33 @@
    - execute-fn  - function [executor env-id command opts] -> result map
    - executor    - TaskExecutor instance
    - env-id      - environment/container ID
-   - workdir     - workspace directory inside capsule"
+   - workdir     - workspace directory inside capsule
+
+   The returned fn takes exec opts as a second argument. A call whose
+   opts carry `:env` entries (an OpenCode call's inline config, which
+   holds its permissions and can hold the operator's provider keys) is
+   refused with an error result: the executors have no secret-safe way to
+   pass them (an `env K=V` prefix would show them in `docker exec` and
+   `kubectl exec` arguments, and the Kubernetes executor ignores an :env
+   option), and running without them would drop the call's permissions.
+   The executor has no stdin."
   [execute-fn executor env-id workdir]
-  (fn [cmd]
-    (let [result (execute-fn executor env-id cmd {:workdir workdir})]
-      (if (and (map? result) (:data result))
-        {:out (get-in result [:data :stdout] "")
-         :err (get-in result [:data :stderr] "")
-         :exit (get-in result [:data :exit-code] 0)}
-        {:out ""
-         :err (str "Capsule exec error: " result)
-         :exit 1}))))
+  (fn capsule-exec
+    ([cmd] (capsule-exec cmd {}))
+    ([cmd {:keys [env]}]
+     (if (seq env)
+       {:out ""
+        :err (str "Capsule exec error: cannot carry this call's environment entries "
+                  (vec (sort (keys env))) " into the capsule")
+        :exit 1}
+       (let [result (execute-fn executor env-id cmd {:workdir workdir})]
+         (if (and (map? result) (:data result))
+           {:out (get-in result [:data :stdout] "")
+            :err (get-in result [:data :stderr] "")
+            :exit (get-in result [:data :exit-code] 0)}
+           {:out ""
+            :err (str "Capsule exec error: " result)
+            :exit 1}))))))
 
 (defn ^{:stratum 0} mock-exec-fn [output & {:keys [exit] :or {exit 0}}]
   (fn
@@ -141,7 +168,7 @@
   (let [{:keys [config logger exec-fn]} client
         {:keys [backend]} config
         backend-config (get backend-registry/backends backend)
-        {:keys [cmd args-fn]} backend-config
+        {:keys [cmd args-fn env-fn]} backend-config
         request-with-model (with-client-config request config)]
     (log-prompt-sent logger backend (prompts/build-request-prompt request))
 
@@ -159,7 +186,8 @@
                                      :prompt-via prompt-via))
             full-cmd (into [cmd] args)
             opts     (cond-> (prompts/exec-opts-for-prompt-via prompt-via prompt)
-                       (:workdir request) (assoc :workdir (:workdir request)))
+                       (:workdir request) (assoc :workdir (:workdir request))
+                       env-fn             (assoc :env (env-fn request-with-model)))
             result   (run-cli-exec exec-fn full-cmd opts)
             response (cli-output/parse-cli-output (:out result) (:exit result) (:err result))]
         (log-response logger response)
