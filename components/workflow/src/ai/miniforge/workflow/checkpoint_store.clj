@@ -410,7 +410,10 @@
                                           :manifest merged-manifest))]
                    (if (anomaly/anomaly? validation)
                      (invalid-manifest checkpoint-root workflow-run-id phase-name manifest-path validation)
-                     (let [_ (try
+                     (let [;; Pruning trusts the manifest on disk: force its
+                           ;; directory entry first (a failure fails the write).
+                           _ (checkpoint-file/sync-directory! run-dir)
+                           _ (try
                                ;; Best effort, class-only catch at an absolute
                                ;; boundary (std 211 ex. a): the next write retries.
                                (generation/prune! run-dir [existing-manifest])
@@ -421,10 +424,13 @@
                            ;; result is written again.
                            reusable? (fn [phase result]
                                        (when-let [path (get existing-paths phase)]
-                                         (try+
-                                           (= (coerce/stringify-instants result)
-                                              (:phase/result (read-edn-file path)))
-                                           (catch Exception _ false))))
+                                         ;; Read as the loader reads it: a file it
+                                         ;; would reject is not reused.
+                                         (let [stored (read-checkpoint-file path)]
+                                           (and (map? stored)
+                                                (not (anomaly/anomaly? stored))
+                                                (= (coerce/stringify-instants result)
+                                                   (:phase/result stored))))))
                            to-write (cond-> (into {}
                                                   (remove (fn [[phase result]]
                                                             (or (nil? result) (reusable? phase result))))

@@ -65,6 +65,19 @@
     (is (not (anomaly/anomaly? written)) "a pending interrupt does not fail the write")
     (is restored? "and is still pending after it")))
 
+(defn- ^{:stratum 0} verify-unsynced-run-dir-prunes-nothing [root]
+  (let [ctx (fixture/plan-completed-context root {})
+        writes (mapv #(store/persist-execution-state! (assoc ctx :execution/redirect-count %)) (range 2))
+        run-dir (str (fs/parent (:checkpoint/manifest-path (last writes))))
+        generations (fs/path run-dir "generations")
+        before (set (map str (fs/list-dir generations)))
+        sync! checkpoint-file/sync-directory!
+        failed (with-redefs [checkpoint-file/sync-directory!
+                             (fn [dir] (if (= run-dir (str dir)) (throw (IOException. "no fsync")) (sync! dir)))]
+                 (store/persist-execution-state! (assoc ctx :execution/redirect-count 2)))]
+    (is (anomaly/anomaly? failed))
+    (is (= before (set (map str (fs/list-dir generations)))) "nothing pruned, nothing new")))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} verify-crash-before-manifest [root]
@@ -137,6 +150,21 @@
 (deftest ^{:stratum 1} a-pending-interrupt-is-held-off-and-restored
   (fixture/call-with-temp-checkpoint-root verify-pending-interrupt))
 
+(defn- ^{:stratum 1} verify-unloadable-phase-rewritten [root]
+  (let [planned (fixture/plan-completed-context root {})
+        id (:execution/id planned)
+        _ (store/persist-execution-state! planned)
+        plan-path (:plan (fixture/recorded-paths root id))]
+    ;; Same result, but a format this build will not load.
+    (spit plan-path (pr-str (assoc (edn/read-string (slurp plan-path)) :checkpoint/format-version 999)))
+    (store/persist-execution-state! (implement-completed planned))
+    (let [loaded (workflow/load-checkpoint-data id {:checkpoint/root root})]
+      (is (= {:status :completed} (get-in loaded [:phase-results :plan])))
+      (is (empty? (:checkpoint/read-failures loaded))))))
+
+(deftest ^{:stratum 1} an-unforced-run-directory-stops-the-write-before-pruning
+  (fixture/call-with-temp-checkpoint-root verify-unsynced-run-dir-prunes-nothing))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} a-write-that-dies-before-its-manifest-leaves-the-previous-checkpoint
@@ -147,6 +175,9 @@
 
 (deftest ^{:stratum 2} a-phase-a-failed-write-lost-is-written-by-the-next
   (fixture/call-with-temp-checkpoint-root verify-failed-phase-recovered))
+
+(deftest ^{:stratum 2} a-phase-file-the-loader-rejects-is-rewritten
+  (fixture/call-with-temp-checkpoint-root verify-unloadable-phase-rewritten))
 
 (deftest ^{:stratum 2} a-run-written-in-the-flat-layout-keeps-its-files
   (fixture/call-with-temp-checkpoint-root verify-flat-layout-run))
