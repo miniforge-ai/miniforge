@@ -123,8 +123,7 @@
 (defn- ^{:stratum 0} start-stream-process!
   [cmd {:keys [workdir stdin]}]
   (let [builder (ProcessBuilder. ^java.util.List cmd)]
-    (when-let [env (subprocess/clean-env)]
-      (subprocess/apply-process-env! builder env))
+    (subprocess/apply-process-env! builder (subprocess/agent-env))
     (when workdir
       (.directory builder (io/file workdir)))
     (let [process (.start builder)

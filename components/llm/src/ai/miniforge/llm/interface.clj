@@ -22,6 +22,7 @@
    [ai.miniforge.llm.cost :as cost]
    [ai.miniforge.llm.interface.protocols.llm-client :as p]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+   [ai.miniforge.llm.protocols.impl.llm-client.subprocess :as subprocess]
    [ai.miniforge.llm.protocols.records.llm-client :as records]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.llm.model-registry :as registry]
@@ -397,6 +398,14 @@
      (explain-selection selection)"
   [selection]
   (selector/explain-selection selection))
+
+(defn ^{:stratum 0} agent-env
+  "The environment the llm client gives an agent CLI process: miniforge's
+   own environment filtered by the :agent-env allowlist in
+   llm/client-defaults.edn. For callers that start a backend CLI
+   themselves, such as the backend preflight probe."
+  []
+  (subprocess/agent-env))
 
 ;; Capsule integration
 (def ^{:stratum 0} capsule-exec-fn
