@@ -106,6 +106,12 @@
                                "missing managed paths"    (dissoc shipped :tool/managed-config-paths)}]
         (is (thrown? clojure.lang.ExceptionInfo (policy/read-tool-policy (pr-str broken))) defect)))))
 
+(deftest ^{:stratum 0} every-protected-path-is-a-managed-path-test
+  (testing "each protected pattern matches a managed config path, so a link to it is followed"
+    (let [policy @sut/tool-policy]
+      (doseq [pattern (:tool/protected-paths policy)]
+        (is (some #(re-find pattern %) (:tool/managed-config-paths policy)) (str pattern))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} decision
@@ -148,9 +154,18 @@
       (spit (io/file dir "cfg" "mcp.json") "{}")
       (link ".claude" "shared-config")
       (link ".mcp.json" "cfg/mcp.json")
+      (link ".codex" "missing-dir")
+      (link "opencode.json" "cfg/opencode.json")
       (testing "a write to the target of a linked config directory or file is refused"
         (is (= "deny" (write-decision "shared-config/settings.local.json")))
         (is (= "deny" (write-decision "cfg/mcp.json"))))
+      (testing "a link whose target does not exist yet is followed too"
+        (is (= "deny" (write-decision "missing-dir/config.toml")))
+        (is (= "deny" (write-decision "cfg/opencode.json"))))
+      (testing "a relative path to the target is refused like an absolute one"
+        (is (= "deny" (:decision (sut/evaluate-tool-use {:role :implementer :root (str dir) :path-ok? stub-path-ok?}
+                                                        "mcp__context__context_write"
+                                                        {:path "shared-config/settings.json" :content "{}"})))))
       (testing "other files in the linked directory stay writable"
         (is (= "allow" (write-decision "shared-config/skills/x/SKILL.md")))
         (is (= "allow" (write-decision "cfg/other.json"))))
