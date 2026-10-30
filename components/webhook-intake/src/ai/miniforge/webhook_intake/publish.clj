@@ -68,18 +68,21 @@
 
 (defn ^{:stratum 2} delivery-response
   "[status body] for a verified, parsed `delivery` (see
-   github/delivery->events). A redelivery of a published delivery is 200;
+   github/delivery->events). Deliveries are told apart by
+   `body-signature` (the X-Hub-Signature-256 value, an HMAC of the body),
+   not by X-GitHub-Delivery, which is not signed: a captured delivery
+   replayed under a fresh id is still a redelivery. A redelivery of a published delivery is 200;
    one still being published, or whose publish threw (its event may
    already have started a workflow), is 409; one after a refused publish
    resumes from the first unpublished event."
-  [{:keys [stream seen]} {:keys [delivery-id] :as delivery}]
-  (let [{:keys [claimed? status published]} (deliveries/claim! seen delivery-id)
+  [{:keys [stream seen]} delivery body-signature]
+  (let [{:keys [claimed? status published]} (deliveries/claim! seen body-signature)
         events (github/delivery->events delivery)]
     (cond
       (= :done status) [200 {:duplicate true}]
       (= :unknown status) [409 {:error "publish-outcome-unknown"}]
       (not claimed?) [409 {:error "delivery-in-progress"}]
-      :else (case (publish-delivery! stream seen delivery-id events published)
+      :else (case (publish-delivery! stream seen body-signature events published)
               :done [202 {:events (mapv :event/type events)}]
               :failed [500 {:error "publish-failed"}]
               [500 {:error "publish-outcome-unknown"}]))))

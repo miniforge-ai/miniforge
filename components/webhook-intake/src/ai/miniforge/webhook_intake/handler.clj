@@ -78,7 +78,8 @@
         (apply json-response (publish/delivery-response {:stream stream :seen seen}
                                                         {:event-name x-github-event
                                                          :delivery-id x-github-delivery
-                                                         :payload payload}))
+                                                         :payload payload}
+                                                        x-hub-signature-256))
         (json-response 400 {:error "payload-invalid"})))))
 
 ;------------------------------------------------------------------------------ Layer 2

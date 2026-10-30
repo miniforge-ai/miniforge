@@ -18,7 +18,7 @@
 (ns ai.miniforge.webhook-intake.deliveries
   "Progress of each GitHub delivery the intake has taken, so a
    redelivery neither publishes an event twice nor is acknowledged before
-   its events are out.
+   its events are out. Deliveries are keyed by their body signature.
 
    `seen` is an atom of {:deliveries {id {:status :published}} :order [id]}
    holding the newest `recent-delivery-capacity` ids, oldest first.
