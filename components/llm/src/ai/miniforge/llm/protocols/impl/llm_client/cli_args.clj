@@ -207,7 +207,11 @@
       isolate?                     (into claude-isolation-args)
       (and isolate? (not mcp-config)) (conj "--strict-mcp-config")
       (not isolate?)               (into claude-session-args)
-      (seq mcp-allowed-tools)      (into ["--allowedTools" (claude-mcp-allowlist-string mcp-allowed-tools)])
+      ;; A session call's allow rules come from its settings file alone
+      ;; (the role's tools); the shared list here would grant every role
+      ;; context_write if the hook ever let a call fall through.
+      (and isolate? (seq mcp-allowed-tools))
+      (into ["--allowedTools" (claude-mcp-allowlist-string mcp-allowed-tools)])
       (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
       (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
       system                       (into ["--system-prompt" system])

@@ -176,6 +176,14 @@
                   :Write]})]
       (is (some #(= "mcp__context__context_read,Write" %) args)))))
 
+(deftest ^{:stratum 1} claude-args-session-gets-no-allowed-tools-test
+  (testing "a session call takes its allow rules from its settings file, not --allowedTools"
+    (let [args ((private-fn 'claude-args)
+                {:prompt "p"
+                 :supervision {:settings-path "/tmp/s.json"}
+                 :mcp-allowed-tools [{:mcp/server :context :mcp/tool :context_write} :Write]})]
+      (is (not (some #{"--allowedTools"} args))))))
+
 (deftest ^{:stratum 1} claude-args-disallowed-tools-test
   (testing "disallowed-tools adds --disallowedTools"
     (let [args ((private-fn 'claude-args) {:prompt "p" :disallowed-tools ["bad"]})]

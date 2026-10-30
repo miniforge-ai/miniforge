@@ -32,6 +32,9 @@ on branches miniforge checks out from other people's pull requests.
 2. `cli-config/pre-tool-use-settings` takes the role's tools and writes them as
    `permissions.allow`; `role-allowed-tools` reads them from the shipped policy. Host
    and capsule sessions both pass them.
+3. A session call no longer passes `--allowedTools`. The list there is shared by every
+   role (it includes `context_write`), so it would have granted the reviewer a write if
+   the hook ever let a call fall through; the settings file is now the only grant.
 
 ## Testing Plan
 
@@ -63,8 +66,8 @@ settings, hooks, plugins or skills.
    stop a write outside the worktree in the CLI check above. The Bash patterns, the
    agent environment allowlist (#2284) and the capsule remain the controls.
 3. The planner's WebFetch is allowed for any URL, as tool-policy.edn grants it.
-4. A hook that times out falls back to these allow rules: the role's own tools run
-   unchecked by the hook for that call.
+4. A hook that times out falls back to these allow rules: the role's own tools (and
+   nothing else) run unchecked by the hook for that call.
 5. As for isolated calls (#2282), `apiKeyHelper`, `env` and `model` from the
    operator's settings.json no longer apply to agent sessions.
 
