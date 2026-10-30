@@ -339,4 +339,7 @@
     (or (operator/live-runner? workflow-id)
         (process-running? (:pid origin) (:pid-started origin))
         (manifest-owner-alive? workflow-id)
-        (some? (workflow/run-owner (str workflow-id))))))
+        ;; Under the root the run checkpoints in, as the runner locks it.
+        (let [root (workflow/run-checkpoint-root (str workflow-id) (es/default-events-dir))]
+          (or (anomaly/anomaly? root)
+              (some? (workflow/run-owner (str workflow-id) root)))))))

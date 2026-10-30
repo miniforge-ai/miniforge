@@ -29,7 +29,11 @@
 
    Files live under `<checkpoint-root>/.owners/`, a dot directory the
    checkpoint GC passes over, outside any run directory (a file there
-   would count as a checkpoint)."
+   would count as a checkpoint).
+
+   Closing any descriptor of a file releases the process's POSIX locks on
+   it, so a file this process owns is never opened again: a registry of
+   the locks held here answers claims and probes for them."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.workflow.messages :as messages]
@@ -45,10 +49,17 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defonce ^{:stratum 0} ^:private local-owners
+  (atom {}))
+
 (defn ^{:stratum 0} owner-file
-  "Run `run-id`'s owner lock file under `checkpoint-root`."
+  "Run `run-id`'s owner lock file under `checkpoint-root`, from the root's
+   real path when it exists, so every path to one root names one file."
   [checkpoint-root run-id]
-  (fs/path checkpoint-root ".owners" (str run-id ".lock")))
+  (let [root (if (fs/exists? checkpoint-root)
+               (fs/real-path checkpoint-root)
+               (fs/absolutize checkpoint-root))]
+    (fs/path root ".owners" (str run-id ".lock"))))
 
 (defn- ^{:stratum 0} try-lock
   "The lock on `channel`, or nil when another holder has it (another
@@ -108,13 +119,15 @@
                                               LinkOption/NOFOLLOW_LINKS]
                                        create? (conj StandardOpenOption/CREATE)))))
 
-(defn ^{:stratum 0} release!
-  "Release an owner lock acquire! returned. The file stays."
-  [{:owner/keys [channel lock]}]
-  (.close ^java.lang.AutoCloseable lock)
-  (.close ^java.lang.AutoCloseable channel))
-
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} release!
+  "Release an owner lock acquire! returned. The file stays."
+  [{:owner/keys [channel lock file]}]
+  (locking local-owners
+    (swap! local-owners dissoc file)
+    (.close ^java.lang.AutoCloseable lock)
+    (.close ^java.lang.AutoCloseable channel)))
 
 (defn ^{:stratum 1} acquire!
   "Take run `run-id`'s owner lock under `checkpoint-root` without waiting,
@@ -122,23 +135,29 @@
    release!), a :conflict anomaly naming the live owner when it is held,
    or an :unavailable anomaly on an I/O error."
   [checkpoint-root run-id]
-  (let [path (owner-file checkpoint-root run-id)]
-    (try+
-      (let [channel (open-channel path true)]
+  (let [path (owner-file checkpoint-root run-id)
+        file (str path)]
+    (locking local-owners
+      (if-let [record (get @local-owners file)]
+        (busy run-id record)
         (try+
-          (if-let [lock (try-lock channel)]
-            (do (write-owner! channel {:owner/run-id (str run-id)
-                                       :owner/pid (.pid (java.lang.ProcessHandle/current))
-                                       :owner/started-at (str (Instant/now))})
-                {:owner/channel channel :owner/lock lock :owner/run-id run-id})
-            (let [owner (read-owner channel)]
-              (.close channel)
-              (busy run-id owner)))
+          (let [channel (open-channel path true)]
+            (try+
+              (if-let [lock (try-lock channel)]
+                (let [record {:owner/run-id (str run-id)
+                              :owner/pid (.pid (java.lang.ProcessHandle/current))
+                              :owner/started-at (str (Instant/now))}]
+                  (write-owner! channel record)
+                  (swap! local-owners assoc file record)
+                  {:owner/channel channel :owner/lock lock :owner/run-id run-id :owner/file file})
+                (let [owner (read-owner channel)]
+                  (.close channel)
+                  (busy run-id owner)))
+              (catch Exception e
+                (.close channel)
+                (throw e))))
           (catch Exception e
-            (.close channel)
-            (throw e))))
-      (catch Exception e
-        (failed run-id path e)))))
+            (failed run-id path e)))))))
 
 (defn ^{:stratum 1} owner
   "The live owner of run `run-id` under `checkpoint-root` (its record, {}
@@ -146,28 +165,27 @@
    :unavailable anomaly on an I/O error."
   [checkpoint-root run-id]
   (let [path (owner-file checkpoint-root run-id)]
-    (try+
-      (when (fs/exists? path {:nofollow-links true})
-        (with-open [channel (open-channel path false)]
-          (if-let [lock (try-lock channel)]
-            (do (.close lock) nil)
-            (read-owner channel))))
-      (catch java.nio.file.NoSuchFileException _ nil)
-      (catch Exception e
-        (failed run-id path e)))))
+    (locking local-owners
+      (or (get @local-owners (str path))
+          (try+
+            (when (fs/exists? path {:nofollow-links true})
+              (with-open [channel (open-channel path false)]
+                (if-let [lock (try-lock channel)]
+                  (do (.close lock) nil)
+                  (read-owner channel))))
+            (catch java.nio.file.NoSuchFileException _ nil)
+            (catch Exception e
+              (failed run-id path e)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} with-run-owner
-  "`(f)` while holding run `run-id`'s owner lock under `checkpoint-root`;
-   `(f)` alone when `run-id` is nil (a run id minted fresh, which no other
-   process can hold). When the lock is busy or cannot be taken, `f` does
-   not run and the anomaly is thrown: the run must not start."
+  "`(f)` while holding run `run-id`'s owner lock under `checkpoint-root`.
+   When the lock is busy or cannot be taken, `f` does not run and the
+   anomaly is thrown: the run must not start."
   [checkpoint-root run-id f]
-  (if (nil? run-id)
-    (f)
-    (let [held (acquire! checkpoint-root run-id)]
-      (if (anomaly/anomaly? held)
-        (throw+ held)
-        (try (f)
-             (finally (release! held)))))))
+  (let [held (acquire! checkpoint-root run-id)]
+    (if (anomaly/anomaly? held)
+      (throw+ held)
+      (try (f)
+           (finally (release! held))))))

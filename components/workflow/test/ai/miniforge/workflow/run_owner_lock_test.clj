@@ -93,6 +93,40 @@
         (is (false? @acquired) "nothing is acquired for a refused run")
         (finally (owner/release! held))))))
 
+(def ^{:stratum 0} ^:private probe-script
+  "bb program: try to lock argv[0], then release; print \"busy\" when
+   another process holds it, else \"free\"."
+  (str "(let [ch (java.nio.channels.FileChannel/open (java.nio.file.Paths/get (first *command-line-args*) (make-array String 0))"
+       "          (into-array java.nio.file.OpenOption [java.nio.file.StandardOpenOption/WRITE]))]"
+       "  (println (if (try (some? (.tryLock ch)) (finally (.close ch))) \"free\" \"busy\")))"))
+
+(deftest ^{:stratum 0} run-pipeline-locks-the-run-it-executes-test
+  (fs/with-temp-dir [root {:prefix "run-owner-pipeline-"}]
+    (testing "a snapshot-only restore claims the snapshot's run"
+      (let [id   (random-uuid)
+            held (owner/acquire! root id)]
+        (try
+          (is (= :conflict
+                 (try+ (runner/run-pipeline {:workflow/id :owner-test :workflow/pipeline []} {}
+                                            {:resume-machine-snapshot {:execution/id id}
+                                             :checkpoint/root (str root)})
+                       :started
+                       (catch [:anomaly/type :conflict] _ :conflict))))
+          (finally (owner/release! held)))))
+    (testing "a run given no id holds the lock on the id it is given"
+      (let [seen (atom nil)]
+        (with-redefs-fn {#'ai.miniforge.workflow.runner/acquire-environment
+                         (fn [_ _ opts]
+                           (reset! seen {:id (:workflow-id opts)
+                                         :owner (owner/owner root (:workflow-id opts))})
+                           (throw (ex-info "stop here" {})))}
+          #(try (runner/run-pipeline {:workflow/id :owner-test :workflow/pipeline []} {}
+                                     {:checkpoint/root (str root)})
+                (catch clojure.lang.ExceptionInfo _ nil)))
+        (is (uuid? (:id @seen)))
+        (is (= (str (:id @seen)) (get-in @seen [:owner :owner/run-id])))
+        (is (nil? (owner/owner root (:id @seen))) "released when the run ends")))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} owner-lock-held-by-another-process-test
@@ -117,3 +151,20 @@
           (let [held (owner/acquire! root id)]
             (is (not (anomaly/anomaly? held)))
             (owner/release! held)))))))
+
+(deftest ^{:stratum 1} local-claims-and-probes-keep-the-os-lock-test
+  (if-not (fs/which "bb")
+    (println "SKIP cross-process owner lock test: bb is not on PATH")
+    (fs/with-temp-dir [root {:prefix "run-owner-local-"}]
+      (let [id   (random-uuid)
+            held (owner/acquire! root id)
+            seen (fn [] (clojure.string/trim
+                         (:out (bp/shell {:out :string :err :inherit}
+                                         "bb" "-e" probe-script (str (owner/owner-file root id))))))]
+        (try
+          (is (= :conflict (:anomaly/type (owner/acquire! root id))))
+          (is (some? (owner/owner root id)))
+          (testing "after a rejected claim and a probe here, another process still finds it held"
+            (is (= "busy" (seen))))
+          (finally (owner/release! held)))
+        (is (= "free" (seen)))))))

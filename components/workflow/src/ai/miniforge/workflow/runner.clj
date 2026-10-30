@@ -59,16 +59,18 @@
 
 (def ^{:stratum 0} extract-output outcome/extract-output)
 
-(defn- ^{:stratum 0} owner-run-id
-  "The run id this pipeline claims before it starts: the caller's uuid
-   :workflow-id (as the CLI and resume pass it; same parsing as
-   context/opts-run-id), or nil for an id the context mints fresh."
+(defn- ^{:stratum 0} effective-run-id
+  "The id the run executes under, settled before it starts so the owner
+   lock and the context share it: a restored snapshot's, else the caller's
+   uuid :workflow-id (same parsing as context/opts-run-id), else a fresh
+   one."
   [opts]
   (let [wid (:workflow-id opts)]
-    (cond
-      (uuid? wid)   wid
-      (string? wid) (parse-uuid wid)
-      :else         nil)))
+    (or (get-in opts [:resume-machine-snapshot :execution/id])
+        (cond
+          (uuid? wid)   wid
+          (string? wid) (parse-uuid wid))
+        (random-uuid))))
 
 (def ^{:stratum 0} ^:private acquire-environment preparation/acquire-environment)
 
@@ -90,16 +92,17 @@
    ;; launcher retry of a run still running is refused (the owner lock's
    ;; anomaly is thrown) before anything is acquired. The root is the one
    ;; the run checkpoints under, as restore-context resolves it.
-   (owner/with-run-owner
-    (checkpoint-paths/resolve-checkpoint-root (merge opts (:resume-machine-snapshot opts)))
-    (owner-run-id opts)
-    (fn []
-      (let [[acquired-env opts] (acquire-environment workflow input opts)
-            owned (session/create (wrap-phase-callbacks (:event-stream opts) opts)
-                                  build-pipeline extract-output)
-            execute (partial session/execute! workflow input opts owned run-pipeline)
-            release (partial lifetime/release! opts workflow acquired-env owned)]
-        (lifetime/protect! owned execute release))))))
+   (let [run-id (effective-run-id opts)]
+     (owner/with-run-owner
+      (checkpoint-paths/resolve-checkpoint-root (merge opts (:resume-machine-snapshot opts)))
+      run-id
+      (fn []
+        (let [[acquired-env opts] (acquire-environment workflow input (assoc opts :workflow-id run-id))
+              owned (session/create (wrap-phase-callbacks (:event-stream opts) opts)
+                                    build-pipeline extract-output)
+              execute (partial session/execute! workflow input opts owned run-pipeline)
+              release (partial lifetime/release! opts workflow acquired-env owned)]
+          (lifetime/protect! owned execute release)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

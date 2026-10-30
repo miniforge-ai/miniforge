@@ -383,9 +383,12 @@
             (display/print-info (messages/t :resume/resuming
                                             {:workflow-id workflow-id})))
         ;; A run still running is not resumed: its runner holds the run's
-        ;; owner lock (see run-pipeline), under its checkpoint root.
+        ;; owner lock (see run-pipeline), under its checkpoint root. A root
+        ;; or lock that cannot be looked up refuses the resume too.
         _ (let [root  (workflow/run-checkpoint-root (str workflow-id) events-dir)
-                owner (workflow/run-owner (str workflow-id) (when (string? root) root))]
+                _     (throw-resume-anomaly! root)
+                owner (workflow/run-owner (str workflow-id) root)]
+            (throw-resume-anomaly! owner)
             (when (some? owner)
               (response/throw-anomaly! :anomalies/conflict
                                        (messages/t :resume/run-live
