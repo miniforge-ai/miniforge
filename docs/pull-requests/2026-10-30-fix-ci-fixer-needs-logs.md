@@ -20,8 +20,11 @@ never called on this path.
 
 ## Changes in Detail
 
-1. `run-fix-loop` builds the prompt from the fix context, and `generate-fix` passes it as the fix
-   task's `:description`. Review and conflict fixes get their prompt the same way.
+1. `generate-fix` passes `fix-prompt/build-fix-prompt` of the fix context as the fix task's
+   `:description`, so every caller, not only `run-fix-loop`, gives the fixer its prompt. Review and
+   conflict fixes get their prompt the same way. The prompt builder moves to its own `fix-prompt`
+   namespace (with named `review-change` / `review-line` helpers), which keeps `fix_loop.clj` within
+   three layers.
 2. The `:ci-failure` prompt includes the failed-job logs under a "Failed job logs:" heading.
 3. `fix-ci-failure` refuses to start when the logs are blank: `schema/failure` with
    `:reason :ci-logs-unavailable`, and `generate-fn` is never called.
@@ -30,14 +33,15 @@ never called on this path.
 5. Test refactor: the gh 2.102 replay helpers move to `gh-replay-test-support`.
 
 `controller.clj` is untouched (7 layers against the rule-210 budget of 3), so the controller still
-reports `:reason :fix-failed`; the fix-loop result carries `:ci-logs-unavailable`.
+reports `:reason :fix-failed` (and has already counted a fix iteration); the fix-loop result
+carries `:ci-logs-unavailable`. Splitting the controller and reporting the refusal is a follow-up.
 
 ## Testing Plan
 
 `ci-fix-prompt-test` drives `controller/run-lifecycle!` against replayed gh 2.102 output with the
 inner loop stubbed: a failing Actions check reaches the fixer with a non-blank prompt containing the
 job's log; a failure with no fetchable log does not call the fixer; every review-comment shape
-renders. The worker is cancelled on timeout so stubs never outlive the test. This is the
+renders. On timeout the worker is cancelled and awaited, so stubs never outlive the test. This is the
 qualification scenario "CI failure gives the fixer a non-empty prompt with failed-job logs"
 (`ai.miniforge.pr-lifecycle.ci-fix-prompt-test`).
 

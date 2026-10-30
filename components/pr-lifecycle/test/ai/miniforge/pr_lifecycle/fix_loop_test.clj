@@ -29,6 +29,7 @@
    [clojure.string :as str]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
+   [ai.miniforge.pr-lifecycle.fix-prompt :as fix-prompt]
    [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
    [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]))
 
@@ -85,7 +86,7 @@
                :fix/failing-tests ["FAIL in (test-foo)" "FAIL in (test-bar)"]
                :fix/lint-errors ["src/foo.clj:10: warning"]
                :fix/build-errors []}
-          prompt (fix/build-fix-prompt ctx)]
+          prompt (fix-prompt/build-fix-prompt ctx)]
       (is (string? prompt))
       (is (str/includes? prompt "Fix CI failures"))
       (is (str/includes? prompt "2 test failures"))
@@ -99,7 +100,7 @@
                :fix/failure-summary "1 change"
                :fix/affected-files #{}
                :fix/review-comments [{:file "src/a.clj" :line 10 :change "Fix null check"}]}
-          prompt (fix/build-fix-prompt ctx)]
+          prompt (fix-prompt/build-fix-prompt ctx)]
       (is (str/includes? prompt "Address review feedback"))
       (is (str/includes? prompt "Fix null check")))))
 
@@ -109,7 +110,7 @@
                :fix/type :conflict
                :fix/failure-summary "2 conflicts"
                :fix/affected-files #{"src/a.clj" "src/b.clj"}}
-          prompt (fix/build-fix-prompt ctx)]
+          prompt (fix-prompt/build-fix-prompt ctx)]
       (is (str/includes? prompt "Resolve merge conflicts"))
       (is (str/includes? prompt "src/a.clj")))))
 
@@ -119,7 +120,7 @@
                :fix/type :unknown
                :fix/failure-summary "something broke"
                :fix/affected-files #{}}
-          prompt (fix/build-fix-prompt ctx)]
+          prompt (fix-prompt/build-fix-prompt ctx)]
       (is (str/includes? prompt "Fix issues"))
       (is (str/includes? prompt "something broke")))))
 

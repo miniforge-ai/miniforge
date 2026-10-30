@@ -23,6 +23,7 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.events :as events]
+   [ai.miniforge.pr-lifecycle.fix-prompt :as fix-prompt]
    [ai.miniforge.pr-lifecycle.fix-stage :as fix-stage]
    [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
    [ai.miniforge.pr-lifecycle.messages :as messages]
@@ -86,61 +87,6 @@
 
    :fix/created-at (java.util.Date.)})
 
-(defn ^{:stratum 0} build-fix-prompt
-  "Build a prompt for the fix agent based on failure type.
-
-   Arguments:
-   - fix-context: Context from create-fix-context
-
-   Returns string prompt for the agent."
-  [fix-context]
-  (let [fix-type (:fix/type fix-context)
-        task-id (:fix/task-id fix-context)
-        summary (:fix/failure-summary fix-context)
-        affected-files (str/join ", " (:fix/affected-files fix-context))]
-    (case fix-type
-      :ci-failure
-      (str "Fix CI failures for task " task-id ".\n\n"
-           "Summary: " summary "\n\n"
-           "Affected files: " affected-files "\n\n"
-           (when-let [tests (:fix/failing-tests fix-context)]
-             (str "Failing tests:\n" (str/join "\n" (take 10 tests)) "\n\n"))
-           (when-let [lint (:fix/lint-errors fix-context)]
-             (str "Lint errors:\n" (str/join "\n" (take 10 lint)) "\n\n"))
-           (when-let [build (:fix/build-errors fix-context)]
-             (str "Build errors:\n" (str/join "\n" (take 5 build)) "\n\n"))
-           (when-let [logs (:fix/ci-logs fix-context)]
-             (str (messages/system-t :fix/ci-logs-heading) "\n" logs "\n\n"))
-           "Generate fixes to resolve these issues while maintaining the original intent.")
-
-      :review-changes
-      (str "Address review feedback for task " task-id ".\n\n"
-           "Requested changes:\n"
-           (str/join "\n\n"
-                     (->> (:fix/review-comments fix-context)
-                          ;; Callers pass extracted changes {:file :line :change},
-                          ;; triage results wrapping a parsed :comment, or the
-                          ;; PR monitor's {:body :path :line} comments.
-                          (map (fn [c]
-                                 (let [comment (get c :comment c)
-                                       file (or (:file c) (:comment/path comment) (:path comment))
-                                       line (or (:line c) (:comment/line comment) (:line comment))
-                                       change (or (:change c) (:comment/body comment) (:body comment))]
-                                   (str "- " file (when line (str ":" line))
-                                        "\n  " change))))
-                          (take 10)))
-           "\n\nGenerate fixes that address these specific concerns.")
-
-      :conflict
-      (str "Resolve merge conflicts for task " task-id ".\n\n"
-           "Conflicting files: " affected-files "\n\n"
-           "Resolve the conflicts while preserving the intent of both changes.")
-
-      ;; Default
-      (str "Fix issues for task " task-id ".\n\n"
-           "Summary: " summary "\n\n"
-           "Affected files: " affected-files))))
-
 ;; Fix generation
 (defn ^{:stratum 0} blank-logs?
   "True when CI logs (a string or a seq of lines) carry no text."
@@ -155,7 +101,7 @@
    Arguments:
    - fix-context: Context from create-fix-context
    - generate-fn: Generation function for the agent; receives a fix task
-     whose :description is (:fix/prompt fix-context)
+     whose :description is fix-prompt/build-fix-prompt of the fix context
    - context: Execution context with :logger etc.
 
    Options:
@@ -168,7 +114,7 @@
   (let [logger (:logger context)
         task {:task/id (:fix/task-id fix-context)
               :task/type :fix
-              :description (:fix/prompt fix-context)}
+              :description (fix-prompt/build-fix-prompt fix-context)}
         loop-context (merge context
                             {:max-iterations max-iterations
                              :fix-context fix-context})]
@@ -415,10 +361,9 @@
                             {:message (str "Fix attempt " attempt " of " max-attempts)
                              :data {:task-id task-id}}))
 
-              ;; Build fix context; the prompt rides along as the fix task's description
-              fix-context (let [ctx (create-fix-context task pr-info failure-info
-                                                        :previous-fixes previous-fixes)]
-                            (assoc ctx :fix/prompt (build-fix-prompt ctx)))
+              ;; Build fix context
+              fix-context (create-fix-context task pr-info failure-info
+                                              :previous-fixes previous-fixes)
 
               ;; Generate fix
               fix-result (generate-fix fix-context generate-fn context)
@@ -584,7 +529,7 @@
   (:fix/type fix-ctx)  ; => :ci-failure
 
   ;; Build prompt
-  (build-fix-prompt fix-ctx)
+  (fix-prompt/build-fix-prompt fix-ctx)
 
   ;; Parse CI failure
   (triage/parse-ci-failure

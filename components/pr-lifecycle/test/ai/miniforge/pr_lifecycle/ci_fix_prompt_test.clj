@@ -25,7 +25,7 @@
   (:require
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.pr-lifecycle.controller :as controller]
-   [ai.miniforge.pr-lifecycle.fix-loop :as fix]
+   [ai.miniforge.pr-lifecycle.fix-prompt :as fix-prompt]
    [ai.miniforge.pr-lifecycle.gh-replay-test-support :as gh]
    [ai.miniforge.pr-lifecycle.messages :as messages]
    [babashka.process :as process]
@@ -50,7 +50,7 @@
 
 (deftest ^{:stratum 0} review-prompt-renders-every-comment-shape-test
   (testing "the review prompt shows file, line and text for each caller's comment shape"
-    (let [prompt (fix/build-fix-prompt
+    (let [prompt (fix-prompt/build-fix-prompt
                   {:fix/type :review-changes :fix/task-id "t"
                    :fix/review-comments
                    [{:file "a.clj" :line 1 :change "rename foo"}
@@ -86,7 +86,9 @@
     ;; Interrupting the worker unwinds its with-redefs, so the stubs do
     ;; not outlive a run that timed out.
     (when (= ::timed-out result)
-      (future-cancel worker))
+      (future-cancel worker)
+      ;; future-cancel returns before the worker has unwound; wait for it.
+      (deref worker scenario-timeout-ms nil))
     {:result result
      :tasks @tasks}))
 
