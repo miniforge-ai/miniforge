@@ -17,7 +17,7 @@ and a list of remote and credential commands denied inside those.
 
 ## Motivation
 
-OpenCode is the default backend. #2287 denies every tool to an OpenCode call outside
+OpenCode is the default backend. #2291 denies every tool to an OpenCode call outside
 a session; this does the same job for session calls by role, so a reviewer on OpenCode
 cannot write and only the implementer and tester can run Bash.
 
@@ -47,7 +47,7 @@ cannot write and only the implementer and tester can run Bash.
 
 ## Deployment Plan
 
-Ships with the next release, after #2284 and #2287. OpenCode agents lose tools their
+Ships with the next release, after #2284 and #2291. OpenCode agents lose tools their
 role does not list.
 
 ## Known limits
@@ -60,7 +60,7 @@ role does not list.
 
 ## Related Issues/PRs
 
-1. #2284 (agent environment), #2287 (OpenCode outside sessions), #2251 (tool policy).
+1. #2284 (agent environment), #2291 (OpenCode outside sessions), #2251 (tool policy).
 
 ## Checklist
 
