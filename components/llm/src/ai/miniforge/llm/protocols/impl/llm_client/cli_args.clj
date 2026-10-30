@@ -154,6 +154,17 @@
   (let [deny (settings/client-default [:opencode :deny-all-permission])]
     (if isolated? deny (get supervision :opencode-permission deny))))
 
+(defn ^{:stratum 0} external-directory-rule
+  "OpenCode's external_directory permission for a call: every path
+   outside the worktree denied, and OpenCode's own tool-output directory
+   (where it keeps every session's full tool output) denied by its exact
+   glob. OpenCode's agent resolver appends an allow for that glob unless
+   the same glob is denied, so a plain \"deny\" would leave it open."
+  []
+  (let [data (or (not-empty (settings/getenv-value "XDG_DATA_HOME"))
+                 (str (settings/getenv-value "HOME") "/.local/share"))]
+    (array-map "*" "deny" (str data "/opencode/tool-output/*") "deny")))
+
 (defn ^{:stratum 0} echo-args
   "Build CLI arguments for the echo (test) backend."
   [{:keys [prompt]}]
@@ -194,14 +205,15 @@
    OPENCODE_DISABLE_PROJECT_CONFIG=1, and OPENCODE_CONFIG_CONTENT, the
    operator's own inline config (`operator-opencode-config`) with the
    call's permissions (`opencode-permission`) set globally and on
-   `policy-agent`, which the call selects. Key order is kept, since
-   OpenCode applies the last rule that matches. Project config is off
+   `policy-agent`, which the call selects, with external_directory set by
+   `external-directory-rule`. Key order is kept, since OpenCode applies
+   the last rule that matches. Project config is off
    because the worktree is content an agent can write: an opencode.json or
    .opencode/agent/<name>.md there would merge into the agent once its
    name is known (it shows in the process list), and a project MCP server
    would start even under --pure."
   [request]
-  (let [permission (opencode-permission request)
+  (let [permission (assoc (opencode-permission request) "external_directory" (external-directory-rule))
         agent      {"mode" "primary"
                     "description" "miniforge: the tools this call may use"
                     "permission" permission}]

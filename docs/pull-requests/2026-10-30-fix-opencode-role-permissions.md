@@ -40,7 +40,11 @@ cannot write and only the implementer and tester can run Bash.
 4. Every OpenCode call now runs this way, so `opencode-args` drops the request's own
    `:agent` and refuses `:attach`, `:command`, `:session`, `:continue?` and `:fork?` for
    every call (no caller passes them).
-5. `:opencode/edit-deny` covers the `.git` pointer file of a linked worktree and nested
+5. The llm client sets `external_directory` to a rule object that denies `*` and OpenCode's
+   own tool-output glob (`<data>/opencode/tool-output/*`) by name: OpenCode's agent
+   resolver appends an allow for that directory, which holds every session's full tool
+   output, unless that exact glob is denied.
+6. `:opencode/edit-deny` covers the `.git` pointer file of a linked worktree and nested
    `.git` directories (`.git`, `*/.git`, `*/.git/*`, and `.GIT`/`.Git` spellings).
 
 ## Testing Plan
@@ -58,6 +62,9 @@ cannot write and only the implementer and tester can run Bash.
    order and denies `.git` paths.
 3. Checked with OpenCode 1.18.30 `debug config` / `debug agent build`: every key is
    accepted, rule objects keep their order, and the allowed tools are on and the rest off.
+   With `external_directory: "deny"` the resolver still appended an allow for
+   `~/.local/share/opencode/tool-output/*` after it; with the exact glob denied, no
+   external_directory allow came after the final deny.
 
 ## Deployment Plan
 

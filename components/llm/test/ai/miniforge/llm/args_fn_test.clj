@@ -345,13 +345,24 @@
           (pr-str option)))))
 
 (deftest ^{:stratum 1} opencode-env-sets-the-calls-permissions-test
-  (let [agent  (nth ((private-fn 'opencode-args) {:prompt "p"}) 3)
-        config (fn [request] (json/parse-string (get (cli-args/opencode-env request) "OPENCODE_CONFIG_CONTENT")))]
+  (let [agent     (nth ((private-fn 'opencode-args) {:prompt "p"}) 3)
+        config    (fn [request] (json/parse-string (get (cli-args/opencode-env request) "OPENCODE_CONFIG_CONTENT")))
+        all-deny? (fn [block] (every? #(if (map? %) (every? #{"deny"} (vals %)) (= "deny" %)) (vals block)))]
     (testing "outside a session, isolated, and in a session that carries no block: everything denied"
       (doseq [request [{:prompt "p"} (merge supervised {:isolated? true}) supervised]]
-        (is (every? #{"deny"} (vals (get (config request) "permission"))) (pr-str request))
-        (is (every? #{"deny"} (vals (get-in (config request) ["agent" agent "permission"]))) (pr-str request))
+        (is (all-deny? (get (config request) "permission")) (pr-str request))
+        (is (all-deny? (get-in (config request) ["agent" agent "permission"])) (pr-str request))
         (is (= "primary" (get-in (config request) ["agent" agent "mode"])))))
+    (testing "external_directory also denies OpenCode's tool-output directory by its exact glob"
+      (with-redefs [settings/getenv-value (fn [k] (get {"HOME" "/home/op"} k))]
+        (doseq [request [{:prompt "p"} (assoc-in supervised [:supervision :opencode-permission]
+                                                 (array-map "*" "deny" "external_directory" "deny" "read" "allow"))]]
+          (is (= {"*" "deny" "/home/op/.local/share/opencode/tool-output/*" "deny"}
+                 (get-in (config request) ["agent" agent "permission" "external_directory"]))
+              (pr-str request))))
+      (with-redefs [settings/getenv-value (fn [k] (get {"HOME" "/home/op" "XDG_DATA_HOME" "/data"} k))]
+        (is (contains? (get-in (config {:prompt "p"}) ["agent" agent "permission" "external_directory"])
+                       "/data/opencode/tool-output/*"))))
     (testing "plugins and the worktree's own OpenCode config stay off"
       (is (= "1" (get (cli-args/opencode-env supervised) "OPENCODE_PURE")))
       (is (= "1" (get (cli-args/opencode-env supervised) "OPENCODE_DISABLE_PROJECT_CONFIG"))))
@@ -363,8 +374,8 @@
                                 "edit" (array-map "*" "allow" ".git" "deny") "bash" bash)
             content  (get (cli-args/opencode-env (assoc-in supervised [:supervision :opencode-permission] block))
                           "OPENCODE_CONFIG_CONTENT")]
-        (is (str/includes? content (str "{\"*\":\"deny\",\"external_directory\":\"deny\",\"read\":\"allow\","
-                                        "\"list\":\"allow\",\"grep\":\"allow\",\"glob\":\"allow\",")))
+        (is (str/includes? content "{\"*\":\"deny\",\"external_directory\":{\"*\":\"deny\","))
+        (is (str/includes? content "\"read\":\"allow\",\"list\":\"allow\",\"grep\":\"allow\",\"glob\":\"allow\","))
         (is (str/includes? content (str "\"bash\":{\"*\":\"allow\","
                                         (str/join "," (map #(str "\"" % "\":\"deny\"") commands)) "}"))
             "a 27-key rule object keeps its order")))
