@@ -60,6 +60,15 @@
    --mcp-config is given."
   ["--tools" "" "--setting-sources" "" "--disable-slash-commands"])
 
+(def ^{:stratum 0} ^:private claude-session-args
+  "Flags for a call inside an artifact session, which runs miniforge's
+   PreToolUse hook: load none of the operator's user, project or local
+   settings (the session's own --settings file still applies), and refuse
+   any tool the hook does not explicitly allow. The tool policy then
+   decides alone; the operator's permission mode, allow rules, hooks and
+   plugins do not reach the session."
+  ["--setting-sources" "" "--permission-mode" "dontAsk"])
+
 (def ^{:stratum 0} ^:private claude-input-format-flag
   "Claude CLI flag that selects how the user prompt is delivered. Paired
    with `claude-input-format-stdin` (the only value we use today), this
@@ -231,7 +240,9 @@
    `:supervision`). Only an artifact session writes those settings, so a
    call outside one has no PreToolUse hook: it gets no built-in tools and
    none of the operator's settings, hooks, plugins or skills, rather than
-   whatever tools the operator's own settings would allow it."
+   whatever tools the operator's own settings would allow it. A call
+   with hook settings and no `:isolated?` gets `claude-session-args`
+   instead."
   [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools
            disallowed-tools supervision budget-usd max-turns model resume
            prompt-via isolated?]
@@ -261,7 +272,12 @@
                                           "--strict-mcp-config"])
       isolate?                     (into claude-isolation-args)
       (and isolate? (not mcp-config)) (conj "--strict-mcp-config")
-      (seq mcp-allowed-tools)      (into ["--allowedTools" (claude-mcp-allowlist-string mcp-allowed-tools)])
+      (not isolate?)               (into claude-session-args)
+      ;; A session call's allow rules come from its settings file alone
+      ;; (the role's tools); the shared list here would grant every role
+      ;; context_write if the hook ever let a call fall through.
+      (and isolate? (seq mcp-allowed-tools))
+      (into ["--allowedTools" (claude-mcp-allowlist-string mcp-allowed-tools)])
       (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
       (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
       system                       (into ["--system-prompt" system])

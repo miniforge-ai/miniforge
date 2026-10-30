@@ -22,6 +22,7 @@
    cleanup."
   (:require
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
+   [ai.miniforge.agent.tool-supervisor :as tool-supervisor]
    [babashka.fs :as fs]
    [cheshire.core :as json]
    [clojure.edn :as edn]
@@ -236,10 +237,29 @@
    as https://code.claude.com/docs/en/hooks and the settings JSON schema
    require (the group's \"hooks\" key is required, and no other keys are
    allowed); \"*\" matches every tool. A handler placed directly in the
-   PreToolUse array is not a valid entry, so Claude never runs it."
-  [hook-cmd]
-  {"hooks" {"PreToolUse" [{"matcher" "*"
-                           "hooks"   [{"type" "command" "command" hook-cmd}]}]}})
+   PreToolUse array is not a valid entry, so Claude never runs it.
+
+   `allowed-tools` (the role's tools in the tool policy) go into
+   permissions.allow. A session runs Claude with `--setting-sources \"\"
+   --permission-mode dontAsk`, so these are the only allow rules it has:
+   a tool the role does not list is refused even if the hook let it by,
+   and a call Claude's own checks would ask about is refused, not run.
+
+   The handler sets \"onFailure\" \"block\" (Claude Code 2.1.295+), so a
+   hook that times out or fails to answer blocks the call; by default
+   Claude would fall back to the allow rules and run it."
+  [hook-cmd allowed-tools]
+  {"permissions" {"allow" (vec (sort allowed-tools))}
+   "hooks" {"PreToolUse" [{"matcher" "*"
+                           "hooks"   [{"type" "command"
+                                       "command" hook-cmd
+                                       "onFailure" "block"}]}]}})
+
+(defn ^{:stratum 0} role-allowed-tools
+  "The tools `role` may call under the shipped tool policy, or none for a
+   role it does not list."
+  [role]
+  (tool-supervisor/role-tools @tool-supervisor/tool-policy role))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -485,7 +505,8 @@
   [session-dir role workdir]
   (let [hook-command (hook-eval-command (resolve-miniforge-command) role workdir)
         path (str session-dir "/claude-settings.json")]
-    (spit path (json/generate-string (pre-tool-use-settings hook-command) {:pretty true}))
+    (spit path (json/generate-string (pre-tool-use-settings hook-command (role-allowed-tools role))
+                                     {:pretty true}))
     path))
 
 ;; High-level session helpers

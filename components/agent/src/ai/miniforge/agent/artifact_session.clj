@@ -415,7 +415,9 @@
                                                "args"    (:args srv-cmd)}}}
                      {:pretty true})
         hook-cmd    (hook-eval-command ["bb" "miniforge"] (:role session) (:workdir session))
-        settings    (json/generate-string (cli-config/pre-tool-use-settings hook-cmd) {:pretty true})]
+        settings    (json/generate-string (cli-config/pre-tool-use-settings
+                                           hook-cmd (cli-config/role-allowed-tools (:role session)))
+                                          {:pretty true})]
     ;; Write configs inside capsule
     (exec! executor env-id (str "cat > " (file-artifacts/shell-quote (:mcp-config-path session)) " << 'MCPEOF'\n" mcp-config "\nMCPEOF")
            {:workdir (:workdir session)})
