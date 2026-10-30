@@ -23,6 +23,7 @@
             [ai.miniforge.llm.messages :as msg]
             [ai.miniforge.llm.protocols.records.llm-client]
             [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+            [ai.miniforge.llm.protocols.impl.llm-client.stream-exec :as stream-exec]
             [ai.miniforge.llm.progress-monitor :as pm]
             [ai.miniforge.logging.interface :as log]
             [cheshire.core :as json]))
@@ -880,6 +881,19 @@
                :content "fallback answer"}]
              @chunks)))))
 
+(defn- ^{:stratum 0} recording-claude-client
+  "A claude client whose exec-fn and stream-exec-fn record every command
+   into `cmds` and return an empty successful result."
+  [cmds opts]
+  (let [record! (fn [cmd] (swap! cmds conj cmd) {:out "ok" :err "" :exit 0})]
+    (llm/create-client
+     (merge {:backend :claude
+             :stream-exec-fn (fn [cmd _on-line _opts] (record! cmd) {:out "" :err "" :exit 0})
+             :exec-fn (fn
+                        ([cmd] (record! cmd))
+                        ([cmd _opts] (record! cmd)))}
+            opts))))
+
 ;; Claude backend args-fn budget tests (PR #288)
 (deftest ^{:stratum 0} claude-args-fn-budget-usd-test
   (let [args-fn (:args-fn (get impl/backends :claude))]
@@ -1188,7 +1202,7 @@
           "subprocess saw stdin content split by line"))))
 
 (defn- ^{:stratum 0} fake-stream-process
-  "Stub for `#'impl/start-stream-process!`. Returns a map matching the
+  "Stub for `#'stream-exec/start-stream-process!`. Returns a map matching the
    shape `stream-exec-fn` consumes, with a `Process` proxy whose
    stdout is `input-stream`. `.destroyForcibly` closes the supplied
    `on-destroy!` closure (used for tests that need to release a
@@ -1621,6 +1635,37 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} isolated-client-sends-isolation-flags-test
+  (testing "an isolated claude client sends the isolation flags on complete and complete-stream"
+    (let [cmds (atom [])
+          client (recording-claude-client cmds {:isolated? true})
+          supervised {:prompt "test" :supervision {:settings-path "/tmp/s.json"}}]
+      (llm/complete client supervised)
+      (llm/complete-stream client supervised (fn [_chunk] nil))
+      (is (<= 2 (count @cmds)))
+      (is (every? #(= ["--tools" ""] (take 2 (drop-while (complement #{"--tools"}) %))) @cmds))
+      (is (every? #(some #{"--setting-sources"} %) @cmds))
+      (is (every? #(some #{"--disable-slash-commands"} %) @cmds)))))
+
+(deftest ^{:stratum 1} sessionless-claude-call-is-isolated-test
+  (testing "a plain claude client isolates a call that carries no hook settings"
+    (let [cmds (atom [])
+          client (recording-claude-client cmds {})]
+      (llm/complete client {:prompt "test"})
+      (llm/complete-stream client {:prompt "test"} (fn [_chunk] nil))
+      (is (<= 2 (count @cmds)))
+      (is (every? #(= ["--tools" ""] (take 2 (drop-while (complement #{"--tools"}) %))) @cmds))
+      (is (every? #(some #{"--setting-sources"} %) @cmds))))
+
+  (testing "a call inside an artifact session (hook settings present) keeps its tools"
+    (let [cmds (atom [])
+          client (recording-claude-client cmds {})
+          supervised {:prompt "test" :supervision {:settings-path "/tmp/s.json"}}]
+      (llm/complete client supervised)
+      (llm/complete-stream client supervised (fn [_chunk] nil))
+      (is (<= 2 (count @cmds)))
+      (is (every? #(not-any? #{"--tools" "--setting-sources"} %) @cmds)))))
+
 (deftest ^{:stratum 1} stagnation-fires-on-silence-without-keepalive-test
   (testing "without keepalive, a silent monitor stagnates after the threshold"
     ;; Bug demonstration: this is the dogfood failure mode in unit form.
@@ -1778,8 +1823,8 @@
     ;; closes the pipe. With a stub probe-fn returning false, the
     ;; monitor fires within ~30ms (10ms interval × 3 strikes) and
     ;; forces stream-exec-fn to return. No real subprocess; portable.
-    (with-redefs [impl/start-stream-process! (fn [_cmd _opts]
-                                               (fake-blocking-stream-process))]
+    (with-redefs [stream-exec/start-stream-process! (fn [_cmd _opts]
+                                                      (fake-blocking-stream-process))]
       (let [handler (fn [_line] nil)
             monitor (pm/create-progress-monitor {:min-activity-interval-ms 1
                                                  :stagnation-threshold-ms  120000
@@ -1806,8 +1851,8 @@
   ;; `:echo` test backend) supply no `:backend-key`. The network
   ;; monitor must stay dormant so they keep working unchanged.
   (testing "without :backend-key, no probe traffic is generated"
-    (with-redefs [impl/start-stream-process! (fn [_cmd _opts]
-                                               (fake-eof-stream-process))]
+    (with-redefs [stream-exec/start-stream-process! (fn [_cmd _opts]
+                                                      (fake-eof-stream-process))]
       (let [probe-calls (atom 0)
             handler (fn [_line] nil)
             monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})

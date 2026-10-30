@@ -4,7 +4,8 @@
 (ns ai.miniforge.workflow.boundary.checkpoint-permissions
   "POSIX publication policy; other providers retain their native defaults."
   (:require [babashka.fs :as fs]
-            [slingshot.slingshot :refer [try+]]))
+            [slingshot.slingshot :refer [try+]])
+  (:import [java.nio.file NoSuchFileException]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -15,5 +16,19 @@
     (fs/posix-file-permissions path {:nofollow-links true})
     true
     (catch UnsupportedOperationException _ false)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} existing-permissions [target]
+  (try+
+    (let [attributes (fs/read-attributes target "posix:*" {:nofollow-links true})]
+      (if (:isSymbolicLink attributes) private-permissions (:permissions attributes)))
+    (catch NoSuchFileException _ private-permissions)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} prepare! [temporary target]
+  (when (posix? temporary)
+    (fs/set-posix-file-permissions temporary (existing-permissions target))))
 
 (comment ::checkpoint-permission-policy)

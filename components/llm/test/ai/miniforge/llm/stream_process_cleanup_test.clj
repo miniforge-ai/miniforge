@@ -25,7 +25,8 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.llm.progress-monitor :as pm]
-   [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
+   [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+   [ai.miniforge.llm.protocols.impl.llm-client.stream-exec :as stream-exec]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -225,7 +226,7 @@
   (testing "a process that closes stdout but does not exit is killed when the join wait runs out"
     (let [pids (atom {})]
       (try
-        (with-redefs-fn {#'impl/process-join-timeout-ms (constantly short-join-timeout-ms)}
+        (with-redefs-fn {#'stream-exec/process-join-timeout-ms (constantly short-join-timeout-ms)}
           (fn []
             (let [{:keys [outcome]} (start-stream-thread
                                      stdout-closing-shell-cmd

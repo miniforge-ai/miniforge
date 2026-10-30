@@ -58,7 +58,7 @@
               written (filter #(= :workflow/machine-snapshot-written (:event/type %))
                               (es/get-events stream))]
           (is (= 1 (count written)))
-          (is (= (str (fs/path root (str (:execution/id ctx)) "machine-snapshot.edn"))
+        (is (= (str (fs/path (fs/real-path root) (str (:execution/id ctx)) "machine-snapshot.edn"))
                  (:snapshot/path (first written)))))
         (finally (es/close-current-event-stream! stream))))))
 
