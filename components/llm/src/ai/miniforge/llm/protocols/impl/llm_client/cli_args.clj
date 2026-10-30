@@ -159,11 +159,14 @@
    outside the worktree denied, and OpenCode's own tool-output directory
    (where it keeps every session's full tool output) denied by its exact
    glob. OpenCode's agent resolver appends an allow for that glob unless
-   the same glob is denied, so a plain \"deny\" would leave it open."
+   the same glob is denied, so a plain \"deny\" would leave it open. The
+   directory is joined as OpenCode's path.join does, separators collapsed,
+   since the resolver compares the glob as text."
   []
   (let [data (or (not-empty (settings/getenv-value "XDG_DATA_HOME"))
-                 (str (settings/getenv-value "HOME") "/.local/share"))]
-    (array-map "*" "deny" (str data "/opencode/tool-output/*") "deny")))
+                 (str (settings/getenv-value "HOME") "/.local/share"))
+        dir  (java.nio.file.Paths/get (str data) (into-array String ["opencode" "tool-output"]))]
+    (array-map "*" "deny" (str (.normalize dir) "/*") "deny")))
 
 (defn ^{:stratum 0} echo-args
   "Build CLI arguments for the echo (test) backend."

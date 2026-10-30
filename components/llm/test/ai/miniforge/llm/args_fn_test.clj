@@ -360,9 +360,11 @@
           (is (= {"*" "deny" "/home/op/.local/share/opencode/tool-output/*" "deny"}
                  (get-in (config request) ["agent" agent "permission" "external_directory"]))
               (pr-str request))))
-      (with-redefs [settings/getenv-value (fn [k] (get {"HOME" "/home/op" "XDG_DATA_HOME" "/data"} k))]
-        (is (contains? (get-in (config {:prompt "p"}) ["agent" agent "permission" "external_directory"])
-                       "/data/opencode/tool-output/*"))))
+      (doseq [data ["/data" "/data/" "/data//"]]
+        (with-redefs [settings/getenv-value (fn [k] (get {"HOME" "/home/op" "XDG_DATA_HOME" data} k))]
+          (is (contains? (get-in (config {:prompt "p"}) ["agent" agent "permission" "external_directory"])
+                         "/data/opencode/tool-output/*")
+              (str "XDG_DATA_HOME=" data " gives OpenCode's own spelling of the glob")))))
     (testing "plugins and the worktree's own OpenCode config stay off"
       (is (= "1" (get (cli-args/opencode-env supervised) "OPENCODE_PURE")))
       (is (= "1" (get (cli-args/opencode-env supervised) "OPENCODE_DISABLE_PROJECT_CONFIG"))))
