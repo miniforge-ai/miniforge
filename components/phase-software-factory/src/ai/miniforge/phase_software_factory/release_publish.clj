@@ -32,6 +32,26 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} provenance
+  "The release's provenance from phase context: rendered as YAML
+   frontmatter on the PR body so a PR maps back to its workflow run and
+   spec, and the key of the release branch and effects. :workflow is the
+   PARENT run id for a DAG sub-task (shared across the run's PRs) else
+   this run's id; :task distinguishes DAG tasks. :origin is the run's
+   lineage (the parent's for a DAG task), the same across resume attempts;
+   the release branch is keyed on it. A DAG task restored from a
+   checkpoint written before lineage was recorded has only
+   :workflow/parent-id, which keyed its branch then."
+  [ctx]
+  {:workflow (or (get-in ctx [:execution/input :workflow/parent-id])
+                 (get-in ctx [:execution/id]))
+   :origin   (or (get-in ctx [:execution/input :workflow/origin-id])
+                 (get-in ctx [:execution/input :workflow/parent-id])
+                 (get-in ctx [:execution/origin-id])
+                 (get-in ctx [:execution/id]))
+   :spec     (get-in ctx [:execution/input :spec/path])
+   :task     (get-in ctx [:execution/input :task/id])})
+
 (defn- ^{:stratum 0} resolve-github-token
   "Resolve GitHub token for capsule PR operations.
    Mirrors the resolution order from docker.clj's resolve-git-token:
@@ -135,22 +155,7 @@
    ;; against the default branch with a cumulative diff. Absent (root
    ;; tasks / non-DAG runs) → executor falls back to the default branch.
    :base-branch (get-in ctx [:execution/opts :release/base-branch])
-   ;; PR provenance → rendered as YAML frontmatter on the PR body so
-   ;; a PR maps deterministically back to its workflow run + spec.
-   ;; :workflow is the PARENT run id for a DAG sub-task (shared across
-   ;; the run's PRs) else this run's id; :task distinguishes DAG tasks.
-   ;; :origin is the run's lineage (the parent's for a DAG task), the same
-   ;; across resume attempts; the release branch is keyed on it. A DAG
-   ;; task restored from a checkpoint written before lineage was recorded
-   ;; has only :workflow/parent-id, which keyed its branch then.
-   :provenance {:workflow (or (get-in ctx [:execution/input :workflow/parent-id])
-                              (get-in ctx [:execution/id]))
-                :origin   (or (get-in ctx [:execution/input :workflow/origin-id])
-                              (get-in ctx [:execution/input :workflow/parent-id])
-                              (get-in ctx [:execution/origin-id])
-                              (get-in ctx [:execution/id]))
-                :spec     (get-in ctx [:execution/input :spec/path])
-                :task     (get-in ctx [:execution/input :task/id])}
+   :provenance (provenance ctx)
    ;; Resolve and inject GitHub token for capsule gh CLI auth
    :github-token (resolve-github-token ctx)})
 

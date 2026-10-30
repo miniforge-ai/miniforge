@@ -69,7 +69,13 @@
     (testing "no PR asked for: the push alone completes"
       (is (= :completed (get-in (publish false no-pr) [:output :release/status]))))))
 
-(deftest ^{:stratum 0} log-paths-test
-  (is (= ["src/a.clj" "src/b clj.clj" "old.clj"]
-         (release-unpushed/log-paths
-          "\u0000src/a.clj\u0000src/b clj.clj\u0000\u0000\nsrc/a.clj\u0000old.clj\u0000"))))
+(deftest ^{:stratum 0} scan-output-parsing-test
+  (testing "NUL fields keep a path of spaces; only empty fields are separators"
+    (is (= ["  " "a b.txt" "src/x.clj"]
+           (release-unpushed/nul-fields "  \u0000a b.txt\u0000\u0000src/x.clj\u0000"))))
+  (testing "ls-tree entries by path, a submodule as a commit"
+    (is (= {"src/a.clj" {:type "blob" :object "abc"}
+            "standards/miniforge" {:type "commit" :object "def"}}
+           (release-unpushed/tree-entries
+            (str "100644 blob abc\tsrc/a.clj\u0000"
+                 "160000 commit def\tstandards/miniforge\u0000"))))))

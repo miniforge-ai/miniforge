@@ -190,6 +190,15 @@
    :environment-id (:environment-id impl-result)
    :worktree-path  worktree-path})
 
+(defn- ^{:stratum 0} release-description
+  "The release's task description: the run input's, else its title, else
+   the default. The release branch name is derived from it."
+  [ctx]
+  (let [input (get-in ctx [:execution/input])]
+    (or (:description input)
+        (:title input)
+        (messages/t :default/task-description))))
+
 (defn- ^{:stratum 0} compute-verdict
   "Pick the verdict that should flow on the phase result.
 
@@ -377,8 +386,9 @@
 (defn- ^{:stratum 1} unpushed-files
   "release-unpushed/unpushed-files in the worktree at `root-path`: on the
    host, or through `execute-fn` in the capsule when it is given. A scan
-   git cannot answer is a :release/git-status-failed anomaly, never []."
-  [root-path execute-fn executor env-id]
+   git cannot answer is a :release/git-status-failed anomaly, never [].
+   `run-branch` is the run's release branch (see release-unpushed)."
+  [root-path execute-fn executor env-id run-branch]
   (let [run  (if execute-fn
                (fn [argv]
                  ;; The command runs under `sh -c`: quote any argument with
@@ -391,7 +401,7 @@
                     :err  (get-in r [:data :stderr] (:message (:error r)))}))
                (fn [argv] (apply shell/sh (concat argv [:dir root-path]))))
         {:keys [files failure]} (try
-                                  (release-unpushed/unpushed-files run)
+                                  (release-unpushed/unpushed-files run run-branch)
                                   (catch Exception e
                                     {:failure {:detail (or (ex-message e) (.getName (class e)))
                                                :data   {:exception/class (.getName (class e))}}}))]
@@ -609,13 +619,10 @@
                              [{:artifact/type    :review
                                :artifact/content {:review/decision (:review/decision review-output)
                                                   :review/summary  (:review/summary review-output)
-                                                  :review/warnings known-issues}}])
-          input          (get-in ctx [:execution/input])]
+                                                  :review/warnings known-issues}}])]
       {:workflow/id       (or (get-in ctx [:execution/id]) (random-uuid))
        :workflow/phase    :release
-       :workflow/spec     {:spec/description (or (:description input)
-                                                 (:title input)
-                                                 (messages/t :default/task-description))}
+       :workflow/spec     {:spec/description (release-description ctx)}
        :workflow/artifacts (into code-artifacts review-artifacts)})))
 
 ;------------------------------------------------------------------------------ Layer 4
@@ -654,7 +661,10 @@
                                    (git-dirty-files-capsule execute-fn executor env-id wt)
                                    (git-dirty-files wt))]
                   (if (and (vector? dirty) (empty? dirty))
-                    (unpushed-files wt (when governed? execute-fn) executor env-id)
+                    (let [{:keys [origin task]} (release-publish/provenance ctx)]
+                      (unpushed-files wt (when governed? execute-fn) executor env-id
+                                      (release-executor/release-branch-name
+                                       origin task (release-description ctx))))
                     dirty)))]
     ;; Short-circuit: skip release when there is nothing to release.
     ;; This covers:

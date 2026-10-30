@@ -24,6 +24,7 @@
   (:require
    [ai.miniforge.release-executor.core :as core]
    [ai.miniforge.release-executor.git :as git]
+   [ai.miniforge.release-executor.metadata :as metadata]
    [ai.miniforge.release-executor.shell :as shell]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -49,6 +50,12 @@
                              :create-pr? false}
                             {:releaser my-releaser-agent})"
   core/execute-release-phase)
+
+(def ^{:stratum 0} release-branch-name
+  "The fixed release branch of a run (and DAG task). Args: [run-id task-id
+   task-description]. The release uses it whenever its context carries a
+   run id."
+  metadata/release-branch-name)
 
 (def ^{:stratum 0} prepare-release
   "First half of the release: metadata, branch and commit, nothing pushed.
