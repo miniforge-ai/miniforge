@@ -104,19 +104,31 @@
    its target, hop by hop, whether the target exists or not.
    getCanonicalFile alone stops at a link whose target is missing and
    returns the link's own path, so a dangling `.mcp.json -> cfg/mcp.json`
-   would not show that `cfg/mcp.json` is the file Claude loads. Stops
-   after 40 links on one path, the kernel's own loop limit."
+   would not show that `cfg/mcp.json` is the file Claude loads. A link's
+   target is walked one component at a time, as the kernel does: each
+   component is followed if it is a link before the next is applied, so
+   `..` steps back from where the links before it led, not from the text
+   of the target. Stops after 40 links on one path, the kernel's own loop
+   limit."
   [root rel]
   (loop [cur   (.toPath (io/file (str root)))
          parts (remove str/blank? (str/split (str rel) #"/"))
          hops  0]
     (cond
       (and (java.nio.file.Files/isSymbolicLink cur) (< hops 40))
-      (recur (.normalize (.resolveSibling cur (java.nio.file.Files/readSymbolicLink cur)))
-             parts (inc hops))
+      (let [target (java.nio.file.Files/readSymbolicLink cur)]
+        (recur (if (.isAbsolute target) (.getRoot target) (.getParent cur))
+               (concat (map str target) parts)
+               (inc hops)))
 
       (seq parts)
-      (recur (.resolve cur ^String (first parts)) (rest parts) hops)
+      (let [[part & more] parts]
+        (recur (case part
+                 "."  cur
+                 ".." (or (.getParent cur) cur)
+                 (.resolve cur ^String part))
+               more
+               hops))
 
       :else
       cur)))

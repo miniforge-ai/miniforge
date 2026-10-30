@@ -169,6 +169,15 @@
       (testing "other files in the linked directory stay writable"
         (is (= "allow" (write-decision "shared-config/skills/x/SKILL.md")))
         (is (= "allow" (write-decision "cfg/other.json"))))
+      (testing "a .. in a link target steps back from where the links before it led"
+        (.mkdirs (io/file dir "nested" "dir"))
+        (.mkdirs (io/file dir "nested" "cfg"))
+        (link "alias" "nested/dir")
+        (java.nio.file.Files/delete (.resolve root ".claude"))
+        (java.nio.file.Files/createSymbolicLink (.resolve root ".claude") (java.nio.file.Paths/get "alias/../cfg" (make-array String 0))
+                                                (make-array java.nio.file.attribute.FileAttribute 0))
+        (is (= "deny" (write-decision "nested/cfg/settings.json")))
+        (is (= "allow" (write-decision "cfg/settings.json")) "the lexical reading of the target is not the loaded file"))
       (finally
         (run! #(java.nio.file.Files/deleteIfExists (.toPath ^java.io.File %)) (reverse (file-seq dir)))))))
 

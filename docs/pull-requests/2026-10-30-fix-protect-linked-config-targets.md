@@ -27,9 +27,11 @@ Claude loads the file as `.claude/settings.local.json`.
    concrete paths (directories and files), added to the closed schema.
 2. `tool-policy/follow-links` resolves each symlink on a managed path hop by hop,
    whether its target exists or not (`getCanonicalFile` stops at a dangling link and
-   returns the link's own path). `managed-config-aliases`: for each managed path whose
-   resolved form is, or contains, the canonical form of the path a tool names, that
-   managed path plus the rest of the path below it.
+   returns the link's own path), walking each link target one component at a time so
+   a `..` applies after the links before it, as the kernel resolves it.
+   `managed-config-aliases`: for each managed path whose resolved form is, or contains,
+   the canonical form of the path a tool names, that managed path plus the rest of the
+   path below it.
 3. `path-refusal` refuses a path when any of those names matches
    `:tool/protected-paths`.
 
@@ -40,7 +42,10 @@ Claude loads the file as `.claude/settings.local.json`.
    to the linked file are refused (both fail on #2271's branch); other files in the
    linked directory stay writable; links whose targets do not exist yet
    (`.codex -> missing-dir`, `opencode.json -> cfg/opencode.json`) are followed; a
-   relative `context_write` path is refused like an absolute one.
+   relative `context_write` path is refused like an absolute one; with
+   `.claude -> alias/../cfg` and `alias -> nested/dir`, a write to the file Claude loads,
+   `nested/cfg/settings.json`, is refused (Copilot review: a lexical `..` pointed the
+   check at `cfg/`).
 2. `every-protected-path-is-a-managed-path-test`: each `:tool/protected-paths` pattern
    matches a managed path, so the two lists cannot drift apart unnoticed. The schema
    test covers a policy missing the new key.
