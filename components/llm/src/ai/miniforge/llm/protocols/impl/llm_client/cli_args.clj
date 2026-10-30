@@ -115,12 +115,14 @@
    selected model/profile knobs through and treats OpenCode as the
    common provider wrapper instead of handling API keys directly.
 
-   A call outside an artifact session also gets `--pure` (no external
-   plugins); `opencode-env` denies it every tool."
+   A call outside an artifact session, and a session call that carries
+   its role's OpenCode permissions, also gets `--pure` (no external
+   plugins); `opencode-env` sets the permissions."
   [{:keys [prompt model agent attach command session continue? fork? files format
            supervision isolated?]}]
   (cond-> ["run"]
-    (or isolated? (not (:settings-path supervision))) (conj "--pure")
+    (or isolated? (not (:settings-path supervision)) (:opencode-permission supervision))
+    (conj "--pure")
     attach    (into ["--attach" attach])
     command   (into ["--command" command])
     continue? (conj "--continue")
@@ -133,16 +135,20 @@
     true      (conj prompt)))
 
 (defn ^{:stratum 0} opencode-env
-  "Environment entries for an OpenCode call. A call outside an artifact
-   session (no hook settings under `:supervision`), or one that asks to be
-   `:isolated?`, gets OPENCODE_CONFIG_CONTENT with every permission denied
-   (`[:opencode :deny-all-permission]` in llm/client-defaults.edn), which
-   OpenCode applies over its global and project config. nil otherwise."
+  "Environment entries for an OpenCode call: OPENCODE_CONFIG_CONTENT, which
+   OpenCode applies over its global and project config. A call outside an
+   artifact session (no hook settings under `:supervision`), or one that
+   asks to be `:isolated?`, gets every permission denied
+   (`[:opencode :deny-all-permission]` in llm/client-defaults.edn). A
+   session call gets the permission block its `:supervision` carries as
+   `:opencode-permission` (the role's tools, from the agent's tool
+   policy; key order kept, since OpenCode applies the last matching
+   rule). nil for a session call without one."
   [{:keys [supervision isolated?]}]
-  (when (or isolated? (not (:settings-path supervision)))
-    {"OPENCODE_CONFIG_CONTENT"
-     (json/generate-string
-      {"permission" (settings/client-default [:opencode :deny-all-permission])})}))
+  (when-let [permission (if (or isolated? (not (:settings-path supervision)))
+                          (settings/client-default [:opencode :deny-all-permission])
+                          (:opencode-permission supervision))]
+    {"OPENCODE_CONFIG_CONTENT" (json/generate-string {"permission" permission})}))
 
 (defn ^{:stratum 0} echo-args
   "Build CLI arguments for the echo (test) backend."

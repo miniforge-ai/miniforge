@@ -322,8 +322,14 @@
   (testing "isolated? does the same for a session call"
     (is (some #{"--pure"} ((private-fn 'opencode-args) (merge supervised {:prompt "p" :isolated? true}))))
     (is (some? (cli-args/opencode-env (merge supervised {:isolated? true})))))
-  (testing "a session call gets neither"
-    (is (nil? (cli-args/opencode-env supervised)))))
+  (testing "a session call with no permission block gets neither"
+    (is (nil? (cli-args/opencode-env supervised))))
+  (testing "a session call carrying its role's permissions gets them, in order, and --pure"
+    (let [permission (array-map "*" "deny" "read" "allow" "edit" (array-map "*" "allow" ".mcp.json" "deny"))
+          request    (assoc-in supervised [:supervision :opencode-permission] permission)]
+      (is (some #{"--pure"} ((private-fn 'opencode-args) (assoc request :prompt "p"))))
+      (is (= "{\"permission\":{\"*\":\"deny\",\"read\":\"allow\",\"edit\":{\"*\":\"allow\",\".mcp.json\":\"deny\"}}}"
+             (get (cli-args/opencode-env request) "OPENCODE_CONFIG_CONTENT"))))))
 
 (deftest ^{:stratum 1} opencode-args-model-and-agent-test
   (testing "model and agent pass through to OpenCode"

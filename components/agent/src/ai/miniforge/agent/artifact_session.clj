@@ -33,6 +33,7 @@
    [ai.miniforge.agent.artifact-session.parsing :as parsing]
    [ai.miniforge.agent.artifact-session.readers :as readers]
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
+   [ai.miniforge.agent.tool-supervisor :as tool-supervisor]
    [ai.miniforge.anomaly.interface :as anomaly]
    [cheshire.core :as json]
    [clojure.java.io :as io]
@@ -424,6 +425,7 @@
            :mcp-allowed-tools mcp-tools
            :supervision {:hook-eval-cmd hook-cmd
                          :settings-path (str session-dir "/claude-settings.json")
+                         :opencode-permission (tool-supervisor/opencode-permission (:role session))
                          :policy :workspace-write})))
 
 (defn ^{:stratum 1} write-cursor-permissions-for-session!
@@ -476,6 +478,7 @@
            :mcp-cleanup-files [codex-path cursor-path cursor-perms]
            :supervision {:hook-eval-cmd hook-eval-cmd
                          :settings-path settings-path
+                         :opencode-permission (tool-supervisor/opencode-permission (:role session))
                          :policy :workspace-write
                          :task-context (:task-context session)
                          :phase (:phase session)})))

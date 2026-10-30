@@ -168,4 +168,35 @@
   "reboot\\b"
   "init\\s+0"
   "halt\\b"
-  "poweroff\\b"]}
+  "poweroff\\b"]
+
+ ;; OpenCode runs no PreToolUse hook, so an artifact session hands it its
+ ;; role's tools as OpenCode permissions instead (OPENCODE_CONFIG_CONTENT,
+ ;; https://opencode.ai/docs/permissions/): every permission denied, then
+ ;; each OpenCode permission the role's tools map to here allowed.
+ ;; miniforge gives OpenCode no context MCP server, so the context tools
+ ;; map to OpenCode's own read and edit tools; external_directory stays
+ ;; denied, which keeps them inside the worktree. A role allowed to edit
+ ;; still may not edit :opencode/edit-deny, and a role allowed bash may not
+ ;; run :opencode/bash-deny. OpenCode matches both as globs (`*` is any
+ ;; text), which covers far less than the patterns above.
+ :opencode/tool-permissions
+ {"mcp__context__context_read"  ["read" "list"]
+  "mcp__context__context_grep"  ["grep"]
+  "mcp__context__context_glob"  ["glob" "list"]
+  "mcp__context__context_write" ["edit"]
+  "Read" ["read" "list"] "Glob" ["glob"] "Grep" ["grep"] "LS" ["list"]
+  "Write" ["edit"] "Edit" ["edit"] "MultiEdit" ["edit"] "NotebookEdit" ["edit"]
+  "Bash" ["bash"] "WebFetch" ["webfetch"] "WebSearch" ["websearch"]
+  "TodoWrite" ["todowrite"] "TaskCreate" ["todowrite"] "TaskUpdate" ["todowrite"]}
+
+ :opencode/edit-deny
+ [".git/*" ".claude/settings.json" ".claude/settings.local.json" ".mcp.json"
+  ".codex/config.toml" ".cursor/mcp.json" ".cursor/cli.json*" ".opencode/*"
+  "opencode.json" "opencode.jsonc" ".miniforge-session/*"]
+
+ :opencode/bash-deny
+ ["curl *" "wget *" "ssh *" "scp *" "sftp *" "rsync *" "nc *" "ncat *" "socat *"
+  "gh auth *" "gh api *" "gh secret *" "printenv*" "env" "export" "set"
+  "git push*" "git remote add *" "git remote set-url *" "git config *"
+  "git credential*" "aws *" "security *" "cat ~/.*" "cat /proc/*"]}

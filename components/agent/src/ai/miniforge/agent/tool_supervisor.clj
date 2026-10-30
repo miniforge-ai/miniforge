@@ -124,6 +124,13 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} opencode-permission
+  "OpenCode's permission block for a session of `role` under the shipped
+   tool policy (`tool-policy/opencode-permission`). An artifact session
+   passes it to the llm client, which hands it to OpenCode."
+  [role]
+  (tool-policy/opencode-permission @tool-policy role))
+
 ;; Core evaluation function
 (defn ^{:stratum 1} evaluate-tool-use
   "Evaluate a session's request to call `tool-name` with `tool-input`.
