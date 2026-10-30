@@ -3,7 +3,8 @@
 ;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 
 {:effect-transaction/messages
- {:grant/id-mismatch "Grant does not match the one recorded on the proposal"
+ {:attempt/exhausted "This effect has reached its limit of recorded attempts in this run; investigate before retrying"
+  :grant/id-mismatch "Grant does not match the one recorded on the proposal"
   :grant/effect-class-mismatch "Grant effect class does not match the proposed effect"
   :grant/recheck-failed "Grant re-check failed at commit: {outcome}"
   :record/change-invalid "EffectTransaction change failed validation"

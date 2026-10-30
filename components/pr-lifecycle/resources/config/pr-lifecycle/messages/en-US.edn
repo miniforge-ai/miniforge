@@ -42,6 +42,8 @@
   "Merge readiness check blocked the merge: {reason}"
   :merge/head-unavailable
   "Could not read the pull request head commit"
+  :merge/closed-unmerged
+  "GitHub reports the pull request closed without merging"
   :merge/grant-substituted
   "The merge proposal names a grant this attempt did not issue"
   :controller/lifecycle-starting

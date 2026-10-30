@@ -67,6 +67,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} terminal-result
+  "The result for a PR GitHub reports merged (`:pr/state` MERGED, with its
+   `:merge/sha`) or closed without merging, or nil when it is still open."
+  [operations worktree-path pr-number policy context observed]
+  (case (:pr/state observed)
+    "MERGED" (merged-result operations worktree-path pr-number policy context
+                            {} (:merge/sha observed))
+    "CLOSED" (dag/err :merge-closed-unmerged (messages/t :merge/closed-unmerged)
+                      {:effect/observed observed})
+    nil))
+
 (defn ^{:stratum 1} settlement-result
   "Translate one transaction state without overstating a pending merge."
   [operations worktree-path pr-number policy context settled]
