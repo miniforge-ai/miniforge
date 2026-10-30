@@ -164,6 +164,9 @@
           path (cli-config/write-claude-settings! dir :implementer dir)
           allow (set (get-in (json/parse-string (slurp path)) ["permissions" "allow"]))]
       (is (every? allow ["Bash" "Write" "mcp__context__context_write"]))))
+  (testing "the hook blocks the call when it times out or fails, rather than falling back to the allow rules"
+    (is (= "block" (get-in (cli-config/pre-tool-use-settings "true" #{})
+                           ["hooks" "PreToolUse" 0 "hooks" 0 "onFailure"]))))
   (testing "a role the policy does not list is allowed nothing"
     (is (= [] (get-in (cli-config/pre-tool-use-settings "true" (cli-config/role-allowed-tools :unlisted))
                       ["permissions" "allow"])))))
