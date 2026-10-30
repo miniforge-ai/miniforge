@@ -91,6 +91,8 @@
       (str/starts-with? line "git ls-remote origin refs/heads/")
       (let [b (str/replace (last-word line) "refs/heads/" "")]
         (ok (if-let [pushed (get-in @state [:pushed b])] (str pushed "\trefs/heads/" b) "")))
+      (and (:gh-down? @state) (str/starts-with? line "gh pr list"))
+      (fail "error connecting to api.github.com")
       (str/starts-with? line "gh pr list --head ")
       (ok (pr-lines prs (nth (str/split line #"\s+") 4)))
       (str/starts-with? line "gh pr create")

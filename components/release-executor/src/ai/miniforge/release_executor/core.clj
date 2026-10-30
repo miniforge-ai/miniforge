@@ -537,7 +537,18 @@
                        (git/exec! worktree-path ["git" "diff" "--cached" "--name-only"])
                        (sandbox/exec! executor environment-id "git diff --cached --name-only")))
           staged-output (get staged-r :output "")
-          staged-count (count (remove str/blank? (str/split-lines staged-output)))]
+          staged-count (count (remove str/blank? (str/split-lines staged-output)))
+          ;; Only asked once nothing is staged or ahead: the run's branch
+          ;; and its PR, to recognize a release that has since merged.
+          merged (delay
+                   (when (and create-pr? (:workflow provenance))
+                     {:head  (if host-mode?
+                               (git/exec! worktree-path ["git" "rev-parse" "HEAD"])
+                               (sandbox/exec! executor environment-id "git rev-parse HEAD"))
+                      :found (if host-mode?
+                               (git/find-pr! worktree-path branch (:github-token state))
+                               (sandbox/find-pr! executor environment-id branch
+                                                 (gh-exec-opts state)))}))]
       (cond
         (not (result/succeeded? stage-r))
         (fail state :stage-failed (:error stage-r))
@@ -562,16 +573,15 @@
         (assoc state :write-metrics {:total-operations 0 :files-written 0
                                      :preexisting-commits true})
 
-        (and create-pr? (:workflow provenance)
-             (let [head  (if host-mode?
-                           (git/exec! worktree-path ["git" "rev-parse" "HEAD"])
-                           (sandbox/exec! executor environment-id "git rev-parse HEAD"))
-                   found (if host-mode?
-                           (git/find-pr! worktree-path branch (:github-token state))
-                           (sandbox/find-pr! executor environment-id branch (gh-exec-opts state)))]
-               (and (result/succeeded? head)
-                    (= "MERGED" (get-in found [:pr :pr-state]))
-                    (= (str/trim (str (:output head))) (get-in found [:pr :pr-head-sha])))))
+        ;; A lookup that failed says nothing about an empty worktree.
+        (and @merged (not (result/succeeded? (:found @merged))))
+        (fail state :pr-lookup-failed (msg/t :pr/lookup-failed {:branch branch
+                                                                :error  (:error (:found @merged))}))
+
+        (let [{:keys [head found]} @merged]
+          (and head (result/succeeded? head)
+               (= "MERGED" (get-in found [:pr :pr-state]))
+               (= (str/trim (str (:output head))) (get-in found [:pr :pr-head-sha]))))
         (assoc state :write-metrics {:total-operations 0 :files-written 0
                                      :preexisting-commits true})
 

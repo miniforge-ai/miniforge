@@ -48,6 +48,11 @@
     (testing "a safe git branch name"
       (is (re-matches #"mf/[a-z0-9-]+-[0-9a-f]{8}" name)))))
 
+(deftest ^{:stratum 0} branch-name-never-carries-a-token-test
+  (let [token "ghp_abcdefghijklmnopqrstuvwxyz0123456789"]
+    (is (not (str/includes? (metadata/release-branch-name (random-uuid) nil (str token " fix the build"))
+                            "abcdefghijklmnopqrstuvwxyz0123456789")))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} release!
@@ -142,3 +147,14 @@
       (is (= 1 (count (:prs @state))))
       (is (not-any? #(str/includes? % "--amend") (:log @state))
           "no PR-doc amend onto a merged branch"))))
+
+(deftest ^{:stratum 2} retry-after-a-merge-with-github-down-test
+  (testing "a failed lookup is reported as such, not as an empty worktree"
+    (let [state  (atom (remote/initial-state))
+          run-id (random-uuid)
+          _      (release! state run-id)
+          _      (swap! state #(-> % (update-in [:prs 0] assoc :state "MERGED")
+                                   (assoc :merged-into-base? true :gh-down? true)))
+          again  (release! state run-id)]
+      (is (not (:success? again)))
+      (is (= :pr-lookup-failed (-> again :errors first :type))))))
