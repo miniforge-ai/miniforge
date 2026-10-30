@@ -190,8 +190,16 @@
   "Bash" ["bash"] "WebFetch" ["webfetch"] "WebSearch" ["websearch"]
   "TodoWrite" ["todowrite"] "TaskCreate" ["todowrite"] "TaskUpdate" ["todowrite"]}
 
+ ;; OpenCode matches these against the worktree-relative path, case-
+ ;; sensitively except on Windows, so on a case-insensitive macOS volume
+ ;; another spelling of an agent config path gets through. Those entries are
+ ;; defense in depth: OpenCode calls read no project config and Claude
+ ;; sessions no project settings. The .git entries matter: in a linked
+ ;; worktree .git is a pointer file the host's git follows, and a nested
+ ;; repository has its own .git.
  :opencode/edit-deny
- [".git/*" ".claude/settings.json" ".claude/settings.local.json" ".mcp.json"
+ [".git" ".git/*" "*/.git" "*/.git/*" ".GIT" ".GIT/*" ".Git" ".Git/*"
+  ".claude/settings.json" ".claude/settings.local.json" ".mcp.json"
   ".codex/config.toml" ".cursor/mcp.json" ".cursor/cli.json*" ".opencode/*"
   "opencode.json" "opencode.jsonc" ".miniforge-session/*"]
 

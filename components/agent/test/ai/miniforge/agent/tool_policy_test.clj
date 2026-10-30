@@ -20,8 +20,10 @@
    config/agent/tool-policy.edn lists for it, and a missing or unknown role
    gets none."
   (:require
+   [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.agent.implementer :as implementer]
    [ai.miniforge.agent.planner :as planner]
@@ -125,6 +127,14 @@
         (is (= ["*" "allow"] (first bash)))
         (is (= "deny" (get bash "git push*")))
         (is (= "deny" (get bash "curl *")))))
+    (testing "the .git pointer file and nested .git directories are not editable"
+      (doseq [path [".git" ".git/*" "*/.git" "*/.git/*"]]
+        (is (= "deny" (get-in (perm :implementer) ["edit" path])) path)))
+    (testing "rule order survives serialization at the size the implementer's block has"
+      (let [json (json/generate-string (perm :implementer))]
+        (is (str/starts-with? json "{\"*\":\"deny\",\"external_directory\":\"deny\","))
+        (is (str/includes? json "\"edit\":{\"*\":\"allow\",\".git\":\"deny\","))
+        (is (str/includes? json "\"bash\":{\"*\":\"allow\",\"curl *\":\"deny\","))))
     (testing "only the planner gets web access, and an unlisted role gets nothing"
       (is (= "allow" (get (perm :planner) "webfetch")))
       (is (nil? (get (perm :implementer) "webfetch")))

@@ -109,15 +109,19 @@
    - env-id      - environment/container ID
    - workdir     - workspace directory inside capsule
 
-   The returned fn takes exec opts as a second argument and passes their
-   `:env` entries (an OpenCode call's inline config) to the capsule
-   command, so a governed call keeps them. The executor has no stdin."
+   The returned fn takes exec opts as a second argument and runs the
+   command under `env K=V ...` for their `:env` entries (an OpenCode
+   call's inline config), so a governed call keeps them whether or not
+   the executor honours an :env option (the Kubernetes one does not). The
+   executor has no stdin."
   [execute-fn executor env-id workdir]
   (fn capsule-exec
     ([cmd] (capsule-exec cmd {}))
     ([cmd {:keys [env]}]
-     (let [result (execute-fn executor env-id cmd (cond-> {:workdir workdir}
-                                                     (seq env) (assoc :env env)))]
+     (let [cmd    (if (seq env)
+                    (into (into ["env"] (map (fn [[k v]] (str k "=" v))) (sort env)) cmd)
+                    cmd)
+           result (execute-fn executor env-id cmd {:workdir workdir})]
        (if (and (map? result) (:data result))
          {:out (get-in result [:data :stdout] "")
           :err (get-in result [:data :stderr] "")

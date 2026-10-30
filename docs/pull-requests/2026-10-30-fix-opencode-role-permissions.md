@@ -34,10 +34,14 @@ cannot write and only the implementer and tester can run Bash.
 3. Both session writers put it in `:supervision` as `:opencode-permission`. The llm
    client sends it the way #2291 sends its deny block: as the permissions of an agent
    defined in the call's inline config, with a random name per process, selected with
-   `--agent` and `--pure`. OpenCode applies an agent's rules after the global and
-   project ones, so a repository's `opencode.json` cannot widen the role's tools.
-   `cli-args/opencode-permission` picks the block (deny-all outside a session, the
-   role's inside one).
+   `--agent` and `--pure`, with the worktree's project config off (as #2291 does).
+   `cli-args/opencode-permission` picks the block: the role's for a session call that
+   carries one, deny-all for anything else, including a session call that carries none.
+4. Every OpenCode call now runs this way, so `opencode-args` drops the request's own
+   `:agent` and refuses `:attach`, `:command`, `:session`, `:continue?` and `:fork?` for
+   every call (no caller passes them).
+5. `:opencode/edit-deny` covers the `.git` pointer file of a linked worktree and nested
+   `.git` directories (`.git`, `*/.git`, `*/.git/*`, and `.GIT`/`.Git` spellings).
 
 ## Testing Plan
 
@@ -45,9 +49,13 @@ cannot write and only the implementer and tester can run Bash.
    role; the reviewer reads but cannot edit or run commands; the implementer's edit and
    bash rule objects deny agent config, `.git`, `git push` and `curl`; only the planner
    gets web access; an unlisted role gets nothing.
-2. `opencode-call-outside-a-session-is-isolated-test`: a session call carrying the
-   block runs `--pure` as the policy agent, the request's own agent dropped, with the
-   block as that agent's permissions in rule order.
+2. `opencode-env-sets-the-calls-permissions-test`: deny-all outside a session, for an
+   isolated call and for a session call without a block; a session call's block reaches
+   the agent in rule order at real sizes (a 9-key block with a 27-key bash object);
+   project config and plugins off; the operator's inline config kept.
+   `opencode-args-refuses-server-command-and-resume-test`: refused in and out of
+   sessions. The tool-policy test checks the implementer's serialized block keeps its
+   order and denies `.git` paths.
 3. Checked with OpenCode 1.18.30 `debug config` / `debug agent build`: every key is
    accepted, rule objects keep their order, and the allowed tools are on and the rest off.
 
@@ -61,7 +69,11 @@ role does not list.
 1. OpenCode matches bash rules as globs, so `:opencode/bash-deny` covers far less
    than the hook's regexes; the agent environment allowlist (#2284) and the capsule are
    the controls that hold.
-2. OpenCode sessions still get no context MCP server, so they read through OpenCode's
+2. OpenCode matches edit rules case-sensitively except on Windows, so on a
+   case-insensitive macOS volume other spellings of the listed paths get through.
+3. The role block's `read: allow` overrides OpenCode's default ask on `*.env` files,
+   as the Claude hook allows those reads.
+4. OpenCode sessions still get no context MCP server, so they read through OpenCode's
    own tools, kept inside the worktree by `external_directory: deny`.
 
 ## Related Issues/PRs
