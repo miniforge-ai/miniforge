@@ -233,6 +233,25 @@
                           (environment-status [_ _] (dag/ok {:status :running})))]
       (is (= "main" (sandbox/detect-default-branch failing-exec "env-1"))))))
 
+(deftest ^{:stratum 0} push-probe-asks-one-checkout-test
+  (testing "the probe's destination checks and its ls-remote all run in the
+            checkout the caller's opts select"
+    (let [seen (atom [])
+          exec (reify
+                 dag/TaskExecutor
+                 (executor-type [_] :mock)
+                 (available? [_] (dag/ok {:available? true}))
+                 (acquire-environment! [_ _ _] (dag/ok {}))
+                 (execute! [_ _env-id command opts]
+                   (swap! seen conj (:workdir opts))
+                   (dag/ok {:exit-code 0 :stdout "git@github.com:org/repo.git" :stderr ""}))
+                 (copy-to! [_ _ _ _] (dag/ok {}))
+                 (copy-from! [_ _ _ _] (dag/ok {}))
+                 (release-environment! [_ _] (dag/ok {}))
+                 (environment-status [_ _] (dag/ok {:status :running})))]
+      (sandbox/remote-branch-sha! exec "env-1" "feat/test" {:workdir "/repo"})
+      (is (= ["/repo" "/repo" "/repo"] @seen)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} create-mock-executor

@@ -328,8 +328,8 @@
    failed command's result."
   [executor env-id branch exec-opts]
   (or (validate-safe-branch-name branch)
-      (let [fetch  (exec! executor env-id "git remote get-url origin")
-            pushes (exec! executor env-id "git remote get-url --push --all origin")]
+      (let [fetch  (exec! executor env-id "git remote get-url origin" exec-opts)
+            pushes (exec! executor env-id "git remote get-url --push --all origin" exec-opts)]
         ;; ls-remote asks origin's fetch URL; it speaks for the push only
         ;; when the push goes there and nowhere else.
         (if-not (and (result/succeeded? fetch) (result/succeeded? pushes)
