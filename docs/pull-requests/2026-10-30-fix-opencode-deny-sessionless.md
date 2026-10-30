@@ -44,10 +44,13 @@ Bash under OpenCode's defaults with no check.
    permission rules apply after the agent's).
 4. A backend entry may carry an `:env-fn` (OpenCode does). `complete-impl` passes its
    entries as `:env` exec options; `default-exec-fn` and `start-capture-process!` set
-   them on top of the agent environment allowlist; `capsule-exec-fn` runs the capsule
-   command under an `env K=V ...` prefix for them, so an executor that ignores an
-   `:env` option (Kubernetes) cannot drop them; the backend preflight probe passes them
-   too. An operator `OPENCODE_CONFIG_CONTENT` that is not plain JSON (OpenCode also
+   them on top of the agent environment allowlist; the backend preflight probe passes
+   them too. The capsule exec adapter (`capsule-exec-fn`) refuses a call that carries
+   them, returning its usual error result: the executors have no secret-safe way to pass
+   them into a capsule, and running without them would drop the call's permissions. No
+   governed LLM client installs that adapter today (`runner-preparation` only stores it
+   in `:execution/exec-fn`); carrying the config into the capsule belongs with running
+   the agent CLI there. An operator `OPENCODE_CONFIG_CONTENT` that is not plain JSON (OpenCode also
    reads JSONC) fails the call instead of being dropped.
 
 ## Testing Plan
@@ -57,7 +60,7 @@ Bash under OpenCode's defaults with no check.
    global and agent permissions, the operator's inline config kept, `:attach` refused;
    a session call gets none of it.
 2. `opencode-call-carries-its-deny-config-test`, `backend-env-entries-reach-the-process-test`,
-   `capsule-exec-carries-env-entries-test`; the OpenCode preflight test.
+   `capsule-exec-refuses-env-entries-test`; the OpenCode preflight test.
 3. OpenCode 1.18.30 `debug agent` / `debug config`, with a project `opencode.json`
    and `.opencode/agent/<name>.md` that name the policy agent and add a local MCP
    server: without `OPENCODE_DISABLE_PROJECT_CONFIG` they turned `task` and `webfetch`
@@ -72,14 +75,21 @@ Bash under OpenCode's defaults with no check.
 
 ## Deployment Plan
 
-Ships with the next release. OpenCode calls inside an artifact session are unchanged
+Ships with the next release. Isolated OpenCode calls, and the backend preflight probe,
+no longer read the worktree's `opencode.json`: providers, endpoints and models defined
+only there must move to the operator's global OpenCode config
+(`~/.config/opencode/opencode.json`) or `OPENCODE_CONFIG_CONTENT`, or the preflight
+probe fails before the run starts. OpenCode calls inside an artifact session are unchanged
 here; giving them each role's tool permissions is the next change.
 
 ## Known limits
 
-1. Upstream OpenCode reports project-local plugins still loading under `--pure` and
-   `OPENCODE_PURE=1` on 1.18.31 and later (anomalyco/opencode#49836). With project
-   config off they should not be found, but that is not checked on those versions.
+1. Upstream OpenCode reports project-local plugins still loading on 1.18.31 and later
+   (anomalyco/opencode#49836), with `--pure`, `OPENCODE_PURE=1` and
+   `OPENCODE_DISABLE_PROJECT_CONFIG=1` all set. None of the three is a mitigation on
+   those versions; such a plugin runs code at startup outside tool permissions, and the
+   agent environment allowlist (#2284) only limits what it can read from the
+   environment.
 2. The operator's global OpenCode config still loads (provider settings); its
    permission rules come before the agent's, so the agent's `"*"` deny still wins.
 3. The operator's global OpenCode config is the operator's own and still loads: its
