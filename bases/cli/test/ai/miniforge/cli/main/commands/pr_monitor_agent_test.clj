@@ -41,21 +41,27 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} prompt-arity-returns-model-text-test
-  (testing "one argument: the monitor gets the model's text, in one turn"
-    (let [seen (atom nil)
-          client (llm/mock-client {:output "change-request"})]
-      (with-redefs [task-executor/create-generate-fn echo-fix-fn
-                    llm/chat (fn [c prompt opts]
-                               (reset! seen opts)
-                               (llm/complete c (assoc opts :prompt prompt)))]
-        (is (= "change-request" ((sut/monitor-generate-fn client) "classify this")))
-        (is (= sut/text-reply-max-turns (:max-turns @seen)))))))
+  (testing "one argument, completion-only backend: the monitor gets the model's text"
+    (with-redefs [task-executor/create-generate-fn echo-fix-fn
+                  llm/client-backend (constantly :anthropic-api)]
+      (is (= "change-request"
+             ((sut/monitor-generate-fn (llm/mock-client {:output "change-request"})) "classify this"))))))
 
 (deftest ^{:stratum 1} prompt-arity-returns-nil-on-failure-test
   (testing "a failed model call yields nil, which the classifier treats as no answer"
-    (let [client (llm/mock-client {:output "boom" :exit 1})]
-      (with-redefs [task-executor/create-generate-fn echo-fix-fn]
-        (is (nil? ((sut/monitor-generate-fn client) "classify this")))))))
+    (with-redefs [task-executor/create-generate-fn echo-fix-fn
+                  llm/client-backend (constantly :anthropic-api)]
+      (is (nil? ((sut/monitor-generate-fn (llm/mock-client {:output "boom" :exit 1})) "classify this"))))))
+
+(deftest ^{:stratum 1} prompt-arity-skips-agent-backends-test
+  (testing "one argument, agent backend: nil, and the agent is never called"
+    (let [called (atom false)]
+      (with-redefs [task-executor/create-generate-fn echo-fix-fn
+                    llm/chat (fn [& _] (reset! called true) {:success true :content "x"})]
+        (doseq [backend [:claude :codex :cursor :opencode]]
+          (with-redefs [llm/client-backend (constantly backend)]
+            (is (nil? ((sut/monitor-generate-fn (llm/mock-client {})) "classify this")) (name backend)))))
+      (is (false? @called)))))
 
 (deftest ^{:stratum 1} task-arity-runs-the-implementer-test
   (testing "two arguments: the fix task goes to the task-executor generate-fn"

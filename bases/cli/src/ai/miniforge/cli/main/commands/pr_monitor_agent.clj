@@ -21,6 +21,8 @@
    LLM generate-fn it classifies comments, answers questions and fixes
    change requests with."
   (:require
+   [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.task-executor.interface :as task-executor]
@@ -28,10 +30,14 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} text-reply-max-turns
-  "Agent turns allowed when the monitor asks for text (classifying a
-   comment, answering a question): one reply, no tool round trips."
-  1)
+(def ^{:stratum 0} completion-only-backends
+  "LLM backends that call a completion API over HTTP (:cmd \"http\"). They
+   have no tools, so a prompt to one can only produce text. The CLI
+   backends (claude, codex, cursor, opencode) run agents that can read
+   and write files: codex runs every call with workspace-write and no
+   approvals, and claude honours the user's own permission settings."
+  (into #{} (keep (fn [[backend {:keys [cmd]}]] (when (= "http" (str cmd)) backend)))
+        llm/backends))
 
 (defn ^{:stratum 0} parse-trusted-authors
   "Logins from a comma-separated --trusted-authors value, as a set; empty
@@ -47,17 +53,23 @@
 (defn ^{:stratum 1} monitor-generate-fn
   "generate-fn for the PR monitor, which calls it two ways:
    - with a prompt (classifying a comment, answering a question): returns
-     the model's text, or nil when the call fails;
+     the model's text, or nil when the call fails. Only a completion-only
+     backend is asked; with an agent backend it returns nil, so comments
+     are classified by heuristics and questions go unanswered, rather
+     than letting a comment's text drive an agent that can write files
+     outside the fix loop;
    - with a fix task and loop context (fixing a change request): returns
      the implementer agent's {:artifact :tokens}, the same generate-fn the
      PR lifecycle controller gets from the task runner."
   [llm-client]
-  (let [fix-fn (task-executor/create-generate-fn llm-client)]
+  (let [fix-fn (task-executor/create-generate-fn llm-client)
+        text? (contains? completion-only-backends (llm/client-backend llm-client))]
     (fn
       ([prompt]
-       (let [response (llm/chat llm-client prompt {:max-turns text-reply-max-turns})]
-         (when (llm/success? response)
-           (llm/get-content response))))
+       (when text?
+         (let [response (llm/chat llm-client prompt)]
+           (when (llm/success? response)
+             (llm/get-content response)))))
       ([task ctx]
        (fix-fn task ctx)))))
 
@@ -67,7 +79,13 @@
   "The :generate-fn and :trusted-authors entries for create-pr-monitor,
    from the command's --trusted-authors option and the configured LLM
    backend. An unknown backend throws, so the monitor does not start
-   without the generate-fn it would need to act."
+   without the generate-fn it would need to act. Prints a notice when the
+   backend is an agent, so comment classification and question answers
+   are off."
   [{:keys [trusted-authors]}]
-  {:generate-fn (monitor-generate-fn (context/create-llm-client nil nil true))
-   :trusted-authors (parse-trusted-authors trusted-authors)})
+  (let [client (context/create-llm-client nil nil true)
+        backend (llm/client-backend client)]
+    (when-not (contains? completion-only-backends backend)
+      (display/print-info (messages/t :pr/monitor-text-backend-unsafe {:backend (name backend)})))
+    {:generate-fn (monitor-generate-fn client)
+     :trusted-authors (parse-trusted-authors trusted-authors)}))
