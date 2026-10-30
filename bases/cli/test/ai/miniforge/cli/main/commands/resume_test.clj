@@ -27,6 +27,7 @@
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.control :as control]
    [ai.miniforge.cli.main.commands.resume :as sut]
+   [ai.miniforge.cli.main.commands.resume-anomaly :as resume-anomaly]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
@@ -70,7 +71,7 @@
                                   "Invalid resume request"
                                   {:workflow-id "bad"})
           thrown (try+
-                  (#'sut/throw-resume-anomaly! source)
+                  (resume-anomaly/throw-resume-anomaly! source)
                   (catch [:anomaly/category :anomalies/incorrect] m m))]
       (is (= :anomalies/incorrect (:anomaly/category thrown)))
       (is (= :invalid-input (:anomaly/type thrown)))
