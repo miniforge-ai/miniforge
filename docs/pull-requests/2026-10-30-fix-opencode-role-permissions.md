@@ -74,7 +74,15 @@ role does not list.
 3. The role block's `read: allow` overrides OpenCode's default ask on `*.env` files,
    as the Claude hook allows those reads.
 4. OpenCode sessions still get no context MCP server, so they read through OpenCode's
-   own tools, kept inside the worktree by `external_directory: deny`.
+   own tools, kept inside the worktree by `external_directory: deny`. OpenCode checks
+   that path lexically, so a symlink in the worktree (one committed on a branch under
+   review, say) that points at a file outside it can be read, and a link can alias a
+   protected edit path. The Claude hook resolves paths before it checks them; OpenCode
+   runs no hook, so the capsule's filesystem boundary is the control for this.
+5. Every OpenCode call now carries env entries, so the capsule exec adapter refuses it
+   (#2291). No governed LLM client installs that adapter today (`runner-preparation`
+   only stores it in `:execution/exec-fn`, which nothing reads); carrying the config
+   into a capsule is part of running the agent CLI there.
 
 ## Related Issues/PRs
 
