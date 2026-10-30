@@ -29,13 +29,13 @@
       (ctx/transition-to-failed)))
 
 (defn- ^{:stratum 0} execute-supervised
-  [pipeline context callbacks iteration]
+  [pipeline context callbacks iteration control-state]
   (let [state (monitoring/build-supervision-state context iteration)
         result (monitoring/check-workflow-supervision
                  (:execution/supervision-runtime context) state)]
     (if (= :halt (:status result))
       (monitoring/handle-supervision-halt context result ctx/transition-to-failed)
-      (phase-step/execute-phase pipeline context callbacks))))
+      (phase-step/execute-phase pipeline context callbacks control-state))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -72,7 +72,19 @@
   (await-resume! control-state)
   (let [result (if-let [stop-anomaly (check-stopped control-state)]
                  (apply-dashboard-stop context stop-anomaly)
-                 (execute-supervised pipeline context callbacks iteration))]
+                 ;; A cancel during the phase interrupts it (and the agent
+                 ;; CLI it waits on). An interrupted phase can come back as
+                 ;; an ordinary failure, so a stop is recorded as one here,
+                 ;; before the checkpoint. A run the phase completed stays
+                 ;; completed: a cancel that lands after the work is done
+                 ;; does not undo it.
+                 (let [phase-context (execute-supervised pipeline context callbacks iteration
+                                                         control-state)
+                       stop-anomaly (when-not (= :completed (:execution/status phase-context))
+                                      (check-stopped control-state))]
+                   (if stop-anomaly
+                     (apply-dashboard-stop phase-context stop-anomaly)
+                     phase-context)))]
     ;; A failed write is warned about and published, never thrown, so
     ;; the run goes on without that checkpoint.
     (runner-checkpoint/checkpoint! result)

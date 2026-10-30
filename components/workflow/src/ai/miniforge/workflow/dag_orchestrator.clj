@@ -70,7 +70,9 @@
    [ai.miniforge.workflow.dag-task-execution :as dag-task-execution]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-defaults :as runner-defaults]
-   [clojure.set :as set]))
+   [ai.miniforge.workflow.stop-signal :as stop-signal]
+   [clojure.set :as set]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -141,16 +143,21 @@
    Ensures all futures are cancelled on failure so that sub-workflow
    finally blocks can release their execution environments (Docker
    containers, worktrees). Without cancellation, abandoned futures
-   keep capsules alive until the JVM exits."
+   keep capsules alive until the JVM exits.
+
+   A cancel does not interrupt the wait (`stop-signal/coordinating`): each
+   task's sub-workflow shares the control state and stops its own phase,
+   and the batch collects what each returns."
   [tasks execute-fn context]
   (let [task-futures (doall
                       (map (fn [[task-id task]]
                              [task-id (future (execute-fn task context))])
                            tasks))]
     (try
-      (->> task-futures
-           (map (fn [[task-id f]] [task-id @f]))
-           (into {}))
+      (stop-signal/coordinating
+       #(->> task-futures
+             (map (fn [[task-id f]] [task-id @f]))
+             (into {})))
       (catch Throwable t
         ;; Cancel outstanding futures so their sub-workflow finally blocks
         ;; run and release any acquired execution environments.
@@ -230,9 +237,22 @@
           paused  (do (when-not logged?
                         (log/info logger :dag-orchestrator :dag/paused
                                   {:message (messages/t :status/paused)}))
-                      (Thread/sleep (long (runner-defaults/pause-poll-interval-ms)))
+                      ;; A cancel's interrupt during the wait is the cancel:
+                      ;; the loop re-reads :stopped and returns the usual
+                      ;; cancelled result.
+                      (try+ (Thread/sleep (long (runner-defaults/pause-poll-interval-ms)))
+                            (catch InterruptedException e
+                              (when-not (stop-signal/stop-caused? control-state e) (throw e))))
                       (recur true))
           :else   false)))))
+
+(defn- ^{:stratum 0} stop-aware-sleep
+  "Sleep `ms`; a cancel's interrupt ends the sleep early instead of
+   escaping (another interrupt still throws)."
+  [control-state ms]
+  (try+ (Thread/sleep (long ms))
+        (catch InterruptedException e
+          (when-not (stop-signal/stop-caused? control-state e) (throw e)))))
 
 (defn- ^{:stratum 0} cancelled-dag-result
   "Terminal result for a run the operator stopped between batches. Built by
@@ -406,13 +426,21 @@
                      (inc iteration))
 
               (seq rate-limited-ids)
-              (let [decision (dag-rate-limit/handle-rate-limit-in-batch
-                              context rate-limited-ids new-completed new-failed
-                              all-results results event-stream workflow-id logger)]
+              (let [;; A cancel's interrupt ends a short rate-limit wait;
+                    ;; the loop then sees :stopped and returns the
+                    ;; cancelled result with every result so far.
+                    decision (binding [resilience/*sleep!* (partial stop-aware-sleep control-state)]
+                               (dag-rate-limit/handle-rate-limit-in-batch
+                                context rate-limited-ids new-completed new-failed
+                                all-results results event-stream workflow-id logger))]
                 (if (= :continue (:action decision))
                   (recur new-completed
                          new-failed
-                         (merge all-results (select-keys results completed))
+                         ;; A cancel that ended the wait keeps this batch's
+                         ;; spend, as the branch above does.
+                         (merge all-results (if (some-> control-state deref :stopped)
+                                              results
+                                              (select-keys results completed)))
                          (into sub-workflow-ids batch-sub-ids)
                          (:new-backend decision)
                          (inc iteration))

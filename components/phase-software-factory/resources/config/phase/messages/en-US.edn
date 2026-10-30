@@ -7,6 +7,7 @@
 
   ;; Implementation phase
   :implement/agent-error           "Agent returned error status"
+  :implement/run-stopped           "The run was cancelled while the implementer ran"
   :implement/exhausted-retries     "Implementation failed after exhausting retry budget"
   :implement/warn-no-output        "WARNING: implement phase result has no :output — artifact may be nil"
   :implement/no-worktree           "No :execution/worktree-path in context — workflow runner must acquire an execution environment before the implement phase"
