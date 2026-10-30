@@ -148,7 +148,17 @@
                                       extras))
       (anomaly/ref-write-failed-anomaly task-id ref-name commit-sha upd))))
 
-(defn ^{:stratum 0} derive-resolution-overrides
+(defn- ^{:stratum 0} stop-guarded-edit-fn
+  "`edit` (a resolution agent-edit-fn) that does nothing once
+   `control-state` is stopped: an agent error response can swallow the
+   interrupt, and the resolution loop would call the agent again."
+  [control-state edit]
+  (fn [& args]
+    (when-not (:stopped @control-state) (apply edit args))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} derive-resolution-overrides
   "Build the resolution-overrides map handed to `resolve-conflict!`.
    Combines:
    - explicit overrides on `context` under `:dag/resolution-overrides`
@@ -165,14 +175,18 @@
   [context]
   (let [explicit (get context :dag/resolution-overrides)
         llm-backend (:llm-backend context)
+        control-state (:control-state context)
         auto (when (and llm-backend (not (:agent-edit-fn explicit)))
                {:agent-edit-fn
                 (merge-resolution/agent-driven-edit-fn
                  (cond-> {:llm-backend llm-backend}
-                   (:logger context) (assoc :logger (:logger context))))})]
-    (merge auto explicit)))
-
-;------------------------------------------------------------------------------ Layer 1
+                   (:logger context) (assoc :logger (:logger context))))})
+        overrides (merge auto explicit)
+        edit (:agent-edit-fn overrides)]
+    ;; Once the run is cancelled the agent is not called again; the loop
+    ;; then ends within its budget without an LLM call.
+    (cond-> overrides
+      (and control-state edit) (assoc :agent-edit-fn (stop-guarded-edit-fn control-state edit)))))
 
 (defn ^{:stratum 1} attempt-resolution!
   "Spec §6.1 conflict path. The merge produced a conflict; spawn the
