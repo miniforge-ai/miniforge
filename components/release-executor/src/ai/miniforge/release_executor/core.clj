@@ -401,10 +401,11 @@
 
 (defn ^{:stratum 1} step-verify-prepared
   "Fail closed unless the worktree is where prepare-release left it: the
-   prepared branch checked out at the prepared commit. Publishing runs
-   later (after the release gates); were the worktree moved in between,
-   the push and the PR would carry commits nobody validated, or the wrong
-   branch."
+   prepared branch checked out at the prepared commit, with nothing staged.
+   Publishing runs later (after the release gates); were the worktree
+   moved in between, the push and the PR would carry commits nobody
+   validated, or the wrong branch, and a staged change would ride the
+   PR-doc amend."
   [state]
   (if (failed? state)
     state
@@ -414,12 +415,20 @@
                               (sandbox/exec! executor environment-id (str/join " " argv))))
           on     (run ["git" "rev-parse" "--abbrev-ref" "HEAD"])
           at     (run ["git" "rev-parse" "HEAD"])
+          ;; Exits 0 only when the index matches HEAD; 1 when something is
+          ;; staged, anything else when git could not tell.
+          index  (run ["git" "diff" "--cached" "--quiet"])
           head   {:head-branch (str/trim (str (:output on))) :head-sha (str/trim (str (:output at)))}]
-      (if (and (result/succeeded? on) (result/succeeded? at)
-               (= branch (:head-branch head)) (= commit-sha (:head-sha head)))
-        state
+      (cond
+        (not (and (result/succeeded? on) (result/succeeded? at)
+                  (= branch (:head-branch head)) (= commit-sha (:head-sha head))))
         (fail state :worktree-moved
-              (msg/t :publish/worktree-moved (merge {:branch branch :commit-sha commit-sha} head)))))))
+              (msg/t :publish/worktree-moved (merge {:branch branch :commit-sha commit-sha} head)))
+
+        (not (result/succeeded? index))
+        (fail state :worktree-moved (msg/t :publish/index-changed {:branch branch}))
+
+        :else state))))
 
 (defn ^{:stratum 1} step-check-gh-auth
   "Check gh CLI auth.  Dispatches to git/check-gh-auth! (host) or
