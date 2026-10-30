@@ -19,6 +19,7 @@
   "Granted deployment behavior at the provider and durable-record seams."
   (:require
    [ai.miniforge.effect-transaction.interface :as fx]
+   [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.phase-deployment.deploy-authority :as authority]
    [ai.miniforge.phase-deployment.deploy-governed :as governed]
    [ai.miniforge.phase-deployment.policy :as policy]
@@ -137,7 +138,10 @@
     (is (= :failed (:deploy/status result)))
     (is (= rollback-info (:deploy/rollback-info result)))
     (is (= rollback-info
-           (get-in record [:effect/observed :deploy/rollback-info])))))
+           (get-in record [:effect/observed :deploy/rollback-info])))
+    (is (= :revocation/superseded
+           (:grant/revocation-reason
+            (grant/current (:grant-breach-dir ctx) (:deploy/grant-id result)))))))
 
 (deftest ^{:stratum 2} successful-deploy-records-before-exact-apply-test
   (let [calls (atom [])
@@ -191,3 +195,15 @@
                                      (recording-operations calls) now)]
       (is (= :failed (:deploy/status result)))
       (is (not (applied? calls))))))
+
+(deftest ^{:stratum 2} cancelled-run-revokes-before-apply-test
+  (let [calls (atom [])
+        ctx (assoc (context) :execution/opts
+                   {:control-state (atom {:paused false :stopped true})})
+        result (governed/transact! ctx deploy-config
+                                   (recording-operations calls) now)]
+    (is (= :failed (:deploy/status result)))
+    (is (not (applied? calls)))
+    (is (= :revocation/operator
+           (:grant/revocation-reason
+            (grant/current (:grant-breach-dir ctx) (:deploy/grant-id result)))))))
