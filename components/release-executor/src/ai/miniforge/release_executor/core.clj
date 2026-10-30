@@ -988,11 +988,13 @@
                     {:outcome :done :observed (pr-observed r) :ran? true}
                     {:outcome :failed :failure (:error r)})))]
           (cond
-            (and (= :done outcome) ran?)
-            (assoc state :pr-number (:pr/number observed) :pr-url (:pr/url observed))
+            ;; Opened now, or by an earlier attempt whose record (or the
+            ;; reconciling lookup) names the PR: the lookup above can lag.
+            (and (= :done outcome) (:pr/url observed))
+            (cond-> (assoc state :pr-number (:pr/number observed) :pr-url (:pr/url observed))
+              (not ran?) (assoc :pr-reused? true))
 
-            ;; Recorded as opened by an earlier attempt, yet the lookup
-            ;; above listed no PR: do not claim it.
+            ;; Recorded as opened, yet nothing names the PR: do not claim it.
             (= :done outcome)
             (fail state :pr-unconfirmed (msg/t :pr/recorded-not-found {:branch branch}))
 

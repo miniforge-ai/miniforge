@@ -129,3 +129,14 @@
       (is (not (:success? resumed)))
       (is (= :pr-lookup-failed (-> resumed :errors first :type)))
       (is (= 1 (count (:prs state)))))))
+
+(deftest ^{:stratum 2} crash-after-the-pr-with-a-lagging-lookup-test
+  (testing "the resume's first lookup lists no PR yet; reconciling the creation
+            record asks again, finds it, and reuses it"
+    (let [lagged (atom false)
+          lag    (fn [_state line]
+                   (when (and (str/starts-with? line "gh pr list")
+                              (compare-and-set! lagged false true))
+                     {:exit-code 0 :stdout "" :stderr ""}))
+          run    (crash-then-resume (fn [_ _]) (crash-on "gh pr create") lag)]
+      (is (one-pr-and-success? run)))))
