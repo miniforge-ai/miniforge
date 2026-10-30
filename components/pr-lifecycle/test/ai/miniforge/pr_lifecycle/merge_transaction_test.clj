@@ -44,6 +44,11 @@
    (str (.toFile (Files/createTempDirectory "merge-grants" (into-array FileAttribute []))))
    :pr/repo "miniforge-ai/miniforge"})
 
+(def ^{:stratum 0} target
+  {:pr/repo "miniforge-ai/miniforge"
+   :pr/number 42
+   :pr/head-sha "0123456789abcdef0123456789abcdef01234567"})
+
 (defn ^{:stratum 0} gh-returning
   "An injected gh that answers every call with `body`."
   [body]
@@ -69,8 +74,8 @@
 
 (defn ^{:stratum 1} merge-case! []
   (let [context (ctx)
-        prepared (authority/prepare context (random-uuid)
-                                    (:pr/repo context) 42 :squash now)]
+        prepared (authority/prepare context (random-uuid) target
+                                    {:ready? true :blocking []} :squash now)]
     {:context context
      :authority prepared
      :transaction (mt/propose! context prepared now)}))

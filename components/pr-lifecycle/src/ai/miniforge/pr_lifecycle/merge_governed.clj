@@ -35,9 +35,9 @@
      :output (:output (:data result))}))
 
 (defn- ^{:stratum 0} enable-merge
-  [operations worktree-path pr-number policy]
+  [operations worktree-path pr-number policy head-sha]
   (let [result ((:merge-pr operations)
-                worktree-path pr-number :policy policy)]
+                worktree-path pr-number :policy policy :head-sha head-sha)]
     {:ok? (dag/ok? result) :error (:error result)}))
 
 (defn- ^{:stratum 0} propose-authority!
@@ -60,11 +60,14 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} transact!
-  "Prepare authority, durably propose, then commit an allowed merge."
-  [operations worktree-path pr-number repo policy context ^Instant now]
-  (let [run-gh (partial provider-command operations worktree-path)
-        enable! (partial enable-merge operations worktree-path pr-number policy)
-        prepared (authority/prepare context (random-uuid) repo pr-number
+  "Prepare authority, durably propose, then commit an allowed merge of
+   `target` (`:pr/repo`, `:pr/number`, `:pr/head-sha`)."
+  [operations worktree-path target readiness policy context ^Instant now]
+  (let [pr-number (:pr/number target)
+        run-gh (partial provider-command operations worktree-path)
+        enable! (partial enable-merge operations worktree-path pr-number policy
+                         (:pr/head-sha target))
+        prepared (authority/prepare context (random-uuid) target readiness
                                     (:method policy) now)
         proposed (propose-authority! context prepared now)]
     (cond

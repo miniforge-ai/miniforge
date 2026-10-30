@@ -22,11 +22,13 @@
    [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.pr-lifecycle.merge :as merge]
+   [ai.miniforge.pr-lifecycle.merge-authority :as authority]
    [ai.miniforge.pr-lifecycle.merge-readiness :as readiness]
    [clojure.test :refer [deftest is testing]])
   (:import
    [java.nio.file Files]
-   [java.nio.file.attribute FileAttribute]))
+   [java.nio.file.attribute FileAttribute]
+   [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -43,6 +45,8 @@
    (str (.toFile (Files/createTempDirectory
                   "merge-grants" (into-array FileAttribute []))))})
 
+(def ^{:stratum 0} head-sha "0123456789abcdef0123456789abcdef01234567")
+
 (defn- ^{:stratum 0} ready-result
   [& _]
   {:ready? true :checks {} :blocking []})
@@ -53,7 +57,8 @@
    {:principal "runtime:test"
     :effect-class :effect/merge
     :scope (merge (select-keys request
-                               [:effect/id :workflow-run/id :pr/repo :pr/number])
+                               [:effect/id :workflow-run/id :pr/repo :pr/number
+                                :pr/head-sha])
                   scope-overrides)
     :constraints {:constraint/max-count 1}
     :delegable? false
@@ -66,11 +71,29 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} head-result
+  [& _]
+  (dag/ok {:pr/head-sha head-sha}))
+
+(deftest ^{:stratum 1} unready-merge-is-refused-at-issuance-test
+  (testing "readiness the caller evaluated reaches the issuer's preflight"
+    (let [context (merge-context)
+          target {:pr/repo "miniforge-ai/miniforge" :pr/number 123
+                  :pr/head-sha head-sha}
+          refused (authority/prepare context (random-uuid) target
+                                     {:ready? false :blocking [:ci-not-green]}
+                                     :squash (Instant/now))]
+      (is (= :unauthorized (:anomaly/type refused))
+          "issuance refuses an unready merge instead of granting it")
+      (is (= :anomalies.execution-grant/refused
+             (:anomaly/subtype refused))))))
+
 (defn- ^{:stratum 1} attempt-with-issuer
   [issuer]
   (let [merge-calls (atom 0)
         context (merge-context)]
     (with-redefs [readiness/evaluate ready-result
+                  merge/read-pr-head (constantly (dag/ok {:pr/head-sha head-sha}))
                   merge/read-repository repository-result
                   grant/issue-for-effect issuer
                   merge/merge-pr!
@@ -81,10 +104,13 @@
                                    merge/default-merge-policy context)
        :merge-calls @merge-calls})))
 
-(deftest ^{:stratum 1} governed-merge-records-authority-before-provider-test
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} governed-merge-records-authority-before-provider-test
   (let [context (merge-context)
         at-command (atom nil)]
     (with-redefs [readiness/evaluate ready-result
+                  merge/read-pr-head head-result
                   merge/read-repository repository-result
                   merge/merge-pr!
                   (fn [_ _ & _]
@@ -110,12 +136,14 @@
         (is (= "miniforge-ai/miniforge"
                (get-in @at-command [:effect/proposal :pr/repo])))
         (is (= 123 (get-in @at-command [:effect/proposal :pr/number])))
+        (is (= head-sha (get-in @at-command [:effect/proposal :pr/head-sha])))
         (is (= :granted
                (:effect/authority
                 (first (fx/list-records (:effect-store-dir context))))))))))
 
-(deftest ^{:stratum 1} pending-auto-merge-is-not-completed-test
+(deftest ^{:stratum 2} pending-auto-merge-is-not-completed-test
   (with-redefs [readiness/evaluate ready-result
+                merge/read-pr-head head-result
                 merge/read-repository repository-result
                 merge/merge-pr!
                 (fn [_ _ & _] (dag/ok {:merged? true :method :squash}))
@@ -130,8 +158,9 @@
       (is (true? (get-in result [:data :auto-merge/enabled?])))
       (is (nil? (get-in result [:data :merge/sha]))))))
 
-(deftest ^{:stratum 1} uncertain-merge-does-not-claim-auto-merge-test
+(deftest ^{:stratum 2} uncertain-merge-does-not-claim-auto-merge-test
   (with-redefs [readiness/evaluate ready-result
+                merge/read-pr-head head-result
                 merge/read-repository repository-result
                 merge/merge-pr!
                 (fn [_ _ & _] (throw (ex-info "provider disconnected" {})))]
@@ -146,7 +175,22 @@
              (get-in result [:error :data :effect/failure])))
       (is (nil? (get-in result [:data :auto-merge/enabled?]))))))
 
-;------------------------------------------------------------------------------ Layer 2
+(deftest ^{:stratum 2} provider-merge-is-bound-to-the-head-commit-test
+  (let [calls (atom [])]
+    (with-redefs [readiness/evaluate ready-result
+                  merge/read-pr-head head-result
+                  merge/read-repository repository-result
+                  merge/run-gh-command
+                  (fn [args _]
+                    (swap! calls conj args)
+                    (dag/ok {:output "{\"state\":\"MERGED\",\"mergeCommit\":{\"oid\":\"squash\"}}"}))]
+      (merge/attempt-merge "/tmp" 123 merge/default-merge-policy
+                           (merge-context))
+      (let [merge-call (first (filter #(= ["gh" "pr" "merge"] (take 3 %))
+                                      @calls))]
+        (is (= ["--match-head-commit" head-sha] (take-last 2 merge-call))
+            (str "gh pr merge must name the authorized head, saw: "
+                 (pr-str merge-call)))))))
 
 (deftest ^{:stratum 2} denied-authority-never-invokes-merge-test
   (testing "an absent grant denies before the provider mutation"

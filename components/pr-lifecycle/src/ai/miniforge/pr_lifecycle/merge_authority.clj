@@ -21,7 +21,8 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.execution-grant.interface :as grant]
-   [ai.miniforge.gate.interface :as gate])
+   [ai.miniforge.gate.interface :as gate]
+   [ai.miniforge.pr-lifecycle.messages :as messages])
   (:import
    [java.time Instant]))
 
@@ -50,21 +51,42 @@
   (-> (dissoc request :workflow-run/status :effect/class :effect/preflight)
       (assoc :merge/method merge-method)))
 
-(defn ^{:stratum 0} request
-  "Build the closed, runtime-attested request for one merge effect."
-  [context effect-id repo pr-number]
+(defn- ^{:stratum 0} ready?
+  [readiness]
+  (and (true? (:ready? readiness)) (empty? (:blocking readiness))))
+
+(defn- ^{:stratum 0} readiness-blocker
+  [reason]
+  {:rule-id (keyword "merge-readiness" (name reason))
+   :message (messages/t :merge/readiness-blocked {:reason (name reason)})})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} readiness-classification
+  "Classify each merge-readiness blocking reason as a denying violation."
+  [readiness]
+  (cond-> (assoc empty-classification
+                 :blocking (mapv readiness-blocker (:blocking readiness)))
+    (and (not (ready? readiness)) (empty? (:blocking readiness)))
+    (update :blocking conj (readiness-blocker :readiness-unknown))))
+
+(defn ^{:stratum 1} request
+  "Build the closed request for one merge of `target`, a map of
+   `:pr/repo`, `:pr/number` and `:pr/head-sha`. The preflight result is
+   the readiness the caller evaluated, so issuance refuses an unready PR."
+  [context effect-id target readiness]
   {:workflow-run/id (:run-id context)
    :workflow-run/status :running
    :effect/id effect-id
    :effect/class :effect/merge
    :effect/preflight {:preflight/type :preflight/merge-readiness
-                      :preflight/result :allow}
-   :pr/repo repo
-   :pr/number pr-number})
+                      :preflight/result (if (ready? readiness) :allow :deny)}
+   :pr/repo (:pr/repo target)
+   :pr/number (:pr/number target)
+   :pr/head-sha (:pr/head-sha target)})
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} breach-dir
+(defn ^{:stratum 1} breach-dir
+  "The registry and breach-history directory for merge grants."
   [context]
   (or (:grant-breach-dir context)
       (str (config/miniforge-home) "/" default-breach-dir-property)))
@@ -86,9 +108,10 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} prepare
-  "Issue, authorize, and decide authority for a preflight-approved merge."
-  [context effect-id repo pr-number merge-method ^Instant now]
-  (let [request (request context effect-id repo pr-number)
+  "Issue, authorize, and decide authority for one merge of `target` at
+   the readiness the caller evaluated."
+  [context effect-id target readiness merge-method ^Instant now]
+  (let [request (request context effect-id target readiness)
         grant-record (grant/issue-for-effect (breach-dir context) request now)]
     (if (anomaly/anomaly? grant-record)
       grant-record
@@ -97,7 +120,7 @@
                                            {:effect/scope scope
                                             :usage/count 1}
                                            now)
-            envelope (gate/decide empty-classification
+            envelope (gate/decide (readiness-classification readiness)
                                   unpinned-policy
                                   authorization)]
         (authority-record request merge-method grant-record
