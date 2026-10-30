@@ -25,6 +25,7 @@
   (:require
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.pr-lifecycle.controller :as controller]
+   [ai.miniforge.pr-lifecycle.fix-loop :as fix]
    [ai.miniforge.pr-lifecycle.gh-replay-test-support :as gh]
    [ai.miniforge.pr-lifecycle.messages :as messages]
    [babashka.process :as process]
@@ -47,6 +48,19 @@
    [{:bucket "fail" :name "Workers Builds: site" :state "FAILURE" :workflow ""
      :link "https://dash.cloudflare.com/0/workers/services/view/site/production/builds/1"}]))
 
+(deftest ^{:stratum 0} review-prompt-renders-every-comment-shape-test
+  (testing "the review prompt shows file, line and text for each caller's comment shape"
+    (let [prompt (fix/build-fix-prompt
+                  {:fix/type :review-changes :fix/task-id "t"
+                   :fix/review-comments
+                   [{:file "a.clj" :line 1 :change "rename foo"}
+                    {:actionable? true :comment {:comment/path "b.clj" :comment/line 2
+                                                 :comment/body "add a test"}}
+                    {:body "drop the println" :path "c.clj" :line 3 :author "jane"}]})]
+      (is (str/includes? prompt "- a.clj:1\n  rename foo"))
+      (is (str/includes? prompt "- b.clj:2\n  add a test"))
+      (is (str/includes? prompt "- c.clj:3\n  drop the println")))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} ci-failure-fix-tasks
@@ -66,8 +80,14 @@
                                               {:success false :termination :stubbed})]
                 (swap! ctrl assoc :pr {:pr/id 2244 :pr/branch "feat/x" :pr/head-sha "abc"})
                 (controller/start-ci-monitoring! ctrl)
-                (controller/run-lifecycle! ctrl nil :skip-pr-creation? true)))]
-    {:result (deref (future (run)) scenario-timeout-ms ::timed-out)
+                (controller/run-lifecycle! ctrl nil :skip-pr-creation? true)))
+        worker (future (run))
+        result (deref worker scenario-timeout-ms ::timed-out)]
+    ;; Interrupting the worker unwinds its with-redefs, so the stubs do
+    ;; not outlive a run that timed out.
+    (when (= ::timed-out result)
+      (future-cancel worker))
+    {:result result
      :tasks @tasks}))
 
 ;------------------------------------------------------------------------------ Layer 2

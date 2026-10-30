@@ -118,9 +118,16 @@
            "Requested changes:\n"
            (str/join "\n\n"
                      (->> (:fix/review-comments fix-context)
+                          ;; Callers pass extracted changes {:file :line :change},
+                          ;; triage results wrapping a parsed :comment, or the
+                          ;; PR monitor's {:body :path :line} comments.
                           (map (fn [c]
-                                 (str "- " (:file c) (when (:line c) (str ":" (:line c)))
-                                      "\n  " (:change c))))
+                                 (let [comment (get c :comment c)
+                                       file (or (:file c) (:comment/path comment) (:path comment))
+                                       line (or (:line c) (:comment/line comment) (:line comment))
+                                       change (or (:change c) (:comment/body comment) (:body comment))]
+                                   (str "- " file (when line (str ":" line))
+                                        "\n  " change))))
                           (take 10)))
            "\n\nGenerate fixes that address these specific concerns.")
 
