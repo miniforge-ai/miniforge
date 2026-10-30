@@ -1,0 +1,42 @@
+{
+  "action": "closed",
+  "number": 2254,
+  "pull_request": {
+    "base": {
+      "ref": "main",
+      "repo": {
+        "full_name": "miniforge-ai/miniforge"
+      },
+      "sha": "69fa2cb21400478ff4f1dde482dca067eea48941"
+    },
+    "head": {
+      "ref": "refactor/ci-checks-namespace",
+      "repo": {
+        "full_name": "miniforge-ai/miniforge"
+      },
+      "sha": "d981e67fb2b5c9f44fca78e408e5e466f411c062"
+    },
+    "html_url": "https://github.com/miniforge-ai/miniforge/pull/2254",
+    "merge_commit_sha": "16840259d909d46bee2b328b9391a2186a39f280",
+    "merged": true,
+    "merged_at": "2026-10-30T00:26:20Z",
+    "number": 2254,
+    "state": "closed",
+    "user": {
+      "login": "H31MDALLR",
+      "type": "User"
+    }
+  },
+  "repository": {
+    "default_branch": "main",
+    "full_name": "miniforge-ai/miniforge",
+    "html_url": "https://github.com/miniforge-ai/miniforge",
+    "id": 1137151617,
+    "name": "miniforge",
+    "private": false
+  },
+  "sender": {
+    "login": "H31MDALLR",
+    "type": "User"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "action": "opened",
+  "number": 2259,
+  "pull_request": {
+    "base": {
+      "ref": "fix/ci-monitor-gh-json",
+      "repo": {
+        "full_name": "miniforge-ai/miniforge"
+      },
+      "sha": "0a7ffe51e3c1a09360a51d0631332d925098639a"
+    },
+    "head": {
+      "ref": "fix/ci-fixer-needs-logs",
+      "repo": {
+        "full_name": "miniforge-ai/miniforge"
+      },
+      "sha": "75814d4450cdb737cd2e4677102054fcc29796dd"
+    },
+    "html_url": "https://github.com/miniforge-ai/miniforge/pull/2259",
+    "merge_commit_sha": "4ba6d5a2f5e56e0f5898a8381090a481e49c3717",
+    "merged": false,
+    "merged_at": null,
+    "number": 2259,
+    "state": "open",
+    "user": {
+      "login": "H31MDALLR",
+      "type": "User"
+    }
+  },
+  "repository": {
+    "default_branch": "main",
+    "full_name": "miniforge-ai/miniforge",
+    "html_url": "https://github.com/miniforge-ai/miniforge",
+    "id": 1137151617,
+    "name": "miniforge",
+    "private": false
+  },
+  "sender": {
+    "login": "H31MDALLR",
+    "type": "User"
+  }
+}
