@@ -64,6 +64,10 @@ same worktree. The Bash deny list covered destructive commands only;
    inputs are trimmed before the check, as the MCP handlers trim them; the path as
    written (symlinks unresolved) is also checked against the protected list and is what
    pr-lifecycle's guard sees, so a symlinked `.claude/` cannot hide protected settings.
+   Each path is checked both as given and trimmed (handlers differ on trimming), a raw
+   `..` component is refused before normalization, both the resolved and the as-written
+   forms must pass the guard, and `\` separators are turned into `/` before the
+   protected-path match.
 6. Independent adversarial review; findings fixed or listed below.
 
 ## Deployment Plan

@@ -48,10 +48,10 @@
    relative path is taken as relative to root, and root itself is \".\".
    Comparing canonical forms keeps /var and /private/var (macOS) the same
    place and sends a symlink out of the worktree where it points. Git
-   metadata is for the caller's `path-ok?` check. Surrounding whitespace
-   is trimmed first, as the MCP handlers trim theirs."
+   metadata is for the caller's `path-ok?` check. The caller tries the path
+   both as given and trimmed (`path-candidates`)."
   [root path]
-  (let [p (str/trim (str path))]
+  (let [p (str path)]
     (when-not (str/starts-with? p "~")
       (let [root-c (.getCanonicalFile (io/file (str root)))
             file   (io/file p)
@@ -64,11 +64,11 @@
   "`path` relative to the worktree `root` as written: `.` and `..`
    resolved, symlinks not, against root as given or its canonical form,
    whichever prefixes the path. nil when neither does, or the path starts
-   with ~. Whitespace is trimmed as in `worktree-relative`. The caller
-   checks this form too, so a symlink on the path (a linked `.claude/`)
-   cannot hide a protected file or reach `path-ok?` already resolved."
+   with ~. The caller checks this form too, so a symlink on the path (a
+   linked `.claude/`) cannot hide a protected file or reach `path-ok?`
+   already resolved."
   [root path]
-  (let [p (str/trim (str path))]
+  (let [p (str path)]
     (when-not (str/starts-with? p "~")
       (let [file   (io/file p)
             given  (.normalize (.toPath (io/file (str root))))
@@ -77,6 +77,26 @@
             base   (some #(when (.startsWith path-p ^java.nio.file.Path %) %) [canon given])
             rel    (some-> base (.relativize path-p) str)]
         (if (= "" rel) "." rel)))))
+
+(defn ^{:stratum 0} path-candidates
+  "The forms of path input `v` to check: as given, and trimmed. Some
+   handlers trim (consider_situation's codex_path), others open the path
+   as given (context_write), so both must pass."
+  [v]
+  (distinct [(str v) (str/trim (str v))]))
+
+(defn ^{:stratum 0} climbs?
+  "True when path `p` has a `..` component as written. Refused before any
+   normalization: through a symlink, `link/../config` reaches a different
+   place than its lexical form `config`."
+  [p]
+  (boolean (some #{".."} (str/split (str p) #"[/\\\\]"))))
+
+(defn ^{:stratum 0} unix-separators
+  "`rel` with Windows separators turned into `/`, so the protected-path
+   patterns match a path java.nio printed with backslashes."
+  [rel]
+  (some-> rel (str/replace "\\" "/")))
 
 (defn ^{:stratum 0} escaping-glob?
   "True when glob `pattern` would search outside the directory it runs in:
@@ -112,26 +132,31 @@
    stays inside root and out of its git metadata. A tool that names a path
    is refused when either is missing.
 
-   A path must resolve inside root (`worktree-relative`); `path-ok?` sees
-   it as written (`lexical-relative`) when that form exists, so its own
-   symlink refusal applies; and it is protected when either form matches
-   :tool/protected-paths."
+   Each `path-candidates` form of a path input must have no `..`
+   component, resolve inside root (`worktree-relative`), and pass
+   `path-ok?` both resolved and as written (`lexical-relative`), so the
+   guard's own symlink and metadata checks see both; it is protected when
+   either form matches :tool/protected-paths, with `/` separators."
   [policy {:keys [root path-ok?]} tool-name tool-input]
   (let [path-keys (get-in policy [:tool/path-keys tool-name])
         glob-keys (get-in policy [:tool/glob-keys tool-name])
         named     (fn [ks] (keep #(when-some [v (get tool-input %)] [% v]) ks))
-        protected (fn [rel] (some #(re-find % rel) (:tool/protected-paths policy)))]
+        protected (fn [rel] (some #(re-find % (unix-separators rel)) (:tool/protected-paths policy)))]
     (if (and (or (seq path-keys) (seq glob-keys)) (not (and root path-ok?)))
       (str tool-name " names a path, and the hook has no worktree root to check it against")
       (or (some (fn [[k v]]
-                  (let [rel (worktree-relative root v)
-                        lex (lexical-relative root v)]
-                    (cond
-                      (not (and rel (path-ok? root (or lex rel))))
-                      (str (name k) " " (pr-str v) " is outside the worktree or in its git metadata")
+                  (some (fn [p]
+                          (let [rel (worktree-relative root p)
+                                lex (lexical-relative root p)]
+                            (cond
+                              (or (climbs? p)
+                                  (not (and rel (path-ok? root rel)))
+                                  (and lex (not (path-ok? root lex))))
+                              (str (name k) " " (pr-str v) " is outside the worktree or in its git metadata")
 
-                      (or (protected rel) (and lex (protected lex)))
-                      (str (name k) " " (pr-str v) " is agent or session config miniforge manages"))))
+                              (or (protected rel) (and lex (protected lex)))
+                              (str (name k) " " (pr-str v) " is agent or session config miniforge manages"))))
+                        (path-candidates v)))
                 (named path-keys))
           (some (fn [[k v]]
                   (when (escaping-glob? v)

@@ -219,3 +219,21 @@
     (is (= "deny" (decision :implementer "mcp__context__consider_situation" {:codex_path " /etc "}))
         "whitespace the handler trims cannot turn an absolute path relative")
     (is (= "allow" (decision :implementer "mcp__context__consider_situation" {:situation "x"})))))
+
+(deftest ^{:stratum 2} raw-path-forms-are-checked-test
+  (testing "a .. component is refused before normalization"
+    (is (= "deny" (decision :implementer "mcp__context__context_write" {:path "src/../a.clj" :content "x"}))))
+  (testing "a backslash-separated path to protected settings is still protected"
+    (is (= "deny" (decision :implementer "Write" {:file_path (str worktree "/.claude\\settings.local.json")}))))
+  (testing "the untrimmed path a handler opens as given is checked, not only the trimmed one"
+    (let [root (java.nio.file.Files/createTempDirectory "raw-path" (make-array java.nio.file.attribute.FileAttribute 0))
+          dir  (.toFile root)]
+      (try
+        (.mkdirs (io/file dir ".git"))
+        (spit (io/file dir ".git" "config") "[core]\n")
+        (java.nio.file.Files/createSymbolicLink (.resolve root "safe ") (.resolve root ".git/config")
+                                                (make-array java.nio.file.attribute.FileAttribute 0))
+        (is (= "deny" (:decision (sut/evaluate-tool-use {:role :implementer :root (str dir) :path-ok? stub-path-ok?}
+                                                        "mcp__context__context_write" {:path "safe " :content "x"}))))
+        (finally
+          (run! #(java.nio.file.Files/deleteIfExists (.toPath ^java.io.File %)) (reverse (file-seq dir))))))))
