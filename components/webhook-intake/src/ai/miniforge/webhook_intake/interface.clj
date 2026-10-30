@@ -20,6 +20,7 @@
    into an event-stream event that workflow triggers can match."
   (:require
    [ai.miniforge.webhook-intake.github :as github]
+   [ai.miniforge.webhook-intake.handler :as handler]
    [ai.miniforge.webhook-intake.signature :as signature]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -37,3 +38,7 @@
    matching. Empty for deliveries miniforge does not act on, including
    pull requests from forks."
   github/delivery->events)
+
+(def ^{:stratum 0} github-path
+  "Path the intake serves GitHub deliveries on."
+  handler/github-path)
