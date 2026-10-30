@@ -140,3 +140,30 @@
                      {:exit-code 0 :stdout "" :stderr ""}))
           run    (crash-then-resume (fn [_ _]) (crash-on "gh pr create") lag)]
       (is (one-pr-and-success? run)))))
+
+(deftest ^{:stratum 2} timed-out-push-is-reconciled-not-retried-blind-test
+  (testing "a push the runtime stopped at its deadline after it reached origin is
+            recorded as an unknown outcome and confirmed by origin on resume"
+    (let [timeout (let [fired (atom false)]
+                    (fn [state line]
+                      (when (and (str/starts-with? line "git push") (compare-and-set! fired false true))
+                        (remote/answer! state line)
+                        {:exit-code 124 :stdout "" :stderr "timed out"})))
+          {:keys [crashed resumed state]} (crash-then-resume timeout (fn [_ _]))]
+      (is (= :push-unresolved (-> crashed :errors first :type))
+          "the attempt that timed out does not claim a result")
+      (is (one-pr-and-success? {:resumed resumed :state state})))))
+
+(deftest ^{:stratum 2} reconciled-pr-is-judged-like-a-listed-one-test
+  (testing "the PR a reconciling lookup finds was closed meanwhile: the release
+            fails instead of reporting it"
+    (let [lagged (atom false)
+          lag    (fn [state line]
+                   (when (and (str/starts-with? line "gh pr list")
+                              (compare-and-set! lagged false true))
+                     (swap! state update-in [:prs 0] assoc :state "CLOSED")
+                     {:exit-code 0 :stdout "" :stderr ""}))
+          {:keys [resumed state]} (crash-then-resume (fn [_ _]) (crash-on "gh pr create") lag)]
+      (is (not (:success? resumed)))
+      (is (= :pr-closed (-> resumed :errors first :type)))
+      (is (= 1 (count (:prs state)))))))
