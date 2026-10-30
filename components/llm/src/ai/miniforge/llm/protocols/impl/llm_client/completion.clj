@@ -29,6 +29,16 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} with-client-config
+  "`request` with the client's per-call settings: the model, the Ollama
+   context size, and isolation. A client created `:isolated?` isolates
+   every call; a request may also ask for it alone."
+  [request {:keys [model num-ctx isolated?]}]
+  (cond-> request
+    model (assoc :model model)
+    num-ctx (assoc :num-ctx num-ctx)
+    isolated? (assoc :isolated? true)))
+
 (defn- ^{:stratum 0} run-cli-exec
   "Invoke a CLI exec-fn with cmd plus optional opts. The 1-arity
    branch keeps caller-supplied exec-fns from the days before opts
@@ -129,12 +139,10 @@
 
 (defn ^{:stratum 1} complete-impl [client request]
   (let [{:keys [config logger exec-fn]} client
-        {:keys [backend model num-ctx]} config
+        {:keys [backend]} config
         backend-config (get backend-registry/backends backend)
         {:keys [cmd args-fn]} backend-config
-        request-with-model (cond-> request
-                             model (assoc :model model)
-                             num-ctx (assoc :num-ctx num-ctx))]
+        request-with-model (with-client-config request config)]
     (log-prompt-sent logger backend (prompts/build-request-prompt request))
 
     ;; Handle HTTP backends differently from CLI backends
