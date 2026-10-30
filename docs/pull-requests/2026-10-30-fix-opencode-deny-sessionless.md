@@ -44,10 +44,13 @@ Bash under OpenCode's defaults with no check.
    permission rules apply after the agent's).
 4. A backend entry may carry an `:env-fn` (OpenCode does). `complete-impl` passes its
    entries as `:env` exec options; `default-exec-fn` and `start-capture-process!` set
-   them on top of the agent environment allowlist; `capsule-exec-fn` runs the capsule
-   command under an `env K=V ...` prefix for them, so an executor that ignores an
-   `:env` option (Kubernetes) cannot drop them; the backend preflight probe passes them
-   too. An operator `OPENCODE_CONFIG_CONTENT` that is not plain JSON (OpenCode also
+   them on top of the agent environment allowlist; the backend preflight probe passes
+   them too. The capsule exec adapter (`capsule-exec-fn`) refuses a call that carries
+   them, returning its usual error result: the executors have no secret-safe way to pass
+   them into a capsule, and running without them would drop the call's permissions. No
+   governed LLM client installs that adapter today (`runner-preparation` only stores it
+   in `:execution/exec-fn`); carrying the config into the capsule belongs with running
+   the agent CLI there. An operator `OPENCODE_CONFIG_CONTENT` that is not plain JSON (OpenCode also
    reads JSONC) fails the call instead of being dropped.
 
 ## Testing Plan
@@ -57,7 +60,7 @@ Bash under OpenCode's defaults with no check.
    global and agent permissions, the operator's inline config kept, `:attach` refused;
    a session call gets none of it.
 2. `opencode-call-carries-its-deny-config-test`, `backend-env-entries-reach-the-process-test`,
-   `capsule-exec-carries-env-entries-test`; the OpenCode preflight test.
+   `capsule-exec-refuses-env-entries-test`; the OpenCode preflight test.
 3. OpenCode 1.18.30 `debug agent` / `debug config`, with a project `opencode.json`
    and `.opencode/agent/<name>.md` that name the policy agent and add a local MCP
    server: without `OPENCODE_DISABLE_PROJECT_CONFIG` they turned `task` and `webfetch`

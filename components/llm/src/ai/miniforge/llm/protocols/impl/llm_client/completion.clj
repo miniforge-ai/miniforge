@@ -109,26 +109,31 @@
    - env-id      - environment/container ID
    - workdir     - workspace directory inside capsule
 
-   The returned fn takes exec opts as a second argument and runs the
-   command under `env K=V ...` for their `:env` entries (an OpenCode
-   call's inline config), so a governed call keeps them whether or not
-   the executor honours an :env option (the Kubernetes one does not). The
-   executor has no stdin."
+   The returned fn takes exec opts as a second argument. A call whose
+   opts carry `:env` entries (an OpenCode call's inline config, which
+   holds its permissions and can hold the operator's provider keys) is
+   refused with an error result: the executors have no secret-safe way to
+   pass them (an `env K=V` prefix would show them in `docker exec` and
+   `kubectl exec` arguments, and the Kubernetes executor ignores an :env
+   option), and running without them would drop the call's permissions.
+   The executor has no stdin."
   [execute-fn executor env-id workdir]
   (fn capsule-exec
     ([cmd] (capsule-exec cmd {}))
     ([cmd {:keys [env]}]
-     (let [cmd    (if (seq env)
-                    (into (into ["env"] (map (fn [[k v]] (str k "=" v))) (sort env)) cmd)
-                    cmd)
-           result (execute-fn executor env-id cmd {:workdir workdir})]
-       (if (and (map? result) (:data result))
-         {:out (get-in result [:data :stdout] "")
-          :err (get-in result [:data :stderr] "")
-          :exit (get-in result [:data :exit-code] 0)}
-         {:out ""
-          :err (str "Capsule exec error: " result)
-          :exit 1})))))
+     (if (seq env)
+       {:out ""
+        :err (str "Capsule exec error: cannot carry this call's environment entries "
+                  (vec (sort (keys env))) " into the capsule")
+        :exit 1}
+       (let [result (execute-fn executor env-id cmd {:workdir workdir})]
+         (if (and (map? result) (:data result))
+           {:out (get-in result [:data :stdout] "")
+            :err (get-in result [:data :stderr] "")
+            :exit (get-in result [:data :exit-code] 0)}
+           {:out ""
+            :err (str "Capsule exec error: " result)
+            :exit 1}))))))
 
 (defn ^{:stratum 0} mock-exec-fn [output & {:keys [exit] :or {exit 0}}]
   (fn

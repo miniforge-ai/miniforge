@@ -79,14 +79,17 @@
         (is (some #{"--pure"} cmd))
         (is (contains? (:env opts) "OPENCODE_CONFIG_CONTENT"))))))
 
-(deftest ^{:stratum 0} capsule-exec-carries-env-entries-test
-  (testing "a governed call's env entries reach the capsule command"
-    (let [seen (atom nil)
-          exec (impl/capsule-exec-fn (fn [_executor _env-id cmd opts] (reset! seen (assoc opts :cmd cmd)) {:data {:stdout "ok"}})
-                                     :executor "env-1" "/workspace")]
-      (is (= "ok" (:out (exec ["opencode" "run" "p"] {:env {"OPENCODE_CONFIG_CONTENT" "{}" "OPENCODE_PURE" "1"}}))))
-      (is (= ["env" "OPENCODE_CONFIG_CONTENT={}" "OPENCODE_PURE=1" "opencode" "run" "p"] (:cmd @seen))
-          "as an env prefix, which every executor runs, not only one that honours :env")
+(deftest ^{:stratum 0} capsule-exec-refuses-env-entries-test
+  (let [seen (atom nil)
+        exec (impl/capsule-exec-fn (fn [_executor _env-id cmd opts] (reset! seen (assoc opts :cmd cmd)) {:data {:stdout "ok"}})
+                                   :executor "env-1" "/workspace")]
+    (testing "a call carrying env entries is refused, not run without its permissions or with them in argv"
+      (let [result (exec ["opencode" "run" "p"] {:env {"OPENCODE_CONFIG_CONTENT" "{\"k\":\"secret\"}"}})]
+        (is (= 1 (:exit result)))
+        (is (nil? @seen) "the executor is not called")
+        (is (not (re-find #"secret" (:err result))) "the error names the entries, not their values")))
+    (testing "a call without them runs in the capsule as before"
+      (is (= "ok" (:out (exec ["claude" "-p" "x"] {:stdin "x"}))))
       (is (= "/workspace" (:workdir @seen))))))
 
 ;------------------------------------------------------------------------------ Layer 1
