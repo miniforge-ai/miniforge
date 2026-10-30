@@ -45,14 +45,17 @@
   ["git" "remote" "get-url" "origin"])
 
 (defn ^{:stratum 0} log-command
-  "The paths that commits on HEAD and on no origin ref (save the
-   `excluded-branches`, the run's own) touch, merge commits' changes
-   included, NUL-separated."
-  [excluded-branches]
-  (conj (into ["git" "log" "-m" "--format=" "--name-only" "-z" "HEAD" "--not"]
-              (map #(str "--exclude=origin/" %))
-              (distinct (remove nil? excluded-branches)))
-        "--remotes=origin"))
+  "The paths that commits on HEAD touch, when they are on none of
+   `base-commits` (where the task's work started) and on no origin ref
+   save the run's own `excluded-branches`; merge commits' changes
+   included, a rename as its two paths, NUL-separated. A base commit the
+   repository lacks is ignored."
+  [excluded-branches base-commits]
+  (-> ["git" "log" "-m" "--no-renames" "--ignore-missing" "--format=" "--name-only" "-z"
+       "HEAD" "--not"]
+      (into (remove nil?) base-commits)
+      (into (comp (remove nil?) (distinct) (map #(str "--exclude=origin/" %))) excluded-branches)
+      (conj "--remotes=origin")))
 
 (defn- ^{:stratum 0} answered? [result]
   (= 0 (:exit result)))
@@ -67,11 +70,13 @@
    {:failure {:detail :data}}: an unanswered scan is not an empty one.
 
    `run` runs a git argv in the worktree and returns {:exit :out :err};
-   `run-branches` are the run's own branches (release and checkpoint)."
-  [run run-branches]
+   `run-branches` are the run's own branches (release and checkpoint);
+   `base-commits` are where the task's work started, so commits that were
+   there before it (a local base branch ahead of origin) are not its."
+  [run run-branches base-commits]
   (let [head     (run head-command)
         origin   (when (answered? head) (run origin-command))
-        log-cmd  (log-command run-branches)
+        log-cmd  (log-command run-branches base-commits)
         log      (when (answered? origin) (run log-cmd))
         paths    (when (answered? log)
                    (filterv #(agent/substantive-file? {:path %}) (distinct (entries/nul-fields (:out log)))))

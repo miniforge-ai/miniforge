@@ -332,6 +332,13 @@
                        set)}))
       (catch clojure.lang.ExceptionInfo e (ex-data e)))))
 
+(deftest ^{:stratum 0} an-interrupted-scan-is-not-a-failed-scan-test
+  (let [thrown (try (#'release/scan-unpushed (fn [_] (throw (InterruptedException. "cancelled"))) [] [])
+                    (catch InterruptedException e e))
+        interrupted? (Thread/interrupted)]
+    (is (instance? InterruptedException thrown))
+    (is interrupted? "the interrupt flag is set again")))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} release-readiness-test
@@ -590,24 +597,26 @@
       (fn [worktree]
         (publish-head! worktree)
         (write-and-commit-mock-files! worktree)
-        (let [seen (atom nil)]
-          (with-redefs [release-executor/prepare-release
-                        (fn [workflow-state _ _]
-                          (reset! seen workflow-state)
-                          {:success? true :artifacts [] :prepared {} :metrics {}})]
-            (let [ctx    {:execution/id (random-uuid)
-                          :execution/input {:description "Already done" :title "Noop"}
-                          :execution/metrics {:tokens 0 :duration-ms 0}
-                          :execution/phase-results {:implement {:result {:status :already-implemented}}}
-                          :worktree-path worktree
-                          :phase-config {:phase :release}}
-                  result ((:enter (phase/get-phase-interceptor {:phase :release})) ctx)]
-              (is (not (get-in result [:phase :result :output :skipped])))
-              (is (= #{"src/feature.clj" "test/feature_test.clj"}
-                     (->> (:workflow/artifacts @seen)
-                          (mapcat (comp :code/files :artifact/content))
-                          (map :path)
-                          set))))))))))
+        (is (= {:skipped? false :paths #{"src/feature.clj" "test/feature_test.clj"}}
+               (enter-already-implemented worktree))))))
+  (testing "commits from before the task's base are not its work"
+    (with-test-worktree
+      (fn [worktree]
+        (publish-head! worktree)
+        ;; The local base branch is ahead of origin when the task starts.
+        (write-and-commit-mock-files! worktree)
+        (let [base (str/trim (:out (shell/sh "git" "rev-parse" "HEAD" :dir worktree)))]
+          (is (true? (:skipped? (enter-already-implemented
+                                 worktree {:execution/environment-metadata {:base-sha base}}))))))))
+  (testing "a renamed file is released as its two paths"
+    (with-test-worktree
+      (fn [worktree]
+        (write-and-commit-mock-files! worktree)
+        (publish-head! worktree)
+        (sh-must-succeed! worktree ["git" "mv" "src/feature.clj" "src/renamed.clj"])
+        (sh-must-succeed! worktree ["git" "commit" "-q" "--no-verify" "--no-gpg-sign" "-m" "rename"])
+        (is (= #{"src/feature.clj" "src/renamed.clj"}
+               (:paths (enter-already-implemented worktree))))))))
 
 ;------------------------------------------------------------------------------ File Writing Tests
 (deftest ^{:stratum 3} release-writes-files-to-temp-directory-test

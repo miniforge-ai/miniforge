@@ -33,6 +33,7 @@
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.interface.gate :as phase-gate]
+            [ai.miniforge.phase.interface.task-base :as task-base]
             [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
             [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [ai.miniforge.phase-software-factory.messages :as messages]
@@ -41,7 +42,8 @@
             [ai.miniforge.phase-software-factory.release-publish :as release-publish]
             [ai.miniforge.phase-software-factory.release-unpushed :as release-unpushed]
             [ai.miniforge.release-executor.interface :as release-executor]
-            [ai.miniforge.response.interface :as response]))
+            [ai.miniforge.response.interface :as response]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -285,6 +287,53 @@
       ;; needs the status fields — don't ship the rendered prose twice.
       codex-outcome (assoc :codex/outcome (dissoc codex-outcome :text)))))
 
+(defn- ^{:stratum 0} capsule-git-runner
+  "A git runner for release-unpushed that runs each argv in the capsule at
+   `root-path` through `execute-fn`. The command runs under `sh -c`, so an
+   argument with characters beyond a plain path or ref is quoted."
+  [execute-fn executor env-id root-path]
+  (fn [argv]
+    (let [arg #(if (re-matches #"[A-Za-z0-9._/:@=-]+" %) % (agent/shell-quote %))
+          r   (execute-fn executor env-id (str/join " " (map arg argv)) {:workdir root-path})]
+      {:exit (get-in r [:data :exit-code])
+       :out  (get-in r [:data :stdout] "")
+       :err  (get-in r [:data :stderr] (:message (:error r)))})))
+
+(defn- ^{:stratum 0} host-git-runner
+  "A git runner for release-unpushed that runs each argv on the host in
+   `root-path`."
+  [root-path]
+  (fn [argv] (apply shell/sh (concat argv [:dir root-path]))))
+
+(defn- ^{:stratum 0} scan-unpushed
+  "release-unpushed/unpushed-files with `run`. An exception is the scan's
+   failure; an interrupt (a cancel or timeout) is not a failed scan to
+   retry: the flag is set again and it propagates."
+  [run run-branches base-commits]
+  (try+
+    (release-unpushed/unpushed-files run run-branches base-commits)
+    (catch InterruptedException e
+      (.interrupt (Thread/currentThread))
+      (throw e))
+    (catch Exception e
+      {:failure {:detail (or (ex-message e) (.getName (class e)))
+                 :data   {:exception/class (.getName (class e))}}})))
+
+(defn- ^{:stratum 0} task-base-commits
+  "Where the task's work started: the commits among its recorded task base
+   refs (a resumed run carries the first attempt's), else, on a first
+   attempt, the environment's base commit. A resumed environment's base is
+   the checkpoint it restored, which holds the run's own work, so it is
+   not used."
+  [ctx]
+  (let [recorded (filterv #(and (string? %) (re-matches #"[0-9a-f]{7,40}" %))
+                          (task-base/recorded-refs ctx))
+        base-sha (get-in ctx [:execution/environment-metadata :base-sha])]
+    (cond
+      (seq recorded) recorded
+      (and base-sha (not (get-in ctx [:execution/opts :resume-workspace]))) [base-sha]
+      :else [])))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} release-readiness
@@ -387,24 +436,13 @@
   "release-unpushed/unpushed-files in the worktree at `root-path`: on the
    host, or through `execute-fn` in the capsule when it is given. A scan
    git cannot answer is a :release/git-status-failed anomaly, never [].
-   `run-branches` are the run's own branches (see release-unpushed)."
-  [root-path execute-fn executor env-id run-branches]
-  (let [run  (if execute-fn
-               (fn [argv]
-                 ;; The command runs under `sh -c`: quote any argument with
-                 ;; characters beyond a plain path or ref.
-                 (let [arg #(if (re-matches #"[A-Za-z0-9._/:@=-]+" %) % (agent/shell-quote %))
-                       r   (execute-fn executor env-id (str/join " " (map arg argv))
-                                       {:workdir root-path})]
-                   {:exit (get-in r [:data :exit-code])
-                    :out  (get-in r [:data :stdout] "")
-                    :err  (get-in r [:data :stderr] (:message (:error r)))}))
-               (fn [argv] (apply shell/sh (concat argv [:dir root-path]))))
-        {:keys [files failure]} (try
-                                  (release-unpushed/unpushed-files run run-branches)
-                                  (catch Exception e
-                                    {:failure {:detail (or (ex-message e) (.getName (class e)))
-                                               :data   {:exception/class (.getName (class e))}}}))]
+   `run-branches` are the run's own branches and `base-commits` where its
+   work started (see release-unpushed)."
+  [root-path execute-fn executor env-id run-branches base-commits]
+  (let [run (if execute-fn
+              (capsule-git-runner execute-fn executor env-id root-path)
+              (host-git-runner root-path))
+        {:keys [files failure]} (scan-unpushed run run-branches base-commits)]
     (if failure (git-status-failed root-path failure) files)))
 
 (defn- ^{:stratum 1} release-files-result
@@ -669,7 +707,8 @@
                                       [(release-executor/release-branch-name
                                         origin task (release-description ctx))
                                        (get ctx :execution/task-branch)
-                                       (get-in ctx [:execution/opts :resume-workspace :branch])]))
+                                       (get-in ctx [:execution/opts :resume-workspace :branch])]
+                                      (task-base-commits ctx)))
                     dirty)))]
     ;; Short-circuit: skip release when there is nothing to release.
     ;; This covers:

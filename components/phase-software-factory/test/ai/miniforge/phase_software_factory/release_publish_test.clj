@@ -84,7 +84,7 @@
 (deftest ^{:stratum 0} head-probe-test
   (let [scan (fn [head-reply] (release-unpushed/unpushed-files
                                (fn [argv] (if (= "rev-parse" (second argv)) head-reply {:exit 0 :out ""}))
-                               nil))]
+                               nil nil))]
     (testing "no commit yet: nothing to release"
       (is (= {:files []} (scan {:exit 1 :out "" :err ""}))))
     (testing "a probe that did not answer is a failure, not an empty scan"
