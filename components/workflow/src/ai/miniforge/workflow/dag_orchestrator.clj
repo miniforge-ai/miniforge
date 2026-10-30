@@ -436,7 +436,11 @@
                 (if (= :continue (:action decision))
                   (recur new-completed
                          new-failed
-                         (merge all-results (select-keys results completed))
+                         ;; A cancel that ended the wait keeps this batch's
+                         ;; spend, as the branch above does.
+                         (merge all-results (if (some-> control-state deref :stopped)
+                                              results
+                                              (select-keys results completed)))
                          (into sub-workflow-ids batch-sub-ids)
                          (:new-backend decision)
                          (inc iteration))

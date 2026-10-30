@@ -46,6 +46,21 @@
     (cond-> phase-ctx
       switch-result (assoc :self-healing/backend-switch switch-result))))
 
+(defn- ^{:stratum 0} run-phase-step
+  "The phase step in an interrupting scope (`stop-signal`): a stop
+   interrupts it. An interruption that escapes it under a stopped run
+   leaves `context` as it came in."
+  [pipeline context callbacks control-state]
+  (try+
+    (stop-signal/interrupting-on-stop
+     control-state
+     #(exec/execute-phase-step pipeline context callbacks
+                               ctx/merge-metrics
+                               ctx/transition-to-completed
+                               ctx/transition-to-failed))
+    (catch Exception e
+      (if (stop-signal/stop-caused? control-state e) context (throw e)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} rate-limited?
@@ -92,15 +107,7 @@
   ([pipeline context callbacks]
    (execute-phase pipeline context callbacks nil))
   ([pipeline context callbacks control-state]
-   (let [phase-context (-> (try+
-                             (stop-signal/interrupting-on-stop
-                              control-state
-                              #(exec/execute-phase-step pipeline context callbacks
-                                                        ctx/merge-metrics
-                                                        ctx/transition-to-completed
-                                                        ctx/transition-to-failed))
-                             (catch Throwable t
-                               (if (stop-signal/stop-caused? control-state t) context (throw t))))
+   (let [phase-context (-> (run-phase-step pipeline context callbacks control-state)
                            (monitoring/clear-transient-state))
          _ (env/persist-workspace-at-phase-boundary! context phase-context)
          error-message (get-in phase-context

@@ -13,21 +13,27 @@
             [ai.miniforge.workflow.execution-transition :as transition]
             [ai.miniforge.workflow.messages :as messages]
             [ai.miniforge.workflow.runner-outcome :as outcome]
+            [ai.miniforge.workflow.stop-signal :as stop-signal]
             [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} invoke
-  "Call a boundary callback. One interrupted (a cancel reaching a blocking
-   callback) refuses the boundary with an anomaly, so the context keeps
-   what the phase produced; the interrupt flag is set again."
-  [callback & args]
+  "Call a boundary callback with `context` and `args`. One the run's stop
+   interrupted (a cancel reaching a blocking callback) refuses the boundary
+   with an anomaly, so the context keeps what the phase produced. Any other
+   interrupt propagates. The interrupt flag is set again either way."
+  [callback context & args]
   (when callback
-    (try+ (apply callback args)
+    (try+ (apply callback context args)
           (catch InterruptedException e
             (.interrupt (Thread/currentThread))
-            (anomaly/anomaly :unavailable (messages/t :status/stopped-control)
-                             {:anomaly/ex-class (.getName (class e))})))))
+            (if (stop-signal/stop-caused? (or (:control-state context)
+                                              (get-in context [:execution/opts :control-state]))
+                                          e)
+              (anomaly/anomaly :unavailable (messages/t :status/stopped-control)
+                               {:anomaly/ex-class (.getName (class e))})
+              (throw e))))))
 
 (defn- ^{:stratum 0} active-context [context interceptor]
   (-> context

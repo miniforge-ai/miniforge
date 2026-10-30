@@ -83,8 +83,11 @@
   (let [monitor     (Object.)
         armed       (atom true)
         interrupted (atom false)
-        hook        {:monitor monitor :armed armed :interrupted interrupted
-                     :thread (Thread/currentThread) :control-state control-state}
+        hook        {:monitor       monitor
+                     :armed         armed
+                     :interrupted   interrupted
+                     :thread        (Thread/currentThread)
+                     :control-state control-state}
         remove-hook (on-stop! control-state #(interrupt! hook))]
     (try
       (binding [*hook* hook] (f))

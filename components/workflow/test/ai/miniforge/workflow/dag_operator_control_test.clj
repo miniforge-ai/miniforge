@@ -33,6 +33,7 @@
    [ai.miniforge.workflow.execution-dag :as execution-dag]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-defaults :as runner-defaults]
+   [ai.miniforge.workflow.stop-signal :as stop-signal]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -192,6 +193,25 @@
       (is (= 0 (:tasks-failed result)) "a rate limit is not a task failure")
       (is (= 3 (:tasks-unreached result)))
       (is (= :anomalies.dashboard/stop (anomaly/subtype (:error result)))))))
+
+(deftest ^{:stratum 2} cancel-during-a-rate-limit-wait-keeps-the-batch-spend-test
+  (testing "root hits a rate limit with a short reset; the cancel lands as
+            the wait starts. The wait ends, and the cancelled result keeps the
+            rate-limited task's spend."
+    (let [control (es/create-control-state)
+          [logger _] (log/collecting-logger)
+          task (fn [task-def _context]
+                 (dag/err :task-execution-failed "429 Too Many Requests: rate limit, resets in 2 minutes"
+                          {:task-id (:task/id task-def)
+                           :metrics {:tokens 100 :cost-usd 0.5 :duration-ms 1}}))
+          sleep @#'dag-orch/stop-aware-sleep
+          result (with-redefs-fn {#'dag-orch/execute-single-task task
+                                  #'dag-orch/stop-aware-sleep (fn [cs ms] (es/cancel! cs) (sleep cs ms))}
+                   #(stop-signal/interrupting-on-stop
+                     control
+                     (fn [] (dag-orch/execute-plan-as-dag chain-plan {:logger logger :control-state control}))))]
+      (is (true? (:cancelled? result)))
+      (is (= 100 (get-in result [:metrics :tokens]))))))
 
 (deftest ^{:stratum 2} cancel-after-every-task-completed-reports-the-completed-run-test
   (testing "a cancel that lands while the last batch runs cuts nothing short:

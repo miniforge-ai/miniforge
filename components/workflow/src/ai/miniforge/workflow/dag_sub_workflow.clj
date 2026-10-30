@@ -40,6 +40,24 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} merge-parents
+  "merge-parent-branches! for a multi-parent task, in its own interrupting
+   scope: it runs before the task's sub-workflow installs a stop hook. The
+   merge code turns an interrupt into an ordinary merge failure, so a merge
+   error under a stopped run, or an interruption that escapes, is the
+   task's stop."
+  [context task-def]
+  (let [control-state (:control-state context)
+        stopped (merge-anomaly/merge-stopped-anomaly (:task/id task-def))
+        merged (try+
+                 (stop-signal/interrupting-on-stop
+                  control-state #(dag-merge/merge-parent-branches! context task-def))
+                 (catch Exception e
+                   (if (stop-signal/stop-caused? control-state e) stopped (throw e))))]
+    (if (and (merge-anomaly/merge-error? merged) (some-> control-state deref :stopped))
+      stopped
+      merged)))
+
 (defn ^{:stratum 0} task-sub-workflow
   "Build a sub-workflow config for a single DAG task.
 
@@ -178,18 +196,8 @@
                        (nil? task-def)
                        nil
 
-                       ;; Runs before the task's sub-workflow installs its own
-                       ;; stop hook: a cancel interrupts the merge-resolution
-                       ;; agent here, and the task fails as stopped.
                        (dag/multi-parent? deps)
-                       (try+
-                         (stop-signal/interrupting-on-stop
-                          (:control-state context)
-                          #(dag-merge/merge-parent-branches! context task-def))
-                         (catch Throwable t
-                           (if (stop-signal/stop-caused? (:control-state context) t)
-                             (merge-anomaly/merge-stopped-anomaly (:task/id task-def))
-                             (throw t))))
+                       (merge-parents context task-def)
 
                        :else
                        ;; v1 single-parent path returns a branch string for

@@ -217,7 +217,13 @@
 (deftest ^{:stratum 1} a-cancel-during-a-parent-merge-stops-the-task-test
   (let [cs (es/create-control-state)
         _  (cancel-after! cs 300)]
-    (with-redefs [dag-merge/merge-parent-branches! (fn [_ _] (Thread/sleep 10000) nil)]
+    ;; As the real merge code does, the stub swallows the interrupt and
+    ;; reports an ordinary merge failure.
+    (with-redefs [dag-merge/merge-parent-branches!
+                  (fn [_ _]
+                    (try (Thread/sleep 10000) nil
+                         (catch InterruptedException _
+                           {:anomaly/category :anomalies/dag-multi-parent-merge-failed})))]
       (let [opts (dag-sub-workflow/task-sub-opts {:control-state cs}
                                                  {:task/id :c :task/deps [:a :b]})]
         (is (= :anomalies/dag-merge-stopped (get-in opts [:dag/merge-anomaly :anomaly/category])))
@@ -226,9 +232,18 @@
 (deftest ^{:stratum 1} cancel-at-callback-cooldown-and-resolution-boundaries-test
   (testing "an interrupted boundary callback refuses the boundary (the context
             keeps its results) and keeps the interrupt"
-    (let [receipt (#'execution-step/invoke (fn [& _] (throw (InterruptedException. "cancelled"))))
+    (let [stopped (doto (es/create-control-state) es/cancel!)
+          receipt (#'execution-step/invoke (fn [& _] (throw (InterruptedException. "cancelled")))
+                                           {:control-state stopped})
           interrupted? (Thread/interrupted)]
       (is (anomaly/anomaly? receipt))
+      (is interrupted?)))
+  (testing "an interrupt that is not the run's stop propagates from a callback"
+    (let [thrown (try (#'execution-step/invoke (fn [& _] (throw (InterruptedException. "not a stop")))
+                                               {:control-state (es/create-control-state)})
+                      (catch InterruptedException e e))
+          interrupted? (Thread/interrupted)]
+      (is (instance? InterruptedException thrown))
       (is interrupted?)))
   (testing "a cancel's interrupt ends a rate-limit cooldown instead of escaping"
     (let [cs (es/create-control-state)
