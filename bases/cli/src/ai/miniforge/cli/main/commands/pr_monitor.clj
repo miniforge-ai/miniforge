@@ -27,6 +27,7 @@
    [clojure.string :as str]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.main.commands.pr-monitor-agent :as pr-agent]
    [ai.miniforge.cli.main.commands.pr-monitor-primitives :as prim]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
@@ -81,10 +82,12 @@
 
 ;; Monitor session — compose the primitives with pr-lifecycle calls
 (defn- ^{:stratum 0} run-monitor!
-  "Create a PR monitor from `mon-opts`, install a shutdown hook, run the loop.
+  "Create a PR monitor from `mon-opts` plus the generate-fn and trusted
+   authors built from `cmd-opts`, install a shutdown hook, run the loop.
    Single implementation shared by the fresh-monitor and resume paths."
-  [mon-opts author]
-  (let [monitor (pr-lifecycle/create-pr-monitor mon-opts)
+  [mon-opts author cmd-opts]
+  (let [monitor (pr-lifecycle/create-pr-monitor
+                 (merge mon-opts (pr-agent/monitor-agent-opts cmd-opts)))
         ;; Guard nil: create-pr-monitor may not populate [:config :poll-interval-ms]
         ;; before the atom is first deref'd. Fall back to default-poll-interval-ms.
         eff-ms  (or (get-in @monitor [:config :poll-interval-ms])
@@ -123,7 +126,7 @@
    Exit semantics:
      - returns normally (exit 0 by default) when worklist is empty after pruning
      - shared/exit! 1 on unresolvable remote, missing worklist, prune failure, nil author"
-  [repo-path cli-cfg]
+  [repo-path cli-cfg cmd-opts]
   (let [origin-url (remote-origin-url repo-path)]     ; A
     (when-not origin-url
       (display/print-error (messages/t :pr/monitor-no-remote {:path repo-path}))
@@ -159,7 +162,7 @@
                 (let [poll-ms  (worklist-poll-ms prs)
                       mon-opts (cond-> {:worktree-path repo-path :self-author author}
                                  poll-ms (assoc :poll-interval-ms poll-ms))]    ; H
-                  (run-monitor! mon-opts author))))))))))  ; H G F E D C B A defn
+                  (run-monitor! mon-opts author cmd-opts))))))))))  ; H G F E D C B A defn
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -168,6 +171,8 @@
   "Start the PR monitor loop for autonomous comment resolution.
 
    With --author: creates a fresh monitor polling that author's open PRs.
+   --trusted-authors a,b: logins whose comments are acted on even without
+   an OWNER, MEMBER or COLLABORATOR association.
    Without --author: resumes from a persisted work-list, using --repo (or
    cwd) as the repo path for work-list key derivation.
 
@@ -183,8 +188,8 @@
             poll-ms  (parse-poll-interval poll-interval cli-cfg)
             mon-opts (cond-> {:worktree-path repo-path :self-author resolved}
                        poll-ms (assoc :poll-interval-ms poll-ms))]
-        (run-monitor! mon-opts resolved))
-      (resume-from-worklist! repo-path cli-cfg))))
+        (run-monitor! mon-opts resolved opts))
+      (resume-from-worklist! repo-path cli-cfg opts))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
