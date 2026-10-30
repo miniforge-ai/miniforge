@@ -111,6 +111,22 @@
 
       :else (dag/ok committed))))
 
+(defn ^{:stratum 1} settle-prior!
+  "Settle an earlier attempt at this exact merge of `target`, or nil when
+   there is none and a new attempt may start."
+  [operations worktree-path target context ^Instant now]
+  (let [opened (open-attempt context target)]
+    (cond
+      (anomaly/anomaly? opened)
+      (dag/err :merge-proposal-failed (messages/t :merge/proposal-failed)
+               {:proposal/result opened})
+
+      (:effect/existing opened)
+      (settle-existing context (:effect/existing opened) (:pr/number target) now
+                       (partial provider-command operations worktree-path))
+
+      :else nil)))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} transact!

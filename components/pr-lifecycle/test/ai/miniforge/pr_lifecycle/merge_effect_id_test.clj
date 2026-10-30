@@ -35,9 +35,11 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} attempt!
-  "Attempt PR 9 in `context`; `merge-result` is what `gh pr merge` returns."
-  [context merges state-json merge-result]
-  (with-redefs [readiness/evaluate (constantly {:ready? true :blocking []})
+  "Attempt PR 9 in `context`; `merge-result` is what `gh pr merge` returns,
+   and `readiness` what the readiness checks report."
+  [context merges state-json merge-result & {:keys [readiness]
+                                             :or {readiness {:ready? true :blocking []}}}]
+  (with-redefs [readiness/evaluate (constantly readiness)
                 merge/run-gh-command (github state-json)
                 merge/read-repository (constantly (dag/ok {:pr/repo "miniforge-ai/miniforge"}))
                 merge/merge-pr! (fn [& _] (swap! merges inc) merge-result)]
@@ -67,3 +69,25 @@
     (is (= 2 @merges))
     (is (= #{:failed :unknown-outcome}
            (set (map :effect/state (fx/list-records (:effect-store-dir context))))))))
+
+(deftest ^{:stratum 2} an-open-pr-stays-reconcilable-until-github-settles-it-test
+  (let [context (merge-context)
+        merges (atom 0)
+        open "{\"state\":\"OPEN\",\"mergeCommit\":null}"
+        merged "{\"state\":\"MERGED\",\"mergeCommit\":{\"oid\":\"squash\"}}"]
+    (attempt! context merges open (dag/ok {}))
+    (attempt! context merges open (dag/ok {}))
+    (let [result (attempt! context merges merged (dag/ok {}))]
+      (is (= 1 @merges) "OPEN, OPEN, MERGED: gh pr merge ran once")
+      (is (= "squash" (get-in result [:data :merge/sha]))))))
+
+(deftest ^{:stratum 2} a-completed-merge-is-reported-even-when-no-longer-ready-test
+  (let [context (merge-context)
+        merges (atom 0)]
+    (attempt! context merges "{\"state\":\"OPEN\",\"mergeCommit\":null}" (dag/ok {}))
+    (let [result (attempt! context merges
+                           "{\"state\":\"MERGED\",\"mergeCommit\":{\"oid\":\"squash\"}}"
+                           (dag/ok {})
+                           :readiness {:ready? false :blocking [:branch-not-up-to-date]})]
+      (is (= "squash" (get-in result [:data :merge/sha])))
+      (is (= 1 @merges)))))

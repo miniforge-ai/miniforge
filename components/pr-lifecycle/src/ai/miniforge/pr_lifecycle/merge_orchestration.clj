@@ -74,6 +74,24 @@
     (outcome/settlement-result operations worktree-path pr-number policy context
                                (:data transaction-result))))
 
+(defn- ^{:stratum 0} prior-attempt
+  "The answer for an earlier attempt at this exact merge, or nil. Checked
+   before readiness: a PR that already merged no longer reads as ready."
+  [operations worktree-path pr-number policy context head-result]
+  (let [repository-result (when (dag/ok? head-result)
+                            ((:read-repository operations) worktree-path))
+        settled (when (dag/ok? repository-result)
+                  (governed/settle-prior!
+                   operations worktree-path
+                   {:pr/repo (:pr/repo (:data repository-result))
+                    :pr/number pr-number
+                    :pr/head-sha (:pr/head-sha (:data head-result))}
+                   context (Instant/now)))]
+    (if (dag/ok? settled)
+      (outcome/settlement-result operations worktree-path pr-number policy context
+                                 (:data settled))
+      settled)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} rebase-stale!
@@ -98,13 +116,21 @@
               {:message (messages/system-t :merge/attempting)
                :data {:pr-number pr-number}}))
   (let [head-result ((:read-head operations) worktree-path pr-number)
-        readiness-result ((:evaluate-readiness operations)
-                          worktree-path pr-number policy)
+        prior (prior-attempt operations worktree-path pr-number policy context
+                             head-result)
+        readiness-result (when-not prior
+                           ((:evaluate-readiness operations)
+                            worktree-path pr-number policy))
         stale? (some #{:branch-not-up-to-date}
                      (:blocking readiness-result))]
-    (if (:ready? readiness-result)
+    (cond
+      prior prior
+
+      (:ready? readiness-result)
       (merge-ready! operations worktree-path pr-number policy context
                     readiness-result head-result)
+
+      :else
       (let [branch-raw (get-in (:checks readiness-result) [:branch :data :raw])
             conflict-result (when stale?
                               (attempt-conflict-resolution!
