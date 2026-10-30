@@ -46,4 +46,5 @@
   :release/changes-description          "Changes from implementation"
   :release/phase-failed                 "Release phase failed"
   :release/publish-failed               "Release could not push the branch or open the PR"
-  :release/not-prepared                 "Release has no prepared branch to publish"}}
+  :release/not-prepared                 "Release has no prepared branch to publish"
+  :release/pr-missing                   "Release was asked to open a PR but the release executor reported none"}}
