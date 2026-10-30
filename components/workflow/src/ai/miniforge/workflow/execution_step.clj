@@ -21,19 +21,24 @@
 (defn- ^{:stratum 0} invoke
   "Call a boundary callback with `context` and `args`. One the run's stop
    interrupted (a cancel reaching a blocking callback) refuses the boundary
-   with an anomaly, so the context keeps what the phase produced. Any other
-   interrupt propagates. The interrupt flag is set again either way."
+   with an anomaly, so the context keeps what the phase produced, whatever
+   the interruption's form (InterruptedException, or ClosedByInterrupt from
+   channel I/O). Any other interrupt propagates. The interrupt flag is set
+   again either way."
   [callback context & args]
   (when callback
     (try+ (apply callback context args)
-          (catch InterruptedException e
-            (.interrupt (Thread/currentThread))
-            (if (stop-signal/stop-caused? (or (:control-state context)
-                                              (get-in context [:execution/opts :control-state]))
-                                          e)
-              (anomaly/anomaly :unavailable (messages/t :status/stopped-control)
-                               {:anomaly/ex-class (.getName (class e))})
-              (throw e))))))
+          (catch Exception e
+            (cond
+              (stop-signal/stop-caused? (or (:control-state context)
+                                            (get-in context [:execution/opts :control-state]))
+                                        e)
+              (do (.interrupt (Thread/currentThread))
+                  (anomaly/anomaly :unavailable (messages/t :status/stopped-control)
+                                   {:anomaly/ex-class (.getName (class e))}))
+              (instance? InterruptedException e)
+              (do (.interrupt (Thread/currentThread)) (throw e))
+              :else (throw e))))))
 
 (defn- ^{:stratum 0} active-context [context interceptor]
   (-> context

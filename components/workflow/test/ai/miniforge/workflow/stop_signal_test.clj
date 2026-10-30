@@ -92,6 +92,18 @@
     (let [interrupted? (Thread/interrupted)]
       (is (not interrupted?)))))
 
+(deftest ^{:stratum 0} interrupts-from-elsewhere-are-kept-test
+  (let [stopped #(doto (es/create-control-state) es/cancel!)]
+    (testing "one pending on entry survives the stop's own"
+      (.interrupt (Thread/currentThread))
+      (stop-signal/interrupting-on-stop (stopped) (fn [] nil))
+      (is (Thread/interrupted)))
+    (testing "one arriving after coordinating cleared the scope's own"
+      (stop-signal/interrupting-on-stop (stopped) (fn []
+                                                    (stop-signal/coordinating (fn [] nil))
+                                                    (.interrupt (Thread/currentThread))))
+      (is (Thread/interrupted)))))
+
 (deftest ^{:stratum 0} a-stop-during-coordination-is-left-to-the-next-boundary
   ;; The stop's callback is still in flight when coordination ends; the
   ;; scope stays disarmed, so it cannot interrupt the work after it.
@@ -216,6 +228,13 @@
             keeps its results) and keeps the interrupt"
     (let [stopped (doto (es/create-control-state) es/cancel!)
           receipt (#'execution-step/invoke (fn [& _] (throw (InterruptedException. "cancelled")))
+                                           {:control-state stopped})
+          interrupted? (Thread/interrupted)]
+      (is (anomaly/anomaly? receipt))
+      (is interrupted?)))
+  (testing "a callback's channel I/O the stop interrupted refuses the boundary too"
+    (let [stopped (doto (es/create-control-state) es/cancel!)
+          receipt (#'execution-step/invoke (fn [& _] (throw (java.nio.channels.ClosedByInterruptException.)))
                                            {:control-state stopped})
           interrupted? (Thread/interrupted)]
       (is (anomaly/anomaly? receipt))

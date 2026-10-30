@@ -78,7 +78,8 @@
    interrupt this caused is cleared, so what follows (workspace
    persistence, the checkpoint write) runs uninterrupted. The stop itself
    stays in the control state for the next boundary. An interrupt from
-   elsewhere is left alone."
+   elsewhere is left alone: one pending on entry is never cleared, and one
+   arriving after `coordinating` cleared the scope's own is kept."
   [control-state f]
   (let [monitor     (Object.)
         armed       (atom true)
@@ -87,6 +88,7 @@
                      :armed         armed
                      :interrupted   interrupted
                      :thread        (Thread/currentThread)
+                     :pending?      (.isInterrupted (Thread/currentThread))
                      :control-state control-state}
         remove-hook (on-stop! control-state #(interrupt! hook))]
     (try
@@ -94,7 +96,7 @@
       (finally
         (locking monitor (reset! armed false))
         (remove-hook)
-        (when @interrupted (Thread/interrupted))))))
+        (when (and @interrupted (not (:pending? hook))) (Thread/interrupted))))))
 
 (defn ^{:stratum 1} coordinating
   "`(f)` with this thread's `interrupting-on-stop` scope disarmed, for work
@@ -105,11 +107,12 @@
    stop (its callback possibly still in flight) is left to the next
    boundary. Outside a scope of this thread's own, just `(f)`."
   [f]
-  (let [{:keys [monitor armed interrupted thread control-state]} *hook*]
+  (let [{:keys [monitor armed interrupted thread control-state pending?]} *hook*]
     (if (and monitor (identical? (Thread/currentThread) thread))
       (do (locking monitor
             (reset! armed false)
-            (when @interrupted (Thread/interrupted)))
+            (when (and @interrupted (not pending?)) (Thread/interrupted))
+            (reset! interrupted false))
           (try
             (f)
             (finally
