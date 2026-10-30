@@ -5,6 +5,7 @@
 {:runtime-signing/messages
  {:key/unreadable "The runtime signing key could not be read or created"
   :key/linked "The runtime signing key path is a symbolic link"
+  :key/not-regular "The runtime signing key path is not a regular file"
   :key/unsafe-directory "The runtime signing key's directory is a link, owned by another user, or writable by others"
   :key/exposed "The runtime signing key is owned by another user or open to other users; restrict it to its owner"
   :key/malformed "The runtime signing key file does not hold a 32-byte hex key"}}
