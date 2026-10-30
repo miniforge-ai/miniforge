@@ -128,7 +128,15 @@
    ;; a PR maps deterministically back to its workflow run + spec.
    ;; :workflow is the PARENT run id for a DAG sub-task (shared across
    ;; the run's PRs) else this run's id; :task distinguishes DAG tasks.
+   ;; :origin is the run's lineage (the parent's for a DAG task), the same
+   ;; across resume attempts; the release branch is keyed on it. A DAG
+   ;; task restored from a checkpoint written before lineage was recorded
+   ;; has only :workflow/parent-id, which keyed its branch then.
    :provenance {:workflow (or (get-in ctx [:execution/input :workflow/parent-id])
+                              (get-in ctx [:execution/id]))
+                :origin   (or (get-in ctx [:execution/input :workflow/origin-id])
+                              (get-in ctx [:execution/input :workflow/parent-id])
+                              (get-in ctx [:execution/origin-id])
                               (get-in ctx [:execution/id]))
                 :spec     (get-in ctx [:execution/input :spec/path])
                 :task     (get-in ctx [:execution/input :task/id])}

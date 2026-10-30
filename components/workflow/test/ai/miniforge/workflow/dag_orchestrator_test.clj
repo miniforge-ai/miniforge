@@ -284,6 +284,11 @@
           in  (dag-orch/task-sub-input (make-task-def id-a "A") ctx)]
       (is (= "parent-run-1" (:workflow/parent-id in)))
       (is (= "work/x.spec.edn" (:spec/path in)))
+      (is (not (contains? in :workflow/origin-id)) "no lineage recorded, none passed")
+      (is (= "first-run" (:workflow/origin-id (dag-orch/task-sub-input
+                                               (make-task-def id-a "A")
+                                               (assoc ctx :execution/origin-id "first-run"))))
+          "the parent's lineage, which outlives its attempt ids")
       (is (= id-a (:task/id in)) "task id distinguishes PRs within the run")))
   (testing "1-arity (no context) omits provenance — backward compatible"
     (let [in (dag-orch/task-sub-input (make-task-def id-a "A"))]
