@@ -68,6 +68,8 @@
   (cond
     (not (material/safe-directory? posix? (.getParent path))) (failure :key/unsafe-directory)
     (Files/isSymbolicLink path) (failure :key/linked)
+    ;; A FIFO or device would pass the other checks and block the read.
+    (not (Files/isRegularFile path material/no-follow)) (failure :key/not-regular)
     (material/exposed? posix? path) (failure :key/exposed)
     :else (or (some-> (read-no-follow path) material/parse-key)
               (failure :key/malformed))))
