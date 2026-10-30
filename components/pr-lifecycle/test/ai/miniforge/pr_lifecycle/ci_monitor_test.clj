@@ -260,7 +260,7 @@
 ;------------------------------------------------------------------------------ Mocked poll-ci-status
 (deftest ^{:stratum 0} poll-ci-status-success-all-passing-test
   (testing "poll-ci-status returns :success when all checks pass"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}
                                       {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
@@ -274,7 +274,7 @@
 
 (deftest ^{:stratum 0} poll-ci-status-with-failures-test
   (testing "poll-ci-status returns :failure when any check fails"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "FAILURE"}
                                       {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
@@ -287,7 +287,7 @@
 
 (deftest ^{:stratum 0} poll-ci-status-pending-checks-test
   (testing "poll-ci-status returns :pending when checks are still running"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}
                                       {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
@@ -301,7 +301,7 @@
 
 (deftest ^{:stratum 0} poll-ci-status-no-checks-test
   (testing "poll-ci-status returns :unknown when no checks exist"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/ok {:checks []}))]
       (let [monitor (ci/create-ci-monitor
@@ -314,7 +314,7 @@
 
 (deftest ^{:stratum 0} poll-ci-status-gh-failure-returns-unknown-test
   (testing "poll-ci-status returns :unknown on gh command failure"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/err :gh-command-failed "connection refused"))]
       (let [monitor (ci/create-ci-monitor
@@ -326,7 +326,7 @@
 
 (deftest ^{:stratum 0} poll-ci-status-increments-poll-count-test
   (testing "Each poll increments the poll counter"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}]}))]
       (let [monitor (ci/create-ci-monitor
@@ -339,7 +339,7 @@
 
 (deftest ^{:stratum 0} poll-ci-status-updates-last-poll-timestamp-test
   (testing "Poll sets last-poll timestamp"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}]}))]
       (let [monitor (ci/create-ci-monitor
@@ -351,7 +351,7 @@
 
 (deftest ^{:stratum 0} poll-ci-status-updates-monitor-status-test
   (testing "Poll updates the monitor atom's :status field"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
       (let [monitor (ci/create-ci-monitor
@@ -364,7 +364,7 @@
 ;------------------------------------------------------------------------------ Status Change Detection
 (deftest ^{:stratum 0} poll-ci-status-generates-ci-passed-event-test
   (testing "Transition to :success generates a :pr/ci-passed event"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}
                                       {:name "build" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
@@ -379,7 +379,7 @@
 
 (deftest ^{:stratum 0} poll-ci-status-generates-ci-failed-event-test
   (testing "Transition to :failure generates a :pr/ci-failed event"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "FAILURE"}
                                       {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
@@ -395,7 +395,7 @@
 
 (deftest ^{:stratum 0} poll-ci-status-no-event-for-pending-test
   (testing "No event generated when status remains :pending"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}]}))]
       (let [monitor (ci/create-ci-monitor
@@ -412,7 +412,7 @@
 
 (deftest ^{:stratum 0} poll-ci-status-no-event-for-unknown-on-error-test
   (testing "No event generated when poll fails (:unknown is non-terminal)"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/err :gh-command-failed "timeout"))]
       (let [monitor (ci/create-ci-monitor
@@ -425,7 +425,7 @@
 
 (deftest ^{:stratum 0} poll-ci-status-neutral-generates-event-test
   (testing "Transition to :neutral (terminal) generates a ci-failed event"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/ok {:checks [{:name "optional" :state "COMPLETED" :conclusion "NEUTRAL"}]}))]
       (let [monitor (ci/create-ci-monitor
@@ -439,7 +439,7 @@
 
 (deftest ^{:stratum 0} poll-ci-status-failed-event-includes-check-names-test
   (testing "Failed event logs mention the names of failed checks"
-    (with-redefs [ci/get-pr-checks
+    (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
                     (dag/ok {:checks [{:name "unit-tests" :state "COMPLETED" :conclusion "FAILURE"}
                                       {:name "integration" :state "COMPLETED" :conclusion "FAILURE"}
@@ -468,7 +468,7 @@
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
                     :poll-interval-ms 1
                     :timeout-ms 5000)]
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (let [n (swap! call-count inc)]
                         (if (< n 3)
@@ -489,7 +489,7 @@
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
                     :poll-interval-ms 1
                     :timeout-ms 5000)]
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (let [n (swap! call-count inc)]
                         (if (< n 3)
@@ -509,7 +509,7 @@
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
                     :poll-interval-ms 1
                     :timeout-ms 50)]
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}]}))]
         (let [result (ci/run-ci-monitor monitor nil)]
@@ -524,7 +524,7 @@
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
                     :poll-interval-ms 1
                     :timeout-ms 50)]
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (dag/err :gh-command-failed "network unreachable"))]
         (let [result (ci/run-ci-monitor monitor nil)]
@@ -537,7 +537,7 @@
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
                     :poll-interval-ms 1
                     :timeout-ms 30)]
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}]}))]
         (ci/run-ci-monitor monitor nil)
@@ -550,7 +550,7 @@
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
                     :poll-interval-ms 1
                     :timeout-ms 5000)]
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
         (let [result (ci/run-ci-monitor monitor nil)]
@@ -563,7 +563,7 @@
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
                     :poll-interval-ms 1
                     :timeout-ms 5000)]
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "FAILURE"}]}))]
         (let [result (ci/run-ci-monitor monitor nil)]
@@ -579,7 +579,7 @@
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
                     :poll-interval-ms 1
                     :timeout-ms 5000)]
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (let [n (swap! call-count inc)]
                         (if (< n 3)
@@ -599,7 +599,7 @@
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
                     :poll-interval-ms 1
                     :timeout-ms 5000)]
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
         (ci/run-ci-monitor monitor nil
@@ -616,7 +616,7 @@
                     :poll-interval-ms 1
                     :timeout-ms 5000
                     :event-bus bus)]
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
         (ci/run-ci-monitor monitor nil)
@@ -631,7 +631,7 @@
                     :poll-interval-ms 1
                     :timeout-ms 5000
                     :event-bus bus)]
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "FAILURE"}]}))]
         (ci/run-ci-monitor monitor nil)
@@ -646,7 +646,7 @@
                     :poll-interval-ms 1
                     :timeout-ms 50
                     :event-bus bus)]
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}]}))]
         (ci/run-ci-monitor monitor nil)
@@ -661,7 +661,7 @@
                     :poll-interval-ms 1
                     :timeout-ms 5000)]
       (is (nil? (:started-at @monitor)))
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
         (ci/run-ci-monitor monitor nil)
@@ -673,7 +673,7 @@
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
                     :poll-interval-ms 1
                     :timeout-ms 5000)]
-      (with-redefs [ci/get-pr-checks
+      (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
                       (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
         (ci/run-ci-monitor monitor nil)
