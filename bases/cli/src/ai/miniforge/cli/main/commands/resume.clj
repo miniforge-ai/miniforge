@@ -490,6 +490,7 @@
                                      (get reconstructed :input {})
                                      {:llm-backend llm-client
                                       :acting (:acting reconstructed)
+                                      :require-operator? (context/require-operator?)
                                       ;; `--pin` also pins the checkpoints this
                                       ;; attempt writes, under a new run id too.
                                       :checkpoint/pin? (boolean (:pin opts))

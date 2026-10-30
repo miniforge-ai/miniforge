@@ -7,6 +7,7 @@
             [ai.miniforge.dag-executor.interface :as dag-exec]
             [ai.miniforge.llm.interface :as llm-impl]
             [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.tenancy.interface :as tenancy]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.fsm :as workflow-fsm]
             [ai.miniforge.workflow.messages :as messages]
@@ -69,6 +70,21 @@
 (defn- ^{:stratum 0} governed-capsule? [opts]
   (boolean (and (= :governed (:execution-mode opts))
                 (:executor opts) (:environment-id opts))))
+
+(defn- ^{:stratum 0} unowned-run-anomaly
+  "With `:require-operator?` set, return an anomaly when the run would carry
+   no valid acting context: the resume snapshot's on a resume, else the
+   caller's `:acting`. Otherwise nil."
+  [opts]
+  (when (:require-operator? opts)
+    (let [snapshot (:resume-machine-snapshot opts)
+          acting (if (and snapshot (:resume-phase-results opts))
+                   (tenancy/require-acting snapshot :execution/acting)
+                   (tenancy/require-acting opts :acting))]
+      (when (anomaly/anomaly? acting)
+        (anomaly/anomaly :invalid-input
+                         (messages/t :tenancy/operator-required)
+                         {:tenancy/refusal acting})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -146,13 +162,15 @@
 
    Returns the assembled execution context on success, or an
    `:invalid-input` anomaly when `:governed` mode is requested but no
-   capsule executor + `:environment-id` were supplied in `opts`. Governed
-   mode forbids worktree fallback (N11 §7.4).
+   capsule executor + `:environment-id` were supplied in `opts` (governed
+   mode forbids worktree fallback, N11 §7.4), or when `:require-operator?`
+   is set and the run has no valid acting context.
 
    The supplied run-pipeline port is stored unchanged for nested execution;
    context preparation has no dependency on the runner namespace."
   [workflow input opts run-pipeline]
   (or (governed-capsule-missing-anomaly opts)
+      (unowned-run-anomaly opts)
       (assemble-initial-context workflow input opts run-pipeline)))
 
 (comment ::runner-preparation)
