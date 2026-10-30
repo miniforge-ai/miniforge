@@ -54,3 +54,10 @@
       (is (str/includes? (:task/description task) "/repo/checkout"))
       (is (= "/repo/checkout" (:worktree-path ctx)))
       (is (= ::backend (:llm-backend ctx))))))
+
+(deftest ^{:stratum 1} namespaced-description-is-kept-test
+  (testing "a task that carries :task/description keeps its instructions in the prompt"
+    (let [[_ task _] (invoke-once {:task/id "t-2" :task/type :implement
+                                   :task/description "Add retry to the poller"}
+                                  {:worktree-path "/repo/checkout"})]
+      (is (str/includes? (:task/description task) "# Task: Add retry to the poller")))))

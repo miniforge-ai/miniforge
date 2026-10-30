@@ -31,7 +31,8 @@
 
 (defn ^{:stratum 0} format-task-prompt
   [task context]
-  (let [{:keys [description files dependencies acceptance-criteria]} task
+  (let [{:keys [files dependencies acceptance-criteria]} task
+        description (or (:description task) (:task/description task))
         {:keys [worktree-path base-commit]} context]
     (str "# Task: " description "\n\n"
          (when files
