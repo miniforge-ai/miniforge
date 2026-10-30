@@ -69,7 +69,9 @@
                     release-executor/publish-release
                     (fn [_ _]
                       (swap! calls update :published inc)
-                      {:success? true :artifacts [] :metrics {}})]
+                      {:success? true :metrics {}
+                       :artifacts [{:artifact/content {:pr-number 1
+                                                       :pr-url "https://github.com/o/r/pull/1"}}]})]
         (let [interceptor (phase/get-phase-interceptor {:phase :release})
               [_ phase-result] (lifecycle/execute-phase-lifecycle
                                 interceptor (release-ctx worktree decision))]

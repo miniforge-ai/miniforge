@@ -290,7 +290,9 @@
       (with-redefs [release-executor/prepare-release
                     (fn [& args] (assoc (apply (:executor release-opts) args) :prepared {}))
                     release-executor/publish-release
-                    (constantly {:success? true :artifacts [] :metrics {}})]
+                    (constantly {:success? true :metrics {}
+                                 :artifacts [{:artifact/content {:pr-number 1
+                                                                 :pr-url "https://github.com/o/r/pull/1"}}]})]
         (-> release-ctx
             ((:enter release-interceptor))
             ((:leave release-interceptor))))

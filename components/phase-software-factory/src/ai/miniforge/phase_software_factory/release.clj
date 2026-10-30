@@ -33,14 +33,17 @@
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.interface.gate :as phase-gate]
+            [ai.miniforge.phase.interface.task-base :as task-base]
             [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
             [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [ai.miniforge.phase-software-factory.messages :as messages]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
             [ai.miniforge.phase-software-factory.release-publish :as release-publish]
+            [ai.miniforge.phase-software-factory.release-unpushed :as release-unpushed]
             [ai.miniforge.release-executor.interface :as release-executor]
-            [ai.miniforge.response.interface :as response]))
+            [ai.miniforge.response.interface :as response]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -189,6 +192,15 @@
    :environment-id (:environment-id impl-result)
    :worktree-path  worktree-path})
 
+(defn- ^{:stratum 0} release-description
+  "The release's task description: the run input's, else its title, else
+   the default. The release branch name is derived from it."
+  [ctx]
+  (let [input (get-in ctx [:execution/input])]
+    (or (:description input)
+        (:title input)
+        (messages/t :default/task-description))))
+
 (defn- ^{:stratum 0} compute-verdict
   "Pick the verdict that should flow on the phase result.
 
@@ -274,6 +286,53 @@
       ;; :text already rode into the behavior addendum; the summary only
       ;; needs the status fields — don't ship the rendered prose twice.
       codex-outcome (assoc :codex/outcome (dissoc codex-outcome :text)))))
+
+(defn- ^{:stratum 0} capsule-git-runner
+  "A git runner for release-unpushed that runs each argv in the capsule at
+   `root-path` through `execute-fn`. The command runs under `sh -c`, so an
+   argument with characters beyond a plain path or ref is quoted."
+  [execute-fn executor env-id root-path]
+  (fn [argv]
+    (let [arg #(if (re-matches #"[A-Za-z0-9._/:@=-]+" %) % (agent/shell-quote %))
+          r   (execute-fn executor env-id (str/join " " (map arg argv)) {:workdir root-path})]
+      {:exit (get-in r [:data :exit-code])
+       :out  (get-in r [:data :stdout] "")
+       :err  (get-in r [:data :stderr] (:message (:error r)))})))
+
+(defn- ^{:stratum 0} host-git-runner
+  "A git runner for release-unpushed that runs each argv on the host in
+   `root-path`."
+  [root-path]
+  (fn [argv] (apply shell/sh (concat argv [:dir root-path]))))
+
+(defn- ^{:stratum 0} scan-unpushed
+  "release-unpushed/unpushed-files with `run`. An exception is the scan's
+   failure; an interrupt (a cancel or timeout) is not a failed scan to
+   retry: the flag is set again and it propagates."
+  [run run-branches base-commits]
+  (try+
+    (release-unpushed/unpushed-files run run-branches base-commits)
+    (catch InterruptedException e
+      (.interrupt (Thread/currentThread))
+      (throw e))
+    (catch Exception e
+      {:failure {:detail (or (ex-message e) (.getName (class e)))
+                 :data   {:exception/class (.getName (class e))}}})))
+
+(defn- ^{:stratum 0} task-base-commits
+  "Where the task's work started: the commits among its recorded task base
+   refs (a resumed run carries the first attempt's), else, on a first
+   attempt, the environment's base commit. A resumed environment's base is
+   the checkpoint it restored, which holds the run's own work, so it is
+   not used."
+  [ctx]
+  (let [recorded (filterv #(and (string? %) (re-matches #"[0-9a-f]{7,40}" %))
+                          (task-base/recorded-refs ctx))
+        base-sha (get-in ctx [:execution/environment-metadata :base-sha])]
+    (cond
+      (seq recorded) recorded
+      (and base-sha (not (get-in ctx [:execution/opts :resume-workspace]))) [base-sha]
+      :else [])))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -372,6 +431,19 @@
     (catch Exception e
       (git-status-failed root-path {:detail (or (ex-message e) (.getName (class e)))
                                     :data   {:exception/class (.getName (class e))}}))))
+
+(defn- ^{:stratum 1} unpushed-files
+  "release-unpushed/unpushed-files in the worktree at `root-path`: on the
+   host, or through `execute-fn` in the capsule when it is given. A scan
+   git cannot answer is a :release/git-status-failed anomaly, never [].
+   `run-branches` are the run's own branches and `base-commits` where its
+   work started (see release-unpushed)."
+  [root-path execute-fn executor env-id run-branches base-commits]
+  (let [run (if execute-fn
+              (capsule-git-runner execute-fn executor env-id root-path)
+              (host-git-runner root-path))
+        {:keys [files failure]} (scan-unpushed run run-branches base-commits)]
+    (if failure (git-status-failed root-path failure) files)))
 
 (defn- ^{:stratum 1} release-files-result
   "Return release file data, the failed scan's own anomaly when `dirty` is
@@ -585,13 +657,10 @@
                              [{:artifact/type    :review
                                :artifact/content {:review/decision (:review/decision review-output)
                                                   :review/summary  (:review/summary review-output)
-                                                  :review/warnings known-issues}}])
-          input          (get-in ctx [:execution/input])]
+                                                  :review/warnings known-issues}}])]
       {:workflow/id       (or (get-in ctx [:execution/id]) (random-uuid))
        :workflow/phase    :release
-       :workflow/spec     {:spec/description (or (:description input)
-                                                 (:title input)
-                                                 (messages/t :default/task-description))}
+       :workflow/spec     {:spec/description (release-description ctx)}
        :workflow/artifacts (into code-artifacts review-artifacts)})))
 
 ;------------------------------------------------------------------------------ Layer 4
@@ -618,19 +687,35 @@
         ;; Emit phase-started telemetry event
         _ (phase/emit-phase-started! ctx :release)
         ;; Skip probe: scan only when an empty worktree means "nothing to release".
+        ;; A clean worktree is checked for unpushed commits too: committed
+        ;; work no push has published is released, not skipped as done.
         probe (when (contains? #{:already-implemented :already-satisfied nil} impl-status)
                 (let [wt         (ctx-worktree-path ctx)
                       execute-fn (get ctx :execution/execute-fn)
                       executor   (get ctx :execution/executor)
-                      env-id     (get ctx :execution/environment-id)]
-                  (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
-                    (git-dirty-files-capsule execute-fn executor env-id wt)
-                    (git-dirty-files wt))))]
+                      env-id     (get ctx :execution/environment-id)
+                      governed?  (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
+                      dirty      (if governed?
+                                   (git-dirty-files-capsule execute-fn executor env-id wt)
+                                   (git-dirty-files wt))]
+                  (if (and (vector? dirty) (empty? dirty))
+                    (let [{:keys [origin task]} (release-publish/provenance ctx)]
+                      ;; The run's own branches are not publication: its
+                      ;; release branch, and the checkpoint branches this
+                      ;; attempt persists to and a resume started from.
+                      (unpushed-files wt (when governed? execute-fn) executor env-id
+                                      [(release-executor/release-branch-name
+                                        origin task (release-description ctx))
+                                       (get ctx :execution/task-branch)
+                                       (get-in ctx [:execution/opts :resume-workspace :branch])]
+                                      (task-base-commits ctx)))
+                    dirty)))]
     ;; Short-circuit: skip release when there is nothing to release.
     ;; This covers:
     ;; - implement returned :already-implemented (no new code)
     ;; - plan returned :already-satisfied (DAG had 0 tasks, no implement ran)
-    ;; In both cases, only skip if there are also no git changes from other phases.
+    ;; In both cases, only skip if there are also no git changes from other phases,
+    ;; and no commits ahead of origin's default branch.
     ;; A failed scan returns an anomaly, which does not skip; build-workflow-state
     ;; reuses the probe rather than rescanning, so the anomaly is what it raises.
     (if (and (vector? probe) (empty? probe))

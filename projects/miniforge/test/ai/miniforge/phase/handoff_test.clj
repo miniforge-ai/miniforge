@@ -311,7 +311,9 @@
                          :prepared {}
                          :metrics {:tokens 100 :duration-ms 500}})
                       release-executor/publish-release
-                      (constantly {:success? true :artifacts [] :metrics {}})]
+                      (constantly {:success? true :metrics {}
+                                   :artifacts [{:artifact/content {:pr-number 1
+                                                                   :pr-url "https://github.com/o/r/pull/1"}}]})]
 
           ;; Mock verify phase test runner to prevent subprocess spawning
           (with-mocked-test-runner

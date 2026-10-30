@@ -18,6 +18,9 @@
 (ns ai.miniforge.phase-software-factory.release-publish-test
   (:require
    [ai.miniforge.phase-software-factory.release-publish :as release-publish]
+   [ai.miniforge.phase-software-factory.release-unpushed :as release-unpushed]
+   [ai.miniforge.phase-software-factory.release-unpushed-entries :as entries]
+   [ai.miniforge.release-executor.interface :as release-executor]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -39,3 +42,51 @@
       (is (= "first-run" (origin {:execution/id "attempt-2" :execution/origin-id "first-run"}))))
     (testing "a context with no lineage recorded: its own id"
       (is (= "run" (origin {:execution/id "run"}))))))
+
+(deftest ^{:stratum 0} create-pr-option-test
+  (let [create-pr? (fn [opts config]
+                     (:create-pr? (release-publish/build-publish-context
+                                   {:execution/id "run" :execution/opts (assoc opts :github-token "t")}
+                                   (assoc config :worktree-path "/wt") nil)))]
+    (testing "an explicit false in the execution opts is honoured"
+      (is (false? (create-pr? {:create-pr? false} {}))))
+    (testing "absent from opts: the phase config, else true"
+      (is (false? (create-pr? {} {:create-pr? false})))
+      (is (true? (create-pr? {} {}))))))
+
+(deftest ^{:stratum 0} publish-requires-the-pr-it-was-asked-for-test
+  (let [publish (fn [create-pr? exec-result]
+                  (with-redefs [release-executor/publish-release (constantly exec-result)]
+                    (get-in (release-publish/publish-when-allowed
+                             {:phase {:result {:status :success
+                                               :output {:release/prepared {}}}}
+                              :execution/id "run"
+                              :execution/opts {:github-token "t" :create-pr? create-pr?}
+                              :worktree-path "/wt"})
+                            [:phase :result])))
+        no-pr {:success? true :artifacts [{:artifact/content {:branch "b"}}] :metrics {}}]
+    (testing "asked for a PR, none reported: the release fails"
+      (is (= :release/pr-missing (get-in (publish true no-pr) [:error :data :type]))))
+    (testing "no PR asked for: the push alone completes"
+      (is (= :completed (get-in (publish false no-pr) [:output :release/status]))))))
+
+(deftest ^{:stratum 0} scan-output-parsing-test
+  (testing "NUL fields keep a path of spaces; only empty fields are separators"
+    (is (= ["  " "a b.txt" "src/x.clj"]
+           (entries/nul-fields "  \u0000a b.txt\u0000\u0000src/x.clj\u0000"))))
+  (testing "ls-tree entries by path, a submodule as a commit"
+    (is (= {"src/a.clj" {:type "blob" :object "abc"}
+            "standards/miniforge" {:type "commit" :object "def"}}
+           (entries/tree-entries
+            (str "100644 blob abc\tsrc/a.clj\u0000"
+                 "160000 commit def\tstandards/miniforge\u0000"))))))
+
+(deftest ^{:stratum 0} head-probe-test
+  (let [scan (fn [head-reply] (release-unpushed/unpushed-files
+                               (fn [argv] (if (= "rev-parse" (second argv)) head-reply {:exit 0 :out ""}))
+                               nil nil))]
+    (testing "no commit yet: nothing to release"
+      (is (= {:files []} (scan {:exit 1 :out "" :err ""}))))
+    (testing "a probe that did not answer is a failure, not an empty scan"
+      (is (:failure (scan {:exit nil :out "" :err "executor error"})))
+      (is (:failure (scan {:exit 124 :out "" :err "timed out"}))))))

@@ -32,6 +32,26 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} provenance
+  "The release's provenance from phase context: rendered as YAML
+   frontmatter on the PR body so a PR maps back to its workflow run and
+   spec, and the key of the release branch and effects. :workflow is the
+   PARENT run id for a DAG sub-task (shared across the run's PRs) else
+   this run's id; :task distinguishes DAG tasks. :origin is the run's
+   lineage (the parent's for a DAG task), the same across resume attempts;
+   the release branch is keyed on it. A DAG task restored from a
+   checkpoint written before lineage was recorded has only
+   :workflow/parent-id, which keyed its branch then."
+  [ctx]
+  {:workflow (or (get-in ctx [:execution/input :workflow/parent-id])
+                 (get-in ctx [:execution/id]))
+   :origin   (or (get-in ctx [:execution/input :workflow/origin-id])
+                 (get-in ctx [:execution/input :workflow/parent-id])
+                 (get-in ctx [:execution/origin-id])
+                 (get-in ctx [:execution/id]))
+   :spec     (get-in ctx [:execution/input :spec/path])
+   :task     (get-in ctx [:execution/input :task/id])})
+
 (defn- ^{:stratum 0} resolve-github-token
   "Resolve GitHub token for capsule PR operations.
    Mirrors the resolution order from docker.clj's resolve-git-token:
@@ -49,7 +69,23 @@
                (str/trim (:out r))))
            (catch Exception _ nil))))
 
-(defn- ^{:stratum 0} publish-prepared
+(defn- ^{:stratum 0} pr-missing
+  "The failure of a publish asked to open a PR that reported none,
+   logged."
+  [logger]
+  (log/error logger :release :release/pr-missing {})
+  (response/failure (messages/t :release/pr-missing) {:data {:type :release/pr-missing}}))
+
+(defn- ^{:stratum 0} create-pr-option
+  "Whether the release opens a PR: an explicit value in the execution
+   options (false included), else the phase config's, else true."
+  [ctx config]
+  (let [opt (get-in ctx [:execution/opts :create-pr?])]
+    (if (some? opt) opt (get config :create-pr? true))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} publish-prepared
   "Publish what enter-release prepared through `publish-context`, folding
    the outcome into the phase `result`: on success its output gains the
    release artifacts, the publish metrics and :workflow/pr-info. A failure
@@ -63,7 +99,13 @@
     (if-let [prepared (get-in result [:output :release/prepared])]
       (try
         (let [exec-result (release-executor/publish-release prepared publish-context)]
-          (if (:success? exec-result)
+          (cond
+            ;; PR creation was asked for: a release with no PR is not done.
+            (and (:success? exec-result) (:create-pr? publish-context)
+                 (not (get-in exec-result [:artifacts 0 :artifact/content :pr-url])))
+            (failed (pr-missing logger))
+
+            (:success? exec-result)
             (let [content (:artifact/content (first (:artifacts exec-result)))]
               (update result :output
                       (fn [output]
@@ -77,6 +119,8 @@
                                                     :pr-url     (:pr-url content)
                                                     :branch     (:branch content)
                                                     :commit-sha (:commit-sha content)})))))
+
+            :else
             (do (log/error logger :release :release/publish-failed
                            {:data {:errors (:errors exec-result)}})
                 (failed (response/failure (messages/t :release/publish-failed)
@@ -87,8 +131,6 @@
           (failed (response/failure e))))
       (failed (response/failure (messages/t :release/not-prepared)
                                 {:data {:type :release/not-prepared}})))))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} build-publish-context
   "Build the release executor context from phase context: where the
@@ -115,31 +157,16 @@
    :logger (or (get-in ctx [:execution/logger]) logger)
    :artifact-store (get-in ctx [:execution/artifact-store])
    :event-stream (:event-stream ctx)
-   ;; Allow disabling PR creation via config or execution opts
-   :create-pr? (or (get-in ctx [:execution/opts :create-pr?])
-                   (get config :create-pr? true))
+   ;; Allow disabling PR creation via config or execution opts. An explicit
+   ;; false in opts wins (an `or` read it as absent).
+   :create-pr? (create-pr-option ctx config)
    ;; PR base override for a dependency-chained DAG task: the DAG
    ;; orchestrator passes the parent task's branch so this task's PR
    ;; STACKS on the parent (base = parent branch) instead of opening
    ;; against the default branch with a cumulative diff. Absent (root
    ;; tasks / non-DAG runs) → executor falls back to the default branch.
    :base-branch (get-in ctx [:execution/opts :release/base-branch])
-   ;; PR provenance → rendered as YAML frontmatter on the PR body so
-   ;; a PR maps deterministically back to its workflow run + spec.
-   ;; :workflow is the PARENT run id for a DAG sub-task (shared across
-   ;; the run's PRs) else this run's id; :task distinguishes DAG tasks.
-   ;; :origin is the run's lineage (the parent's for a DAG task), the same
-   ;; across resume attempts; the release branch is keyed on it. A DAG
-   ;; task restored from a checkpoint written before lineage was recorded
-   ;; has only :workflow/parent-id, which keyed its branch then.
-   :provenance {:workflow (or (get-in ctx [:execution/input :workflow/parent-id])
-                              (get-in ctx [:execution/id]))
-                :origin   (or (get-in ctx [:execution/input :workflow/origin-id])
-                              (get-in ctx [:execution/input :workflow/parent-id])
-                              (get-in ctx [:execution/origin-id])
-                              (get-in ctx [:execution/id]))
-                :spec     (get-in ctx [:execution/input :spec/path])
-                :task     (get-in ctx [:execution/input :task/id])}
+   :provenance (provenance ctx)
    ;; Resolve and inject GitHub token for capsule gh CLI auth
    :github-token (resolve-github-token ctx)})
 

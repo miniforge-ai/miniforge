@@ -42,8 +42,10 @@
   ;; Release phase
   :release/zero-files                   "Release phase received code artifact with zero files"
   :release/git-status-failed            "Release could not list changed files in {worktree-path}: {detail}"
+  :release/git-command-failed           "{command} exited {exit}"
   :release/skipped-already-implemented  "Release skipped — task was already implemented"
   :release/changes-description          "Changes from implementation"
   :release/phase-failed                 "Release phase failed"
   :release/publish-failed               "Release could not push the branch or open the PR"
-  :release/not-prepared                 "Release has no prepared branch to publish"}}
+  :release/not-prepared                 "Release has no prepared branch to publish"
+  :release/pr-missing                   "Release was asked to open a PR but the release executor reported none"}}
