@@ -724,6 +724,19 @@
       (let [result (poll {:ci/logs nil :ci/log-errors [{:run-id "1" :error {:message "run 1 is still in progress"}}]})]
         (is (= :pending (:status result)))
         (is (nil? (:event result)))))
+    (testing "a failed fetch after every check finished: retry next poll"
+      (with-redefs [checks/get-pr-checks (fn [_ _] (dag/ok {:checks [(first checks)]}))
+                    checks/get-check-logs (fn [_ _] {:ci/logs nil
+                                                     :ci/log-errors [{:run-id "1" :error {:message "HTTP 502"}}]})]
+        (is (= :pending (:status (ci/poll-ci-status
+                                  (ci/create-ci-monitor (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo")
+                                  nil))))))
+    (testing "no Actions run to fetch from, nothing pending: terminal at once"
+      (with-redefs [checks/get-pr-checks (fn [_ _] (dag/ok {:checks [(dissoc (first checks) :link)]}))
+                    checks/get-check-logs (fn [_ _] {:ci/logs nil :ci/log-errors []})]
+        (is (= :failure (:status (ci/poll-ci-status
+                                  (ci/create-ci-monitor (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo")
+                                  nil))))))
     (testing "the log is available: the failure is terminal and carries it"
       (let [result (poll {:ci/logs "Structure\tcheck\tboom" :ci/log-errors []})]
         (is (= :failure (:status result)))

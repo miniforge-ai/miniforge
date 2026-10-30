@@ -105,9 +105,11 @@
 
    On :failure, also fetches the failed jobs' logs into :ci/logs (nil
    when none could be fetched) and :ci/log-errors. gh serves a run's
-   failed-job log only once the whole run has finished, so while other
-   checks are still pending and no log is available yet, a failure polls
-   as :pending and is fetched again on the next poll.
+   failed-job log only once the whole run has finished, and a fetch can
+   fail transiently, so a failure with no log yet polls as :pending while
+   other checks are still pending or a fetch failed, and the log is
+   fetched again next poll (bounded by the monitor timeout). A failure
+   whose checks have no GitHub Actions run is terminal at once.
 
    Returns {:status keyword :checks [...] :event event-or-nil}"
   [monitor logger]
@@ -132,7 +134,9 @@
                        pending? (assoc :status :pending))
             logs (when (= :failure (:status computed))
                    (ci-checks/get-check-logs worktree-path (:failed computed)))
-            logs-not-ready? (and logs (nil? (:ci/logs logs)) (seq (:pending computed)))
+            logs-not-ready? (and logs
+                                 (nil? (:ci/logs logs))
+                                 (or (seq (:pending computed)) (seq (:ci/log-errors logs))))
             status (if logs-not-ready? :pending (:status computed))
             prev-status (:status @monitor)]
 
