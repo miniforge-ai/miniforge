@@ -83,6 +83,8 @@
       (str/starts-with? line "git rev-parse HEAD") (ok sha)
       (str/starts-with? line "git push -u origin ")
       (do (swap! state assoc-in [:pushed (last-word line)] sha) (ok))
+      (and (:gh-down? @state) (str/starts-with? line "gh pr list"))
+      (fail "error connecting to api.github.com")
       (str/starts-with? line "gh pr list --head ")
       (ok (pr-lines prs (nth (str/split line #"\s+") 4)))
       (str/starts-with? line "gh pr create")

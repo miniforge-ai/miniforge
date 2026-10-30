@@ -20,6 +20,7 @@
    Handles invoking the releaser agent and generating fallback metadata."
   (:require
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.release-executor.messages :as msg]
    [clojure.string :as str])
   (:import
@@ -155,9 +156,11 @@
   "The release branch of one run (and DAG task), the same on every attempt:
    mf/<task slug>-<8 hex digits of a name-based UUID of the run and task
    ids>. A retried or resumed release computes the same name, so it finds
-   its branch and PR again instead of making new ones."
+   its branch and PR again instead of making new ones. The description is
+   redacted first: a pushed ref is public, and slugify would keep a
+   token's payload while dropping the characters redaction matches on."
   [run-id task-id task-description]
-  (let [title (first-sentence (or task-description (default-task-description)) 70)
+  (let [title (first-sentence (redaction/redact (or task-description (default-task-description))) 70)
         id    (UUID/nameUUIDFromBytes
                (.getBytes (pr-str [:release/branch (str run-id) (some-> task-id str)])
                           StandardCharsets/UTF_8))]
