@@ -16,8 +16,9 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.workflow.anomaly.required-operator-test
-  "With `:require-operator?` set, the runner refuses to build a run that
-   carries no valid acting context, on a fresh run and on a resume."
+  "With `:require-operator?` set, the runner refuses to build a fresh run
+   that carries no valid acting context. Resumes are refused earlier, by
+   the resume command."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.tenancy.interface :as tenancy]
@@ -62,15 +63,15 @@
     (is (not (anomaly/anomaly? result)))
     (is (= acting (:execution/acting result)))))
 
-(deftest ^{:stratum 1} required-operator-checks-the-resumed-snapshot-test
-  (testing "given a resume whose snapshot carries no acting → refused"
-    (is (anomaly/anomaly?
-         (runner/build-initial-context
-          workflow input
-          {:require-operator? true
-           :acting acting
-           :resume-machine-snapshot {:execution/id (random-uuid)}
-           :resume-phase-results {}})))))
+(deftest ^{:stratum 1} required-operator-leaves-resumes-to-the-resume-command-test
+  (testing "given a resume, the runner does not refuse: a refusal here would
+            be persisted over the run's checkpoint"
+    (is (not (anomaly/anomaly?
+              (runner/build-initial-context
+               workflow input
+               {:require-operator? true
+                :resume-machine-snapshot {:execution/id (random-uuid)}
+                :resume-phase-results {}}))))))
 
 (deftest ^{:stratum 1} unset-flag-keeps-unowned-runs-working-test
   (is (not (anomaly/anomaly? (runner/build-initial-context workflow input {})))))

@@ -154,6 +154,21 @@
                 :bundle-path "/tmp/task-a.bundle"}
                (:resume-workspace @run-pipeline-opts)))))))
 
+(deftest ^{:stratum 0} required-operator-refuses-an-unowned-resume-before-writing-test
+  (let [pipeline-ran? (atom false)
+        pinned? (atom false)]
+    (with-redefs [wr/reconstruct-context
+                  (fn [_ _] {:machine-snapshot {:execution/id (random-uuid)}
+                             :phase-results {}})
+                  context/require-operator? (constantly true)
+                  workflow/pin-checkpoint! (fn [& _] (reset! pinned? true))
+                  main-display/print-info (fn [& _] nil)
+                  sut/run-pipeline (fn [& _] (reset! pipeline-ran? true))]
+      (is (thrown-with-msg? Exception #"Refusing to resume"
+                            (sut/resume-workflow (random-uuid) {:quiet true :pin true})))
+      (is (false? @pipeline-ran?) "the runner never sees the refused resume")
+      (is (false? @pinned?) "nothing is written for a refused resume"))))
+
 (deftest ^{:stratum 0} terminal-status-predicate-test
   (testing "explicit terminal statuses are accepted"
     (doseq [s [:completed :completed-with-warnings :failed :aborted :cancelled]]

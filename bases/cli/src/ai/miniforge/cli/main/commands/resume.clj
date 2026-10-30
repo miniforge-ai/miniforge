@@ -41,6 +41,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.tenancy.interface :as tenancy]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.workflow-resume.interface :as wr]
@@ -267,6 +268,21 @@
     (when (:workflow/spec-hash readable)
       (select-keys readable [:workflow/spec-path :workflow/spec-hash]))))
 
+(defn ^{:stratum 0} unowned-resume-anomaly
+  "With [:tenancy :require-operator?] set, an anomaly when the recorded run
+   carries no valid acting context; otherwise nil. Checked before the
+   resume writes anything, so a refusal leaves the run's checkpoint as it
+   was."
+  [recorded]
+  (when (context/require-operator?)
+    (let [acting (tenancy/require-acting (:machine-snapshot recorded)
+                                         :execution/acting)]
+      (when (anomaly/anomaly? acting)
+        (anomaly/anomaly :invalid-input
+                         (messages/t :resume/operator-required
+                                     {:reason (:anomaly/message acting)})
+                         {:config/key [:tenancy :require-operator?]})))))
+
 (defn ^{:stratum 0} resolve-resume-workflow
   "Resolve workflow identity for a resumed run, using the CLI's
    default selection profile as fallback. Thin wrapper over the
@@ -366,6 +382,7 @@
                                             {:workflow-id workflow-id})))
         recorded (wr/reconstruct-context events-dir (str workflow-id))
         _ (resume-anomaly/throw-resume-anomaly! recorded)
+        _ (resume-anomaly/throw-resume-anomaly! (unowned-resume-anomaly recorded))
         ;; Shown even when quiet: an unreadable checkpoint file means work
         ;; the run already paid for may be done again.
         _ (doseq [failure (:checkpoint-read-failures recorded)]
@@ -490,7 +507,6 @@
                                      (get reconstructed :input {})
                                      {:llm-backend llm-client
                                       :acting (:acting reconstructed)
-                                      :require-operator? (context/require-operator?)
                                       ;; `--pin` also pins the checkpoints this
                                       ;; attempt writes, under a new run id too.
                                       :checkpoint/pin? (boolean (:pin opts))

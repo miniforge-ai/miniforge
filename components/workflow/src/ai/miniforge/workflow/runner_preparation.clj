@@ -72,15 +72,14 @@
                 (:executor opts) (:environment-id opts))))
 
 (defn- ^{:stratum 0} unowned-run-anomaly
-  "With `:require-operator?` set, return an anomaly when the run would carry
-   no valid acting context: the resume snapshot's on a resume, else the
-   caller's `:acting`. Otherwise nil."
+  "With `:require-operator?` set, an anomaly when a fresh run has no valid
+   `:acting` context; otherwise nil. A resume is not checked here: the
+   runner would persist the refusal over the run's checkpoint, so the
+   resume command refuses before it writes anything."
   [opts]
-  (when (:require-operator? opts)
-    (let [snapshot (:resume-machine-snapshot opts)
-          acting (if (and snapshot (:resume-phase-results opts))
-                   (tenancy/require-acting snapshot :execution/acting)
-                   (tenancy/require-acting opts :acting))]
+  (when (and (:require-operator? opts)
+             (not (:resume-machine-snapshot opts)))
+    (let [acting (tenancy/require-acting opts :acting)]
       (when (anomaly/anomaly? acting)
         (anomaly/anomaly :invalid-input
                          (messages/t :tenancy/operator-required)
@@ -164,7 +163,7 @@
    `:invalid-input` anomaly when `:governed` mode is requested but no
    capsule executor + `:environment-id` were supplied in `opts` (governed
    mode forbids worktree fallback, N11 §7.4), or when `:require-operator?`
-   is set and the run has no valid acting context.
+   is set and a fresh run has no valid acting context.
 
    The supplied run-pipeline port is stored unchanged for nested execution;
    context preparation has no dependency on the runner namespace."
