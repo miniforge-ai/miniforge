@@ -57,6 +57,18 @@
    (effect-policy pull-request-grant-ttl-seconds
                   [:pr/repo :pr/base :pr/branch :pr/head-sha :pr/payload-hash :pr/governance-hash])
 
+   :effect/push
+   (effect-policy pull-request-grant-ttl-seconds
+                  [:git/remote-url :git/branch :git/sha :git/force?])
+
+   :effect/comment
+   (effect-policy pull-request-grant-ttl-seconds
+                  [:pr/repo :pr/number :github/action :github/payload-hash])
+
+   :effect/provision
+   (effect-policy (* 30 60)
+                  [:pulumi/stack :pulumi/stack-dir :pulumi/plan-hash])
+
    :effect/deploy
    (effect-policy (* 30 60)
                   [:kustomize-dir :context :namespace :deployment-name])})
