@@ -34,7 +34,9 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.workflow.dag-merge :as dag-merge]
    [ai.miniforge.workflow.dag-merge-anomaly :as merge-anomaly]
-   [ai.miniforge.workflow.dag-plan :as dag-plan]))
+   [ai.miniforge.workflow.dag-plan :as dag-plan]
+   [ai.miniforge.workflow.stop-signal :as stop-signal]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -176,8 +178,18 @@
                        (nil? task-def)
                        nil
 
+                       ;; Runs before the task's sub-workflow installs its own
+                       ;; stop hook: a cancel interrupts the merge-resolution
+                       ;; agent here, and the task fails as stopped.
                        (dag/multi-parent? deps)
-                       (dag-merge/merge-parent-branches! context task-def)
+                       (try+
+                         (stop-signal/interrupting-on-stop
+                          (:control-state context)
+                          #(dag-merge/merge-parent-branches! context task-def))
+                         (catch Throwable t
+                           (if (stop-signal/stop-caused? (:control-state context) t)
+                             (merge-anomaly/merge-stopped-anomaly (:task/id task-def))
+                             (throw t))))
 
                        :else
                        ;; v1 single-parent path returns a branch string for

@@ -23,7 +23,10 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.context :as ctx]
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.workflow.dag-merge :as dag-merge]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.dag-sub-workflow :as dag-sub-workflow]
    [ai.miniforge.workflow.execution :as exec]
    [ai.miniforge.workflow.monitoring :as monitoring]
    [ai.miniforge.workflow.runner-checkpoint :as runner-checkpoint]
@@ -89,6 +92,52 @@
     (let [interrupted? (Thread/interrupted)]
       (is (not interrupted?)))))
 
+(deftest ^{:stratum 0} a-stop-during-coordination-is-left-to-the-next-boundary
+  ;; The stop's callback is still in flight when coordination ends; the
+  ;; scope stays disarmed, so it cannot interrupt the work after it.
+  (let [cs          (es/create-control-state)
+        entered     (promise)
+        proceed     (promise)
+        stopper     (atom nil)
+        interrupted (atom nil)
+        interrupt!  @#'stop-signal/interrupt!]
+    (with-redefs-fn {#'stop-signal/interrupt! (fn [hook]
+                                                (deliver entered true)
+                                                (deref proceed 5000 nil)
+                                                (interrupt! hook))}
+      #(stop-signal/interrupting-on-stop
+        cs (fn []
+             (stop-signal/coordinating
+              (fn []
+                (reset! stopper (future (es/cancel! cs)))
+                (deref entered 5000 nil)))
+             (deliver proceed true)
+             (deref @stopper 5000 nil)
+             (reset! interrupted (Thread/interrupted)))))
+    (is (false? @interrupted))))
+
+(deftest ^{:stratum 0} stop-caused-failures-at-phase-boundaries-test
+  (let [checkpointed (atom false)
+        context      (ctx/create-context {:workflow/id :stop-test :workflow/version "1.0.0"
+                                          :workflow/pipeline [{:phase :plan}]}
+                                         {:task "Test"} {})
+        iterate-with (fn [cs step]
+                       (with-redefs-fn {#'monitoring/check-workflow-supervision (constantly {:status :continue})
+                                        #'exec/execute-phase-step step
+                                        #'env/persist-workspace-at-phase-boundary! (fn [_ _] nil)
+                                        #'runner-checkpoint/checkpoint! (fn [c] (reset! checkpointed true) c)}
+                         #(runner-iteration/execute-single-iteration [] context {} 0 cs)))]
+    (testing "an interruption escaping the phase step (a blocking callback) is the stop, checkpointed"
+      (let [cs (es/create-control-state)
+            result (iterate-with cs (fn [_ _ & _] (es/cancel! cs) (throw (InterruptedException. "callback"))))]
+        (is (some #{:dashboard-stop} (map :type (:execution/errors result))))
+        (is (true? @checkpointed))))
+    (testing "a cancel landing after the phase completed the run does not undo it"
+      (let [cs (es/create-control-state)
+            result (iterate-with cs (fn [_ c & _] (es/cancel! cs) (assoc c :execution/status :completed)))]
+        (is (= :completed (:execution/status result)))
+        (is (not-any? #{:dashboard-stop} (map :type (:execution/errors result))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} cancel-interrupts-the-running-phase-test
@@ -152,3 +201,21 @@
            (is (false? @persisted))
            (is (false? @checkpoint))
            (is (some #{:dashboard-stop} (map :type (:execution/errors result)))))))))
+
+(deftest ^{:stratum 1} a-cancel-during-the-dag-pause-wait-returns-stopped-test
+  (let [cs (es/create-control-state)
+        _  (es/pause! cs)
+        _  (cancel-after! cs 300)
+        logger (log/create-logger {:min-level :error :output :human})]
+    (is (true? (stop-signal/interrupting-on-stop
+                cs #(#'dag-orch/await-launch-clearance! cs logger))))
+    (is (not (Thread/interrupted)))))
+
+(deftest ^{:stratum 1} a-cancel-during-a-parent-merge-stops-the-task-test
+  (let [cs (es/create-control-state)
+        _  (cancel-after! cs 300)]
+    (with-redefs [dag-merge/merge-parent-branches! (fn [_ _] (Thread/sleep 10000) nil)]
+      (let [opts (dag-sub-workflow/task-sub-opts {:control-state cs}
+                                                 {:task/id :c :task/deps [:a :b]})]
+        (is (= :anomalies/dag-merge-stopped (get-in opts [:dag/merge-anomaly :anomaly/category])))
+        (is (not (Thread/interrupted)))))))

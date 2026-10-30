@@ -48,6 +48,17 @@
       (when (:stopped @control-state) (fire!))
       #(remove-watch control-state hook))))
 
+(defn ^{:stratum 0} stop-caused?
+  "True when `control-state` is stopped and `t` or one of its causes is an
+   interruption: the failure a stop's interrupt produced in blocking work."
+  [control-state t]
+  (boolean
+   (and (some-> control-state deref :stopped)
+        ;; ClosedByInterruptException by name: babashka does not expose it.
+        (some #(or (instance? InterruptedException %)
+                   (= "java.nio.channels.ClosedByInterruptException" (.getName (class %))))
+              (take-while some? (iterate ex-cause t))))))
+
 (defn- ^{:stratum 0} interrupt!
   "Interrupt `hook`'s thread, unless the scope is disarmed. The monitor
    orders it against disarming: once disarmed, no interrupt lands."
@@ -73,7 +84,7 @@
         armed       (atom true)
         interrupted (atom false)
         hook        {:monitor monitor :armed armed :interrupted interrupted
-                     :thread (Thread/currentThread)}
+                     :thread (Thread/currentThread) :control-state control-state}
         remove-hook (on-stop! control-state #(interrupt! hook))]
     (try
       (binding [*hook* hook] (f))
@@ -87,10 +98,11 @@
    that waits on tasks which stop on their own (DAG batch tasks run
    sub-workflows sharing the control state): interrupting the waiter would
    abandon their results. An interrupt the scope already delivered is
-   cleared first. Re-armed after; a stop during `f` is left to the next
+   cleared first. Re-armed after, unless the run stopped meanwhile: that
+   stop (its callback possibly still in flight) is left to the next
    boundary. Outside a scope of this thread's own, just `(f)`."
   [f]
-  (let [{:keys [monitor armed interrupted thread]} *hook*]
+  (let [{:keys [monitor armed interrupted thread control-state]} *hook*]
     (if (and monitor (identical? (Thread/currentThread) thread))
       (do (locking monitor
             (reset! armed false)
@@ -98,7 +110,9 @@
           (try
             (f)
             (finally
-              (locking monitor (reset! armed true)))))
+              (locking monitor
+                (when-not (some-> control-state deref :stopped)
+                  (reset! armed true))))))
       (f))))
 
 (comment ::stop-signal)

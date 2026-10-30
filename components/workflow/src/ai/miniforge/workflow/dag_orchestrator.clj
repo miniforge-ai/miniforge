@@ -71,7 +71,8 @@
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-defaults :as runner-defaults]
    [ai.miniforge.workflow.stop-signal :as stop-signal]
-   [clojure.set :as set]))
+   [clojure.set :as set]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -236,7 +237,12 @@
           paused  (do (when-not logged?
                         (log/info logger :dag-orchestrator :dag/paused
                                   {:message (messages/t :status/paused)}))
-                      (Thread/sleep (long (runner-defaults/pause-poll-interval-ms)))
+                      ;; A cancel's interrupt during the wait is the cancel:
+                      ;; the loop re-reads :stopped and returns the usual
+                      ;; cancelled result.
+                      (try+ (Thread/sleep (long (runner-defaults/pause-poll-interval-ms)))
+                            (catch InterruptedException e
+                              (when-not (stop-signal/stop-caused? control-state e) (throw e))))
                       (recur true))
           :else   false)))))
 

@@ -75,10 +75,14 @@
                  ;; A cancel during the phase interrupts it (and the agent
                  ;; CLI it waits on). An interrupted phase can come back as
                  ;; an ordinary failure, so a stop is recorded as one here,
-                 ;; before the checkpoint.
+                 ;; before the checkpoint. A run the phase completed stays
+                 ;; completed: a cancel that lands after the work is done
+                 ;; does not undo it.
                  (let [phase-context (execute-supervised pipeline context callbacks iteration
-                                                         control-state)]
-                   (if-let [stop-anomaly (check-stopped control-state)]
+                                                         control-state)
+                       stop-anomaly (when-not (= :completed (:execution/status phase-context))
+                                      (check-stopped control-state))]
+                   (if stop-anomaly
                      (apply-dashboard-stop phase-context stop-anomaly)
                      phase-context)))]
     ;; A failed write is warned about and published, never thrown, so

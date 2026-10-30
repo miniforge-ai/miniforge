@@ -12,7 +12,8 @@
             [ai.miniforge.workflow.runner-environment :as env]
             [ai.miniforge.workflow.runner-events :as events]
             [ai.miniforge.workflow.runner-outcome :as outcome]
-            [ai.miniforge.workflow.stop-signal :as stop-signal]))
+            [ai.miniforge.workflow.stop-signal :as stop-signal]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -83,18 +84,23 @@
   "Execute one phase; persist workspace before applying retry or health policy.
 
    A cancel (`control-state` stopped) while the phase step runs interrupts
-   it and the agent CLI it waits on. Workspace persistence and the retry
-   and health policy after it run uninterrupted, and a stopped run skips
-   the retry backoff."
+   it and the agent CLI it waits on. An interruption that escapes the step
+   (a blocking phase callback, outside the interceptor's error handler)
+   leaves the context as it came in, for the runner to record the stop.
+   Workspace persistence and the retry and health policy after it run
+   uninterrupted, and a stopped run skips the retry backoff."
   ([pipeline context callbacks]
    (execute-phase pipeline context callbacks nil))
   ([pipeline context callbacks control-state]
-   (let [phase-context (-> (stop-signal/interrupting-on-stop
-                            control-state
-                            #(exec/execute-phase-step pipeline context callbacks
-                                                      ctx/merge-metrics
-                                                      ctx/transition-to-completed
-                                                      ctx/transition-to-failed))
+   (let [phase-context (-> (try+
+                             (stop-signal/interrupting-on-stop
+                              control-state
+                              #(exec/execute-phase-step pipeline context callbacks
+                                                        ctx/merge-metrics
+                                                        ctx/transition-to-completed
+                                                        ctx/transition-to-failed))
+                             (catch Throwable t
+                               (if (stop-signal/stop-caused? control-state t) context (throw t))))
                            (monitoring/clear-transient-state))
          _ (env/persist-workspace-at-phase-boundary! context phase-context)
          error-message (get-in phase-context
