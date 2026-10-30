@@ -26,12 +26,17 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} sign
-  "Hex HMAC-SHA256 of `value`'s canonical EDN under `key-bytes`. Throws when
-   `value` cannot be rendered canonically: signing it is a programmer error."
+  "Hex HMAC-SHA256 of `value`'s canonical EDN under `key-bytes`. Printer
+   settings are pinned, so a caller's `*print-length*` or namespace-map
+   binding cannot change or truncate the signed text. Throws when `value`
+   cannot be rendered canonically: signing it is a programmer error."
   [^bytes key-bytes value]
-  (let [mac (Mac/getInstance algorithm)]
+  (let [mac (Mac/getInstance algorithm)
+        text (binding [*print-length* nil *print-level* nil *print-meta* false
+                       *print-namespace-maps* false *print-dup* false]
+               (content-hash/canonical-edn value))]
     (.init mac (SecretKeySpec. key-bytes algorithm))
-    (hex (.doFinal mac (utf8 (content-hash/canonical-edn value))))))
+    (hex (.doFinal mac (utf8 text)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
