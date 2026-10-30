@@ -7,7 +7,10 @@
    The key is written to a temporary file that NIO creates with owner-only
    permissions, then hard-linked into place, so an existing key is never
    replaced. `java.io.File` creation applies the process umask, which can
-   leave a new file readable by other users."
+   leave a new file readable by other users.
+
+   Only POSIX owner and mode bits are checked. An ACL that grants another
+   user access to the key directory or file is not detected."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.file-durability.interface :as durability]
