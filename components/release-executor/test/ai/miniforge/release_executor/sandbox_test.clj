@@ -266,6 +266,28 @@
        (environment-status [_ _] (dag/ok {:status :running})))
      commands]))
 
+(deftest ^{:stratum 1} timed-out-push-is-not-retried-over-https-test
+  (testing "a push stopped at its deadline may have reached origin: it comes
+            back as timed out, with no HTTPS token retry behind it"
+    (let [cmds (atom [])
+          exec (reify dag/TaskExecutor
+                 (executor-type [_] :mock)
+                 (available? [_] (dag/ok {:available? true}))
+                 (acquire-environment! [_ _ _] (dag/ok {:environment-id "e"}))
+                 (execute! [_ _ command _]
+                   (swap! cmds conj (cmd-str command))
+                   (dag/ok (if (clojure.string/starts-with? (cmd-str command) "git push")
+                             {:exit-code 124 :stdout "" :stderr "timed out"}
+                             {:exit-code 0 :stdout "git@github.com:o/r.git" :stderr ""})))
+                 (copy-to! [_ _ _ _] (dag/ok {}))
+                 (copy-from! [_ _ _ _] (dag/ok {}))
+                 (release-environment! [_ _] (dag/ok {:released? true}))
+                 (environment-status [_ _] (dag/ok {:status :running})))
+          r    (sandbox/push-branch! exec "e" "feature/x" {:env {"GH_TOKEN" "t"}})]
+      (is (not (:success? r)))
+      (is (:timed-out? r))
+      (is (not-any? #(clojure.string/includes? % "set-url") @cmds)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 ;; ============================================================================

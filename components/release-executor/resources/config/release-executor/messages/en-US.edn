@@ -28,6 +28,7 @@
   ;; push and PR creation recorded as effect transactions
   :push/unresolved "Whether branch {branch} was pushed is unknown and the remote could not confirm it: {detail}"
   :push/no-commit "No release commit to push on branch {branch}"
+  :push/probe-destination-differs "origin pushes somewhere other than its single fetch URL, so git ls-remote cannot confirm the push"
   :pr/unresolved "Whether a PR was opened for branch {branch} is unknown and GitHub could not confirm it: {detail}"
   :pr/recorded-not-found "A PR for branch {branch} is recorded as opened, but GitHub lists none"
 

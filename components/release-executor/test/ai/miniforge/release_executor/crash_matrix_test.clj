@@ -99,6 +99,16 @@
       (is (:success? r1))
       (is (one-pr-and-success? {:resumed r2 :state @state})))))
 
+(deftest ^{:stratum 1} push-to-another-destination-is-not-confirmed-by-fetch-url-test
+  (testing "origin pushes to a URL other than its fetch URL: ls-remote cannot
+            speak for the push, so the outcome stays unresolved"
+    (let [state  (atom (assoc (remote/initial-state) :push-url "git@github.com:o/mirror.git"))
+          origin (random-uuid)
+          _      (release! state origin (fn [_ _]) (crash-on "git push"))
+          again  (release! state origin (fn [_ _]) (fn [_ _]))]
+      (is (= :push-unresolved (-> again :errors first :type)))
+      (is (empty? (:prs @state))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} crash-before-the-push-reaches-the-remote-test
@@ -167,3 +177,15 @@
       (is (not (:success? resumed)))
       (is (= :pr-closed (-> resumed :errors first :type)))
       (is (= 1 (count (:prs state)))))))
+
+(deftest ^{:stratum 2} interrupted-push-is-an-unknown-outcome-test
+  (testing "a push interrupted (exit 130) after it reached origin is not marked
+            failed; the resume confirms it with origin"
+    (let [interrupt (let [fired (atom false)]
+                      (fn [state line]
+                        (when (and (str/starts-with? line "git push") (compare-and-set! fired false true))
+                          (remote/answer! state line)
+                          {:exit-code 130 :stdout "" :stderr "interrupted"})))
+          {:keys [crashed resumed state]} (crash-then-resume interrupt (fn [_ _]))]
+      (is (= :push-unresolved (-> crashed :errors first :type)))
+      (is (one-pr-and-success? {:resumed resumed :state state})))))
