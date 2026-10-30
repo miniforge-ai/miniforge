@@ -117,11 +117,9 @@
    the decision minted for this effect; `:proposal`, extra fields the
    record carries; `:effect-fn`, called with the committing record;
    `:probe-fn`, asked about an earlier attempt still in flight; optional
-   `:spent?` and `:clock`."
-  [{:keys [store-dir basis spent? probe-fn] :as opts} ^Instant now]
-  (let [opened (if spent?
-                 (attempt/open store-dir basis spent?)
-                 (attempt/open store-dir basis))]
+   `:clock`."
+  [{:keys [store-dir basis probe-fn] :as opts} ^Instant now]
+  (let [opened (attempt/open store-dir basis)]
     (cond
       (anomaly/anomaly? opened) opened
       (:effect/existing opened) (settle-existing store-dir (:effect/existing opened) probe-fn now)
