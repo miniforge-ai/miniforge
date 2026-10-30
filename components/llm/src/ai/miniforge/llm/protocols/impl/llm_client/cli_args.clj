@@ -174,11 +174,15 @@
 (defn ^{:stratum 1} opencode-env
   "Environment entries for an OpenCode call. A call outside an artifact
    session (no hook settings under `:supervision`), or one that asks to be
-   `:isolated?`, gets OPENCODE_PURE=1 and OPENCODE_CONFIG_CONTENT: the
-   operator's own inline config (`operator-opencode-config`) with every
-   permission denied (`[:opencode :deny-all-permission]` in
-   llm/client-defaults.edn), globally and on `isolation-agent`, which the
-   call selects. nil otherwise."
+   `:isolated?`, gets OPENCODE_PURE=1, OPENCODE_DISABLE_PROJECT_CONFIG=1
+   and OPENCODE_CONFIG_CONTENT: the operator's own inline config
+   (`operator-opencode-config`) with every permission denied
+   (`[:opencode :deny-all-permission]` in llm/client-defaults.edn),
+   globally and on `isolation-agent`, which the call selects. Project
+   config is off because the worktree is content an agent can write: an
+   opencode.json or .opencode/agent/<name>.md there would merge into the
+   agent once its name is known (it shows in the process list), and a
+   project MCP server would start even under --pure. nil otherwise."
   [{:keys [supervision isolated?]}]
   (when (or isolated? (not (:settings-path supervision)))
     (let [deny  (settings/client-default [:opencode :deny-all-permission])
@@ -186,6 +190,7 @@
                  "description" "miniforge: a call with no tools"
                  "permission" deny}]
       {"OPENCODE_PURE" "1"
+       "OPENCODE_DISABLE_PROJECT_CONFIG" "1"
        "OPENCODE_CONFIG_CONTENT"
        (json/generate-string
         (-> (operator-opencode-config)

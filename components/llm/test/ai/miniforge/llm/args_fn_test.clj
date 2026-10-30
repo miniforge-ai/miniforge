@@ -324,6 +324,7 @@
       (is (re-matches #"miniforge-isolated-[0-9a-f]{8}" agent))
       (is (= ["explain"] (drop 4 args)) "the request's own agent is not used")
       (is (= "1" (get env "OPENCODE_PURE")))
+      (is (= "1" (get env "OPENCODE_DISABLE_PROJECT_CONFIG")) "the worktree's own OpenCode config is not read")
       (is (every? #{"deny"} (vals (get config "permission"))))
       (is (= "primary" (get-in config ["agent" agent "mode"])))
       (is (every? #{"deny"} (vals (get-in config ["agent" agent "permission"]))))))
