@@ -39,6 +39,7 @@
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
             [ai.miniforge.phase-software-factory.release-publish :as release-publish]
+            [ai.miniforge.phase-software-factory.release-unpushed :as release-unpushed]
             [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
 
@@ -373,6 +374,34 @@
       (git-status-failed root-path {:detail (or (ex-message e) (.getName (class e)))
                                     :data   {:exception/class (.getName (class e))}}))))
 
+(defn- ^{:stratum 1} unpushed-files
+  "release-unpushed/unpushed-files in the worktree at `root-path`: on the
+   host, or through `execute-fn` in the capsule when it is given. A scan
+   git cannot answer is a :release/git-status-failed anomaly, never []."
+  [root-path execute-fn executor env-id]
+  (let [run  (if execute-fn
+               (fn [argv]
+                 ;; The command runs under `sh -c`: quote any argument with
+                 ;; characters beyond a plain path or ref.
+                 (let [arg #(if (re-matches #"[A-Za-z0-9._/:@=-]+" %) % (agent/shell-quote %))
+                       r   (execute-fn executor env-id (str/join " " (map arg argv))
+                                       {:workdir root-path})]
+                   {:exit (get-in r [:data :exit-code])
+                    :out  (get-in r [:data :stdout] "")
+                    :err  (get-in r [:data :stderr] (:message (:error r)))}))
+               (fn [argv] (apply shell/sh (concat argv [:dir root-path]))))
+        read (if execute-fn
+               (fn [path] (let [r (run ["cat" (str root-path "/" path)])]
+                            (when (= 0 (:exit r)) (:out r))))
+               (fn [path] (let [f (io/file root-path path)]
+                            (when (.isFile f) (slurp f)))))
+        {:keys [files failure]} (try
+                                  (release-unpushed/unpushed-files run read)
+                                  (catch Exception e
+                                    {:failure {:detail (or (ex-message e) (.getName (class e)))
+                                               :data   {:exception/class (.getName (class e))}}}))]
+    (if failure (git-status-failed root-path failure) files)))
+
 (defn- ^{:stratum 1} release-files-result
   "Return release file data, the failed scan's own anomaly when `dirty` is
    one, or a canonical anomaly when there is no substantive work to release."
@@ -618,19 +647,26 @@
         ;; Emit phase-started telemetry event
         _ (phase/emit-phase-started! ctx :release)
         ;; Skip probe: scan only when an empty worktree means "nothing to release".
+        ;; A clean worktree is checked for unpushed commits too: committed
+        ;; work no push has published is released, not skipped as done.
         probe (when (contains? #{:already-implemented :already-satisfied nil} impl-status)
                 (let [wt         (ctx-worktree-path ctx)
                       execute-fn (get ctx :execution/execute-fn)
                       executor   (get ctx :execution/executor)
-                      env-id     (get ctx :execution/environment-id)]
-                  (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
-                    (git-dirty-files-capsule execute-fn executor env-id wt)
-                    (git-dirty-files wt))))]
+                      env-id     (get ctx :execution/environment-id)
+                      governed?  (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
+                      dirty      (if governed?
+                                   (git-dirty-files-capsule execute-fn executor env-id wt)
+                                   (git-dirty-files wt))]
+                  (if (and (vector? dirty) (empty? dirty))
+                    (unpushed-files wt (when governed? execute-fn) executor env-id)
+                    dirty)))]
     ;; Short-circuit: skip release when there is nothing to release.
     ;; This covers:
     ;; - implement returned :already-implemented (no new code)
     ;; - plan returned :already-satisfied (DAG had 0 tasks, no implement ran)
-    ;; In both cases, only skip if there are also no git changes from other phases.
+    ;; In both cases, only skip if there are also no git changes from other phases,
+    ;; and no commits ahead of origin's default branch.
     ;; A failed scan returns an anomaly, which does not skip; build-workflow-state
     ;; reuses the probe rather than rescanning, so the anomaly is what it raises.
     (if (and (vector? probe) (empty? probe))

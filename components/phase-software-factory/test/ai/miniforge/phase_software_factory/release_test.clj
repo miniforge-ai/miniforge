@@ -359,6 +359,25 @@
    :execution/phase-results {:implement {:result mock-implement-result}}
    :worktree-path worktree})
 
+(defn- ^{:stratum 1} publish-head!
+  "Give `worktree` an origin (a bare repository inside its .git, removed
+   with it) whose main is the current HEAD, after a seed commit when there
+   is none: nothing is ahead of origin until a later commit."
+  [worktree]
+  (let [origin (str worktree "/.git/test-origin.git")]
+    (doseq [args [["git" "config" "user.email" "test@example.com"]
+                  ["git" "config" "user.name" "Test"]
+                  ["git" "config" "commit.gpgsign" "false"]]]
+      (sh-must-succeed! worktree args))
+    (when-not (zero? (:exit (shell/sh "git" "rev-parse" "--verify" "HEAD" :dir worktree)))
+      (sh-must-succeed! worktree ["git" "commit" "-q" "--allow-empty" "--no-verify" "-m" "seed"]))
+    (doseq [args [["git" "init" "-q" "--bare" origin]
+                  ["git" "remote" "add" "origin" origin]
+                  ["git" "push" "-q" "--no-verify" "origin" "HEAD:refs/heads/main"]
+                  ["git" "fetch" "-q" "origin"]
+                  ["git" "symbolic-ref" "refs/remotes/origin/HEAD" "refs/remotes/origin/main"]]]
+      (sh-must-succeed! worktree args))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} create-base-context
@@ -441,6 +460,7 @@
     ;; NPE-ing in leave-release on (- end-time nil).
     (with-test-worktree
       (fn [worktree]
+      (publish-head! worktree)
       (let [ctx {:execution/id (random-uuid)
                  :execution/input {:description "Already done" :title "Noop"}
                  :execution/metrics {:tokens 0 :duration-ms 0}
@@ -456,6 +476,7 @@
   (testing "release phase skips when implement returned :already-implemented"
     (with-test-worktree
       (fn [worktree]
+      (publish-head! worktree)
       (let [ctx {:execution/id (random-uuid)
                  :execution/input {:description "Already done" :title "Noop"}
                  :execution/metrics {:tokens 0 :duration-ms 0}
@@ -468,6 +489,32 @@
             "Release should complete (skip) when implement status is :already-implemented"))))))
 
 ;------------------------------------------------------------------------------ Layer 3
+
+(deftest ^{:stratum 3} release-releases-unpushed-commits-test
+  (testing "a clean worktree whose work sits in unpushed commits is released,
+            not skipped as already done"
+    (with-test-worktree
+      (fn [worktree]
+        (publish-head! worktree)
+        (write-and-commit-mock-files! worktree)
+        (let [seen (atom nil)]
+          (with-redefs [release-executor/prepare-release
+                        (fn [workflow-state _ _]
+                          (reset! seen workflow-state)
+                          {:success? true :artifacts [] :prepared {} :metrics {}})]
+            (let [ctx    {:execution/id (random-uuid)
+                          :execution/input {:description "Already done" :title "Noop"}
+                          :execution/metrics {:tokens 0 :duration-ms 0}
+                          :execution/phase-results {:implement {:result {:status :already-implemented}}}
+                          :worktree-path worktree
+                          :phase-config {:phase :release}}
+                  result ((:enter (phase/get-phase-interceptor {:phase :release})) ctx)]
+              (is (not (get-in result [:phase :result :output :skipped])))
+              (is (= #{"src/feature.clj" "test/feature_test.clj"}
+                     (->> (:workflow/artifacts @seen)
+                          (mapcat (comp :code/files :artifact/content))
+                          (map :path)
+                          set))))))))))
 
 ;------------------------------------------------------------------------------ File Writing Tests
 (deftest ^{:stratum 3} release-writes-files-to-temp-directory-test
@@ -900,7 +947,10 @@
                        :prepared {}
                        :metrics {:files-written 2 :tokens 300 :duration-ms 800}})
                     release-executor/publish-release
-                    (constantly {:success? true :artifacts [] :metrics {}})]
+                    (constantly {:success? true
+                                 :artifacts [{:artifact/content {:pr-number 1
+                                                                 :pr-url "https://github.com/o/r/pull/1"}}]
+                                 :metrics {}})]
         (let [ctx (create-base-context worktree)
               ctx-with-config (assoc ctx :phase-config {:phase :release})
               interceptor (phase/get-phase-interceptor {:phase :release})

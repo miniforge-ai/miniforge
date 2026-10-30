@@ -272,10 +272,16 @@
             probe's error, even when a rescan would come back clean"
     (let [calls      (atom 0)
           execute-fn (fn [_executor _env-id command _opts]
-                       (when (str/starts-with? command "git status")
+                       (cond
+                         (str/starts-with? command "git status")
                          (if (= 1 (swap! calls inc))
                            {:ok? true :data {:exit-code 128 :stdout "" :stderr index-lock-stderr}}
-                           {:ok? true :data {:exit-code 0 :stdout ""}})))
+                           {:ok? true :data {:exit-code 0 :stdout ""}})
+                         ;; nothing ahead of origin's main either
+                         (str/starts-with? command "git symbolic-ref")
+                         {:ok? true :data {:exit-code 0 :stdout "refs/remotes/origin/main"}}
+                         (str/starts-with? command "git diff")
+                         {:ok? true :data {:exit-code 0 :stdout ""}}))
           ctx        (assoc (release-ctx "/workspace" :already-implemented)
                             :execution/mode           :governed
                             :execution/execute-fn     execute-fn
