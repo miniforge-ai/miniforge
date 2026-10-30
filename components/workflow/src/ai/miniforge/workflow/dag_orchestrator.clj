@@ -70,6 +70,7 @@
    [ai.miniforge.workflow.dag-task-execution :as dag-task-execution]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-defaults :as runner-defaults]
+   [ai.miniforge.workflow.stop-signal :as stop-signal]
    [clojure.set :as set]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -141,16 +142,21 @@
    Ensures all futures are cancelled on failure so that sub-workflow
    finally blocks can release their execution environments (Docker
    containers, worktrees). Without cancellation, abandoned futures
-   keep capsules alive until the JVM exits."
+   keep capsules alive until the JVM exits.
+
+   A cancel does not interrupt the wait (`stop-signal/coordinating`): each
+   task's sub-workflow shares the control state and stops its own phase,
+   and the batch collects what each returns."
   [tasks execute-fn context]
   (let [task-futures (doall
                       (map (fn [[task-id task]]
                              [task-id (future (execute-fn task context))])
                            tasks))]
     (try
-      (->> task-futures
-           (map (fn [[task-id f]] [task-id @f]))
-           (into {}))
+      (stop-signal/coordinating
+       #(->> task-futures
+             (map (fn [[task-id f]] [task-id @f]))
+             (into {})))
       (catch Throwable t
         ;; Cancel outstanding futures so their sub-workflow finally blocks
         ;; run and release any acquired execution environments.

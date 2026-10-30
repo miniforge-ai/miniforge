@@ -22,8 +22,12 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.execution :as exec]
+   [ai.miniforge.workflow.monitoring :as monitoring]
    [ai.miniforge.workflow.runner-checkpoint :as runner-checkpoint]
+   [ai.miniforge.workflow.runner-environment :as env]
    [ai.miniforge.workflow.runner-iteration :as runner-iteration]
    [ai.miniforge.workflow.stop-signal :as stop-signal]
    [clojure.test :refer [deftest is testing]]))
@@ -64,6 +68,27 @@
         ((stop-signal/on-stop! cs #(swap! now inc)))
         (is (= 1 @now))))))
 
+(deftest ^{:stratum 0} a-stop-delivered-during-teardown-does-not-interrupt-afterwards
+  ;; The stop's callback is already running when the scope ends; it reaches
+  ;; the interrupt only after teardown, and must find the scope disarmed.
+  (let [cs        (es/create-control-state)
+        entered   (promise)
+        proceed   (promise)
+        stopper   (atom nil)
+        interrupt! @#'stop-signal/interrupt!]
+    (with-redefs-fn {#'stop-signal/interrupt! (fn [hook]
+                                                (deliver entered true)
+                                                (deref proceed 5000 nil)
+                                                (interrupt! hook))}
+      #(stop-signal/interrupting-on-stop
+        cs (fn []
+             (reset! stopper (future (es/cancel! cs)))
+             (deref entered 5000 nil))))
+    (deliver proceed true)
+    (deref @stopper 5000 nil)
+    (let [interrupted? (Thread/interrupted)]
+      (is (not interrupted?)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} cancel-interrupts-the-running-phase-test
@@ -79,7 +104,8 @@
 (deftest ^{:stratum 1} cancel-reaches-in-flight-dag-tasks-test
   (testing "a DAG batch's tasks run sub-workflows that share the run's control
             state, so a cancel interrupts each task's running phase; the
-            batch returns promptly with each task's own result"
+            batch, waited on inside the parent phase's own scope, returns
+            promptly with each task's own result"
     (let [cs      (es/create-control-state)
           procs   (atom [])
           started (System/currentTimeMillis)
@@ -89,25 +115,40 @@
                                                            #(run-subprocess! procs))
                          (catch InterruptedException _
                            (dag/err :task-execution-failed "stopped" {}))))
-          results (dag-orch/execute-tasks-batch {:a {} :b {}} task {:control-state cs})]
+          results (stop-signal/interrupting-on-stop
+                   cs #(dag-orch/execute-tasks-batch {:a {} :b {}} task {:control-state cs}))]
       (is (< (- (System/currentTimeMillis) started) 10000) "the batch returns promptly")
+      (is (= #{:a :b} (set (keys results))) "the parent collected every task's result")
       (is (every? dag/err? (vals results)))
       (is (every? #(dead-within? % 5000) @procs) "every task's subprocess is killed"))))
 
 (deftest ^{:stratum 1} cancel-reaches-the-runner-iteration-phase-test
-  (testing "the runner's phase step is interrupted by a cancel, and the
-            checkpoint after it runs with the interrupt cleared"
+  (testing "the runner's phase step is interrupted by a cancel; workspace
+            persistence and the checkpoint after it run with the interrupt
+            cleared, and the run is recorded as stopped"
     (let [cs         (es/create-control-state)
           procs      (atom [])
+          persisted  (atom nil)
           checkpoint (atom nil)
+          context    (ctx/create-context {:workflow/id :stop-test :workflow/version "1.0.0"
+                                          :workflow/pipeline [{:phase :plan}]}
+                                         {:task "Test"} {})
           _          (cancel-after! cs 300)]
-      (with-redefs-fn {#'ai.miniforge.workflow.runner-iteration/execute-supervised
-                       (fn [_ context _ _]
+      (with-redefs-fn {#'monitoring/check-workflow-supervision (constantly {:status :continue})
+                       #'exec/execute-phase-step
+                       (fn [_ context & _]
+                         ;; Re-sets the flag it caught, as some phases do.
                          (try (run-subprocess! procs) context
-                              (catch InterruptedException _ (assoc context ::interrupted true))))
+                              (catch InterruptedException _
+                                (.interrupt (Thread/currentThread))
+                                (assoc context ::interrupted true))))
+                       #'env/persist-workspace-at-phase-boundary!
+                       (fn [_ _] (reset! persisted (.isInterrupted (Thread/currentThread))))
                        #'runner-checkpoint/checkpoint!
                        (fn [ctx] (reset! checkpoint (.isInterrupted (Thread/currentThread))) ctx)}
-        #(let [result (runner-iteration/execute-single-iteration [] {} {} 0 cs)]
+        #(let [result (runner-iteration/execute-single-iteration [] context {} 0 cs)]
            (is (::interrupted result))
            (is (dead-within? (first @procs) 5000))
-           (is (false? @checkpoint)))))))
+           (is (false? @persisted))
+           (is (false? @checkpoint))
+           (is (some #{:dashboard-stop} (map :type (:execution/errors result)))))))))

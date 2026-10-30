@@ -11,8 +11,7 @@
             [ai.miniforge.workflow.runner-checkpoint :as runner-checkpoint]
             [ai.miniforge.workflow.runner-defaults :as defaults]
             [ai.miniforge.workflow.runner-outcome :as outcome]
-            [ai.miniforge.workflow.runner-phase-step :as phase-step]
-            [ai.miniforge.workflow.stop-signal :as stop-signal]))
+            [ai.miniforge.workflow.runner-phase-step :as phase-step]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -30,13 +29,13 @@
       (ctx/transition-to-failed)))
 
 (defn- ^{:stratum 0} execute-supervised
-  [pipeline context callbacks iteration]
+  [pipeline context callbacks iteration control-state]
   (let [state (monitoring/build-supervision-state context iteration)
         result (monitoring/check-workflow-supervision
                  (:execution/supervision-runtime context) state)]
     (if (= :halt (:status result))
       (monitoring/handle-supervision-halt context result ctx/transition-to-failed)
-      (phase-step/execute-phase pipeline context callbacks))))
+      (phase-step/execute-phase pipeline context callbacks control-state))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -74,11 +73,14 @@
   (let [result (if-let [stop-anomaly (check-stopped control-state)]
                  (apply-dashboard-stop context stop-anomaly)
                  ;; A cancel during the phase interrupts it (and the agent
-                 ;; CLI it waits on); the stop is acted on at the next
-                 ;; boundary.
-                 (stop-signal/interrupting-on-stop
-                  control-state
-                  #(execute-supervised pipeline context callbacks iteration)))]
+                 ;; CLI it waits on). An interrupted phase can come back as
+                 ;; an ordinary failure, so a stop is recorded as one here,
+                 ;; before the checkpoint.
+                 (let [phase-context (execute-supervised pipeline context callbacks iteration
+                                                         control-state)]
+                   (if-let [stop-anomaly (check-stopped control-state)]
+                     (apply-dashboard-stop phase-context stop-anomaly)
+                     phase-context)))]
     ;; A failed write is warned about and published, never thrown, so
     ;; the run goes on without that checkpoint.
     (runner-checkpoint/checkpoint! result)
