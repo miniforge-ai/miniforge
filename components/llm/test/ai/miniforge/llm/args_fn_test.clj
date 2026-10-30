@@ -364,7 +364,10 @@
         (with-redefs [settings/getenv-value (fn [k] (get {"HOME" "/home/op" "XDG_DATA_HOME" data} k))]
           (is (contains? (get-in (config {:prompt "p"}) ["agent" agent "permission" "external_directory"])
                          "/data/opencode/tool-output/*")
-              (str "XDG_DATA_HOME=" data " gives OpenCode's own spelling of the glob")))))
+              (str "XDG_DATA_HOME=" data " gives OpenCode's own spelling of the glob"))))
+      (with-redefs [settings/getenv-value (fn [k] (get {"HOME" "/home/op"} k))]
+        (is (contains? (cli-args/external-directory-rule "\\") "/home/op/.local/share/opencode/tool-output\\*")
+            "the wildcard follows the platform separator, as path.join puts it")))
     (testing "plugins and the worktree's own OpenCode config stay off"
       (is (= "1" (get (cli-args/opencode-env supervised) "OPENCODE_PURE")))
       (is (= "1" (get (cli-args/opencode-env supervised) "OPENCODE_DISABLE_PROJECT_CONFIG"))))

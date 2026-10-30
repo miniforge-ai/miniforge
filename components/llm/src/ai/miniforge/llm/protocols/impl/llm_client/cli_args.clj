@@ -160,13 +160,14 @@
    (where it keeps every session's full tool output) denied by its exact
    glob. OpenCode's agent resolver appends an allow for that glob unless
    the same glob is denied, so a plain \"deny\" would leave it open. The
-   directory is joined as OpenCode's path.join does, separators collapsed,
-   since the resolver compares the glob as text."
-  []
+   glob is joined as OpenCode's path.join does: separators collapsed, and
+   the wildcard after the platform's own `separator` (a backslash on
+   Windows), since the resolver compares the glob as text."
+  [& [separator]]
   (let [data (or (not-empty (settings/getenv-value "XDG_DATA_HOME"))
                  (str (settings/getenv-value "HOME") "/.local/share"))
         dir  (java.nio.file.Paths/get (str data) (into-array String ["opencode" "tool-output"]))]
-    (array-map "*" "deny" (str (.normalize dir) "/*") "deny")))
+    (array-map "*" "deny" (str (.normalize dir) (or separator java.io.File/separator) "*") "deny")))
 
 (defn ^{:stratum 0} echo-args
   "Build CLI arguments for the echo (test) backend."
