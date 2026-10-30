@@ -312,6 +312,18 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} remote-branch-sha!
+  "The commit origin's `branch` points at, via `git ls-remote` in the
+   sandbox: {:success? true :sha sha-or-nil} (nil: no such branch), or the
+   failed command's result."
+  [executor env-id branch exec-opts]
+  (or (validate-safe-branch-name branch)
+      (let [r (exec! executor env-id ["git" "ls-remote" "origin" (str "refs/heads/" branch)]
+                     exec-opts)]
+        (if (result/succeeded? r)
+          (result/shell-success {:sha (-> (str/trim (:output r "")) (str/split #"\s+") first not-empty)})
+          r))))
+
 (defn ^{:stratum 2} find-pr!
   "Look up the PR `branch` already has, in any state, via gh in the sandbox
    (see pr-lookup). Optional exec-opts supports :env for GH_TOKEN. Returns

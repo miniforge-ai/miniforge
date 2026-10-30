@@ -558,6 +558,22 @@
     (catch Exception e
       (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil}))))
 
+(defn ^{:stratum 1} remote-branch-sha!
+  "The commit origin's `branch` points at, via `git ls-remote` on the host:
+   {:success? true :sha sha-or-nil} (nil: no such branch), or a failure
+   when the remote did not answer."
+  [worktree-path branch github-token]
+  (or
+   (validate-safe-branch-name branch)
+   (try
+     (let [r (shell/run-bounded ["git" "ls-remote" "origin" (str "refs/heads/" branch)]
+                                (gh-shell-opts worktree-path github-token))]
+       (if (zero? (:exit r))
+         (result/shell-success {:sha (-> (str/trim (get r :out "")) (str/split #"\s+") first not-empty)})
+         (result/shell-failure (get r :err "") (timeout-data r))))
+     (catch Exception e
+       (result/shell-failure (.getMessage e))))))
+
 (defn ^{:stratum 1} find-pr!
   "Look up the PR `branch` already has, in any state, via gh on the host
    (see pr-lookup). Returns {:success? true :pr pr-or-nil}, or a failure
