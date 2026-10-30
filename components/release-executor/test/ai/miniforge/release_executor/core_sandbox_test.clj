@@ -189,6 +189,15 @@
     (let [already "---\nminiforge-workflow: x\n---\n\nbody"]
       (is (= already (core/with-provenance already {:provenance {:workflow "r1"}}))))))
 
+(def ^{:stratum 0} ^:private publishable-responses
+  "Executor responses for a release that commits, pushes and opens a PR."
+  {"git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
+   "git diff"         {:exit-code 0 :stdout "M src/a.clj" :stderr ""}
+   "gh auth"          {:exit-code 0 :stdout "Logged in" :stderr ""}
+   "gh pr create"     {:exit-code 0 :stdout "https://github.com/o/r/pull/7" :stderr ""}
+   "rev-parse --abbrev-ref" {:exit-code 0 :stdout "feature/test-change\n" :stderr ""}
+   "git rev-parse HEAD" {:exit-code 0 :stdout "abc123\n" :stderr ""}})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================
@@ -362,6 +371,61 @@
                   {:release-meta test-release-meta})]
       ;; The pipeline should succeed and create a PR
       (is (:success? result)))))
+
+(deftest ^{:stratum 1} prepare-release-pushes-nothing-test
+  (testing "prepare-release commits on the branch but never pushes or opens a PR;
+            publish-release does both from the prepared data"
+    (let [[exec cmds] (create-mock-executor :responses publishable-responses)
+          context     {:executor exec :environment-id "mock-env"
+                       :worktree-path "/tmp/wt" :create-pr? true}
+          prepared    (core/prepare-release (make-workflow-state) context
+                                            {:release-meta test-release-meta})
+          effect?     (fn [cmd] (some #(clojure.string/includes? cmd %) ["git push" "gh pr"]))]
+      (is (:success? prepared))
+      (is (some #(clojure.string/starts-with? % "git commit") @cmds))
+      (is (not-any? effect? @cmds) "no push or PR before publish-release")
+      (is (= "feature/test-change" (get-in prepared [:prepared :branch])))
+      (reset! cmds [])
+      (let [published (core/publish-release (:prepared prepared) context)]
+        (is (:success? published))
+        (is (some #(clojure.string/includes? % "git push -u origin feature/test-change") @cmds))
+        (is (some #(clojure.string/includes? % "gh pr create") @cmds))
+        (is (not-any? #(clojure.string/starts-with? % "git commit -m") @cmds)
+            "publish does not commit again")
+        (is (= "https://github.com/o/r/pull/7"
+               (get-in published [:artifacts 0 :artifact/content :pr-url])))))))
+
+(deftest ^{:stratum 1} publish-release-refuses-a-moved-worktree-test
+  (testing "publish pushes nothing when HEAD is no longer the prepared commit"
+    (let [[exec cmds] (create-mock-executor :responses publishable-responses)
+          context     {:executor exec :environment-id "mock-env"
+                       :worktree-path "/tmp/wt" :create-pr? true}
+          prepared    (core/prepare-release (make-workflow-state) context
+                                            {:release-meta test-release-meta})
+          published   (core/publish-release (assoc-in (:prepared prepared) [:commit-sha] "other")
+                                            context)]
+      (is (not (:success? published)))
+      (is (= :worktree-moved (-> published :errors first :type)))
+      (is (not-any? #(clojure.string/includes? % "git push") @cmds)))))
+
+(deftest ^{:stratum 1} publish-release-refuses-staged-changes-test
+  (testing "publish pushes nothing when a change was staged after prepare, HEAD unchanged"
+    (let [responses {"git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
+                     "--name-only"      {:exit-code 0 :stdout "src/a.clj" :stderr ""}
+                     "--numstat"        {:exit-code 0 :stdout "1\t0\tsrc/a.clj" :stderr ""}
+                     "gh auth"          {:exit-code 0 :stdout "Logged in" :stderr ""}
+                     "rev-parse --abbrev-ref" {:exit-code 0 :stdout "feature/test-change\n" :stderr ""}
+                     "git rev-parse HEAD" {:exit-code 0 :stdout "abc123\n" :stderr ""}
+                     "--quiet"          {:exit-code 1 :stdout "" :stderr ""}}
+          [exec cmds] (create-mock-executor :responses responses)
+          context     {:executor exec :environment-id "mock-env"
+                       :worktree-path "/tmp/wt" :create-pr? true}
+          prepared    (core/prepare-release (make-workflow-state) context
+                                            {:release-meta test-release-meta})
+          published   (core/publish-release (:prepared prepared) context)]
+      (is (:success? prepared))
+      (is (= :worktree-moved (-> published :errors first :type)))
+      (is (not-any? #(clojure.string/includes? % "git push") @cmds)))))
 
 (deftest ^{:stratum 1} step-create-branch-prefers-base-branch-override
   (testing "an explicit base-branch-override (chained DAG task's parent branch)
