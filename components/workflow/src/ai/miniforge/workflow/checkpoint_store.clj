@@ -344,19 +344,21 @@
    invalid one is an `:invalid-input` anomaly, with nothing written. A failed write is reported, not thrown: the
    caller decides whether the run goes on without a checkpoint. A
    context that fails the checkpoint schema still throws; that is a
-   programmer error, not an I/O condition."
+   programmer error, not an I/O condition.
+
+   The root is resolved once, before anything is read or written, and
+   every read, write and the gate history use that resolved root: a root
+   alias retargeted during the write cannot split one checkpoint across
+   directories. The result's `:checkpoint/root` is that resolved root,
+   and the manifest records each file at the path it was published at."
   [ctx]
   (when-let [workflow-run-id (:execution/id ctx)]
-    (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root ctx)
+    (let [requested-root (checkpoint-paths/resolve-checkpoint-root ctx)
           phase-name (checkpoint-records/active-or-last-phase ctx)
           phase-result (get-in ctx [:execution/phase-results phase-name])
-          snapshot-path (checkpoint-paths/machine-snapshot-path checkpoint-root
-                                                                workflow-run-id)
-          manifest-path (checkpoint-paths/manifest-path checkpoint-root workflow-run-id)
           snapshot (checkpoint-records/build-machine-snapshot ctx)
-          manifest (checkpoint-records/build-manifest ctx checkpoint-root)
-          checkpoint-data {:checkpoint/root checkpoint-root
-                           :manifest manifest
+          checkpoint-data {:checkpoint/root requested-root
+                           :manifest (checkpoint-records/build-manifest ctx requested-root)
                            :machine-snapshot snapshot
                            :phase-results (or (:execution/phase-results ctx) {})}]
       (schemas/validate-checkpoint-data! checkpoint-data)
@@ -366,41 +368,57 @@
       ;; the manifest actually written (merged with it) is validated
       ;; before anything is written.
       (try+
-        (directory/prepare! checkpoint-root)
-        (directory/prepare! (checkpoint-paths/workflow-checkpoint-dir checkpoint-root workflow-run-id))
-        (let [existing-manifest (read-edn-file manifest-path)
+        (let [checkpoint-root (str (directory/prepare! requested-root))
+              _ (directory/prepare! (checkpoint-paths/workflow-checkpoint-dir checkpoint-root workflow-run-id))
+              manifest-path (checkpoint-paths/manifest-path checkpoint-root workflow-run-id)
+              existing-manifest (read-edn-file manifest-path)
               merged-manifest (merge (checkpoint-records/build-manifest ctx checkpoint-root
                                                                         existing-manifest)
                                      (checkpoint-spec/spec-fields ctx existing-manifest))
               validation (schemas/validate-checkpoint-data
-                          (assoc checkpoint-data :manifest merged-manifest))]
+                          (assoc checkpoint-data
+                                 :checkpoint/root checkpoint-root
+                                 :manifest merged-manifest))]
           (if (anomaly/anomaly? validation)
             (invalid-manifest checkpoint-root workflow-run-id phase-name manifest-path validation)
-            (do
-              (doseq [[resumed-phase resumed-result] (get-in ctx [:execution/opts :resume-phase-results])
-                      :let [path (checkpoint-paths/phase-checkpoint-path checkpoint-root workflow-run-id resumed-phase)]
-                      :when (and resumed-result (not (fs/exists? path)))]
-                (write-edn-atomically! path (checkpoint-records/build-phase-checkpoint ctx resumed-phase resumed-result)))
-              (let [phase-path (when (and phase-name phase-result)
-                                 (write-edn-atomically!
-                                  (checkpoint-paths/phase-checkpoint-path checkpoint-root workflow-run-id phase-name)
-                                  (checkpoint-records/build-phase-checkpoint ctx phase-name phase-result)))]
-                (when phase-path
-                  (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
-                ;; A failed initial pin must remain a failed checkpoint.
-                (let [snapshot-path (write-edn-atomically! snapshot-path snapshot)
-                      manifest-path (write-edn-atomically! manifest-path merged-manifest)
-                      pin (when (and (true? (get-in ctx [:execution/opts :checkpoint/pin?]))
-                                     (not (fs/exists? (checkpoint-paths/pin-marker-path
-                                                       checkpoint-root workflow-run-id))))
-                            (pin-checkpoint! workflow-run-id {:checkpoint/root checkpoint-root}))]
-                  (if (anomaly/anomaly? pin)
-                    (assoc-in pin [:anomaly/data :phase/name] phase-name)
-                    (cond-> {:checkpoint/root checkpoint-root
-                             :checkpoint/machine-snapshot-path snapshot-path
-                             :checkpoint/manifest-path manifest-path}
-                      phase-path
-                      (assoc :checkpoint/phase phase-name
-                             :checkpoint/phase-path phase-path))))))))
+            (let [resumed-paths
+                  (into {}
+                        (keep (fn [[resumed-phase resumed-result]]
+                                (let [path (checkpoint-paths/phase-checkpoint-path
+                                            checkpoint-root workflow-run-id resumed-phase)]
+                                  (when (and resumed-result (not (fs/exists? path)))
+                                    [resumed-phase
+                                     (write-edn-atomically!
+                                      path
+                                      (checkpoint-records/build-phase-checkpoint ctx resumed-phase resumed-result))]))))
+                        (get-in ctx [:execution/opts :resume-phase-results]))
+                  phase-path (when (and phase-name phase-result)
+                               (write-edn-atomically!
+                                (checkpoint-paths/phase-checkpoint-path checkpoint-root workflow-run-id phase-name)
+                                (checkpoint-records/build-phase-checkpoint ctx phase-name phase-result)))
+                  _ (when phase-path
+                      (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
+                  snapshot-path (write-edn-atomically!
+                                 (checkpoint-paths/machine-snapshot-path checkpoint-root workflow-run-id)
+                                 snapshot)
+                  manifest-path (write-edn-atomically!
+                                 manifest-path
+                                 (-> merged-manifest
+                                     (assoc :workflow/machine-snapshot-path snapshot-path)
+                                     (update :workflow/phase-checkpoints merge resumed-paths
+                                             (when phase-path {phase-name phase-path}))))
+                  ;; A failed initial pin must remain a failed checkpoint.
+                  pin (when (and (true? (get-in ctx [:execution/opts :checkpoint/pin?]))
+                                 (not (fs/exists? (checkpoint-paths/pin-marker-path
+                                                   checkpoint-root workflow-run-id))))
+                        (pin-checkpoint! workflow-run-id {:checkpoint/root checkpoint-root}))]
+              (if (anomaly/anomaly? pin)
+                (assoc-in pin [:anomaly/data :phase/name] phase-name)
+                (cond-> {:checkpoint/root checkpoint-root
+                         :checkpoint/machine-snapshot-path snapshot-path
+                         :checkpoint/manifest-path manifest-path}
+                  phase-path
+                  (assoc :checkpoint/phase phase-name
+                         :checkpoint/phase-path phase-path))))))
         (catch Exception e
-          (write-failure checkpoint-root workflow-run-id phase-name e))))))
+          (write-failure requested-root workflow-run-id phase-name e))))))

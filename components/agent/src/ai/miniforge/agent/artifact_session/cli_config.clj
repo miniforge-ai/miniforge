@@ -201,13 +201,15 @@
         (catch Exception _ nil)))))
 
 (defn ^{:stratum 0} hook-eval-command
-  "The PreToolUse hook command for a session of `role`: the miniforge
-   command `words` (e.g. [\"mf\"] or [\"bb\" \"miniforge\"]) running
-   `hook-eval --role <role>`, then `|| exit 2`. Claude runs the command
+  "The PreToolUse hook command for a session of `role` in the worktree
+   `root`: the miniforge command `words` (e.g. [\"mf\"] or
+   [\"bb\" \"miniforge\"]) running `hook-eval --role <role> --root <root>`,
+   then `|| exit 2`. Claude runs the command
    through `sh -c` and blocks the tool call only on exit code 2, so a hook
    that cannot start (miniforge not on PATH, a crash before it replies)
    blocks too instead of letting the call through. A nil `role` leaves
-   `--role` off, and hook-eval then refuses every tool.
+   `--role` off, and hook-eval then refuses every tool; a nil `root`
+   leaves `--root` off, and it refuses every file tool.
 
    A keyword role keeps its namespace (`:custom/implementer` becomes
    `--role custom/implementer`), so a role the policy does not list is
@@ -215,7 +217,7 @@
 
    A word holding anything beyond letters, digits and `_./:=@%+,-` is
    shell-quoted, so a checkout path with a space stays one argument."
-  [words role]
+  [words role root]
   (let [word (fn [w]
                (if (re-matches #"[A-Za-z0-9_./:=@%+,-]+" w)
                  w
@@ -225,6 +227,7 @@
                           (when role ["--role" (word (if (keyword? role)
                                                         (subs (str role) 1)
                                                         (str role)))])
+                          (when root ["--root" (word (str root))])
                           ["||" "exit" "2"]))))
 
 (defn ^{:stratum 0} pre-tool-use-settings
@@ -473,14 +476,14 @@
 (defn ^{:stratum 2} write-claude-settings!
   "Write Claude CLI settings JSON with PreToolUse hook for supervision.
 
-   The hook runs `hook-eval --role <role>` on the command
-   `resolve-miniforge-command` returns (e.g. `mf hook-eval --role
-   implementer`), which reads the tool request from stdin and returns
-   allow/deny on stdout (`hook-eval-command`).
+   The hook runs `hook-eval --role <role> --root <workdir>` on the
+   command `resolve-miniforge-command` returns (e.g. `mf hook-eval --role
+   implementer --root /work/repo`), which reads the tool request from
+   stdin and returns allow/deny on stdout (`hook-eval-command`).
 
    Returns the path to the settings file."
-  [session-dir role]
-  (let [hook-command (hook-eval-command (resolve-miniforge-command) role)
+  [session-dir role workdir]
+  (let [hook-command (hook-eval-command (resolve-miniforge-command) role workdir)
         path (str session-dir "/claude-settings.json")]
     (spit path (json/generate-string (pre-tool-use-settings hook-command) {:pretty true}))
     path))

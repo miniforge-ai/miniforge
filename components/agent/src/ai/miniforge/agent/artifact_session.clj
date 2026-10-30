@@ -413,7 +413,7 @@
                      {"mcpServers" {"context" {"command" (:command srv-cmd)
                                                "args"    (:args srv-cmd)}}}
                      {:pretty true})
-        hook-cmd    (hook-eval-command ["bb" "miniforge"] (:role session))
+        hook-cmd    (hook-eval-command ["bb" "miniforge"] (:role session) (:workdir session))
         settings    (json/generate-string (cli-config/pre-tool-use-settings hook-cmd) {:pretty true})]
     ;; Write configs inside capsule
     (exec! executor env-id (str "cat > " (file-artifacts/shell-quote (:mcp-config-path session)) " << 'MCPEOF'\n" mcp-config "\nMCPEOF")
@@ -464,12 +464,13 @@
                                                 "args"    (:args srv-cmd)}}}
         _             (spit (:mcp-config-path session)
                             (json/generate-string mcp-config {:pretty true}))
-        settings-path (write-claude-settings! (:dir session) (:role session))
+        settings-path (write-claude-settings! (:dir session) (:role session) (:workdir session))
         codex-path    (cli-config/write-codex-mcp-config! config-root srv-cmd)
         cursor-path   (cli-config/write-cursor-mcp-config! config-root srv-cmd)
         _             (backup-cursor-permissions! config-root)
         cursor-perms  (write-cursor-permissions! config-root mcp-tools nil)
-        hook-eval-cmd (hook-eval-command (resolve-miniforge-command) (:role session))]
+        hook-eval-cmd (hook-eval-command (resolve-miniforge-command) (:role session)
+                                         (:workdir session))]
     (assoc session
            :mcp-allowed-tools mcp-tools
            :mcp-cleanup-files [codex-path cursor-path cursor-perms]

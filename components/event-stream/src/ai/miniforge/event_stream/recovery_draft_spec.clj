@@ -25,11 +25,15 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+;; :checkpoint/root is optional so a journal holding announcements written
+;; before it existed still recovers; the constructors always set it.
 (def ^{:stratum 1} CheckpointWritten
-  [:and Phase [:map [:checkpoint/path :string] [:checkpoint/size-bytes Size]]])
+  [:and Phase [:map [:checkpoint/path :string] [:checkpoint/size-bytes Size]
+               [:checkpoint/root {:optional true} :string]]])
 
 (def ^{:stratum 1} SnapshotWritten
-  [:and Machine [:map [:snapshot/path :string] [:snapshot/size-bytes Size]]])
+  [:and Machine [:map [:snapshot/path :string] [:snapshot/size-bytes Size]
+                 [:checkpoint/root {:optional true} :string]]])
 
 (def ^{:stratum 1} CheckpointFailed [:and Phase Failure])
 
