@@ -23,6 +23,7 @@
    2d moves merge and deploy onto this path."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.effect-transaction.attempt :as attempt]
    [ai.miniforge.effect-transaction.core :as core]
    [ai.miniforge.effect-transaction.envelope-signature :as envelope-signature]
    [ai.miniforge.effect-transaction.current-commit :as current]
@@ -71,6 +72,18 @@
 (def ^{:stratum 0} envelope-signed?
   "True only when an envelope carries this runtime's signature."
   envelope-signature/signed?)
+
+(def ^{:stratum 0} attempt-id
+  "The deterministic effect id of attempt n at an effect basis:
+   (attempt-id basis n)."
+  attempt/attempt-id)
+
+(def ^{:stratum 0} open-attempt
+  "The first attempt at a basis that may still run, read from a store:
+   {:effect/id id} when it has no record, {:effect/existing record} when an
+   earlier attempt is not a definite failure, or an anomaly. An optional
+   `spent?` predicate names further records to skip."
+  attempt/open)
 
 (def ^{:stratum 0} propose!
   "Create a durable proposal without replacing an existing effect ID."

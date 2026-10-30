@@ -19,10 +19,12 @@
   "Application flow for one granted, transacted Kubernetes deployment."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.phase-deployment.deploy-authority :as authority]
    [ai.miniforge.phase-deployment.deploy-outcome :as outcome]
    [ai.miniforge.phase-deployment.deploy-transaction :as transaction]
+   [ai.miniforge.phase-deployment.evidence :as evidence]
    [ai.miniforge.phase-deployment.messages :as msg]
    [ai.miniforge.schema.interface :as schema]
    [clojure.string :as str])
@@ -43,8 +45,18 @@
            (msg/t fallback-key))))
 
 (defn- ^{:stratum 0} advance
+  "Run `step` unless the flow failed or is answering for an earlier attempt."
   [state step]
-  (if (:flow/failure state) state (step state)))
+  (if (or (:flow/failure state) (:attempt/existing state)) state (step state)))
+
+(defn- ^{:stratum 0} effect-basis
+  "What fixes this deploy's effect id: run, exact target, and the digest
+   of the rendered manifests, so a changed manifest is a new effect."
+  [state]
+  (let [{:keys [kustomize-dir context namespace deployment-name]} (:target state)]
+    [:effect/deploy (get-in state [:context :execution/id])
+     kustomize-dir context namespace deployment-name
+     (evidence/sha256 (:rendered-yaml state))]))
 
 (def ^{:stratum 0} unclaimed-states
   "Transaction states in which the deploy cannot have reached the cluster."
@@ -65,6 +77,31 @@
     (if (schema/failed? result)
       (fail state :preflight (failure-detail result :deploy/context-unavailable))
       (assoc state :target (:target result)))))
+
+(defn- ^{:stratum 1} open-attempt
+  "Take this deploy's fixed effect id. An earlier attempt still in flight
+   is reconciled first; one that turns out spent (it failed, or a healthy
+   rollout ran other images) gives way to a fresh attempt, and any other
+   is answered for instead of deploying again. A context with no run gets
+   a fresh id; authority then refuses it."
+  [state]
+  (if-not (uuid? (get-in state [:context :execution/id]))
+    (assoc state :effect-id (random-uuid))
+    (let [context (:context state)
+          open #(fx/open-attempt (transaction/store-dir context) (effect-basis state)
+                                 transaction/spent?)
+          settle (fn [t]
+                   (let [r (transaction/reconcile! context t (:operations state)
+                                                   (transaction/current-time context))]
+                     (if (anomaly/anomaly? r) t r)))]
+      (loop [opened (open) reconciled? false]
+        (let [t (:effect/existing opened)
+              settled (when (and t (not reconciled?)) (settle t))]
+          (cond
+            (anomaly/anomaly? opened) (fail state :proposal (:anomaly/message opened))
+            (nil? t) (assoc state :effect-id (:effect/id opened))
+            (and settled (transaction/spent? settled)) (recur (open) true)
+            :else (assoc state :attempt/existing (or settled t))))))))
 
 (defn- ^{:stratum 1} render-manifests
   [state]
@@ -111,7 +148,7 @@
   (let [preflight {:rendered-yaml (:rendered-yaml state)
                    :server-dry-run (:server-dry-run state)
                    :app-label (get-in state [:target :app-label])}
-        prepared (authority/prepare (:context state) (random-uuid)
+        prepared (authority/prepare (:context state) (:effect-id state)
                                     (:target state) preflight (:now state))
         {:grant/keys [id revocation]} (:anomaly/data prepared)]
     (if (anomaly/anomaly? prepared)
@@ -161,6 +198,16 @@
       (fail state :observe (:anomaly/message reconciled))
       (assoc state :transaction reconciled))))
 
+(defn- ^{:stratum 1} settle-existing
+  "Report an earlier attempt instead of deploying again; refuse one
+   proposed but never committed."
+  [state]
+  (if-let [t (:attempt/existing state)]
+    (if (= :proposed (:effect/state t))
+      (fail state :proposal (msg/t :deploy/effect-unsettled))
+      (assoc state :transaction t))
+    state))
+
 (defn- ^{:stratum 1} revoke-abandoned
   "Revoke the grant of a deploy that ended before it could reach the
    cluster, so the grant cannot authorize a later attempt."
@@ -181,8 +228,10 @@
 
 (defn ^{:stratum 2} transact!
   "Resolve, render, check manifest policy, preflight, authorize, persist,
-   commit, and reconcile one deploy. A deploy that ends before it could
-   reach the cluster revokes its grant."
+   commit, and reconcile one deploy. The effect id is fixed per run and
+   target, so an earlier attempt that did not definitely fail is settled
+   rather than deployed again. A deploy that ends before it could reach
+   the cluster revokes its grant."
   [context deploy-config operations ^Instant now]
   (-> {:context context
        :deploy-config deploy-config
@@ -190,6 +239,7 @@
        :now now}
       (advance resolve-target)
       (advance render-manifests)
+      (advance open-attempt)
       (advance check-manifest-policy)
       (advance server-dry-run)
       (advance prepare-authority)
@@ -199,5 +249,6 @@
       (advance check-stop)
       (advance commit-effect)
       (advance reconcile-effect)
+      settle-existing
       revoke-abandoned
       outcome/from-state))
