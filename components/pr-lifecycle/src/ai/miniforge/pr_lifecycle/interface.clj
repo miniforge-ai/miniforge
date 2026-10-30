@@ -35,6 +35,7 @@
   (:require
    [ai.miniforge.pr-lifecycle.controller :as controller]
    [ai.miniforge.pr-lifecycle.ci-monitor :as ci]
+   [ai.miniforge.pr-lifecycle.ci-checks :as ci-checks]
    [ai.miniforge.pr-lifecycle.classifier :as classifier]
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
@@ -254,7 +255,7 @@
 (def ^{:stratum 0} compute-ci-status
   "Compute overall CI status from individual checks.
    Returns {:status keyword :passed [] :failed [] :pending []}"
-  ci/compute-ci-status)
+  ci-checks/compute-ci-status)
 
 ;; Review monitoring
 (def ^{:stratum 0} create-review-monitor
