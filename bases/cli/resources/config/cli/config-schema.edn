@@ -74,6 +74,7 @@
   [:fleet :repos]                                   :vector
 
   [:tenancy :operator-name]                         :string
+  [:tenancy :require-operator?]                     :boolean
 
   [:observability :event-sinks]                     :vector
   [:observability :log-sinks]                       :vector
