@@ -16,1977 +16,253 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.llm.protocols.impl.llm-client
-  "Implementation functions for LLMClient protocol."
+  "Implementation functions for LLMClient protocol.
+
+   This namespace holds the streaming entry point (`complete-stream-impl`
+   and the handlers it dispatches to), `get-config-impl`, and the default
+   capture exec-fn. The rest lives in the `llm-client.*` namespaces:
+   `responses` (the response contract and anomaly categories), `settings`
+   (the EDN resources and environment reads), `prompts` (prompt assembly,
+   delivery and size), `cli-args` and `cli-output` (agent CLI arguments
+   and output), `backend-registry` (the backends and their probe
+   endpoints), `http-wire` and `http-backend` (the direct HTTP providers),
+   `subprocess`, `stream-reader` and `stream-exec` (running the agent
+   CLI), and `completion` (`complete-impl` and the exec-fn adapters). The
+   aliases in Layer 0 keep the moved definitions' names here for callers."
   (:require
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]
    [clojure.string :as str]
-   [cheshire.core :as json]
-   [org.httpkit.client :as http]
-   [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.cost :as cost]
    [ai.miniforge.llm.messages :as msg]
    [ai.miniforge.llm.model-registry :as model-registry]
-   [ai.miniforge.llm.network-monitor :as nnm]
    [ai.miniforge.llm.progress-monitor :as pm]
-   [ai.miniforge.response.interface :as response]
-   [slingshot.slingshot :refer [throw+ try+]])
-  (:import
-   [java.io ByteArrayInputStream]
-   [java.net HttpURLConnection]
-   [java.util.concurrent LinkedBlockingQueue TimeUnit]))
+   [ai.miniforge.llm.protocols.impl.llm-client.backend-registry :as backend-registry]
+   [ai.miniforge.llm.protocols.impl.llm-client.cli-args :as cli-args]
+   [ai.miniforge.llm.protocols.impl.llm-client.cli-output :as cli-output]
+   [ai.miniforge.llm.protocols.impl.llm-client.completion :as completion]
+   [ai.miniforge.llm.protocols.impl.llm-client.http-backend :as http-backend]
+   [ai.miniforge.llm.protocols.impl.llm-client.http-wire :as http-wire]
+   [ai.miniforge.llm.protocols.impl.llm-client.prompts :as prompts]
+   [ai.miniforge.llm.protocols.impl.llm-client.responses :as responses]
+   [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]
+   [ai.miniforge.llm.protocols.impl.llm-client.stream-exec :as stream-exec]
+   [ai.miniforge.llm.protocols.impl.llm-client.stream-reader :as stream-reader]
+   [ai.miniforge.llm.protocols.impl.llm-client.subprocess :as subprocess]
+   [ai.miniforge.logging.interface :as log]
+   [slingshot.slingshot :refer [throw+ try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; LLM response builders
-;;
-;; All LLM responses follow the contract:
-;;   Success: {:success true :content string :usage map}
-;;   Failure: {:success false :error {:type string :message string} :anomaly anomaly-map}
-;;
-;; These builders ensure consistent construction across all backends
-;; (CLI, HTTP/Ollama, streaming, non-streaming).
-(defn- ^{:stratum 0} load-client-defaults
-  []
-  (if-let [resource (io/resource "llm/client-defaults.edn")]
-    (edn/read-string (slurp resource))
-    (response/throw-anomaly! :anomalies/not-found
-                             "Missing llm/client-defaults.edn resource")))
-
-(defn ^{:stratum 0} llm-success
-  "Build a successful LLM response."
-  ([content]
-   (llm-success content nil))
-  ([content {:keys [usage exit-code]}]
-   (let [usage (or usage {:input-tokens 0 :output-tokens 0})]
-     (cond-> {:success true
-              :content content
-              :usage usage
-              :tokens (+ (get usage :input-tokens 0) (get usage :output-tokens 0))}
-       (some? exit-code) (assoc :exit-code exit-code)))))
-
-(def ^{:stratum 0} ^:private category->type
-  "W2 convergence map (subset). Maps every legacy `:anomalies/*` and
-   `:anomalies.*/*` category this brick actually produces (per
-   `(grep '(llm-error ' …)`) to the canonical `:anomaly/type` from the
-   runbook (`docs/runbooks/anomaly-convergence.md`). Generic-standard
-   categories map to a bare type and emit no subtype; domain categories
-   map to a `(type, subtype)` pair where the subtype is the legacy
-   category keyword verbatim.
-
-   Only the categories actually emitted today are listed — an unmapped
-   category throws `IllegalArgumentException` in `->canonical-anomaly`,
-   forcing the table to grow when a new producer site is added (per
-   the no-dead-code policy)."
-  {:anomalies/fault              :fault
-   :anomalies/unavailable        :unavailable
-   :anomalies/unsupported        :unsupported
-   :anomalies/timeout            :timeout
-   :anomalies/incorrect          :invalid-input
-   :anomalies/forbidden          :unauthorized
-   :anomalies/not-found          :not-found
-   :anomalies.agent/llm-error    :fault
-   :anomalies.agent/rate-limited :unavailable})
-
-(def ^{:stratum 0} ^:private generic-standard-categories
-  "Subset of the cognitect-standard categories (per the runbook
-   `Generic standard (no subtype)` table) that this brick emits — these
-   seven map 1:1 to a type and carry no `:anomaly/subtype`. The runbook's
-   full set is eight; only `:anomalies/conflict` is not produced by
-   `llm-error` in this brick today."
-  #{:anomalies/fault
-    :anomalies/unavailable
-    :anomalies/unsupported
-    :anomalies/timeout
-    :anomalies/incorrect
-    :anomalies/forbidden
-    :anomalies/not-found})
-
-;; Stream parser functions
-(defn- ^{:stratum 0} parsed-usage
-  [usage]
-  ;; Capture cache fields: a large prompt lands mostly under cache-creation.
-  ;; Assoc only numeric fields — a present-but-nil key defeats downstream
-  ;; `(get usage :input-tokens 0)` defaulting (NPEs llm-success's :tokens sum).
-  (let [input-tokens (:input_tokens usage)
-        output-tokens (:output_tokens usage)
-        cache-creation (:cache_creation_input_tokens usage)
-        cache-read (:cache_read_input_tokens usage)]
-    (when (some number? [input-tokens output-tokens cache-creation cache-read])
-      (cond-> {}
-        (number? input-tokens)   (assoc :input-tokens input-tokens)
-        (number? output-tokens)  (assoc :output-tokens output-tokens)
-        (number? cache-creation) (assoc :cache-creation-input-tokens cache-creation)
-        (number? cache-read)     (assoc :cache-read-input-tokens cache-read)))))
-
-(defn ^{:stratum 0} fold-message-usage
-  "Fold one assistant message's usage into the running usage map.
-
-   - Input-side counts (:input-tokens, :cache-*-input-tokens) describe
-     that API call's whole context, so the LATEST one is the run's
-     current context size. Summing them would inflate
-     `context-overflow-by-usage?` into a false overflow on any long run
-     that was cut before its result frame.
-   - :output-tokens is per call and accumulates.
-   - Claude Code emits one `assistant` event per content block, each
-     carrying the same message `usage`; `message-id` dedupes those so a
-     text + tool_use message folds once. The id rides as metadata so the
-     usage map keeps the plain `{:input-tokens .. :output-tokens ..}`
-     shape callers compare and serialize."
-  [prev message-id usage]
-  (let [prev (or prev {})]
-    (if (and message-id (= message-id (::message-id (meta prev))))
-      prev
-      (-> (merge prev (dissoc usage :output-tokens))
-          (cond-> (contains? usage :output-tokens)
-            (update :output-tokens (fnil + 0) (:output-tokens usage)))
-          (vary-meta assoc ::message-id message-id)))))
-
-(defn- ^{:stratum 0} normalize-finish-reason
-  "Normalize a provider's finish reason to the canonical stop-reason
-   strings used across all backends. The canonical strings are the
-   Claude CLI's, which every consumer already compares against.
-
-   - \"stop\" (Codex, OpenAI wire shape, Ollama), \"STOP\" (Gemini)
-       → \"end_turn\"   (the model finished)
-   - \"length\" (Codex, OpenAI wire shape, Ollama), \"MAX_TOKENS\" (Gemini)
-       → \"max_tokens\" (the answer was cut at the output cap)
-   - anything else → passed through unchanged (\"max_turns\",
-     \"content_filter\", \"refusal\", \"SAFETY\", ...), so Anthropic's
-     `stop_reason`, already canonical, is returned as given
-
-   A missing or non-string reason yields nil."
-  [finish-reason]
-  (when (string? finish-reason)
-    (case finish-reason
-      ("stop" "STOP")         "end_turn"
-      ("length" "MAX_TOKENS") "max_tokens"
-      finish-reason)))
-
-;------------------------------------------------------------------------------ Backend configurations
-;; Named argument builders — extracted from the backends config map for clarity.
-(defn ^{:stratum 0} claude-mcp-allowlist-string
-  "Claude CLI's --allowedTools wire format.
-
-   Accepts two entry shapes:
-   - `{:mcp/server :mcp/tool}` keyword map → `mcp__<server>__<tool>`
-     (MCP tool; server name comes from the mcp-config.json key)
-   - Keyword by itself → `(name kw)` (native Claude Code tool,
-     e.g. `:Write`)
-
-   Entries are joined with commas. A malformed entry throws via
-   `(name nil)` at the call site."
-  [mcp-allowed-tools]
-  (->> mcp-allowed-tools
-       (mapv (fn [t]
-               (if (keyword? t)
-                 (name t)
-                 (let [{:mcp/keys [server tool]} t]
-                   (str "mcp__" (name server) "__" (name tool))))))
-       (str/join ",")))
-
-(def ^{:stratum 0} ^:private claude-input-format-flag
-  "Claude CLI flag that selects how the user prompt is delivered. Paired
-   with `claude-input-format-stdin` (the only value we use today), this
-   tells the CLI to read the prompt from stdin instead of argv."
-  "--input-format")
-
-(def ^{:stratum 0} ^:private claude-input-format-stdin
-  "Argument value for `claude-input-format-flag` that switches the CLI
-   to text-on-stdin input mode."
-  "text")
-
-(defn- ^{:stratum 0} codex-args
-  "Build CLI arguments for the Codex backend."
-  [{:keys [prompt model system prompt-via]
-    :or {prompt-via :stdin}}]
-  (let [stdin? (= prompt-via :stdin)]
-    (cond-> ["exec"
-             "--json"
-             "--ignore-user-config"
-             "--sandbox=workspace-write"
-             "--skip-git-repo-check"]
-      true   (into ["-c" "approval_policy=never"])
-      model  (into ["-m" model])
-      system (into ["-c" (str "system_prompt=" (json/generate-string system))])
-      stdin? (conj "-")
-      (not stdin?) (conj prompt))))
-
-(defn- ^{:stratum 0} cursor-args
-  "Build CLI arguments for the Cursor backend (binary `agent`).
-
-   Flags follow https://cursor.com/docs/cli/reference/parameters:
-
-     -p / --print  non-interactive run with tool access
-     --force       required for the agent to write files in print mode;
-                   this is the autonomous-execution switch (analogous to
-                   codex `approval_policy=never`)
-
-   Tool restriction is enforced out-of-band via the default-deny
-   .cursor/cli.json permissions allowlist written by the agent session
-   (see artifact-session/write-cursor-permissions!), not via CLI flags —
-   so we do not pass --approve-mcps (which would blanket-approve every MCP
-   server). Cursor exposes no system-prompt flag, so `system` is prepended
-   to the user prompt."
-  [{:keys [prompt system model]}]
-  (let [prompt (if system (str system "\n\n" prompt) prompt)]
-    (cond-> ["-p" "--force"]
-      model (into ["--model" model])
-      true  (conj prompt))))
-
-(defn- ^{:stratum 0} opencode-args
-  "Build CLI arguments for the OpenCode backend.
-
-   OpenCode owns provider credentials, model aliases, project config,
-   agent profiles, MCP config, and permissions. Miniforge passes the
-   selected model/profile knobs through and treats OpenCode as the
-   common provider wrapper instead of handling API keys directly."
-  [{:keys [prompt model agent attach command session continue? fork? files format]}]
-  (cond-> ["run"]
-    attach    (into ["--attach" attach])
-    command   (into ["--command" command])
-    continue? (conj "--continue")
-    session   (into ["--session" session])
-    fork?     (conj "--fork")
-    model     (into ["--model" model])
-    agent     (into ["--agent" agent])
-    (seq files) (into (mapcat (fn [file] ["--file" file]) files))
-    format    (into ["--format" format])
-    true      (conj prompt)))
-
-(defn- ^{:stratum 0} echo-args
-  "Build CLI arguments for the echo (test) backend."
-  [{:keys [prompt]}]
-  [prompt])
-
-;; `:probe-endpoint` on each backend entry is the stable provider edge
-;; URL that the network-monitor (PR-B) probes via
-;; `network-health/probe-network`. We only care that the connection
-;; completed, not the response status — a 4xx is the typical case (HEAD
-;; against api.anthropic.com unauthenticated returns 405). Backends
-;; without a provider-controlled endpoint (`:echo`) get the generic
-;; Cloudflare DNS connectivity URL so the monitor still has something
-;; to probe.
-(def ^{:stratum 0} ^:private generic-connectivity-probe-url
-  "https://1.1.1.1/")
-
-;; Pure-data backend fields (`:cmd`, endpoints, `:default-model`,
-;; `:models`, etc.) live in `llm/backends.edn`; the function-valued
-;; fields (`:stream-parser`, `:args-fn`) stay here because they
-;; reference parser/arg-builder fns defined in this namespace. The two
-;; are merged per backend below to form `backends`.
-(defn- ^{:stratum 0} load-backend-data
-  []
-  (if-let [resource (io/resource "llm/backends.edn")]
-    (edn/read-string (slurp resource))
-    (response/throw-anomaly! :anomalies/not-found
-                             "Missing llm/backends.edn resource")))
-
-(defn ^{:stratum 0} build-messages-prompt [messages]
-  (->> messages
-       (map (fn [{:keys [role content]}]
-              (case role
-                "user" content
-                "assistant" (str "[Assistant]: " content)
-                "system" (str "[System]: " content)
-                content)))
-       (str/join "\n\n")))
-
-(defn- ^{:stratum 0} http-failure-anomaly
-  "Build the canonical `:unavailable` anomaly that this brick emits for
-   any HTTP-layer failure on an LLM call (thrown exception or http-kit
-   `{:error <Throwable>}` deref). Centralizes the shape so the throwing
-   and non-throwing failure modes converge."
-  [^Throwable cause url]
-  (anomaly/anomaly
-   :unavailable
-   (str "HTTP request failed: " (.getMessage cause))
-   {:operation :http-request
-    :url url}))
-
-(defn- ^{:stratum 0} token-usage
-  "Build the canonical usage map, keeping only numeric fields — a
-   present-but-nil key defeats downstream `(get usage :input-tokens 0)`
-   defaulting (same trap `parsed-usage` guards against).
-
-   `extras` carries the optional fields a backend reports beyond the two
-   totals, under these keys:
-   - `:cached-input-tokens`       input tokens served from the provider's
-                                  prompt cache. On the OpenAI wire shape and
-                                  the Codex CLI this is a SUBSET of
-                                  `:input-tokens` (unlike the Claude CLI's
-                                  `:cache-read-input-tokens`, which is counted
-                                  beside `:input-tokens`, never inside it).
-   - `:cache-write-input-tokens`  input tokens written to the prompt cache,
-                                  also a subset of `:input-tokens`.
-   - `:reasoning-output-tokens`   output tokens spent on reasoning, a subset
-                                  of `:output-tokens`.
-   Kept under their own names so no consumer double-counts them."
-  ([input-tokens output-tokens]
-   (token-usage input-tokens output-tokens nil))
-  ([input-tokens output-tokens extras]
-   (reduce-kv (fn [usage k v] (cond-> usage (number? v) (assoc k v)))
-              (cond-> {}
-                (number? input-tokens)  (assoc :input-tokens input-tokens)
-                (number? output-tokens) (assoc :output-tokens output-tokens))
-              extras)))
-
-(def ^{:stratum 0} ^:private http-too-many-requests
-  "HTTP 429. `java.net.HttpURLConnection` predates RFC 6585 and has no
-   constant for it; the other status literals in this namespace come
-   from that class."
-  429)
-
-(defn- ^{:stratum 0} parse-response-body
-  "Parse a response body as JSON, returning a canonical fault anomaly when
-   the JSON library throws. Callers retain the HTTP status alongside this
-   value so a non-OK response remains a status failure, not a parse failure."
-  [{:keys [status body]}]
-  (try+
-    (json/parse-string body true)
-    (catch Exception e
-      (anomaly/exception-anomaly
-       :fault
-       (msg/t :http-provider.system/parse-failed
-              {:reason (ex-message e)})
-       {:operation :parse-provider-response
-        :status status}
-       e))))
-
-;------------------------------------------------------------------------------ Direct provider requests
-;; Request/response shaping for the API-key HTTP backends
-;; (:anthropic-api / :openai-api / :gemini-api) used where CLI-agent
-;; backends cannot run — a sandboxed (Mac App Store) child process
-;; inherits the sandbox, so the user's claude/codex CLI wakes up
-;; without its config or keychain. Each provider is a body builder +
-;; response extractor pair; transport and error shaping are shared
-;; (`http-post-request`, `parse-provider-response`).
-(defn- ^{:stratum 0} chat-messages
-  "Normalize a request to the wire-shape message vector shared by the
-   chat-style provider APIs: a `:prompt` string becomes a single user
-   message; an explicit `:messages` vector passes through with only
-   the wire-relevant keys."
-  [{:keys [prompt messages]}]
-  (if prompt
-    [{:role "user" :content prompt}]
-    (mapv (fn [m] (select-keys m [:role :content])) messages)))
-
-(defn ^{:stratum 0} getenv-value
-  "Indirection over `System/getenv` so env-dependent backend resolution
-   (api-key, base-url) is testable via `with-redefs` (kept public like
-   `http-post-request` for exactly that reason)."
-  [k]
-  (System/getenv k))
-
-(def ^{:stratum 0} ^:private network-monitor-env-var
-  "Environment variable that switches the network-drop monitor off for
-   streaming CLI calls, for a network where the provider's probe
-   endpoint is unreachable although the agent CLI works (for example a
-   gateway set through the CLI's own base-URL setting)."
-  "MINIFORGE_NETWORK_MONITOR")
-
-(def ^{:stratum 0} ^:private env-flag-off-values
-  "Values (trimmed, any case) that read as off for an on/off environment
-   variable: `network-monitor-env-var` and the provider switches in a
-   backend's `:probe-endpoint-routes`."
-  #{"off" "false" "0" "no"})
-
-(def ^{:stratum 0} ^:private probe-region-pattern
-  "Shape of a cloud region name substituted into a route's
-   `:regional-url`; anything else is ignored rather than spliced into
-   a URL."
-  #"[a-z0-9-]+")
-
-(defn- ^{:stratum 0} http-url
-  "`value`, trimmed, when it is an absolute http(s) URL with a host;
-   nil otherwise."
-  [value]
-  (when (string? value)
-    (try+
-      (let [url (str/trim value)
-            uri (java.net.URI. url)]
-        (when (and (#{"http" "https"} (some-> (.getScheme uri) str/lower-case))
-                   (.getHost uri))
-          url))
-      (catch java.net.URISyntaxException _
-        nil))))
-
-(defn ^{:stratum 0} rate-limited?
-  "Detect Claude CLI rate limit messages in content.
-   Claude CLI returns exit 0 but emits a rate limit message as content."
-  [content]
-  (and (string? content)
-       (re-find #"(?i)you've hit your limit|too many requests|\b429\b|rate limit(?:ed| exceeded)?\b|resets \d+[ap]m"
-                content)))
-
-(defn ^{:stratum 0} format-timeout-error [{:keys [message type elapsed-ms]}]
-  (format "Adaptive timeout: %s (type: %s, elapsed: %dms)"
-          message (name type) elapsed-ms))
-
-(defn ^{:stratum 0} success-result [out-lines process-result]
-  {:out (str/join "\n" out-lines)
-   :err (:err process-result)
-   :exit (:exit process-result)})
-
-(defn ^{:stratum 0} stream-anomaly-result [out-lines stream-anomaly]
-  {:out (str/join "\n" out-lines)
-   :err (:anomaly/message stream-anomaly)
-   :exit -1
-   :anomaly stream-anomaly})
-
-(def ^{:stratum 0} ^:private eof-sentinel
-  (Object.))
-
-(defn- ^{:stratum 0} open-stream-dump-writer
-  []
-  (when-let [dump-path (System/getenv "MF_STREAM_DUMP")]
-    (java.io.PrintWriter.
-     (java.io.FileWriter. dump-path true))))
-
-(defn- ^{:stratum 0} stream-read-failure
-  [ex]
-  (anomaly/exception-anomaly :fault (or (ex-message ex) (str (type ex))) ex))
-
-(defn- ^{:stratum 0} enqueue-stream-line!
-  [line-queue line]
-  (.put line-queue line))
-
-(def ^{:stratum 0} ^:private stream-reader-join-timeout-ms
-  "How long process-stream-lines waits for its daemon reader thread to
-   exit after the stream reader is closed."
-  100)
-
-(defn- ^{:stratum 0} daemon-thread!
-  [thread-name f]
-  (let [thread (Thread. ^Runnable f thread-name)]
-    (.setDaemon thread true)
-    (.start thread)
-    thread))
-
-(defn- ^{:stratum 0} record-stream-line!
-  [out-lines dump-writer on-line last-line-at now line]
-  (reset! last-line-at now)
-  (swap! out-lines conj line)
-  (when dump-writer
-    (.println dump-writer line)
-    (.flush dump-writer))
-  (on-line line))
-
-(defn- ^{:stratum 0} stream-idle-timeout
-  [last-line-at line-timeout-ms out-lines now]
-  (when (>= (- now @last-line-at) line-timeout-ms)
-    {:type :stream-idle
-     :message (str "No stream output for " line-timeout-ms "ms")
-     :elapsed-ms (- now @last-line-at)
-     :stats {:lines-read (count @out-lines)}}))
-
-(defn- ^{:stratum 0} anomaly-signal?
-  [line-or-signal]
-  (anomaly/anomaly? line-or-signal))
-
-(defn ^{:stratum 0} clean-env
-  "Build environment map without CLAUDECODE to allow nested Claude CLI sessions.
-   Returns nil if CLAUDECODE is not set (use default env)."
-  []
-  (when (System/getenv "CLAUDECODE")
-    (into {} (remove (fn [[k _]] (= k "CLAUDECODE"))) (System/getenv))))
-
-(defn- ^{:stratum 0} ->stdin-stream
-  "Build the InputStream passed as the subprocess's stdin. A non-blank
-   :stdin string becomes a ByteArrayInputStream over its UTF-8 bytes;
-   absent or blank stdin maps to a zero-length stream so the
-   subprocess sees EOF immediately (legacy behavior for argv backends)."
-  [stdin-str]
-  (if (and (string? stdin-str) (not (.isEmpty ^String stdin-str)))
-    (ByteArrayInputStream. (.getBytes ^String stdin-str "UTF-8"))
-    (ByteArrayInputStream. (byte-array 0))))
-
-(defn- ^{:stratum 0} apply-process-env!
-  [^ProcessBuilder builder env]
-  (when env
-    (let [target-env (.environment builder)]
-      (.clear target-env)
-      (doseq [[k v] env]
-        (.put target-env k v)))))
-
-(defn- ^{:stratum 0} wait-for-stream-process
-  [^Process process timeout-ms]
-  (if (.waitFor process (long timeout-ms) TimeUnit/MILLISECONDS)
-    {:exit (.exitValue process)}
-    {:exit -1 :err "Process timed out"}))
-
-(defn- ^{:stratum 0} destroy-process-tree!
-  "Forcibly kill `process` and every process it spawned.
-
-   `.destroyForcibly` alone kills only the agent CLI: its MCP servers and
-   Bash tool children are re-parented and keep running, still writing to
-   the worktree. The descendants are listed while the parent is alive
-   (once it dies they are re-parented and drop out of the list), killed
-   leaf-first, then the parent: the same tree kill verify and the
-   dag-executor runtime use. Does not wait for exit."
-  [^Process process]
-  (let [descendants (try+
-                      (vec (.toArray (.descendants process)))
-                      ;; A Process with no native handle (a test proxy)
-                      ;; has no descendants to list.
-                      (catch UnsupportedOperationException _
-                        []))]
-    (doseq [^java.lang.ProcessHandle child (rseq descendants)]
-      (.destroyForcibly child))
-    (.destroyForcibly process)))
-
-(def ^{:stratum 0} ^:private keepalive-min-interval-ms
-  "Floor on the keepalive interval so the worker doesn't burn cycles
-   pinging the monitor in a tight loop on production-sized thresholds.
-   1s is plenty fine-grained for a 180+ second stagnation window."
-  1000)
-
-(defn- ^{:stratum 0} network-drop-timeout
-  "Shape the network-monitor's `:on-drop` diagnostic into the same
-   `{:type :message :elapsed-ms ...}` envelope `pm/check-timeout`
-   returns, so the existing `timeout-result` path handles it
-   identically. The PR-C auto-resumer keys on `:type :network-drop` to
-   know it should resume from the last persisted checkpoint."
-  [{:keys [backend-key consecutive-failures probe-interval-ms]
-    :as   diag}]
-  {:type           :network-drop
-   :backend-key    backend-key
-   :elapsed-ms     (* consecutive-failures probe-interval-ms)
-   :message        (format "Network drop: %d consecutive probes failed for %s"
-                           consecutive-failures (name backend-key))
-   :stats          (select-keys diag
-                                [:consecutive-failures :failure-threshold
-                                 :probe-interval-ms])})
-
-(defn- ^{:stratum 0} resolve-prompt-via
-  "Read the backend's declared prompt-delivery mode. Defaults to :argv
-   so backends that pre-date the :prompt-via knob keep their legacy
-   behavior."
-  [backend-config]
-  (get backend-config :prompt-via :argv))
-
-(defn- ^{:stratum 0} exec-opts-for-prompt-via
-  "Build the exec-layer opts map for a given prompt-via + prompt.
-
-   :stdin → {:stdin prompt} so the exec layer pipes the prompt to the
-            subprocess's stdin.
-   :argv  → {} (prompt rides in argv via the args-fn).
-
-   Returning an empty map for :argv lets call sites use `(seq opts)`
-   to decide between the 1-arity and 2-arity exec-fn calls — preserves
-   back-compat with caller-supplied 1-arity exec-fns documented as a
-   public test hook on CLIClient."
-  [prompt-via prompt]
-  (cond-> {} (= prompt-via :stdin) (assoc :stdin prompt)))
-
-(defn- ^{:stratum 0} run-cli-exec
-  "Invoke a CLI exec-fn with cmd plus optional opts. The 1-arity
-   branch keeps caller-supplied exec-fns from the days before opts
-   existed working unchanged; the 2-arity branch threads opts in
-   when they carry signal (e.g. :stdin)."
-  [exec-fn cmd opts]
-  (if (seq opts)
-    (exec-fn cmd opts)
-    (exec-fn cmd)))
-
-(defn ^{:stratum 0} normalize-exec-fn
-  "Wrap an exec-fn so it accepts both 1-arity (cmd) and 2-arity
-   (cmd opts) call patterns.
-
-   `:exec-fn` on `create-client` is a documented public test hook.
-   Pre-:prompt-via callers supplied 1-arity functions; once the
-   :stdin path landed the impl started invoking exec-fn 2-arity for
-   the :claude backend. Without this wrapper a 1-arity user fn
-   would throw ArityException the first time the new code path
-   ran.
-
-   The wrapper probes 2-arity on first 2-arity call and caches the
-   decision in an atom so subsequent calls dispatch directly. The
-   probe only happens when the caller actually passes opts; pure
-   1-arity invocations stay one indirection.
-
-   Returns a fn equivalent to `f` for callers that already accept
-   both arities."
-  [f]
-  (let [arity (atom :unknown)]
-    (fn
-      ([cmd] (f cmd))
-      ([cmd opts]
-       (case @arity
-         :one (f cmd)
-         :two (f cmd opts)
-         (try
-           (let [r (f cmd opts)]
-             (reset! arity :two)
-             r)
-           (catch clojure.lang.ArityException _
-             (reset! arity :one)
-             (f cmd))))))))
-
-(defn ^{:stratum 0} log-prompt-sent [logger backend prompt]
-  (when logger
-    (log/debug logger :system :agent/prompt-sent
-               {:data {:backend backend
-                       :prompt-length (count prompt)}})))
-
-(defn ^{:stratum 0} log-response [logger response]
-  (when logger
-    (if (:success response)
-      (log/debug logger :system :agent/response-received
-                 {:data {:response-length (count (:content response))}})
-      (log/error logger :system :agent/task-failed
-                 {:message (msg/t :backend.system/request-failed)
-                  :data (:error response)}))))
-
-(defn- ^{:stratum 0} record-parsed-progress!
-  [progress-monitor parsed accumulated-content]
-  (cond
-    (:tool-use parsed)
-    (pm/record-activity!
-     progress-monitor
-     (str "tool-use:"
-          (or (:tool-name parsed)
-              (some->> (:tool-names parsed) seq sort (str/join ","))
-              "unknown")))
-
-    ;; Tool-result events are liveness signals — use a stable activity
-    ;; key (not the call-id) so :unique-chunks stays bounded across long
-    ;; tool-heavy runs.
-    (:tool-result parsed)
-    (pm/record-activity! progress-monitor :tool-result)
-
-    (:heartbeat parsed)
-    (pm/record-activity! progress-monitor :stream-heartbeat)
-
-    (contains? parsed :done?)
-    (pm/record-activity! progress-monitor :stream-result)
-
-    :else
-    (pm/record-chunk! progress-monitor @accumulated-content)))
-
-(def ^{:stratum 0} ^:private timeout-type->terminated-by
-  "Adaptive-timeout `:type` → the `:llm/terminated-by` marker a cut run
-   carries on its response. The marker names the CLIENT-SIDE reason the
-   run ended before the model finished, so a role can branch on it
-   without re-parsing the timeout envelope. `:hard-limit` is renamed to
-   `:max-total` because that is the knob (`:max-total-ms`) an operator
-   turns to change it."
-  {:hard-limit   :max-total
-   :stagnation   :stagnation
-   :stream-idle  :stream-idle
-   :network-drop :network-drop})
-
-(defn- ^{:stratum 0} message-preview
-  "Return the last up-to-500 characters of content for post-mortem diagnostics.
-   Returns nil when content is blank."
-  [content]
-  (when (seq content)
-    (subs content (max 0 (- (count content) 500)))))
-
-(defn- ^{:stratum 0} blank-streaming-success?
-  "True when the streaming transport exited 0 but produced no useful parsed output.
-
-   This is the Claude failure mode observed in dogfood on 2026-05-02:
-   the process exited successfully, emitted no parsed stdout blocks, no tool calls,
-   and left the planner with an empty assistant turn. In that case we retry once
-   through the non-streaming path before classifying the invocation as failed."
-  [exit-code final-content tool-call-count usage]
-  (and (zero? exit-code)
-       (str/blank? final-content)
-       (zero? tool-call-count)
-       (nil? usage)))
-
-(def ^{:stratum 0} context-overflow-error-type
-  "Error :type for a prompt that exceeded the model's context window.
-   Terminal: excluded from submission-recovery (the turn has no artifact to
-   recover and a retry just re-sends the over-budget prompt). See N12 §4."
-  "context_overflow")
-
-(defn- ^{:stratum 0} usage-token-count
-  "Return a numeric usage token count, treating missing or malformed values
-   as zero so context accounting remains numeric for upstream payloads."
-  [usage token-key]
-  (let [tokens (get usage token-key)]
-    (if (number? tokens) tokens 0)))
-
-(def ^{:stratum 0} ^:private chars-per-token-estimate
-  "Rough characters-per-token divisor for a pre-flight input-size estimate.
-   ~4 chars/token is the usual English heuristic; this is a coarse gauge of
-   headroom against the model's context window, not a billing figure."
-  4)
 
 (defn ^{:stratum 0} get-config-impl [client]
   (:config client))
 
-(defn ^{:stratum 0} capsule-exec-fn
-  "Returns an exec-fn that routes CLI commands through a task capsule executor.
-   Used in governed mode so the agent CLI runs inside the Docker/K8s container
-   instead of on the host (N11 §6.2).
+;; Aliases: the moved definitions keep their llm-client names for callers.
+(def ^{:stratum 0} anthropic-request-body
+  "Alias of `http-wire/anthropic-request-body`."
+  http-wire/anthropic-request-body)
 
-   Arguments:
-   - execute-fn  - function [executor env-id command opts] -> result map
-   - executor    - TaskExecutor instance
-   - env-id      - environment/container ID
-   - workdir     - workspace directory inside capsule"
-  [execute-fn executor env-id workdir]
-  (fn [cmd]
-    (let [result (execute-fn executor env-id cmd {:workdir workdir})]
-      (if (and (map? result) (:data result))
-        {:out (get-in result [:data :stdout] "")
-         :err (get-in result [:data :stderr] "")
-         :exit (get-in result [:data :exit-code] 0)}
-        {:out ""
-         :err (str "Capsule exec error: " result)
-         :exit 1}))))
+(def ^{:stratum 0} backends
+  "Alias of `backend-registry/backends`."
+  backend-registry/backends)
 
-(defn ^{:stratum 0} mock-exec-fn [output & {:keys [exit] :or {exit 0}}]
-  (fn
-    ([_cmd]      {:out output :err "" :exit exit})
-    ([_cmd _opts] {:out output :err "" :exit exit})))
+(def ^{:stratum 0} build-messages-prompt
+  "Alias of `prompts/build-messages-prompt`."
+  prompts/build-messages-prompt)
 
-(defn ^{:stratum 0} mock-exec-fn-multi [outputs]
-  (let [call-count (atom 0)
-        respond    (fn []
-                     (let [idx @call-count
-                           output (get outputs idx (last outputs))]
-                       (swap! call-count inc)
-                       {:out output :err "" :exit 0}))]
-    (fn
-      ([_cmd]       (respond))
-      ([_cmd _opts] (respond)))))
+(def ^{:stratum 0} capsule-exec-fn
+  "Alias of `completion/capsule-exec-fn`."
+  completion/capsule-exec-fn)
 
-(defn- ^{:stratum 0} openai-usage-extras
-  "The cache and reasoning breakdown an OpenAI-shaped `usage` block
-   carries under its `*_details` maps. Absent on servers that do not
-   report them (most local OpenAI-compatible servers)."
-  [usage]
-  {:cached-input-tokens (get-in usage [:prompt_tokens_details :cached_tokens])
-   :cache-write-input-tokens (get-in usage [:prompt_tokens_details :cache_write_tokens])
-   :reasoning-output-tokens (get-in usage [:completion_tokens_details :reasoning_tokens])})
+(def ^{:stratum 0} claude-args
+  "Alias of `cli-args/claude-args`."
+  cli-args/claude-args)
+
+(def ^{:stratum 0} claude-mcp-allowlist-string
+  "Alias of `cli-args/claude-mcp-allowlist-string`."
+  cli-args/claude-mcp-allowlist-string)
+
+(def ^{:stratum 0} codex-args
+  "Alias of `cli-args/codex-args`."
+  cli-args/codex-args)
+
+(def ^{:stratum 0} complete-impl
+  "Alias of `completion/complete-impl`."
+  completion/complete-impl)
+
+(def ^{:stratum 0} context-overflow-by-usage?
+  "Alias of `prompts/context-overflow-by-usage?`."
+  prompts/context-overflow-by-usage?)
+
+(def ^{:stratum 0} context-overflow-error-type
+  "Alias of `prompts/context-overflow-error-type`."
+  prompts/context-overflow-error-type)
+
+(def ^{:stratum 0} cursor-args
+  "Alias of `cli-args/cursor-args`."
+  cli-args/cursor-args)
+
+(def ^{:stratum 0} echo-args
+  "Alias of `cli-args/echo-args`."
+  cli-args/echo-args)
+
+(def ^{:stratum 0} fold-message-usage
+  "Alias of `cli-output/fold-message-usage`."
+  cli-output/fold-message-usage)
+
+(def ^{:stratum 0} gemini-request-body
+  "Alias of `http-wire/gemini-request-body`."
+  http-wire/gemini-request-body)
+
+(def ^{:stratum 0} http-complete
+  "Alias of `http-backend/http-complete`."
+  http-backend/http-complete)
+
+(def ^{:stratum 0} http-post-request
+  "Alias of `http-backend/http-post-request`."
+  http-backend/http-post-request)
+
+(def ^{:stratum 0} llm-error
+  "Alias of `responses/llm-error`."
+  responses/llm-error)
+
+(def ^{:stratum 0} log-streaming-result
+  "Alias of `cli-output/log-streaming-result`."
+  cli-output/log-streaming-result)
+
+(def ^{:stratum 0} mock-exec-fn
+  "Alias of `completion/mock-exec-fn`."
+  completion/mock-exec-fn)
+
+(def ^{:stratum 0} mock-exec-fn-multi
+  "Alias of `completion/mock-exec-fn-multi`."
+  completion/mock-exec-fn-multi)
+
+(def ^{:stratum 0} normalize-exec-fn
+  "Alias of `completion/normalize-exec-fn`."
+  completion/normalize-exec-fn)
+
+(def ^{:stratum 0} ollama-request-body
+  "Alias of `http-wire/ollama-request-body`."
+  http-wire/ollama-request-body)
+
+(def ^{:stratum 0} openai-request-body
+  "Alias of `http-wire/openai-request-body`."
+  http-wire/openai-request-body)
+
+(def ^{:stratum 0} opencode-args
+  "Alias of `cli-args/opencode-args`."
+  cli-args/opencode-args)
+
+(def ^{:stratum 0} openrouter-request-body
+  "Alias of `http-wire/openrouter-request-body`."
+  http-wire/openrouter-request-body)
+
+(def ^{:stratum 0} parse-claude-stream-line
+  "Alias of `cli-output/parse-claude-stream-line`."
+  cli-output/parse-claude-stream-line)
+
+(def ^{:stratum 0} parse-cli-output
+  "Alias of `cli-output/parse-cli-output`."
+  cli-output/parse-cli-output)
+
+(def ^{:stratum 0} parse-codex-stream-line
+  "Alias of `cli-output/parse-codex-stream-line`."
+  cli-output/parse-codex-stream-line)
+
+(def ^{:stratum 0} parse-ollama-response
+  "Alias of `http-wire/parse-ollama-response`."
+  http-wire/parse-ollama-response)
+
+(def ^{:stratum 0} parsed-usage
+  "Alias of `cli-output/parsed-usage`."
+  cli-output/parsed-usage)
+
+(def ^{:stratum 0} post-kill-join-timeout-ms
+  "Alias of `stream-exec/post-kill-join-timeout-ms`."
+  stream-exec/post-kill-join-timeout-ms)
+
+(def ^{:stratum 0} probe-endpoint-for
+  "Alias of `backend-registry/probe-endpoint-for`."
+  backend-registry/probe-endpoint-for)
+
+(def ^{:stratum 0} process-stream-lines
+  "Alias of `stream-exec/process-stream-lines`."
+  stream-exec/process-stream-lines)
+
+(def ^{:stratum 0} prompt-size-telemetry
+  "Alias of `prompts/prompt-size-telemetry`."
+  prompts/prompt-size-telemetry)
+
+(def ^{:stratum 0} rate-limited?
+  "Alias of `cli-output/rate-limited?`."
+  cli-output/rate-limited?)
+
+(def ^{:stratum 0} read-process-stream!
+  "Alias of `subprocess/read-process-stream!`."
+  subprocess/read-process-stream!)
+
+(def ^{:stratum 0} record-parsed-progress!
+  "Alias of `cli-output/record-parsed-progress!`."
+  cli-output/record-parsed-progress!)
+
+(def ^{:stratum 0} resolve-prompt-via
+  "Alias of `prompts/resolve-prompt-via`."
+  prompts/resolve-prompt-via)
+
+(def ^{:stratum 0} start-capture-process!
+  "Alias of `subprocess/start-capture-process!`."
+  subprocess/start-capture-process!)
+
+(def ^{:stratum 0} start-stream-reader!
+  "Alias of `stream-reader/start-stream-reader!`."
+  stream-reader/start-stream-reader!)
+
+(def ^{:stratum 0} stop-stream-reader!
+  "Alias of `stream-reader/stop-stream-reader!`."
+  stream-reader/stop-stream-reader!)
+
+(def ^{:stratum 0} stream-exec-fn
+  "Alias of `stream-exec/stream-exec-fn`."
+  stream-exec/stream-exec-fn)
+
+(def ^{:stratum 0} stream-with-parser
+  "Alias of `cli-output/stream-with-parser`."
+  cli-output/stream-with-parser)
+
+(def ^{:stratum 0} streaming-error-response
+  "Alias of `cli-output/streaming-error-response`."
+  cli-output/streaming-error-response)
+
+(def ^{:stratum 0} streaming-success-response
+  "Alias of `cli-output/streaming-success-response`."
+  cli-output/streaming-success-response)
+
+(def ^{:stratum 0} success-response
+  "Alias of `cli-output/success-response`."
+  cli-output/success-response)
+
+(def ^{:stratum 0} terminated-by
+  "Alias of `cli-output/terminated-by`."
+  cli-output/terminated-by)
+
+(def ^{:stratum 0} timeout-result
+  "Alias of `stream-exec/timeout-result`."
+  stream-exec/timeout-result)
+
+(def ^{:stratum 0} total-input-tokens
+  "Alias of `prompts/total-input-tokens`."
+  prompts/total-input-tokens)
+
+(def ^{:stratum 0} wait-for-stream-process
+  "Alias of `subprocess/wait-for-stream-process`."
+  subprocess/wait-for-stream-process)
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} terminated-by
-  "Return the `:llm/terminated-by` marker for an adaptive-timeout envelope,
-   or nil when the run was not cut by the client (no envelope, or an
-   envelope type outside the known taxonomy)."
-  [timeout-info]
-  (get timeout-type->terminated-by (:type timeout-info)))
-
-(defn- ^{:stratum 1} env-flag-off?
-  "True when `value` is one of `env-flag-off-values`."
-  [value]
-  (contains? env-flag-off-values
-             (some-> value str/trim str/lower-case)))
-
-(defn- ^{:stratum 1} route-endpoint
-  "The probe URL a `:probe-endpoint-routes` entry yields from the
-   environment: the URL in its `:base-url-env`, else its `:global-url`
-   or `:regional-url` for the region in its `:region-env`. Nil when
-   none of those is set (or usable)."
-  [{:keys [base-url-env region-env regional-url global-url]}]
-  (let [region (some-> region-env getenv-value str/trim str/lower-case not-empty)]
-    (or (some-> base-url-env getenv-value http-url)
-        (when (and global-url (= "global" region))
-          global-url)
-        (when (and regional-url region (re-matches probe-region-pattern region))
-          (format regional-url region)))))
-
-(def ^{:stratum 1} ^:private client-defaults
-  (delay (load-client-defaults)))
-
-(defn- ^{:stratum 1} ->canonical-anomaly
-  "Build a canonical anomaly map from the brick's legacy category
-   keyword + message + extra data. Generic-standard categories produce
-   `(anomaly/anomaly type msg data)`; domain categories produce
-   `(anomaly/sub-anomaly type category msg data)`.
-
-   `category` MUST be in `category->type`; an unmapped category is a
-   programmer error (the table must be updated when new categories
-   are introduced)."
-  [category message data]
-  (let [a-type (or (category->type category)
-                   (throw (IllegalArgumentException.
-                           (str "Unmapped LLM anomaly category: "
-                                (pr-str category)
-                                ". Add it to `category->type` in "
-                                "ai.miniforge.llm.protocols.impl.llm-client"))))]
-    (if (contains? generic-standard-categories category)
-      (anomaly/anomaly a-type message data)
-      (anomaly/sub-anomaly a-type category message data))))
-
-(defn ^{:stratum 1} parse-claude-stream-line
-  "Parse a line from Claude CLI streaming output.
-
-   Claude CLI stream-json emits:
-   - {\"type\":\"system\"} — one-shot init event; parsed to a heartbeat
-     so it refreshes stream supervision once at session start
-   - {\"type\":\"assistant\",\"message\":{\"content\":[{\"text\":\"...\"}]}} — content
-   - {\"type\":\"tool_use\"} — tool invocation (carries :tool-use)
-   - {\"type\":\"rate_limit_event\"} — periodic liveness pulse from
-     the CLI; parsed to a heartbeat so it keeps the progress monitor
-     alive while the model is mid-think (no assistant chunks yet)
-   - {\"type\":\"result\"} — final usage / stop-reason envelope
-
-   Unrecognised event types also parse to a heartbeat — the stream
-   stays alive even when the CLI introduces new event shapes the
-   miniforge parser hasn't yet learned.
-
-   Arguments:
-     line - String line from stream
-
-   Returns: {:delta string :done? boolean ...} or nil
-            (nil for blank lines or parse failures only)"
-  [line]
-  (try
-    (when-not (str/blank? line)
-      (let [data (json/parse-string line true)]
-        (case (:type data)
-          "assistant"
-          (let [content-blocks (get-in data [:message :content])
-                text-blocks (keep (fn [block]
-                                    (when (= "text" (:type block))
-                                      (:text block)))
-                                  content-blocks)
-                ;; Collect full tool_use block maps so we can extract :id
-                ;; and :input alongside :name. One pass for all three fields.
-                tool-blocks (keep (fn [block]
-                                    (when (= "tool_use" (:type block)) block))
-                                  content-blocks)
-                ;; `keep :name` (not `map :name`) drops blocks without a
-                ;; :name field so `(seq tool-names)` only goes truthy when
-                ;; the assistant turn actually has named tool calls.
-                tool-names (keep :name tool-blocks)
-                text (str/join text-blocks)
-                ;; Claude surfaces stop_reason on each assistant message.
-                ;; Values: "end_turn" | "max_tokens" | "stop_sequence" |
-                ;; "tool_use" | "max_turns" (Claude Code adds the last).
-                ;; The accumulator tracks the LATEST — that's the reason
-                ;; the overall turn ended.
-                stop-reason (get-in data [:message :stop_reason])
-                ;; Per-message usage. The authoritative totals arrive on
-                ;; the final `result` frame — which a run cut by an
-                ;; adaptive timeout never sees. Carrying each message's
-                ;; usage lets the accumulator report what a cut run
-                ;; consumed (2026-09-04 trap-bench series 9: two cut
-                ;; implement turns logged `:tokens 0`).
-                message-usage (parsed-usage (get-in data [:message :usage]))
-                message-id (get-in data [:message :id])
-                with-usage (fn [parsed]
-                             (cond-> parsed
-                               message-usage (assoc :message-usage message-usage)
-                               (and message-usage message-id)
-                               (assoc :message-id message-id)))]
-            (cond
-              (seq tool-names)
-              (let [first-tool (first tool-blocks)]
-                (cond-> (with-usage {:delta (or text "") :done? false
-                                     :tool-use true :tool-names tool-names})
-                  stop-reason               (assoc :stop-reason stop-reason)
-                  ;; Additive: :tool-call-id and :tool-input from the first
-                  ;; tool_use block. Present only when the fields are
-                  ;; non-nil so existing consumers that check for key
-                  ;; presence see no change on stripped blocks.
-                  (:id first-tool)          (assoc :tool-call-id (:id first-tool))
-                  (some? (:input first-tool)) (assoc :tool-input (:input first-tool))))
-
-              (not (str/blank? text))
-              (cond-> (with-usage {:delta text :done? false})
-                stop-reason (assoc :stop-reason stop-reason))
-
-              ;; No text + no tool calls — still carry stop-reason if
-              ;; present so "empty turn" shows a reason.
-              stop-reason
-              (with-usage {:delta "" :done? false :stop-reason stop-reason})))
-
-          ;; Legacy format support
-          "stream_event"
-          (when-let [delta-text (get-in data [:event :delta :text])]
-            {:delta delta-text :done? false})
-
-          "result"
-          (let [usage (parsed-usage (or (:usage data)
-                                        (get-in data [:result :usage])))]
-            (cond-> {:delta "" :done? true
-                     :final-content (:result data)
-                     :cost-usd (:total_cost_usd data)}
-              usage (assoc :usage usage)
-              (:session_id data) (assoc :session-id (:session_id data))
-              (:num_turns data)  (assoc :num-turns (:num_turns data))
-              ;; Claude Code surfaces a top-level stop_reason on the
-              ;; final result event too — prefer it over the per-message
-              ;; stop_reason when both are present.
-              (:stop_reason data) (assoc :stop-reason (:stop_reason data))))
-
-          ;; User messages contain tool_result content blocks — emitted by
-          ;; the CLI when tool output is fed back to the model. Surface a
-          ;; :tool-result chunk so downstream subscribers can observe both
-          ;; the invocation (:tool-use) and the outcome (:tool-result).
-          ;; "user" frames without tool_result (e.g. plain echo) fall
-          ;; through to a heartbeat — same shape the case-default would
-          ;; have produced before "user" was a recognised type.
-          "user"
-          (let [content-blocks (get-in data [:message :content])
-                tool-result-blocks (when (sequential? content-blocks)
-                                     (filter (fn [b] (= "tool_result" (:type b)))
-                                             content-blocks))]
-            (if (seq tool-result-blocks)
-              (let [block       (first tool-result-blocks)
-                    raw-content (:content block)
-                    tool-output (cond
-                                  (string? raw-content)     raw-content
-                                  ;; Array of content blocks — join text parts
-                                  (sequential? raw-content) (->> raw-content
-                                                                 (keep (fn [b]
-                                                                         (when (= "text" (:type b))
-                                                                           (:text b))))
-                                                                 (str/join "\n"))
-                                  (nil? raw-content)        ""
-                                  :else                     (str raw-content))]
-                {:delta        ""
-                 :done?        false
-                 :tool-result  true
-                 :tool-call-id (:tool_use_id block)
-                 :tool-output  tool-output
-                 :tool-error?  (boolean (:is_error block))})
-              {:delta "" :done? false :heartbeat true}))
-
-          ;; Tool use events — capture tool name for diagnostics
-          "tool_use"
-          (let [tool-name (or (get-in data [:tool :name])
-                              (get-in data [:name])
-                              (:tool_name data))]
-            {:delta "" :done? false :tool-use true
-             :tool-name tool-name})
-
-          ;; System init and rate-limit notifications carry no content,
-          ;; but they ARE liveness signals from the CLI. While Claude is
-          ;; thinking on a heavy first turn (Opus on a multi-thousand-
-          ;; token planner prompt can take 30-60s before the first
-          ;; assistant chunk), `rate_limit_event` is often the only
-          ;; thing arriving on stdout. Treat both as heartbeats so the
-          ;; adaptive timeout doesn't fire on a model that's actively
-          ;; working — observed in the 2026-05-04 dogfood: 7 rate-limit
-          ;; events + 1 system init in 60s, stagnation killed the run
-          ;; with zero assistant output produced.
-          ("system" "rate_limit_event")
-          {:delta "" :done? false :heartbeat true}
-
-          ;; Any other unrecognised event type — emit a heartbeat so the
-          ;; stream stays alive during tool-heavy phases
-          {:delta "" :done? false :heartbeat true})))
-    (catch Exception _e
-      nil)))
-
-(defn ^{:stratum 1} parse-codex-stream-line
-  "Parse a line from Codex CLI streaming output.
-
-   Codex emits JSONL events:
-   - thread.started: session began
-   - turn.started: turn began
-   - item.completed: reasoning, agent_message, mcp_tool_call, etc.
-   - turn.completed: carries usage data and optional finish_reason
-   - turn.failed / error: failure events
-
-   Diagnostic fields returned on turn.completed:
-   - :stop-reason   — normalized finish_reason (\"end_turn\", \"max_turns\", etc.)
-   - :increment-turns — true, signalling the accumulator to bump its turn counter
-
-   Arguments:
-     line - String line from stream
-
-   Returns: {:delta string :done? boolean :usage map} or nil"
-  [line]
-  (try
-    (when-not (str/blank? line)
-      (let [data (json/parse-string line true)]
-        (case (:type data)
-          ;; Agent message — the actual text output
-          "item.completed"
-          (let [item (:item data)
-                item-type (:type item)]
-            (case item-type
-              "agent_message"
-              {:delta (str (:text item) "\n") :done? false}
-
-              ;; MCP tool invocation — emit a tool-use signal so the
-              ;; callback can publish :agent/tool-call with the real name
-              "mcp_tool_call"
-              {:delta "" :done? false :tool-use true
-               :tool-name (or (get-in item [:tool :name])
-                              (:tool item)
-                              (:tool_name item)
-                              (:name item))
-               :tool-call-id (:id item)}
-
-              ;; Native tool call (pre-MCP) — same treatment
-              "tool_call"
-              {:delta "" :done? false :tool-use true
-               :tool-name (or (:name item) (:tool_name item))
-               :tool-call-id (:id item)}
-
-              ;; MCP tool result — emitted when MCP tool output is returned
-              ;; to the model. Analogous to Claude's tool_result blocks:
-              ;; surface :tool-result so downstream code can pair each
-              ;; invocation with its outcome.
-              "mcp_tool_result"
-              {:delta        ""
-               :done?        false
-               :tool-result  true
-               :tool-call-id (or (:tool_call_id item) (:id item))
-               :tool-output  (:output item)
-               :tool-error?  (boolean (:is_error item))}
-
-              ;; Native tool result (pre-MCP) — same shape as mcp_tool_result.
-              "tool_result"
-              {:delta        ""
-               :done?        false
-               :tool-result  true
-               :tool-call-id (or (:tool_call_id item) (:id item))
-               :tool-output  (:output item)
-               :tool-error?  (boolean (:is_error item))}
-
-              ;; reasoning — ignored for content but could be surfaced
-              ;; later as :agent/reasoning events if useful
-              nil))
-
-          ;; Turn completed carries usage and optional finish_reason.
-          ;; :increment-turns signals the stream-with-parser accumulator
-          ;; to bump its turn counter (Codex equivalent of num_turns).
-          "turn.completed"
-          (let [usage (:usage data)
-                stop-reason (normalize-finish-reason (:finish_reason data))]
-            (cond-> {:delta "" :done? true
-                     :increment-turns true
-                     ;; input/output stay present even when nil (existing
-                     ;; contract); the cache and reasoning counts ride
-                     ;; along only when Codex reports a number.
-                     :usage (cond-> {:input-tokens (:input_tokens usage)
-                                     :output-tokens (:output_tokens usage)}
-                              (number? (:cached_input_tokens usage))
-                              (assoc :cached-input-tokens (:cached_input_tokens usage))
-                              (number? (:reasoning_output_tokens usage))
-                              (assoc :reasoning-output-tokens
-                                     (:reasoning_output_tokens usage)))}
-              stop-reason (assoc :stop-reason stop-reason)))
-
-          ;; Turn failed
-          "turn.failed"
-          {:delta (str "\nError: " (get-in data [:error :message] "unknown")) :done? true}
-
-          "error"
-          {:delta (str "\nError: " (:message data "unknown")) :done? true}
-
-          ;; thread.started, turn.started, item.started — ignore
-          nil)))
-    (catch Exception _e
-      nil)))
-
-(def ^{:stratum 1} ^:private backend-data
-  (load-backend-data))
-
-;------------------------------------------------------------------------------ HTTP Backend Support
-(defn ^{:stratum 1} ollama-request-body
-  "Build Ollama API request body. `:num-ctx` sets Ollama's context-window
-   option — without it Ollama applies its own small default and silently
-   truncates long prompts."
-  [{:keys [prompt messages model streaming? num-ctx]}]
-  (let [model (or model "codellama")
-        msg-content (or prompt
-                        (build-messages-prompt messages))]
-    (cond-> {:model model
-             :messages [{:role "user" :content msg-content}]
-             :stream (boolean streaming?)}
-      num-ctx (assoc :options {:num_ctx (long num-ctx)}))))
-
-(defn- ^{:stratum 1} extraction
-  "The `{:content :usage}` shape `parse-provider-response` expects from
-   every extractor — built in one place so the extractors stay pure
-   field mappings. The optional fields:
-   - `:usage-extras`  the usage fields beyond the two totals (see
-                      `token-usage`).
-   - `:cost-usd`      the amount the provider says it billed for the
-                      call; when numeric it rides beside `:usage`, never
-                      inside it.
-   - `:finish-reason` the provider's own word for why generation
-                      stopped; it becomes the canonical `:stop-reason`
-                      (see `normalize-finish-reason`)."
-  [content input-tokens output-tokens {:keys [usage-extras cost-usd finish-reason]}]
-  (let [stop-reason (normalize-finish-reason finish-reason)]
-    (cond-> {:content content
-             :usage (token-usage input-tokens output-tokens usage-extras)}
-      (number? cost-usd) (assoc :cost-usd cost-usd)
-      stop-reason        (assoc :stop-reason stop-reason))))
-
-(defn- ^{:stratum 1} http-status->category
-  "Map a non-OK provider HTTP status to the brick's legacy anomaly
-   category, so a 403 classifies as forbidden and a 429 as rate-limited
-   instead of everything collapsing into a generic api_error."
-  [status]
-  (cond
-    (not (integer? status))                              :anomalies/unavailable
-    (or (= status HttpURLConnection/HTTP_UNAUTHORIZED)
-        (= status HttpURLConnection/HTTP_FORBIDDEN))  :anomalies/forbidden
-    (= status HttpURLConnection/HTTP_NOT_FOUND)       :anomalies/not-found
-    (= status http-too-many-requests)                 :anomalies.agent/rate-limited
-    (< status HttpURLConnection/HTTP_INTERNAL_ERROR)  :anomalies/incorrect
-    :else                                             :anomalies/unavailable))
-
-(defn ^{:stratum 1} openai-request-body
-  "Build an OpenAI Chat Completions request body. The system prompt is
-   a leading `system`-role message on this API."
-  [{:keys [system model max-tokens] :as request}]
-  (cond-> {:model model
-           :messages (into (if system [{:role "system" :content system}] [])
-                           (chat-messages request))}
-    max-tokens (assoc :max_completion_tokens max-tokens)))
-
-(defn ^{:stratum 1} gemini-request-body
-  "Build a Gemini generateContent request body. Gemini has no
-   assistant role — prior assistant turns map to `model` — and the
-   system prompt rides in `systemInstruction`."
-  [{:keys [system max-tokens] :as request}]
-  (cond-> {:contents (mapv (fn [{:keys [role content]}]
-                             {:role (if (= role "assistant") "model" "user")
-                              :parts [{:text content}]})
-                           (chat-messages request))}
-    system     (assoc :systemInstruction {:parts [{:text system}]})
-    max-tokens (assoc :generationConfig {:maxOutputTokens max-tokens})))
-
-(defn- ^{:stratum 1} resolve-api-key
-  "Resolve the API key for a direct provider backend: a non-blank
-   `:api-key` in the client config wins; otherwise the backend's
-   `:api-key-env` environment variable. Blank/whitespace values count
-   as absent on BOTH paths — a config map carrying :api-key \"\" (BYOK
-   setups where the key field exists but is empty) must still fall
-   through to the env var. The env path is how the sandboxed app
-   delivers a keychain-held key to the workflow process without it
-   ever touching disk."
-  [backend-config config]
-  (or (some-> (:api-key config) str str/trim not-empty)
-      (some-> (:api-key-env backend-config) getenv-value str str/trim not-empty)))
-
-(defn- ^{:stratum 1} resolve-base-url
-  "The endpoint for the request. Only a backend that declares
-   `:base-url-env` supports overrides — there a non-blank client-config
-   `:base-url` wins, then the env variable. Every other backend always
-   uses its static `:api-endpoint`, so a stray client `:base-url` can
-   never redirect a fixed-endpoint provider."
-  [backend-config config]
-  (or (when (:base-url-env backend-config)
-        (or (some-> (:base-url config) str str/trim not-empty)
-            (some-> (:base-url-env backend-config) getenv-value str str/trim
-                    not-empty)))
-      (:api-endpoint backend-config)))
-
-(defn ^{:stratum 1} timeout-result [out-lines timeout-reason]
-  {:out (str/join "\n" out-lines)
-   :err (format-timeout-error timeout-reason)
-   :exit -1
-   :timeout timeout-reason})
-
-(defn- ^{:stratum 1} read-stream-loop!
-  [out-reader line-queue]
-  (loop []
-    (if-some [line (.readLine out-reader)]
-      (do (enqueue-stream-line! line-queue line)
-          (recur))
-      (enqueue-stream-line! line-queue eof-sentinel))))
-
-(defn- ^{:stratum 1} stop-stream-reader!
-  "Release the reader daemon once the consumer has stopped polling.
-
-   The close runs on its own daemon thread. `BufferedReader.close` takes
-   the lock `readLine` holds while it blocks on the process pipe, so an
-   inline close waits for the next line or EOF; a silent subprocess sends
-   neither, and the lock wait ignores interrupts, so the calling thread
-   would hang before it could kill the process. Callers kill the process
-   tree on every abnormal exit; that ends the blocked read and lets the
-   close through."
-  [^Thread reader-thread out-reader]
-  (daemon-thread! "llm-stream-reader-close"
-                  (fn []
-                    (try+
-                      (.close out-reader)
-                      ;; JVM Errors stay fatal; anything else, ex-info
-                      ;; included (`Object`), is a best-effort close.
-                      (catch Error fatal
-                        (throw fatal))
-                      (catch Object _
-                        nil))))
-  (.interrupt reader-thread)
-  (.join reader-thread stream-reader-join-timeout-ms))
-
-(defn- ^{:stratum 1} eof-signal?
-  [line-or-signal]
-  (identical? line-or-signal eof-sentinel))
-
-(defn- ^{:stratum 1} timeout-signal
-  [last-line-at line-timeout-ms out-lines]
-  {:done? false
-   :timeout (stream-idle-timeout last-line-at
-                                 line-timeout-ms
-                                 out-lines
-                                 (System/currentTimeMillis))})
-
-(defn- ^{:stratum 1} write-process-stdin!
-  [^Process process stdin-str]
-  (daemon-thread!
-   "llm-stream-stdin-writer"
-   (fn []
-     (try
-       (with-open [out (.getOutputStream process)
-                   in (->stdin-stream stdin-str)]
-         (io/copy in out))
-       (catch Exception _
-         nil)))))
-
-(defn- ^{:stratum 1} read-process-stream!
-  [thread-name input-stream output]
-  (daemon-thread!
-   thread-name
-   (fn []
-     (try
-       (reset! output (slurp input-stream))
-       (catch Exception e
-         (reset! output (or (ex-message e) (str e))))))))
-
-(defn- ^{:stratum 1} stop-stream-process!
-  "Wait up to `join-timeout` ms for the stream subprocess to exit and
-   collect its stderr. `kill?` (the stream ended on a timeout or an
-   anomaly) destroys the process tree first. A process still running
-   when the wait runs out (it closed stdout but did not exit) is
-   destroyed too, so the agent CLI never outlives the call."
-  [{:keys [^Process process stdin-thread stderr-thread stderr]} kill? join-timeout]
-  (when kill?
-    (destroy-process-tree! process))
-  (let [result (wait-for-stream-process process join-timeout)]
-    (when (and (not kill?) (= -1 (:exit result)))
-      (destroy-process-tree! process))
-    (when stdin-thread
-      (.join ^Thread stdin-thread stream-reader-join-timeout-ms))
-    (when stderr-thread
-      (.join ^Thread stderr-thread stream-reader-join-timeout-ms))
-    (assoc result :err @stderr)))
-
-(defn ^{:stratum 1} build-request-prompt [request]
-  (or (:prompt request)
-      (build-messages-prompt (:messages request))))
-
-(defn ^{:stratum 1} stream-with-parser
-  [stream-parser on-chunk progress-monitor accumulated-content accumulated-usage accumulated-cost accumulated-tools accumulated-session-id accumulated-stop-reason accumulated-turns]
-  (fn [line]
-    (when-let [parsed (stream-parser line)]
-      ;; Per-message usage folds as it streams (see `fold-message-usage`)
-      ;; so a run cut before its result frame still reports what it
-      ;; consumed; the result frame's `:usage` then REPLACES those keys
-      ;; with the backend's authoritative totals.
-      (when-let [message-usage (:message-usage parsed)]
-        (swap! accumulated-usage fold-message-usage (:message-id parsed) message-usage))
-      (when-let [usage (:usage parsed)]
-        (swap! accumulated-usage (fn [prev] (merge prev usage))))
-      (when-let [cost (:cost-usd parsed)]
-        (reset! accumulated-cost cost))
-      (when-let [session-id (:session-id parsed)]
-        (reset! accumulated-session-id session-id))
-      (when-let [sr (:stop-reason parsed)]
-        (reset! accumulated-stop-reason sr))
-      ;; Claude surfaces num_turns as an absolute count on the result event.
-      (when-let [nt (:num-turns parsed)]
-        (reset! accumulated-turns nt))
-      ;; Claude may surface the final assistant text only on the terminal
-      ;; result event. Preserve previously streamed content when present,
-      ;; but recover result-only output when no assistant delta arrived.
-      (when-let [final-content (:final-content parsed)]
-        (when (and (string? final-content)
-                   (str/blank? @accumulated-content)
-                   (not (str/blank? final-content)))
-          (reset! accumulated-content final-content)))
-      ;; Codex signals each completed turn via :increment-turns rather than
-      ;; emitting an absolute count — bump the accumulator on each one.
-      (when (:increment-turns parsed)
-        (swap! accumulated-turns (fnil inc 0)))
-      (if (or (:tool-use parsed) (:tool-result parsed) (:heartbeat parsed))
-        ;; Tool-use, tool-result, and heartbeat events: track tool names and
-        ;; fire on-chunk without appending anything to accumulated-content.
-        (do
-          (when-let [tool-name (:tool-name parsed)]
-            (swap! accumulated-tools conj tool-name))
-          (when-let [tool-names (:tool-names parsed)]
-            (swap! accumulated-tools into tool-names))
-          (record-parsed-progress! progress-monitor parsed accumulated-content)
-          (on-chunk (assoc parsed :content @accumulated-content)))
-        ;; Normal text deltas
-        (when-let [delta (:delta parsed)]
-          (swap! accumulated-content str delta)
-          (record-parsed-progress! progress-monitor parsed accumulated-content)
-          (on-chunk (assoc parsed :content @accumulated-content)))))))
-
-(defn ^{:stratum 1} total-input-tokens
-  "prompt + cache-creation + cache-read tokens. Summed because a large
-   prompt lands mostly under cache-creation, not :input-tokens. See N12 §2."
-  [usage]
-  (+ (usage-token-count usage :input-tokens)
-     (usage-token-count usage :cache-creation-input-tokens)
-     (usage-token-count usage :cache-read-input-tokens)))
-
-(defn ^{:stratum 1} prompt-size-telemetry
-  "Pre-flight size gauge over the assembled system + user prompt, computed
-   BEFORE dispatch so it survives a context-overflow rejection (where
-   `:usage` never arrives). `:estimated-input-tokens` is a coarse chars/4
-   estimate, rounded UP so a near-boundary prompt isn't under-reported.
-   See N12 §3."
-  [system prompt]
-  (let [system-chars (count (or system ""))
-        user-chars   (count (or prompt ""))
-        total-chars  (+ system-chars user-chars)]
-    {:system-chars system-chars
-     :user-chars user-chars
-     :total-chars total-chars
-     ;; ceil division (stay conservative for a headroom gauge)
-     :estimated-input-tokens (quot (+ total-chars (dec chars-per-token-estimate))
-                                   chars-per-token-estimate)}))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} network-monitor-enabled?
-  "False when `network-monitor-env-var` reads as off."
-  []
-  (not (env-flag-off? (getenv-value network-monitor-env-var))))
-
-(defn- ^{:stratum 2} route-applies?
-  "A route applies when it has no `:when-env` switch, or the switch is
-   set and does not read as off (`CLAUDE_CODE_USE_BEDROCK=1`)."
-  [{:keys [when-env]}]
-  (or (nil? when-env)
-      (let [value (getenv-value when-env)]
-        (and (not (str/blank? value))
-             (not (env-flag-off? value))))))
-
-(defn ^{:stratum 2} log-streaming-result
-  "Log the outcome of a streamed run. A cut run (any adaptive timeout)
-   logs at warn with the elapsed time, the ceiling it hit, and the number
-   of tool calls the model had already made — the 2026-09-04 trap-bench
-   series 9 run (`baseline-trap-a-ry1`) hit the 10-minute `:max-total`
-   ceiling twice mid-write and nothing in the run log said so."
-  [logger timeout-info content-length tool-call-count]
-  (when logger
-    (if timeout-info
-      (log/warn logger :system :agent/streaming-timeout
-                {:message (:message timeout-info)
-                 :data (cond-> {:type (:type timeout-info)
-                                :terminated-by (terminated-by timeout-info)
-                                :elapsed-ms (:elapsed-ms timeout-info)
-                                :tool-call-count tool-call-count
-                                :stats (:stats timeout-info)}
-                         (:max-ms timeout-info)
-                         (assoc :max-ms (:max-ms timeout-info)))})
-      (log/debug logger :system :agent/streaming-complete
-                 {:data {:response-length content-length}}))))
-
-(defn- ^{:stratum 2} client-default
-  [path]
-  (get-in @client-defaults path))
-
-(defn ^{:stratum 2} llm-error
-  "Build a failed LLM response with anomaly.
-
-   The `:anomaly` map is canonical (W2 convergence): `:anomaly/type` from
-   the runbook, `:anomaly/subtype` set to the original category for
-   domain categories (so failure-classifier / response/translate dispatch
-   identically). The original `:operation` lives under `:anomaly/data`."
-  ([category error-type message]
-   (llm-error category error-type message nil))
-  ([category error-type message
-    {:keys [exit-code stderr stdout raw-stdout timeout failure-anomaly]}]
-   (cond-> {:success false
-            :error (cond-> {:type error-type :message message}
-                     stderr  (assoc :stderr stderr)
-                     stdout  (assoc :stdout stdout)
-                     raw-stdout (assoc :raw-stdout raw-stdout)
-                     timeout (assoc :timeout timeout))
-            :anomaly (or failure-anomaly
-                         (->canonical-anomaly
-                          category message
-                          {:operation :llm-complete}))}
-     (some? exit-code) (assoc :exit-code exit-code))))
-
-(defn- ^{:stratum 2} request-endpoint
-  "Resolve the request URL. Gemini embeds the model in the URL path
-   (`:model-in-url?`); the other providers take it in the body."
-  [backend-config request config]
-  (let [endpoint (resolve-base-url backend-config config)]
-    (if (:model-in-url? backend-config)
-      (format endpoint (:model request))
-      endpoint)))
-
-(defn- ^{:stratum 2} extract-anthropic
-  "Text + usage from an Anthropic Messages response: join the `text`
-   content blocks (tool-use and thinking blocks carry no answer text).
-   The finish reason is `stop_reason`."
-  [body]
-  (extraction (->> (:content body)
-                   (keep (fn [block] (when (= "text" (:type block)) (:text block))))
-                   (str/join))
-              (get-in body [:usage :input_tokens])
-              (get-in body [:usage :output_tokens])
-              {:finish-reason (:stop_reason body)}))
-
-(defn- ^{:stratum 2} extract-openai
-  "Text + usage from an OpenAI Chat Completions response. The finish
-   reason is the first choice's `finish_reason`."
-  [body]
-  (extraction (get-in body [:choices 0 :message :content])
-              (get-in body [:usage :prompt_tokens])
-              (get-in body [:usage :completion_tokens])
-              {:usage-extras (openai-usage-extras (:usage body))
-               :finish-reason (get-in body [:choices 0 :finish_reason])}))
-
-(defn- ^{:stratum 2} extract-openrouter
-  "Text + usage from an OpenRouter response: the OpenAI shape, plus the
-   USD amount OpenRouter billed for the call (`usage.cost`)."
-  [body]
-  (extraction (get-in body [:choices 0 :message :content])
-              (get-in body [:usage :prompt_tokens])
-              (get-in body [:usage :completion_tokens])
-              {:usage-extras (openai-usage-extras (:usage body))
-               :cost-usd (get-in body [:usage :cost])
-               :finish-reason (get-in body [:choices 0 :finish_reason])}))
-
-(defn- ^{:stratum 2} extract-gemini
-  "Text + usage from a Gemini generateContent response: join the text
-   parts of the first candidate. The finish reason is that candidate's
-   `finishReason`."
-  [body]
-  (extraction (->> (get-in body [:candidates 0 :content :parts])
-                   (keep :text)
-                   (str/join))
-              (get-in body [:usageMetadata :promptTokenCount])
-              (get-in body [:usageMetadata :candidatesTokenCount])
-              {:finish-reason (get-in body [:candidates 0 :finishReason])}))
-
-(defn- ^{:stratum 2} start-stream-reader!
-  "Start the daemon that drains `out-reader` into `line-queue`.
-
-   Three exit shapes:
-   1. EOF — `read-stream-loop!` enqueues the eof sentinel and returns; thread
-      exits cleanly.
-   2. Clean shutdown via `stop-stream-reader!` — the consumer
-      (`process-stream-lines`) has stopped polling, so `stop-stream-reader!`
-      closes the reader and calls `.interrupt`. `BufferedReader.readLine`
-      is NOT interruptible, and the close cannot cut it short either (it
-      waits for the lock `readLine` holds), so a reader blocked there
-      unblocks when the process dies and the pipe reaches EOF. A reader
-      blocked in `.put` on a full queue unblocks via the `.interrupt` and
-      raises `InterruptedException`. Both cases land in the same silent
-      catch: the consumer already left the queue; no anomaly to publish.
-   3. Real read error — surface as a `stream-read-failure` anomaly so the
-      consumer sees it. The inner try/catch around the anomaly enqueue
-      guards against a sticky-interrupt race during cleanup (the thread's
-      interrupt flag is still set from case 2, so `.put` here can throw IE
-      too — swallow it; the consumer is already gone).
-
-   Pre-fix, case 2 was caught by the generic `(catch Exception e ...)` which
-   then called `enqueue-stream-line!` → `.put` → a second IE that bubbled out
-   of the runnable to the JVM default exception handler and printed an ugly
-   stack trace to stderr. The 2026-06-04 eliminate-requiring-resolve dogfood
-   surfaced 18 of these IEs across 20 sub-tasks — pure log noise, zero
-   workflow impact, but enough to look like a real bug in post-run triage."
-  [out-reader line-queue]
-  (daemon-thread!
-   "llm-stream-reader"
-   (fn []
-     (try
-       (read-stream-loop! out-reader line-queue)
-       (catch InterruptedException _
-         ;; clean shutdown — consumer already exited; nothing to report
-         nil)
-       (catch Exception e
-         (try
-           (enqueue-stream-line! line-queue (stream-read-failure e))
-           (catch InterruptedException _
-             ;; the stop-stream-reader! interrupt raced this catch
-             nil)))))))
-
-(defn- ^{:stratum 2} process-stream-signal
-  [line-or-signal out-lines dump-writer on-line last-line-at line-timeout-ms]
-  (cond
-    (anomaly-signal? line-or-signal)
-    {:done? true
-     :anomaly line-or-signal}
-
-    (eof-signal? line-or-signal)
-    {:done? true}
-
-    (some? line-or-signal)
-    (do (record-stream-line! out-lines
-                             dump-writer
-                             on-line
-                             last-line-at
-                             (System/currentTimeMillis)
-                             line-or-signal)
-        {:done? false})
-
-    :else
-    (timeout-signal last-line-at line-timeout-ms out-lines)))
-
-(defn- ^{:stratum 2} read-process-stderr!
-  [^Process process stderr]
-  (read-process-stream! "llm-stream-stderr-reader"
-                        (.getErrorStream process)
-                        stderr))
-
-(defn- ^{:stratum 2} start-capture-process!
-  [cmd {:keys [workdir stdin]}]
-  (let [builder (ProcessBuilder. ^java.util.List cmd)]
-    (when-let [env (clean-env)]
-      (apply-process-env! builder env))
-    (when workdir
-      (.directory builder (io/file workdir)))
-    (let [process (.start builder)
-          stdout (atom "")
-          stderr (atom "")
-          stdin-thread (write-process-stdin! process stdin)
-          stdout-thread (read-process-stream! "llm-stdout-reader"
-                                             (.getInputStream process)
-                                             stdout)
-          stderr-thread (read-process-stream! "llm-stderr-reader"
-                                             (.getErrorStream process)
-                                             stderr)]
-      {:process process
-       :stdout stdout
-       :stderr stderr
-       :stdin-thread stdin-thread
-       :stdout-thread stdout-thread
-       :stderr-thread stderr-thread})))
-
-(defn ^{:stratum 2} context-overflow-by-usage?
-  "True when total input tokens >= the model's context window — the
-   structured, locale/backend-independent overflow signal (N12 §4).
-   `context-window` is nil for uncatalogued models → no assertion."
-  [usage context-window]
-  (boolean (and context-window
-                (pos? (total-input-tokens usage))
-                (>= (total-input-tokens usage) context-window))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn- ^{:stratum 3} default-claude-cli-budget-usd
-  []
-  (client-default [:claude-cli :default-budget-usd]))
-
-(defn- ^{:stratum 3} anthropic-api-version
-  []
-  (client-default [:http :anthropic :api-version]))
-
-(defn- ^{:stratum 3} default-anthropic-max-tokens
-  []
-  (client-default [:http :anthropic :default-max-tokens]))
-
-;; ---------------------------------------------------------------------------
-;; Stream-timing constants
-;;
-;; Names spell out intent so the surrounding code reads as the why,
-;; not the what. Tuning history lives in inline doc-comments next to
-;; each constant.
-(defn- ^{:stratum 3} default-stagnation-threshold-ms
-  []
-  (client-default [:stream :default-stagnation-threshold-ms]))
-
-(defn- ^{:stratum 3} default-max-total-ms
-  []
-  (client-default [:stream :default-max-total-ms]))
-
-(defn- ^{:stratum 3} default-min-activity-interval-ms
-  []
-  (client-default [:stream :default-min-activity-interval-ms]))
-
-(defn- ^{:stratum 3} http-idle-timeout-ms
-  "How long a direct provider call may go without a byte from the
-   server before the client gives up."
-  []
-  (client-default [:http :idle-timeout-ms]))
-
-(defn ^{:stratum 3} openrouter-request-body
-  "Build an OpenRouter request body: the OpenAI Chat Completions shape,
-   with usage accounting requested so the response reports billed cost
-   and cached-token counts, and with the configured routing preferences
-   as the `provider` object. OpenRouter serves one model from several
-   hosts; the preferences decide which hosts may see the prompt."
-  [request]
-  (assoc (openai-request-body request)
-         :usage {:include true}
-         :provider (client-default [:http :openrouter :provider])))
-
-(defn- ^{:stratum 3} stream-line-timeout-ms
-  []
-  (client-default [:stream :line-timeout-ms]))
-
-(defn- ^{:stratum 3} process-join-timeout-ms
-  []
-  (client-default [:stream :process-join-timeout-ms]))
-
-(defn- ^{:stratum 3} post-kill-join-timeout-ms
-  []
-  (client-default [:stream :post-kill-join-timeout-ms]))
-
-(defn- ^{:stratum 3} stream-poll-interval-ms
-  []
-  (client-default [:stream :poll-interval-ms]))
-
-(defn- ^{:stratum 3} provider-http-error->llm-error
-  "Build the canonical failure for a non-OK provider response: the
-   category classifies by status class, and the message preserves the
-   status alongside the provider's own error text."
-  [{:keys [status message]}]
-  (llm-error (http-status->category status)
-             "api_error"
-             (msg/t :http-provider.system/api-error
-                    {:status status
-                     :message (or message
-                                  (msg/t :http-provider.system/unknown-api-error))})))
-
-(defn- ^{:stratum 3} response-parse-error
-  "Wrap a canonical JSON-parse anomaly in the LLM failure shape without
-   discarding its operation, HTTP status, or exception provenance."
-  [parse-anomaly]
-  (llm-error :anomalies/fault
-             "parse_error"
-             (:anomaly/message parse-anomaly)
-             {:failure-anomaly parse-anomaly}))
-
-(defn ^{:stratum 3} success-response
-  ([output exit-code]
-   (success-response output exit-code nil))
-  ([output exit-code stderr]
-  (let [trimmed (str/trim output)]
-    (cond
-      (str/blank? trimmed)
-      (llm-error :anomalies.agent/llm-error "empty_success_output"
-                 "CLI backend exited successfully but produced no output"
-                 {:exit-code exit-code :stderr stderr :stdout output})
-
-      (rate-limited? trimmed)
-      (llm-error :anomalies.agent/rate-limited "rate_limit"
-                 (str "Claude CLI rate limited: " trimmed)
-                 {:exit-code exit-code :stdout output})
-
-      :else
-      (cond-> (llm-success trimmed {:exit-code exit-code})
-        (seq stderr) (assoc :stderr stderr))))))
-
-(defn ^{:stratum 3} error-response [output exit-code stderr]
-  (let [error-message (if (and stderr (str/blank? output)) stderr output)]
-    (llm-error :anomalies.agent/llm-error "cli_error" (str/trim error-message)
-               {:exit-code exit-code :stderr stderr :stdout output})))
-
-(defn- ^{:stratum 3} start-stream-process!
-  [cmd {:keys [workdir stdin]}]
-  (let [builder (ProcessBuilder. ^java.util.List cmd)]
-    (when-let [env (clean-env)]
-      (apply-process-env! builder env))
-    (when workdir
-      (.directory builder (io/file workdir)))
-    (let [process (.start builder)
-          stderr (atom "")
-          stdin-thread (write-process-stdin! process stdin)
-          stderr-thread (read-process-stderr! process stderr)]
-      {:process process
-       :stderr stderr
-       :stdin-thread stdin-thread
-       :stderr-thread stderr-thread})))
-
-(defn ^{:stratum 3} streaming-success-response
-  "Build a streaming success response with diagnostic metadata.
-
-   Diagnostic fields added to the response map:
-   - :stop-reason          — why the model stopped (\"end_turn\", \"max_turns\", etc.)
-   - :num-turns            — number of conversation turns consumed
-   - :tool-call-count      — total number of tool invocations during the run
-   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)"
-  [content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview stderr]
-  (if (rate-limited? content)
-    (llm-error :anomalies.agent/rate-limited "rate_limit"
-               (str "Claude CLI rate limited: " (str/trim content))
-               {:exit-code exit-code :stdout content
-                :stop-reason stop-reason :num-turns num-turns})
-    (cond-> (llm-success content {:exit-code exit-code :usage usage})
-      cost-usd                    (assoc :cost-usd cost-usd)
-      stop-reason                 (assoc :stop-reason stop-reason)
-      num-turns                   (assoc :num-turns num-turns)
-      (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
-      (seq final-message-preview) (assoc :final-message-preview final-message-preview)
-      (seq stderr)                (assoc :stderr stderr))))
-
-(defn ^{:stratum 3} streaming-error-response
-  "Build a streaming error response with diagnostic metadata.
-
-   Diagnostic fields added to the response map (alongside :success/:error/:anomaly):
-   - :stop-reason          — last observed stop reason before failure
-   - :num-turns            — number of conversation turns consumed
-   - :tool-call-count      — total number of tool invocations during the run
-   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)
-
-   `usage` + `context-window` drive context-overflow classification (N12 §4);
-   optional — the 9-arity form skips it (for callers without them). When
-   `usage` is present it is also carried on the response as `:usage` /
-   `:tokens` (same shape `llm-success` emits) so a run that was cut still
-   reports the tokens it consumed.
-
-   `:llm/terminated-by` is set whenever `timeout-info` carries a known
-   adaptive-timeout type (see `terminated-by`) — `:max-total` for the
-   hard ceiling — so roles can refuse to promote partial work from a run
-   the client cut, instead of treating it like a model that finished."
-  ([content exit-code err-result raw-stdout timeout-info stop-reason num-turns
-    tool-call-count final-message-preview]
-   (streaming-error-response content exit-code err-result raw-stdout timeout-info
-                             stop-reason num-turns tool-call-count
-                             final-message-preview nil nil))
-  ([content exit-code err-result raw-stdout timeout-info stop-reason num-turns
-    tool-call-count final-message-preview usage context-window]
-   (let [error-message (or (not-empty (str/trim (or err-result "")))
-                           (when-not (str/blank? content) content)
-                           (not-empty (str/trim (or raw-stdout "")))
-                           (msg/t :streaming-error.system/no-output))
-         category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
-         error-type (cond
-                      timeout-info "adaptive_timeout"
-                      (context-overflow-by-usage? usage context-window) context-overflow-error-type
-                      :else "cli_error")]
-     (cond-> (llm-error category error-type (str/trim error-message)
-                        {:exit-code exit-code
-                         :stderr err-result
-                         :stdout content
-                         :raw-stdout raw-stdout
-                         :timeout timeout-info})
-       (terminated-by timeout-info) (assoc :llm/terminated-by (terminated-by timeout-info))
-       (some? usage)               (assoc :usage usage
-                                          :tokens (+ (get usage :input-tokens 0)
-                                                     (get usage :output-tokens 0)))
-       stop-reason                 (assoc :stop-reason stop-reason)
-       num-turns                   (assoc :num-turns num-turns)
-       (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
-       (seq final-message-preview) (assoc :final-message-preview final-message-preview)))))
-
-;------------------------------------------------------------------------------ Layer 4
-
-(defn ^{:stratum 4} http-post-request
-  "Make HTTP POST request to LLM API.
-
-   Returns HTTP response map or canonical anomaly map on failure
-   (W2 convergence: `:anomaly/type :unavailable`, no subtype since
-   `:anomalies/unavailable` is a generic-standard category).
-
-   http-kit signals connection failures via either a thrown exception
-   or a `{:error <Throwable>}` response map (depending on whether the
-   error surfaces before or after the future resolves); both modes
-   collapse to the same canonical anomaly.
-
-   The idle timeout is set explicitly: these calls are non-streaming, so
-   the server sends nothing until the model is done, and a long
-   completion outlasts http-kit's 60 s default."
-  [url headers body]
-  (try
-    (let [response @(http/post url
-                               {:headers headers
-                                :body (json/generate-string body)
-                                :idle-timeout (http-idle-timeout-ms)})]
-      (if-let [cause (:error response)]
-        (http-failure-anomaly cause url)
-        response))
-    (catch Exception e
-      (http-failure-anomaly e url))))
-
-(defn- ^{:stratum 4} claude-args
-  "Build CLI arguments for the Claude backend.
-
-   Prompt delivery is controlled by `:prompt-via` on the request map:
-
-     :argv  (default) — prompt is conjoined as a positional argv arg.
-                        Legacy behavior; kept for tests + backends that
-                        do not invoke the planner-sized prompt path.
-     :stdin           — prompt is omitted from argv; `--input-format text`
-                        tells claude to read the user prompt from stdin.
-                        Required for the planner / implementer path
-                        because system-prompt + spec text +
-                        existing-files context regularly exceeds POSIX
-                        ARG_MAX once combined into argv (observed
-                        2026-05-07 stage-3 dogfood: \"Argument list too
-                        long\" on plan phase).
-
-   Callers (handle-streaming / complete-impl) read `:prompt-via` from
-   the backend config and thread it into the request map before
-   invoking this fn; for :stdin they additionally pipe the prompt
-   string into the process via the exec layer's `:stdin` option."
-  [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools
-           disallowed-tools supervision budget-usd max-turns model resume
-           prompt-via]
-    :or   {prompt-via :argv}}]
-  (let [budget (or budget-usd
-                   (when max-tokens (default-claude-cli-budget-usd)))
-        stdin? (= prompt-via :stdin)]
-    (cond-> ["-p"]
-      streaming?                   (conj "--output-format" "stream-json")
-      streaming?                   (conj "--verbose")
-      stdin?                       (conj claude-input-format-flag
-                                         claude-input-format-stdin)
-      ;; --strict-mcp-config: only load the MCP servers from our
-      ;; --mcp-config, ignoring the host's user/project MCP config. On
-      ;; the local worktree executor the agent CLI otherwise inherits the
-      ;; operator's personal ~/.claude MCP servers (e.g. Gmail / Calendar
-      ;; / Drive), whose tool schemas bloat the agent's fixed context
-      ;; overhead. On 2026-06-07 that leakage pushed the planner's
-      ;; first-turn prompt past the 200k window — a single ToolSearch
-      ;; result tipped it over and the CLI returned "Prompt is too long"
-      ;; (plan phase, review-redirect-convergence dogfood adhoc-2135293220).
-      ;; The container executor is already isolated from host config; this
-      ;; brings the local runner to parity for the MCP vector. Mirrors the
-      ;; codex builder's --ignore-user-config.
-      mcp-config                   (into ["--mcp-config" mcp-config
-                                          "--strict-mcp-config"])
-      (seq mcp-allowed-tools)      (into ["--allowedTools" (claude-mcp-allowlist-string mcp-allowed-tools)])
-      (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
-      (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
-      system                       (into ["--system-prompt" system])
-      budget                       (into ["--max-budget-usd" (str budget)])
-      max-turns                    (into ["--max-turns" (str max-turns)])
-      model                        (into ["--model" model])
-      resume                       (into ["--resume" resume])
-      (not stdin?)                 (conj prompt))))
-
-(defn ^{:stratum 4} parse-ollama-response
-  "Parse Ollama API response.
-
-   Handles canonical anomaly maps from http-post-request or HTTP
-   response maps. After W2 convergence, http-post-request returns
-   `:anomaly/type :unavailable` (no subtype) on failure — the legacy
-   category `:anomalies/unavailable` is reconstituted explicitly for
-   `llm-error` so downstream classification stays identical."
-  [response]
-  ;; If response is already a canonical anomaly map, re-wrap it as :anomalies/unavailable so downstream classification stays identical
-  (if (anomaly/anomaly? response)
-    (llm-error :anomalies/unavailable "http_error" (:anomaly/message response))
-    (let [body   (parse-response-body response)
-          status (:status response)]
-      (cond
-        (not= HttpURLConnection/HTTP_OK status)
-        (provider-http-error->llm-error
-         {:status status
-          :message (when-not (anomaly/anomaly? body) (get body :error))})
-
-        (anomaly/anomaly? body)
-        (response-parse-error body)
-
-        :else
-        (let [stop-reason (normalize-finish-reason (:done_reason body))]
-          (cond-> (llm-success (get-in body [:message :content] "")
-                               {:usage (token-usage (:prompt_eval_count body)
-                                                    (:eval_count body))})
-            stop-reason (assoc :stop-reason stop-reason)))))))
-
-(defn ^{:stratum 4} anthropic-request-body
-  "Build an Anthropic Messages API request body. `max_tokens` is
-   mandatory on this API, so an absent or nil `:max-tokens` falls back
-   to the configured default — callers pass {:max-tokens nil} through
-   chat/complete opts, and a get-with-default would let that nil reach
-   the wire as \"max_tokens\": null (a guaranteed 400)."
-  [{:keys [system model] :as request}]
-  (cond-> {:model model
-           :max_tokens (or (:max-tokens request) (default-anthropic-max-tokens))
-           :messages (chat-messages request)}
-    system (assoc :system system)))
-
-(defn- ^{:stratum 4} provider-headers
-  "Auth + protocol headers for a direct provider request. Each provider
-   spells the API-key header differently; only Anthropic versions its
-   wire protocol via a header. The default arm covers Ollama, which is
-   local and credential-free."
-  [provider api-key]
-  (case provider
-    "Anthropic" {"Content-Type" "application/json"
-                 "x-api-key" api-key
-                 "anthropic-version" (anthropic-api-version)}
-    "OpenAI"    {"Content-Type" "application/json"
-                 "Authorization" (str "Bearer " api-key)}
-    "OpenRouter" {"Content-Type" "application/json"
-                  "Authorization" (str "Bearer " api-key)}
-    ;; Compatible servers are usually credential-free; send auth only
-    ;; when a key was actually supplied (vLLM behind a gateway, etc.).
-    "OpenAI-Compatible" (cond-> {"Content-Type" "application/json"}
-                          (some? api-key)
-                          (assoc "Authorization" (str "Bearer " api-key)))
-    "Gemini"    {"Content-Type" "application/json"
-                 "x-goog-api-key" api-key}
-    {"Content-Type" "application/json"}))
-
-(defn- ^{:stratum 4} parse-provider-response
-  "Shared response handling for the direct provider backends: a
-   transport-layer anomaly converts to the canonical http_error
-   failure; otherwise JSON parse, HTTP status check, then
-   provider-specific extraction. `extract-fn` takes the
-   parsed body and returns `{:content string :usage usage-map}`, plus
-   `:cost-usd` and `:stop-reason` when the provider reported them (see
-   `extraction`).
-
-   A blank `:content` on a 200 is surfaced as an error — every caller
-   of this path expects generated text (an empty answer with
-   `stop_reason: refusal` or a truncated candidate would otherwise
-   flow downstream as a silent success).
-
-   `:stop-reason` is on the result whenever the provider gave one, so a
-   caller can tell an answer cut at the output cap (`max_tokens`) from a
-   complete one (`end_turn`)."
-  [extract-fn response]
-  (if (anomaly/anomaly? response)
-    (llm-error :anomalies/unavailable "http_error" (:anomaly/message response))
-    (let [body   (parse-response-body response)
-          status (:status response)]
-      (cond
-        (not= HttpURLConnection/HTTP_OK status)
-        (provider-http-error->llm-error
-         {:status status
-          :message (when-not (anomaly/anomaly? body)
-                     (get-in body [:error :message]))})
-
-        (anomaly/anomaly? body)
-        (response-parse-error body)
-
-        :else
-        (let [{:keys [content usage cost-usd stop-reason]} (extract-fn body)]
-          ;; A provider bills a call, and says why generation stopped,
-          ;; whether or not it produced text, so both stay on the result
-          ;; either way. An empty answer cut at the output cap (every
-          ;; token spent on reasoning) and a refusal both arrive as an
-          ;; empty 200; the stop reason is what tells them apart.
-          (cond-> (if (str/blank? content)
-                    (llm-error :anomalies.agent/llm-error "empty_success_output"
-                               (msg/t :http-provider.system/no-generated-text))
-                    (llm-success content {:usage usage}))
-            (number? cost-usd) (assoc :cost-usd cost-usd)
-            stop-reason        (assoc :stop-reason stop-reason)))))))
-
-(defn ^{:stratum 4} parse-cli-output
-  ([output exit-code]
-   (parse-cli-output output exit-code nil))
-  ([output exit-code stderr]
-   (if (zero? exit-code)
-     (success-response output exit-code stderr)
-     (error-response output exit-code stderr))))
-
-(defn ^{:stratum 4} default-progress-monitor []
-  (pm/create-progress-monitor
-   {:stagnation-threshold-ms  (default-stagnation-threshold-ms)
-    :max-total-ms             (default-max-total-ms)
-    :min-activity-interval-ms (default-min-activity-interval-ms)}))
-
-(defn- ^{:stratum 4} stream-poll-signal
-  [line-queue]
-  (.poll line-queue
-         (stream-poll-interval-ms)
-         TimeUnit/MILLISECONDS))
-
-(defn- ^{:stratum 4} stop-capture-process!
+;; Stays here, calling wait-for-stream-process and
+;; post-kill-join-timeout-ms through the aliases above, so a test
+;; that redefines llm-client/wait-for-stream-process or
+;; llm-client/post-kill-join-timeout-ms still steers it.
+(defn- ^{:stratum 1} stop-capture-process!
   "Wait up to `timeout-ms` for the capture subprocess to exit and collect
    its output. On timeout the process tree is destroyed, not just the CLI
    (its MCP servers and tool children would otherwise keep running), and
@@ -2001,204 +277,25 @@
           timed-out? (= -1 (:exit initial-result))
           result (if timed-out?
                    (do
-                     (destroy-process-tree! process)
+                     (subprocess/destroy-process-tree! process)
                      (wait-for-stream-process process (post-kill-join-timeout-ms)))
                    initial-result)]
       (doseq [thread [stdin-thread stdout-thread stderr-thread]
               :when thread]
-        (.join ^Thread thread stream-reader-join-timeout-ms))
+        (.join ^Thread thread subprocess/stream-reader-join-timeout-ms))
       {:out (or @stdout "")
        :err (or (not-empty (:err result)) @stderr "")
        :exit (:exit result)})
     (catch InterruptedException _
-      (destroy-process-tree! process)
+      (subprocess/destroy-process-tree! process)
       (.interrupt (Thread/currentThread))
       (throw+))
     ;; `Object` also matches ex-info, which a `Throwable` selector misses.
     (catch Object _
-      (destroy-process-tree! process)
+      (subprocess/destroy-process-tree! process)
       (throw+))))
 
-(defn- ^{:stratum 4} keepalive-interval-ms
-  "Refresh interval for the stream-side keepalive thread.
-
-   Tied to the configured stagnation threshold so the keepalive fires
-   well within the window — at one-third of the threshold we get
-   three refreshes per stagnation-window, so a brief reader stall
-   never races the timer.
-
-   Two clamps:
-   - lower: `keepalive-min-interval-ms` to avoid a hot-loop on
-     production stagnation values.
-   - upper: strictly less than the stagnation threshold so the
-     keepalive always fires before stagnation can. The min wins
-     when the configured threshold is small (e.g. tests using
-     80ms) so the lower-bound floor doesn't push the interval
-     past the threshold."
-  [monitor]
-  (let [stagnation (get @monitor :stagnation-threshold-ms
-                        (default-stagnation-threshold-ms))
-        target     (long (/ stagnation 3))
-        ceiling    (max 1 (dec stagnation))]
-    (min ceiling (max keepalive-min-interval-ms target))))
-
-;------------------------------------------------------------------------------ Layer 5
-
-;; Function-valued backend fields. The :ollama entry is intentionally
-;; absent (it has none); OpenCode loads credentials from its auth
-;; store, environment, or project .env/config, so Miniforge should not
-;; read provider-specific keys on that path.
-(def ^{:stratum 5} ^:private backend-fns
-  {:claude {:stream-parser parse-claude-stream-line
-            :args-fn claude-args}
-   :codex {:stream-parser parse-codex-stream-line
-           :args-fn codex-args}
-   :cursor {:args-fn cursor-args}
-   :opencode {:args-fn opencode-args}
-   :echo {:args-fn echo-args}})
-
-(def ^{:stratum 5} ^:private http-providers
-  "Wire-shape registry for the HTTP backends: request-body builder +
-   response parser per provider string, plus `:requires-model?` for
-   the APIs that embed the model in the body or URL and have no
-   default. `http-complete` dispatches here; a provider missing from
-   this map is an unsupported HTTP backend."
-  {"Ollama"    {:body-fn ollama-request-body
-                :parse-fn parse-ollama-response}
-   "Anthropic" {:body-fn anthropic-request-body
-                :parse-fn (partial parse-provider-response extract-anthropic)
-                :requires-model? true}
-   "OpenAI"    {:body-fn openai-request-body
-                :parse-fn (partial parse-provider-response extract-openai)
-                :requires-model? true}
-   "OpenAI-Compatible" {:body-fn openai-request-body
-                        :parse-fn (partial parse-provider-response
-                                           extract-openai)
-                        :requires-model? true}
-   "OpenRouter" {:body-fn openrouter-request-body
-                 :parse-fn (partial parse-provider-response
-                                    extract-openrouter)
-                 :requires-model? true}
-   "Gemini"    {:body-fn gemini-request-body
-                :parse-fn (partial parse-provider-response extract-gemini)
-                :requires-model? true}})
-
-(defn ^{:stratum 5} process-stream-lines [out-reader monitor on-line]
-  (let [out-lines (atom [])
-        timeout-reason (atom nil)
-        stream-anomaly (atom nil)
-        line-timeout-ms (stream-line-timeout-ms)
-        last-line-at (atom (System/currentTimeMillis))
-        dump-writer (open-stream-dump-writer)
-        line-queue (LinkedBlockingQueue.)
-        reader-thread (start-stream-reader! out-reader line-queue)]
-    (try+
-      (loop []
-        (if-let [t (pm/check-timeout monitor)]
-          (reset! timeout-reason t)
-          (let [{:keys [done? timeout anomaly]}
-                (process-stream-signal (stream-poll-signal line-queue)
-                                       out-lines
-                                       dump-writer
-                                       on-line
-                                       last-line-at
-                                       line-timeout-ms)]
-            (cond
-              anomaly (reset! stream-anomaly anomaly)
-              done? nil
-              timeout (reset! timeout-reason timeout)
-              :else (recur)))))
-      (finally
-        (stop-stream-reader! reader-thread out-reader)
-        (when dump-writer (.close dump-writer))))
-    {:lines @out-lines
-     :timeout @timeout-reason
-     :anomaly @stream-anomaly}))
-
-(defn ^{:stratum 5} default-exec-fn
-  "Run `cmd` with ProcessBuilder, capturing :out / :err / :exit.
-
-   2-arity opts map supports:
-   - `:stdin`  — string piped to the subprocess's stdin
-   - `:workdir` — directory where the subprocess runs"
-  ([cmd] (default-exec-fn cmd {}))
-  ([cmd {:keys [stdin workdir]}]
-   (let [timeout-ms 600000
-         process (start-capture-process! cmd {:stdin stdin
-                                              :workdir workdir})]
-     (stop-capture-process! process timeout-ms))))
-
-;------------------------------------------------------------------------------ Layer 6
-
-(def ^{:stratum 6} backends
-  (merge-with merge backend-data backend-fns))
-
-(defn ^{:stratum 6} http-complete
-  "Complete request using an HTTP backend.
-
-   Three families share this path: the local, credential-free Ollama
-   endpoint; the direct API-key providers (:anthropic-api /
-   :openai-api / :gemini-api / :openrouter) for builds where CLI-agent
-   backends are unavailable; and :openai-compat, any server speaking
-   the OpenAI wire shape, keyed or not. `config` is the client config — only `:api-key` is
-   read from it here; the caller (`complete-impl` /
-   `complete-stream-impl`) has already merged the config `:model` into
-   `request`, which is where this fn and the body builders read it."
-  [backend-config request config]
-  (let [{:keys [provider api-key-env]} backend-config
-        {:keys [body-fn parse-fn requires-model?] :as provider-entry}
-        (get http-providers provider)
-        api-key (resolve-api-key backend-config config)]
-    (cond
-      (nil? provider-entry)
-      (llm-error :anomalies/unsupported "unsupported_backend"
-                 (msg/t :http-provider.system/unsupported-backend
-                        {:provider provider}))
-
-      (and api-key-env
-           (not (:optional-api-key? backend-config))
-           (str/blank? (str api-key)))
-      (llm-error :anomalies/incorrect "missing_api_key"
-                 (msg/t :http-provider.system/missing-api-key
-                        {:provider provider :env-var api-key-env}))
-
-      ;; Fail closed before any request rather than formatting a nil
-      ;; model into the URL (Gemini) or body (Anthropic/OpenAI).
-      (and requires-model? (str/blank? (str (:model request))))
-      (llm-error :anomalies/incorrect "missing_model"
-                 (msg/t :http-provider.system/missing-model
-                        {:provider provider}))
-
-      :else
-      (parse-fn (http-post-request (request-endpoint backend-config request
-                                                     config)
-                                   (provider-headers provider api-key)
-                                   (body-fn request))))))
-
-;------------------------------------------------------------------------------ Layer 7
-
-(defn ^{:stratum 7} probe-endpoint-for
-  "Resolve the network-health probe URL for `backend-key`: the endpoint
-   the agent CLI actually talks to, read from the environment through
-   the backend's `:probe-endpoint-routes` (`ANTHROPIC_BASE_URL`, the
-   Bedrock and Vertex settings, `OPENAI_BASE_URL`). The first route that
-   applies decides; when it yields no URL, or no route applies, the
-   backend entry's static `:probe-endpoint` is used, and the generic
-   Cloudflare DNS connectivity URL when there is none (unknown
-   backends, entries without an endpoint).
-
-   The caller (e.g. `stream-exec-fn` in PR-B) resolves the URL here and
-   passes it to `network-health/probe-network` directly, keeping
-   that namespace endpoint-agnostic and free of backend-config
-   dependencies."
-  [backend-key]
-  (let [{:keys [probe-endpoint probe-endpoint-routes]} (get backends backend-key)
-        route (first (filter route-applies? probe-endpoint-routes))]
-    (or (some-> route route-endpoint)
-        probe-endpoint
-        generic-connectivity-probe-url)))
-
-(defn ^{:stratum 7} http-stream-complete
+(defn ^{:stratum 1} http-stream-complete
   "Complete request using HTTP API with streaming.
 
    Note: Currently falls back to non-streaming — the HTTP backends
@@ -2220,165 +317,7 @@
                    (msg/t :http-provider.system/stream-failed
                           {:reason (.getMessage e)}))))))
 
-(defn ^{:stratum 7} complete-impl [client request]
-  (let [{:keys [config logger exec-fn]} client
-        {:keys [backend model num-ctx]} config
-        backend-config (get backends backend)
-        {:keys [cmd args-fn]} backend-config
-        request-with-model (cond-> request
-                             model (assoc :model model)
-                             num-ctx (assoc :num-ctx num-ctx))]
-    (log-prompt-sent logger backend (build-request-prompt request))
-
-    ;; Handle HTTP backends differently from CLI backends
-    (if (= cmd "http")
-      (let [response (http-complete backend-config request-with-model config)]
-        (log-response logger response)
-        response)
-
-      ;; CLI backend
-      (let [prompt     (build-request-prompt request)
-            prompt-via (resolve-prompt-via backend-config)
-            args     (args-fn (assoc request-with-model
-                                     :prompt prompt
-                                     :prompt-via prompt-via))
-            full-cmd (into [cmd] args)
-            opts     (cond-> (exec-opts-for-prompt-via prompt-via prompt)
-                       (:workdir request) (assoc :workdir (:workdir request)))
-            result   (run-cli-exec exec-fn full-cmd opts)
-            response (parse-cli-output (:out result) (:exit result) (:err result))]
-        (log-response logger response)
-        response))))
-
-;------------------------------------------------------------------------------ Layer 8
-
-(defn ^{:stratum 8} stream-exec-fn
-  "Run `cmd` as a streaming subprocess, dispatching each output line to
-   `on-line`.
-
-   Options:
-   - `:progress-monitor`  — caller-supplied progress monitor; defaults
-                            to a fresh `default-progress-monitor`.
-   - `:workdir`, `:stdin` — passed through to `start-stream-process!`.
-   - `:backend-key`       — when set, starts the network-drop monitor
-                            against the corresponding provider endpoint
-                            (PR-B). Disabled when omitted so legacy
-                            callers / synthetic-stream tests are
-                            unaffected.
-   - `:network-monitor-opts` — overrides for `start-network-monitor!`
-                               (probe-interval-ms, failure-threshold,
-                               probe-fn). Tests inject `:probe-fn` here
-                               to drive the monitor deterministically
-                               without real network I/O.
-
-   Every exit other than a clean one (timeout, stream anomaly, network
-   drop, an exception, or this thread being interrupted) destroys the
-   subprocess and everything it spawned. On interrupt the interrupt flag
-   is restored before the InterruptedException is rethrown."
-  ([cmd on-line]
-   (stream-exec-fn cmd on-line {}))
-  ([cmd on-line {:keys [progress-monitor workdir stdin backend-key
-                        network-monitor-opts]}]
-   (let [monitor (or progress-monitor (default-progress-monitor))
-         stream-process (start-stream-process! cmd {:workdir workdir
-                                                    :stdin stdin})
-         process (:process stream-process)]
-     ;; The implement watchdog stops a stalled agent by interrupting this
-     ;; thread. Unless the agent CLI dies here it keeps running, MCP
-     ;; servers and Bash children included, and keeps editing the
-     ;; worktree while the phase retries with a second agent.
-     (try+
-       (let [out-reader (java.io.BufferedReader.
-                         (java.io.InputStreamReader. (.getInputStream process)))
-             ;; Decouple stagnation from the CLI's emission cadence.
-             ;; claude in --input-format text mode does not emit
-             ;; rate_limit_event during the model's think phase, so the
-             ;; stream-heartbeat-based stagnation guard has no signal
-             ;; during legitimate thinking on heavy prompts (2026-05-07
-             ;; stage-3 dogfood: stagnation timeout at 180s with 6
-             ;; init-time chunks then nothing for the model's full
-             ;; think). Keepalive refreshes the monitor while the JVM-side
-             ;; reader is alive; max-total-ms remains the wedge backstop.
-             stop-keepalive! (pm/start-keepalive! monitor
-                                                  (keepalive-interval-ms monitor))
-             ;; Network-drop monitor — independent of the keepalive. PR-B
-             ;; of the network-resilience stack. Probes the provider every
-             ;; `default-probe-interval-ms` (10s) and fires once after
-             ;; `default-failure-threshold` (3) consecutive failures.
-             ;; on-drop: stamps the network-drop reason into the shared
-             ;; atom and destroys the subprocess tree so the reader
-             ;; loop exits immediately (the agent is hung on socket I/O
-             ;; that will never recover without process restart).
-             ;; Disabled when no :backend-key is provided so legacy
-             ;; callers (tests with synthetic streams, the `:echo` test
-             ;; backend) keep working unchanged.
-             network-drop-reason (atom nil)
-             stop-network-monitor!
-             (when backend-key
-               ;; Caller opts merged FIRST so the integration-owned
-               ;; :backend-key, :probe-url, and :on-drop always win — a
-               ;; test fixture that mistakenly carries those keys can't
-               ;; clobber the monitor's correctness contract. Test-only
-               ;; knobs (:probe-interval-ms, :failure-threshold, :probe-fn)
-               ;; still flow through.
-               (nnm/start-network-monitor!
-                 (merge network-monitor-opts
-                        {:backend-key backend-key
-                         :probe-url   (probe-endpoint-for backend-key)
-                         :on-drop     (fn [diag]
-                                        (compare-and-set! network-drop-reason nil
-                                                          (network-drop-timeout diag))
-                                        ;; Kill the subprocess tree so the
-                                        ;; consumer's reader sees EOF (no
-                                        ;; child left holding stdout) and
-                                        ;; the loop exits. stop-stream-process!
-                                        ;; kills again; that is a no-op.
-                                        (destroy-process-tree! process))})))
-             {:keys [lines timeout anomaly]}
-             (try
-               (process-stream-lines out-reader monitor on-line)
-               (finally
-                 (stop-keepalive!)
-                 (when stop-network-monitor! (stop-network-monitor!))))
-             ;; A network-drop signal (if any) supersedes whatever
-             ;; pm/check-timeout returned — the subprocess was killed by
-             ;; the network monitor, so `process-stream-lines` likely
-             ;; observed a stream-idle as a knock-on effect. Surface the
-             ;; root cause for the workflow / PR-C auto-resumer.
-             effective-timeout (or @network-drop-reason timeout)
-             ;; Stream ended with a timeout reason (stream-idle,
-             ;; stagnation, total-max, or network-drop) — the subprocess
-             ;; is hung or silent. Kill it so `deref` returns immediately
-             ;; instead of waiting 10 min for a process that will not exit.
-             terminal-failure (or effective-timeout anomaly)
-             join-timeout (if terminal-failure
-                            (post-kill-join-timeout-ms)
-                            (process-join-timeout-ms))
-             result (stop-stream-process! stream-process
-                                          (boolean terminal-failure)
-                                          join-timeout)]
-         (cond
-           effective-timeout
-           (timeout-result lines effective-timeout)
-
-           anomaly
-           (stream-anomaly-result lines anomaly)
-
-           :else
-           (success-result lines result)))
-       (catch InterruptedException _
-         ;; Kill first, then restore the flag the exception cleared, so
-         ;; the caller still sees the interrupt.
-         (destroy-process-tree! process)
-         (.interrupt (Thread/currentThread))
-         (throw+))
-       ;; `Object` is slingshot's catch-all: it also matches ex-info and
-       ;; throw+ payloads, which a `Throwable` selector would miss.
-       (catch Object _
-         (destroy-process-tree! process)
-         (throw+))))))
-
-(defn ^{:stratum 8} handle-non-streaming-fallback [client request on-chunk]
+(defn ^{:stratum 1} handle-non-streaming-fallback [client request on-chunk]
   (let [result (complete-impl client request)]
     (when (:success result)
       (on-chunk {:delta (:content result)
@@ -2386,18 +325,14 @@
                  :content (:content result)}))
     result))
 
-;------------------------------------------------------------------------------ Layer 9
-
-(defn ^{:stratum 9} handle-streaming [client request on-chunk backend-config progress-monitor]
+(defn ^{:stratum 1} handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
         stream-fn (or (:stream-exec-fn client) stream-exec-fn)
-        {:keys [backend model num-ctx]} config
+        {:keys [backend model]} config
         {:keys [cmd args-fn stream-parser]} backend-config
-        prompt     (build-request-prompt request)
+        prompt     (prompts/build-request-prompt request)
         prompt-via (resolve-prompt-via backend-config)
-        request-with-model (cond-> request
-                             model (assoc :model model)
-                             num-ctx (assoc :num-ctx num-ctx))
+        request-with-model (completion/with-client-config request config)
         args     (args-fn (assoc request-with-model
                                  :prompt prompt
                                  :streaming? true
@@ -2418,9 +353,9 @@
     ;; :backend-key starts the network-drop monitor in stream-exec-fn.
     (let [base-opts (cond-> {:progress-monitor progress-monitor
                              :workdir (:workdir request)}
-                      (network-monitor-enabled?) (assoc :backend-key backend))
+                      (settings/network-monitor-enabled?) (assoc :backend-key backend))
           stream-opts (merge base-opts
-                             (exec-opts-for-prompt-via prompt-via prompt))
+                             (prompts/exec-opts-for-prompt-via prompt-via prompt))
           result (stream-fn
                   full-cmd
                   (stream-with-parser stream-parser on-chunk progress-monitor
@@ -2441,9 +376,9 @@
           stop-reason @accumulated-stop-reason
           num-turns @accumulated-turns
           tool-call-count (count tools)
-          final-message-preview (message-preview diagnostic-content)
+          final-message-preview (cli-output/message-preview diagnostic-content)
           usage @accumulated-usage
-          fallback-response (when (blank-streaming-success? exit-code
+          fallback-response (when (cli-output/blank-streaming-success? exit-code
                                                             final-content
                                                             tool-call-count
                                                             usage)
@@ -2515,24 +450,35 @@
                 (assoc :cost-usd resolved-cost)
                 session-id    (assoc :session-id session-id)))))))))
 
-;------------------------------------------------------------------------------ Layer 10
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 10} complete-stream-impl [client request on-chunk]
+(defn ^{:stratum 2} default-exec-fn
+  "Run `cmd` with ProcessBuilder, capturing :out / :err / :exit.
+
+   2-arity opts map supports:
+   - `:stdin`  — string piped to the subprocess's stdin
+   - `:workdir` — directory where the subprocess runs"
+  ([cmd] (default-exec-fn cmd {}))
+  ([cmd {:keys [stdin workdir]}]
+   (let [timeout-ms 600000
+         process (start-capture-process! cmd {:stdin stdin
+                                              :workdir workdir})]
+     (stop-capture-process! process timeout-ms))))
+
+(defn ^{:stratum 2} complete-stream-impl [client request on-chunk]
   (let [{:keys [config]} client
-        {:keys [backend model num-ctx]} config
+        {:keys [backend]} config
         backend-config (get backends backend)
         {:keys [streaming? cmd]} backend-config
         progress-monitor (or (:progress-monitor request)
                              (pm/create-progress-monitor
-                              {:stagnation-threshold-ms (default-stagnation-threshold-ms)
-                               :max-total-ms (default-max-total-ms)}))]
+                              {:stagnation-threshold-ms (stream-exec/default-stagnation-threshold-ms)
+                               :max-total-ms (stream-exec/default-max-total-ms)}))]
 
     ;; Handle HTTP backends
     (if (= cmd "http")
       (http-stream-complete backend-config
-                            (cond-> request
-                              model (assoc :model model)
-                              num-ctx (assoc :num-ctx num-ctx))
+                            (completion/with-client-config request config)
                             on-chunk
                             config)
 
