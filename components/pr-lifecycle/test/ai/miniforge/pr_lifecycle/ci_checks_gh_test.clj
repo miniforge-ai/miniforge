@@ -36,6 +36,16 @@
    passing PRs, gh's error texts, and `gh run view --log-failed`."
   (-> "ai/miniforge/pr_lifecycle/gh-fixtures/gh_2_102.edn" io/resource slurp edn/read-string))
 
+(defn ^{:stratum 0} gh-ok
+  "A shell result for a gh command that exited 0 printing `out`."
+  [out]
+  {:exit 0 :out out :err ""})
+
+(defn ^{:stratum 0} gh-err
+  "A shell result for a gh command that exited `exit` printing `err`."
+  [exit err]
+  {:exit exit :out "" :err err})
+
 (defn ^{:stratum 0} poll-once
   "Poll a fresh monitor for PR `pr-number` once, with `shell-fn` as gh."
   [shell-fn pr-number]
@@ -70,48 +80,48 @@
                            (str/split #","))]
         (cond
           (not= ["gh" "run" "view"] (take 3 args))
-          (if (every? available fields) response {:exit 1 :out "" :err stderr})
+          (if (every? available fields) response (gh-err 1 stderr))
 
           (= (:run/failed-run-id gh-2-102) (nth args 3))
-          {:exit 0 :out (:run/log-failed gh-2-102) :err ""}
+          (gh-ok (:run/log-failed gh-2-102))
 
           :else
-          {:exit 1 :out "" :err (str "could not find any workflow run with ID " (nth args 3))})))))
+          (gh-err 1 (str "could not find any workflow run with ID " (nth args 3))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} requested-fields-are-accepted-by-gh-test
   (testing "get-pr-checks asks only for fields gh 2.102 accepts"
     (let [result (with-redefs [process/shell
-                               (fake-gh {:exit 0 :out (:checks/failing-json gh-2-102) :err ""})]
+                               (fake-gh (gh-ok (:checks/failing-json gh-2-102)))]
                    (checks/get-pr-checks "/tmp" 2244))]
       (is (dag/ok? result) (pr-str (:error result)))
       (is (= 7 (count (:checks (:data result))))))))
 
 (deftest ^{:stratum 2} failing-pr-polls-as-failure-test
   (testing "a PR with a failing check polls as :failure naming that check"
-    (let [result (poll-once (fake-gh {:exit 0 :out (:checks/failing-json gh-2-102) :err ""}) 2244)]
+    (let [result (poll-once (fake-gh (gh-ok (:checks/failing-json gh-2-102))) 2244)]
       (is (= :failure (:status result)))
       (is (= ["Structure"] (mapv :name (get-in result [:checks :failed]))))
       (is (some? (:event result))))))
 
 (deftest ^{:stratum 2} pending-pr-polls-as-pending-test
   (testing "a PR with running checks polls as :pending"
-    (is (= :pending (:status (poll-once (fake-gh {:exit 0 :out (:checks/pending-json gh-2-102) :err ""}) 2251))))))
+    (is (= :pending (:status (poll-once (fake-gh (gh-ok (:checks/pending-json gh-2-102))) 2251))))))
 
 (deftest ^{:stratum 2} passing-pr-polls-as-success-test
   (testing "passing checks next to skipped ones poll as :success"
-    (is (= :success (:status (poll-once (fake-gh {:exit 0 :out (:checks/passing-json gh-2-102) :err ""}) 2249))))))
+    (is (= :success (:status (poll-once (fake-gh (gh-ok (:checks/passing-json gh-2-102))) 2249))))))
 
 (deftest ^{:stratum 2} checks-not-yet-reported-poll-as-pending-test
   (testing "`no checks reported` right after a push is pending, not unknown"
-    (is (= :pending (:status (poll-once (fake-gh {:exit 1 :out "" :err (:checks/no-checks-stderr gh-2-102)}) 2244)))))
+    (is (= :pending (:status (poll-once (fake-gh (gh-err 1 (:checks/no-checks-stderr gh-2-102))) 2244)))))
   (testing "the plain-output pending exit code is pending, not an error"
-    (is (= :pending (:status (poll-once (fake-gh {:exit 8 :out "" :err ""}) 2244))))))
+    (is (= :pending (:status (poll-once (fake-gh (gh-err checks/checks-pending-exit-code "")) 2244))))))
 
 (deftest ^{:stratum 2} failing-pr-poll-carries-failed-job-logs-test
   (testing "a :failure poll fetches the failing run's logs into :ci/logs"
-    (let [result (poll-once (fake-gh {:exit 0 :out (:checks/failing-json gh-2-102) :err ""}) 2244)
+    (let [result (poll-once (fake-gh (gh-ok (:checks/failing-json gh-2-102))) 2244)
           logs (:ci/logs result)]
       (is (str/starts-with? logs "## gh run view 40968057793 --log-failed (failed: Structure)\n"))
       (is (str/includes? logs "Polylith workspace check failed with exit code: 1"))
@@ -123,7 +133,7 @@
   (testing "a run gh cannot show leaves :ci/logs nil and records the error"
     (let [failed [{:name "Test" :bucket "fail"
                    :link "https://github.com/miniforge-ai/miniforge/actions/runs/1/job/2"}]
-          result (with-redefs [process/shell (fake-gh {:exit 0 :out "[]" :err ""})]
+          result (with-redefs [process/shell (fake-gh (gh-ok "[]"))]
                    (checks/get-check-logs "/tmp" failed))]
       (is (nil? (:ci/logs result)))
       (is (= ["1"] (mapv :run-id (:ci/log-errors result)))))))

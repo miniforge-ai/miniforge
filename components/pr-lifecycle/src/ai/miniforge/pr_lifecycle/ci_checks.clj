@@ -22,6 +22,7 @@
    into an overall CI status. The polling loop lives in `ci-monitor`."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.pr-lifecycle.messages :as messages]
    [babashka.process :as process]
    [cheshire.core :as json]
    [clojure.string :as str]
@@ -68,7 +69,7 @@
     (let [checks (json/parse-string output true)]
       (if (sequential? checks)
         (dag/ok {:checks (vec checks)})
-        (dag/err :gh-output-unparseable "gh pr checks did not return a JSON array"
+        (dag/err :gh-output-unparseable (messages/system-t :ci/checks-not-json)
                  {:raw output})))
     (catch Exception e
       (dag/err :gh-output-unparseable (ex-message e) {:raw output}))))
@@ -182,8 +183,9 @@
                        :when (dag/ok? result)
                        :let [text (clean-log (:output (:data result)))]
                        :when (not (str/blank? text))]
-                   (str "## gh run view " run-id " --log-failed"
-                        " (failed: " (str/join ", " names) ")\n" text))]
+                   (str (messages/system-t :ci/log-section
+                                           {:run-id run-id :checks (str/join ", " names)})
+                        "\n" text))]
     {:ci/logs (when (seq sections) (str/join "\n\n" sections))
      :ci/log-errors (vec (for [{:keys [run-id result]} fetched
                                :when (dag/err? result)]

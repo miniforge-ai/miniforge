@@ -24,6 +24,7 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.ci-checks :as ci-checks]
    [ai.miniforge.pr-lifecycle.events :as events]
+   [ai.miniforge.pr-lifecycle.messages :as messages]
    [ai.miniforge.logging.interface :as log]
    [clojure.string :as str]))
 
@@ -84,7 +85,7 @@
   (let [logs (ci-checks/get-check-logs worktree-path (:failed computed))]
     (when (and logger (nil? (:ci/logs logs)))
       (log/warn logger :pr-lifecycle :ci/logs-unavailable
-                {:message "No failed-job logs for failing CI checks"
+                {:message (messages/system-t :ci/logs-unavailable)
                  :data {:pr-number pr-number
                         :failed (mapv :name (:failed computed))
                         :errors (:ci/log-errors logs)}}))
