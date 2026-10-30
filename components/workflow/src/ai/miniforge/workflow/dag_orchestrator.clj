@@ -246,6 +246,14 @@
                       (recur true))
           :else   false)))))
 
+(defn- ^{:stratum 0} stop-aware-sleep
+  "Sleep `ms`; a cancel's interrupt ends the sleep early instead of
+   escaping (another interrupt still throws)."
+  [control-state ms]
+  (try+ (Thread/sleep (long ms))
+        (catch InterruptedException e
+          (when-not (stop-signal/stop-caused? control-state e) (throw e)))))
+
 (defn- ^{:stratum 0} cancelled-dag-result
   "Terminal result for a run the operator stopped between batches. Built by
    `finalize-dag`, so completed work, failures, spend and opened PRs are
@@ -418,9 +426,13 @@
                      (inc iteration))
 
               (seq rate-limited-ids)
-              (let [decision (dag-rate-limit/handle-rate-limit-in-batch
-                              context rate-limited-ids new-completed new-failed
-                              all-results results event-stream workflow-id logger)]
+              (let [;; A cancel's interrupt ends a short rate-limit wait;
+                    ;; the loop then sees :stopped and returns the
+                    ;; cancelled result with every result so far.
+                    decision (binding [resilience/*sleep!* (partial stop-aware-sleep control-state)]
+                               (dag-rate-limit/handle-rate-limit-in-batch
+                                context rate-limited-ids new-completed new-failed
+                                all-results results event-stream workflow-id logger))]
                 (if (= :continue (:action decision))
                   (recur new-completed
                          new-failed

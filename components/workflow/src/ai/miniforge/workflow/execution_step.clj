@@ -11,12 +11,23 @@
             [ai.miniforge.workflow.execution-dag :as dag]
             [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
             [ai.miniforge.workflow.execution-transition :as transition]
-            [ai.miniforge.workflow.runner-outcome :as outcome]))
+            [ai.miniforge.workflow.messages :as messages]
+            [ai.miniforge.workflow.runner-outcome :as outcome]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} invoke [callback & args]
-  (when callback (apply callback args)))
+(defn- ^{:stratum 0} invoke
+  "Call a boundary callback. One interrupted (a cancel reaching a blocking
+   callback) refuses the boundary with an anomaly, so the context keeps
+   what the phase produced; the interrupt flag is set again."
+  [callback & args]
+  (when callback
+    (try+ (apply callback args)
+          (catch InterruptedException e
+            (.interrupt (Thread/currentThread))
+            (anomaly/anomaly :unavailable (messages/t :status/stopped-control)
+                             {:anomaly/ex-class (.getName (class e))})))))
 
 (defn- ^{:stratum 0} active-context [context interceptor]
   (-> context

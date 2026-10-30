@@ -165,12 +165,21 @@
   [context]
   (let [explicit (get context :dag/resolution-overrides)
         llm-backend (:llm-backend context)
+        control-state (:control-state context)
         auto (when (and llm-backend (not (:agent-edit-fn explicit)))
                {:agent-edit-fn
                 (merge-resolution/agent-driven-edit-fn
                  (cond-> {:llm-backend llm-backend}
-                   (:logger context) (assoc :logger (:logger context))))})]
-    (merge auto explicit)))
+                   (:logger context) (assoc :logger (:logger context))))})
+        overrides (merge auto explicit)
+        edit (:agent-edit-fn overrides)]
+    ;; Once the run is cancelled the agent is not called again: an agent
+    ;; error response can swallow the interrupt, and the loop would try
+    ;; once more. The loop then ends within its budget without an LLM call.
+    (cond-> overrides
+      (and control-state edit)
+      (assoc :agent-edit-fn (fn [& args]
+                              (when-not (:stopped @control-state) (apply edit args)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
