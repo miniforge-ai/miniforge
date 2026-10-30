@@ -47,10 +47,11 @@
     (transaction/propose! context prepared now)))
 
 (defn- ^{:stratum 0} commit-authority!
-  [context proposed prepared pr-number now enable! run-gh]
+  [context proposed prepared pr-number enable! run-gh]
   (let [committed (transaction/commit!
-                   context proposed (:authority/grant prepared)
-                   pr-number now enable! run-gh)]
+                   context proposed (authority/breach-dir context)
+                   (get-in prepared [:authority/grant :grant/id])
+                   pr-number enable! run-gh)]
     (if (anomaly/anomaly? committed)
       (dag/err :merge-commit-refused
                (messages/t :merge/commit-refused)
@@ -60,13 +61,12 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} transact!
-  "Prepare authority, durably propose, then commit an allowed merge of
-   `target` (`:pr/repo`, `:pr/number`, `:pr/head-sha`)."
+  "Prepare and register authority, durably propose, then commit an allowed
+   merge of `target` (`:pr/repo`, `:pr/number`, `:pr/head-sha`)."
   [operations worktree-path target readiness policy context ^Instant now]
   (let [pr-number (:pr/number target)
         run-gh (partial provider-command operations worktree-path)
-        enable! (partial enable-merge operations worktree-path pr-number policy
-                         (:pr/head-sha target))
+        enable! (partial enable-merge operations worktree-path pr-number policy)
         prepared (authority/prepare context (random-uuid) target readiness
                                     (:method policy) now)
         proposed (propose-authority! context prepared now)]
@@ -90,5 +90,5 @@
                                             :envelope/decision])})
 
       :else
-      (commit-authority! context proposed prepared pr-number now
+      (commit-authority! context proposed prepared pr-number
                          enable! run-gh))))

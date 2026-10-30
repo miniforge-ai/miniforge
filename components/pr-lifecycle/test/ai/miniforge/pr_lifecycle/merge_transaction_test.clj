@@ -22,6 +22,7 @@
   (:require
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.effect-transaction.interface :as fx]
+   [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.pr-lifecycle.merge-authority :as authority]
    [ai.miniforge.pr-lifecycle.merge-transaction :as mt]
    [clojure.test :refer [deftest is testing]])
@@ -41,8 +42,8 @@
    :effect-store-dir
    (str (.toFile (Files/createTempDirectory "merge-fx" (into-array FileAttribute []))))
    :grant-breach-dir
-   (str (.toFile (Files/createTempDirectory "merge-grants" (into-array FileAttribute []))))
-   :pr/repo "miniforge-ai/miniforge"})
+   (.getCanonicalPath
+    (.toFile (Files/createTempDirectory "merge-grants" (into-array FileAttribute []))))})
 
 (def ^{:stratum 0} target
   {:pr/repo "miniforge-ai/miniforge"
@@ -60,7 +61,7 @@
 (def ^{:stratum 0} open-json
   "{\"state\":\"OPEN\",\"mergeCommit\":null}")
 
-(defn ^{:stratum 0} ok-enable [] (fn [] {:ok? true}))
+(defn ^{:stratum 0} ok-enable [] (fn [_head-sha] {:ok? true}))
 
 (deftest ^{:stratum 0} store-dir-is-never-relative-test
   ;; An audit trail written to whatever directory the process started in
@@ -73,7 +74,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} merge-case! []
-  (let [context (ctx)
+  (let [context (assoc (ctx) :clock (constantly now))
         prepared (authority/prepare context (random-uuid) target
                                     {:ready? true :blocking []} :squash now)]
     {:context context
@@ -94,8 +95,9 @@
   ;; The core correction. `merge-pr!` passes --auto unconditionally, so a
   ;; zero exit means auto-merge was ENABLED. GitHub still says OPEN.
   (let [{:keys [context authority transaction]} (merge-case!)
-        settled (mt/commit! context transaction (:authority/grant authority)
-                            42 now (ok-enable) (gh-returning open-json))]
+        settled (mt/commit! context transaction (:grant-breach-dir context)
+                            (get-in authority [:authority/grant :grant/id])
+                            42 (ok-enable) (gh-returning open-json))]
     (is (= :unknown-outcome (:effect/state settled))
         "a request in flight is not a success")
     (is (not= :succeeded (:effect/state settled)))
@@ -106,16 +108,18 @@
 
 (deftest ^{:stratum 2} observed-merge-carries-githubs-sha-test
   (let [{:keys [context authority transaction]} (merge-case!)
-        settled (mt/commit! context transaction (:authority/grant authority)
-                            42 now (ok-enable) (gh-returning merged-json))]
+        settled (mt/commit! context transaction (:grant-breach-dir context)
+                            (get-in authority [:authority/grant :grant/id])
+                            42 (ok-enable) (gh-returning merged-json))]
     (is (= :succeeded (:effect/state settled)))
     (is (= "squash-sha-on-base" (mt/substantiated-sha settled))
         "the published SHA is GitHub's mergeCommit, not a local branch tip")))
 
 (deftest ^{:stratum 2} a-failed-gh-call-is-a-definite-failure-test
   (let [{:keys [context authority transaction]} (merge-case!)
-        settled (mt/commit! context transaction (:authority/grant authority) 42 now
-                            (fn [] {:ok? false :error "PR already closed"})
+        settled (mt/commit! context transaction (:grant-breach-dir context)
+                            (get-in authority [:authority/grant :grant/id]) 42
+                            (fn [_] {:ok? false :error "PR already closed"})
                             (gh-returning merged-json))]
     (is (= :failed (:effect/state settled))
         "the gh call reported it did not happen — that is knowledge, not doubt")
@@ -123,8 +127,9 @@
 
 (deftest ^{:stratum 2} silent-github-leaves-it-unknown-test
   (let [{:keys [context authority transaction]} (merge-case!)
-        settled (mt/commit! context transaction (:authority/grant authority)
-                            42 now (ok-enable)
+        settled (mt/commit! context transaction (:grant-breach-dir context)
+                            (get-in authority [:authority/grant :grant/id])
+                            42 (ok-enable)
                             (fn [_] {:ok? false :output nil}))]
     (is (= :unknown-outcome (:effect/state settled))
         "GitHub not answering is not GitHub saying no")
@@ -147,18 +152,32 @@
 (deftest ^{:stratum 2} reconcile-settles-a-later-merge-test
   (testing "asking again after GitHub finishes settles it with the real SHA"
     (let [{:keys [context authority transaction]} (merge-case!)
-          pending (mt/commit! context transaction (:authority/grant authority)
-                              42 now (ok-enable) (gh-returning open-json))]
+          pending (mt/commit! context transaction (:grant-breach-dir context)
+                            (get-in authority [:authority/grant :grant/id])
+                            42 (ok-enable) (gh-returning open-json))]
       (is (nil? (mt/substantiated-sha pending)))
       (let [settled (mt/reconcile! context pending 42 later (gh-returning merged-json))]
         (is (= :reconciled (:effect/state settled)))
         (is (= "squash-sha-on-base" (mt/substantiated-sha settled))))))
   (testing "a PR that closed unmerged reconciles as a mismatch, not a merge"
     (let [{:keys [context authority transaction]} (merge-case!)
-          pending (mt/commit! context transaction (:authority/grant authority)
-                              42 now (ok-enable) (gh-returning open-json))
+          pending (mt/commit! context transaction (:grant-breach-dir context)
+                            (get-in authority [:authority/grant :grant/id])
+                            42 (ok-enable) (gh-returning open-json))
           settled (mt/reconcile! context pending 42 later
                                  (gh-returning "{\"state\":\"CLOSED\",\"mergeCommit\":null}"))]
       (is (= :reconciled (:effect/state settled)))
       (is (false? (:effect/matched? settled)))
       (is (nil? (mt/substantiated-sha settled))))))
+
+(deftest ^{:stratum 2} commit-rereads-a-revoked-grant-test
+  (let [{:keys [context authority transaction]} (merge-case!)
+        grant-id (get-in authority [:authority/grant :grant/id])
+        enabled? (atom false)]
+    (grant/revoke-stored! (:grant-breach-dir context) grant-id
+                          :revocation/operator now)
+    (is (= :failed (:effect/state
+                    (mt/commit! context transaction (:grant-breach-dir context)
+                                grant-id 42 (fn [_] (reset! enabled? true))
+                                (gh-returning merged-json)))))
+    (is (false? @enabled?) "a grant revoked after issue never reaches gh")))

@@ -28,9 +28,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} default-breach-dir-property
-  "grant-breaches")
-
 (def ^{:stratum 0} empty-classification
   {:blocking []
    :require-approval []
@@ -60,6 +57,12 @@
   {:rule-id (keyword "merge-readiness" (name reason))
    :message (messages/t :merge/readiness-blocked {:reason (name reason)})})
 
+(defn ^{:stratum 0} breach-dir
+  "The registry and breach-history directory for merge grants."
+  [context]
+  (or (:grant-breach-dir context)
+      (str (config/miniforge-home) "/grant-breaches")))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} readiness-classification
@@ -85,12 +88,6 @@
    :pr/number (:pr/number target)
    :pr/head-sha (:pr/head-sha target)})
 
-(defn ^{:stratum 1} breach-dir
-  "The registry and breach-history directory for merge grants."
-  [context]
-  (or (:grant-breach-dir context)
-      (str (config/miniforge-home) "/" default-breach-dir-property)))
-
 (defn ^{:stratum 1} permitted?
   "True only when both the grant check and DecisionEnvelope allow the effect."
   [{:authority/keys [authorization envelope]}]
@@ -105,14 +102,23 @@
    :authority/authorization authorization
    :authority/envelope envelope})
 
+(defn- ^{:stratum 1} issue-registered
+  "Issue a grant and register it, so commit can re-read and revoke it."
+  [context request now]
+  (let [dir (breach-dir context)
+        issued (grant/issue-for-effect dir request now)]
+    (if (anomaly/anomaly? issued)
+      issued
+      (grant/register! dir issued))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} prepare
-  "Issue, authorize, and decide authority for one merge of `target` at
-   the readiness the caller evaluated."
+  "Issue, register, authorize, and decide authority for one merge of
+   `target` at the readiness the caller evaluated."
   [context effect-id target readiness merge-method ^Instant now]
   (let [request (request context effect-id target readiness)
-        grant-record (grant/issue-for-effect (breach-dir context) request now)]
+        grant-record (issue-registered context request now)]
     (if (anomaly/anomaly? grant-record)
       grant-record
       (let [scope (effect-scope request merge-method)

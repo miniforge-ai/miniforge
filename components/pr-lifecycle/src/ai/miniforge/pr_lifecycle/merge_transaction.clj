@@ -32,12 +32,15 @@
    reconcilable and a later pass asks again.
 
    The caller supplies the runtime-issued grant and allowing envelope.
-   Their identifiers are durable on the proposal, and the effect
-   transaction rechecks the grant against that durable scope before the
-   provider command can run."
+   Their identifiers are durable on the proposal. At commit the grant is
+   re-read from the registry, so a grant revoked or never registered
+   refuses the effect before the provider command can run."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.effect-transaction.interface :as fx]
+   [ai.miniforge.execution-grant.interface :as grant]
+   [ai.miniforge.pr-lifecycle.messages :as messages]
    [cheshire.core :as json])
   (:import
    [java.time Instant]))
@@ -89,6 +92,18 @@
                  (:effect/matched? t)))
     (get-in t [:effect/observed :merge/sha])))
 
+(defn- ^{:stratum 0} issued-grant
+  "Read the registered grant this attempt issued; any other id is refused."
+  [grant-dir issued-id requested-id]
+  (if (= issued-id requested-id)
+    (grant/current grant-dir requested-id)
+    (anomaly/anomaly :unauthorized (messages/t :merge/grant-substituted) {})))
+
+(defn- ^{:stratum 0} clock
+  "The commit-time clock: the context's when supplied, else the system's."
+  [context]
+  (get context :clock #(Instant/now)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} store-dir
@@ -128,7 +143,8 @@
                now))
 
 (defn ^{:stratum 2} commit!
-  "Enable auto-merge, then ask GitHub whether it actually merged.
+  "Re-read the registered grant, enable auto-merge, then ask GitHub
+   whether it actually merged.
 
    The outcome mapping is the honest part. Auto-merge accepted but not
    yet completed is `:accepted`, which the coordinator maps to
@@ -136,21 +152,28 @@
    observed MERGED becomes `:succeeded`, and it carries the SHA GitHub
    reported, never a local one.
 
-   `enable!` performs the gh merge call and returns `{:ok? bool}`;
-   `run-gh` answers the follow-up probe. Both injected."
-  [context t grant-record pr-number ^Instant now enable! run-gh]
-  (fx/commit! (store-dir context) t grant-record {} now
-              (fn []
-                (let [{:keys [ok? error]} (enable!)]
-                  (if-not ok?
-                    {:effect/outcome :failed :effect/failure (str error)}
-                    (if-let [answer (probe run-gh pr-number)]
-                      (if (:effect/matched? answer)
-                        {:effect/outcome :succeeded
-                         :effect/observed (:effect/observed answer)}
-                        {:effect/outcome :accepted
-                         :effect/observed (:effect/observed answer)})
-                      {:effect/outcome :accepted}))))))
+   `enable!` receives the head SHA the durable proposal binds, performs
+   the gh merge call, and returns `{:ok? bool}`; `run-gh` answers the
+   follow-up probe. Both injected. A grant absent from `grant-dir`
+   returns an anomaly and a revoked one records `:failed`; neither
+   calls `enable!`."
+  [context t grant-dir grant-id pr-number enable! run-gh]
+  (fx/commit-current!
+   (store-dir context) (:effect/id t)
+   (partial issued-grant grant-dir grant-id)
+   (clock context)
+   (fn [record]
+     (let [{:keys [ok? error]} (enable! (get-in record [:effect/proposal
+                                                        :pr/head-sha]))]
+       (if-not ok?
+         {:effect/outcome :failed :effect/failure (str error)}
+         (if-let [answer (probe run-gh pr-number)]
+           (if (:effect/matched? answer)
+             {:effect/outcome :succeeded
+              :effect/observed (:effect/observed answer)}
+             {:effect/outcome :accepted
+              :effect/observed (:effect/observed answer)})
+           {:effect/outcome :accepted}))))))
 
 (defn ^{:stratum 2} reconcile!
   "Ask GitHub again about a record whose outcome is still unknown.

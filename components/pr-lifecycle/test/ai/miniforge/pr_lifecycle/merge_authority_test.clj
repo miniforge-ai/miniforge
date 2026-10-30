@@ -42,8 +42,8 @@
    (str (.toFile (Files/createTempDirectory
                   "merge-effects" (into-array FileAttribute []))))
    :grant-breach-dir
-   (str (.toFile (Files/createTempDirectory
-                  "merge-grants" (into-array FileAttribute []))))})
+   (.getCanonicalPath (.toFile (Files/createTempDirectory
+                                "merge-grants" (into-array FileAttribute []))))})
 
 (def ^{:stratum 0} head-sha "0123456789abcdef0123456789abcdef01234567")
 
@@ -193,11 +193,11 @@
                  (pr-str merge-call)))))))
 
 (deftest ^{:stratum 2} denied-authority-never-invokes-merge-test
-  (testing "an absent grant denies before the provider mutation"
+  (testing "an absent grant cannot be registered, so nothing fires"
     (let [{:keys [result merge-calls]} (attempt-with-issuer
                                         (fn [_ _ _] nil))]
       (is (dag/err? result))
-      (is (= :merge-authority-denied (get-in result [:error :code])))
+      (is (= :merge-authority-unavailable (get-in result [:error :code])))
       (is (zero? merge-calls))))
   (testing "a mismatched grant denies before the provider mutation"
     (let [issuer (fn [_ request now]

@@ -66,7 +66,8 @@
            :task-id (random-uuid)
            :pr-id 42
            :effect-store-dir (tmp)
-           :grant-breach-dir (tmp)}
+           :grant-breach-dir (tmp)
+           :clock (constantly now)}
           overrides)))
 
 (defn- ^{:stratum 1} transact
