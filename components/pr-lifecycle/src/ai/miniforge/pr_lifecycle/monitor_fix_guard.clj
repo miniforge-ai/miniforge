@@ -18,9 +18,10 @@
 (ns ai.miniforge.pr-lifecycle.monitor-fix-guard
   "Whether the PR monitor may start a change-request fix. The fix loop
    writes and commits in the monitor's worktree and then pushes the PR's
-   head branch, so the worktree must have that branch checked out.
-   Otherwise the commit lands on whatever branch is checked out and the
-   push sends the PR branch's unchanged local ref."
+   head branch by name, so the worktree must have that branch checked out
+   at the PR's head commit. A matching name alone is not enough: a fork's
+   PR from its own `main` would then commit onto, and push to, this
+   repository's `main`."
   (:require
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.pr-lifecycle.messages :as messages]
@@ -30,12 +31,16 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} checked-out-branch
-  "The branch checked out in `worktree-path`, or nil when git cannot say."
+  "{:branch :sha} checked out in `worktree-path`, or nil when git cannot
+   say."
   [worktree-path]
-  (let [{:keys [exit out]} (process/sh {:dir (str worktree-path)}
-                                       "git" "rev-parse" "--abbrev-ref" "HEAD")]
-    (when (zero? exit)
-      (str/trim out))))
+  (let [git (fn [& args]
+              (let [{:keys [exit out]} (apply process/sh {:dir (str worktree-path)} "git" args)]
+                (when (zero? exit) (str/trim out))))
+        branch (git "rev-parse" "--abbrev-ref" "HEAD")
+        sha (git "rev-parse" "HEAD")]
+    (when (and branch sha)
+      {:branch branch :sha sha})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -45,7 +50,8 @@
    monitor config (:worktree-path :generate-fn :logger)."
   [{:keys [worktree-path generate-fn logger]} pr-info]
   (let [branch (:pr/branch pr-info)
-        checked-out (when generate-fn (checked-out-branch worktree-path))]
+        head (when generate-fn (checked-out-branch worktree-path))
+        checked-out (:branch head)]
     (cond
       (not generate-fn)
       (do (when logger
@@ -53,12 +59,15 @@
                       {:message (messages/system-t :monitor/fix-without-generate-fn)}))
           {:success? false :reason :no-generate-fn})
 
-      (or (str/blank? branch) (not= branch checked-out))
+      (or (str/blank? branch)
+          (not= branch checked-out)
+          (not= (:pr/sha pr-info) (:sha head)))
       (do (when logger
             (log/warn logger :pr-monitor :handler/worktree-not-on-pr-branch
                       {:message (messages/system-t :monitor/worktree-not-on-pr-branch
                                                    {:branch branch :checked-out checked-out
+                                                    :sha (:pr/sha pr-info) :head (:sha head)
                                                     :path worktree-path})
                        :data {:pr-number (:pr/number pr-info)}}))
           {:success? false :reason :worktree-not-on-pr-branch
-           :pr/branch branch :checked-out checked-out}))))
+           :pr/branch branch :pr/sha (:pr/sha pr-info) :checked-out head}))))

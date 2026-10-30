@@ -25,7 +25,7 @@
 
   ;; monitor-fix-guard — a change-request fix needs the PR's branch checked out
   :monitor/worktree-not-on-pr-branch
-  "Not fixing: {path} has {checked-out} checked out, not the PR branch {branch}. This comment is skipped and not retried; the monitor fixes only PRs whose branch it runs on."
+  "Not fixing: {path} has {checked-out} at {head} checked out, not the PR branch {branch} at {sha}. This comment is skipped and not retried; the monitor fixes only the PR whose head it has checked out."
 
   :monitor-state/invalid-watermarks
   "PR monitor watermarks file {path} does not hold a map of PR number to watermark; miniforge will not overwrite it."
