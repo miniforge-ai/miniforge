@@ -19,6 +19,7 @@
   "Application flow for one granted, transacted Kubernetes deployment."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.phase-deployment.deploy-authority :as authority]
    [ai.miniforge.phase-deployment.deploy-outcome :as outcome]
@@ -43,8 +44,16 @@
            (msg/t fallback-key))))
 
 (defn- ^{:stratum 0} advance
+  "Run `step` unless the flow failed or is answering for an earlier attempt."
   [state step]
-  (if (:flow/failure state) state (step state)))
+  (if (or (:flow/failure state) (:attempt/existing state)) state (step state)))
+
+(defn- ^{:stratum 0} effect-basis
+  "What fixes this deploy's effect id: run and exact target."
+  [state]
+  (let [{:keys [kustomize-dir context namespace deployment-name]} (:target state)]
+    [:effect/deploy (get-in state [:context :execution/id])
+     kustomize-dir context namespace deployment-name]))
 
 (def ^{:stratum 0} unclaimed-states
   "Transaction states in which the deploy cannot have reached the cluster."
@@ -65,6 +74,20 @@
     (if (schema/failed? result)
       (fail state :preflight (failure-detail result :deploy/context-unavailable))
       (assoc state :target (:target result)))))
+
+(defn- ^{:stratum 1} open-attempt
+  "Take this deploy's fixed effect id, or the earlier attempt's record when
+   one did not definitely fail. A context with no run gets a fresh id;
+   authority then refuses it."
+  [state]
+  (let [opened (if (uuid? (get-in state [:context :execution/id]))
+                 (fx/open-attempt (transaction/store-dir (:context state))
+                                  (effect-basis state))
+                 {:effect/id (random-uuid)})]
+    (cond
+      (anomaly/anomaly? opened) (fail state :proposal (:anomaly/message opened))
+      (:effect/existing opened) (assoc state :attempt/existing (:effect/existing opened))
+      :else (assoc state :effect-id (:effect/id opened)))))
 
 (defn- ^{:stratum 1} render-manifests
   [state]
@@ -111,7 +134,7 @@
   (let [preflight {:rendered-yaml (:rendered-yaml state)
                    :server-dry-run (:server-dry-run state)
                    :app-label (get-in state [:target :app-label])}
-        prepared (authority/prepare (:context state) (random-uuid)
+        prepared (authority/prepare (:context state) (:effect-id state)
                                     (:target state) preflight (:now state))
         {:grant/keys [id revocation]} (:anomaly/data prepared)]
     (if (anomaly/anomaly? prepared)
@@ -161,6 +184,25 @@
       (fail state :observe (:anomaly/message reconciled))
       (assoc state :transaction reconciled))))
 
+(defn- ^{:stratum 1} settle-existing
+  "Answer for an earlier attempt instead of deploying again: ask the
+   cluster about one still in flight, report a settled one as it is, and
+   refuse one proposed but never committed."
+  [state]
+  (if-let [t (:attempt/existing state)]
+    (cond
+      (contains? fx/reconcilable-states (:effect/state t))
+      (let [reconciled (transaction/reconcile!
+                        (:context state) t (:operations state)
+                        (transaction/current-time (:context state)))]
+        (assoc state :transaction (if (anomaly/anomaly? reconciled) t reconciled)))
+
+      (= :proposed (:effect/state t))
+      (fail state :proposal (msg/t :deploy/effect-unsettled))
+
+      :else (assoc state :transaction t))
+    state))
+
 (defn- ^{:stratum 1} revoke-abandoned
   "Revoke the grant of a deploy that ended before it could reach the
    cluster, so the grant cannot authorize a later attempt."
@@ -181,14 +223,17 @@
 
 (defn ^{:stratum 2} transact!
   "Resolve, render, check manifest policy, preflight, authorize, persist,
-   commit, and reconcile one deploy. A deploy that ends before it could
-   reach the cluster revokes its grant."
+   commit, and reconcile one deploy. The effect id is fixed per run and
+   target, so an earlier attempt that did not definitely fail is settled
+   rather than deployed again. A deploy that ends before it could reach
+   the cluster revokes its grant."
   [context deploy-config operations ^Instant now]
   (-> {:context context
        :deploy-config deploy-config
        :operations operations
        :now now}
       (advance resolve-target)
+      (advance open-attempt)
       (advance render-manifests)
       (advance check-manifest-policy)
       (advance server-dry-run)
@@ -199,5 +244,6 @@
       (advance check-stop)
       (advance commit-effect)
       (advance reconcile-effect)
+      settle-existing
       revoke-abandoned
       outcome/from-state))
