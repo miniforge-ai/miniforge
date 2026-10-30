@@ -107,13 +107,16 @@
   "Persist the effect that `merge-grant` authorizes."
   ([dir g] (propose-merge! dir g merge-proposal))
   ([dir g proposal]
-   (fx/propose! dir
-                {:effect-id (get-in g [:grant/scope :effect/id])
-                 :effect-class :effect/merge
-                 :grant-id (:grant/id g)
-                 :envelope-id (random-uuid)
-                 :proposal proposal}
-                now)))
+   (let [envelope (fx/sign-envelope {:envelope/id (random-uuid)
+                                      :envelope/decision :allow})]
+     (fx/propose! dir
+                  {:effect-id (get-in g [:grant/scope :effect/id])
+                   :effect-class :effect/merge
+                   :grant-id (:grant/id g)
+                   :envelope-id (:envelope/id envelope)
+                   :envelope envelope
+                   :proposal proposal}
+                  now))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

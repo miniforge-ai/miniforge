@@ -9,6 +9,7 @@
   :record/change-invalid "EffectTransaction change failed validation"
   :record/id-immutable "EffectTransaction identity cannot change during a lifecycle transition"
   :record/input-invalid "EffectTransaction inputs failed validation"
+  :record/unencodable "EffectTransaction binding cannot be encoded for signing"
   :record/not-found "EffectTransaction does not exist in the durable store"
   :record/transition-conflict "EffectTransaction changed before its durable transition could be claimed"
   :proposal/no-store "propose! requires :dir — refusing to write records to the process working directory"

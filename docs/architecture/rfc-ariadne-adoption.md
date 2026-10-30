@@ -204,6 +204,43 @@ on records, grants on actions) and a unification *across* them
 - **The two process contradictions (3, 8) don't move** — the
   conformance manifest and spec-text cleanup remain their own work.
 
+## Implementation status: signatures
+
+Status as of 2026-10-29. Where the tables above say "runtime-signed"
+or "attested", this is what is built.
+
+1. **Key and algorithm.** The `runtime-signing` component holds one
+   runtime key, 32 random bytes in the owner-only file
+   `<miniforge-home>/keys/runtime-signing.key`, created through NIO
+   with `rw-------` and never replaced. Signatures are HMAC-SHA256 over
+   a lossless canonical encoding of the record. Only a process holding
+   the key can sign or verify; these are not public-key signatures.
+2. **Signed.** Every `ExecutionGrant` when it is issued or delegated,
+   over its issued fields (revocation is recorded later as a separate
+   marker and is outside the signature). The `DecisionEnvelope` that
+   allows an effect, when it is minted for that effect: merge, deploy,
+   and OPSV PR creation. When the runtime proposes the effect it also
+   signs the record's binding: effect id, grant id, envelope and
+   proposal. Envelopes from phase gating are not signed.
+3. **Verified.** At effect commit, in `effect-transaction`. A grant
+   that is unsigned or altered is denied (`:unsigned`). A proposal
+   whose envelope is missing, names another id, does not allow, or does
+   not verify, or whose binding does not verify, is denied
+   (`:envelope-unsigned`), so a signed envelope copied into another
+   record or a proposal edited in the store does not commit. Either way the record
+   goes to `:failed` and the effect does not run. Effects committed
+   with `:authority/unenforced` are not checked.
+4. **Not built.** Attested contracts, attested policy transforms and
+   meta-agent verdicts, content-addressed contract attestation, and
+   signatures on supervisory truth outside effect envelopes remain
+   targets.
+5. **Limits.** A process running as the same user can read the key,
+   so local-mode agents are not contained by signatures alone. Deleting
+   a grant's revocation marker, restoring an older signed record, or
+   resetting a record's lifecycle state (`:effect/state`) before its
+   grant expires is not detected. The observed result
+   (`:effect/observed`) is outside the binding signature.
+
 ## Suggested adoption order
 
 1. **Envelopes + fail-closed `decide()` around the existing gate

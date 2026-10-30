@@ -97,6 +97,7 @@
    {:effect-id (:effect/id authority) :effect-class :effect/deploy
     :grant-id (get-in authority [:authority/grant :grant/id])
     :envelope-id (get-in authority [:authority/envelope :envelope/id])
+    :envelope (:authority/envelope authority)
     :proposal (:effect/proposal authority)}
    now))
 

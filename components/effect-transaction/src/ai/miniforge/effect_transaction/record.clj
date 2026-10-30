@@ -19,6 +19,7 @@
   "Validation and durable lifecycle changes for effect transactions."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.effect-transaction.envelope-signature :as envelope-signature]
    [ai.miniforge.effect-transaction.messages :as msg]
    [ai.miniforge.effect-transaction.schema :as schema]
    [ai.miniforge.effect-transaction.store :as store]
@@ -92,7 +93,7 @@
                           (msg/t :proposal/no-store)
                           {})
      (propose! dir opts (Instant/now))))
-  ([dir {:keys [effect-id effect-class grant-id envelope-id proposal]} ^Instant now]
+  ([dir {:keys [effect-id effect-class grant-id envelope-id envelope proposal]} ^Instant now]
    (let [at (normalize-instant now)
          t {:effect/id (if (some? effect-id) effect-id (random-uuid))
             :effect/class effect-class
@@ -101,7 +102,10 @@
             :effect/proposal (if proposal proposal {})
             :effect/state :proposed
             :effect/at at
-            :effect/updated-at at}]
-     (if (valid? t)
-       (store/create! dir t)
-       (invalid (msg/t :record/input-invalid) t)))))
+            :effect/updated-at at}
+         t (cond-> t envelope (-> (assoc :effect/envelope envelope)
+                                  envelope-signature/bind))]
+     (cond
+       (anomaly/anomaly? t) t
+       (valid? t) (store/create! dir t)
+       :else (invalid (msg/t :record/input-invalid) t)))))

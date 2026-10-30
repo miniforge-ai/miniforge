@@ -7,6 +7,7 @@
   (:require
    [ai.miniforge.effect-transaction.fixtures :as fixture]
    [ai.miniforge.effect-transaction.interface :as fx]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -29,6 +30,7 @@
             calls (atom 0)
             done (commit-with dir t (forge g) calls)]
         (is (= :failed (:effect/state done)))
+        (is (str/includes? (str (:effect/failure done)) "unsigned"))
         (is (zero? @calls))))))
 
 (deftest ^{:stratum 1} a-runtime-signed-grant-commits-test

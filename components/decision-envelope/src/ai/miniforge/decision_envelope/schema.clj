@@ -97,4 +97,5 @@
    [:envelope/obligations [:vector Obligation]]
    [:envelope/pins Pins]
    [:envelope/produced-by [:enum :runtime]]
-   [:envelope/at inst?]])
+   [:envelope/at inst?]
+   [:envelope/signature {:optional true} [:re #"\A[0-9a-f]{64}\z"]]])

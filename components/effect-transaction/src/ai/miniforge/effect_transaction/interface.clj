@@ -24,6 +24,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.core :as core]
+   [ai.miniforge.effect-transaction.envelope-signature :as envelope-signature]
    [ai.miniforge.effect-transaction.current-commit :as current]
    [ai.miniforge.effect-transaction.current-schema :as current-schema]
    [ai.miniforge.effect-transaction.messages :as msg]
@@ -60,6 +61,16 @@
 (def ^{:stratum 0} valid?
   "True when `t` satisfies the closed EffectTransaction schema."
   core/valid?)
+
+(def ^{:stratum 0} sign-envelope
+  "Sign the decision envelope that allows an effect with the runtime key.
+   Pass the result to `propose!` as `:envelope`; commit refuses a proposal
+   without a signed allowing envelope."
+  envelope-signature/sign)
+
+(def ^{:stratum 0} envelope-signed?
+  "True only when an envelope carries this runtime's signature."
+  envelope-signature/signed?)
 
 (def ^{:stratum 0} propose!
   "Create a durable proposal without replacing an existing effect ID."

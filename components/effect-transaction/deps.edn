@@ -2,6 +2,7 @@
  :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
         ai.miniforge/execution-grant {:local/root "../execution-grant"}
         ai.miniforge/messages {:local/root "../messages"}
+        ai.miniforge/runtime-signing {:local/root "../runtime-signing"}
         metosin/malli {:mvn/version "0.16.4"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}
