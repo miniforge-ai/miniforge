@@ -21,8 +21,6 @@
    `github/delivery->events`, and publishes each event to an event stream,
    where workflow triggers pick it up."
   (:require
-   [ai.miniforge.webhook-intake.deliveries :as deliveries]
-   [ai.miniforge.webhook-intake.github :as github]
    [ai.miniforge.webhook-intake.publish :as publish]
    [ai.miniforge.webhook-intake.signature :as signature]
    [cheshire.core :as json]
@@ -61,11 +59,7 @@
 
 (defn ^{:stratum 1} handle-github
   "Handle one request to `github-path`. `intake` holds :secret, :stream
-   and :seen. A redelivery of a published delivery is 200; one that
-   arrives while the delivery is still being published is 409; one after
-   a refused publish resumes from the first unpublished event; one after
-   a publish that threw is 409, since its event may already have started
-   a workflow."
+   and :seen; see `publish/delivery-response` for redeliveries."
   [{:keys [secret stream seen]} req]
   (let [body (body-bytes (:body req))
         {:strs [x-hub-signature-256 x-github-event x-github-delivery]} (:headers req)]
@@ -81,19 +75,10 @@
 
       :else
       (if-let [payload (parse-payload body)]
-        (let [{:keys [claimed? status published]} (deliveries/claim! seen x-github-delivery)
-              events (github/delivery->events {:event-name x-github-event
-                                               :delivery-id x-github-delivery
-                                               :payload payload})]
-          (cond
-            (= :done status) (json-response 200 {:duplicate true})
-            (= :unknown status) (json-response 409 {:error "publish-outcome-unknown"})
-            (not claimed?) (json-response 409 {:error "delivery-in-progress"})
-            :else
-            (case (publish/publish-delivery! stream seen x-github-delivery events published)
-              :done (json-response 202 {:events (mapv :event/type events)})
-              :failed (json-response 500 {:error "publish-failed"})
-              (json-response 500 {:error "publish-outcome-unknown"}))))
+        (apply json-response (publish/delivery-response {:stream stream :seen seen}
+                                                        {:event-name x-github-event
+                                                         :delivery-id x-github-delivery
+                                                         :payload payload}))
         (json-response 400 {:error "payload-invalid"})))))
 
 ;------------------------------------------------------------------------------ Layer 2
