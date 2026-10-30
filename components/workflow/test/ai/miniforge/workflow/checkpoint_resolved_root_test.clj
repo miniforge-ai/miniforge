@@ -54,10 +54,32 @@
       (is (= (:checkpoint/phase-path written)
              (get-in manifest [:workflow/phase-checkpoints :plan]))))))
 
+(defn- ^{:stratum 1} verify-one-run-directory [root]
+  (let [first-run (fs/create-dirs (fs/path root "first-run"))
+        second-run (fs/create-dirs (fs/path root "second-run"))
+        ctx (assoc-in (fixture/plan-completed-context root {})
+                      [:execution/phase-results :plan :phase/decision-envelope]
+                      {:envelope/decision :allow})
+        link (fs/create-sym-link (fs/path root (str (:execution/id ctx))) first-run)
+        written (with-redefs [checkpoint-file/write! (retarget-after-first-write
+                                                      checkpoint-file/write! link second-run)]
+                  (store/persist-execution-state! ctx))
+        resolved (str (fs/real-path first-run))]
+    (is (not (anomaly/anomaly? written)))
+    (doseq [path [(:checkpoint/phase-path written)
+                  (:checkpoint/machine-snapshot-path written)
+                  (:checkpoint/manifest-path written)]]
+      (is (fs/starts-with? path resolved) path))
+    (is (fs/exists? (fs/path first-run store/gate-history-filename)))
+    (is (empty? (fs/list-dir second-run)) "nothing lands in the new target")))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} a-retargeted-root-alias-cannot-split-one-checkpoint
   (fixture/call-with-posix-checkpoint-root verify-one-root))
+
+(deftest ^{:stratum 2} a-retargeted-run-directory-link-cannot-split-one-checkpoint
+  (fixture/call-with-posix-checkpoint-root verify-one-run-directory))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.workflow.checkpoint-resolved-root-test))

@@ -160,9 +160,11 @@
                         stderr))
 
 (defn ^{:stratum 2} start-capture-process!
-  [cmd {:keys [workdir stdin]}]
+  "Start `cmd` with the agent environment plus the backend's own `env`
+   entries (config miniforge supplies, such as OpenCode's inline config)."
+  [cmd {:keys [workdir stdin env]}]
   (let [builder (ProcessBuilder. ^java.util.List cmd)]
-    (apply-process-env! builder (agent-env))
+    (apply-process-env! builder (merge (agent-env) env))
     (when workdir
       (.directory builder (io/file workdir)))
     (let [process (.start builder)

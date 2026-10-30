@@ -23,13 +23,20 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
-   [ai.miniforge.llm.protocols.impl.llm-client.completion :as completion]))
+   [ai.miniforge.llm.protocols.impl.llm-client.cli-args :as cli-args]
+   [ai.miniforge.llm.protocols.impl.llm-client.completion :as completion]
+   [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]
+   [cheshire.core :as json]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Private fn accessor
 (defn- ^{:stratum 0} private-fn [sym]
   (var-get (ns-resolve 'ai.miniforge.llm.protocols.impl.llm-client sym)))
+
+(def ^{:stratum 0} ^:private supervised
+  "Hook settings, as an artifact session passes them."
+  {:supervision {:settings-path "/tmp/s.json"}})
 
 (deftest ^{:stratum 0} claude-mcp-allowlist-string-test
   (testing "keyword server + tool → mcp__<server>__<tool>"
@@ -92,10 +99,11 @@
 ;; claude-args
 ;; ============================================================================
 (deftest ^{:stratum 1} claude-args-minimal-test
-  (testing "a minimal prompt with hook settings produces [-p --settings <path> <prompt>]"
+  (testing "a minimal prompt with hook settings loads only those settings and refuses what the hook does not allow"
     (let [args ((private-fn 'claude-args) {:prompt "hello"
                                            :supervision {:settings-path "/tmp/s.json"}})]
-      (is (= ["-p" "--settings" "/tmp/s.json" "hello"] args)))))
+      (is (= ["-p" "--setting-sources" "" "--permission-mode" "dontAsk" "--settings" "/tmp/s.json" "hello"]
+             args)))))
 
 (deftest ^{:stratum 1} claude-args-isolated-test
   (testing "a call with no hook settings gets no tools, settings, skills, or host MCP config"
@@ -116,10 +124,12 @@
       (is (some #{"--setting-sources"} args))
       (is (= 1 (count (filter #(= "--strict-mcp-config" %) args))))))
 
-  (testing "a call with hook settings and no isolated? gets none of the flags"
+  (testing "a call with hook settings and no isolated? keeps its tools, and gets the session flags"
     (let [args ((private-fn 'claude-args) {:prompt "p"
                                            :supervision {:settings-path "/tmp/s.json"}})]
-      (is (not-any? #{"--tools" "--setting-sources" "--disable-slash-commands"} args)))))
+      (is (not-any? #{"--tools" "--disable-slash-commands"} args))
+      (is (= ["--setting-sources" "" "--permission-mode" "dontAsk"]
+             (->> args (drop-while #(not= "--setting-sources" %)) (take 4)))))))
 
 (deftest ^{:stratum 1} claude-args-streaming-test
   (testing "streaming adds output-format and verbose flags"
@@ -172,6 +182,14 @@
                  [{:mcp/server :context :mcp/tool :context_read}
                   :Write]})]
       (is (some #(= "mcp__context__context_read,Write" %) args)))))
+
+(deftest ^{:stratum 1} claude-args-session-gets-no-allowed-tools-test
+  (testing "a session call takes its allow rules from its settings file, not --allowedTools"
+    (let [args ((private-fn 'claude-args)
+                {:prompt "p"
+                 :supervision {:settings-path "/tmp/s.json"}
+                 :mcp-allowed-tools [{:mcp/server :context :mcp/tool :context_write} :Write]})]
+      (is (not (some #{"--allowedTools"} args))))))
 
 (deftest ^{:stratum 1} claude-args-disallowed-tools-test
   (testing "disallowed-tools adds --disallowedTools"
@@ -303,14 +321,51 @@
 ;; opencode-args
 ;; ============================================================================
 (deftest ^{:stratum 1} opencode-args-minimal-test
-  (testing "minimal prompt invokes non-interactive run"
-    (let [args ((private-fn 'opencode-args) {:prompt "explain"})]
+  (testing "minimal prompt in a session invokes non-interactive run"
+    (let [args ((private-fn 'opencode-args) (merge supervised {:prompt "explain"}))]
       (is (= ["run" "explain"] args)))))
 
+(deftest ^{:stratum 1} opencode-call-outside-a-session-is-isolated-test
+  (testing "a call with no hook settings runs without external plugins, as an agent that may use no tool"
+    (let [args   ((private-fn 'opencode-args) {:prompt "explain" :agent "build"})
+          agent  (nth args 3)
+          env    (cli-args/opencode-env {:prompt "explain"})
+          config (json/parse-string (get env "OPENCODE_CONFIG_CONTENT"))]
+      (is (= ["run" "--pure" "--agent"] (take 3 args)))
+      (is (re-matches #"miniforge-isolated-[0-9a-f]{8}" agent))
+      (is (= ["explain"] (drop 4 args)) "the request's own agent is not used")
+      (is (= "1" (get env "OPENCODE_PURE")))
+      (is (= "1" (get env "OPENCODE_DISABLE_PROJECT_CONFIG")) "the worktree's own OpenCode config is not read")
+      (is (every? #{"deny"} (vals (get config "permission"))))
+      (is (= "primary" (get-in config ["agent" agent "mode"])))
+      (is (every? #{"deny"} (vals (get-in config ["agent" agent "permission"]))))))
+  (testing "the operator's own inline config is kept; only its permissions are replaced"
+    (with-redefs [settings/getenv-value (fn [k] (when (= "OPENCODE_CONFIG_CONTENT" k)
+                                                  "{\"model\":\"openrouter/m\",\"permission\":{\"bash\":\"allow\"},\"agent\":{\"mine\":{\"mode\":\"primary\"}}}"))]
+      (let [config (json/parse-string (get (cli-args/opencode-env {:prompt "p"}) "OPENCODE_CONFIG_CONTENT"))]
+        (is (= "openrouter/m" (get config "model")))
+        (is (= "deny" (get-in config ["permission" "bash"])))
+        (is (contains? (get config "agent") "mine")))))
+  (testing "an isolated call may not attach, run a configured command, or resume a session"
+    (doseq [option [{:attach "http://localhost:4096"} {:command "review"} {:session "ses_1"}
+                    {:continue? true} {:fork? true}]]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   ((private-fn 'opencode-args) (merge {:prompt "p"} option)))
+          (pr-str option))))
+  (testing "an operator inline config that is not plain JSON fails rather than being dropped"
+    (with-redefs [settings/getenv-value (fn [k] (when (= "OPENCODE_CONFIG_CONTENT" k) "{\"model\": \"m\", // jsonc\n}"))]
+      (is (thrown? clojure.lang.ExceptionInfo (cli-args/opencode-env {:prompt "p"})))))
+  (testing "isolated? does the same for a session call"
+    (is (some #{"--pure"} ((private-fn 'opencode-args) (merge supervised {:prompt "p" :isolated? true}))))
+    (is (some? (cli-args/opencode-env (merge supervised {:isolated? true})))))
+  (testing "a session call gets neither"
+    (is (nil? (cli-args/opencode-env supervised)))))
+
 (deftest ^{:stratum 1} opencode-args-model-and-agent-test
-  (testing "model and agent pass through to OpenCode"
+  (testing "in a session, model and agent pass through to OpenCode"
     (let [args ((private-fn 'opencode-args)
                 {:prompt "fix it"
+                 :supervision {:settings-path "/tmp/s.json"}
                  :model "anthropic/claude-sonnet-4-5"
                  :agent "miniforge-implementer"})]
       (is (= "run" (first args)))
@@ -324,6 +379,7 @@
   (testing "session reuse and serve attachment flags are preserved"
     (let [args ((private-fn 'opencode-args)
                 {:prompt "continue"
+                 :supervision {:settings-path "/tmp/s.json"}
                  :attach "http://localhost:4096"
                  :session "sess_123"
                  :fork? true})]
@@ -338,6 +394,7 @@
   (testing "attached files expand into repeated --file flags"
     (let [args ((private-fn 'opencode-args)
                 {:prompt "review"
+                 :supervision {:settings-path "/tmp/s.json"}
                  :files ["README.md" "src/core.clj"]})]
       (is (= ["run"
               "--file" "README.md"

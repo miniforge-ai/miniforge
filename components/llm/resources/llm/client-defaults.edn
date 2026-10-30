@@ -62,6 +62,19 @@
   :post-kill-join-timeout-ms 5000
   :poll-interval-ms 250}
 
+ ;; OpenCode allows most tools when its config says nothing. A call
+ ;; outside an artifact session has no miniforge hook, so it runs with this
+ ;; permission block as OPENCODE_CONFIG_CONTENT, the inline config OpenCode
+ ;; applies over its global and project config: every permission denied.
+ ;; Keys are OpenCode's (https://opencode.ai/docs/permissions/); "*" covers
+ ;; any it adds later.
+ :opencode
+ {:deny-all-permission {"*" "deny" "read" "deny" "edit" "deny" "glob" "deny"
+                        "grep" "deny" "list" "deny" "bash" "deny" "task" "deny"
+                        "todowrite" "deny" "skill" "deny" "lsp" "deny"
+                        "question" "deny" "webfetch" "deny" "websearch" "deny"
+                        "external_directory" "deny" "doom_loop" "deny"}}
+
  ;; The environment an agent CLI process (claude, codex, cursor-agent,
  ;; opencode) and the backend preflight probe get: only these variables
  ;; from miniforge's own environment. The CLI passes its environment on to
