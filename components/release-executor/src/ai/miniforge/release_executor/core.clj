@@ -456,13 +456,14 @@
 
    With a run id in :provenance the branch is the run's fixed one
    (metadata/release-branch-name), not the releaser's choice, so a retry
-   or resume reuses the branch and its PR."
+   or resume reuses the branch and its PR. :origin, the run's lineage
+   across resume attempts, wins over :workflow."
   [state]
   (if (failed? state)
     state
     (let [{:keys [release-meta host-mode? worktree-path executor environment-id
                   base-branch-override logger provenance task-description]} state
-          branch-name (if-let [run-id (:workflow provenance)]
+          branch-name (if-let [run-id (or (:origin provenance) (:workflow provenance))]
                         (metadata/release-branch-name run-id (:task provenance) task-description)
                         (:release/branch-name release-meta))
           result (if host-mode?

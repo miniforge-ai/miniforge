@@ -223,6 +223,17 @@
       (string? wid) (parse-uuid wid)
       :else         nil)))
 
+(defn- ^{:stratum 0} opts-origin-id
+  "The run this one continues, from opts :origin-id (a resume attempt under
+   a new run id passes the original run's). A uuid or uuid-shaped string;
+   anything else is nil."
+  [opts]
+  (let [origin (:origin-id opts)]
+    (cond
+      (uuid? origin)   origin
+      (string? origin) (parse-uuid origin)
+      :else            nil)))
+
 (defn ^{:stratum 0} merge-metrics
   "Merge phase metrics into execution metrics.
    Nil-safe: treats nil values as 0 to prevent NPE from merge-with +."
@@ -352,10 +363,14 @@
   (let [execution-machine (fsm/compile-execution-machine workflow)
         fsm-state (let [initial-state (fsm/initialize-execution execution-machine)]
                     (fsm/start-execution execution-machine initial-state))
-        checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)]
+        checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
+        run-id (or (opts-run-id opts) (random-uuid))]
     (sync-machine-projections
      (merge
-      {:execution/id (or (opts-run-id opts) (random-uuid))
+      {:execution/id run-id
+       ;; The run's lineage: its own id, or the run a resume attempt
+       ;; continues. Effects keyed on it outlive attempt ids.
+       :execution/origin-id (or (opts-origin-id opts) run-id)
        :execution/workflow workflow
        :execution/workflow-id (:workflow/id workflow)
        :execution/workflow-version (:workflow/version workflow)
@@ -408,6 +423,9 @@
        :execution/fsm-machine execution-machine
        :execution/fsm-state fsm-state
        :execution/input (get machine-snapshot :execution/input input)
+       :execution/origin-id (or (:execution/origin-id machine-snapshot)
+                                (opts-origin-id opts)
+                                (:execution/id machine-snapshot))
        :execution/phase-results phase-results
        ;; From the SNAPSHOT, never from `opts`. A resumed run is still
        ;; acting under the authority it was started with; taking this
