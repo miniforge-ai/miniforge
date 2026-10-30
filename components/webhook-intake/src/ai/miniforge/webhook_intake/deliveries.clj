@@ -23,7 +23,10 @@
    `seen` is an atom of {:deliveries {id {:status :published}} :order [id]}
    holding the newest `recent-delivery-capacity` ids, oldest first.
    :status is :in-flight while a request publishes the delivery's events,
-   :done once all are published, and :failed after a publish failed;
+   :done once all are published, :failed after a publish was refused
+   (nothing delivered, so a redelivery may retry), and :unknown after a
+   publish threw (a subscriber may already have the event, so it is not
+   retried);
    :published counts the events already published, in the order
    delivery->events returns them.")
 
@@ -59,21 +62,20 @@
   [{:keys [deliveries order] :as s} id]
   (let [{:keys [status published]} (get deliveries id)]
     (case status
-      (:in-flight :done)
+      (:in-flight :done :unknown)
       [s {:claimed? false :status status}]
 
       :failed
       [(assoc-in s [:deliveries id :status] :in-flight)
        {:claimed? true :published published}]
 
-      (let [order (conj order id)
-            evicted (->> order
+      (let [evicted (->> order
                          (remove #(= :in-flight (get-in deliveries [% :status])))
-                         (take (max 0 (- (count order) recent-delivery-capacity)))
+                         (take (max 0 (- (inc (count order)) recent-delivery-capacity)))
                          set)]
         [{:deliveries (assoc (apply dissoc deliveries evicted)
                              id {:status :in-flight :published 0})
-          :order (vec (remove evicted order))}
+          :order (conj (vec (remove evicted order)) id)}
          {:claimed? true :published 0}]))))
 
 ;------------------------------------------------------------------------------ Layer 2

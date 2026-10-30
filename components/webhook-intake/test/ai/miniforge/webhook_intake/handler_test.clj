@@ -103,13 +103,15 @@
       (is (= 200 (:status (handler (delivery-request merged-body)))))
       (is (= 1 (count @published))))))
 
-(deftest ^{:stratum 2} failed-publish-allows-redelivery-test
-  (testing "a publish that throws is 500 and the redelivery is processed"
+(deftest ^{:stratum 2} thrown-publish-is-not-retried-test
+  (testing "a publish that throws after a subscriber got the event is 500, and a redelivery is 409, not a second publish"
     (let [{:keys [intake published]} (intake-with-collector)
           handler (sut/create-handler intake)]
-      (is (= 500 (:status (with-redefs [event-stream/publish! (fn [& _] (throw (Exception. "sink down")))]
+      (is (= 500 (:status (with-redefs [event-stream/publish! (fn [_ event]
+                                                                (swap! published conj event)
+                                                                (throw (Exception. "filter threw")))]
                             (handler (delivery-request merged-body))))))
-      (is (= 202 (:status (handler (delivery-request merged-body)))))
+      (is (= 409 (:status (handler (delivery-request merged-body)))))
       (is (= 1 (count @published))))))
 
 (deftest ^{:stratum 2} in-flight-redelivery-is-not-acknowledged-test
@@ -129,14 +131,14 @@
       (is (= 1 (count @published))))))
 
 (deftest ^{:stratum 2} partial-publish-resumes-test
-  (testing "a retry after the second of two events failed publishes only the second"
+  (testing "a retry after the second of two events was refused publishes only the second"
     (let [{:keys [intake published]} (intake-with-collector)
           handler (sut/create-handler intake)
           real-publish event-stream/publish!
           calls (atom 0)]
       (is (= 500 (:status (with-redefs [event-stream/publish! (fn [stream event]
                                                                 (if (= 2 (swap! calls inc))
-                                                                  (throw (Exception. "sink down"))
+                                                                  {:rejected? true :reason :workflow-quiesced}
                                                                   (real-publish stream event)))]
                             (handler (delivery-request two-pr-failed-suite-body :event "check_suite"))))))
       (is (= 202 (:status (handler (delivery-request two-pr-failed-suite-body :event "check_suite")))))

@@ -26,36 +26,39 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} published?
-  "True when a publish! result is the delivered event: not a structured
-   rejection (e.g. a quiesced workflow) and not an anomaly."
-  [result]
-  (and (map? result)
-       (not (:rejected? result))
-       (not (anomaly/anomaly? result))))
-
 (defn ^{:stratum 0} publish-one
-  "publish! `event`, turning a thrown exception into an anomaly."
+  "publish! `event`. :published when it returned the event; :refused when
+   it returned a rejection (e.g. a quiesced workflow) or an anomaly, which
+   it does before any sink or subscriber sees the event; :unknown when it
+   threw, which can happen after subscribers already received it (a
+   subscriber filter throwing, or logging after delivery)."
   [stream event]
   (try+
-    (event-stream/publish! stream event)
-    (catch Exception e
-      (anomaly/anomaly :fault (str (ex-message e)) {}))))
+    (let [result (event-stream/publish! stream event)]
+      (if (and (map? result)
+               (not (:rejected? result))
+               (not (anomaly/anomaly? result)))
+        :published
+        :refused))
+    (catch Exception _
+      :unknown)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} publish-delivery!
   "Publish `events` of delivery `id` from index `start`, recording
-   progress in `seen`. True once all are published (the delivery is
-   :done); false at the first that is not (the delivery is :failed, and
-   a redelivery resumes from that event)."
+   progress in `seen`. Returns :done once all are published; :failed at
+   the first refused event (a redelivery resumes from it); :unknown at
+   the first that threw (not retried: a subscriber may already have it)."
   [stream seen id events start]
   (loop [i start]
     (if (>= i (count events))
       (do (deliveries/record! seen id {:status :done :published i})
-          true)
-      (if (published? (publish-one stream (nth events i)))
-        (do (deliveries/record! seen id {:published (inc i)})
-            (recur (inc i)))
-        (do (deliveries/record! seen id {:status :failed :published i})
-            false)))))
+          :done)
+      (let [outcome (publish-one stream (nth events i))]
+        (if (= :published outcome)
+          (do (deliveries/record! seen id {:published (inc i)})
+              (recur (inc i)))
+          (let [status (if (= :refused outcome) :failed :unknown)]
+            (deliveries/record! seen id {:status status :published i})
+            status))))))

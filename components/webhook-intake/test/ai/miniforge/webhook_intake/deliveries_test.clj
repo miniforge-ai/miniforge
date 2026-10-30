@@ -56,3 +56,19 @@
         (sut/record! seen (str "d-" i) {:status :done}))
       (is (= {:claimed? false :status :in-flight} (sut/claim! seen "slow")))
       (is (not (contains? (:deliveries @seen) "d-0")) "the oldest finished delivery went instead"))))
+
+(deftest ^{:stratum 0} all-in-flight-at-capacity-test
+  (testing "with every tracked delivery in flight, a new one is still tracked and evictable later"
+    (let [seen (sut/new-seen)]
+      (doseq [i (range sut/recent-delivery-capacity)]
+        (sut/claim! seen (str "d-" i)))
+      (sut/claim! seen "new")
+      (is (= (count (:order @seen)) (count (:deliveries @seen))))
+      (is (= "new" (last (:order @seen)))))))
+
+(deftest ^{:stratum 0} unknown-outcome-is-not-claimed-test
+  (testing "a delivery whose publish threw is not claimed again"
+    (let [seen (sut/new-seen)]
+      (sut/claim! seen "d-1")
+      (sut/record! seen "d-1" {:status :unknown :published 0})
+      (is (= {:claimed? false :status :unknown} (sut/claim! seen "d-1"))))))
