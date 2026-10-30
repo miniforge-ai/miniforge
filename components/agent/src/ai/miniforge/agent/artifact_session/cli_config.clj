@@ -243,11 +243,17 @@
    permissions.allow. A session runs Claude with `--setting-sources \"\"
    --permission-mode dontAsk`, so these are the only allow rules it has:
    a tool the role does not list is refused even if the hook let it by,
-   and a call Claude's own checks would ask about is refused, not run."
+   and a call Claude's own checks would ask about is refused, not run.
+
+   The handler sets \"onFailure\" \"block\" (Claude Code 2.1.295+), so a
+   hook that times out or fails to answer blocks the call; by default
+   Claude would fall back to the allow rules and run it."
   [hook-cmd allowed-tools]
   {"permissions" {"allow" (vec (sort allowed-tools))}
    "hooks" {"PreToolUse" [{"matcher" "*"
-                           "hooks"   [{"type" "command" "command" hook-cmd}]}]}})
+                           "hooks"   [{"type" "command"
+                                       "command" hook-cmd
+                                       "onFailure" "block"}]}]}})
 
 (defn ^{:stratum 0} role-allowed-tools
   "The tools `role` may call under the shipped tool policy, or none for a
