@@ -6,6 +6,10 @@
 
    Map entries and set members are sorted by their own encodings, and
    strings are printed readably whatever the caller's printer bindings.
+   Keywords and symbols carry a type tag and their namespace and name as
+   quoted strings, since their printed form is not escaped: the symbol
+   `nil` and nil, or the symbol `a b` and the symbols `a` `b`, would
+   otherwise encode alike.
    A map or set holding two entries that would encode alike (an Instant
    and a Date at the same moment, say) is refused rather than collapsed,
    so two distinct values never share an encoding."
@@ -27,9 +31,11 @@
   "Encoding of one non-collection value, or a refusal."
   [x]
   (cond
-    (or (nil? x) (boolean? x) (string? x) (keyword? x) (symbol? x) (uuid? x)
-        (ratio? x) (decimal? x))
+    (or (nil? x) (boolean? x) (string? x) (uuid? x) (ratio? x) (decimal? x))
     (pr-str x)
+
+    (keyword? x) (str "#keyword" (pr-str [(namespace x) (name x)]))
+    (symbol? x) (str "#symbol" (pr-str [(namespace x) (name x)]))
 
     (integer? x) (str (biginteger x))
     (float? x) (pr-str (double x))
