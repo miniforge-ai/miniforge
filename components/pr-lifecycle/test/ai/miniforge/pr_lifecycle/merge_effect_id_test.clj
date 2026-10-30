@@ -28,13 +28,16 @@
      :grant-breach-dir (tmp "attempt-grants")}))
 
 (defn- ^{:stratum 0} github
-  "gh answers for a PR whose state is `@state`: OPEN, MERGED or CLOSED."
+  "gh answers for a PR whose state is `@state`: OPEN, MERGED or CLOSED.
+   A `--jq .headRefOid` read gets the bare head, as gh returns it."
   [state]
-  (fn [_args _worktree]
-    (dag/ok {:output (json/generate-string
-                      {:headRefOid "0123456789abcdef0123456789abcdef01234567"
-                       :state @state
-                       :mergeCommit (when (= "MERGED" @state) {:oid "squash"})})})))
+  (fn [args _worktree]
+    (dag/ok {:output (if (some #{"--jq"} args)
+                       "0123456789abcdef0123456789abcdef01234567"
+                       (json/generate-string
+                        {:headRefOid "0123456789abcdef0123456789abcdef01234567"
+                         :state @state
+                         :mergeCommit (when (= "MERGED" @state) {:oid "squash"})}))})))
 
 ;------------------------------------------------------------------------------ Layer 1
 

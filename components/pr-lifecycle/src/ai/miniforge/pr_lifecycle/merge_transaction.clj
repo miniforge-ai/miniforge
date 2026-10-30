@@ -58,11 +58,6 @@
    process happened to start in is an audit trail nobody can find."
   "effects")
 
-(def ^{:stratum 0} terminal-pr-states
-  "GitHub PR states after which the PR can no longer merge: merged, or
-   closed without merging. OPEN is not one; a merge may still be queued."
-  #{"MERGED" "CLOSED"})
-
 (defn ^{:stratum 0} merged-state?
   "True when GitHub reports the PR as merged. GitHub is the authority on
    whether a merge happened; nothing local is."
@@ -112,14 +107,6 @@
   (get context :clock #(Instant/now)))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} settled-answer
-  "A probe answer only once GitHub reports a terminal PR state. An OPEN
-   PR, for example one a merge queue is still processing, is no answer,
-   so the record stays reconcilable."
-  [answer]
-  (when (contains? terminal-pr-states (get-in answer [:effect/observed :pr/state]))
-    answer))
 
 (defn ^{:stratum 1} store-dir
   "Resolve the effect store from `context`, falling back to the
@@ -198,5 +185,4 @@
    untouched and the next pass asks again. Callers publish a merged
    event only when the returned record reports `:effect/matched?` true."
   [context t pr-number ^Instant now run-gh]
-  (fx/reconcile! (store-dir context) t
-                 (fn [_] (settled-answer (probe run-gh pr-number))) now))
+  (fx/reconcile! (store-dir context) t (fn [_] (probe run-gh pr-number)) now))

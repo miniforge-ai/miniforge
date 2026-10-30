@@ -91,13 +91,6 @@
                  (assoc :grant/revocation-failure
                         (:grant/revocation-failure settled))))
 
-      (and (= :reconciled (:effect/state settled))
-           (false? (:effect/matched? settled)))
-      (dag/err :merge-closed-unmerged
-               (messages/t :merge/closed-unmerged)
-               {:effect/id (:effect/id settled)
-                :effect/observed (:effect/observed settled)})
-
       merge-sha
       (merged-result operations worktree-path pr-number
                      policy context settled merge-sha)
