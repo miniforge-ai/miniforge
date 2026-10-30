@@ -47,11 +47,15 @@
     (catch Exception e
       (dag/err :gh-exception (.getMessage e)))))
 
-;; Value coercion
-(defn- ^{:stratum 0} keywordize-val
-  "Coerce a map value to a lower-case keyword, returning `default` when nil."
-  [m k default]
-  (or (some-> (get m k) str/lower-case keyword) default))
+;; Check classification
+(def ^{:stratum 0} bucket->group
+  "Status group for each value of the `bucket` field of `gh pr checks --json`.
+   gh derives the bucket from a check's state and conclusion."
+  {"pass"     :passed
+   "fail"     :failed
+   "pending"  :pending
+   "skipping" :neutral
+   "cancel"   :cancelled})
 
 (defn ^{:stratum 0} get-check-logs
   "Get logs for failed checks.
@@ -109,41 +113,37 @@
       (dag/ok {:raw (:output (:data result))})
       result)))
 
+;; Check classification
+(defn ^{:stratum 1} check-group
+  "Status group of one gh check, from its `bucket`; :unknown when absent."
+  [check]
+  (get bucket->group (:bucket check) :unknown))
+
+;------------------------------------------------------------------------------ Layer 2
+
 ;; Status computation
-(defn ^{:stratum 1} compute-ci-status
+(defn ^{:stratum 2} compute-ci-status
   "Compute overall CI status from individual checks.
 
    Arguments:
-   - checks: Sequence of check maps with :state and :conclusion
+   - checks: Sequence of `gh pr checks --json` maps with :name :state :bucket
 
-   Returns {:status keyword :passed [] :failed [] :pending []}"
+   A cancelled check is not a pass: it outranks passed and neutral checks.
+
+   Returns {:status keyword :passed [] :failed [] :pending [] :neutral []
+            :cancelled [] :total n}"
   [checks]
-  (let [grouped (group-by (fn [check]
-                            (let [state      (keywordize-val check :state :unknown)
-                                  conclusion (keywordize-val check :conclusion :unknown)]
-                              (cond
-                                (= state :completed)
-                                (case conclusion
-                                  :success :passed
-                                  (:failure :action-required) :failed
-                                  (:neutral :skipped) :neutral
-                                  :cancelled :cancelled
-                                  :timed-out :timed-out
-                                  :failed)
-
-                                (#{:in-progress :queued :waiting :pending} state)
-                                :pending
-
-                                :else :unknown)))
-                          checks)
+  (let [grouped (group-by check-group checks)
         passed (vec (get grouped :passed []))
         failed (vec (get grouped :failed []))
         pending (vec (get grouped :pending []))
         neutral (vec (get grouped :neutral []))
+        cancelled (vec (get grouped :cancelled []))
 
         status (cond
                  (seq failed) :failure
                  (seq pending) :pending
+                 (seq cancelled) :cancelled
                  (seq passed) :success
                  (seq neutral) :neutral
                  :else :unknown)]
@@ -153,4 +153,5 @@
      :failed failed
      :pending pending
      :neutral neutral
+     :cancelled cancelled
      :total (count checks)}))
