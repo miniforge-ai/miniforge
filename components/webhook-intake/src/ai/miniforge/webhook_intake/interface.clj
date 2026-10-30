@@ -26,6 +26,11 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} sign
+  "`(sign secret body-bytes)`: the X-Hub-Signature-256 value GitHub sends
+   for `body-bytes` under `secret`, for clients and tests."
+  signature/sign)
+
 (def ^{:stratum 0} valid-signature?
   "`(valid-signature? secret body-bytes x-hub-signature-256)`: true when the
    header is GitHub's HMAC-SHA256 signature of the raw body under the
