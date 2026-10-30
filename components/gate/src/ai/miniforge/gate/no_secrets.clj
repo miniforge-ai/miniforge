@@ -95,12 +95,6 @@
             ["--no-textconv" "--no-ext-diff" "--text" "--no-color" "--inter-hunk-context=0"])
           args))
 
-(defn- ^{:stratum 0} nul-split
-  "NUL-terminated git output as fields, untrimmed: a name may start or end
-   with a space."
-  [s]
-  (into [] (remove empty?) (str/split (str s) #"\u0000")))
-
 (defn ^{:stratum 0} added-lines
   "[line-number text] for each line a zero-context unified diff adds,
    numbered in the new version. Public for tests."
