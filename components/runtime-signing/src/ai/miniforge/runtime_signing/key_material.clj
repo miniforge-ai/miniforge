@@ -34,16 +34,14 @@
   "Any of these on the key directory lets another user swap the key file."
   #{PosixFilePermission/GROUP_WRITE PosixFilePermission/OTHERS_WRITE})
 
-(def ^{:stratum 0} process-owner
-  "The owner this process creates files as: the owner of a temporary file
-   it creates once. Comparing owners, not the `user.name` property, holds
-   when the UID has no passwd entry (a container run as a bare UID) or
-   `user.name` is overridden."
-  (delay
-    (let [probe (Files/createTempFile "miniforge-owner-" ".probe" (into-array FileAttribute []))]
-      (try
-        (Files/getOwner probe (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
-        (finally (Files/deleteIfExists probe))))))
+(def ^{:stratum 0} known-owner
+  "The owner this process creates files as, once a probe has found it."
+  (atom nil))
+
+(defn ^{:stratum 0} owned-by?
+  "True when `owner` owns `path` itself (links not followed)."
+  [owner ^Path path]
+  (= owner (Files/getOwner path (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))))
 
 (defn ^{:stratum 0} posix-file-system? [^Path path]
   (contains? (.supportedFileAttributeViews (.getFileSystem path)) "posix"))
@@ -67,11 +65,20 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} owned-by-process-user?
-  "True when this process's owner owns `path` itself (links not followed)."
-  [^Path path]
-  (= @process-owner
-     (Files/getOwner path (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))))
+(defn ^{:stratum 1} process-owner
+  "The owner this process creates files as: the owner of a temporary file
+   it creates in `dir`. Comparing owners, not the `user.name` property,
+   holds when the UID has no passwd entry (a container run as a bare UID)
+   or `user.name` is overridden. The probe goes in the key directory,
+   which key creation writes anyway, so no other directory has to be
+   writable; a key directory this process cannot write fails closed. A
+   found owner is remembered; a failed probe is not."
+  [^Path dir]
+  (or @known-owner
+      (let [probe (Files/createTempFile dir ".owner-" ".probe" (into-array FileAttribute []))]
+        (try
+          (reset! known-owner (Files/getOwner probe (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])))
+          (finally (Files/deleteIfExists probe))))))
 
 (defn ^{:stratum 1} fresh-key-text
   "New random key material as hex."
@@ -80,24 +87,22 @@
     (.nextBytes (SecureRandom.) key-bytes)
     (hmac/hex key-bytes)))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} exposed?
-  "True when another user owns the file at `path` or holds any permission
-   on it."
-  [posix? ^Path path]
+(defn ^{:stratum 1} exposed?
+  "True when someone other than `owner` owns the file at `path`, or
+   another user holds any permission on it."
+  [posix? owner ^Path path]
   (and posix?
-       (or (not (owned-by-process-user? path))
+       (or (not (owned-by? owner path))
            (boolean (some exposing-permissions
                           (Files/getPosixFilePermissions path no-follow))))))
 
-(defn ^{:stratum 2} safe-directory?
-  "True when `dir` is a real directory that only the process user can
-   write. POSIX ownership is not checked where POSIX modes do not exist."
-  [posix? ^Path dir]
+(defn ^{:stratum 1} safe-directory?
+  "True when `dir` is a real directory that only `owner` can write.
+   POSIX ownership is not checked where POSIX modes do not exist."
+  [posix? owner ^Path dir]
   (and (not (Files/isSymbolicLink dir))
        (or (not posix?)
-           (and (owned-by-process-user? dir)
+           (and (owned-by? owner dir)
                 (not-any? writable-by-others
                           (Files/getPosixFilePermissions dir no-follow))))))
 

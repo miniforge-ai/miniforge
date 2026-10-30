@@ -34,7 +34,9 @@ contents, so a process that can write those stores can write authority.
      or others; a key file that is a link, not a regular file (a FIFO would block the read), not owned by this process's
      owner, or open to other users; a file over 256 bytes or not exactly 64 hex characters after trimming. The file is
      read to EOF through a channel opened with NOFOLLOW_LINKS. "This process's owner" is the owner of a temporary file
-     the process creates, compared as a principal, so a container run as a bare UID with no passwd entry still works.
+     the process creates in the key directory, compared as a principal, so a container run as a bare UID with no passwd
+     entry still works and no other directory (such as `java.io.tmpdir`) has to be writable. A found owner is remembered
+     for the process; a failed probe is not.
    3. On a file system without POSIX permissions the key is created without them.
 3. Registered on the dev and test classpaths. Projects pick it up when execution-grant depends on it.
 
@@ -48,7 +50,8 @@ authority. A process running as the same user can read the key, so this alone do
   malformed key file, a padded key with trailing garbage, and a world-writable key directory are refused; a signature
   verifies, survives key reordering, and fails for a changed value, another key, nil, or a wrong signature; printer
   bindings (`*print-length* 0`, `*print-readably* false`) change nothing; `#{1 1.0}` and `#{1}` sign differently; a set
-  of an Instant and a Date at the same moment is refused.
+  of an Instant and a Date at the same moment is refused; an owner probe that fails (no key directory yet) is not
+  remembered, and a later probe finds the owner.
 2. Babashka: with the dev classpath, `bb` created a key `rw-------`, read it back unchanged, and verified a signature.
   The existing graalvm compatibility test requires every component under bb, this one included, and passes. That test
   file is already over the stratum limit on main, so I did not add a call-path test to it.

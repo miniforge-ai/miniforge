@@ -5,6 +5,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.runtime-signing.interface :as signing]
+   [ai.miniforge.runtime-signing.key-material :as material]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]])
   (:import
@@ -128,3 +129,13 @@
         "another runtime's key does not verify")
     (is (not (signing/signed? k grant nil)))
     (is (not (signing/signed? k grant (apply str (repeat 64 "0")))))))
+
+(deftest ^{:stratum 1} a-failed-owner-probe-is-not-remembered-test
+  (with-redefs [material/known-owner (atom nil)]
+    (let [dir (.getParent (.toPath (key-file)))]
+      (is (thrown? Exception (material/process-owner dir))
+          "no key directory yet, so the probe cannot be written")
+      (Files/createDirectories dir (into-array FileAttribute []))
+      (is (= (Files/getOwner dir (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
+             (material/process-owner dir))
+          "a later probe in a writable directory still finds the owner"))))
