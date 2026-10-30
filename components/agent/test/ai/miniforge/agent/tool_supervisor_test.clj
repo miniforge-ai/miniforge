@@ -37,7 +37,8 @@
           output (with-out-str
                    (binding [*in* (java.io.StringReader. payload)]
                      (is (= 0 (sut/hook-eval-stdin! {:role :implementer})))))]
-      (is (= "{}\n" output)))))
+      (is (= "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\"}}\n"
+             output)))))
 
 ;; Fail closed
 (defn- ^{:stratum 0} hook-run

@@ -109,18 +109,23 @@
   (json/parse-stream (PushbackReader. *in*) true))
 
 (defn ^{:stratum 0} hook-reply
-  "The PreToolUse reply for an evaluation `result`: {} for allow (no
-   decision, so Claude's normal permission flow applies), and for deny
-   hookSpecificOutput with hookEventName PreToolUse, permissionDecision
-   deny and the reason. That is the current PreToolUse output
+  "The PreToolUse reply for an evaluation `result`: hookSpecificOutput
+   with hookEventName PreToolUse and permissionDecision allow, or deny
+   with the reason. That is the current PreToolUse output
    (https://code.claude.com/docs/en/hooks); the top-level
-   {\"decision\": \"block\"} it replaces is deprecated for this event."
+   {\"decision\": \"block\"} it replaces is deprecated for this event.
+
+   The allow is explicit because an artifact session runs Claude with
+   `--setting-sources \"\" --permission-mode dontAsk`: no settings of the
+   operator's grant anything, so a tool the hook does not allow is
+   refused. The tool policy alone decides."
   [result]
   (if (= "deny" (:decision result))
     {:hookSpecificOutput {:hookEventName "PreToolUse"
                           :permissionDecision "deny"
                           :permissionDecisionReason (:reason result)}}
-    {}))
+    {:hookSpecificOutput {:hookEventName "PreToolUse"
+                          :permissionDecision "allow"}}))
 
 ;------------------------------------------------------------------------------ Layer 1
 

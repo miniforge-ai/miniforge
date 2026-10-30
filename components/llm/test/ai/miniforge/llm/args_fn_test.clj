@@ -92,10 +92,11 @@
 ;; claude-args
 ;; ============================================================================
 (deftest ^{:stratum 1} claude-args-minimal-test
-  (testing "a minimal prompt with hook settings produces [-p --settings <path> <prompt>]"
+  (testing "a minimal prompt with hook settings loads only those settings and refuses what the hook does not allow"
     (let [args ((private-fn 'claude-args) {:prompt "hello"
                                            :supervision {:settings-path "/tmp/s.json"}})]
-      (is (= ["-p" "--settings" "/tmp/s.json" "hello"] args)))))
+      (is (= ["-p" "--setting-sources" "" "--permission-mode" "dontAsk" "--settings" "/tmp/s.json" "hello"]
+             args)))))
 
 (deftest ^{:stratum 1} claude-args-isolated-test
   (testing "a call with no hook settings gets no tools, settings, skills, or host MCP config"
@@ -116,10 +117,12 @@
       (is (some #{"--setting-sources"} args))
       (is (= 1 (count (filter #(= "--strict-mcp-config" %) args))))))
 
-  (testing "a call with hook settings and no isolated? gets none of the flags"
+  (testing "a call with hook settings and no isolated? keeps its tools, and gets the session flags"
     (let [args ((private-fn 'claude-args) {:prompt "p"
                                            :supervision {:settings-path "/tmp/s.json"}})]
-      (is (not-any? #{"--tools" "--setting-sources" "--disable-slash-commands"} args)))))
+      (is (not-any? #{"--tools" "--disable-slash-commands"} args))
+      (is (= ["--setting-sources" "" "--permission-mode" "dontAsk"]
+             (->> args (drop-while #(not= "--setting-sources" %)) (take 4)))))))
 
 (deftest ^{:stratum 1} claude-args-streaming-test
   (testing "streaming adds output-format and verbose flags"

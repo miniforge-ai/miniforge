@@ -44,8 +44,8 @@
     root))
 
 (defn- ^{:stratum 0} decision
-  "hook-eval's permissionDecision for `role` calling `tool` with `input`
-   in the worktree at `root`; nil when it allows."
+  "hook-eval's permissionDecision (\"allow\" or \"deny\") for `role`
+   calling `tool` with `input` in the worktree at `root`."
   [root role tool input]
   (let [payload (json/generate-string {:tool_name tool :tool_input input})
         out     (with-out-str
@@ -60,8 +60,8 @@
         canonical (str (fs/canonicalize root))]
     (try
       (testing "a write inside the worktree is allowed, by either spelling of its path"
-        (is (nil? (decision root :implementer "Write" {:file_path (str root "/src/a.clj")})))
-        (is (nil? (decision root :implementer "Write" {:file_path (str canonical "/src/a.clj")}))))
+        (is (= "allow" (decision root :implementer "Write" {:file_path (str root "/src/a.clj")})))
+        (is (= "allow" (decision root :implementer "Write" {:file_path (str canonical "/src/a.clj")}))))
       (testing "a write into the git dir or the configured hooks dir is refused"
         (doseq [path [".git/config" ".git/hooks/pre-commit" ".githooks/pre-commit"]]
           (is (= "deny" (decision root :implementer "Write" {:file_path (str root "/" path)})) path)))
