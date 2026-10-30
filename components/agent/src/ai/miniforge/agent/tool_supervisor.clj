@@ -63,14 +63,21 @@
 
 ;; Bash command policy
 (defn ^{:stratum 0} evaluate-bash-command
-  "Evaluate a Bash command against `deny-patterns`.
+  "Evaluate a Bash command against `policy`: refused when longer than its
+   :bash/max-command-length (checked first, so a padded command cannot
+   slow the patterns down) or when it matches one of :bash/deny-patterns.
 
    Returns {:decision \"allow\"} or {:decision \"deny\" :reason string}."
-  [deny-patterns command]
-  (if-let [pattern (some #(when (re-find % (str command)) %) deny-patterns)]
-    {:decision "deny"
-     :reason (str "Command matches dangerous pattern: " pattern)}
-    {:decision "allow"}))
+  [policy command]
+  (let [command (str command)
+        limit   (:bash/max-command-length policy)]
+    (if (> (count command) limit)
+      {:decision "deny"
+       :reason (str "Command is longer than " limit " characters; write long content with Write")}
+      (if-let [pattern (some #(when (re-find % command) %) (:bash/deny-patterns policy))]
+        {:decision "deny"
+         :reason (str "Command matches dangerous pattern: " pattern)}
+        {:decision "allow"}))))
 
 ;; Event emission
 (defn ^{:stratum 0} emit-tool-use-event!
@@ -150,7 +157,7 @@
        {:decision "deny" :reason outside}
 
        (= "Bash" tool-name)
-       (evaluate-bash-command (:bash/deny-patterns policy) (:command tool-input))
+       (evaluate-bash-command policy (:command tool-input))
 
        :else
        {:decision "allow"}))))

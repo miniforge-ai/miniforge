@@ -20,6 +20,7 @@
    config/agent/tool-policy.edn lists for it, and a missing or unknown role
    gets none."
   (:require
+   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.agent.implementer :as implementer]
@@ -60,23 +61,42 @@
    "git -c credential.helper= fetch origin"
    "bash -c 'exec 3<>/dev/tcp/x.example/80'"
    "wget -q -O- https://x.example"
-   ":(){ :|:& };:"])
+   ":(){ :|:& };:"
+   ;; Writes into git metadata and agent config, and git settings that run
+   ;; code or redirect a remote, reached through the shell.
+   "echo x > .git/hooks/pre-push"
+   "echo '{}' > .mcp.json"
+   "git config core.hooksPath tools/hooks"
+   "git config remote.origin.url https://x.example/r.git"
+   "git config url.https://x.example/.insteadOf https://github.com/"
+   "git -c core.sshcommand=x fetch origin"
+   "GIT_SSH_COMMAND=x git fetch origin"
+   "/usr/bin/curl https://x.example"
+   "x=$(curl -s https://x.example)"
+   "export"])
 
 (def ^{:stratum 0} ^:private build-commands
   "Commands an implementer or tester runs that must stay allowed."
   ["bb test" "clojure -M:test" "git status" "git diff --stat"
    "git add -A && git commit -m \"push the fix through\"" "ls -la src"
-   "npm install" "ssh-keygen -lf key.pub" "env FOO=1 bb test"])
+   "npm install" "ssh-keygen -lf key.pub" "env FOO=1 bb test"
+   ;; Text that names a tool or a secret-looking file without using it.
+   "git commit -m \"fix curl retry\"" "git diff src/ai/miniforge/credential.clj"
+   "clojure -M:test -n ai.miniforge.aws.s3-test" "cat docs/deploy.aws.md"
+   "cat .npmrc" "set -euo pipefail; bb test" "set -e; make" "git clone ../sibling"])
 
 (deftest ^{:stratum 0} policy-file-is-checked-against-its-schema-test
-  (testing "the shipped policy passes"
-    (is (map? (policy/read-tool-policy (slurp (io/resource "config/agent/tool-policy.edn"))))))
-  (testing "a misspelt key, a vector where a set belongs, or a keyword tool name throws"
-    (doseq [text ["{:common #{} :roles {} :bash/deny-patterns [] :comon #{}}"
-                  "{:common [\"Read\"] :roles {} :bash/deny-patterns []}"
-                  "{:common #{} :roles {:implementer #{:Bash}} :bash/deny-patterns []}"
-                  "{:common #{} :roles {} }"]]
-      (is (thrown? clojure.lang.ExceptionInfo (policy/read-tool-policy text)) text))))
+  (let [shipped (edn/read-string (slurp (io/resource "config/agent/tool-policy.edn")))]
+    (testing "the shipped policy passes"
+      (is (map? (policy/read-tool-policy (pr-str shipped)))))
+    (testing "each single defect in the shipped policy throws"
+      (doseq [[defect broken] {"misspelt extra key"       (assoc shipped :comon #{})
+                               "vector where a set goes"  (update shipped :common vec)
+                               "keyword tool name"        (assoc-in shipped [:roles :implementer] #{:Bash})
+                               "missing length limit"     (dissoc shipped :bash/max-command-length)
+                               "zero length limit"        (assoc shipped :bash/max-command-length 0)
+                               "path keys not keywords"   (assoc-in shipped [:tool/path-keys "Read"] ["file_path"])}]
+        (is (thrown? clojure.lang.ExceptionInfo (policy/read-tool-policy (pr-str broken))) defect)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -162,3 +182,22 @@
   (testing "with no worktree root every file tool is refused"
     (is (= "deny" (:decision (sut/evaluate-tool-use {:role :implementer :path-ok? stub-path-ok?}
                                                     "Write" {:file_path "/work/repo/a.clj"}))))))
+
+(deftest ^{:stratum 2} long-bash-commands-are-refused-test
+  (testing "a command over the length limit is refused before any pattern runs"
+    (is (= "deny" (decision :implementer "Bash" {:command (apply str "echo " (repeat 40000 "a"))})))
+    (is (= "allow" (decision :implementer "Bash" {:command (apply str "echo " (repeat 20000 "a"))})))))
+
+(deftest ^{:stratum 2} only-loaded-agent-config-is-protected-test
+  (testing "config a later session loads is refused"
+    (doseq [path [".claude/settings.json" ".claude/settings.local.json" ".codex/config.toml"
+                  ".cursor/cli.json" ".cursor/mcp.json" "opencode.json"]]
+      (is (= "deny" (decision :implementer "Write" {:file_path (str worktree "/" path)})) path)))
+  (testing "tracked skills, commands and rules stay editable"
+    (doseq [path [".claude/skills/review/SKILL.md" ".claude/commands/x.md" ".cursor/rules/style.mdc"]]
+      (is (= "allow" (decision :implementer "Write" {:file_path (str worktree "/" path)})) path))))
+
+(deftest ^{:stratum 2} codex-path-stays-in-the-worktree-test
+  (testing "consider_situation may not read a codex outside the worktree"
+    (is (= "deny" (decision :implementer "mcp__context__consider_situation" {:codex_path "/etc"})))
+    (is (= "allow" (decision :implementer "mcp__context__consider_situation" {:situation "x"})))))

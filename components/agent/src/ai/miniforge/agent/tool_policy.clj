@@ -38,6 +38,7 @@
    [:tool/path-keys [:map-of :string [:vector :keyword]]]
    [:tool/glob-keys [:map-of :string [:vector :keyword]]]
    [:tool/protected-paths [:vector :string]]
+   [:bash/max-command-length [:int {:min 1}]]
    [:bash/deny-patterns [:vector :string]]])
 
 (defn ^{:stratum 0} worktree-relative
@@ -114,10 +115,10 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (read-tool-policy "{:common #{} :roles {:reviewer #{}} :bash/deny-patterns []}")
-  ;; => {:common #{} :roles {:reviewer #{}} :bash/deny-patterns []}
+  (read-tool-policy (slurp (clojure.java.io/resource "config/agent/tool-policy.edn")))
+  ;; => the shipped policy, patterns compiled
 
-  (read-tool-policy "{:common [\"Read\"] :roles {} :bash/deny-patterns []}")
-  ;; throws: :common should be a set
+  (worktree-relative "/work/repo" "/work/repo/src/a.clj") ; => "src/a.clj"
+  (worktree-relative "/work/repo" "/etc/passwd")          ; => nil
 
   :end)

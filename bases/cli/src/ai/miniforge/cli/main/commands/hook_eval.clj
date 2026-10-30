@@ -29,9 +29,12 @@
 
 (defn ^{:stratum 0} worktree-path-ok?
   "True when `relative-path` stays inside the worktree at `root` and out of
-   its git metadata (git dir, common dir, hooks dir, a `.git` component, a
-   symlink on the path), per pr-lifecycle's `safe-worktree-path` from
-   #2100. The root itself passes, for a search of the whole worktree."
+   its git metadata (git dir, common dir, hooks dir, a `.git` component),
+   per pr-lifecycle's `safe-worktree-path` from #2100. The root itself
+   passes, for a search of the whole worktree. The path arrives already
+   canonical (`tool-policy/worktree-relative` resolves symlinks first), so
+   a link inside the worktree is judged where it points, and a dangling
+   link is refused."
   [root relative-path]
   (some? (pr-lifecycle/safe-worktree-path root relative-path {:allow-root? true})))
 
