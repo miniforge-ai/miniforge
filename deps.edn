@@ -12,6 +12,7 @@
                        "components/buzzword-bingo/src"
                        "components/buzzword-bingo/resources"
                        "components/content-hash/src"
+                       "components/runtime-signing/src"
                        "components/file-durability/src"
                        "components/file-durability/resources"
                        "components/resource-cleanup/src"
@@ -254,6 +255,7 @@
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
                       ai.miniforge/buzzword-bingo {:local/root "components/buzzword-bingo"}
                       ai.miniforge/content-hash {:local/root "components/content-hash"}
+                      ai.miniforge/runtime-signing {:local/root "components/runtime-signing"}
                       ai.miniforge/file-durability {:local/root "components/file-durability"}
                       ai.miniforge/redaction {:local/root "components/redaction"}
                       ai.miniforge/resource-cleanup {:local/root "components/resource-cleanup"}
@@ -396,6 +398,7 @@
                        "components/algorithms/test"
                        "components/buzzword-bingo/test"
                        "components/content-hash/test"
+                       "components/runtime-signing/test"
                        "components/redaction/test"
                        "components/opsv/test"
                        "components/opsv-actuation/test"

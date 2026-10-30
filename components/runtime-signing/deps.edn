@@ -1,0 +1,4 @@
+{:paths ["src"]
+ :deps {ai.miniforge/content-hash {:local/root "../content-hash"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}
