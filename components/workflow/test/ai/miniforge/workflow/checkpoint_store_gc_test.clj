@@ -4,7 +4,8 @@
 (ns ai.miniforge.workflow.checkpoint-store-gc-test
   "Checkpoint GC: what goes, what stays, and the hold that keeps a run's
    events while its checkpoint exists."
-  (:require [ai.miniforge.event-stream.interface :as es]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.event-stream.interface :as es]
             [ai.miniforge.workflow.checkpoint-store-gc :as gc]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.interface :as workflow]
@@ -53,6 +54,22 @@
     (spit (second files) "{:phase/result {:status :completed}}")
     (doseq [f (reverse (file-seq dir))] (.setLastModified ^java.io.File f at))
     id))
+
+(deftest ^{:stratum 1} root-lookup-passes-over-an-unreadable-event
+  (fs/with-temp-dir [alternate {:prefix "gc-alternate-root-"}]
+    (fs/with-temp-dir [events-dir {:prefix "gc-events-"}]
+      (let [id (random-uuid)
+            dir (io/file (str events-dir) "archived" (str id))
+            newest (io/file dir "0000000000000002__000000000000.transit.json")]
+        (archive-event! (fs/file events-dir) id
+                        (plan-written (str alternate) id
+                                      (str (fs/path alternate (str id) "phases" "plan.edn"))))
+        (spit newest "not transit")
+        (testing "an older readable announcement names the root"
+          (is (= (str alternate) (gc/run-checkpoint-root id (fs/file events-dir)))))
+        (testing "with none readable the root is unknown, not the default"
+          (fs/delete (io/file dir "0000000000000001__000000000000.transit.json"))
+          (is (anomaly/anomaly? (gc/run-checkpoint-root id (fs/file events-dir)))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
