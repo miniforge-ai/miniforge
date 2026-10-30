@@ -666,6 +666,8 @@
                               "components/algorithms/test"
                               "components/content-hash/src"
                               "components/content-hash/test"
+                              "components/runtime-signing/src"
+                              "components/runtime-signing/resources"
                               "components/opsv/src"
                               "components/opsv/test"
                               "components/logging/src"

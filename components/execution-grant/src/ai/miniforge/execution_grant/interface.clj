@@ -40,6 +40,7 @@
    [ai.miniforge.execution-grant.messages :as msg]
    [ai.miniforge.execution-grant.revocation :as revocation]
    [ai.miniforge.execution-grant.schema :as schema]
+   [ai.miniforge.execution-grant.signature :as signature]
    [ai.miniforge.execution-grant.store :as store]
    [ai.miniforge.execution-grant.store-schema :as store-schema]
    [ai.miniforge.execution-grant.temporal :as temporal]
@@ -118,6 +119,11 @@
 (def ^{:stratum 0} attenuation-violations
   "Every axis on which a child fails to attenuate its parent."
   attenuation/violations)
+
+(def ^{:stratum 0} signed?
+  "True only when a grant carries this runtime's signature over its issued
+   fields. Effect commit refuses a grant for which this is false."
+  signature/signed?)
 
 (def ^{:stratum 0} authorize
   "The one check site: is this effect within its grant, as of now?
@@ -227,13 +233,14 @@
                arguments))))
 
 (defn ^{:stratum 1} issue
-  "Issue a root grant; id and issued-at are runtime-owned. Invalid
-   boundary data is returned as an `:invalid-input` anomaly."
+  "Issue a root grant signed by the runtime key; id and issued-at are
+   runtime-owned. Invalid boundary data is returned as an `:invalid-input`
+   anomaly, and a key that cannot load as its anomaly."
   ([opts] (issue opts (Instant/now)))
   ([opts now]
    (let [arguments [opts now]]
      (if (valid-input? schema/IssueArguments arguments)
-       (core/issue opts now)
+       (signature/sign (core/issue opts now))
        (invalid :grant/input-invalid schema/IssueArguments arguments)))))
 
 (defn ^{:stratum 1} delegate
@@ -249,7 +256,8 @@
        (not (valid-input? schema/DelegationArguments arguments))
        (invalid :grant/delegated-invalid schema/DelegationArguments arguments)
 
-       :else (core/delegate parent opts now)))))
+       :else (let [child (core/delegate parent opts now)]
+               (if (anomaly/anomaly? child) child (signature/sign child)))))))
 
 (defn ^{:stratum 1} revoke
   "Revoke a grant for a reason, preserving the record."
@@ -284,6 +292,6 @@
          (if (anomaly/anomaly? options)
            options
            (let [grant (issue options (temporal/->instant now))]
-             (if (valid? grant)
+             (if (or (anomaly/anomaly? grant) (valid? grant))
                grant
                (invalid-output grant)))))))))

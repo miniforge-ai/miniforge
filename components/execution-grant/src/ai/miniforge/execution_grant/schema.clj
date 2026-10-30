@@ -119,7 +119,8 @@
    [:grant/issued-at inst?]
    [:grant/expires-at inst?]
    [:grant/revoked-at [:maybe inst?]]
-   [:grant/revocation-reason [:maybe (into [:enum] revocation-reasons)]]])
+   [:grant/revocation-reason [:maybe (into [:enum] revocation-reasons)]]
+   [:grant/signature {:optional true} [:re #"\A[0-9a-f]{64}\z"]]])
 
 (def ^{:stratum 1} Breach
   "CLOSED record of one ceiling a principal exceeded (Ariadne 2e)."

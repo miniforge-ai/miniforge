@@ -51,9 +51,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} evaluate
-  "Check the named grant against durable scope and a one-operation usage."
+  "Check the named grant's runtime signature, then its scope against the
+   durable proposal and a one-operation usage. An unsigned or altered
+   grant is denied as `:unsigned`."
   [t grant-record ^Instant now]
   (or (grant-conflict t grant-record)
+      (when-not (grant/signed? grant-record)
+        {:grant/outcome :unsigned :grant/id (:grant/id grant-record)})
       (grant/authorize grant-record
                        {:effect/scope (effect-scope t)
                         :usage/count 1}

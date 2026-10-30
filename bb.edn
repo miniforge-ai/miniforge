@@ -830,6 +830,8 @@
                  "components/effect-transaction/resources"
                  "components/execution-grant/src"
                  "components/execution-grant/resources"
+                 "components/runtime-signing/src"
+                 "components/runtime-signing/resources"
                  "components/file-durability/src"
                  "components/file-durability/resources"
                  "components/automation-edge-correlator/src"
