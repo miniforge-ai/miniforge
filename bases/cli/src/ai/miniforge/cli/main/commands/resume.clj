@@ -384,9 +384,9 @@
         ;; owner lock (see run-pipeline), under its checkpoint root. A root
         ;; or lock that cannot be looked up refuses the resume too.
         _ (let [root  (workflow/run-checkpoint-root (str workflow-id) events-dir)
-                _     (throw-resume-anomaly! root)
+                _     (resume-anomaly/throw-resume-anomaly! root)
                 owner (workflow/run-owner (str workflow-id) root)]
-            (throw-resume-anomaly! owner)
+            (resume-anomaly/throw-resume-anomaly! owner)
             (when (some? owner)
               (response/throw-anomaly! :anomalies/conflict
                                        (messages/t :resume/run-live
