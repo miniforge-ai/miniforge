@@ -3,7 +3,11 @@
 ;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 
 {:effect-transaction/messages
- {:attempt/exhausted "Every attempt at this effect up to the limit failed; investigate before retrying"
+ {:governed/unauthorized "The issued grant does not cover this effect"
+  :governed/envelope-refuses "The decision envelope does not allow this effect"
+  :governed/grant-substituted "The effect proposal names a grant this attempt did not issue"
+  :governed/unsettled "An earlier attempt at this effect was proposed but never committed; reconcile it before retrying"
+  :attempt/exhausted "Every attempt at this effect up to the limit failed; investigate before retrying"
   :grant/id-mismatch "Grant does not match the one recorded on the proposal"
   :grant/effect-class-mismatch "Grant effect class does not match the proposed effect"
   :grant/recheck-failed "Grant re-check failed at commit: {outcome}"

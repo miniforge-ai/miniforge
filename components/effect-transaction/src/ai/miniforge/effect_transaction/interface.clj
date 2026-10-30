@@ -26,6 +26,7 @@
    [ai.miniforge.effect-transaction.attempt :as attempt]
    [ai.miniforge.effect-transaction.core :as core]
    [ai.miniforge.effect-transaction.envelope-signature :as envelope-signature]
+   [ai.miniforge.effect-transaction.governed :as governed]
    [ai.miniforge.effect-transaction.current-commit :as current]
    [ai.miniforge.effect-transaction.current-schema :as current-schema]
    [ai.miniforge.effect-transaction.messages :as msg]
@@ -62,6 +63,12 @@
 (def ^{:stratum 0} valid?
   "True when `t` satisfies the closed EffectTransaction schema."
   core/valid?)
+
+(def ^{:stratum 0} govern!
+  "Run one effect at most once under a registered grant and a signed
+   allowing envelope: (govern! opts now). See `governed/govern!` for opts.
+   Returns the effect record or an anomaly."
+  governed/govern!)
 
 (def ^{:stratum 0} sign-envelope
   "Sign the decision envelope that allows an effect with the runtime key.
