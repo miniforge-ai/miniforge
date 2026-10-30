@@ -50,11 +50,25 @@
       (signing/load-or-create-key! target)
       (Files/createSymbolicLink (.toPath link) (.toPath target) (into-array FileAttribute []))
       (is (anomaly/anomaly? (signing/load-or-create-key! link)))))
+  (testing "given a key directory other users can write → refused"
+    (let [file (key-file)]
+      (signing/load-or-create-key! file)
+      (Files/setPosixFilePermissions (.toPath (.getParentFile file))
+                                     (PosixFilePermissions/fromString "rwxrwxrwx"))
+      (is (anomaly/anomaly? (signing/load-or-create-key! file)))))
   (testing "given malformed key text → refused"
     (let [file (key-file)]
       (signing/load-or-create-key! file)
       (spit file "not a key")
       (is (anomaly/anomaly? (signing/load-or-create-key! file))))))
+
+(deftest ^{:stratum 1} printer-bindings-do-not-change-signatures-test
+  (let [k (signing/load-or-create-key! (key-file))
+        signature (signing/sign k grant)]
+    (binding [*print-length* 0 *print-level* 1 *print-namespace-maps* true]
+      (is (= signature (signing/sign k grant)))
+      (is (not (signing/signed? k (assoc grant :grant/id (random-uuid)) signature))
+          "a truncating printer must not make two grants sign alike"))))
 
 (deftest ^{:stratum 1} signatures-bind-the-exact-value-test
   (let [k (signing/load-or-create-key! (key-file))

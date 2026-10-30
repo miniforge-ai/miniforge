@@ -16,7 +16,9 @@
   (:import
    [java.io File]
    [java.nio.charset StandardCharsets]
-   [java.nio.file FileAlreadyExistsException Files Path]))
+   [java.nio ByteBuffer]
+   [java.nio.file FileAlreadyExistsException Files LinkOption OpenOption Path
+    StandardOpenOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -31,14 +33,24 @@
        (catch FileAlreadyExistsException _ nil))
   (durability/sync-ancestry! (.toFile (.getParent path))))
 
+(defn- ^{:stratum 0} read-no-follow
+  "The file's text, opened without following a final symbolic link."
+  [^Path path]
+  (with-open [channel (Files/newByteChannel
+                       path (into-array OpenOption [StandardOpenOption/READ
+                                                    LinkOption/NOFOLLOW_LINKS]))]
+    (let [buffer (ByteBuffer/allocate 256)]
+      (.read channel buffer)
+      (String. (.array buffer) 0 (.position buffer) StandardCharsets/UTF_8))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} read-key [posix? ^Path path]
   (cond
+    (not (material/safe-directory? posix? (.getParent path))) (failure :key/unsafe-directory)
     (Files/isSymbolicLink path) (failure :key/linked)
     (material/exposed? posix? path) (failure :key/exposed)
-    :else (or (material/parse-key (String. (Files/readAllBytes path)
-                                           StandardCharsets/UTF_8))
+    :else (or (material/parse-key (read-no-follow path))
               (failure :key/malformed))))
 
 (defn- ^{:stratum 1} publish!

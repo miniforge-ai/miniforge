@@ -2,8 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.runtime-signing.key-material
-  "Pure helpers for the runtime signing key: generation, parsing, and the
-   file permissions that keep it owner-only."
+  "Helpers for the runtime signing key: generation, parsing, and the
+   ownership and permissions that keep it owner-only."
   (:require
    [ai.miniforge.runtime-signing.hmac :as hmac]
    [clojure.string :as str])
@@ -25,6 +25,16 @@
   #{PosixFilePermission/GROUP_READ PosixFilePermission/GROUP_WRITE
     PosixFilePermission/GROUP_EXECUTE PosixFilePermission/OTHERS_READ
     PosixFilePermission/OTHERS_WRITE PosixFilePermission/OTHERS_EXECUTE})
+
+(def ^{:stratum 0} writable-by-others
+  "Any of these on the key directory lets another user swap the key file."
+  #{PosixFilePermission/GROUP_WRITE PosixFilePermission/OTHERS_WRITE})
+
+(defn ^{:stratum 0} owned-by-process-user?
+  "True when the process user owns `path` itself (links not followed)."
+  [^Path path]
+  (= (System/getProperty "user.name")
+     (.getName (Files/getOwner path (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])))))
 
 (defn ^{:stratum 0} posix-file-system? [^Path path]
   (contains? (.supportedFileAttributeViews (.getFileSystem path)) "posix"))
@@ -49,11 +59,23 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} exposed?
-  "True when other users hold any permission on the file at `path`."
+  "True when another user owns the file at `path` or holds any permission
+   on it."
   [posix? ^Path path]
   (and posix?
-       (boolean (some exposing-permissions
-                      (Files/getPosixFilePermissions path no-follow)))))
+       (or (not (owned-by-process-user? path))
+           (boolean (some exposing-permissions
+                          (Files/getPosixFilePermissions path no-follow))))))
+
+(defn ^{:stratum 1} safe-directory?
+  "True when `dir` is a real directory that only the process user can
+   write. POSIX ownership is not checked where POSIX modes do not exist."
+  [posix? ^Path dir]
+  (and (not (Files/isSymbolicLink dir))
+       (or (not posix?)
+           (and (owned-by-process-user? dir)
+                (not-any? writable-by-others
+                          (Files/getPosixFilePermissions dir no-follow))))))
 
 (defn ^{:stratum 1} fresh-key-text
   "New random key material as hex."
