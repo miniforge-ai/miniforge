@@ -37,6 +37,8 @@ about one call in six ended on a tool call with no answer, and every call carrie
    isolation reach each request through one helper, used by `complete-impl`,
    `handle-streaming` and the HTTP branch of `complete-stream-impl`.
 4. `create-client` (records and interface) accepts `:isolated?`.
+5. The backend preflight probe (`workflow-runner.edn` `:claude-args`), which runs
+   `claude -p` itself rather than through the llm client, carries the same flags.
 
 ## Testing Plan
 
@@ -47,12 +49,15 @@ about one call in six ended on a tool call with no answer, and every call carrie
    `complete` and `complete-stream` without hook settings (fails on main), and not
    with them.
 3. `isolated-client-sends-isolation-flags-test`, `with-client-config-test` (#2081).
-4. `bb test` for the llm component: 236 tests, 0 failures.
+4. `claude-preflight-runs-isolated-test`: the probe command carries the flags (fails on
+   main).
+5. llm component tests and the preflight tests pass.
+6. Independent adversarial review; findings fixed or listed below.
 
 ## Deployment Plan
 
-Ships with the next release. Text-only Claude calls lose tool access they were never
-meant to have; no caller outside an artifact session asks for tools.
+Ships with the next release. Claude calls outside an artifact session lose the tool
+access they had through the operator's own settings.
 
 ## Related Issues/PRs
 
@@ -62,8 +67,22 @@ meant to have; no caller outside an artifact session asks for tools.
    a tool-free mode for the Codex and Cursor backends, which still run every call with
    write access.
 
+## Known limits
+
+1. An isolated call reads no user settings, so `apiKeyHelper`, `env`, `model` and
+   `effortLevel` set in `~/.claude/settings.json` do not apply to it. OAuth (keychain)
+   and environment variables still do. The backend preflight carries the same flags,
+   so a workflow run with auth that only works through user settings fails at
+   preflight, not mid-run.
+2. The reviewer's enumeration retry runs outside an artifact session. Its prompt can
+   point at `context_read` (the shed path), which it never had; before this change it
+   could fall back on the operator's built-in Read with no hook, and now it has no
+   tools. Running the retry in a read-only session needs `reviewer.clj` split first
+   (seven layers).
+
 ## Checklist
 
 - [x] Tests fail on main and pass here
-- [x] llm component tests pass
+- [x] llm component and preflight tests pass
+- [x] Independent review
 - [ ] CI green, Copilot comments resolved

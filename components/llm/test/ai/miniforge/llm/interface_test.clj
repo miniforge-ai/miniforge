@@ -1643,6 +1643,7 @@
       (llm/complete client supervised)
       (llm/complete-stream client supervised (fn [_chunk] nil))
       (is (<= 2 (count @cmds)))
+      (is (every? #(= ["--tools" ""] (take 2 (drop-while (complement #{"--tools"}) %))) @cmds))
       (is (every? #(some #{"--setting-sources"} %) @cmds))
       (is (every? #(some #{"--disable-slash-commands"} %) @cmds)))))
 
@@ -1658,10 +1659,12 @@
 
   (testing "a call inside an artifact session (hook settings present) keeps its tools"
     (let [cmds (atom [])
-          client (recording-claude-client cmds {})]
-      (llm/complete client {:prompt "test" :supervision {:settings-path "/tmp/s.json"}})
-      (is (= 1 (count @cmds)))
-      (is (not-any? #{"--tools" "--setting-sources"} (first @cmds))))))
+          client (recording-claude-client cmds {})
+          supervised {:prompt "test" :supervision {:settings-path "/tmp/s.json"}}]
+      (llm/complete client supervised)
+      (llm/complete-stream client supervised (fn [_chunk] nil))
+      (is (<= 2 (count @cmds)))
+      (is (every? #(not-any? #{"--tools" "--setting-sources"} %) @cmds)))))
 
 (deftest ^{:stratum 1} stagnation-fires-on-silence-without-keepalive-test
   (testing "without keepalive, a silent monitor stagnates after the threshold"
