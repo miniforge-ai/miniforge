@@ -408,6 +408,25 @@
       (is (= :worktree-moved (-> published :errors first :type)))
       (is (not-any? #(clojure.string/includes? % "git push") @cmds)))))
 
+(deftest ^{:stratum 1} publish-release-refuses-staged-changes-test
+  (testing "publish pushes nothing when a change was staged after prepare, HEAD unchanged"
+    (let [responses {"git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
+                     "--name-only"      {:exit-code 0 :stdout "src/a.clj" :stderr ""}
+                     "--numstat"        {:exit-code 0 :stdout "1\t0\tsrc/a.clj" :stderr ""}
+                     "gh auth"          {:exit-code 0 :stdout "Logged in" :stderr ""}
+                     "rev-parse --abbrev-ref" {:exit-code 0 :stdout "feature/test-change\n" :stderr ""}
+                     "git rev-parse HEAD" {:exit-code 0 :stdout "abc123\n" :stderr ""}
+                     "--quiet"          {:exit-code 1 :stdout "" :stderr ""}}
+          [exec cmds] (create-mock-executor :responses responses)
+          context     {:executor exec :environment-id "mock-env"
+                       :worktree-path "/tmp/wt" :create-pr? true}
+          prepared    (core/prepare-release (make-workflow-state) context
+                                            {:release-meta test-release-meta})
+          published   (core/publish-release (:prepared prepared) context)]
+      (is (:success? prepared))
+      (is (= :worktree-moved (-> published :errors first :type)))
+      (is (not-any? #(clojure.string/includes? % "git push") @cmds)))))
+
 (deftest ^{:stratum 1} step-create-branch-prefers-base-branch-override
   (testing "an explicit base-branch-override (chained DAG task's parent branch)
             wins over the executor-detected default, so the PR stacks on the
