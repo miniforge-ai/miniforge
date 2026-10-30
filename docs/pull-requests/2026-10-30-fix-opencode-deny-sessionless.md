@@ -10,9 +10,9 @@
 
 OpenCode (miniforge's default backend) allows most tools when its config says
 nothing, and miniforge passed it no permission config. An OpenCode call outside an
-artifact session, which has no miniforge hook, now runs with `--pure` (no external
-plugins) and `OPENCODE_CONFIG_CONTENT` set to a permission block that denies every
-tool. OpenCode applies that inline config over its global and project config.
+artifact session, which has no miniforge hook, now runs with `--pure` and
+`OPENCODE_PURE=1` (no external plugins) as an agent defined in its inline config
+(`OPENCODE_CONFIG_CONTENT`) whose permissions deny every tool.
 
 ## Motivation
 
@@ -24,39 +24,50 @@ Bash under OpenCode's defaults with no check.
 
 1. `client-defaults.edn` `[:opencode :deny-all-permission]`: every OpenCode
    permission key set to `deny`, plus `"*"`.
-2. `cli-args/opencode-env`: OPENCODE_CONFIG_CONTENT with that block for a call with no
-   hook settings, or one that asks to be `:isolated?`; nil for a session call.
-   `opencode-args` adds `--pure` in the same cases.
-3. A backend entry may carry an `:env-fn` (OpenCode does). `complete-impl` passes its
+2. `cli-args/opencode-env`, for a call with no hook settings or one that asks to be
+   `:isolated?`: OPENCODE_PURE=1 and OPENCODE_CONFIG_CONTENT. The config is the
+   operator's own inline config, if any, with the deny block as its global
+   permissions and as the permissions of `isolation-agent`. OpenCode merges config per
+   key and applies an agent's rules after the global and project ones, so a global
+   block alone could be undone by a repository's `opencode.json` (an extra allow key,
+   or a grant on its `build` agent); the agent's final `"*"` deny is not. The agent
+   name is random per process, so a repository cannot define one of the same name.
+3. `opencode-args` runs such a call `--pure --agent <isolation-agent>`, ignores the
+   request's own `:agent`, and refuses `:attach` (a running server uses its own
+   config).
+4. A backend entry may carry an `:env-fn` (OpenCode does). `complete-impl` passes its
    entries as `:env` exec options; `default-exec-fn` and `start-capture-process!` set
-   them on top of the agent environment allowlist.
-4. The backend preflight probe passes the same entries, so an OpenCode probe runs as a
-   real call outside a session would.
+   them on top of the agent environment allowlist; `capsule-exec-fn` passes them to the
+   capsule command; the backend preflight probe passes them too.
 
 ## Testing Plan
 
-1. `opencode-call-outside-a-session-is-isolated-test`: `--pure` and an all-deny
-   permission block with no hook settings or with `:isolated?`; neither for a session
-   call (fails on main).
-2. `opencode-call-carries-its-deny-config-test`: an OpenCode client's exec gets the
-   config; `backend-env-entries-reach-the-process-test`: the entries reach the child
-   process on top of the allowlist.
-3. The OpenCode preflight test now expects `--pure` and the config.
-4. Checked with OpenCode 1.18.30's `opencode debug config` and `debug agent build`: the
-   inline block overrides a project `opencode.json` that allows bash and edit, and its
-   deny rules come after the build agent's own allow rules, so every tool resolves to
-   off. No model call: the local OpenCode provider credentials did not work.
+1. `opencode-call-outside-a-session-is-isolated-test`: `--pure --agent
+   miniforge-isolated-<hex>`, the request's agent dropped, OPENCODE_PURE=1, deny-all
+   global and agent permissions, the operator's inline config kept, `:attach` refused;
+   a session call gets none of it.
+2. `opencode-call-carries-its-deny-config-test`, `backend-env-entries-reach-the-process-test`,
+   `capsule-exec-carries-env-entries-test`; the OpenCode preflight test.
+3. OpenCode 1.18.30 `debug agent`, with a project `opencode.json` granting
+   `"my_mcp_*": "allow"`, `bash` and `edit` (globally and on `build`): the `build` agent
+   still had bash, edit and write on under a global-only deny (the earlier version of
+   this change); the inline agent had every tool off, its `"*"` deny after the project
+   allow.
 
 ## Deployment Plan
 
-Ships with the next release, after #2284 (this builds on its process environment).
-OpenCode calls inside an artifact session are unchanged here; giving them each role's
-tool permissions is the next change.
+Ships with the next release. OpenCode calls inside an artifact session are unchanged
+here; giving them each role's tool permissions is the next change.
 
 ## Known limits
 
-1. `--attach` sends the call to a running OpenCode server, which uses its own config.
-2. A capsule call (`capsule-exec-fn`) does not carry the env entries yet.
+1. Upstream OpenCode reports project-local plugins still loading under `--pure` and
+   `OPENCODE_PURE=1` on 1.18.31 and later (anomalyco/opencode#49836). Such a plugin runs
+   code at startup outside tool permissions; the agent environment allowlist (#2284)
+   limits what it can read from the environment.
+2. Non-streaming Claude calls through `capsule-exec-fn` lose their stdin prompt (the
+   executor has no stdin). That predates this change and belongs with running the
+   agent CLI inside the capsule.
 
 ## Related Issues/PRs
 

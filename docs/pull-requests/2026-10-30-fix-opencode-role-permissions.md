@@ -31,8 +31,13 @@ cannot write and only the implementer and tester can run Bash.
    order (`"*": "deny"` and `external_directory: deny` first, allows after; edit and bash
    as rule objects with `"*": "allow"` first and the denies after), because OpenCode
    applies the last matching rule.
-3. Both session writers put it in `:supervision` as `:opencode-permission`; the llm
-   client's `opencode-env` sends it, and `opencode-args` adds `--pure`.
+3. Both session writers put it in `:supervision` as `:opencode-permission`. The llm
+   client sends it the way #2291 sends its deny block: as the permissions of an agent
+   defined in the call's inline config, with a random name per process, selected with
+   `--agent` and `--pure`. OpenCode applies an agent's rules after the global and
+   project ones, so a repository's `opencode.json` cannot widen the role's tools.
+   `cli-args/opencode-permission` picks the block (deny-all outside a session, the
+   role's inside one).
 
 ## Testing Plan
 
@@ -41,7 +46,8 @@ cannot write and only the implementer and tester can run Bash.
    bash rule objects deny agent config, `.git`, `git push` and `curl`; only the planner
    gets web access; an unlisted role gets nothing.
 2. `opencode-call-outside-a-session-is-isolated-test`: a session call carrying the
-   block gets it in order, as JSON, and `--pure`.
+   block runs `--pure` as the policy agent, the request's own agent dropped, with the
+   block as that agent's permissions in rule order.
 3. Checked with OpenCode 1.18.30 `debug config` / `debug agent build`: every key is
    accepted, rule objects keep their order, and the allowed tools are on and the rest off.
 

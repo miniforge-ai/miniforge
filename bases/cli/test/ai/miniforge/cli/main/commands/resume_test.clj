@@ -392,6 +392,23 @@
         (is (= [{:phase :plan} {:phase :implement} {:phase :verify}] (:workflow/pipeline workflow)))
         (is (nil? (:resume-phase-results opts)))))))
 
+(deftest ^{:stratum 1} new-attempt-keeps-the-run-lineage-test
+  (let [snapshot-id (random-uuid)
+        snapshotted {:completed-phases [:plan]
+                     :phase-results {:plan {}}
+                     :machine-snapshot {:execution/id snapshot-id}}]
+    (testing "a new attempt continues the run it resumes"
+      (let [{:keys [opts]} (resume-with snapshotted {:run-id (str (random-uuid))})]
+        (is (= snapshot-id (:origin-id opts)))
+        (is (= snapshot-id (get-in opts [:resume-machine-snapshot :execution/origin-id])))))
+    (testing "an attempt of an attempt keeps the first run's lineage"
+      (let [origin (random-uuid)
+            {:keys [opts]} (resume-with (assoc-in snapshotted [:machine-snapshot :execution/origin-id] origin)
+                                        {:run-id (str (random-uuid))})]
+        (is (= origin (:origin-id opts)))))
+    (testing "a rewind, which drops the snapshot, keeps the lineage too"
+      (is (= snapshot-id (:origin-id (:opts (resume-with snapshotted {:from-phase :plan}))))))))
+
 (deftest ^{:stratum 1} run-id-option-test
   (let [snapshot-id (random-uuid)
         snapshotted {:completed-phases [:plan]

@@ -49,11 +49,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} create-temp-checkpoint-root
-  "A fresh, empty directory under the JVM temp dir, as a path string.
-   Named so a leaked one is attributable to a test run."
+  "A fresh, empty directory under the JVM temp dir, as a real path string
+   (the store records paths under the resolved root, and macOS's temp dir
+   is a link). Named so a leaked one is attributable to a test run."
   []
-  (str (Files/createTempDirectory "mf-checkpoint-test-"
-                                  (make-array FileAttribute 0))))
+  (str (fs/real-path (Files/createTempDirectory "mf-checkpoint-test-"
+                                                (make-array FileAttribute 0)))))
 
 (defn ^{:stratum 0} delete-checkpoint-root!
   "Remove a temp checkpoint root and everything a run wrote under it.
