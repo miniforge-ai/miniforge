@@ -227,13 +227,15 @@
 (defn ^{:stratum 0} prepared-release
   "What publish-release needs from a prepared pipeline state, as plain
    data: no runtime handles or credentials, and code artifacts without
-   file content (publish renders paths only)."
+   file content (publish renders paths only). The §7.7.2 answer-channel
+   keys ride along, so publish-release's result carries them too."
   [state]
   (let [strip-content (fn [artifact]
                         (update artifact :code/files
                                 (fn [files] (mapv #(dissoc % :content) files))))]
     (-> (select-keys state [:branch :base-branch :commit-sha :release-meta
-                            :write-metrics :workflow-data])
+                            :write-metrics :workflow-data
+                            :codex-answers :codex-answer-log])
         (assoc :code-artifacts (mapv strip-content (:code-artifacts state))))))
 
 (defn ^{:stratum 0} pipeline->result
@@ -397,6 +399,28 @@
 
     :else state))
 
+(defn ^{:stratum 1} step-verify-prepared
+  "Fail closed unless the worktree is where prepare-release left it: the
+   prepared branch checked out at the prepared commit. Publishing runs
+   later (after the release gates); were the worktree moved in between,
+   the push and the PR would carry commits nobody validated, or the wrong
+   branch."
+  [state]
+  (if (failed? state)
+    state
+    (let [{:keys [host-mode? worktree-path executor environment-id branch commit-sha]} state
+          run    (fn [argv] (if host-mode?
+                              (git/exec! worktree-path argv)
+                              (sandbox/exec! executor environment-id (str/join " " argv))))
+          on     (run ["git" "rev-parse" "--abbrev-ref" "HEAD"])
+          at     (run ["git" "rev-parse" "HEAD"])
+          head   {:head-branch (str/trim (str (:output on))) :head-sha (str/trim (str (:output at)))}]
+      (if (and (result/succeeded? on) (result/succeeded? at)
+               (= branch (:head-branch head)) (= commit-sha (:head-sha head)))
+        state
+        (fail state :worktree-moved
+              (msg/t :publish/worktree-moved (merge {:branch branch :commit-sha commit-sha} head)))))))
+
 (defn ^{:stratum 1} step-check-gh-auth
   "Check gh CLI auth.  Dispatches to git/check-gh-auth! (host) or
    sandbox/check-gh-auth! (sandbox)."
@@ -485,11 +509,17 @@
    commits-ahead-of-base (git rev-list --count --right-only
    origin/<base>...HEAD — the three-dot merge-base form) detects this
    carry-forward case and treats it as success — step-commit will skip
-   cleanly and step-push will ship the existing commits."
+   cleanly and step-push will ship the existing commits.
+
+   A run released before whose PR has since merged has nothing staged and
+   nothing ahead (the fetched base holds the release). When the run's
+   branch has a merged PR at HEAD, that is the same release, carried on as
+   above, not an empty one."
   [state]
   (if (failed? state)
     state
-    (let [{:keys [host-mode? worktree-path executor environment-id base-branch]} state
+    (let [{:keys [host-mode? worktree-path executor environment-id base-branch
+                  branch provenance create-pr?]} state
           stage-r (if host-mode?
                     (git/stage-files! worktree-path :all)
                     (sandbox/stage-files! executor environment-id :all))
@@ -520,6 +550,19 @@
                       (git/commits-ahead-of-base worktree-path base-branch)
                       (sandbox/commits-ahead-of-base executor environment-id base-branch))]
           (and ahead (pos? ahead)))
+        (assoc state :write-metrics {:total-operations 0 :files-written 0
+                                     :preexisting-commits true})
+
+        (and create-pr? (:workflow provenance)
+             (let [head  (if host-mode?
+                           (git/exec! worktree-path ["git" "rev-parse" "HEAD"])
+                           (sandbox/exec! executor environment-id "git rev-parse HEAD"))
+                   found (if host-mode?
+                           (git/find-pr! worktree-path branch (:github-token state))
+                           (sandbox/find-pr! executor environment-id branch (gh-exec-opts state)))]
+               (and (result/succeeded? head)
+                    (= "MERGED" (get-in found [:pr :pr-state]))
+                    (= (str/trim (str (:output head))) (get-in found [:pr :pr-head-sha])))))
         (assoc state :write-metrics {:total-operations 0 :files-written 0
                                      :preexisting-commits true})
 
@@ -829,11 +872,13 @@
    Dispatches git backend based on :host-mode?.
 
    Runs after step-create-pr so PR number/URL are available.
-   Skipped when :create-pr? is false."
+   Skipped when :create-pr? is false, and for a merged PR: amending and
+   force-pushing its branch would put a commit no PR holds."
   [state]
   (cond
     (failed? state)           state
     (not (:create-pr? state)) state
+    (:pr-merged? state)       state
     :else
     (let [{:keys [release-meta pr-number pr-url branch
                   host-mode? worktree-path executor environment-id
@@ -964,7 +1009,8 @@
             (assoc state
                    :pr-number  (:pr-number existing)
                    :pr-url     (:pr-url existing)
-                   :pr-reused? true))
+                   :pr-reused? true
+                   :pr-merged? (= "MERGED" (:pr-state existing))))
 
         :else
         (let [pr-opts {:title       (:release/pr-title release-meta)
@@ -1014,6 +1060,7 @@
     (not (:create-pr? state))                     state
     (not (:pr-number state))                      state
     (not (pr-body-needs-update? (:release-meta state))) state
+    (:pr-merged? state)                           state
     :else
     (let [{:keys [release-meta pr-number host-mode? worktree-path
                   executor environment-id logger
@@ -1097,6 +1144,7 @@
   [prepared context]
   (-> (merge (release-state {} context {}) prepared)
       step-validate-inputs
+      step-verify-prepared
       step-push
       step-create-pr
       step-generate-pr-doc

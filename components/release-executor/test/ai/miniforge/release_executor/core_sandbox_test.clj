@@ -195,7 +195,8 @@
    "git diff"         {:exit-code 0 :stdout "M src/a.clj" :stderr ""}
    "gh auth"          {:exit-code 0 :stdout "Logged in" :stderr ""}
    "gh pr create"     {:exit-code 0 :stdout "https://github.com/o/r/pull/7" :stderr ""}
-   "git rev-parse"    {:exit-code 0 :stdout "abc123\n" :stderr ""}})
+   "rev-parse --abbrev-ref" {:exit-code 0 :stdout "feature/test-change\n" :stderr ""}
+   "git rev-parse HEAD" {:exit-code 0 :stdout "abc123\n" :stderr ""}})
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -393,6 +394,19 @@
             "publish makes no new commit (it only amends the PR doc onto the release commit)")
         (is (= "https://github.com/o/r/pull/7"
                (get-in published [:artifacts 0 :artifact/content :pr-url])))))))
+
+(deftest ^{:stratum 1} publish-release-refuses-a-moved-worktree-test
+  (testing "publish pushes nothing when HEAD is no longer the prepared commit"
+    (let [[exec cmds] (create-mock-executor :responses publishable-responses)
+          context     {:executor exec :environment-id "mock-env"
+                       :worktree-path "/tmp/wt" :create-pr? true}
+          prepared    (core/prepare-release (make-workflow-state) context
+                                            {:release-meta test-release-meta})
+          published   (core/publish-release (assoc-in (:prepared prepared) [:commit-sha] "other")
+                                            context)]
+      (is (not (:success? published)))
+      (is (= :worktree-moved (-> published :errors first :type)))
+      (is (not-any? #(clojure.string/includes? % "git push") @cmds)))))
 
 (deftest ^{:stratum 1} step-create-branch-prefers-base-branch-override
   (testing "an explicit base-branch-override (chained DAG task's parent branch)
