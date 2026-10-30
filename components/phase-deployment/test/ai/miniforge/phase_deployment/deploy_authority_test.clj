@@ -56,13 +56,13 @@
   {:execution/id run-id
    :execution/phase-results {:provision {:result {:output provision-preview}}}
    :grant-breach-dir
-   (str (.toFile
-         (Files/createTempDirectory "grant" (into-array FileAttribute []))))})
+   (.getCanonicalPath
+    (.toFile (Files/createTempDirectory "grant" (into-array FileAttribute []))))})
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} request-binds-canonical-authority-inputs-test
-  (let [request (authority/request (context) (random-uuid) target)]
+  (let [request (authority/request (context) (random-uuid) target :allow)]
     (is (= run-id (:workflow-run/id request)))
     (is (= "gke-prod" (:context request)))
     (is (= "gke-prod" (:default-context request)))))
@@ -81,10 +81,26 @@
 
 (deftest ^{:stratum 2} prepare-omits-unrecorded-preflight-evidence-test
   (let [proposal (:effect/proposal
-                  (authority/prepare (context) (random-uuid) target {} now))]
+                  (authority/prepare (context) (random-uuid) target
+                                     (select-keys preflight
+                                                  [:rendered-yaml :server-dry-run])
+                                     now))]
+    (is (= "manifest" (:deploy/rendered-yaml proposal)))
     (is (not-any? #(contains? proposal %)
-                  [:app-label :deploy/rendered-yaml
-                   :deploy/server-dry-run :deploy/rollback-info]))))
+                  [:app-label :deploy/rollback-info]))))
+
+(deftest ^{:stratum 2} prepare-refuses-without-dry-run-evidence-test
+  (doseq [evidence [{} (dissoc preflight :server-dry-run)
+                    (assoc preflight :server-dry-run " ")]]
+    (let [prepared (authority/prepare (context) (random-uuid) target evidence now)]
+      (is (= :unauthorized (:anomaly/type prepared))
+          "issuance refuses a deploy whose manifests never passed a dry run"))))
+
+(deftest ^{:stratum 2} prepare-registers-its-grant-test
+  (let [ctx (context)
+        prepared (authority/prepare ctx (random-uuid) target preflight now)
+        grant-id (get-in prepared [:authority/grant :grant/id])]
+    (is (= grant-id (:grant/id (grant/current (:grant-breach-dir ctx) grant-id))))))
 
 (deftest ^{:stratum 2} prepare-denies-when-provision-preview-is-absent-test
   (let [prepared (authority/prepare

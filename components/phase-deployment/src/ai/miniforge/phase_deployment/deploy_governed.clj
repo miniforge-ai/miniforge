@@ -121,9 +121,11 @@
 
 (defn- ^{:stratum 1} commit-effect
   [state]
-  (let [committed (transaction/commit!
-                   (:context state) (:transaction state) (:authority state)
-                   (:operations state) (:now state))]
+  (let [context (:context state)
+        committed (transaction/commit!
+                   context (:transaction state) (authority/breach-dir context)
+                   (get-in state [:authority :authority/grant :grant/id])
+                   (:operations state))]
     (if (anomaly/anomaly? committed)
       (fail state :apply (:anomaly/message committed))
       (assoc state :transaction committed))))

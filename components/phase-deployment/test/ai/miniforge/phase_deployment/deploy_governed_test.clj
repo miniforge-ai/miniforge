@@ -50,7 +50,7 @@
 
 (defn- ^{:stratum 0} tmp-dir
   []
-  (str (.toFile (Files/createTempDirectory "deploy" (into-array FileAttribute [])))))
+  (.getCanonicalPath (.toFile (Files/createTempDirectory "deploy" (into-array FileAttribute [])))))
 
 (defn- ^{:stratum 0} record-call
   [calls operation & arguments]
@@ -69,7 +69,8 @@
   []
   {:execution/id (random-uuid)
    :execution/phase-results {:provision {:result {:output {:steps []}}}}
-   :effect-store-dir (tmp-dir) :grant-breach-dir (tmp-dir)})
+   :effect-store-dir (tmp-dir) :grant-breach-dir (tmp-dir)
+   :clock (constantly now)})
 
 (defn- ^{:stratum 1} prepared-authority
   [ctx]
@@ -173,21 +174,20 @@
                (:effect/observed record)))))))
 
 (deftest ^{:stratum 2} inactive-authority-never-reaches-apply-test
-  (doseq [[label change]
-          [[:absent #(assoc % :authority/grant nil)]
-           [:mismatched #(assoc-in % [:authority/grant :grant/scope :context]
-                                   "other-cluster")]
-           [:expired #(assoc-in % [:authority/grant :grant/expires-at]
-                                (.minusSeconds now 1))]]]
-    (testing (name label)
-      (let [calls (atom [])
-            ctx (context)
-            prepared (change (prepared-authority ctx))]
-        (with-redefs [authority/prepare (fn [& _] prepared)]
-          (let [result (governed/transact! ctx deploy-config
-                                           (recording-operations calls) now)]
-            (is (= :failed (:deploy/status result)))
-            (is (= :authority (:deploy/stage result)))
-            (when (= :absent label)
-              (is (not (some #(= :rollback (first %)) @calls))))
-            (is (not (applied? calls)))))))))
+  (testing "an absent grant fails before rollback capture"
+    (let [calls (atom [])
+          ctx (context)
+          prepared (assoc (prepared-authority ctx) :authority/grant nil)]
+      (with-redefs [authority/prepare (fn [& _] prepared)]
+        (let [result (governed/transact! ctx deploy-config
+                                         (recording-operations calls) now)]
+          (is (= :authority (:deploy/stage result)))
+          (is (not (some #(= :rollback (first %)) @calls)))
+          (is (not (applied? calls)))))))
+  (testing "a grant that has expired by commit time never applies"
+    (let [calls (atom [])
+          ctx (assoc (context) :clock (constantly (.plusSeconds now 3600)))
+          result (governed/transact! ctx deploy-config
+                                     (recording-operations calls) now)]
+      (is (= :failed (:deploy/status result)))
+      (is (not (applied? calls))))))

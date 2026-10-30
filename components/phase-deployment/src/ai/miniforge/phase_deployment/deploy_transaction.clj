@@ -21,8 +21,11 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.effect-transaction.interface :as fx]
+   [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.phase-deployment.messages :as msg]
-   [ai.miniforge.schema.interface :as schema]))
+   [ai.miniforge.schema.interface :as schema])
+  (:import
+   [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -40,6 +43,18 @@
   (str (or (not-empty (:stderr result))
            (:error result)
            (msg/t :deploy/apply-failed))))
+
+(defn- ^{:stratum 0} issued-grant
+  "Read the registered grant this attempt issued; any other id is refused."
+  [grant-dir issued-id requested-id]
+  (if (= issued-id requested-id)
+    (grant/current grant-dir requested-id)
+    (anomaly/anomaly :unauthorized (msg/t :deploy/grant-substituted) {})))
+
+(defn- ^{:stratum 0} clock
+  "The commit-time clock: the context's when supplied, else the system's."
+  [context]
+  (get context :clock #(Instant/now)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -81,13 +96,14 @@
    now))
 
 (defn ^{:stratum 2} commit!
-  [context transaction authority operations now]
-  (let [dir (store-dir context)
-        durable (fx/read-record dir (:effect/id transaction))]
-    (if (anomaly/anomaly? durable)
-      durable
-      (fx/commit! dir transaction (:authority/grant authority) {} now
-                  (partial apply-report operations (:effect/proposal durable))))))
+  "Re-read the registered grant, then apply the durable proposal. A grant
+   absent from `grant-dir` returns an anomaly and a revoked one records
+   `:failed`; neither applies anything."
+  [context transaction grant-dir grant-id operations]
+  (fx/commit-current! (store-dir context) (:effect/id transaction)
+                      (partial issued-grant grant-dir grant-id)
+                      (clock context)
+                      #(apply-report operations (:effect/proposal %))))
 
 (defn ^{:stratum 2} reconcile!
   [context transaction operations now]
