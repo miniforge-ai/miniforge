@@ -1,0 +1,185 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.llm.protocols.impl.llm-client.cli-args
+  "Argument builders for the agent CLI backends (Claude, Codex, Cursor,
+   OpenCode, echo)."
+  (:require
+   [clojure.string :as str]
+   [cheshire.core :as json]
+   [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+;------------------------------------------------------------------------------ Backend configurations
+;; Named argument builders — extracted from the backends config map for clarity.
+(defn ^{:stratum 0} claude-mcp-allowlist-string
+  "Claude CLI's --allowedTools wire format.
+
+   Accepts two entry shapes:
+   - `{:mcp/server :mcp/tool}` keyword map → `mcp__<server>__<tool>`
+     (MCP tool; server name comes from the mcp-config.json key)
+   - Keyword by itself → `(name kw)` (native Claude Code tool,
+     e.g. `:Write`)
+
+   Entries are joined with commas. A malformed entry throws via
+   `(name nil)` at the call site."
+  [mcp-allowed-tools]
+  (->> mcp-allowed-tools
+       (mapv (fn [t]
+               (if (keyword? t)
+                 (name t)
+                 (let [{:mcp/keys [server tool]} t]
+                   (str "mcp__" (name server) "__" (name tool))))))
+       (str/join ",")))
+
+(def ^{:stratum 0} ^:private claude-input-format-flag
+  "Claude CLI flag that selects how the user prompt is delivered. Paired
+   with `claude-input-format-stdin` (the only value we use today), this
+   tells the CLI to read the prompt from stdin instead of argv."
+  "--input-format")
+
+(def ^{:stratum 0} ^:private claude-input-format-stdin
+  "Argument value for `claude-input-format-flag` that switches the CLI
+   to text-on-stdin input mode."
+  "text")
+
+(defn ^{:stratum 0} codex-args
+  "Build CLI arguments for the Codex backend."
+  [{:keys [prompt model system prompt-via]
+    :or {prompt-via :stdin}}]
+  (let [stdin? (= prompt-via :stdin)]
+    (cond-> ["exec"
+             "--json"
+             "--ignore-user-config"
+             "--sandbox=workspace-write"
+             "--skip-git-repo-check"]
+      true   (into ["-c" "approval_policy=never"])
+      model  (into ["-m" model])
+      system (into ["-c" (str "system_prompt=" (json/generate-string system))])
+      stdin? (conj "-")
+      (not stdin?) (conj prompt))))
+
+(defn ^{:stratum 0} cursor-args
+  "Build CLI arguments for the Cursor backend (binary `agent`).
+
+   Flags follow https://cursor.com/docs/cli/reference/parameters:
+
+     -p / --print  non-interactive run with tool access
+     --force       required for the agent to write files in print mode;
+                   this is the autonomous-execution switch (analogous to
+                   codex `approval_policy=never`)
+
+   Tool restriction is enforced out-of-band via the default-deny
+   .cursor/cli.json permissions allowlist written by the agent session
+   (see artifact-session/write-cursor-permissions!), not via CLI flags —
+   so we do not pass --approve-mcps (which would blanket-approve every MCP
+   server). Cursor exposes no system-prompt flag, so `system` is prepended
+   to the user prompt."
+  [{:keys [prompt system model]}]
+  (let [prompt (if system (str system "\n\n" prompt) prompt)]
+    (cond-> ["-p" "--force"]
+      model (into ["--model" model])
+      true  (conj prompt))))
+
+(defn ^{:stratum 0} opencode-args
+  "Build CLI arguments for the OpenCode backend.
+
+   OpenCode owns provider credentials, model aliases, project config,
+   agent profiles, MCP config, and permissions. Miniforge passes the
+   selected model/profile knobs through and treats OpenCode as the
+   common provider wrapper instead of handling API keys directly."
+  [{:keys [prompt model agent attach command session continue? fork? files format]}]
+  (cond-> ["run"]
+    attach    (into ["--attach" attach])
+    command   (into ["--command" command])
+    continue? (conj "--continue")
+    session   (into ["--session" session])
+    fork?     (conj "--fork")
+    model     (into ["--model" model])
+    agent     (into ["--agent" agent])
+    (seq files) (into (mapcat (fn [file] ["--file" file]) files))
+    format    (into ["--format" format])
+    true      (conj prompt)))
+
+(defn ^{:stratum 0} echo-args
+  "Build CLI arguments for the echo (test) backend."
+  [{:keys [prompt]}]
+  [prompt])
+
+(defn- ^{:stratum 0} default-claude-cli-budget-usd
+  []
+  (settings/client-default [:claude-cli :default-budget-usd]))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} claude-args
+  "Build CLI arguments for the Claude backend.
+
+   Prompt delivery is controlled by `:prompt-via` on the request map:
+
+     :argv  (default) — prompt is conjoined as a positional argv arg.
+                        Legacy behavior; kept for tests + backends that
+                        do not invoke the planner-sized prompt path.
+     :stdin           — prompt is omitted from argv; `--input-format text`
+                        tells claude to read the user prompt from stdin.
+                        Required for the planner / implementer path
+                        because system-prompt + spec text +
+                        existing-files context regularly exceeds POSIX
+                        ARG_MAX once combined into argv (observed
+                        2026-05-07 stage-3 dogfood: \"Argument list too
+                        long\" on plan phase).
+
+   Callers (handle-streaming / complete-impl) read `:prompt-via` from
+   the backend config and thread it into the request map before
+   invoking this fn; for :stdin they additionally pipe the prompt
+   string into the process via the exec layer's `:stdin` option."
+  [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools
+           disallowed-tools supervision budget-usd max-turns model resume
+           prompt-via]
+    :or   {prompt-via :argv}}]
+  (let [budget (or budget-usd
+                   (when max-tokens (default-claude-cli-budget-usd)))
+        stdin? (= prompt-via :stdin)]
+    (cond-> ["-p"]
+      streaming?                   (conj "--output-format" "stream-json")
+      streaming?                   (conj "--verbose")
+      stdin?                       (conj claude-input-format-flag
+                                         claude-input-format-stdin)
+      ;; --strict-mcp-config: only load the MCP servers from our
+      ;; --mcp-config, ignoring the host's user/project MCP config. On
+      ;; the local worktree executor the agent CLI otherwise inherits the
+      ;; operator's personal ~/.claude MCP servers (e.g. Gmail / Calendar
+      ;; / Drive), whose tool schemas bloat the agent's fixed context
+      ;; overhead. On 2026-06-07 that leakage pushed the planner's
+      ;; first-turn prompt past the 200k window — a single ToolSearch
+      ;; result tipped it over and the CLI returned "Prompt is too long"
+      ;; (plan phase, review-redirect-convergence dogfood adhoc-2135293220).
+      ;; The container executor is already isolated from host config; this
+      ;; brings the local runner to parity for the MCP vector. Mirrors the
+      ;; codex builder's --ignore-user-config.
+      mcp-config                   (into ["--mcp-config" mcp-config
+                                          "--strict-mcp-config"])
+      (seq mcp-allowed-tools)      (into ["--allowedTools" (claude-mcp-allowlist-string mcp-allowed-tools)])
+      (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
+      (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
+      system                       (into ["--system-prompt" system])
+      budget                       (into ["--max-budget-usd" (str budget)])
+      max-turns                    (into ["--max-turns" (str max-turns)])
+      model                        (into ["--model" model])
+      resume                       (into ["--resume" resume])
+      (not stdin?)                 (conj prompt))))
