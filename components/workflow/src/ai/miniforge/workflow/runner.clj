@@ -91,10 +91,13 @@
    ;; One live process per run id, held for the whole run: a resume or a
    ;; launcher retry of a run still running is refused (the owner lock's
    ;; anomaly is thrown) before anything is acquired. The root is the one
-   ;; the run checkpoints under, as restore-context resolves it.
-   (let [run-id (effective-run-id opts)]
+   ;; the run checkpoints under: the snapshot's when the context is
+   ;; restored (snapshot and phase results both given), else the options'.
+   (let [run-id (effective-run-id opts)
+         restored? (and (:resume-machine-snapshot opts) (:resume-phase-results opts))]
      (owner/with-run-owner
-      (checkpoint-paths/resolve-checkpoint-root (merge opts (:resume-machine-snapshot opts)))
+      (checkpoint-paths/resolve-checkpoint-root (cond-> opts
+                                                  restored? (merge (:resume-machine-snapshot opts))))
       run-id
       (fn []
         (let [[acquired-env opts] (acquire-environment workflow input (assoc opts :workflow-id run-id))

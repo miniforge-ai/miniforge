@@ -125,7 +125,24 @@
                 (catch clojure.lang.ExceptionInfo _ nil)))
         (is (uuid? (:id @seen)))
         (is (= (str (:id @seen)) (get-in @seen [:owner :owner/run-id])))
-        (is (nil? (owner/owner root (:id @seen))) "released when the run ends")))))
+        (is (nil? (owner/owner root (:id @seen))) "released when the run ends")))
+    (testing "a snapshot without phase results is not restored: the options' root is locked"
+      (let [id (random-uuid)
+            snapshot-root (str (fs/create-dirs (fs/path root "snapshot-root")))
+            opts-root (str (fs/create-dirs (fs/path root "opts-root")))
+            seen (atom nil)]
+        (with-redefs-fn {#'ai.miniforge.workflow.runner/acquire-environment
+                         (fn [_ _ _]
+                           (reset! seen {:opts (owner/owner opts-root id)
+                                         :snapshot (owner/owner snapshot-root id)})
+                           (throw (ex-info "stop here" {})))}
+          #(try (runner/run-pipeline {:workflow/id :owner-test :workflow/pipeline []} {}
+                                     {:resume-machine-snapshot {:execution/id id
+                                                                :execution/checkpoint-root snapshot-root}
+                                      :checkpoint/root opts-root})
+                (catch clojure.lang.ExceptionInfo _ nil)))
+        (is (some? (:opts @seen)))
+        (is (nil? (:snapshot @seen)))))))
 
 (deftest ^{:stratum 0} owner-file-is-stable-through-a-symlinked-parent-test
   (fs/with-temp-dir [dir {:prefix "run-owner-link-"}]
@@ -140,6 +157,20 @@
             "the same file before and after the root exists")
         (is (= :conflict (:anomaly/type (owner/acquire! root id)))
             "a second local claim through the alias is answered by the registry")
+        (finally (owner/release! held))))))
+
+(deftest ^{:stratum 0} owner-file-is-stable-through-parent-traversal-test
+  (fs/with-temp-dir [dir {:prefix "run-owner-dots-"}]
+    (let [root   (str (fs/path dir "unused" ".." "checkpoints"))
+          id     (random-uuid)
+          before (owner/owner-file root id)
+          held   (owner/acquire! root id)]
+      (try
+        (fs/create-dirs (fs/path dir "checkpoints"))
+        (is (= (str before) (str (owner/owner-file root id)))
+            "the same file before and after the root exists")
+        (is (= :conflict (:anomaly/type (owner/acquire! root id)))
+            "a second local claim is answered by the registry")
         (finally (owner/release! held))))))
 
 ;------------------------------------------------------------------------------ Layer 1
