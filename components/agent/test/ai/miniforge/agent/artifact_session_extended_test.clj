@@ -302,7 +302,7 @@
   (testing "writes a valid JSON settings file with hook"
     (let [s (session/create-session!)]
       (try
-        (let [path (session/write-claude-settings! (:dir s))
+        (let [path (session/write-claude-settings! (:dir s) :implementer)
               content (json/parse-string (slurp path) true)]
           (is (str/ends-with? path "claude-settings.json"))
           (is (map? content))

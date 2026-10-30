@@ -26,7 +26,9 @@
    [cheshire.core :as json]
    [org.httpkit.client :as http]
    [ai.miniforge.llm.interface :as llm]
-   [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
+   [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+   [ai.miniforge.llm.protocols.impl.llm-client.http-backend :as http-backend]
+   [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -54,7 +56,7 @@
    {:url :headers :body}}."
   [response f]
   (let [captured (atom nil)]
-    (with-redefs [impl/http-post-request
+    (with-redefs [http-backend/http-post-request
                   (fn [url headers body]
                     (reset! captured {:url url :headers headers :body body})
                     response)]
@@ -432,7 +434,7 @@
     (let [{:keys [result captured]}
           (capture-http (openrouter-200 "never sent")
                         (fn []
-                          (with-redefs [impl/getenv-value (constantly nil)]
+                          (with-redefs [settings/getenv-value (constantly nil)]
                             (llm/complete (llm/create-client {:backend :openrouter
                                                               :model "vendor/model"})
                                           {:prompt "q"}))))]
@@ -472,7 +474,7 @@
     (let [{:keys [result captured]}
           (capture-http (openai-200 "local answer")
                         (fn []
-                          (with-redefs [impl/getenv-value (constantly nil)]
+                          (with-redefs [settings/getenv-value (constantly nil)]
                             (llm/complete (llm/create-client {:backend :openai-compat
                                                               :model "qwen3-30b-a3b"})
                                           {:prompt "hi"}))))]
@@ -530,7 +532,7 @@
     (let [{:keys [result captured]}
           (capture-http (openai-200 "keyless ok")
                         (fn []
-                          (with-redefs [impl/getenv-value (constantly nil)]
+                          (with-redefs [settings/getenv-value (constantly nil)]
                             (llm/complete (llm/create-client {:backend :openai-compat
                                                               :model "m"})
                                           {:prompt "hi"}))))]
@@ -545,7 +547,7 @@
           {:keys [captured]}
           (capture-http (openai-200 "keyed ok")
                         (fn []
-                          (with-redefs [impl/getenv-value
+                          (with-redefs [settings/getenv-value
                                         (fn [k] (when (= k env-var) test-api-key))]
                             (llm/complete (llm/create-client {:backend :openai-compat
                                                               :model "m"})

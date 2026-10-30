@@ -21,6 +21,7 @@
    block, and the Cursor MCP config and permission allowlist, with their
    cleanup."
   (:require
+   [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [babashka.fs :as fs]
    [cheshire.core :as json]
    [clojure.edn :as edn]
@@ -43,7 +44,8 @@
 
    Any other bb.edn (a user repository's own, or one that does not parse)
    is skipped. Taking it would point both commands at tasks that do not
-   exist there, and a failing PreToolUse hook does not block the tool."
+   exist there: the MCP server would not start, and the PreToolUse hook
+   would fail and so block every tool (`hook-eval-command`)."
   []
   (loop [dir (.getCanonicalFile (io/file (System/getProperty "user.dir")))]
     (let [bb-file (io/file dir "bb.edn")
@@ -197,6 +199,33 @@
             (.delete f)
             (spit f (json/generate-string config' {:pretty true}))))
         (catch Exception _ nil)))))
+
+(defn ^{:stratum 0} hook-eval-command
+  "The PreToolUse hook command for a session of `role`: the miniforge
+   command `words` (e.g. [\"mf\"] or [\"bb\" \"miniforge\"]) running
+   `hook-eval --role <role>`, then `|| exit 2`. Claude runs the command
+   through `sh -c` and blocks the tool call only on exit code 2, so a hook
+   that cannot start (miniforge not on PATH, a crash before it replies)
+   blocks too instead of letting the call through. A nil `role` leaves
+   `--role` off, and hook-eval then refuses every tool.
+
+   A keyword role keeps its namespace (`:custom/implementer` becomes
+   `--role custom/implementer`), so a role the policy does not list is
+   refused rather than read as a listed role with the same name.
+
+   A word holding anything beyond letters, digits and `_./:=@%+,-` is
+   shell-quoted, so a checkout path with a space stays one argument."
+  [words role]
+  (let [word (fn [w]
+               (if (re-matches #"[A-Za-z0-9_./:=@%+,-]+" w)
+                 w
+                 (file-artifacts/shell-quote w)))]
+    (str/join " " (concat (map word words)
+                          ["hook-eval"]
+                          (when role ["--role" (word (if (keyword? role)
+                                                        (subs (str role) 1)
+                                                        (str role)))])
+                          ["||" "exit" "2"]))))
 
 (defn ^{:stratum 0} pre-tool-use-settings
   "Claude Code settings that run `hook-cmd` before every tool call. Each
@@ -444,14 +473,14 @@
 (defn ^{:stratum 2} write-claude-settings!
   "Write Claude CLI settings JSON with PreToolUse hook for supervision.
 
-   The hook runs `hook-eval` on the command `resolve-miniforge-command`
-   returns (e.g. `mf hook-eval`), which reads the tool request from stdin
-   and returns allow/deny on stdout.
+   The hook runs `hook-eval --role <role>` on the command
+   `resolve-miniforge-command` returns (e.g. `mf hook-eval --role
+   implementer`), which reads the tool request from stdin and returns
+   allow/deny on stdout (`hook-eval-command`).
 
    Returns the path to the settings file."
-  [session-dir]
-  (let [[cmd & args] (resolve-miniforge-command)
-        hook-command (str/join " " (concat [cmd] args ["hook-eval"]))
+  [session-dir role]
+  (let [hook-command (hook-eval-command (resolve-miniforge-command) role)
         path (str session-dir "/claude-settings.json")]
     (spit path (json/generate-string (pre-tool-use-settings hook-command) {:pretty true}))
     path))

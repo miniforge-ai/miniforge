@@ -44,4 +44,6 @@
   :release/git-status-failed            "Release could not list changed files in {worktree-path}: {detail}"
   :release/skipped-already-implemented  "Release skipped — task was already implemented"
   :release/changes-description          "Changes from implementation"
-  :release/phase-failed                 "Release phase failed"}}
+  :release/phase-failed                 "Release phase failed"
+  :release/publish-failed               "Release could not push the branch or open the PR"
+  :release/not-prepared                 "Release has no prepared branch to publish"}}

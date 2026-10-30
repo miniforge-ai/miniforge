@@ -23,6 +23,7 @@
             [ai.miniforge.llm.messages :as msg]
             [ai.miniforge.llm.protocols.records.llm-client]
             [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+            [ai.miniforge.llm.protocols.impl.llm-client.stream-exec :as stream-exec]
             [ai.miniforge.llm.progress-monitor :as pm]
             [ai.miniforge.logging.interface :as log]
             [cheshire.core :as json]))
@@ -1188,7 +1189,7 @@
           "subprocess saw stdin content split by line"))))
 
 (defn- ^{:stratum 0} fake-stream-process
-  "Stub for `#'impl/start-stream-process!`. Returns a map matching the
+  "Stub for `#'stream-exec/start-stream-process!`. Returns a map matching the
    shape `stream-exec-fn` consumes, with a `Process` proxy whose
    stdout is `input-stream`. `.destroyForcibly` closes the supplied
    `on-destroy!` closure (used for tests that need to release a
@@ -1778,8 +1779,8 @@
     ;; closes the pipe. With a stub probe-fn returning false, the
     ;; monitor fires within ~30ms (10ms interval × 3 strikes) and
     ;; forces stream-exec-fn to return. No real subprocess; portable.
-    (with-redefs [impl/start-stream-process! (fn [_cmd _opts]
-                                               (fake-blocking-stream-process))]
+    (with-redefs [stream-exec/start-stream-process! (fn [_cmd _opts]
+                                                      (fake-blocking-stream-process))]
       (let [handler (fn [_line] nil)
             monitor (pm/create-progress-monitor {:min-activity-interval-ms 1
                                                  :stagnation-threshold-ms  120000
@@ -1806,8 +1807,8 @@
   ;; `:echo` test backend) supply no `:backend-key`. The network
   ;; monitor must stay dormant so they keep working unchanged.
   (testing "without :backend-key, no probe traffic is generated"
-    (with-redefs [impl/start-stream-process! (fn [_cmd _opts]
-                                               (fake-eof-stream-process))]
+    (with-redefs [stream-exec/start-stream-process! (fn [_cmd _opts]
+                                                      (fake-eof-stream-process))]
       (let [probe-calls (atom 0)
             handler (fn [_line] nil)
             monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})

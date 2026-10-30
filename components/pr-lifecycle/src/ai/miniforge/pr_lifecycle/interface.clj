@@ -657,24 +657,6 @@
      (evaluate-merge-readiness \"/path/to/repo\" 123 default-merge-policy)"
   merge/evaluate-merge-readiness)
 
-(def ^{:stratum 0} merge-pr!
-  "Merge a PR using gh CLI.
-
-   Options:
-   - :policy - Merge policy map
-
-   Example:
-     (merge-pr! \"/path/to/repo\" 123 :policy {:method :squash})"
-  merge/merge-pr!)
-
-(def ^{:stratum 0} enable-auto-merge!
-  "Enable auto-merge for a PR."
-  merge/enable-auto-merge!)
-
-(def ^{:stratum 0} disable-auto-merge!
-  "Disable auto-merge for a PR."
-  merge/disable-auto-merge!)
-
 (def ^{:stratum 0} rebase-pr!
   "Rebase a PR onto the latest base branch."
   merge/rebase-pr!)
