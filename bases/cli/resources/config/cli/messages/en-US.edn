@@ -598,6 +598,13 @@
   :pr/policy-respond-escalated "pr policy-respond: comment {cid} escalated — {reason}"
   :pr/policy-respond-failed "pr policy-respond: PR #{n} — [{code}] {message}"
 
+  ;; Webhook intake
+  :webhook/triggers-required "--triggers <file.edn> is required: the trigger rules that decide which events start which workflows."
+  :webhook/triggers-invalid "{path} is not a readable trigger file. Every rule needs :on (one of :pr/merged :pr/opened :pr/ci-failed), :repo \"owner/name\", :run {:workflow-id <id>}, and a :branch-pattern that compiles if given."
+  :webhook/start-refused "{reason} Pass --secret-file <file> holding the webhook secret."
+  :webhook/listening "Receiving GitHub webhooks at {url} with {count} trigger rule(s). Press Ctrl+C to stop."
+  :webhook/stopping "Stopping webhook intake..."
+
   ;; PR Monitor
   :pr/monitor-starting "Starting PR monitor for author: {author}"
   :pr/monitor-polling "Polling every {seconds}s in {dir}"

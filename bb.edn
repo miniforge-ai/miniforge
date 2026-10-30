@@ -827,6 +827,8 @@
                  "components/policy-clause/src"
                  "components/decision-envelope/src"
                  "components/effect-transaction/src"
+                 "components/webhook-intake/src"
+                 "components/webhook-intake/resources"
                  "components/effect-transaction/resources"
                  "components/execution-grant/src"
                  "components/execution-grant/resources"

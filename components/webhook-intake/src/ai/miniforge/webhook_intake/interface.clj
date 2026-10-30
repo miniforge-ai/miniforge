@@ -21,9 +21,15 @@
   (:require
    [ai.miniforge.webhook-intake.github :as github]
    [ai.miniforge.webhook-intake.handler :as handler]
+   [ai.miniforge.webhook-intake.listener :as listener]
    [ai.miniforge.webhook-intake.signature :as signature]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} sign
+  "`(sign secret body-bytes)`: the X-Hub-Signature-256 value GitHub sends
+   for `body-bytes` under `secret`, for clients and tests."
+  signature/sign)
 
 (def ^{:stratum 0} valid-signature?
   "`(valid-signature? secret body-bytes x-hub-signature-256)`: true when the
@@ -42,3 +48,10 @@
 (def ^{:stratum 0} github-path
   "Path the intake serves GitHub deliveries on."
   handler/github-path)
+
+(def ^{:stratum 0} start!
+  "`(start! {:secret :stream :host :port})`: serve `github-path` on `:host`
+   (default 127.0.0.1) and `:port` (0 picks a free one), publishing each
+   signed delivery's events to `:stream`. Throws an :invalid-input
+   anomaly when `:secret` is blank. Returns {:host :port :stop-fn}."
+  listener/start!)

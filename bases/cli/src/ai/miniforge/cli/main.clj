@@ -66,6 +66,7 @@
    [ai.miniforge.cli.main.commands.control-plane :as cmd-cp]
    [ai.miniforge.cli.main.commands.operator-serve :as cmd-operator-serve]
    [ai.miniforge.cli.main.commands.scan :as cmd-scan]
+   [ai.miniforge.cli.main.commands.webhook-serve :as cmd-webhook]
    [ai.miniforge.cli.main.commands.init :as cmd-init]
    [ai.miniforge.cli.main.commands.worktree :as cmd-worktree]
    [ai.miniforge.cli.main.commands.runtime :as cmd-runtime]
@@ -305,6 +306,8 @@
 (defn ^{:stratum 0} pr-merge-cmd [m] (cmd-pr/pr-merge-cmd (util/get-opts m)))
 
 (defn ^{:stratum 0} pr-monitor-cmd [m] (cmd-pr/pr-monitor-cmd (util/get-opts m)))
+
+(defn ^{:stratum 0} webhook-serve-cmd [m] (cmd-webhook/webhook-serve-cmd (util/get-opts m)))
 
 (defn ^{:stratum 0} pr-review-monitor-cmd [m] (cmd-pr-review-monitor/pr-review-monitor-cmd (util/get-opts m)))
 
@@ -643,6 +646,12 @@
     :spec {:author        {:alias :a}
            :poll-interval {:alias :p}
            :repo          {}}}
+
+   {:cmds ["webhook" "serve"] :fn webhook-serve-cmd :restrict true
+    :spec {:triggers    {}
+           :host        {}
+           :port        {:coerce :long}
+           :secret-file {}}}
 
    ;; N13 §2.2 Standards Reviewer auto-trigger (single-pass v0)
    {:cmds ["pr" "review-monitor"]
