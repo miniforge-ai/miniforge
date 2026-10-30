@@ -782,14 +782,15 @@
 
 ;; Tool supervision
 (def ^{:stratum 0} evaluate-tool-use
-  "Evaluate a role's tool use request against the default-deny policy.
-   Args: [role tool-name tool-input], or [policy role tool-name tool-input].
+  "Evaluate a session's tool use request against the default-deny policy.
+   Args: [session tool-name tool-input], or [policy session tool-name
+   tool-input]; session is {:role :root :path-ok?}.
    Returns {:decision \"allow\"} or {:decision \"deny\" :reason string}."
   tool-supervisor/evaluate-tool-use)
 
 (def ^{:stratum 0} hook-eval-stdin!
   "CLI entry point for tool-use evaluation from stdin. Args: [] or
-   [{:role role}]. Returns the exit code: 0 after a reply, 2 (Claude blocks
+   [{:role :root :path-ok?}]. Returns the exit code: 0 after a reply, 2 (Claude blocks
    the call) when evaluation fails."
   tool-supervisor/hook-eval-stdin!)
 
