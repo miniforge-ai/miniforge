@@ -69,7 +69,7 @@
     (testing "no PR asked for: the push alone completes"
       (is (= :completed (get-in (publish false no-pr) [:output :release/status]))))))
 
-(deftest ^{:stratum 0} name-status-entries-test
-  (is (= [["M" "src/a.clj"] ["A" "src/b.clj"] ["R" "src/new.clj"] ["D" "old.clj"]]
-         (release-unpushed/name-status-entries
-          "M\u0000src/a.clj\u0000A\u0000src/b.clj\u0000R100\u0000src/old.clj\u0000src/new.clj\u0000D\u0000old.clj\u0000"))))
+(deftest ^{:stratum 0} log-paths-test
+  (is (= ["src/a.clj" "src/b clj.clj" "old.clj"]
+         (release-unpushed/log-paths
+          "\u0000src/a.clj\u0000src/b clj.clj\u0000\u0000\nsrc/a.clj\u0000old.clj\u0000"))))

@@ -390,13 +390,8 @@
                     :out  (get-in r [:data :stdout] "")
                     :err  (get-in r [:data :stderr] (:message (:error r)))}))
                (fn [argv] (apply shell/sh (concat argv [:dir root-path]))))
-        read (if execute-fn
-               (fn [path] (let [r (run ["cat" (str root-path "/" path)])]
-                            (when (= 0 (:exit r)) (:out r))))
-               (fn [path] (let [f (io/file root-path path)]
-                            (when (.isFile f) (slurp f)))))
         {:keys [files failure]} (try
-                                  (release-unpushed/unpushed-files run read)
+                                  (release-unpushed/unpushed-files run)
                                   (catch Exception e
                                     {:failure {:detail (or (ex-message e) (.getName (class e)))
                                                :data   {:exception/class (.getName (class e))}}}))]

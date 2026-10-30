@@ -16,11 +16,13 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-software-factory.release-unpushed
-  "Committed work a release has not published: the files the branch's
-   commits change since it left origin's default branch. The release skip
-   probe reads it, so a clean worktree whose work sits in unpushed commits
-   is released instead of skipped as done. Backend-neutral: the caller
-   supplies how to run git and read a file (host or capsule).
+  "Committed work a release has not published: the files that commits on
+   HEAD but on no remote-tracking ref change. The release skip probe reads
+   it, so a clean worktree whose work sits in unpushed commits is released
+   instead of skipped as done. Needs no base ref: a chained DAG task's
+   parent work is on its pushed branch, and a single-branch clone has the
+   ref it was cloned from. Backend-neutral: the caller supplies how to run
+   git (host or capsule).
 
    Split out of `release` (rule 210)."
   (:require [ai.miniforge.agent.interface :as agent]
@@ -28,52 +30,38 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} name-status-entries
-  "Parse `git diff --name-status -z` output into [status path] pairs. A
-   rename or copy carries its source and destination; the destination is
-   kept."
-  [out]
-  (loop [tokens (remove str/blank? (str/split (or out "") #"\u0000"))
-         entries []]
-    (if-let [status (first tokens)]
-      (if (#{\R \C} (first status))
-        (recur (drop 3 tokens) (conj entries [(str (first status)) (nth tokens 2 nil)]))
-        (recur (drop 2 tokens) (conj entries [status (second tokens)])))
-      (filterv second entries))))
+(def ^{:stratum 0} log-command
+  "The paths that commits on HEAD and on no remote-tracking ref touch."
+  ["git" "log" "--format=" "--name-only" "-z" "HEAD" "--not" "--remotes"])
 
-(defn- ^{:stratum 0} failure
-  [command {:keys [exit err]}]
-  {:failure {:detail (or (not-empty (str/trim (str err))) (str command " exited " exit))
-             :data   {:command command :exit exit :stderr err}}})
+(defn ^{:stratum 0} log-paths
+  "The distinct paths in `log-command` output, in order."
+  [out]
+  (->> (str/split (or out "") #"\u0000")
+       (map str/trim)
+       (remove str/blank?)
+       distinct
+       vec))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} unpushed-files
-  "The files the branch's commits change since `origin/<default>` (three-dot,
-   so a moved origin does not count), as :code/files entries, in
-   {:files [...]}. {:failure {:detail :data}} when git cannot answer (no
-   origin, say): an unanswered scan is not an empty one.
+  "The files unpublished commits change, as :code/files entries with their
+   content at HEAD (a path HEAD no longer has is a deletion), in
+   {:files [...]}. {:failure {:detail :data}} when git cannot answer: an
+   unanswered scan is not an empty one.
 
-   `run` runs a git argv in the worktree and returns {:exit :out :err};
-   `read-file` returns a path's content, or nil when it cannot."
-  [run read-file]
-  (let [head-ref (run ["git" "symbolic-ref" "refs/remotes/origin/HEAD"])
-        base     (if (= 0 (:exit head-ref))
-                   (str/replace (str/trim (:out head-ref)) "refs/remotes/origin/" "")
-                   "main")
-        command  ["git" "diff" "--name-status" "-z" (str "origin/" base "...HEAD")]
-        diff     (run command)]
-    (if-not (= 0 (:exit diff))
-      (failure (str/join " " command) diff)
-      (let [entries (for [[status path] (name-status-entries (:out diff))
-                          :when (agent/substantive-file? {:path path})]
-                      (if (= "D" status)
-                        {:path path :content "" :action :delete}
-                        (let [content (read-file path)]
-                          (if (nil? content)
-                            {:unreadable path}
-                            {:path path :content content
-                             :action (if (= "A" status) :create :modify)}))))]
-        (if-let [unreadable (some :unreadable entries)]
-          {:failure {:detail (str "could not read " unreadable) :data {:path unreadable}}}
-          {:files (vec entries)})))))
+   `run` runs a git argv in the worktree and returns {:exit :out :err}."
+  [run]
+  (let [log (run log-command)]
+    (if-not (= 0 (:exit log))
+      {:failure {:detail (or (not-empty (str/trim (str (:err log))))
+                             (str (str/join " " log-command) " exited " (:exit log)))
+                 :data   {:command (str/join " " log-command) :exit (:exit log)
+                          :stderr (:err log)}}}
+      {:files (vec (for [path (log-paths (:out log))
+                         :when (agent/substantive-file? {:path path})
+                         :let [shown (run ["git" "show" (str "HEAD:" path)])]]
+                     (if (= 0 (:exit shown))
+                       {:path path :content (:out shown) :action :modify}
+                       {:path path :content "" :action :delete})))})))

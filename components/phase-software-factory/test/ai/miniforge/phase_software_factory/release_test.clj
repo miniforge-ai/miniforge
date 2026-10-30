@@ -490,6 +490,25 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
+(deftest ^{:stratum 3} chained-task-with-no-commits-of-its-own-skips-test
+  (testing "a DAG task on its parent's pushed branch, with nothing of its own,
+            is not charged with the parent's commits"
+    (with-test-worktree
+      (fn [worktree]
+        (publish-head! worktree)
+        (write-and-commit-mock-files! worktree)
+        (sh-must-succeed! worktree ["git" "push" "-q" "--no-verify" "origin" "HEAD:refs/heads/parent-pr"])
+        (sh-must-succeed! worktree ["git" "fetch" "-q" "origin"])
+        (let [ctx    {:execution/id (random-uuid)
+                      :execution/input {:description "Already done" :title "Noop"}
+                      :execution/metrics {:tokens 0 :duration-ms 0}
+                      :execution/phase-results {:implement {:result {:status :already-implemented}}}
+                      :execution/opts {:release/base-branch "parent-pr"}
+                      :worktree-path worktree
+                      :phase-config {:phase :release}}
+              result ((:enter (phase/get-phase-interceptor {:phase :release})) ctx)]
+          (is (true? (get-in result [:phase :result :output :skipped]))))))))
+
 (deftest ^{:stratum 3} release-releases-unpushed-commits-test
   (testing "a clean worktree whose work sits in unpushed commits is released,
             not skipped as already done"

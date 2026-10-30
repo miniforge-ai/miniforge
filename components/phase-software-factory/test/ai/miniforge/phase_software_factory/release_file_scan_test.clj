@@ -277,10 +277,8 @@
                          (if (= 1 (swap! calls inc))
                            {:ok? true :data {:exit-code 128 :stdout "" :stderr index-lock-stderr}}
                            {:ok? true :data {:exit-code 0 :stdout ""}})
-                         ;; nothing ahead of origin's main either
-                         (str/starts-with? command "git symbolic-ref")
-                         {:ok? true :data {:exit-code 0 :stdout "refs/remotes/origin/main"}}
-                         (str/starts-with? command "git diff")
+                         ;; no unpushed commits either
+                         (str/starts-with? command "git log")
                          {:ok? true :data {:exit-code 0 :stdout ""}}))
           ctx        (assoc (release-ctx "/workspace" :already-implemented)
                             :execution/mode           :governed
