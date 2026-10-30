@@ -37,8 +37,8 @@ DAG batch. A phase waiting on the agent CLI kept running, and spending, until it
    2. a DAG batch waits for its tasks in `coordinating` and collects each result;
    3. the DAG pause wait and the short rate-limit wait end on a stop, and a cancelled result keeps
       the spend of a batch whose rate-limit wait the cancel ended;
-   4. a multi-parent task's merge and its resolution agent are covered in the follow-up PR on this
-      branch (kept out to stay under the PR size limit).
+   4. a multi-parent task's merge and its resolution agent are covered in #2294, stacked on this
+      PR (kept out to stay under the PR size limit).
 5. `enter-implement` runs no curator when the run is stopped after the agent. A cancel that lands
    during a curator that then fails ends the phase as `:run-stopped`; a curator that succeeded
    keeps its work. The stopped result keeps the agent's metrics and cost.
