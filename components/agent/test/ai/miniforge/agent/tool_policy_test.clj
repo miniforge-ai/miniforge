@@ -169,6 +169,12 @@
       (testing "other files in the linked directory stay writable"
         (is (= "allow" (write-decision "shared-config/skills/x/SKILL.md")))
         (is (= "allow" (write-decision "cfg/other.json"))))
+      (testing "a link inside a managed directory is followed too"
+        (.mkdirs (io/file dir ".miniforge-session"))
+        (link ".miniforge-session/claude-settings.json" "cfg/hook-settings.json")
+        (link ".miniforge-session/mcp-config.json" "cfg/session-mcp.json")
+        (is (= "deny" (write-decision "cfg/hook-settings.json")))
+        (is (= "deny" (write-decision "cfg/session-mcp.json"))))
       (testing "a .. in a link target steps back from where the links before it led"
         (.mkdirs (io/file dir "nested" "dir"))
         (.mkdirs (io/file dir "nested" "cfg"))

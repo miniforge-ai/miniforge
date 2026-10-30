@@ -45,7 +45,9 @@ Claude loads the file as `.claude/settings.local.json`.
    relative `context_write` path is refused like an absolute one; with
    `.claude -> alias/../cfg` and `alias -> nested/dir`, a write to the file Claude loads,
    `nested/cfg/settings.json`, is refused (Copilot review: a lexical `..` pointed the
-   check at `cfg/`).
+   check at `cfg/`); a link inside a managed directory
+   (`.miniforge-session/claude-settings.json -> ../cfg/hook-settings.json`) is followed
+   too, since each managed directory's direct entries count as managed paths.
 2. `every-protected-path-is-a-managed-path-test`: each `:tool/protected-paths` pattern
    matches a managed path, so the two lists cannot drift apart unnoticed. The schema
    test covers a policy missing the new key.

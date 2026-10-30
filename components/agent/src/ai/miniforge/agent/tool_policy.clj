@@ -133,6 +133,17 @@
       :else
       cur)))
 
+(defn ^{:stratum 0} with-children
+  "The `managed` paths plus, for each that is a directory under `root`,
+   its direct entries: a file inside a managed directory can itself be a
+   link (`.miniforge-session/claude-settings.json -> ../cfg/s.json`), which
+   resolving the directory does not follow."
+  [root managed]
+  (mapcat (fn [m]
+            (cons m (for [^java.io.File f (or (.listFiles (io/file (str root) m)) [])]
+                      (str m "/" (.getName f)))))
+          managed))
+
 (defn ^{:stratum 0} escaping-glob?
   "True when glob `pattern` would search outside the directory it runs in:
    absolute (rooted at `/` or `\\`, or naming a Windows drive), starting
@@ -151,7 +162,9 @@
   "The names `path` has under the `managed` config paths once each is
    resolved: for each managed path whose resolved form (`follow-links`,
    then canonical) is, or contains, the canonical form of `path`, that
-   managed path plus the rest of `path` below it. When `.claude` links to
+   managed path plus the rest of `path` below it. Each managed directory's
+   direct entries count as managed paths too (`with-children`). When
+   `.claude` links to
    `shared/`, the path `shared/settings.local.json` is also
    `.claude/settings.local.json`, so the protected patterns see the file
    a later session loads. A relative `path` is taken as relative to
@@ -165,7 +178,7 @@
               (when (.startsWith path-c m-c)
                 (let [below (str (.relativize m-c path-c))]
                   (if (= "" below) m (str m "/" below))))))
-          managed)))
+          (with-children root managed))))
 
 (defn ^{:stratum 1} read-tool-policy
   "Parse tool-policy.edn `text`, check it against `ToolPolicy`, and
