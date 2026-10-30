@@ -48,15 +48,34 @@
    relative path is taken as relative to root, and root itself is \".\".
    Comparing canonical forms keeps /var and /private/var (macOS) the same
    place and sends a symlink out of the worktree where it points. Git
-   metadata is for the caller's `path-ok?` check."
+   metadata is for the caller's `path-ok?` check. Surrounding whitespace
+   is trimmed first, as the MCP handlers trim theirs."
   [root path]
-  (let [p (str path)]
+  (let [p (str/trim (str path))]
     (when-not (str/starts-with? p "~")
       (let [root-c (.getCanonicalFile (io/file (str root)))
             file   (io/file p)
             path-c (.getCanonicalFile (if (.isAbsolute file) file (io/file root-c p)))
             rel    (when (.startsWith (.toPath path-c) (.toPath root-c))
                      (str (.relativize (.toPath root-c) (.toPath path-c))))]
+        (if (= "" rel) "." rel)))))
+
+(defn ^{:stratum 0} lexical-relative
+  "`path` relative to the worktree `root` as written: `.` and `..`
+   resolved, symlinks not, against root as given or its canonical form,
+   whichever prefixes the path. nil when neither does, or the path starts
+   with ~. Whitespace is trimmed as in `worktree-relative`. The caller
+   checks this form too, so a symlink on the path (a linked `.claude/`)
+   cannot hide a protected file or reach `path-ok?` already resolved."
+  [root path]
+  (let [p (str/trim (str path))]
+    (when-not (str/starts-with? p "~")
+      (let [file   (io/file p)
+            given  (.normalize (.toPath (io/file (str root))))
+            canon  (.toPath (.getCanonicalFile (io/file (str root))))
+            path-p (.normalize (.toPath (if (.isAbsolute file) file (io/file (str root) p))))
+            base   (some #(when (.startsWith path-p ^java.nio.file.Path %) %) [canon given])
+            rel    (some-> base (.relativize path-p) str)]
         (if (= "" rel) "." rel)))))
 
 (defn ^{:stratum 0} escaping-glob?
@@ -91,7 +110,12 @@
    say which inputs name a path or a glob. `session` carries :root, the
    worktree, and :path-ok?, (fn [root relative-path]) true when the path
    stays inside root and out of its git metadata. A tool that names a path
-   is refused when either is missing."
+   is refused when either is missing.
+
+   A path must resolve inside root (`worktree-relative`); `path-ok?` sees
+   it as written (`lexical-relative`) when that form exists, so its own
+   symlink refusal applies; and it is protected when either form matches
+   :tool/protected-paths."
   [policy {:keys [root path-ok?]} tool-name tool-input]
   (let [path-keys (get-in policy [:tool/path-keys tool-name])
         glob-keys (get-in policy [:tool/glob-keys tool-name])
@@ -100,12 +124,13 @@
     (if (and (or (seq path-keys) (seq glob-keys)) (not (and root path-ok?)))
       (str tool-name " names a path, and the hook has no worktree root to check it against")
       (or (some (fn [[k v]]
-                  (let [rel (worktree-relative root v)]
+                  (let [rel (worktree-relative root v)
+                        lex (lexical-relative root v)]
                     (cond
-                      (not (and rel (path-ok? root rel)))
+                      (not (and rel (path-ok? root (or lex rel))))
                       (str (name k) " " (pr-str v) " is outside the worktree or in its git metadata")
 
-                      (protected rel)
+                      (or (protected rel) (and lex (protected lex)))
                       (str (name k) " " (pr-str v) " is agent or session config miniforge manages"))))
                 (named path-keys))
           (some (fn [[k v]]

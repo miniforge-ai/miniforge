@@ -103,7 +103,9 @@
 
  ;; Bash commands the hook refuses: java.util.regex patterns, each matched
  ;; anywhere in the command (re-find). Repetition is bounded ({0,200}) so
- ;; no pattern scans a command quadratically.
+ ;; no pattern scans a command quadratically. Patterns that look for the
+ ;; start of a command use (?m), so a newline counts as a separator just
+ ;; as `;` does.
  ;;
  ;; A deny list cannot stop a determined agent (indirection, quoting,
  ;; aliases, a script it writes and runs). It is defense in depth; the
@@ -127,8 +129,8 @@
   "\\bgh\\s+auth\\s+(token|status)\\b"
   "\\bgh\\s+(gist|secret|ssh-key|gpg-key|api)\\b"
   "\\bprintenv\\b"
-  "(^|[;&|(`]\\s*)(env|export|declare|typeset)(\\s+-[a-zA-Z0-9]+){0,4}\\s*($|[|;&>)`])"
-  "(^|[;&|(`]\\s*)set\\s*($|[|;&>)`])"
+  "(?m)(^|[;&|(`]\\s*)(env|export|declare|typeset)(\\s+-[a-zA-Z0-9]+){0,4}\\s*($|[|;&>)`])"
+  "(?m)(^|[;&|(`]\\s*)set\\s*($|[|;&>)`])"
   "\\$\\{?[A-Z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|PRIVATE_KEY)[A-Z0-9_]*"
   "\\$\\{?AWS_[A-Z0-9_]+"
   "\\bgit\\s+credential\\b"
@@ -137,7 +139,7 @@
   "\\bgcloud\\s+auth\\s+print-"
   ;; Network clients where a command starts (not inside an argument such as
   ;; a commit message). Build tools still fetch their dependencies.
-  "(^|[;&|(`]|\\$\\(|\\b(then|do|else|xargs|exec|command|nohup|time|sudo)\\b)\\s*(\\S{0,200}/)?(curl|wget|nc|ncat|netcat|socat|telnet|ftp|tftp|sftp|scp|ssh|rsync)(\\s|$)"
+  "(?m)(^|[;&|(`]|\\$\\(|\\b(then|do|else|xargs|exec|command|nohup|time|sudo)\\b)\\s*(\\S{0,200}/)?(curl|wget|nc|ncat|netcat|socat|telnet|ftp|tftp|sftp|scp|ssh|rsync)(\\s|$)"
   "/dev/(tcp|udp)/"
   ;; Git commands that reach a remote the run did not configure, publish,
   ;; or change git's own behaviour. miniforge's release step pushes; the

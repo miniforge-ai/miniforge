@@ -60,7 +60,11 @@ same worktree. The Bash deny list covered destructive commands only;
    allowed; `.git/config`, the hooks directory, `/etc/passwd`, `.claude/` settings and
    a missing `--root` are refused.
 4. All deny patterns take 21 ms on an adversarial 32 KB command.
-5. Independent adversarial review; findings fixed or listed below.
+5. Copilot review fixes: a newline counts as a command separator ((?m) patterns); path
+   inputs are trimmed before the check, as the MCP handlers trim them; the path as
+   written (symlinks unresolved) is also checked against the protected list and is what
+   pr-lifecycle's guard sees, so a symlinked `.claude/` cannot hide protected settings.
+6. Independent adversarial review; findings fixed or listed below.
 
 ## Deployment Plan
 
@@ -75,6 +79,10 @@ Ships with the next release. Agents lose access to paths outside their worktree.
    or one git refuses as dubious ownership), every path is refused.
 3. MCP context reads resolve against the source root, while the hook checks paths
    against the session's working directory.
+4. The hook sees a search tool's inputs, not its results: `context_grep` and
+   `context_glob` can return files a direct read is refused, and the context server's
+   glob walker follows directory symlinks. Confining search results belongs in the
+   context server (follow-up).
 
 ## Related Issues/PRs
 

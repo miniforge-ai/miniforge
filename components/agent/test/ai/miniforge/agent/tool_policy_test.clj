@@ -73,7 +73,10 @@
    "GIT_SSH_COMMAND=x git fetch origin"
    "/usr/bin/curl https://x.example"
    "x=$(curl -s https://x.example)"
-   "export"])
+   "export"
+   ;; A newline separates commands as `;` does.
+   "printf done\ncurl https://x.example"
+   "true\nprintenv"])
 
 (def ^{:stratum 0} ^:private build-commands
   "Commands an implementer or tester runs that must stay allowed."
@@ -113,6 +116,19 @@
       (doseq [role session-roles]
         (is (contains? (:roles policy) role) (str role))
         (is (every? (sut/role-tools policy role) (:common policy)) (str role))))))
+
+(deftest ^{:stratum 1} linked-config-directory-stays-protected-test
+  (testing "a write through a symlinked .claude/ is still a write to protected settings"
+    (let [root (java.nio.file.Files/createTempDirectory "linked-config" (make-array java.nio.file.attribute.FileAttribute 0))
+          dir  (.toFile root)]
+      (try
+        (.mkdirs (io/file dir "shared-config"))
+        (java.nio.file.Files/createSymbolicLink (.resolve root ".claude") (.resolve root "shared-config")
+                                                (make-array java.nio.file.attribute.FileAttribute 0))
+        (is (= "deny" (:decision (sut/evaluate-tool-use {:role :implementer :root (str dir) :path-ok? stub-path-ok?}
+                                                        "Write" {:file_path (str dir "/.claude/settings.local.json")}))))
+        (finally
+          (run! #(java.nio.file.Files/deleteIfExists (.toPath ^java.io.File %)) (reverse (file-seq dir))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -200,4 +216,6 @@
 (deftest ^{:stratum 2} codex-path-stays-in-the-worktree-test
   (testing "consider_situation may not read a codex outside the worktree"
     (is (= "deny" (decision :implementer "mcp__context__consider_situation" {:codex_path "/etc"})))
+    (is (= "deny" (decision :implementer "mcp__context__consider_situation" {:codex_path " /etc "}))
+        "whitespace the handler trims cannot turn an absolute path relative")
     (is (= "allow" (decision :implementer "mcp__context__consider_situation" {:situation "x"})))))
