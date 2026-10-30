@@ -76,7 +76,8 @@
            :effect/merge
            :preflight/merge-readiness
            {:pr/repo "miniforge-ai/miniforge"
-            :pr/number 1702}))
+            :pr/number 1702
+            :pr/head-sha "0123456789abcdef0123456789abcdef01234567"}))
 
 (def ^{:stratum 1} deploy-request
   (request workflow-run-id
@@ -116,9 +117,12 @@
                                  :preflight/result :deny))))))))
 
 (deftest ^{:stratum 2} issuer-refuses-incomplete-target-scope-test
-  (doseq [field [:pr/repo :pr/number]]
+  (doseq [field [:pr/repo :pr/number :pr/head-sha]]
     (is (= :invalid-input
            (:anomaly/type (issue (dissoc merge-request field))))))
+  (testing "an abbreviated head commit cannot bind a merge"
+    (is (= :invalid-input
+           (:anomaly/type (issue (assoc merge-request :pr/head-sha "0123abc"))))))
   (doseq [field [:kustomize-dir :context :default-context
                  :namespace :deployment-name]]
     (is (= :invalid-input
@@ -143,7 +147,8 @@
     (is (= {:effect/id effect-id
             :workflow-run/id workflow-run-id
             :pr/repo "miniforge-ai/miniforge"
-            :pr/number 1702}
+            :pr/number 1702
+            :pr/head-sha "0123456789abcdef0123456789abcdef01234567"}
            (:grant/scope g)))
     (is (= {:constraint/max-count 1} (:grant/constraints g)))
     (is (false? (:grant/delegable? g)))

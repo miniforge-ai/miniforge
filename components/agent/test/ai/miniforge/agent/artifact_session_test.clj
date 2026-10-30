@@ -20,7 +20,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [cheshire.core :as json]
-            [ai.miniforge.agent.artifact-session :as session]))
+            [ai.miniforge.agent.artifact-session :as session]
+            [ai.miniforge.agent.artifact-session.cli-config :as cli-config]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -300,7 +301,7 @@
           (is (not= original (slurp cli)) "writer mutates the live file")
           (cleanup-fn (str cli))
           (is (= original (slurp cli)) "cleanup restores the exact original")
-          (is (not (.exists (io/file dir (str "cli.json" @#'session/cursor-permissions-backup-suffix))))
+          (is (not (.exists (io/file dir (str "cli.json" @#'cli-config/cursor-permissions-backup-suffix))))
               "backup file is removed after restore"))
         (finally
           (doseq [f (reverse (file-seq tmp))] (.delete ^java.io.File f)))))))
