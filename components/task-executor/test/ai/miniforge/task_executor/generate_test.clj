@@ -21,6 +21,7 @@
   (:require
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.loop.interface :as loop]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.task-executor.generate :as sut]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
@@ -34,7 +35,11 @@
   [task context]
   (let [seen (atom nil)]
     (with-redefs [agent/create-implementer (constantly ::implementer)
-                  agent/invoke (fn [a t ctx] (reset! seen [a t ctx]) {:artifact {:code/files []}})
+                  ;; The implementer's result shape: response/success puts the
+                  ;; code under both :output and :artifact.
+                  agent/invoke (fn [a t ctx]
+                                 (reset! seen [a t ctx])
+                                 (response/success {:code/files []} {:tokens 1}))
                   loop/run-simple (fn [loop-task generate-fn ctx]
                                     (generate-fn loop-task ctx)
                                     {:artifact {:code/files []}})]
