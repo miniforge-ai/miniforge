@@ -1,4 +1,0 @@
-{:webhook-intake/system
- {;; start! — refused: without a secret no delivery could be verified
-  :intake/secret-required
-  "The webhook intake needs a webhook secret; without one it cannot verify that a delivery came from GitHub."}}
