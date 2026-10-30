@@ -321,86 +321,79 @@
 ;; opencode-args
 ;; ============================================================================
 (deftest ^{:stratum 1} opencode-args-minimal-test
-  (testing "minimal prompt in a session invokes non-interactive run"
-    (let [args ((private-fn 'opencode-args) (merge supervised {:prompt "explain"}))]
-      (is (= ["run" "explain"] args)))))
-
-(deftest ^{:stratum 1} opencode-call-outside-a-session-is-isolated-test
-  (testing "a call with no hook settings runs without external plugins, as an agent that may use no tool"
-    (let [args   ((private-fn 'opencode-args) {:prompt "explain" :agent "build"})
-          agent  (nth args 3)
-          env    (cli-args/opencode-env {:prompt "explain"})
-          config (json/parse-string (get env "OPENCODE_CONFIG_CONTENT"))]
+  (testing "every call runs non-interactively, without external plugins, as the policy agent"
+    (let [args ((private-fn 'opencode-args) {:prompt "explain"})]
       (is (= ["run" "--pure" "--agent"] (take 3 args)))
-      (is (re-matches #"miniforge-isolated-[0-9a-f]{8}" agent))
-      (is (= ["explain"] (drop 4 args)) "the request's own agent is not used")
-      (is (= "1" (get env "OPENCODE_PURE")))
-      (is (= "1" (get env "OPENCODE_DISABLE_PROJECT_CONFIG")) "the worktree's own OpenCode config is not read")
-      (is (every? #{"deny"} (vals (get config "permission"))))
-      (is (= "primary" (get-in config ["agent" agent "mode"])))
-      (is (every? #{"deny"} (vals (get-in config ["agent" agent "permission"]))))))
-  (testing "the operator's own inline config is kept; only its permissions are replaced"
-    (with-redefs [settings/getenv-value (fn [k] (when (= "OPENCODE_CONFIG_CONTENT" k)
-                                                  "{\"model\":\"openrouter/m\",\"permission\":{\"bash\":\"allow\"},\"agent\":{\"mine\":{\"mode\":\"primary\"}}}"))]
-      (let [config (json/parse-string (get (cli-args/opencode-env {:prompt "p"}) "OPENCODE_CONFIG_CONTENT"))]
-        (is (= "openrouter/m" (get config "model")))
-        (is (= "deny" (get-in config ["permission" "bash"])))
-        (is (contains? (get config "agent") "mine")))))
-  (testing "an isolated call may not attach, run a configured command, or resume a session"
-    (doseq [option [{:attach "http://localhost:4096"} {:command "review"} {:session "ses_1"}
-                    {:continue? true} {:fork? true}]]
-      (is (thrown? clojure.lang.ExceptionInfo
-                   ((private-fn 'opencode-args) (merge {:prompt "p"} option)))
-          (pr-str option))))
-  (testing "an operator inline config that is not plain JSON fails rather than being dropped"
-    (with-redefs [settings/getenv-value (fn [k] (when (= "OPENCODE_CONFIG_CONTENT" k) "{\"model\": \"m\", // jsonc\n}"))]
-      (is (thrown? clojure.lang.ExceptionInfo (cli-args/opencode-env {:prompt "p"})))))
-  (testing "isolated? does the same for a session call"
-    (is (some #{"--pure"} ((private-fn 'opencode-args) (merge supervised {:prompt "p" :isolated? true}))))
-    (is (some? (cli-args/opencode-env (merge supervised {:isolated? true})))))
-  (testing "a session call gets neither"
-    (is (nil? (cli-args/opencode-env supervised)))))
+      (is (re-matches #"miniforge-[0-9a-f]{8}" (nth args 3)))
+      (is (= ["explain"] (drop 4 args))))))
 
-(deftest ^{:stratum 1} opencode-args-model-and-agent-test
-  (testing "in a session, model and agent pass through to OpenCode"
+(deftest ^{:stratum 1} opencode-args-model-and-files-test
+  (testing "the model and attached files pass through; the request's own agent is not used"
     (let [args ((private-fn 'opencode-args)
-                {:prompt "fix it"
-                 :supervision {:settings-path "/tmp/s.json"}
-                 :model "anthropic/claude-sonnet-4-5"
-                 :agent "miniforge-implementer"})]
-      (is (= "run" (first args)))
-      (is (some #(= "--model" %) args))
-      (is (some #(= "anthropic/claude-sonnet-4-5" %) args))
-      (is (some #(= "--agent" %) args))
-      (is (some #(= "miniforge-implementer" %) args))
-      (is (= "fix it" (last args))))))
+                (merge supervised {:prompt "fix it" :model "anthropic/claude-sonnet-4-5"
+                                   :agent "build" :files ["README.md" "src/core.clj"]}))]
+      (is (= ["--model" "anthropic/claude-sonnet-4-5" "--file" "README.md" "--file" "src/core.clj" "fix it"]
+             (drop 4 args)))
+      (is (not (some #{"build"} args))))))
 
-(deftest ^{:stratum 1} opencode-args-session-and-attach-test
-  (testing "session reuse and serve attachment flags are preserved"
-    (let [args ((private-fn 'opencode-args)
-                {:prompt "continue"
-                 :supervision {:settings-path "/tmp/s.json"}
-                 :attach "http://localhost:4096"
-                 :session "sess_123"
-                 :fork? true})]
-      (is (= ["run"
-              "--attach" "http://localhost:4096"
-              "--session" "sess_123"
-              "--fork"
-              "continue"]
-             args)))))
+(deftest ^{:stratum 1} opencode-args-refuses-server-command-and-resume-test
+  (testing "no call may attach, run a configured command, or resume a session, in a session or not"
+    (doseq [request [{:prompt "p"} (merge supervised {:prompt "p"})]
+            option  [{:attach "http://localhost:4096"} {:command "review"} {:session "ses_1"}
+                     {:continue? true} {:fork? true}]]
+      (is (thrown? clojure.lang.ExceptionInfo ((private-fn 'opencode-args) (merge request option)))
+          (pr-str option)))))
 
-(deftest ^{:stratum 1} opencode-args-files-test
-  (testing "attached files expand into repeated --file flags"
-    (let [args ((private-fn 'opencode-args)
-                {:prompt "review"
-                 :supervision {:settings-path "/tmp/s.json"}
-                 :files ["README.md" "src/core.clj"]})]
-      (is (= ["run"
-              "--file" "README.md"
-              "--file" "src/core.clj"
-              "review"]
-             args)))))
+(deftest ^{:stratum 1} opencode-env-sets-the-calls-permissions-test
+  (let [agent     (nth ((private-fn 'opencode-args) {:prompt "p"}) 3)
+        config    (fn [request] (json/parse-string (get (cli-args/opencode-env request) "OPENCODE_CONFIG_CONTENT")))
+        all-deny? (fn [block] (every? #(if (map? %) (every? #{"deny"} (vals %)) (= "deny" %)) (vals block)))]
+    (testing "outside a session, isolated, and in a session that carries no block: everything denied"
+      (doseq [request [{:prompt "p"} (merge supervised {:isolated? true}) supervised]]
+        (is (all-deny? (get (config request) "permission")) (pr-str request))
+        (is (all-deny? (get-in (config request) ["agent" agent "permission"])) (pr-str request))
+        (is (= "primary" (get-in (config request) ["agent" agent "mode"])))))
+    (testing "external_directory also denies OpenCode's tool-output directory by its exact glob"
+      (with-redefs [settings/getenv-value (fn [k] (get {"HOME" "/home/op"} k))]
+        (doseq [request [{:prompt "p"} (assoc-in supervised [:supervision :opencode-permission]
+                                                 (array-map "*" "deny" "external_directory" "deny" "read" "allow"))]]
+          (is (= {"*" "deny" "/home/op/.local/share/opencode/tool-output/*" "deny"}
+                 (get-in (config request) ["agent" agent "permission" "external_directory"]))
+              (pr-str request))))
+      (doseq [data ["/data" "/data/" "/data//"]]
+        (with-redefs [settings/getenv-value (fn [k] (get {"HOME" "/home/op" "XDG_DATA_HOME" data} k))]
+          (is (contains? (get-in (config {:prompt "p"}) ["agent" agent "permission" "external_directory"])
+                         "/data/opencode/tool-output/*")
+              (str "XDG_DATA_HOME=" data " gives OpenCode's own spelling of the glob"))))
+      (with-redefs [settings/getenv-value (fn [k] (get {"HOME" "/home/op"} k))]
+        (is (contains? (cli-args/external-directory-rule "\\") "/home/op/.local/share/opencode/tool-output\\*")
+            "the wildcard follows the platform separator, as path.join puts it")))
+    (testing "plugins and the worktree's own OpenCode config stay off"
+      (is (= "1" (get (cli-args/opencode-env supervised) "OPENCODE_PURE")))
+      (is (= "1" (get (cli-args/opencode-env supervised) "OPENCODE_DISABLE_PROJECT_CONFIG"))))
+    (testing "a session call's role block reaches the agent in rule order, at the size real blocks have"
+      (let [commands (map #(str "cmd-" (char (+ 97 %)) " *") (range 26))
+            bash     (apply array-map "*" "allow" (mapcat (fn [c] [c "deny"]) commands))
+            block    (array-map "*" "deny" "external_directory" "deny" "read" "allow" "list" "allow"
+                                "grep" "allow" "glob" "allow" "todowrite" "allow"
+                                "edit" (array-map "*" "allow" ".git" "deny") "bash" bash)
+            content  (get (cli-args/opencode-env (assoc-in supervised [:supervision :opencode-permission] block))
+                          "OPENCODE_CONFIG_CONTENT")]
+        (is (str/includes? content "{\"*\":\"deny\",\"external_directory\":{\"*\":\"deny\","))
+        (is (str/includes? content "\"read\":\"allow\",\"list\":\"allow\",\"grep\":\"allow\",\"glob\":\"allow\","))
+        (is (str/includes? content (str "\"bash\":{\"*\":\"allow\","
+                                        (str/join "," (map #(str "\"" % "\":\"deny\"") commands)) "}"))
+            "a 27-key rule object keeps its order")))
+    (testing "the operator's own inline config is kept; only its permissions are replaced"
+      (with-redefs [settings/getenv-value (fn [k] (when (= "OPENCODE_CONFIG_CONTENT" k)
+                                                    "{\"model\":\"openrouter/m\",\"permission\":{\"bash\":\"allow\"},\"agent\":{\"mine\":{\"mode\":\"primary\"}}}"))]
+        (let [c (config {:prompt "p"})]
+          (is (= "openrouter/m" (get c "model")))
+          (is (= "deny" (get-in c ["permission" "bash"])))
+          (is (contains? (get c "agent") "mine")))))
+    (testing "an operator inline config that is not plain JSON fails rather than being dropped"
+      (with-redefs [settings/getenv-value (fn [k] (when (= "OPENCODE_CONFIG_CONTENT" k) "{\"model\": \"m\", // jsonc\n}"))]
+        (is (thrown? clojure.lang.ExceptionInfo (cli-args/opencode-env {:prompt "p"})))))))
 
 ;; ============================================================================
 ;; echo-args
