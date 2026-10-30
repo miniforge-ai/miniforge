@@ -1,0 +1,26 @@
+;; Tool policy for inner LLM agents, enforced by the PreToolUse hook
+;; (`miniforge hook-eval`, tool_supervisor.clj).
+
+{;; Bash commands the hook refuses: java.util.regex patterns, each matched
+ ;; anywhere in the command (re-find). Destructive or exfiltration-risk
+ ;; commands.
+ :bash/deny-patterns
+ ["rm\\s+-rf\\s+/"
+  "rm\\s+-rf\\s+~"
+  "rm\\s+-rf\\s+\\*"
+  "mkfs\\b"
+  "dd\\s+.*of=/dev/"
+  "chmod\\s+-R\\s+777\\s+/"
+  "chown\\s+-R\\s+.*\\s+/"
+  ">\\s*/dev/sd"
+  "curl\\s+.*\\|\\s*sh"
+  "curl\\s+.*\\|\\s*bash"
+  "wget\\s+.*\\|\\s*sh"
+  "wget\\s+.*\\|\\s*bash"
+  "eval\\s+.*\\$\\("
+  ":()\\s*\\{\\s*:\\|:\\s*&\\s*\\}\\s*;"  ; fork bomb
+  "shutdown\\b"
+  "reboot\\b"
+  "init\\s+0"
+  "halt\\b"
+  "poweroff\\b"]}
