@@ -21,6 +21,7 @@
    LLM generate-fn it classifies comments, answers questions and fixes
    change requests with."
   (:require
+   [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-runner.context :as context]
@@ -60,14 +61,16 @@
      outside the fix loop;
    - with a fix task and loop context (fixing a change request): returns
      the implementer agent's {:artifact :tokens}, the same generate-fn the
-     PR lifecycle controller gets from the task runner."
-  [llm-client]
+     PR lifecycle controller gets from the task runner.
+   `model` is the configured model id, sent with each prompt; the HTTP
+   backends need one."
+  [llm-client model]
   (let [fix-fn (task-executor/create-generate-fn llm-client)
         text? (contains? completion-only-backends (llm/client-backend llm-client))]
     (fn
       ([prompt]
        (when text?
-         (let [response (llm/chat llm-client prompt)]
+         (let [response (llm/chat llm-client prompt (cond-> {} model (assoc :model model)))]
            (when (llm/success? response)
              (llm/get-content response)))))
       ([task ctx]
@@ -87,5 +90,5 @@
         backend (llm/client-backend client)]
     (when-not (contains? completion-only-backends backend)
       (display/print-info (messages/t :pr/monitor-text-backend-unsafe {:backend (name backend)})))
-    {:generate-fn (monitor-generate-fn client)
+    {:generate-fn (monitor-generate-fn client (get-in (config/load-config) [:llm :model]))
      :trusted-authors (parse-trusted-authors trusted-authors)}))

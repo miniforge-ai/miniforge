@@ -45,13 +45,13 @@
     (with-redefs [task-executor/create-generate-fn echo-fix-fn
                   llm/client-backend (constantly :anthropic-api)]
       (is (= "change-request"
-             ((sut/monitor-generate-fn (llm/mock-client {:output "change-request"})) "classify this"))))))
+             ((sut/monitor-generate-fn (llm/mock-client {:output "change-request"}) nil) "classify this"))))))
 
 (deftest ^{:stratum 1} prompt-arity-returns-nil-on-failure-test
   (testing "a failed model call yields nil, which the classifier treats as no answer"
     (with-redefs [task-executor/create-generate-fn echo-fix-fn
                   llm/client-backend (constantly :anthropic-api)]
-      (is (nil? ((sut/monitor-generate-fn (llm/mock-client {:output "boom" :exit 1})) "classify this"))))))
+      (is (nil? ((sut/monitor-generate-fn (llm/mock-client {:output "boom" :exit 1}) nil) "classify this"))))))
 
 (deftest ^{:stratum 1} prompt-arity-skips-agent-backends-test
   (testing "one argument, agent backend: nil, and the agent is never called"
@@ -60,13 +60,22 @@
                     llm/chat (fn [& _] (reset! called true) {:success true :content "x"})]
         (doseq [backend [:claude :codex :cursor :opencode]]
           (with-redefs [llm/client-backend (constantly backend)]
-            (is (nil? ((sut/monitor-generate-fn (llm/mock-client {})) "classify this")) (name backend)))))
+            (is (nil? ((sut/monitor-generate-fn (llm/mock-client {}) nil) "classify this")) (name backend)))))
       (is (false? @called)))))
 
 (deftest ^{:stratum 1} task-arity-runs-the-implementer-test
   (testing "two arguments: the fix task goes to the task-executor generate-fn"
     (with-redefs [task-executor/create-generate-fn echo-fix-fn]
       (let [task {:task/id "t" :task/type :fix :description "Address review feedback"}
-            result ((sut/monitor-generate-fn (llm/mock-client {})) task {:worktree-path "/repo"})]
+            result ((sut/monitor-generate-fn (llm/mock-client {}) nil) task {:worktree-path "/repo"})]
         (is (= task (get-in result [:artifact :task])))
         (is (= "/repo" (get-in result [:artifact :ctx :worktree-path])))))))
+
+(deftest ^{:stratum 1} prompt-arity-sends-the-configured-model-test
+  (testing "the configured model goes with each prompt"
+    (let [seen (atom nil)]
+      (with-redefs [task-executor/create-generate-fn echo-fix-fn
+                    llm/client-backend (constantly :anthropic-api)
+                    llm/chat (fn [_ _ opts] (reset! seen opts) {:success true :content "question"})]
+        ((sut/monitor-generate-fn (llm/mock-client {}) "claude-sonnet-5-5") "classify this")
+        (is (= "claude-sonnet-5-5" (:model @seen)))))))

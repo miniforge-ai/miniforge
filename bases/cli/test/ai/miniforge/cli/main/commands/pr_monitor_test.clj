@@ -33,6 +33,7 @@
    [babashka.process :as process]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.main.commands.pr-monitor :as sut]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
@@ -144,6 +145,7 @@
                                                         {:comments-received 0})
                     pr-lifecycle/stop-pr-monitor-loop (fn [_] nil)
                     context/create-llm-client         mock-llm-client
+                    config/load-config                (constantly {})
                     app-config/pr-monitor-config      (constantly cli-cfg)
                     display/print-info                (fn [_] nil)
                     display/print-error               (fn [_] nil)
@@ -238,6 +240,7 @@
                                                         {:comments-received 0})
                     pr-lifecycle/stop-pr-monitor-loop (fn [_] nil)
                     context/create-llm-client         mock-llm-client
+                    config/load-config                (constantly {})
                     ;; gh api user → return the configured default
                     process/sh                        (fn [& args]
                                                         (if (= ["gh" "api" "user" "--jq" ".login"]
