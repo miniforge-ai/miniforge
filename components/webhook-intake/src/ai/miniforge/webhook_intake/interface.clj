@@ -19,6 +19,7 @@
   "Inbound webhook intake: verify a GitHub delivery's signature and turn it
    into an event-stream event that workflow triggers can match."
   (:require
+   [ai.miniforge.webhook-intake.github :as github]
    [ai.miniforge.webhook-intake.signature :as signature]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -28,3 +29,11 @@
    header is GitHub's HMAC-SHA256 signature of the raw body under the
    webhook secret, compared in constant time. False for a blank secret."
   signature/valid-signature?)
+
+(def ^{:stratum 0} delivery->events
+  "`(delivery->events {:event-name :delivery-id :payload})`: event-stream
+   events for a GitHub delivery (:pr/merged, :pr/opened, :pr/ci-passed,
+   :pr/ci-failed), each carrying :pr/repo and :pr/branch for trigger
+   matching. Empty for deliveries miniforge does not act on, including
+   pull requests from forks."
+  github/delivery->events)
