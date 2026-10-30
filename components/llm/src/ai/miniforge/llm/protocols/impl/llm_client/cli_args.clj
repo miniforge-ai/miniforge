@@ -47,6 +47,17 @@
                    (str "mcp__" (name server) "__" (name tool))))))
        (str/join ",")))
 
+(def ^{:stratum 0} ^:private claude-isolation-args
+  "Flags that keep a call off the operator's Claude Code setup: no
+   built-in tools, no user/project/local settings (so no hooks and no
+   plugins), and no skills or slash commands. Without them a single-turn
+   completion loads the operator's hooks and plugins: a SessionStart hook
+   that tells the model to load a skill ends a one-turn call on a tool
+   call with no answer, and the setup adds ~36K tokens of context to every
+   call. Paired with --strict-mcp-config, added in `claude-args` when no
+   --mcp-config is given."
+  ["--tools" "" "--setting-sources" "" "--disable-slash-commands"])
+
 (def ^{:stratum 0} ^:private claude-input-format-flag
   "Claude CLI flag that selects how the user prompt is delivered. Paired
    with `claude-input-format-stdin` (the only value we use today), this
@@ -147,14 +158,22 @@
    Callers (handle-streaming / complete-impl) read `:prompt-via` from
    the backend config and thread it into the request map before
    invoking this fn; for :stdin they additionally pipe the prompt
-   string into the process via the exec layer's `:stdin` option."
+   string into the process via the exec layer's `:stdin` option.
+
+   A call runs isolated (`claude-isolation-args`) when the request sets
+   `:isolated?` or carries no hook settings (no `:settings-path` under
+   `:supervision`). Only an artifact session writes those settings, so a
+   call outside one has no PreToolUse hook: it gets no built-in tools and
+   none of the operator's settings, hooks, plugins or skills, rather than
+   whatever tools the operator's own settings would allow it."
   [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools
            disallowed-tools supervision budget-usd max-turns model resume
-           prompt-via]
+           prompt-via isolated?]
     :or   {prompt-via :argv}}]
   (let [budget (or budget-usd
                    (when max-tokens (default-claude-cli-budget-usd)))
-        stdin? (= prompt-via :stdin)]
+        stdin? (= prompt-via :stdin)
+        isolate? (or isolated? (not (:settings-path supervision)))]
     (cond-> ["-p"]
       streaming?                   (conj "--output-format" "stream-json")
       streaming?                   (conj "--verbose")
@@ -174,6 +193,8 @@
       ;; codex builder's --ignore-user-config.
       mcp-config                   (into ["--mcp-config" mcp-config
                                           "--strict-mcp-config"])
+      isolate?                     (into claude-isolation-args)
+      (and isolate? (not mcp-config)) (conj "--strict-mcp-config")
       (seq mcp-allowed-tools)      (into ["--allowedTools" (claude-mcp-allowlist-string mcp-allowed-tools)])
       (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
       (:settings-path supervision) (into ["--settings" (:settings-path supervision)])

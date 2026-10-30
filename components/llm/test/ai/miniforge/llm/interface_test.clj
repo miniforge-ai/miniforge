@@ -881,6 +881,19 @@
                :content "fallback answer"}]
              @chunks)))))
 
+(defn- ^{:stratum 0} recording-claude-client
+  "A claude client whose exec-fn and stream-exec-fn record every command
+   into `cmds` and return an empty successful result."
+  [cmds opts]
+  (let [record! (fn [cmd] (swap! cmds conj cmd) {:out "ok" :err "" :exit 0})]
+    (llm/create-client
+     (merge {:backend :claude
+             :stream-exec-fn (fn [cmd _on-line _opts] (record! cmd) {:out "" :err "" :exit 0})
+             :exec-fn (fn
+                        ([cmd] (record! cmd))
+                        ([cmd _opts] (record! cmd)))}
+            opts))))
+
 ;; Claude backend args-fn budget tests (PR #288)
 (deftest ^{:stratum 0} claude-args-fn-budget-usd-test
   (let [args-fn (:args-fn (get impl/backends :claude))]
@@ -1621,6 +1634,37 @@
       (is (= {:input-tokens 2400 :output-tokens 100} @accumulated-usage)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} isolated-client-sends-isolation-flags-test
+  (testing "an isolated claude client sends the isolation flags on complete and complete-stream"
+    (let [cmds (atom [])
+          client (recording-claude-client cmds {:isolated? true})
+          supervised {:prompt "test" :supervision {:settings-path "/tmp/s.json"}}]
+      (llm/complete client supervised)
+      (llm/complete-stream client supervised (fn [_chunk] nil))
+      (is (<= 2 (count @cmds)))
+      (is (every? #(= ["--tools" ""] (take 2 (drop-while (complement #{"--tools"}) %))) @cmds))
+      (is (every? #(some #{"--setting-sources"} %) @cmds))
+      (is (every? #(some #{"--disable-slash-commands"} %) @cmds)))))
+
+(deftest ^{:stratum 1} sessionless-claude-call-is-isolated-test
+  (testing "a plain claude client isolates a call that carries no hook settings"
+    (let [cmds (atom [])
+          client (recording-claude-client cmds {})]
+      (llm/complete client {:prompt "test"})
+      (llm/complete-stream client {:prompt "test"} (fn [_chunk] nil))
+      (is (<= 2 (count @cmds)))
+      (is (every? #(= ["--tools" ""] (take 2 (drop-while (complement #{"--tools"}) %))) @cmds))
+      (is (every? #(some #{"--setting-sources"} %) @cmds))))
+
+  (testing "a call inside an artifact session (hook settings present) keeps its tools"
+    (let [cmds (atom [])
+          client (recording-claude-client cmds {})
+          supervised {:prompt "test" :supervision {:settings-path "/tmp/s.json"}}]
+      (llm/complete client supervised)
+      (llm/complete-stream client supervised (fn [_chunk] nil))
+      (is (<= 2 (count @cmds)))
+      (is (every? #(not-any? #{"--tools" "--setting-sources"} %) @cmds)))))
 
 (deftest ^{:stratum 1} stagnation-fires-on-silence-without-keepalive-test
   (testing "without keepalive, a silent monitor stagnates after the threshold"

@@ -328,13 +328,11 @@
 (defn ^{:stratum 1} handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
         stream-fn (or (:stream-exec-fn client) stream-exec-fn)
-        {:keys [backend model num-ctx]} config
+        {:keys [backend model]} config
         {:keys [cmd args-fn stream-parser]} backend-config
         prompt     (prompts/build-request-prompt request)
         prompt-via (resolve-prompt-via backend-config)
-        request-with-model (cond-> request
-                             model (assoc :model model)
-                             num-ctx (assoc :num-ctx num-ctx))
+        request-with-model (completion/with-client-config request config)
         args     (args-fn (assoc request-with-model
                                  :prompt prompt
                                  :streaming? true
@@ -469,7 +467,7 @@
 
 (defn ^{:stratum 2} complete-stream-impl [client request on-chunk]
   (let [{:keys [config]} client
-        {:keys [backend model num-ctx]} config
+        {:keys [backend]} config
         backend-config (get backends backend)
         {:keys [streaming? cmd]} backend-config
         progress-monitor (or (:progress-monitor request)
@@ -480,9 +478,7 @@
     ;; Handle HTTP backends
     (if (= cmd "http")
       (http-stream-complete backend-config
-                            (cond-> request
-                              model (assoc :model model)
-                              num-ctx (assoc :num-ctx num-ctx))
+                            (completion/with-client-config request config)
                             on-chunk
                             config)
 
