@@ -60,4 +60,28 @@
   :line-timeout-ms 420000
   :process-join-timeout-ms 600000
   :post-kill-join-timeout-ms 5000
-  :poll-interval-ms 250}}
+  :poll-interval-ms 250}
+
+ ;; The environment an agent CLI process (claude, codex, cursor-agent,
+ ;; opencode) gets: only these variables from miniforge's own environment.
+ ;; The CLI passes its environment on to the commands its tools run, so
+ ;; anything else (GH_TOKEN, GITHUB_TOKEN, AWS_* credentials,
+ ;; SSH_AUTH_SOCK, miniforge's own tokens such as MINIFORGE_GIT_TOKEN)
+ ;; stays out of the agent's reach. A name matching :deny-prefixes is
+ ;; dropped even when an allow entry matches it.
+ :agent-env
+ {:allow ["PATH" "HOME" "USER" "LOGNAME" "SHELL" "TMPDIR" "TZ"
+          "LANG" "LANGUAGE" "TERM" "COLORTERM"
+          ;; Proxies and TLS trust, so the CLI reaches its provider.
+          "HTTP_PROXY" "HTTPS_PROXY" "NO_PROXY" "ALL_PROXY"
+          "http_proxy" "https_proxy" "no_proxy" "all_proxy"
+          "SSL_CERT_FILE" "SSL_CERT_DIR" "NODE_EXTRA_CA_CERTS"
+          "REQUESTS_CA_BUNDLE" "CURL_CA_BUNDLE"
+          ;; Provider keys and config the agent CLIs read.
+          "CODEX_HOME" "CURSOR_API_KEY" "GOOGLE_API_KEY"
+          ;; Read by the hook and the context server the CLI starts.
+          "MINIFORGE_HOME" "MINIFORGE_CODEX_PATH" "MINIFORGE_LOCALE"
+          "JAVA_HOME"]
+  :allow-prefixes ["LC_" "XDG_" "ANTHROPIC_" "CLAUDE_" "OPENAI_"
+                   "OPENROUTER_" "GEMINI_" "OPENCODE_"]
+  :deny-prefixes ["AWS_" "GH_" "GITHUB_"]}}

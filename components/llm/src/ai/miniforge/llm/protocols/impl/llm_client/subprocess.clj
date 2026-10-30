@@ -21,6 +21,8 @@
    process."
   (:require
    [clojure.java.io :as io]
+   [clojure.string :as str]
+   [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]
    [slingshot.slingshot :refer [try+]])
   (:import
    [java.io ByteArrayInputStream]
@@ -40,12 +42,23 @@
     (.start thread)
     thread))
 
-(defn ^{:stratum 0} clean-env
-  "Build environment map without CLAUDECODE to allow nested Claude CLI sessions.
-   Returns nil if CLAUDECODE is not set (use default env)."
+(defn ^{:stratum 0} host-env
+  "miniforge's own environment, as a map. Tests redefine it."
   []
-  (when (System/getenv "CLAUDECODE")
-    (into {} (remove (fn [[k _]] (= k "CLAUDECODE"))) (System/getenv))))
+  (into {} (System/getenv)))
+
+(defn ^{:stratum 0} allowed-env
+  "The entries of `env` whose names `policy` (the :agent-env client
+   default) allows: listed in :allow or starting with one of
+   :allow-prefixes, and starting with none of :deny-prefixes."
+  [{:keys [allow allow-prefixes deny-prefixes]} env]
+  (let [listed?  (set allow)
+        prefixed? (fn [k prefixes] (some #(str/starts-with? k %) prefixes))]
+    (into {}
+          (filter (fn [[k _]]
+                    (and (or (listed? k) (prefixed? k allow-prefixes))
+                         (not (prefixed? k deny-prefixes)))))
+          env)))
 
 (defn- ^{:stratum 0} ->stdin-stream
   "Build the InputStream passed as the subprocess's stdin. A non-blank
@@ -93,6 +106,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} agent-env
+  "The environment an agent CLI process gets: `host-env` filtered by the
+   :agent-env client default. Credentials miniforge itself holds
+   (GH_TOKEN, AWS_*, SSH_AUTH_SOCK) stay out, and so does CLAUDECODE,
+   which would make a nested Claude CLI refuse to start."
+  []
+  (allowed-env (settings/client-default [:agent-env]) (host-env)))
+
 (defn ^{:stratum 1} write-process-stdin!
   [^Process process stdin-str]
   (daemon-thread!
@@ -126,8 +147,7 @@
 (defn ^{:stratum 2} start-capture-process!
   [cmd {:keys [workdir stdin]}]
   (let [builder (ProcessBuilder. ^java.util.List cmd)]
-    (when-let [env (clean-env)]
-      (apply-process-env! builder env))
+    (apply-process-env! builder (agent-env))
     (when workdir
       (.directory builder (io/file workdir)))
     (let [process (.start builder)
