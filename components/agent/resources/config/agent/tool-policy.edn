@@ -129,8 +129,8 @@
   "\\bgh\\s+auth\\s+(token|status)\\b"
   "\\bgh\\s+(gist|secret|ssh-key|gpg-key|api)\\b"
   "\\bprintenv\\b"
-  "(?m)(^|[;&|(`]\\s*)(env|export|declare|typeset)(\\s+-[a-zA-Z0-9]+){0,4}\\s*($|[|;&>)`])"
-  "(?m)(^|[;&|(`]\\s*)set\\s*($|[|;&>)`])"
+  "(?m)(^|[;&|(`])\\s*(env|export|declare|typeset)(\\s+-[a-zA-Z0-9]+){0,4}\\s*($|[|;&>)`])"
+  "(?m)(^|[;&|(`])\\s*set\\s*($|[|;&>)`])"
   "\\$\\{?[A-Z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|PRIVATE_KEY)[A-Z0-9_]*"
   "\\$\\{?AWS_[A-Z0-9_]+"
   "\\bgit\\s+credential\\b"
@@ -147,7 +147,7 @@
   "\\bgit(\\s+-\\S+(\\s+[^-\\s]\\S*)?){0,8}\\s+(push|remote\\s+(add|set-url))(\\s|$)"
   "\\bgit(\\s+-\\S+(\\s+[^-\\s]\\S*)?){0,8}\\s+(fetch|pull|clone|ls-remote)(\\s+\\S+){0,8}?\\s+\\S{0,200}(://|@)"
   "(?i)\\bgit(\\s+\\S+){0,8}?\\s+-c\\s+\\S{0,200}(url\\.|credential|sshcommand|askpass|hookspath|fsmonitor|remote\\.|core\\.gitproxy)"
-  "(?i)\\bgit\\s+config\\b[^;&|\\n]{0,200}(core\\.(sshcommand|hookspath|fsmonitor|askpass|gitproxy)|url\\.|remote\\.\\S{0,100}\\.(url|pushurl)|credential\\.|include\\.path|includeif)"
+  "(?i)\\bgit(\\s+-\\S+(\\s+[^-\\s]\\S*)?){0,8}\\s+config\\b[^;&|\\n]{0,200}(core\\.(sshcommand|hookspath|fsmonitor|askpass|gitproxy)|url\\.|remote\\.\\S{0,100}\\.(url|pushurl)|credential\\.|include\\.path|includeif)"
   "(?i)\\bGIT_(SSH_COMMAND|SSH|ASKPASS|PROXY_COMMAND|CONFIG_[A-Z0-9_]*|DIR|WORK_TREE)\\s*="
   ;; Git metadata and agent config the file tools refuse, reached through
   ;; the shell instead.

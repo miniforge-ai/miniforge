@@ -100,10 +100,13 @@
 
 (defn ^{:stratum 0} escaping-glob?
   "True when glob `pattern` would search outside the directory it runs in:
-   absolute, starting with ~, or with a .. segment."
+   absolute (rooted at `/` or `\\`, or naming a Windows drive), starting
+   with ~, or with a .. segment."
   [pattern]
   (let [p (str pattern)]
     (boolean (or (str/starts-with? p "/")
+                 (str/starts-with? p "\\")
+                 (re-find #"^[A-Za-z]:" p)
                  (str/starts-with? p "~")
                  (some #{".."} (str/split p #"[/\\\\]"))))))
 

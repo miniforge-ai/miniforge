@@ -67,7 +67,9 @@ same worktree. The Bash deny list covered destructive commands only;
    Each path is checked both as given and trimmed (handlers differ on trimming), a raw
    `..` component is refused before normalization, both the resolved and the as-written
    forms must pass the guard, and `\` separators are turned into `/` before the
-   protected-path match.
+   protected-path match. Leading whitespace no longer hides `env`/`set`, git global
+   options (`git -C . config ...`) no longer hide a risky `git config`, and Windows
+   drive-qualified and `\`-rooted glob patterns are refused.
 6. Independent adversarial review; findings fixed or listed below.
 
 ## Deployment Plan
@@ -87,6 +89,13 @@ Ships with the next release. Agents lose access to paths outside their worktree.
    `context_glob` can return files a direct read is refused, and the context server's
    glob walker follows directory symlinks. Confining search results belongs in the
    context server (follow-up).
+5. A write to the real target of a symlinked config directory or file (`.claude`
+   linked to `shared/`, then a write to `shared/settings.local.json`) is not refused
+   yet (follow-up PR).
+6. A tracked script that a `.git/hooks/*` symlink points to, or any tracked hook a
+   hook manager runs (husky, a repository `core.hooksPath`), stays writable, as repo
+   content. A path guard cannot close that: miniforge's own host-side commits need to
+   run with hooks disabled or inside the capsule.
 
 ## Related Issues/PRs
 

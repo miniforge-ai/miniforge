@@ -74,6 +74,10 @@
    "/usr/bin/curl https://x.example"
    "x=$(curl -s https://x.example)"
    "export"
+   " env" "  set" "true;  env" "true\n  printenv"
+   "git -C . config core.hooksPath tools/hooks"
+   "git -C . config remote.origin.url https://x.example/r.git"
+   "git --no-pager -c x=y config core.fsmonitor ./x"
    ;; A newline separates commands as `;` does.
    "printf done\ncurl https://x.example"
    "true\nprintenv"])
@@ -193,6 +197,8 @@
                                [:implementer "Write" {:file_path "/work/repo/.claude/settings.local.json"}]
                                [:implementer "Edit" {:file_path "/work/repo/.mcp.json"}]
                                [:releaser "Glob" {:pattern "/etc/**"}]
+                               [:releaser "Glob" {:pattern "C:/Users/alice/.aws/**"}]
+                               [:releaser "Glob" {:pattern "\\\\server\\share\\**"}]
                                [:releaser "Grep" {:path "/"}]]]
       (is (= "deny" (decision role tool input)) (str tool " " input))))
   (testing "with no worktree root every file tool is refused"
