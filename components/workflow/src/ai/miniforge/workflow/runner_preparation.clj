@@ -39,7 +39,8 @@
    First refuses a run that is not governed when the user config requires
    governed execution, whether or not its environment was pre-acquired."
   [workflow input opts]
-  (env/refuse-local-when-governed-required! (:workflow/id workflow) (:execution-mode opts))
+  (env/refuse-local-when-governed-required! (:workflow/id workflow) (:execution-mode opts)
+                                            (:executor opts))
   (if (and (:executor opts) (:environment-id opts))
     [nil opts]
     (let [repo-url (get opts :repo-url (get input :repo-url))

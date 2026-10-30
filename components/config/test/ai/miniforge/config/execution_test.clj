@@ -39,9 +39,10 @@
       (testing "a file that sets the key requires it; one that does not, does not"
         (is (true? (sut/user-config-requires-governed? (at "{:execution {:require-governed? true}}"))))
         (is (false? (sut/user-config-requires-governed? (at "{:llm {:backend :claude}}")))))
-      (testing "a file that does not parse, or is not a map, requires it"
-        (is (true? (sut/user-config-requires-governed? (at "{:execution {:require-governed? false"))))
-        (is (true? (sut/user-config-requires-governed? (at "[:not :a :map]")))))
+      (testing "a file that does not parse, or is not exactly one map, requires it"
+        (doseq [text ["{:execution {:require-governed? false" "[:not :a :map]" "" "nil"
+                      "{} {:execution {:require-governed? true}}"]]
+          (is (true? (sut/user-config-requires-governed? (at text))) (pr-str text))))
       (finally
         (run! #(.delete ^java.io.File %) (reverse (file-seq dir)))))))
 

@@ -24,6 +24,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.workflow.runner-environment :as env]
    [ai.miniforge.workflow.runner-preparation :as sut]))
 
@@ -36,6 +37,7 @@
    pre-acquired environment, or the stub's ::stop."
   [opts]
   (with-redefs [config/user-config-requires-governed? (constantly true)
+                dag/executor-type                     :type
                 env/dag-executor-fns                  (fn [] (throw (ex-info "stop" {:anomaly/category ::stop})))]
     (try
       (let [[acquired _] (sut/acquire-environment {:workflow/id "wf-1"} {} (merge {:repo-path "."} opts))]
@@ -49,8 +51,10 @@
   (testing "a run with no mode, or :local, is refused before acquisition"
     (doseq [mode [nil :local]]
       (is (= :anomalies/forbidden (acquire {:execution-mode mode})) (pr-str mode))))
-  (testing "a run handed a pre-acquired executor is refused too unless it is governed"
-    (is (= :anomalies/forbidden (acquire {:execution-mode :local :executor :x :environment-id "e"})))
-    (is (= ::reused (acquire {:execution-mode :governed :executor :x :environment-id "e"}))))
+  (testing "a run handed a pre-acquired executor is refused unless it is governed and in a capsule"
+    (is (= :anomalies/forbidden (acquire {:execution-mode :local :executor {:type :docker} :environment-id "e"})))
+    (is (= :anomalies/forbidden (acquire {:execution-mode :governed :executor {:type :worktree} :environment-id "e"}))
+        "a host worktree executor paired with :governed still runs on the host")
+    (is (= ::reused (acquire {:execution-mode :governed :executor {:type :docker} :environment-id "e"}))))
   (testing "a governed run passes the check and goes on to acquire its capsule"
     (is (= ::stop (acquire {:execution-mode :governed})))))

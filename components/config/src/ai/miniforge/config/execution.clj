@@ -40,22 +40,40 @@
   (let [v (get-in cfg [:execution :require-governed?])]
     (not (or (nil? v) (false? v)))))
 
+(defn ^{:stratum 0} config-file-forms
+  "Every top-level form in the EDN file at `path`, or ::unreadable when it
+   cannot be read or parsed. nil when no file exists there."
+  [path]
+  (when (.exists (io/file (str path)))
+    (try+
+     (with-open [rdr (java.io.PushbackReader. (io/reader (str path)))]
+       (loop [forms []]
+         (let [form (edn/read {:eof ::eof} rdr)]
+           (if (= ::eof form) forms (recur (conj forms form))))))
+     (catch Object _ ::unreadable))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} user-config-requires-governed?
   "Whether the user config file at `path` (default: the user config path)
-   requires governed execution. Reads the file itself rather than only
-   through load-merged-config, which falls back to defaults when the file
-   does not parse: an unparseable or non-map file counts as requiring it,
-   since it may be the file that sets the requirement. With no file, the
-   merged defaults decide."
+   requires governed execution. Reads the file itself rather than through
+   load-merged-config, which falls back to defaults when the file does not
+   parse: the file must hold exactly one map, and anything else (a parse
+   error, an empty file, nil, a vector, a second form after the map)
+   counts as requiring governed execution, since it may be the file that
+   sets the requirement. The one map is merged over the defaults as
+   load-merged-config would. With no file, the defaults decide."
   ([] (user-config-requires-governed? user/default-user-config-path))
   ([path]
-   (let [parsed (try+ (when (.exists (io/file (str path)))
-                        (edn/read-string (slurp (str path))))
-                      (catch Object _ ::unreadable))]
-     (if (or (nil? parsed) (map? parsed))
-       (governed-required? (user/load-merged-config path))
+   (let [forms (config-file-forms path)]
+     (cond
+       (nil? forms)
+       (governed-required? user/default-config)
+
+       (and (vector? forms) (= 1 (count forms)) (map? (first forms)))
+       (governed-required? (user/merge-configs user/default-config (first forms)))
+
+       :else
        true))))
 
 ;------------------------------------------------------------------------------ Rich Comment

@@ -24,9 +24,11 @@ unisolated runs impossible, only to remember the flag on each run.
 
 1. `config.execution/governed-required?` (config interface): fails closed; any value
    other than false or nil (a hand-edited `"true"`, `"yes"`, `1`) counts as required.
-   `user-config-requires-governed?` reads the user config file strictly: one that does
-   not parse, or is not a map, counts as requiring governed execution (the merged-config
-   loader would fall back to defaults and turn the requirement off).
+   `user-config-requires-governed?` reads the user config file strictly: it must hold
+   exactly one map, and anything else (a parse error, an empty file, nil, a vector, a
+   second form) counts as requiring governed execution. The merged-config loader would
+   fall back to defaults and turn the requirement off; the one map is merged over the
+   defaults as that loader would.
 2. `workflow-runner.execution-mode` (CLI): `resolve-mode` takes the explicit mode (a
    keyword or its name), else governed when required, else local; a value outside
    `#{:local :governed}` is unknown. `allowed-mode!` throws `:anomalies/incorrect` for an
@@ -37,7 +39,9 @@ unisolated runs impossible, only to remember the flag on each run.
 4. Backstop: `runner-preparation/acquire-environment`, which every pipeline run passes,
    calls `refuse-local-when-governed-required!` before it acquires an environment or
    reuses a pre-acquired one. Chain steps, plan and DAG files, resumed runs, DAG child
-   tasks and runs handed a pre-acquired executor (such as `--sandbox`) are covered. It
+   tasks and runs handed a pre-acquired executor (such as `--sandbox`) are covered; a
+   pre-acquired `:worktree` executor (host-guarded or not) is refused even when paired
+   with `:governed`. It
    runs before `acquire-execution-environment!`'s `try`, which would otherwise turn the
    refusal into a warning and a local run.
 5. `mf pr respond --execution-mode <m>`: governed (requested or required by the config)

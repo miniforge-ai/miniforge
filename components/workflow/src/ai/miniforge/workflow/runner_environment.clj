@@ -181,12 +181,16 @@
 (defn ^{:stratum 0} refuse-local-when-governed-required!
   "Throw an :anomalies/forbidden anomaly when the user config requires
    governed execution (read strictly, see
-   `config/user-config-requires-governed?`) and `execution-mode` is
-   anything but :governed. Every pipeline run passes through here before it
-   acquires or reuses an environment, so this covers DAG child tasks,
-   resumed runs, chain steps and runs handed a pre-acquired executor."
-  [workflow-id execution-mode]
-  (when (and (not= :governed execution-mode)
+   `config/user-config-requires-governed?`) and the run is not governed:
+   its `execution-mode` is anything but :governed, or it was handed a
+   pre-acquired `executor` that runs on the host (a :worktree executor,
+   which a host-guarded wrapper reports too). Every pipeline run passes
+   through here before it acquires or reuses an environment, so this
+   covers DAG child tasks, resumed runs, chain steps and runs handed a
+   pre-acquired executor."
+  [workflow-id execution-mode executor]
+  (when (and (or (not= :governed execution-mode)
+                 (and executor (= :worktree (dag/executor-type executor))))
              (config/user-config-requires-governed?))
     (response/throw-anomaly! :anomalies/forbidden
                              (messages/t :env/governed-required {:workflow-id (str workflow-id)})
