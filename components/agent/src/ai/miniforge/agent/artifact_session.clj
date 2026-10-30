@@ -302,6 +302,10 @@
   "Alias of `cli-config/cleanup-cursor-permissions!`."
   cli-config/cleanup-cursor-permissions!)
 
+(def ^{:stratum 0} hook-eval-command
+  "Alias of `cli-config/hook-eval-command`."
+  cli-config/hook-eval-command)
+
 (def ^{:stratum 0} command-on-path?
   "Alias of `cli-config/command-on-path?`."
   cli-config/command-on-path?)
@@ -409,7 +413,7 @@
                      {"mcpServers" {"context" {"command" (:command srv-cmd)
                                                "args"    (:args srv-cmd)}}}
                      {:pretty true})
-        hook-cmd    "bb miniforge hook-eval"
+        hook-cmd    (hook-eval-command ["bb" "miniforge"] (:role session))
         settings    (json/generate-string (cli-config/pre-tool-use-settings hook-cmd) {:pretty true})]
     ;; Write configs inside capsule
     (exec! executor env-id (str "cat > " (file-artifacts/shell-quote (:mcp-config-path session)) " << 'MCPEOF'\n" mcp-config "\nMCPEOF")
@@ -460,13 +464,12 @@
                                                 "args"    (:args srv-cmd)}}}
         _             (spit (:mcp-config-path session)
                             (json/generate-string mcp-config {:pretty true}))
-        settings-path (write-claude-settings! (:dir session))
+        settings-path (write-claude-settings! (:dir session) (:role session))
         codex-path    (cli-config/write-codex-mcp-config! config-root srv-cmd)
         cursor-path   (cli-config/write-cursor-mcp-config! config-root srv-cmd)
         _             (backup-cursor-permissions! config-root)
         cursor-perms  (write-cursor-permissions! config-root mcp-tools nil)
-        [hook-cmd & hook-args] (resolve-miniforge-command)
-        hook-eval-cmd (str/join " " (concat [hook-cmd] hook-args ["hook-eval"]))]
+        hook-eval-cmd (hook-eval-command (resolve-miniforge-command) (:role session))]
     (assoc session
            :mcp-allowed-tools mcp-tools
            :mcp-cleanup-files [codex-path cursor-path cursor-perms]
@@ -633,7 +636,8 @@
             :codex-answer-log :absent|:recorded|:unreadable}.
 
    Use when an agent needs cached reads (context_read/grep/glob) for
-   exploration but does not write files."
+   exploration but does not write files. The hook's role comes from
+   `context` as for `with-session`."
   [context body-fn]
   (let [run (fn [session read-answers-fn cleanup-fn]
               (try
@@ -649,6 +653,7 @@
             workdir  (or (:execution/capsule-workdir context) (:execution/worktree-path context) "/workspace")
             exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
             session  (-> (create-capsule-session! executor env-id workdir exec!)
+                         (assoc :role (:agent/role context))
                          write-capsule-mcp-config!)]
         (run session read-capsule-codex-answers cleanup-capsule-session!))
       (let [workdir (:execution/worktree-path context)
@@ -656,6 +661,7 @@
                           (create-session! {:workdir workdir
                                             :source-root (:source-root context)})
                           (create-session! {:source-root (:source-root context)}))
+                        (assoc :role (:agent/role context))
                         write-mcp-config!)]
         (run session read-codex-answers cleanup-session!)))))
 
@@ -666,6 +672,11 @@
    and :execution/mode :governed), creates a capsule session inside the Docker
    container so the MCP server and hooks run inside the capsule boundary.
    Otherwise, creates a host session on the local filesystem.
+
+   The session's PreToolUse hook enforces the tool policy
+   (config/agent/tool-policy.edn) of the context's `:agent/role`, which
+   `specialized/create-base-agent` sets on every call into an agent.
+   Without one, the hook refuses every tool.
 
    Arguments:
    - context - Execution context map (from workflow runner)
@@ -681,6 +692,7 @@
             workdir  (or (:execution/capsule-workdir context) (:execution/worktree-path context) "/workspace")
             exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
             session  (-> (create-capsule-session! executor env-id workdir exec!)
+                       (assoc :role (:agent/role context))
                        write-capsule-mcp-config!)]
       (run-session session body-fn read-capsule-session-outputs cleanup-capsule-session! :capsule))
     (let [workdir (:execution/worktree-path context)
@@ -688,6 +700,7 @@
                         (create-session! {:workdir workdir
                                           :source-root (:source-root context)})
                         (create-session! {:source-root (:source-root context)}))
+                      (assoc :role (:agent/role context))
                       write-mcp-config!)]
       (run-session session body-fn read-host-session-outputs cleanup-session! :host))))
 
