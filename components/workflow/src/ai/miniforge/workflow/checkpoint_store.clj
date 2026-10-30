@@ -331,16 +331,27 @@
    (record-spec-path! workflow-run-id spec-path {}))
   ([workflow-run-id spec-path opts]
    (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
-         path (checkpoint-paths/manifest-path checkpoint-root workflow-run-id)]
-     (checkpoint-lock/with-run-lock
-      checkpoint-root workflow-run-id
-      (fn []
-        (let [manifest (read-checkpoint-file path)]
-          (when (and (map? manifest) (not (anomaly/anomaly? manifest)))
-            (try+
-              (write-edn-atomically! path (assoc manifest :workflow/spec-path (str spec-path)))
-              (catch Exception e
-                (write-failure checkpoint-root workflow-run-id nil e))))))))))
+         path (checkpoint-paths/manifest-path checkpoint-root workflow-run-id)
+         ;; As in persist-execution-state!: a pending interrupt is held off
+         ;; for the lock wait and the write, and kept.
+         interrupted? (Thread/interrupted)]
+     (try+
+       (let [recorded (checkpoint-lock/with-run-lock
+                       checkpoint-root workflow-run-id
+                       (fn []
+                         (let [manifest (read-checkpoint-file path)]
+                           (when (and (map? manifest) (not (anomaly/anomaly? manifest)))
+                             (write-edn-atomically! path (assoc manifest :workflow/spec-path (str spec-path)))))))]
+         (when (= "java.lang.InterruptedException" (get-in recorded [:anomaly/data :anomaly/ex-class]))
+           (.interrupt (Thread/currentThread)))
+         recorded)
+       (catch InterruptedException e
+         (.interrupt (Thread/currentThread))
+         (write-failure checkpoint-root workflow-run-id nil e))
+       (catch Exception e
+         (write-failure checkpoint-root workflow-run-id nil e))
+       (finally
+         (when interrupted? (.interrupt (Thread/currentThread))))))))
 
 (defn ^{:stratum 2} persist-execution-state!
   "Persist a machine snapshot, manifest, and current phase checkpoint,

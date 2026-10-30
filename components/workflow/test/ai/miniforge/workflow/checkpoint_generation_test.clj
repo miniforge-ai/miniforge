@@ -119,6 +119,19 @@
     (is (anomaly/anomaly? written))
     (is interrupted? "the interrupt the lock wait consumed is set again")))
 
+(deftest ^{:stratum 0} recording-the-spec-path-holds-off-a-pending-interrupt
+  (fixture/call-with-temp-checkpoint-root
+   (fn [root]
+     (let [ctx (fixture/plan-completed-context root {})
+           _ (store/persist-execution-state! ctx)
+           recorded (do (.interrupt (Thread/currentThread))
+                        (try (store/record-spec-path! (:execution/id ctx) "/specs/done/spec.md"
+                                                      {:checkpoint/root root})
+                             (catch InterruptedException e e)))
+           restored? (Thread/interrupted)]
+       (is (string? recorded) "the lock wait does not fail on it")
+       (is restored? "and it is still pending after")))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} verify-crash-before-manifest [root]
