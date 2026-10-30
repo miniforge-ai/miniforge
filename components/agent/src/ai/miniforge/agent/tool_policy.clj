@@ -21,12 +21,11 @@
    `tool-supervisor` evaluates tool calls against the result."
   (:require
    [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.response.interface :as response]
    [malli.core :as m]
-   [malli.error :as me])
-  (:import
-   [java.nio.file Paths]))
+   [malli.error :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -43,21 +42,20 @@
 
 (defn ^{:stratum 0} worktree-relative
   "`path` relative to the worktree `root`, or nil when it cannot be inside
-   it: a path starting with ~, an absolute path that is not under root,
-   or a relative one that climbs out of it, once `.` and `..` are resolved
-   lexically. A relative path is taken as relative to root, and root
-   itself is \".\". Symlinks and git metadata are for the caller's
-   `path-ok?` check."
+   it: a path starting with ~, or one whose canonical form (`..` and
+   symlinks resolved, as far as the path exists) is not under root's. A
+   relative path is taken as relative to root, and root itself is \".\".
+   Comparing canonical forms keeps /var and /private/var (macOS) the same
+   place and sends a symlink out of the worktree where it points. Git
+   metadata is for the caller's `path-ok?` check."
   [root path]
   (let [p (str path)]
     (when-not (str/starts-with? p "~")
-      (let [root-p (.normalize (Paths/get (str root) (make-array String 0)))
-            path-p (.normalize (Paths/get p (make-array String 0)))
-            rel    (cond
-                     (.isAbsolute path-p)        (when (.startsWith path-p root-p)
-                                                   (str (.relativize root-p path-p)))
-                     (.startsWith path-p "..")   nil
-                     :else                       (str path-p))]
+      (let [root-c (.getCanonicalFile (io/file (str root)))
+            file   (io/file p)
+            path-c (.getCanonicalFile (if (.isAbsolute file) file (io/file root-c p)))
+            rel    (when (.startsWith (.toPath path-c) (.toPath root-c))
+                     (str (.relativize (.toPath root-c) (.toPath path-c))))]
         (if (= "" rel) "." rel)))))
 
 (defn ^{:stratum 0} escaping-glob?

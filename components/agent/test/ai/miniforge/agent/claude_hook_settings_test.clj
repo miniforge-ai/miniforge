@@ -107,7 +107,7 @@
 
 (deftest ^{:stratum 0} hook-command-runs-under-sh-test
   (testing "a missing miniforge command exits 2, the code Claude reads as block, not 127"
-    (let [cmd (session/hook-eval-command ["/nonexistent/miniforge-cmd"] :implementer)]
+    (let [cmd (session/hook-eval-command ["/nonexistent/miniforge-cmd"] :implementer "/work")]
       (is (= 2 (:exit (shell/sh "sh" "-c" cmd :in "{}"))))))
   (testing "a miniforge command whose path has a space stays one word"
     (let [dir (java.nio.file.Files/createTempDirectory "hook dir " (make-array java.nio.file.attribute.FileAttribute 0))
@@ -115,9 +115,10 @@
       (try
         (spit mf "#!/bin/sh\necho \"$@\"\n")
         (.setExecutable (java.io.File. mf) true)
-        (let [{:keys [exit out]} (shell/sh "sh" "-c" (session/hook-eval-command [mf] :tester) :in "{}")]
+        (let [cmd                (session/hook-eval-command [mf] :tester (str dir))
+              {:keys [exit out]} (shell/sh "sh" "-c" cmd :in "{}")]
           (is (= 0 exit))
-          (is (= "hook-eval --role tester\n" out)))
+          (is (= (str "hook-eval --role tester --root " dir "\n") out)))
         (finally
           (run! #(.delete ^java.io.File %) (reverse (file-seq (.toFile dir)))))))))
 
@@ -128,16 +129,17 @@
     (doseq [[open-session role] [[session/with-session :tester]
                                  [session/with-readonly-session :reviewer]]]
       (let [agent (role-agent role #(open-session % settings-command))]
-        (is (str/ends-with? (:llm-result ((:invoke-fn agent) {} "task"))
-                            (str "hook-eval --role " (name role) " || exit 2"))))))
+        (is (str/includes? (:llm-result ((:invoke-fn agent) {} "task"))
+                           (str "hook-eval --role " (name role) " --root "))))))
   (testing "a capsule session writes the role into the settings it puts in the capsule"
     (let [scripts (atom [])
           agent   (role-agent :implementer #(session/with-session % (constantly nil)))]
       ((:invoke-fn agent) (capsule-context scripts) "task")
-      (is (some #(str/includes? % "bb miniforge hook-eval --role implementer || exit 2") @scripts))))
+      (is (some #(str/includes? % "bb miniforge hook-eval --role implementer --root /workspace || exit 2")
+                @scripts))))
   (testing "a session with no :agent/role has no --role, so hook-eval refuses every tool"
-    (is (str/ends-with? (:llm-result (session/with-session {} settings-command))
-                        "hook-eval || exit 2"))))
+    (is (str/includes? (:llm-result (session/with-session {} settings-command))
+                       "hook-eval --root "))))
 
 (defn- ^{:stratum 1} settings-problems
   "Problems with a settings map's PreToolUse hooks, or [] when conforming."
@@ -153,10 +155,10 @@
   (testing "write-claude-settings! (host sessions)"
     (let [s (session/create-session!)]
       (try
-        (let [settings (json/parse-string (slurp (session/write-claude-settings! (:dir s) :implementer)))]
+        (let [settings (json/parse-string (slurp (session/write-claude-settings! (:dir s) :implementer "/work")))]
           (is (= [] (settings-problems settings)))
           (is (str/ends-with? (str (get-in settings ["hooks" "PreToolUse" 0 "hooks" 0 "command"]))
-                              "hook-eval --role implementer || exit 2")))
+                              "hook-eval --role implementer --root /work || exit 2")))
         (finally
           (session/cleanup-session! s))))))
 
@@ -164,5 +166,5 @@
   (testing "write-capsule-mcp-config! (capsule sessions)"
     (let [settings (capsule-settings)]
       (is (= [] (settings-problems settings)))
-      (is (= "bb miniforge hook-eval --role reviewer || exit 2"
+      (is (= "bb miniforge hook-eval --role reviewer --root /workspace || exit 2"
              (get-in settings ["hooks" "PreToolUse" 0 "hooks" 0 "command"]))))))
