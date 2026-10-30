@@ -30,6 +30,7 @@
 
   ;; publish after prepare
   :publish/worktree-moved "The worktree moved after the release was prepared: expected {branch} at {commit-sha}, found {head-branch} at {head-sha}; not publishing"
+  :publish/index-changed "Changes were staged on {branch} after the release was prepared (or the index could not be read); not publishing"
 
   ;; push HTTPS+token fallback (host mode): why no credential was sent
   :push/token-retry-skipped
