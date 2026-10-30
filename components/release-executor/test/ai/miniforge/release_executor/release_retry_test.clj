@@ -25,6 +25,7 @@
    [ai.miniforge.release-executor.core :as core]
    [ai.miniforge.release-executor.fake-remote :as remote]
    [ai.miniforge.release-executor.metadata :as metadata]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -126,3 +127,18 @@
         (is (not (:success? again)))
         (is (= :pr-merged (-> again :errors first :type)))
         (is (= 1 (count (:prs @state))))))))
+
+(deftest ^{:stratum 2} retry-after-the-pr-merged-test
+  (testing "the PR merged and the base now holds the release: a retry finds the
+            merged PR at HEAD, reports it, and changes nothing"
+    (let [state  (atom (remote/initial-state))
+          run-id (random-uuid)
+          once   (release! state run-id)
+          _      (swap! state #(-> % (update-in [:prs 0] assoc :state "MERGED")
+                                   (assoc :merged-into-base? true :log [])))
+          again  (release! state run-id)]
+      (is (:success? again))
+      (is (= (get-in once [:metrics :pr-url]) (get-in again [:metrics :pr-url])))
+      (is (= 1 (count (:prs @state))))
+      (is (not-any? #(str/includes? % "--amend") (:log @state))
+          "no PR-doc amend onto a merged branch"))))

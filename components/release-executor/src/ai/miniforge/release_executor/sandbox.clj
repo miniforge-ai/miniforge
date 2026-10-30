@@ -41,7 +41,9 @@
 
 (defn ^{:stratum 0} exec!
   "Execute a command in the sandbox environment.
-   Returns {:success? bool :output string :error string}.
+   Returns {:success? bool :output string :error string}, plus
+   :timed-out? true when the runtime stopped the command at its deadline
+   (exit 124, coreutils timeout(1)'s convention): it may have taken effect.
    Optional opts map is merged with {:capture-output? true} and
    forwarded to the executor (supports :env, :timeout-ms, :workdir)."
   ([executor env-id command] (exec! executor env-id command {}))
@@ -53,7 +55,8 @@
          (if (zero? exit-code)
            (result/shell-success {:output (str/trim (or stdout ""))})
            (result/shell-failure (str/trim (or stderr ""))
-                                 {:output (str/trim (or stdout ""))})))
+                                 (cond-> {:output (str/trim (or stdout ""))}
+                                   (= 124 exit-code) (assoc :timed-out? true)))))
        (result/shell-failure (str "Executor error: " (:error r)) {:output ""})))))
 
 (defn- ^{:stratum 0} ssh->https-with-token
@@ -506,7 +509,8 @@
              (reuse-existing-pr! executor env-id exec-opts (:error r))
 
              :else
-             (result/shell-failure (:error r) {:pr-url nil :pr-number nil})))))))
+             (result/shell-failure (:error r) (merge {:pr-url nil :pr-number nil}
+                                                     (select-keys r [:timed-out?])))))))))
 
 (defn ^{:stratum 2} diff-stats-range
   "Get diff stats for the changes this branch introduced since branching

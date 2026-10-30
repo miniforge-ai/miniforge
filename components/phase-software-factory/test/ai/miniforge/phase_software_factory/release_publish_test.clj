@@ -33,6 +33,10 @@
       (is (= "parent-origin" (origin {:execution/id "task-run"
                                       :execution/origin-id "task-run"
                                       :execution/input {:workflow/origin-id "parent-origin"}}))))
+    (testing "a DAG task checkpointed before lineage was recorded: its parent"
+      (is (= "parent-run" (origin {:execution/id "task-run"
+                                   :execution/origin-id "task-run"
+                                   :execution/input {:workflow/parent-id "parent-run"}}))))
     (testing "a resumed attempt: the run it continues"
       (is (= "first-run" (origin {:execution/id "attempt-2" :execution/origin-id "first-run"}))))
     (testing "a context with no lineage recorded: its own id"
