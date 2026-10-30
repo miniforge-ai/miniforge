@@ -79,9 +79,15 @@
    `run-branch` is the run's release branch, or nil."
   [run run-branch]
   (let [origin-cmd ["git" "remote" "get-url" "origin"]
-        log-cmd    (log-command run-branch)]
-    (if-not (= 0 (:exit (run ["git" "rev-parse" "--verify" "--quiet" "HEAD"])))
-      {:files []}
+        log-cmd    (log-command run-branch)
+        head-cmd   ["git" "rev-parse" "--verify" "--quiet" "HEAD"]
+        head       (run head-cmd)]
+    (cond
+      ;; Exit 1 with --quiet: HEAD names no commit yet. Anything else
+      ;; but 0 (a timeout, a capsule error) is a scan that did not answer.
+      (= 1 (:exit head))       {:files []}
+      (not= 0 (:exit head))    (failure head-cmd head)
+      :else
       (let [origin (run origin-cmd)
             log    (when (= 0 (:exit origin)) (run log-cmd))
             paths  (filterv #(agent/substantive-file? {:path %}) (distinct (nul-fields (:out log))))

@@ -79,3 +79,13 @@
            (release-unpushed/tree-entries
             (str "100644 blob abc\tsrc/a.clj\u0000"
                  "160000 commit def\tstandards/miniforge\u0000"))))))
+
+(deftest ^{:stratum 0} head-probe-test
+  (let [scan (fn [head-reply] (release-unpushed/unpushed-files
+                               (fn [argv] (if (= "rev-parse" (second argv)) head-reply {:exit 0 :out ""}))
+                               nil))]
+    (testing "no commit yet: nothing to release"
+      (is (= {:files []} (scan {:exit 1 :out "" :err ""}))))
+    (testing "a probe that did not answer is a failure, not an empty scan"
+      (is (:failure (scan {:exit nil :out "" :err "executor error"})))
+      (is (:failure (scan {:exit 124 :out "" :err "timed out"}))))))
