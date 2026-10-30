@@ -60,4 +60,40 @@
   :line-timeout-ms 420000
   :process-join-timeout-ms 600000
   :post-kill-join-timeout-ms 5000
-  :poll-interval-ms 250}}
+  :poll-interval-ms 250}
+
+ ;; The environment an agent CLI process (claude, codex, cursor-agent,
+ ;; opencode) and the backend preflight probe get: only these variables
+ ;; from miniforge's own environment. The CLI passes its environment on to
+ ;; the commands its tools run, so anything else (GH_TOKEN, GITHUB_TOKEN,
+ ;; AWS_* credentials, SSH_AUTH_SOCK, miniforge's own tokens such as
+ ;; MINIFORGE_GIT_TOKEN) is not handed to it. This covers the environment
+ ;; only: on the host, files and keychain entries the operator's user can
+ ;; read stay readable to the agent's tools. Names are compared without
+ ;; regard to case (Windows spells PATH `Path`). A name matching
+ ;; :deny-prefixes is dropped even when an allow entry matches it. An
+ ;; operator adds names, comma-separated, in MINIFORGE_AGENT_ENV_ALLOW.
+ :agent-env
+ {:allow ["PATH" "HOME" "USER" "LOGNAME" "SHELL" "TMPDIR" "TZ"
+          "LANG" "LANGUAGE" "TERM" "COLORTERM"
+          ;; Windows.
+          "USERPROFILE" "APPDATA" "LOCALAPPDATA" "TEMP" "TMP" "PATHEXT"
+          "COMSPEC" "SYSTEMROOT" "WINDIR" "PROGRAMDATA" "HOMEDRIVE" "HOMEPATH"
+          ;; Proxies and TLS trust, so the CLI reaches its provider.
+          "HTTP_PROXY" "HTTPS_PROXY" "NO_PROXY" "ALL_PROXY"
+          "http_proxy" "https_proxy" "no_proxy" "all_proxy"
+          "SSL_CERT_FILE" "SSL_CERT_DIR" "NODE_EXTRA_CA_CERTS"
+          "REQUESTS_CA_BUNDLE" "CURL_CA_BUNDLE"
+          ;; Provider keys and config the agent CLIs read.
+          "CODEX_HOME" "CURSOR_API_KEY" "GOOGLE_API_KEY"
+          "GOOGLE_GENERATIVE_AI_API_KEY" "GOOGLE_APPLICATION_CREDENTIALS"
+          "GOOGLE_CLOUD_PROJECT" "CLOUD_ML_REGION"
+          ;; Read by the hook and the context server the CLI starts, and
+          ;; by the bb/Clojure tooling that runs them in development.
+          "MINIFORGE_HOME" "MINIFORGE_CODEX_PATH" "MINIFORGE_LOCALE"
+          "JAVA_HOME" "JAVA_TOOL_OPTIONS" "GITLIBS"]
+  :allow-prefixes ["LC_" "XDG_" "ANTHROPIC_" "CLAUDE_" "OPENAI_"
+                   "OPENROUTER_" "GEMINI_" "OPENCODE_" "AZURE_OPENAI_"
+                   "VERTEX_" "GROQ_" "XAI_" "MISTRAL_" "DEEPSEEK_"
+                   "CLJ_" "DEPS_CLJ_" "BABASHKA_"]
+  :deny-prefixes ["AWS_" "GH_" "GITHUB_"]}}
