@@ -34,24 +34,20 @@
   (durability/sync-ancestry! (.toFile (.getParent path))))
 
 (defn- ^{:stratum 0} read-no-follow
-  "The file's text, opened without following a final symbolic link."
+  "The file's whole text, opened without following a final symbolic link,
+   or nil when it exceeds `material/max-key-file-bytes`."
   [^Path path]
   (with-open [channel (Files/newByteChannel
                        path (into-array OpenOption [StandardOpenOption/READ
                                                     LinkOption/NOFOLLOW_LINKS]))]
-    (let [buffer (ByteBuffer/allocate 256)]
-      (.read channel buffer)
-      (String. (.array buffer) 0 (.position buffer) StandardCharsets/UTF_8))))
+    (let [buffer (ByteBuffer/allocate (inc material/max-key-file-bytes))]
+      (loop []
+        (when (and (.hasRemaining buffer) (pos? (.read channel buffer)))
+          (recur)))
+      (when (.hasRemaining buffer)
+        (String. (.array buffer) 0 (.position buffer) StandardCharsets/UTF_8)))))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} read-key [posix? ^Path path]
-  (cond
-    (not (material/safe-directory? posix? (.getParent path))) (failure :key/unsafe-directory)
-    (Files/isSymbolicLink path) (failure :key/linked)
-    (material/exposed? posix? path) (failure :key/exposed)
-    :else (or (material/parse-key (read-no-follow path))
-              (failure :key/malformed))))
 
 (defn- ^{:stratum 1} publish!
   "Write a fresh key beside `path` and link it into place. When another
@@ -67,6 +63,14 @@
                                               StandardCharsets/UTF_8))]
         (if (anomaly/anomaly? written) written (link-into-place! path tmp)))
       (finally (Files/deleteIfExists tmp)))))
+
+(defn- ^{:stratum 1} read-key [posix? ^Path path]
+  (cond
+    (not (material/safe-directory? posix? (.getParent path))) (failure :key/unsafe-directory)
+    (Files/isSymbolicLink path) (failure :key/linked)
+    (material/exposed? posix? path) (failure :key/exposed)
+    :else (or (some-> (read-no-follow path) material/parse-key)
+              (failure :key/malformed))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -2,9 +2,9 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.runtime-signing.hmac
-  "HMAC-SHA256 over the canonical EDN of a value."
+  "HMAC-SHA256 over the lossless canonical encoding of a value."
   (:require
-   [ai.miniforge.content-hash.interface :as content-hash])
+   [ai.miniforge.runtime-signing.canonical :as canonical])
   (:import
    [java.nio.charset StandardCharsets]
    [java.security MessageDigest]
@@ -26,17 +26,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} sign
-  "Hex HMAC-SHA256 of `value`'s canonical EDN under `key-bytes`. Printer
-   settings are pinned, so a caller's `*print-length*` or namespace-map
-   binding cannot change or truncate the signed text. Throws when `value`
-   cannot be rendered canonically: signing it is a programmer error."
+  "Hex HMAC-SHA256 of `value`'s canonical encoding under `key-bytes`.
+   Throws when `value` cannot be encoded losslessly: signing it is a
+   programmer error."
   [^bytes key-bytes value]
-  (let [mac (Mac/getInstance algorithm)
-        text (binding [*print-length* nil *print-level* nil *print-meta* false
-                       *print-namespace-maps* false *print-dup* false]
-               (content-hash/canonical-edn value))]
+  (let [mac (Mac/getInstance algorithm)]
     (.init mac (SecretKeySpec. key-bytes algorithm))
-    (hex (.doFinal mac (utf8 text)))))
+    (hex (.doFinal mac (utf8 (canonical/encode value))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
