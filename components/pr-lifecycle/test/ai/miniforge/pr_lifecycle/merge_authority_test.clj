@@ -69,6 +69,15 @@
   [_]
   (dag/ok {:pr/repo "miniforge-ai/miniforge"}))
 
+(deftest ^{:stratum 0} readiness-blockers-deny-the-envelope-test
+  (is (= [:merge-readiness/ci-not-green]
+         (mapv :rule-id
+               (:blocking (authority/readiness-classification
+                           {:ready? true :blocking [:ci-not-green]})))))
+  (is (= [:merge-readiness/readiness-unknown]
+         (mapv :rule-id
+               (:blocking (authority/readiness-classification {}))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} head-result
@@ -103,6 +112,17 @@
       {:result (merge/attempt-merge "/tmp" 123
                                    merge/default-merge-policy context)
        :merge-calls @merge-calls})))
+
+(deftest ^{:stratum 1} unreadable-head-never-invokes-merge-test
+  (let [merge-calls (atom 0)]
+    (with-redefs [readiness/evaluate ready-result
+                  merge/read-pr-head (fn [& _] (dag/err :head-unavailable "x"))
+                  merge/read-repository repository-result
+                  merge/merge-pr! (fn [& _] (swap! merge-calls inc) (dag/ok {}))]
+      (let [result (merge/attempt-merge "/tmp" 123 merge/default-merge-policy
+                                        (merge-context))]
+        (is (= :head-unavailable (get-in result [:error :code])))
+        (is (zero? @merge-calls))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -216,3 +236,39 @@
       (is (dag/err? result))
       (is (= :merge-authority-denied (get-in result [:error :code])))
       (is (zero? merge-calls)))))
+
+(deftest ^{:stratum 2} a-failed-merge-revokes-its-grant-test
+  (let [context (merge-context)
+        issued (atom nil)
+        issue grant/issue-for-effect]
+    (with-redefs [readiness/evaluate ready-result
+                  merge/read-pr-head head-result
+                  merge/read-repository repository-result
+                  grant/issue-for-effect (fn [& args] (reset! issued (apply issue args)))
+                  merge/merge-pr! (fn [& _] (dag/err :gh-command-failed "closed"))]
+      (let [result (merge/attempt-merge "/tmp" 123 merge/default-merge-policy
+                                        context)]
+        (is (= :merge-failed (get-in result [:error :code])))
+        (is (= :revocation/superseded
+               (:grant/revocation-reason
+                (grant/current (:grant-breach-dir context)
+                               (:grant/id @issued)))))))))
+
+(deftest ^{:stratum 2} a-denied-merge-revokes-its-grant-test
+  (let [context (merge-context)
+        issued (atom nil)
+        issue grant/issue-for-effect]
+    (with-redefs [readiness/evaluate ready-result
+                  merge/read-pr-head head-result
+                  merge/read-repository repository-result
+                  grant/issue-for-effect
+                  (fn [dir request now]
+                    (reset! issued (issue dir request now)))
+                  authority/permitted? (constantly false)
+                  merge/merge-pr! (fn [& _] (dag/ok {}))]
+      (merge/attempt-merge "/tmp" 123 merge/default-merge-policy context)
+      (is (some? (:grant/revoked-at
+                  (grant/current (:grant-breach-dir context)
+                                 (:grant/id @issued)))))
+      (is (empty? (fx/list-records (:effect-store-dir context)))
+          "a denied merge writes no proposal"))))
