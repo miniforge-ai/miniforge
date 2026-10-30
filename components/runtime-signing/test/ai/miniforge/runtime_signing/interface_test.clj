@@ -60,15 +60,33 @@
     (let [file (key-file)]
       (signing/load-or-create-key! file)
       (spit file "not a key")
+      (is (anomaly/anomaly? (signing/load-or-create-key! file)))))
+  (testing "given a valid key followed by padding and garbage → refused"
+    (let [file (key-file)]
+      (signing/load-or-create-key! file)
+      (spit file (str (apply str (repeat 64 "a")) (apply str (repeat 192 " ")) "garbage"))
       (is (anomaly/anomaly? (signing/load-or-create-key! file))))))
 
 (deftest ^{:stratum 1} printer-bindings-do-not-change-signatures-test
   (let [k (signing/load-or-create-key! (key-file))
         signature (signing/sign k grant)]
-    (binding [*print-length* 0 *print-level* 1 *print-namespace-maps* true]
+    (binding [*print-length* 0 *print-level* 1 *print-namespace-maps* true
+              *print-readably* false]
       (is (= signature (signing/sign k grant)))
       (is (not (signing/signed? k (assoc grant :grant/id (random-uuid)) signature))
-          "a truncating printer must not make two grants sign alike"))))
+          "a truncating printer must not make two grants sign alike")
+      (is (not= (signing/sign k {:a "x, :b y"}) (signing/sign k {:a "x" :b "y"}))
+          "unquoted strings must not make two maps sign alike"))))
+
+(deftest ^{:stratum 1} distinct-values-never-share-a-signature-test
+  (let [k (signing/load-or-create-key! (key-file))
+        at (Instant/parse "2026-10-29T00:00:00Z")]
+    (is (not= (signing/sign k #{1 1.0}) (signing/sign k #{1})))
+    (is (not= (signing/sign k [1]) (signing/sign k [1.0])))
+    (is (thrown? IllegalArgumentException
+                 (signing/sign k #{at (java.util.Date/from at)}))
+        "entries that would encode alike are refused, not collapsed")
+    (is (false? (signing/signed? k #{at (java.util.Date/from at)} (apply str (repeat 64 "0")))))))
 
 (deftest ^{:stratum 1} signatures-bind-the-exact-value-test
   (let [k (signing/load-or-create-key! (key-file))

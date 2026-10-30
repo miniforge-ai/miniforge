@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.runtime-signing.interface
-  "Runtime-held signing key and HMAC-SHA256 signatures over canonical EDN.
+  "Runtime-held signing key and HMAC-SHA256 signatures over a lossless
+   canonical encoding.
 
    The runtime signs authority it issues (grants, the envelopes that allow
    an effect) and verifies those signatures before an effect commits. The
@@ -24,7 +25,8 @@
   (io/file (config/miniforge-home) "keys" "runtime-signing.key"))
 
 (def ^{:stratum 0} sign
-  "Hex HMAC-SHA256 of a value's canonical EDN: (sign key-bytes value)."
+  "Hex HMAC-SHA256 of a value's canonical encoding: (sign key-bytes value).
+   Throws for a value that cannot be encoded losslessly."
   hmac/sign)
 
 (def ^{:stratum 0} signed?

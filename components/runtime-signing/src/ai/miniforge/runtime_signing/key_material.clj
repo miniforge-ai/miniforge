@@ -18,6 +18,10 @@
   "Bytes of key material: 256 bits."
   32)
 
+(def ^{:stratum 0} max-key-file-bytes
+  "A key file is 64 hex characters; anything past this bound is malformed."
+  256)
+
 (def ^{:stratum 0} no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
 
 (def ^{:stratum 0} exposing-permissions
