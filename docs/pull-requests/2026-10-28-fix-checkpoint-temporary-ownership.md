@@ -8,7 +8,7 @@
 
 ## Problem and behavior
 
-Depends on the protected path and history boundaries in #2244.
+Uses the protected path and history boundaries merged in #2244.
 
 Shared temporary filenames let overlapping checkpoint writes consume another writer's bytes.
 Each write now owns a unique same-directory temporary and cleans it after success or failure.
@@ -39,10 +39,12 @@ Non-POSIX providers retain native defaults.
 ## Verification
 
 The previous package fails the ownership, permission, and protected-directory regressions.
-The focused review-regression JVM suites pass 21 tests and 78 assertions.
-All three workflow consumers pass serially in 2m11s after updating path
+The protected-path prerequisite suites pass 21 tests and 47 assertions on JVM
+and Babashka. Affected workflow consumers pass in 2m35s after updating path
 expectations to the resolved publication contract.
-Rebuild the isolated CLI after final prerequisite alignment.
+The CLI rebuilt after actual-main alignment passes 66 tests and 191 assertions
+with no production source overlays. The pin/GC project test passes separately
+on its JVM runtime: one test and seven assertions.
 The actual rename-failure test verifies preparation completed before removing the temporary.
 The pin-publication test observes actual lock contention before releasing the
 pin and proves GC retains the run. Its release happens in a finally block.
