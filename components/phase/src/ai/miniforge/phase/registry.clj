@@ -68,8 +68,12 @@
   ;; :no-secrets joined when it became an implement default: a credential
   ;; the implementer writes into a file is committed and pushed, so no
   ;; workflow override may switch the check off.
+  ;; :release-ready joined when the release phase began publishing (push
+  ;; and PR) only after its gates pass: it is the gate that reads the verify
+  ;; and review outcomes, so an override that omitted it would publish
+  ;; unreviewed work.
   #{:policy-verify :policy-review :policy-pack :codex-consultation
-    :stale-references :no-secrets})
+    :stale-references :no-secrets :release-ready})
 
 ;; Phase status predicates
 ;;

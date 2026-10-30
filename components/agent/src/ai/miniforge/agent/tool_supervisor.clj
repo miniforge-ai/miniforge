@@ -34,8 +34,8 @@
                         stdin, evaluates, writes decision to stdout"
   (:require
    [cheshire.core :as json]
-   [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [ai.miniforge.agent.tool-policy :as tool-policy]
    [ai.miniforge.event-stream.interface :as events]
    [slingshot.slingshot :refer [try+]])
   (:import
@@ -46,13 +46,13 @@
 ;; Policy data
 (def ^{:stratum 0} tool-policy
   "The tool policy, read from the classpath resource
-   config/agent/tool-policy.edn on first use, with its
-   :bash/deny-patterns compiled to regexes. A missing or unreadable
-   resource throws there, and the hook then refuses the tool call."
+   config/agent/tool-policy.edn on first use by
+   `tool-policy/read-tool-policy`, which checks it against its schema. A
+   missing, unreadable or malformed resource throws there, and the hook
+   then refuses the tool call."
   (delay (-> (io/resource "config/agent/tool-policy.edn")
              slurp
-             edn/read-string
-             (update :bash/deny-patterns #(mapv re-pattern %)))))
+             tool-policy/read-tool-policy)))
 
 (defn ^{:stratum 0} role-tools
   "The tools `policy` lets `role` call: its :common set plus the role's
@@ -63,14 +63,21 @@
 
 ;; Bash command policy
 (defn ^{:stratum 0} evaluate-bash-command
-  "Evaluate a Bash command against `deny-patterns`.
+  "Evaluate a Bash command against `policy`: refused when longer than its
+   :bash/max-command-length (checked first, so a padded command cannot
+   slow the patterns down) or when it matches one of :bash/deny-patterns.
 
    Returns {:decision \"allow\"} or {:decision \"deny\" :reason string}."
-  [deny-patterns command]
-  (if-let [pattern (some #(when (re-find % (str command)) %) deny-patterns)]
-    {:decision "deny"
-     :reason (str "Command matches dangerous pattern: " pattern)}
-    {:decision "allow"}))
+  [policy command]
+  (let [command (str command)
+        limit   (:bash/max-command-length policy)]
+    (if (> (count command) limit)
+      {:decision "deny"
+       :reason (str "Command is longer than " limit " characters; write long content with Write")}
+      (if-let [pattern (some #(when (re-find % command) %) (:bash/deny-patterns policy))]
+        {:decision "deny"
+         :reason (str "Command matches dangerous pattern: " pattern)}
+        {:decision "allow"}))))
 
 ;; Event emission
 (defn ^{:stratum 0} emit-tool-use-event!
@@ -119,19 +126,24 @@
 
 ;; Core evaluation function
 (defn ^{:stratum 1} evaluate-tool-use
-  "Evaluate `role`'s request to call `tool-name` with `tool-input`.
+  "Evaluate a session's request to call `tool-name` with `tool-input`.
+   `session` carries the agent :role, the worktree :root and :path-ok?
+   (see `tool-policy/path-refusal`).
 
    Returns {:decision \"allow\"} or {:decision \"deny\" :reason string}.
-   Denies a tool `role-tools` does not list for `role`, every tool when
-   `policy` has no entry for `role` (nil included), and a Bash command
+   Denies a tool `role-tools` does not list for the role, every tool when
+   `policy` has no entry for the role (nil included), a path outside the
+   worktree or in its git metadata, and a Bash command
    `evaluate-bash-command` refuses. The three-argument form reads
    `tool-policy`.
 
    `hook-eval-stdin!` maps the result to Claude's PreToolUse reply."
-  ([role tool-name tool-input]
-   (evaluate-tool-use @tool-policy role tool-name tool-input))
-  ([policy role tool-name tool-input]
-   (let [allowed (role-tools policy role)]
+  ([session tool-name tool-input]
+   (evaluate-tool-use @tool-policy session tool-name tool-input))
+  ([policy {:keys [role] :as session} tool-name tool-input]
+   (let [allowed (role-tools policy role)
+         outside (when (contains? allowed tool-name)
+                   (tool-policy/path-refusal policy session tool-name tool-input))]
      (cond
        (nil? allowed)
        {:decision "deny"
@@ -141,8 +153,11 @@
        {:decision "deny"
         :reason (str "Tool " (pr-str tool-name) " is not allowed for role " (pr-str role))}
 
+       outside
+       {:decision "deny" :reason outside}
+
        (= "Bash" tool-name)
-       (evaluate-bash-command (:bash/deny-patterns policy) (:command tool-input))
+       (evaluate-bash-command policy (:command tool-input))
 
        :else
        {:decision "allow"}))))
@@ -154,8 +169,9 @@
 
    Reads Claude PreToolUse JSON from stdin:
      {\"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"ls\"}}
-   evaluates it for the role in `opts` (with none, every tool is refused)
-   and writes `hook-reply` to stdout.
+   evaluates it for the session `opts` describe (:role, :root, :path-ok?;
+   with no role every tool is refused, with no root every file tool) and
+   writes `hook-reply` to stdout.
 
    Returns the exit code: 0 once a reply is written. When reading or
    evaluating the request throws, it writes nothing to stdout, explains on
@@ -164,13 +180,13 @@
    other non-zero code lets the call through, so the hook command
    artifact-session writes turns a failure to start this one into 2 too."
   ([] (hook-eval-stdin! {}))
-  ([{:keys [role]}]
+  ([opts]
    (try+
     (let [input (read-hook-request)
           tool-name (:tool_name input)
           tool-input (get input :tool_input {})
           tool-input-kw (into {} (map (fn [[k v]] [(keyword k) v]) tool-input))
-          result (evaluate-tool-use role tool-name tool-input-kw)
+          result (evaluate-tool-use opts tool-name tool-input-kw)
           ;; Emit event (no-ops if no event stream bound)
           _ (emit-tool-use-event! tool-name result)]
       (println (json/generate-string (hook-reply result)))
@@ -183,16 +199,16 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (evaluate-tool-use :implementer "Bash" {:command "ls -la"})
+  (evaluate-tool-use {:role :implementer} "Bash" {:command "ls -la"})
   ;; => {:decision "allow"}
 
-  (evaluate-tool-use :implementer "Bash" {:command "rm -rf /"})
+  (evaluate-tool-use {:role :implementer} "Bash" {:command "rm -rf /"})
   ;; => {:decision "deny" :reason "..."}
 
-  (evaluate-tool-use :reviewer "Write" {:file_path "src/x.clj"})
+  (evaluate-tool-use {:role :reviewer} "Write" {:file_path "src/x.clj"})
   ;; => {:decision "deny" :reason "Tool \"Write\" is not allowed for role :reviewer"}
 
-  (evaluate-tool-use nil "mcp__context__context_read" {:path "src/core.clj"})
+  (evaluate-tool-use {} "mcp__context__context_read" {:path "src/core.clj"})
   ;; => {:decision "deny" :reason "No tool policy for role nil; every tool is refused"}
 
   :end)
