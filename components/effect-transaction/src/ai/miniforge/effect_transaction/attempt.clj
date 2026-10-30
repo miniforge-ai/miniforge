@@ -5,8 +5,9 @@
   "Deterministic effect ids for repeated attempts at one effect.
 
    The id of attempt n is a name-based UUID of the effect's basis (class,
-   run, exact target) and n, so a resumed or retried run finds the record
-   an earlier attempt left instead of firing the effect again."
+   run, exact target) and n. A resumed or retried run computes the same
+   ids, finds the records earlier attempts left, and takes the next free
+   one; two processes racing for one attempt collide on its record."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.messages :as msg]
@@ -18,7 +19,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} max-attempts
-  "Attempts examined before refusing; each one is a definite failure."
+  "Recorded attempts at one effect basis before refusing to start another."
   64)
 
 (defn ^{:stratum 0} attempt-id
@@ -31,6 +32,22 @@
               StandardCharsets/UTF_8)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} free-attempt-id
+  "The id of the first attempt at `basis` with no record in `dir`. Ids
+   repeat across processes, so two that race for the same attempt collide
+   when they create its record and only one proceeds. Returns a storage
+   anomaly, or :exhausted after `max-attempts` recorded attempts."
+  [dir basis]
+  (loop [n 0]
+    (if (= n max-attempts)
+      (anomaly/anomaly :exhausted (msg/t :attempt/exhausted) {:effect/basis basis})
+      (let [id (attempt-id basis n)
+            t (store/read-record dir id)]
+        (cond
+          (anomaly/anomaly? t) t
+          (nil? t) id
+          :else (recur (inc n)))))))
 
 (defn ^{:stratum 1} open
   "The first attempt at `basis` that may still run, read from `dir`:

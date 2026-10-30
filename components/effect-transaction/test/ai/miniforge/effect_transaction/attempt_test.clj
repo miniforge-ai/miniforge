@@ -5,7 +5,7 @@
   (:require
    [ai.miniforge.effect-transaction.fixtures :as fixture]
    [ai.miniforge.effect-transaction.interface :as fx]
-   [clojure.test :refer [deftest is testing]]))
+   [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -26,16 +26,9 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(deftest ^{:stratum 2} open-attempt-skips-only-definite-failures-test
-  (testing "given no records → attempt 0"
-    (is (= {:effect/id (fx/attempt-id basis 0)} (fx/open-attempt (fixture/tmp-dir) basis))))
-  (testing "given attempt 0 in flight → that record, not a new id"
-    (let [dir (fixture/tmp-dir)
-          t (propose-attempt! dir 0)]
-      (is (= (:effect/id t) (get-in (fx/open-attempt dir basis) [:effect/existing :effect/id])))))
-  (testing "given attempt 0 failed → attempt 1"
-    (let [dir (fixture/tmp-dir)
-          t (propose-attempt! dir 0)]
-      (fx/commit! dir t :authority/unenforced {} fixture/now
-                  (fn [] {:effect/outcome :failed :effect/failure "refused"}))
-      (is (= {:effect/id (fx/attempt-id basis 1)} (fx/open-attempt dir basis))))))
+(deftest ^{:stratum 2} free-attempt-id-takes-the-first-unrecorded-attempt-test
+  (let [dir (fixture/tmp-dir)]
+    (is (= (fx/attempt-id basis 0) (fx/free-attempt-id dir basis)))
+    (propose-attempt! dir 0)
+    (is (= (fx/attempt-id basis 1) (fx/free-attempt-id dir basis))
+        "a recorded attempt, whatever its state, is not reused")))

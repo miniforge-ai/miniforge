@@ -67,6 +67,12 @@
    (attempt-id basis n)."
   attempt/attempt-id)
 
+(def ^{:stratum 0} free-attempt-id
+  "The id of the first attempt at an effect basis with no record in a
+   store: (free-attempt-id dir basis). Returns an anomaly when the store
+   cannot be read or the attempts are exhausted."
+  attempt/free-attempt-id)
+
 (def ^{:stratum 0} open-attempt
   "The first attempt at a basis that may still run, read from a store:
    {:effect/id id} when it has no record, {:effect/existing record} when an
