@@ -445,6 +445,11 @@
       (if (zero? (:exit r))
         (result/shell-success {:output (get r :out "")})
         (result/shell-failure (get r :err "") (timeout-data r))))
+    ;; Interrupted mid-push, it may have reached origin: :interrupted?
+    ;; marks the outcome unknown, and the flag is set again.
+    (catch InterruptedException e
+      (.interrupt (Thread/currentThread))
+      (result/shell-failure (.getMessage e) {:interrupted? true}))
     (catch Exception e
       (result/shell-failure (.getMessage e)))))
 
@@ -463,9 +468,10 @@
    Shared by push-branch! and force-push!."
   [worktree-path github-token push!]
   (let [result (push! nil)]
-    ;; A push stopped at its deadline may have reached origin: retrying it
-    ;; would hide that unknown outcome behind the retry's.
-    (if (or (result/succeeded? result) (not github-token) (:timed-out? result))
+    ;; A push stopped at its deadline or interrupted may have reached
+    ;; origin: retrying it would hide that unknown outcome behind the retry's.
+    (if (or (result/succeeded? result) (not github-token)
+            (:timed-out? result) (:interrupted? result))
       result
       (let [lines    (fn [args]
                        (let [r (exec! worktree-path args)]
@@ -697,5 +703,10 @@
             :else
             (result/shell-failure (get result :err "")
                                   (merge {:pr-url nil :pr-number nil} (timeout-data result)))))
+        ;; Interrupted mid-create, the PR may exist: :interrupted? marks the
+        ;; outcome unknown, and the flag is set again.
+        (catch InterruptedException e
+          (.interrupt (Thread/currentThread))
+          (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil :interrupted? true}))
         (catch Exception e
           (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil})))))))
