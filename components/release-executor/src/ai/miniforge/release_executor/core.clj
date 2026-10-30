@@ -226,13 +226,15 @@
 (defn ^{:stratum 0} prepared-release
   "What publish-release needs from a prepared pipeline state, as plain
    data: no runtime handles or credentials, and code artifacts without
-   file content (publish renders paths only)."
+   file content (publish renders paths only). The §7.7.2 answer-channel
+   keys ride along, so publish-release's result carries them too."
   [state]
   (let [strip-content (fn [artifact]
                         (update artifact :code/files
                                 (fn [files] (mapv #(dissoc % :content) files))))]
     (-> (select-keys state [:branch :base-branch :commit-sha :release-meta
-                            :write-metrics :workflow-data])
+                            :write-metrics :workflow-data
+                            :codex-answers :codex-answer-log])
         (assoc :code-artifacts (mapv strip-content (:code-artifacts state))))))
 
 (defn ^{:stratum 0} pipeline->result
@@ -378,6 +380,28 @@
     (fail state :missing-environment-id (msg/t :exec/missing-environment-id))
 
     :else state))
+
+(defn ^{:stratum 1} step-verify-prepared
+  "Fail closed unless the worktree is where prepare-release left it: the
+   prepared branch checked out at the prepared commit. Publishing runs
+   later (after the release gates); were the worktree moved in between,
+   the push and the PR would carry commits nobody validated, or the wrong
+   branch."
+  [state]
+  (if (failed? state)
+    state
+    (let [{:keys [host-mode? worktree-path executor environment-id branch commit-sha]} state
+          run    (fn [argv] (if host-mode?
+                              (git/exec! worktree-path argv)
+                              (sandbox/exec! executor environment-id (str/join " " argv))))
+          on     (run ["git" "rev-parse" "--abbrev-ref" "HEAD"])
+          at     (run ["git" "rev-parse" "HEAD"])
+          head   {:head-branch (str/trim (str (:output on))) :head-sha (str/trim (str (:output at)))}]
+      (if (and (result/succeeded? on) (result/succeeded? at)
+               (= branch (:head-branch head)) (= commit-sha (:head-sha head)))
+        state
+        (fail state :worktree-moved
+              (msg/t :publish/worktree-moved (merge {:branch branch :commit-sha commit-sha} head)))))))
 
 (defn ^{:stratum 1} step-check-gh-auth
   "Check gh CLI auth.  Dispatches to git/check-gh-auth! (host) or
@@ -977,6 +1001,7 @@
   [prepared context]
   (-> (merge (release-state {} context {}) prepared)
       step-validate-inputs
+      step-verify-prepared
       step-push
       step-create-pr
       step-generate-pr-doc
