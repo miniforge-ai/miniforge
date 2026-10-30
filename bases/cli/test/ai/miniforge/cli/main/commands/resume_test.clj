@@ -376,6 +376,18 @@
         (is (= [{:phase :plan} {:phase :implement} {:phase :verify}] (:workflow/pipeline workflow)))
         (is (nil? (:resume-phase-results opts)))))))
 
+(deftest ^{:stratum 1} a-running-run-is-not-resumed-test
+  (testing "the run's owner lock is held: the resume is refused before anything runs"
+    (let [ran (atom false)]
+      (with-redefs [workflow/run-owner (constantly {:owner/pid 4242
+                                                    :owner/started-at "2026-10-29T00:00:00Z"})
+                    sut/run-pipeline (fn [& _] (reset! ran true) {:execution/status :completed})]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"still running \(process 4242"
+                              (resume-with {:completed-phases [:plan]
+                                            :machine-snapshot {:execution/id (random-uuid)}}
+                                           {}))))
+      (is (false? @ran)))))
+
 (deftest ^{:stratum 1} run-id-option-test
   (let [snapshot-id (random-uuid)
         snapshotted {:completed-phases [:plan]

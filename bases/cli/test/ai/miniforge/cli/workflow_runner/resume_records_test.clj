@@ -22,6 +22,7 @@
    [ai.miniforge.cli.workflow-runner.resume-records :as sut]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.interface :as operator]
+   [ai.miniforge.workflow.interface :as workflow]
    [cheshire.core :as json]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
@@ -136,6 +137,8 @@
         (is (not (sut/target-live? workflow-id)))
         (with-redefs [operator/live-runner? (constantly true)]
           (is (sut/target-live? workflow-id) "a runner in this process"))
+        (with-redefs [workflow/run-owner (constantly {:owner/pid 1})]
+          (is (sut/target-live? workflow-id) "a process holding the run's owner lock"))
         (manifest! "active")
         (is (sut/target-live? workflow-id) "an active manifest whose owner is alive")
         (manifest! "active" (.minusSeconds (java.time.Instant/now) 120))

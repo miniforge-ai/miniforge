@@ -382,6 +382,17 @@
         _ (when-not quiet
             (display/print-info (messages/t :resume/resuming
                                             {:workflow-id workflow-id})))
+        ;; A run still running is not resumed: its runner holds the run's
+        ;; owner lock (see run-pipeline), under its checkpoint root.
+        _ (let [root  (workflow/run-checkpoint-root (str workflow-id) events-dir)
+                owner (workflow/run-owner (str workflow-id) (when (string? root) root))]
+            (when (some? owner)
+              (response/throw-anomaly! :anomalies/conflict
+                                       (messages/t :resume/run-live
+                                                   {:run-id (str workflow-id)
+                                                    :pid (get owner :owner/pid "?")
+                                                    :started-at (get owner :owner/started-at "?")})
+                                       {:run-id (str workflow-id) :run/owner owner})))
         recorded (wr/reconstruct-context events-dir (str workflow-id))
         _ (throw-resume-anomaly! recorded)
         ;; Shown even when quiet: an unreadable checkpoint file means work

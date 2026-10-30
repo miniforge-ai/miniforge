@@ -23,11 +23,24 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.workflow.run-owner-lock :as owner]
+   [ai.miniforge.workflow.runner :as runner]
    [babashka.fs :as fs]
+   [babashka.process :as bp]
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private holder-script
+  "bb program for a second process: lock argv[0], print \"locked\", wait
+   for a line on stdin, then exit, which releases the lock."
+  (str "(let [[f] *command-line-args*"
+       "      ch (java.nio.channels.FileChannel/open (java.nio.file.Paths/get f (make-array String 0))"
+       "           (into-array java.nio.file.OpenOption [java.nio.file.StandardOpenOption/CREATE"
+       "                                                 java.nio.file.StandardOpenOption/WRITE]))"
+       "      held (.tryLock ch)]"
+       "  (println (if held \"locked\" \"busy\")) (flush) (read-line))"))
 
 (deftest ^{:stratum 0} owner-lock-in-this-process-test
   (fs/with-temp-dir [root {:prefix "run-owner-"}]
@@ -63,3 +76,44 @@
       (is (= :done (owner/with-run-owner root id (constantly :done))))
       (is (= :fresh (owner/with-run-owner root nil (constantly :fresh)))
           "a run id minted fresh needs no lock"))))
+
+(deftest ^{:stratum 0} run-pipeline-refuses-a-running-run-test
+  (fs/with-temp-dir [root {:prefix "run-owner-pipeline-"}]
+    (let [id       (random-uuid)
+          held     (owner/acquire! root id)
+          acquired (atom false)]
+      (try
+        (with-redefs-fn {#'ai.miniforge.workflow.runner/acquire-environment
+                         (fn [& _] (reset! acquired true) (throw (ex-info "must not start" {})))}
+          #(is (= :conflict
+                  (try+ (runner/run-pipeline {:workflow/id :owner-test :workflow/pipeline []}
+                                             {} {:workflow-id id :checkpoint/root (str root)})
+                        :started
+                        (catch [:anomaly/type :conflict] _ :conflict)))))
+        (is (false? @acquired) "nothing is acquired for a refused run")
+        (finally (owner/release! held))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} owner-lock-held-by-another-process-test
+  (if-not (fs/which "bb")
+    (println "SKIP cross-process owner lock test: bb is not on PATH")
+    (fs/with-temp-dir [root {:prefix "run-owner-process-"}]
+      (let [id     (random-uuid)
+            file   (owner/owner-file root id)
+            _      (fs/create-dirs (fs/parent file))
+            holder (bp/process ["bb" "-e" holder-script (str file)]
+                               {:in :pipe :out :pipe :err :inherit})
+            locked (future (.readLine ^java.io.BufferedReader (io/reader (:out holder))))]
+        (try
+          (is (= "locked" (deref locked 10000 ::timed-out)))
+          (testing "while the other process holds it, the run is refused"
+            (is (= :conflict (:anomaly/type (owner/acquire! root id))))
+            (is (some? (owner/owner root id))))
+          (finally
+            (doto ^java.io.Writer (io/writer (:in holder)) (.write "go\n") (.flush))
+            (deref holder 10000 nil)))
+        (testing "once it exits, the OS has released the lock"
+          (let [held (owner/acquire! root id)]
+            (is (not (anomaly/anomaly? held)))
+            (owner/release! held)))))))

@@ -18,6 +18,8 @@
 (ns ai.miniforge.workflow.runner
   "Compose workflow setup, bounded execution, lifecycle publication, and cleanup."
   (:require [ai.miniforge.workflow.boundary.runner-lifetime :as lifetime]
+            [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
+            [ai.miniforge.workflow.run-owner-lock :as owner]
             [ai.miniforge.workflow.runner-callbacks :as callbacks]
             [ai.miniforge.workflow.runner-cleanup :as cleanup]
             [ai.miniforge.workflow.runner-events :as events]
@@ -57,6 +59,17 @@
 
 (def ^{:stratum 0} extract-output outcome/extract-output)
 
+(defn- ^{:stratum 0} owner-run-id
+  "The run id this pipeline claims before it starts: the caller's uuid
+   :workflow-id (as the CLI and resume pass it; same parsing as
+   context/opts-run-id), or nil for an id the context mints fresh."
+  [opts]
+  (let [wid (:workflow-id opts)]
+    (cond
+      (uuid? wid)   wid
+      (string? wid) (parse-uuid wid)
+      :else         nil)))
+
 (def ^{:stratum 0} ^:private acquire-environment preparation/acquire-environment)
 
 (def ^{:stratum 0} ^:private wrap-phase-callbacks callbacks/wrap-phase-callbacks)
@@ -73,12 +86,20 @@
   ([workflow input]
    (run-pipeline workflow input {}))
   ([workflow input opts]
-   (let [[acquired-env opts] (acquire-environment workflow input opts)
-         owned (session/create (wrap-phase-callbacks (:event-stream opts) opts)
-                               build-pipeline extract-output)
-         execute (partial session/execute! workflow input opts owned run-pipeline)
-         release (partial lifetime/release! opts workflow acquired-env owned)]
-     (lifetime/protect! owned execute release))))
+   ;; One live process per run id, held for the whole run: a resume or a
+   ;; launcher retry of a run still running is refused (the owner lock's
+   ;; anomaly is thrown) before anything is acquired. The root is the one
+   ;; the run checkpoints under, as restore-context resolves it.
+   (owner/with-run-owner
+    (checkpoint-paths/resolve-checkpoint-root (merge opts (:resume-machine-snapshot opts)))
+    (owner-run-id opts)
+    (fn []
+      (let [[acquired-env opts] (acquire-environment workflow input opts)
+            owned (session/create (wrap-phase-callbacks (:event-stream opts) opts)
+                                  build-pipeline extract-output)
+            execute (partial session/execute! workflow input opts owned run-pipeline)
+            release (partial lifetime/release! opts workflow acquired-env owned)]
+        (lifetime/protect! owned execute release))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
