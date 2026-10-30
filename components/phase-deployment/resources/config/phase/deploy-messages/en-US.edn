@@ -16,6 +16,7 @@
   :deploy/preflight-failed       "Deployment preflight failed"
   :deploy/authority-input-invalid "Deployment authority requires canonical execution and target inputs"
   :deploy/authority-denied       "Deployment authority denied"
+  :deploy/proposal-not-running   "The rollout is healthy but its pods do not run the proposed images"
   :deploy/effect-unsettled       "An earlier attempt at this deploy was proposed but never committed; reconcile it before retrying"
   :deploy/stopped                "Deployment stopped before apply because the run was cancelled"
   :deploy/grant-substituted      "The deployment proposal names a grant this attempt did not issue"

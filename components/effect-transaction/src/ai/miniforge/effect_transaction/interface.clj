@@ -70,7 +70,8 @@
 (def ^{:stratum 0} open-attempt
   "The first attempt at a basis that may still run, read from a store:
    {:effect/id id} when it has no record, {:effect/existing record} when an
-   earlier attempt is not a definite failure, or an anomaly."
+   earlier attempt is not a definite failure, or an anomaly. An optional
+   `spent?` predicate names further records to skip."
   attempt/open)
 
 (def ^{:stratum 0} propose!

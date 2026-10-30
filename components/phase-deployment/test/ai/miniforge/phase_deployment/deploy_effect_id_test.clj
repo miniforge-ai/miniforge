@@ -49,6 +49,30 @@
    (governed/transact! context target (operations applies target apply-result ready?)
                        (Instant/now))))
 
+(deftest ^{:stratum 1} a-healthy-old-deployment-is-not-taken-for-the-proposal-test
+  (let [context (deploy-context)
+        applies (atom 0)
+        running (atom "registry/app:old")
+        fail-apply? (atom true)
+        ops (assoc (operations applies target (schema/success :stdout "applied") true)
+                   :render! (fn [_] (schema/success :rendered-yaml
+                                                    "kind: Deployment\nspec:\n  containers:\n  - image: registry/app:new\n"))
+                   :apply-rendered! (fn [_ _]
+                                      (swap! applies inc)
+                                      (if @fail-apply?
+                                        (throw (ex-info "connection reset before apply" {}))
+                                        (do (reset! running "registry/app:new")
+                                            (schema/success :stdout "applied"))))
+                   :observe! (fn [_] {:provider/matched? true
+                                      :provider/observed {:deployment/ready? true
+                                                          :deployment/pods {:pods [{:images [@running]}]}}}))
+        first-try (governed/transact! context target ops (Instant/now))]
+    (is (= :failed (:deploy/status first-try))
+        "a healthy rollout of other images is not this deploy's success")
+    (reset! fail-apply? false)
+    (is (= :success (:deploy/status (governed/transact! context target ops (Instant/now)))))
+    (is (= 2 @applies) "the retry applied the proposal under the next attempt")))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} a-settled-deploy-is-reported-not-repeated-test

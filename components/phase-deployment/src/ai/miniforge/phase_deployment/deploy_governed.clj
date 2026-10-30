@@ -79,18 +79,29 @@
       (assoc state :target (:target result)))))
 
 (defn- ^{:stratum 1} open-attempt
-  "Take this deploy's fixed effect id, or the earlier attempt's record when
-   one did not definitely fail. A context with no run gets a fresh id;
-   authority then refuses it."
+  "Take this deploy's fixed effect id. An earlier attempt still in flight
+   is reconciled first; one that turns out spent (it failed, or a healthy
+   rollout ran other images) gives way to a fresh attempt, and any other
+   is answered for instead of deploying again. A context with no run gets
+   a fresh id; authority then refuses it."
   [state]
-  (let [opened (if (uuid? (get-in state [:context :execution/id]))
-                 (fx/open-attempt (transaction/store-dir (:context state))
-                                  (effect-basis state))
-                 {:effect/id (random-uuid)})]
-    (cond
-      (anomaly/anomaly? opened) (fail state :proposal (:anomaly/message opened))
-      (:effect/existing opened) (assoc state :attempt/existing (:effect/existing opened))
-      :else (assoc state :effect-id (:effect/id opened)))))
+  (if-not (uuid? (get-in state [:context :execution/id]))
+    (assoc state :effect-id (random-uuid))
+    (let [context (:context state)
+          open #(fx/open-attempt (transaction/store-dir context) (effect-basis state)
+                                 transaction/spent?)
+          settle (fn [t]
+                   (let [r (transaction/reconcile! context t (:operations state)
+                                                   (transaction/current-time context))]
+                     (if (anomaly/anomaly? r) t r)))]
+      (loop [opened (open) reconciled? false]
+        (let [t (:effect/existing opened)
+              settled (when (and t (not reconciled?)) (settle t))]
+          (cond
+            (anomaly/anomaly? opened) (fail state :proposal (:anomaly/message opened))
+            (nil? t) (assoc state :effect-id (:effect/id opened))
+            (and settled (transaction/spent? settled)) (recur (open) true)
+            :else (assoc state :attempt/existing (or settled t))))))))
 
 (defn- ^{:stratum 1} render-manifests
   [state]
@@ -188,22 +199,13 @@
       (assoc state :transaction reconciled))))
 
 (defn- ^{:stratum 1} settle-existing
-  "Answer for an earlier attempt instead of deploying again: ask the
-   cluster about one still in flight, report a settled one as it is, and
-   refuse one proposed but never committed."
+  "Report an earlier attempt instead of deploying again; refuse one
+   proposed but never committed."
   [state]
   (if-let [t (:attempt/existing state)]
-    (cond
-      (contains? fx/reconcilable-states (:effect/state t))
-      (let [reconciled (transaction/reconcile!
-                        (:context state) t (:operations state)
-                        (transaction/current-time (:context state)))]
-        (assoc state :transaction (if (anomaly/anomaly? reconciled) t reconciled)))
-
-      (= :proposed (:effect/state t))
+    (if (= :proposed (:effect/state t))
       (fail state :proposal (msg/t :deploy/effect-unsettled))
-
-      :else (assoc state :transaction t))
+      (assoc state :transaction t))
     state))
 
 (defn- ^{:stratum 1} revoke-abandoned

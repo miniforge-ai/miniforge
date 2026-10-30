@@ -61,7 +61,8 @@
           (false? (:deployment/ready? observed)))
       (deployment state :failed :observe
                   {:deploy/pod-state pod-state
-                   :deploy/failure (:deployment/failure observed)})
+                   :deploy/failure (or (:deployment/failure observed)
+                                       (msg/t :deploy/proposal-not-running))})
 
       :else
       (deployment state :failed :observe
