@@ -451,8 +451,17 @@
             ;; Another id than the run's own: a new attempt, whose events
             ;; and cost are its own.
             new-attempt? (not= (str resume-run-id) (str (or (:execution/id restored-snapshot) workflow-id)))
+            ;; The run every attempt continues, kept across new attempt ids
+            ;; so effects keyed on it (the release branch and PR) are found
+            ;; again. From the recorded snapshot: a rewind drops the
+            ;; reconstructed one.
+            recorded-snapshot (:machine-snapshot recorded)
+            origin-id (or (:execution/origin-id recorded-snapshot)
+                          (:execution/id recorded-snapshot)
+                          (parse-uuid (str workflow-id)))
             machine-snapshot (some-> restored-snapshot
-                                     (assoc :execution/id resume-run-id)
+                                     (assoc :execution/id resume-run-id
+                                            :execution/origin-id origin-id)
                                      (cond-> new-attempt? (assoc :execution/metrics {:tokens 0 :cost-usd 0.0
                                                                                      :duration-ms 0})))
             failed-checkpoint? (and machine-snapshot (:failed? reconstructed))
@@ -515,6 +524,7 @@
                                       ;; above; without it a snapshot-less
                                       ;; resume minted a second id.
                                       :workflow-id resume-run-id
+                                      :origin-id origin-id
                                       :workflow-run/correlation-id correlation-id
                                       :event-stream event-stream
                                       :control-state control-state

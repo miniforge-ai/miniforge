@@ -58,6 +58,22 @@
     :worktree-path "/tmp/wt" :create-pr? true :provenance {:workflow run-id}}
    {:release-meta release-meta}))
 
+(deftest ^{:stratum 1} resumed-attempt-under-a-new-run-id-reuses-the-branch-test
+  (testing "the branch is keyed on the run's lineage (:origin), not the attempt id"
+    (let [state  (atom (remote/initial-state))
+          origin (random-uuid)
+          attempt (fn [run-id]
+                    (core/execute-release-phase
+                     {:workflow/artifacts [] :workflow/spec {:spec/description "Add the feature"}}
+                     {:executor (remote/executor state) :environment-id "fake-env"
+                      :worktree-path "/tmp/wt" :create-pr? true
+                      :provenance {:workflow run-id :origin origin}}
+                     {:release-meta release-meta}))
+          a (attempt (random-uuid))
+          b (attempt (random-uuid))]
+      (is (= (get-in a [:metrics :branch]) (get-in b [:metrics :branch])))
+      (is (= 1 (count (:prs @state)))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} second-release-of-a-run-reuses-branch-and-pr-test
