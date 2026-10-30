@@ -110,7 +110,10 @@
 
 (defn ^{:stratum 0} hook-reply
   "The PreToolUse reply for an evaluation `result`: {} for allow (no
-   decision, so Claude's normal permission flow applies), and for deny
+   decision, so Claude's normal permission flow applies: in an artifact
+   session that is `--permission-mode dontAsk` with the role's tools in
+   the session settings' permissions.allow, so Claude's own checks still
+   refuse what they would have asked about), and for deny
    hookSpecificOutput with hookEventName PreToolUse, permissionDecision
    deny and the reason. That is the current PreToolUse output
    (https://code.claude.com/docs/en/hooks); the top-level

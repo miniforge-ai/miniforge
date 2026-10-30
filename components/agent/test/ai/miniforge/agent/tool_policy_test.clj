@@ -102,8 +102,15 @@
                                "keyword tool name"        (assoc-in shipped [:roles :implementer] #{:Bash})
                                "missing length limit"     (dissoc shipped :bash/max-command-length)
                                "zero length limit"        (assoc shipped :bash/max-command-length 0)
-                               "path keys not keywords"   (assoc-in shipped [:tool/path-keys "Read"] ["file_path"])}]
+                               "path keys not keywords"   (assoc-in shipped [:tool/path-keys "Read"] ["file_path"])
+                               "missing managed paths"    (dissoc shipped :tool/managed-config-paths)}]
         (is (thrown? clojure.lang.ExceptionInfo (policy/read-tool-policy (pr-str broken))) defect)))))
+
+(deftest ^{:stratum 0} every-protected-path-is-a-managed-path-test
+  (testing "each protected pattern matches a managed config path, so a link to it is followed"
+    (let [policy @sut/tool-policy]
+      (doseq [pattern (:tool/protected-paths policy)]
+        (is (some #(re-find pattern %) (:tool/managed-config-paths policy)) (str pattern))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -133,6 +140,52 @@
                                                         "Write" {:file_path (str dir "/.claude/settings.local.json")}))))
         (finally
           (run! #(java.nio.file.Files/deleteIfExists (.toPath ^java.io.File %)) (reverse (file-seq dir))))))))
+
+(deftest ^{:stratum 1} linked-config-target-stays-protected-test
+  (let [root (java.nio.file.Files/createTempDirectory "linked-target" (make-array java.nio.file.attribute.FileAttribute 0))
+        dir  (.toFile root)
+        link (fn [from to] (java.nio.file.Files/createSymbolicLink (.resolve root ^String from) (.resolve root ^String to)
+                                                                   (make-array java.nio.file.attribute.FileAttribute 0)))
+        write-decision (fn [rel] (:decision (sut/evaluate-tool-use {:role :implementer :root (str dir) :path-ok? stub-path-ok?}
+                                                                   "Write" {:file_path (str dir "/" rel)})))]
+    (try
+      (.mkdirs (io/file dir "shared-config"))
+      (.mkdirs (io/file dir "cfg"))
+      (spit (io/file dir "cfg" "mcp.json") "{}")
+      (link ".claude" "shared-config")
+      (link ".mcp.json" "cfg/mcp.json")
+      (link ".codex" "missing-dir")
+      (link "opencode.json" "cfg/opencode.json")
+      (testing "a write to the target of a linked config directory or file is refused"
+        (is (= "deny" (write-decision "shared-config/settings.local.json")))
+        (is (= "deny" (write-decision "cfg/mcp.json"))))
+      (testing "a link whose target does not exist yet is followed too"
+        (is (= "deny" (write-decision "missing-dir/config.toml")))
+        (is (= "deny" (write-decision "cfg/opencode.json"))))
+      (testing "a relative path to the target is refused like an absolute one"
+        (is (= "deny" (:decision (sut/evaluate-tool-use {:role :implementer :root (str dir) :path-ok? stub-path-ok?}
+                                                        "mcp__context__context_write"
+                                                        {:path "shared-config/settings.json" :content "{}"})))))
+      (testing "other files in the linked directory stay writable"
+        (is (= "allow" (write-decision "shared-config/skills/x/SKILL.md")))
+        (is (= "allow" (write-decision "cfg/other.json"))))
+      (testing "a link inside a managed directory is followed too"
+        (.mkdirs (io/file dir ".miniforge-session"))
+        (link ".miniforge-session/claude-settings.json" "cfg/hook-settings.json")
+        (link ".miniforge-session/mcp-config.json" "cfg/session-mcp.json")
+        (is (= "deny" (write-decision "cfg/hook-settings.json")))
+        (is (= "deny" (write-decision "cfg/session-mcp.json"))))
+      (testing "a .. in a link target steps back from where the links before it led"
+        (.mkdirs (io/file dir "nested" "dir"))
+        (.mkdirs (io/file dir "nested" "cfg"))
+        (link "alias" "nested/dir")
+        (java.nio.file.Files/delete (.resolve root ".claude"))
+        (java.nio.file.Files/createSymbolicLink (.resolve root ".claude") (java.nio.file.Paths/get "alias/../cfg" (make-array String 0))
+                                                (make-array java.nio.file.attribute.FileAttribute 0))
+        (is (= "deny" (write-decision "nested/cfg/settings.json")))
+        (is (= "allow" (write-decision "cfg/settings.json")) "the lexical reading of the target is not the loaded file"))
+      (finally
+        (run! #(java.nio.file.Files/deleteIfExists (.toPath ^java.io.File %)) (reverse (file-seq dir)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
