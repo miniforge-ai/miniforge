@@ -32,7 +32,8 @@
 
 (defn ^{:stratum 0} read-cli-version
   [cmd-path]
-  (let [{:keys [out err exit timeout-ms]} (process/run-cli-command [cmd-path "--version"] (support/backend-version-timeout-ms))]
+  (let [{:keys [out err exit timeout-ms]} (process/run-cli-command [cmd-path "--version"] (support/backend-version-timeout-ms)
+                                                                   :env (llm/agent-env))]
     (cond
       timeout-ms
       (support/failure-response :anomalies/unavailable
@@ -98,7 +99,7 @@
                                                                    (support/backend-preflight-timeout-ms)
                                                                    :workdir workdir
                                                                    :stdin stdin
-                                                                   :env env)
+                                                                   :env (merge (llm/agent-env) env))
         content (support/decoded-preflight-content backend-config out)]
     (cond
       timeout-ms
@@ -140,7 +141,8 @@
   [cmd-path workdir]
   (let [{:keys [out err exit timeout-ms]} (process/run-cli-command (claude-preflight-command cmd-path)
                                                                    (support/backend-preflight-timeout-ms)
-                                                                   :workdir workdir)
+                                                                   :workdir workdir
+                                                                   :env (llm/agent-env))
         trimmed (some-> out str/trim)
         content (support/normalized-preflight-content trimmed)]
     (cond
