@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.task-executor.generate
   "Factory for generate-fn closures wrapping agent + inner loop.
 
@@ -28,9 +27,12 @@
             [ai.miniforge.agent.interface :as agent]
             [clojure.string :as str]))
 
-(defn format-task-prompt
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} format-task-prompt
   [task context]
-  (let [{:keys [description files dependencies acceptance-criteria]} task
+  (let [{:keys [files dependencies acceptance-criteria]} task
+        description (or (:description task) (:task/description task))
         {:keys [worktree-path base-commit]} context]
     (str "# Task: " description "\n\n"
          (when files
@@ -47,7 +49,9 @@
          "- Working directory: " worktree-path "\n"
          "- Base commit: " base-commit "\n")))
 
-(defn create-generate-fn
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-generate-fn
   [llm-backend & {:keys [logger event-stream workflow-id max-iterations]}]
   (fn [task context]
     (let [task-map (if (map? task)
@@ -55,20 +59,26 @@
                      {:task/id (str (random-uuid))
                       :task/type :implement
                       :description (str task)})
-          prompt (format-task-prompt task-map context)
-          loop-context (cond-> {:max-iterations (or max-iterations 10)
-                                :initial-prompt prompt
-                                :llm-backend llm-backend}
+          ;; The implementer renders its prompt from the task's
+          ;; :task/description, so the formatted prompt goes there.
+          implementer-task (assoc task-map :task/description
+                                  (format-task-prompt task-map context))
+          ;; The caller's context carries the worktree the implementer
+          ;; must work in; without it the implementer falls back to the
+          ;; process CWD.
+          loop-context (cond-> (merge context
+                                      {:max-iterations (or max-iterations 10)
+                                       :llm-backend llm-backend})
                          logger (assoc :logger logger)
                          event-stream (assoc :event-stream event-stream)
                          workflow-id (assoc :workflow-id workflow-id))
           ;; Create implementer agent with LLM backend
           implementer (agent/create-implementer {:llm-backend llm-backend
                                                   :logger logger})
-          result (loop/run-simple task-map
+          result (loop/run-simple implementer-task
                                   (fn [t ctx]
                                     ;; Inner generate-fn that invokes implementer agent
-                                    (let [agent-result (agent/invoke implementer ctx t)]
+                                    (let [agent-result (agent/invoke implementer t ctx)]
                                       {:artifact (:artifact agent-result)
                                        :tokens (get agent-result :tokens 0)}))
                                   loop-context)]

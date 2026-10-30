@@ -51,7 +51,7 @@
 (def ^{:stratum 1} policies
   "Explicit issuance policy catalog keyed by irreversible effect class."
   {:effect/merge
-   (effect-policy pull-request-grant-ttl-seconds [:pr/repo :pr/number])
+   (effect-policy pull-request-grant-ttl-seconds [:pr/repo :pr/number :pr/head-sha])
 
    :effect/pr-create
    (effect-policy pull-request-grant-ttl-seconds
