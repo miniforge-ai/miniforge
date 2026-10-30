@@ -112,8 +112,8 @@
 
 (defn- ^{:stratum 0} verify-lock-wait-interrupt-kept [root]
   (let [written (with-redefs [checkpoint-lock/with-run-lock
-                              (fn [& _] (anomaly/anomaly :unavailable "interrupted while waiting"
-                                                         {:anomaly/ex-class "java.lang.InterruptedException"}))]
+                              (fn [& _] (anomaly/exception-anomaly :unavailable "interrupted while waiting"
+                                                                   (InterruptedException.)))]
                   (store/persist-execution-state! (fixture/plan-completed-context root {})))
         interrupted? (Thread/interrupted)]
     (is (anomaly/anomaly? written))
@@ -131,6 +131,52 @@
            restored? (Thread/interrupted)]
        (is (string? recorded) "the lock wait does not fail on it")
        (is restored? "and it is still pending after")))))
+
+(deftest ^{:stratum 0} recording-the-spec-path-keeps-the-root-it-locked
+  ;; The root's alias is retargeted while the recorder waits for the lock:
+  ;; the manifest it updates is under the root it locked.
+  (fixture/call-with-posix-checkpoint-root
+   (fn [root]
+     (let [first-root (fs/create-dirs (fs/path root "first"))
+           second-root (fs/create-dirs (fs/path root "second"))
+           alias (fs/create-sym-link (fs/path root "alias") first-root)
+           ctx (fixture/plan-completed-context (str first-root) {})
+           id (:execution/id ctx)
+           _ (store/persist-execution-state! ctx)
+           _ (fs/copy-tree (fs/path first-root (str id)) (fs/path second-root (str id)))
+           entered (promise)
+           release (promise)
+           spec-of #(:workflow/spec-path (edn/read-string (slurp (paths/manifest-path % id))))]
+       (future (checkpoint-lock/with-run-lock (str (fs/real-path first-root)) id
+                                              (fn [] (deliver entered true) @release)))
+       (deref entered 5000 nil)
+       (let [recording (future (store/record-spec-path! id "/specs/done/spec.md" {:checkpoint/root (str alias)}))]
+         (Thread/sleep 200)
+         (fs/delete alias)
+         (fs/create-sym-link alias second-root)
+         (deliver release true)
+         (deref recording 5000 nil))
+       (is (= "/specs/done/spec.md" (spec-of (str first-root))))
+       (is (not= "/specs/done/spec.md" (spec-of (str second-root))))))))
+
+(deftest ^{:stratum 0} recording-the-spec-path-reports-lock-failures
+  (fixture/call-with-temp-checkpoint-root
+   (fn [root]
+     (let [ctx (fixture/plan-completed-context root {})
+           id (:execution/id ctx)
+           record! #(store/record-spec-path! id "/specs/done/spec.md" {:checkpoint/root root})]
+       (store/persist-execution-state! ctx)
+       (testing "a lock that stays busy is an anomaly, not a silent skip"
+         (with-redefs [checkpoint-lock/with-run-lock (fn [& _] (anomaly/anomaly :unavailable "busy" {}))]
+           (is (anomaly/anomaly? (record!)))))
+       (testing "an interrupt the lock wait consumed is set again"
+         (let [recorded (with-redefs [checkpoint-lock/with-run-lock
+                                      (fn [& _] (anomaly/exception-anomaly :unavailable "interrupted"
+                                                                           (InterruptedException.)))]
+                          (record!))
+               interrupted? (Thread/interrupted)]
+           (is (anomaly/anomaly? recorded))
+           (is interrupted?)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

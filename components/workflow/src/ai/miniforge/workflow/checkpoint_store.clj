@@ -133,6 +133,12 @@
                              data
                              e))
 
+(defn- ^{:stratum 0} interrupted-anomaly?
+  "True when `result` is an anomaly the checkpoint lock made of an
+   interrupt: its wait consumed the interrupt flag."
+  [result]
+  (= (.getName InterruptedException) (get-in result [:anomaly/data :anomaly/ex-class])))
+
 (defn- ^{:stratum 0} write-edn-atomically!
   [target-path data]
   (checkpoint-file/write! target-path data))
@@ -330,26 +336,34 @@
   ([workflow-run-id spec-path]
    (record-spec-path! workflow-run-id spec-path {}))
   ([workflow-run-id spec-path opts]
-   (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
-         path (checkpoint-paths/manifest-path checkpoint-root workflow-run-id)
+   (let [requested-root (checkpoint-paths/resolve-checkpoint-root opts)
          ;; As in persist-execution-state!: a pending interrupt is held off
          ;; for the lock wait and the write, and kept.
          interrupted? (Thread/interrupted)]
      (try+
-       (let [recorded (checkpoint-lock/with-run-lock
+       (let [;; As in persist-execution-state!: the root is resolved once,
+             ;; and the lock and the manifest both come from it, so an alias
+             ;; retargeted meanwhile cannot split them.
+             checkpoint-root (if (fs/exists? requested-root)
+                               (str (fs/real-path requested-root))
+                               requested-root)
+             recorded (checkpoint-lock/with-run-lock
                        checkpoint-root workflow-run-id
                        (fn []
-                         (let [manifest (read-checkpoint-file path)]
+                         (let [run-dir (checkpoint-paths/workflow-checkpoint-dir checkpoint-root workflow-run-id)
+                               path (str (fs/path (if (fs/exists? run-dir) (fs/real-path run-dir) run-dir)
+                                                  checkpoint-paths/manifest-filename))
+                               manifest (read-checkpoint-file path)]
                            (when (and (map? manifest) (not (anomaly/anomaly? manifest)))
                              (write-edn-atomically! path (assoc manifest :workflow/spec-path (str spec-path)))))))]
-         (when (= "java.lang.InterruptedException" (get-in recorded [:anomaly/data :anomaly/ex-class]))
+         (when (interrupted-anomaly? recorded)
            (.interrupt (Thread/currentThread)))
          recorded)
        (catch InterruptedException e
          (.interrupt (Thread/currentThread))
-         (write-failure checkpoint-root workflow-run-id nil e))
+         (write-failure requested-root workflow-run-id nil e))
        (catch Exception e
-         (write-failure checkpoint-root workflow-run-id nil e))
+         (write-failure requested-root workflow-run-id nil e))
        (finally
          (when interrupted? (.interrupt (Thread/currentThread))))))))
 
@@ -482,7 +496,7 @@
                                   :checkpoint/phase-path phase-path))))))))]
           ;; The lock wait turns an interrupt into its anomaly, clearing
           ;; the flag: set it again so the cancel is not lost.
-          (when (= "java.lang.InterruptedException" (get-in written [:anomaly/data :anomaly/ex-class]))
+          (when (interrupted-anomaly? written)
             (.interrupt (Thread/currentThread)))
           (if (anomaly/anomaly? written)
             (assoc-in written [:anomaly/data :phase/name] phase-name)

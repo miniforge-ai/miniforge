@@ -121,6 +121,14 @@
                              {:workflow/run-id id :checkpoint/path (str dir)}
                              e))
 
+(defn- ^{:stratum 0} delete-run-dir!
+  "Delete run directory `dir` and answer run id `id`. The lock file stays:
+   unlinking it would let a new caller lock a fresh file while a waiter
+   holds the old one."
+  [dir id]
+  (fs/delete-tree dir)
+  id)
+
 (defn- ^{:stratum 0} pinned-dir?
   [dir]
   (fs/exists? (fs/file dir checkpoint-paths/pin-marker-filename)))
@@ -143,11 +151,7 @@
        (cond
          (pinned-dir? dir) {:pinned id}
          (>= (last-change-ms dir) cutoff-ms) {:recent id}
-         :else
-         (do (fs/delete-tree dir)
-             ;; The lock file stays: unlinking it would let a new caller
-             ;; lock a fresh file while a waiter holds the old one.
-             id))
+         :else (delete-run-dir! dir id))
        (catch Exception e
          (delete-failure dir id e))))))
 

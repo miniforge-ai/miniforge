@@ -5,7 +5,8 @@
   "A work spec stays traceable through its kanban moves: its digest is
    taken before the move to in-progress, and the run's manifest follows
    it to work/failed."
-  (:require [ai.miniforge.cli.workflow-runner.spec-kanban :as kanban]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.cli.workflow-runner.spec-kanban :as kanban]
             [ai.miniforge.workflow.interface :as workflow]
             [babashka.fs :as fs]
             [clojure.string :as str]
@@ -57,6 +58,21 @@
         (with-redefs [workflow/record-spec-path! (fn [& args] (reset! recorded args))]
           (is (some? (kanban/finish-spec! {:source-file spec} {:execution/status :failed}))))
         (is (nil? @recorded))))))
+
+(deftest ^{:stratum 1} a-manifest-that-could-not-be-updated-is-warned-about
+  (with-kanban
+    (fn [root]
+      (let [spec (str root "/work/locked.spec.edn")
+            _ (fs/create-dirs (fs/parent spec))
+            _ (spit spec "v1")
+            err (java.io.StringWriter.)
+            moved (with-redefs [workflow/record-spec-path!
+                                (fn [& _] (anomaly/anomaly :unavailable "the lock stayed busy" {}))]
+                    (binding [*err* err]
+                      (kanban/finish-spec! {:source-file spec}
+                                           {:execution/status :failed :execution/id "exec-2"})))]
+        (is (some? moved) "the spec still moves")
+        (is (str/includes? (str err) "the lock stayed busy"))))))
 
 (deftest ^{:stratum 1} the-manifest-under-the-runs-own-root-follows-the-spec
   ;; A run checkpointed under a per-execution root, not the default one.
