@@ -21,16 +21,22 @@ merge failure. Stacked on the PR that makes a cancel interrupt the running phase
    was reported as `:anomalies/dag-multi-parent-merge-failed`.
 3. An agent error response can swallow the interrupt; the resolution loop then calls the agent
    again within its budget.
+4. `dag-merge-git/run-git` used `clojure.java.shell/sh`, which does not end git when the waiting
+   thread is interrupted, and turned the interruption into exit -1: git (or a merge driver) kept
+   running, and the merge read it as a cache miss and carried on.
 
 ## Changes in Detail
 
 1. `dag-sub-workflow/merge-parents`: runs `merge-parent-branches!` in its own interrupting scope
-   (`stop-signal/interrupting-on-stop`). A merge error under a stopped run, or an interruption that
+   (`stop-signal/interrupting-on-stop`). Any result under a stopped run, or an interruption that
    escapes, becomes the task's stop.
 2. `dag-merge-anomaly/merge-stopped-anomaly`: `:anomalies/dag-merge-stopped`, with the stopped
    status message.
 3. `dag-merge-attempt/derive-resolution-overrides` wraps the resolution `:agent-edit-fn` so it does
    nothing once the run's control state is stopped; the loop then ends without another LLM call.
+4. `dag-merge-git/run-git` waits on git itself. On an interrupt it kills git and every process git
+   started, waits for them, and rethrows, so the merge stages stop. `attempt-merge-with-cache!`
+   removes its temporary worktree before the interruption propagates.
 
 ## Testing Plan
 
@@ -41,12 +47,21 @@ before its fix:
    as the real one does, ends as `:anomalies/dag-merge-stopped` and leaves no interrupt pending.
 2. `cancel-at-callback-cooldown-and-resolution-boundaries-test`: the resolution agent is not called
    after the stop.
+3. `an-interrupted-git-call-ends-git-and-its-children-test`: git running a child `sleep` is
+   interrupted; the call throws and neither process is left. On the previous code both stayed.
+4. A merge that finished after the cancel also ends as the task's stop.
 
-Ran the stop-signal, DAG merge and DAG sub-workflow tests.
+Ran the stop-signal, merge-parent integration, merge-resolution and DAG operator-control tests (49).
 
 ## Deployment Plan
 
 No configuration or data migration.
+
+## Notes
+
+The resolution loop's own git runner (`merge-resolution`) still turns an interrupt into a failed
+command; with the agent guarded it ends within its budget without an LLM call. Changing it needs the
+whole-file stratum autofix of `merge_resolution.clj`, so it follows separately.
 
 ## Related Issues/PRs
 

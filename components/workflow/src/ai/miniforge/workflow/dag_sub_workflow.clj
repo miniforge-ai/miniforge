@@ -43,8 +43,8 @@
 (defn- ^{:stratum 0} merge-parents
   "merge-parent-branches! for a multi-parent task, in its own interrupting
    scope: it runs before the task's sub-workflow installs a stop hook. The
-   merge code turns an interrupt into an ordinary merge failure, so a merge
-   error under a stopped run, or an interruption that escapes, is the
+   merge code can turn an interrupt into an ordinary merge failure, so any
+   result under a stopped run, or an interruption that escapes, is the
    task's stop."
   [context task-def]
   (let [control-state (:control-state context)
@@ -54,7 +54,7 @@
                   control-state #(dag-merge/merge-parent-branches! context task-def))
                  (catch Exception e
                    (if (stop-signal/stop-caused? control-state e) stopped (throw e))))]
-    (if (and (merge-anomaly/merge-error? merged) (some-> control-state deref :stopped))
+    (if (some-> control-state deref :stopped)
       stopped
       merged)))
 
