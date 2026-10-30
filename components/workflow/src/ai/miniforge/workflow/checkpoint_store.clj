@@ -323,18 +323,24 @@
   "Point a run's manifest at where its spec file now lives (the CLI moves
    a work spec to work/done or work/failed when the run ends), keeping the
    recorded hash. Returns the manifest path; nil when the run has no
-   readable manifest; an anomaly when it cannot be written."
+   readable manifest; an anomaly when it cannot be written or the run's
+   lock stays busy. It holds the run's lock: a checkpoint write between
+   its read and its write would otherwise be undone, leaving a manifest
+   that names a generation the write pruned."
   ([workflow-run-id spec-path]
    (record-spec-path! workflow-run-id spec-path {}))
   ([workflow-run-id spec-path opts]
-   (let [path (checkpoint-paths/manifest-path (checkpoint-paths/resolve-checkpoint-root opts)
-                                              workflow-run-id)
-         manifest (read-checkpoint-file path)]
-     (when (and (map? manifest) (not (anomaly/anomaly? manifest)))
-       (try+
-         (write-edn-atomically! path (assoc manifest :workflow/spec-path (str spec-path)))
-         (catch Exception e
-           (write-failure (checkpoint-paths/resolve-checkpoint-root opts) workflow-run-id nil e)))))))
+   (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
+         path (checkpoint-paths/manifest-path checkpoint-root workflow-run-id)]
+     (checkpoint-lock/with-run-lock
+      checkpoint-root workflow-run-id
+      (fn []
+        (let [manifest (read-checkpoint-file path)]
+          (when (and (map? manifest) (not (anomaly/anomaly? manifest)))
+            (try+
+              (write-edn-atomically! path (assoc manifest :workflow/spec-path (str spec-path)))
+              (catch Exception e
+                (write-failure checkpoint-root workflow-run-id nil e))))))))))
 
 (defn ^{:stratum 2} persist-execution-state!
   "Persist a machine snapshot, manifest, and current phase checkpoint,

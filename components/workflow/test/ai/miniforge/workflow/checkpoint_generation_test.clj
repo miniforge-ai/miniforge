@@ -8,6 +8,8 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.boundary.checkpoint-file :as checkpoint-file]
             [ai.miniforge.workflow.checkpoint-store :as store]
+            [ai.miniforge.workflow.checkpoint-store-gc :as gc]
+            [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
             [ai.miniforge.workflow.checkpoint-store-paths :as paths]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.interface :as workflow]
@@ -57,6 +59,23 @@
       (is (every? #(< % manifest-fill) generation-syncs))
       (is (= [:sync run-dir] (last @events))))))
 
+(defn- ^{:stratum 0} verify-write-before-delete [root]
+  (fs/with-temp-dir [events-dir {:prefix "generation-events-"}]
+    (let [ctx (fixture/plan-completed-context root {})
+          id (:execution/id ctx)
+          old (- (System/currentTimeMillis) (* 90 24 60 60 1000))
+          delete-run! @#'gc/delete-run!
+          _ (store/persist-execution-state! ctx)
+          _ (doseq [f (reverse (file-seq (fs/file root (str id))))]
+              (.setLastModified ^java.io.File f old))
+          ;; The GC has classified the run as expired; a write lands first.
+          result (with-redefs-fn {#'gc/delete-run! (fn [& args]
+                                                     (store/persist-execution-state! ctx)
+                                                     (apply delete-run! args))}
+                   #(workflow/gc-checkpoints! {:checkpoint/root root :events-dir (fs/file events-dir)}))]
+      (is (= [id] (get-in result [:kept :recent])))
+      (is (map? (workflow/load-checkpoint-data id {:checkpoint/root root}))))))
+
 (defn- ^{:stratum 0} verify-pending-interrupt [root]
   (let [written (do (.interrupt (Thread/currentThread))
                     (store/persist-execution-state! (fixture/plan-completed-context root {})))
@@ -64,6 +83,19 @@
         restored? (Thread/interrupted)]
     (is (not (anomaly/anomaly? written)) "a pending interrupt does not fail the write")
     (is restored? "and is still pending after it")))
+
+(defn- ^{:stratum 0} verify-spec-path-waits-for-the-lock [root]
+  (let [ctx (fixture/plan-completed-context root {})
+        id (:execution/id ctx)
+        entered (promise)
+        release (promise)]
+    (store/persist-execution-state! ctx)
+    (future (checkpoint-lock/with-run-lock root id (fn [] (deliver entered true) @release)))
+    (deref entered 5000 nil)
+    (let [recording (future (store/record-spec-path! id "/specs/done/spec.md" {:checkpoint/root root}))]
+      (is (= ::waiting (deref recording 200 ::waiting)))
+      (deliver release true)
+      (is (string? (deref recording 5000 nil))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -125,8 +157,14 @@
            (get-in (workflow/load-checkpoint-data id {:checkpoint/root root}) [:phase-results :implement]))
         "the next write writes the phase the failed one lost")))
 
+(deftest ^{:stratum 1} a-write-between-gc-classification-and-delete-keeps-the-run
+  (fixture/call-with-temp-checkpoint-root verify-write-before-delete))
+
 (deftest ^{:stratum 1} a-pending-interrupt-is-held-off-and-restored
   (fixture/call-with-temp-checkpoint-root verify-pending-interrupt))
+
+(deftest ^{:stratum 1} recording-the-spec-path-waits-for-the-run-lock
+  (fixture/call-with-temp-checkpoint-root verify-spec-path-waits-for-the-lock))
 
 ;------------------------------------------------------------------------------ Layer 2
 

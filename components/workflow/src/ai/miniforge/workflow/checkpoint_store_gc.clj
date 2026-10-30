@@ -129,17 +129,21 @@
 
 (defn- ^{:stratum 1} delete-run!
   "Delete one run's checkpoint directory under the run's lock, which a pin
-   takes too. The pin marker is checked again under it, so a pin that
-   landed after the run was classified keeps the run, and a pin that comes
-   later finds the run gone and fails. Returns the run id when deleted,
-   `{:pinned id}` when a pin arrived first, or an anomaly (lock busy, I/O)."
-  [root dir id]
+   and a checkpoint write take too. The pin marker and the last change are
+   checked again under it, so a pin or a write that landed after the run
+   was classified keeps the run, and one that comes later finds the run
+   gone. Returns the run id when deleted, `{:pinned id}` when a pin
+   arrived first, `{:recent id}` when a write did, or an anomaly (lock
+   busy, I/O)."
+  [root dir id cutoff-ms]
   (checkpoint-lock/with-run-lock
    root id
    (fn []
      (try+
-       (if (pinned-dir? dir)
-         {:pinned id}
+       (cond
+         (pinned-dir? dir) {:pinned id}
+         (>= (last-change-ms dir) cutoff-ms) {:recent id}
+         :else
          (do (fs/delete-tree dir)
              ;; The lock file stays: unlinking it would let a new caller
              ;; lock a fresh file while a waiter holds the old one.
@@ -267,14 +271,17 @@
             runs (when (fs/directory? root)
                    (filter #(fs/directory? % {:nofollow-links true}) (fs/list-dir root)))
             by-disposition (group-by #(disposition % cutoff-ms events-dir) runs)
-            results (mapv #(delete-run! root % (run-id %)) (get by-disposition :expired))
-            pinned-late (keep :pinned (filter map? (remove anomaly/anomaly? results)))]
+            results (mapv #(delete-run! root % (run-id %) cutoff-ms) (get by-disposition :expired))
+            late (filter map? (remove anomaly/anomaly? results))
+            pinned-late (keep :pinned late)
+            recent-late (keep :recent late)]
         {:checkpoint/root root
          :deleted (filterv uuid? results)
          :kept (cond-> (into {}
                              (map (fn [[k dirs]] [k (mapv run-id dirs)]))
                              (dissoc by-disposition :expired nil))
-                 (seq pinned-late) (update :pinned (fnil into []) pinned-late))
+                 (seq pinned-late) (update :pinned (fnil into []) pinned-late)
+                 (seq recent-late) (update :recent (fnil into []) recent-late))
          :failures (filterv anomaly/anomaly? results)}))))
 
 (comment
