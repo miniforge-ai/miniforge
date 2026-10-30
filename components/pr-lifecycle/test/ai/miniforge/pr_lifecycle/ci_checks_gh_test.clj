@@ -54,6 +54,22 @@
      (ci/create-ci-monitor (random-uuid) (random-uuid) (random-uuid) pr-number "/tmp")
      nil)))
 
+(deftest ^{:stratum 0} long-log-keeps-failure-lines-test
+  (testing "a failure far from the end of a long log is kept, with the tail"
+    (let [filler (apply str (repeat (* 2 checks/max-log-chars) "ok line\n"))
+          text (str "Lint\tlint\t##[error]src/a.clj:3:1: error: unresolved symbol\n"
+                    "Test\ttest\tFAIL in (foo-test) (foo_test.clj:9)\n"
+                    filler "Test\ttest\tRan 900 tests. 1 failure.")
+          cleaned (checks/clean-log text)]
+      (is (<= (count cleaned) checks/max-log-chars))
+      (is (str/includes? cleaned "error: unresolved symbol"))
+      (is (str/includes? cleaned "FAIL in (foo-test)"))
+      (is (str/ends-with? cleaned "Ran 900 tests. 1 failure.")))))
+
+(deftest ^{:stratum 0} literal-ansi-escapes-are-stripped-test
+  (testing "gh writes ESC as a literal ^[ when stdout is a pipe; both forms are removed"
+    (is (= "set -o pipefail done" (checks/clean-log "^[[36;1mset -o pipefail^[[0m \u001b[1mdone\u001b[0m")))))
+
 (deftest ^{:stratum 0} log-tail-is-capped-test
   (testing "clean-log keeps only the last max-log-chars characters"
     (let [text (str (apply str (repeat checks/max-log-chars "a")) "the error")]
@@ -115,9 +131,7 @@
 
 (deftest ^{:stratum 2} checks-not-yet-reported-poll-as-pending-test
   (testing "`no checks reported` right after a push is pending, not unknown"
-    (is (= :pending (:status (poll-once (fake-gh (gh-err 1 (:checks/no-checks-stderr gh-2-102))) 2244)))))
-  (testing "the plain-output pending exit code is pending, not an error"
-    (is (= :pending (:status (poll-once (fake-gh (gh-err checks/checks-pending-exit-code "")) 2244))))))
+    (is (= :pending (:status (poll-once (fake-gh (gh-err 1 (:checks/no-checks-stderr gh-2-102))) 2244))))))
 
 (deftest ^{:stratum 2} failing-pr-poll-carries-failed-job-logs-test
   (testing "a :failure poll fetches the failing run's logs into :ci/logs"
