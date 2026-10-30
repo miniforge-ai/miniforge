@@ -18,21 +18,26 @@
 (ns ai.miniforge.agent.tool-supervisor
   "Uniform tool-use supervision for inner LLM agents.
 
-   Evaluates tool-use requests against policy. This is the control-plane
-   bridge: vendor-specific mechanisms (Claude hooks, Codex sandbox, Cursor
-   flags) call into this uniform evaluation function.
+   Evaluates tool-use requests against policy. Today only Claude sessions
+   reach it, through the PreToolUse hook; Codex and Cursor sessions get
+   their own CLI permission configs (artifact-session) and no role policy.
+
+   Default-deny: a role may call only the tools config/agent/tool-policy.edn
+   lists for it. Any other tool is refused, every tool is refused when the
+   role is missing or unlisted, and an error while evaluating blocks the
+   call.
 
    Architecture:
-   - evaluate-tool-use: core policy function (pure, no side effects)
+   - evaluate-tool-use: core policy function (pure given a policy; the
+                        three-argument form reads tool-policy once)
    - hook-eval-stdin!:  CLI entry point — reads Claude PreToolUse JSON from
-                        stdin, evaluates, writes decision to stdout
-
-   The policy data is config/agent/tool-policy.edn."
+                        stdin, evaluates, writes decision to stdout"
   (:require
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [ai.miniforge.event-stream.interface :as events])
+   [ai.miniforge.event-stream.interface :as events]
+   [slingshot.slingshot :refer [try+]])
   (:import
    [java.io PushbackReader]))
 
@@ -42,11 +47,19 @@
 (def ^{:stratum 0} tool-policy
   "The tool policy, read from the classpath resource
    config/agent/tool-policy.edn on first use, with its
-   :bash/deny-patterns compiled to regexes."
+   :bash/deny-patterns compiled to regexes. A missing or unreadable
+   resource throws there, and the hook then refuses the tool call."
   (delay (-> (io/resource "config/agent/tool-policy.edn")
              slurp
              edn/read-string
              (update :bash/deny-patterns #(mapv re-pattern %)))))
+
+(defn ^{:stratum 0} role-tools
+  "The tools `policy` lets `role` call: its :common set plus the role's
+   own. nil when `policy` does not list `role`."
+  [policy role]
+  (when-let [own (get-in policy [:roles role])]
+    (into (get policy :common #{}) own)))
 
 ;; Bash command policy
 (defn ^{:stratum 0} evaluate-bash-command
@@ -88,94 +101,98 @@
   []
   (json/parse-stream (PushbackReader. *in*) true))
 
+(defn ^{:stratum 0} hook-reply
+  "The PreToolUse reply for an evaluation `result`: {} for allow (no
+   decision, so Claude's normal permission flow applies), and for deny
+   hookSpecificOutput with hookEventName PreToolUse, permissionDecision
+   deny and the reason. That is the current PreToolUse output
+   (https://code.claude.com/docs/en/hooks); the top-level
+   {\"decision\": \"block\"} it replaces is deprecated for this event."
+  [result]
+  (if (= "deny" (:decision result))
+    {:hookSpecificOutput {:hookEventName "PreToolUse"
+                          :permissionDecision "deny"
+                          :permissionDecisionReason (:reason result)}}
+    {}))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Core evaluation function
 (defn ^{:stratum 1} evaluate-tool-use
-  "Evaluate a tool use request against policy.
+  "Evaluate `role`'s request to call `tool-name` with `tool-input`.
 
    Returns {:decision \"allow\"} or {:decision \"deny\" :reason string}.
+   Denies a tool `role-tools` does not list for `role`, every tool when
+   `policy` has no entry for `role` (nil included), and a Bash command
+   `evaluate-bash-command` refuses. The three-argument form reads
+   `tool-policy`.
 
-   This is the uniform supervision function — vendor-specific mechanisms
-   (hooks, sandbox, flags) call into this. Each vendor maps the result
-   to its own response format."
-  [tool-name tool-input]
-  (case tool-name
-    ;; Read-only tools: always allow
-    ("Read" "Glob" "Grep" "WebSearch" "WebFetch" "LS")
-    {:decision "allow"}
+   `hook-eval-stdin!` maps the result to Claude's PreToolUse reply."
+  ([role tool-name tool-input]
+   (evaluate-tool-use @tool-policy role tool-name tool-input))
+  ([policy role tool-name tool-input]
+   (let [allowed (role-tools policy role)]
+     (cond
+       (nil? allowed)
+       {:decision "deny"
+        :reason (str "No tool policy for role " (pr-str role) "; every tool is refused")}
 
-    ;; MCP context tools: always allow
-    ("mcp__context__context_read"
-     "mcp__context__context_grep"
-     "mcp__context__context_glob")
-    {:decision "allow"}
+       (not (contains? allowed tool-name))
+       {:decision "deny"
+        :reason (str "Tool " (pr-str tool-name) " is not allowed for role " (pr-str role))}
 
-    ;; Write tools: allow (inner agent needs to generate code)
-    ("Edit" "Write" "NotebookEdit")
-    {:decision "allow"}
+       (= "Bash" tool-name)
+       (evaluate-bash-command (:bash/deny-patterns policy) (:command tool-input))
 
-    ;; Bash: evaluate command against policy
-    "Bash"
-    (evaluate-bash-command (:bash/deny-patterns @tool-policy) (:command tool-input))
-
-    ;; Default: allow (permissive — only deny known-dangerous)
-    {:decision "allow"}))
+       :else
+       {:decision "allow"}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} hook-eval-stdin!
-  "CLI entry point for `miniforge hook-eval`.
+  "CLI entry point for `miniforge hook-eval --role <role>`.
 
    Reads Claude PreToolUse JSON from stdin:
      {\"tool_name\": \"Bash\", \"tool_input\": {\"command\": \"ls\"}}
+   evaluates it for the role in `opts` (with none, every tool is refused)
+   and writes `hook-reply` to stdout.
 
-   Writes Claude hook response to stdout:
-     {} for allow (no decision: Claude's normal permission flow applies)
-     {\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\",
-                             \"permissionDecision\": \"deny\",
-                             \"permissionDecisionReason\": \"...\"}} for deny
-   The deny form is the current PreToolUse output
-   (https://code.claude.com/docs/en/hooks); the top-level
-   {\"decision\": \"block\"} it replaces is deprecated for this event.
-
-  Returns exit code 0 always (non-zero would crash the hook)."
-  []
-  (try
+   Returns the exit code: 0 once a reply is written. When reading or
+   evaluating the request throws, it writes nothing to stdout, explains on
+   stderr and returns 2: for PreToolUse, Claude reads exit code 2 as a
+   blocking error, refuses the tool call and shows the agent stderr. Any
+   other non-zero code lets the call through, so the hook command
+   artifact-session writes turns a failure to start this one into 2 too."
+  ([] (hook-eval-stdin! {}))
+  ([{:keys [role]}]
+   (try+
     (let [input (read-hook-request)
           tool-name (:tool_name input)
           tool-input (get input :tool_input {})
           tool-input-kw (into {} (map (fn [[k v]] [(keyword k) v]) tool-input))
-          result (evaluate-tool-use tool-name tool-input-kw)
+          result (evaluate-tool-use role tool-name tool-input-kw)
           ;; Emit event (no-ops if no event stream bound)
           _ (emit-tool-use-event! tool-name result)]
-      (if (= "deny" (:decision result))
-        (println (json/generate-string
-                  {:hookSpecificOutput {:hookEventName "PreToolUse"
-                                        :permissionDecision "deny"
-                                        :permissionDecisionReason (:reason result)}}))
-        ;; Empty object = allow (no objection from hook)
-        (println (json/generate-string {}))))
-    (catch Exception e
-      ;; On error, allow (fail-open) — don't block the inner agent
+      (println (json/generate-string (hook-reply result)))
+      0)
+    (catch Object _
       (binding [*out* *err*]
-        (println (str "WARN: hook-eval error: " (ex-message e))))
-      (println (json/generate-string {}))))
-  0)
+        (println (str "hook-eval refused the tool call: evaluation failed: "
+                      (get &throw-context :message "no message"))))
+      2))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Test evaluate-tool-use
-  (evaluate-tool-use "Read" {:file_path "/tmp/x"})
+  (evaluate-tool-use :implementer "Bash" {:command "ls -la"})
   ;; => {:decision "allow"}
 
-  (evaluate-tool-use "Bash" {:command "ls -la"})
-  ;; => {:decision "allow"}
-
-  (evaluate-tool-use "Bash" {:command "rm -rf /"})
+  (evaluate-tool-use :implementer "Bash" {:command "rm -rf /"})
   ;; => {:decision "deny" :reason "..."}
 
-  (evaluate-tool-use "mcp__context__context_read" {"path" "src/core.clj"})
-  ;; => {:decision "allow"}
+  (evaluate-tool-use :reviewer "Write" {:file_path "src/x.clj"})
+  ;; => {:decision "deny" :reason "Tool \"Write\" is not allowed for role :reviewer"}
+
+  (evaluate-tool-use nil "mcp__context__context_read" {:path "src/core.clj"})
+  ;; => {:decision "deny" :reason "No tool policy for role nil; every tool is refused"}
 
   :end)

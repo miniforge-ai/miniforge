@@ -34,19 +34,20 @@
   #{"allow" "deny" "ask" "defer"})
 
 (defn- ^{:stratum 0} hook-reply
-  "Run hook-eval on one PreToolUse request and return its stdout, parsed."
-  [tool-name tool-input]
+  "Run hook-eval for `role` on one PreToolUse request and return its
+   stdout, parsed."
+  [role tool-name tool-input]
   (let [payload (json/generate-string {:tool_name tool-name :tool_input tool-input})]
     (json/parse-string
      (with-out-str
        (binding [*in* (java.io.StringReader. payload)]
-         (sut/hook-eval-stdin!))))))
+         (sut/hook-eval-stdin! {:role role}))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} deny-uses-the-current-pre-tool-use-output-test
   (testing "a denied Bash command gets hookSpecificOutput, not the deprecated decision/reason"
-    (let [reply  (hook-reply "Bash" {:command "rm -rf /"})
+    (let [reply  (hook-reply :implementer "Bash" {:command "rm -rf /"})
           output (get reply "hookSpecificOutput")]
       (is (= #{"hookSpecificOutput"} (set (keys reply)))
           "no deprecated top-level decision or reason")
@@ -57,4 +58,4 @@
 
 (deftest ^{:stratum 1} allow-reports-no-decision-test
   (testing "an allowed tool call gets an empty object, so Claude's permission flow applies"
-    (is (= {} (hook-reply "Read" {:file_path "x.clj"})))))
+    (is (= {} (hook-reply :implementer "Write" {:file_path "x.clj"})))))

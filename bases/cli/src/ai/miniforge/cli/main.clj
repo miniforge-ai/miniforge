@@ -104,9 +104,11 @@
 (defn ^{:stratum 0} hook-eval-cmd
   "Evaluate a tool-use request from a Claude PreToolUse hook.
 
-   Reads JSON from stdin, evaluates against policy, writes decision to stdout."
-  [_m]
-  (System/exit (agent/hook-eval-stdin!)))
+   Reads JSON from stdin, evaluates it against the tool policy for `--role`
+   (every tool is refused without one), writes the decision to stdout.
+   Exits 2, which blocks the call, when evaluation fails."
+  [m]
+  (System/exit (agent/hook-eval-stdin! (select-keys (util/get-opts m) [:role]))))
 
 (defn ^{:stratum 0} lsp-mcp-bridge-cmd
   "Run the LSP-to-MCP bridge server (spawned by Claude Code/Desktop/Codex as MCP server).
@@ -402,7 +404,8 @@
 
    ;; Tool-use supervision hook (Claude PreToolUse)
    {:cmds ["hook-eval"]
-    :fn hook-eval-cmd}
+    :fn hook-eval-cmd
+    :spec {:role {:coerce :keyword}}}
 
    ;; MCP context server (internal — spawned as subprocess by agent)
    {:cmds ["context-server"]
