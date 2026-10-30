@@ -880,6 +880,23 @@
                :content "fallback answer"}]
              @chunks)))))
 
+(deftest ^{:stratum 0} isolated-client-sends-isolation-flags-test
+  (testing "an isolated claude client sends the isolation flags on complete and complete-stream"
+    (let [cmds (atom [])
+          record! (fn [cmd] (swap! cmds conj cmd) {:out "ok" :err "" :exit 0})
+          client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude
+                   :isolated? true
+                   :stream-exec-fn (fn [cmd _on-line _opts] (record! cmd) {:out "" :err "" :exit 0})
+                   :exec-fn (fn
+                              ([cmd] (record! cmd))
+                              ([cmd _opts] (record! cmd)))})]
+      (llm/complete client {:prompt "test"})
+      (llm/complete-stream client {:prompt "test"} (fn [_chunk] nil))
+      (is (<= 2 (count @cmds)))
+      (is (every? #(some #{"--setting-sources"} %) @cmds))
+      (is (every? #(some #{"--disable-slash-commands"} %) @cmds)))))
+
 ;; Claude backend args-fn budget tests (PR #288)
 (deftest ^{:stratum 0} claude-args-fn-budget-usd-test
   (let [args-fn (:args-fn (get impl/backends :claude))]
