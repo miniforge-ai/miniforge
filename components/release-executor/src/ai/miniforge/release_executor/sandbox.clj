@@ -27,6 +27,7 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.release-executor.messages :as msg]
+   [ai.miniforge.release-executor.pr-lookup :as pr-lookup]
    [ai.miniforge.release-executor.result :as result]
    [ai.miniforge.redaction.interface :as redaction]
    [clojure.string :as str]))
@@ -311,6 +312,17 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} find-pr!
+  "Look up the PR `branch` already has, in any state, via gh in the sandbox
+   (see pr-lookup). Optional exec-opts supports :env for GH_TOKEN. Returns
+   {:success? true :pr pr-or-nil}, or the failed command's result."
+  [executor env-id branch exec-opts]
+  (or (validate-safe-branch-name branch)
+      (let [r (exec! executor env-id (pr-lookup/lookup-argv branch) exec-opts)]
+        (if (result/succeeded? r)
+          (result/shell-success {:pr (pr-lookup/parse-lookup (:output r))})
+          r))))
+
 (defn ^{:stratum 2} stage-files!
   "Stage files in the sandbox container. Returns a shell failure result if
    any path is unsafe (see validate-safe-container-path) — an unvalidated
@@ -336,8 +348,11 @@
              (str "git add " (str/join " " (map #(str "'" % "'") file-paths)))))))
 
 (defn ^{:stratum 2} try-checkout-branch
-  "Try to checkout a new branch off the current HEAD, retrying with a
-   timestamp suffix if the desired name already exists.
+  "Try to checkout a new branch off the current HEAD. When the name already
+   exists and the branch contains HEAD, check it out instead: a retried or
+   resumed release of the same run, whose branch name is fixed, carries on
+   with the branch it made rather than a renamed one (which would get a
+   second PR). Fails when the existing branch does not contain HEAD.
 
    Branches off HEAD (not `origin/<base-branch>`) so the new branch
    inherits whatever commits the task worktree already carries — e.g.
@@ -353,13 +368,23 @@
                             (str "git checkout -b " branch-name))]
     (if (result/succeeded? checkout-r)
       (result/shell-success {:branch branch-name :base-branch base-branch})
-      (let [ts-name (str branch-name "-" (System/currentTimeMillis))
-            retry-r (exec! executor env-id
-                           (str "git checkout -b " ts-name))]
-        (if (result/succeeded? retry-r)
-          (result/shell-success {:branch ts-name :base-branch base-branch})
-          (result/shell-failure (str "Failed to create branch: " (:error retry-r))
-                               {:branch nil})))))))
+      (let [exists?  (result/succeeded?
+                      (exec! executor env-id ["git" "rev-parse" "--verify" "--quiet"
+                                              (str "refs/heads/" branch-name)]))
+            holds?   (and exists?
+                          (result/succeeded?
+                           (exec! executor env-id ["git" "merge-base" "--is-ancestor"
+                                                   "HEAD" branch-name])))
+            checkout (when holds? (exec! executor env-id ["git" "checkout" branch-name]))]
+        (cond
+          (not exists?) (result/shell-failure (str "Failed to create branch: " (:error checkout-r))
+                                              {:branch nil})
+          (not holds?)  (result/shell-failure (msg/t :branch/diverged {:branch branch-name})
+                                              {:branch nil})
+          (result/succeeded? checkout)
+          (result/shell-success {:branch branch-name :base-branch base-branch :reused? true})
+          :else (result/shell-failure (str "Failed to check out branch: " (:error checkout))
+                                      {:branch nil})))))))
 
 (defn ^{:stratum 2} fetch-branch!
   "Fetch origin/<branch> into the sandbox. `create-branch!` fetches only the

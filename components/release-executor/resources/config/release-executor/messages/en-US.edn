@@ -21,6 +21,12 @@
   :pr/create-unconfirmed "gh pr create reported success but printed no PR URL — cannot confirm a PR was opened (output: {output})"
   :pr/reuse-unresolved "A PR already exists for this branch but could not be resolved via gh pr view: {error}"
   :pr/reuse-no-url "gh pr view returned no PR URL"
+  :pr/closed "Branch {branch} already has a closed PR ({pr-url}); not opening another"
+  :pr/merged-other "Branch {branch} already has a merged PR ({pr-url}) of another commit; this release's commit is in no PR"
+  :pr/lookup-failed "Could not check whether branch {branch} already has a PR: {error}"
+
+  ;; release branch
+  :branch/diverged "Release branch {branch} already exists and does not contain HEAD; not reusing it"
 
   ;; publish after prepare
   :publish/worktree-moved "The worktree moved after the release was prepared: expected {branch} at {commit-sha}, found {head-branch} at {head-sha}; not publishing"
