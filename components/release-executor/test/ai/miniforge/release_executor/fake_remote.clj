@@ -50,7 +50,7 @@
   (->> prs
        (filter #(= branch (:head %)))
        reverse
-       (map #(str (:number %) "\t" (:url %) "\t" (:state %)))
+       (map #(str (:number %) "\t" (:url %) "\t" (:state %) "\t" (:head-sha %)))
        (str/join "\n")))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -87,7 +87,8 @@
       (str/starts-with? line "gh pr create")
       (let [n (inc (count prs))
             url (str "https://github.com/o/r/pull/" n)]
-        (swap! state update :prs conj {:number n :url url :state "OPEN" :head head})
+        (swap! state update :prs conj {:number n :url url :state "OPEN" :head head
+                                       :head-sha (get-in @state [:pushed head])})
         (ok url))
       :else (ok))))
 

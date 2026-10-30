@@ -27,8 +27,9 @@
     (is (nil? (pr-lookup/parse-lookup "")))
     (is (nil? (pr-lookup/parse-lookup nil))))
   (testing "one PR"
-    (is (= {:pr-number 7 :pr-url "https://github.com/o/r/pull/7" :pr-state "OPEN"}
-           (pr-lookup/parse-lookup "7\thttps://github.com/o/r/pull/7\tOPEN\n"))))
+    (is (= {:pr-number 7 :pr-url "https://github.com/o/r/pull/7" :pr-state "OPEN"
+            :pr-head-sha "abc"}
+           (pr-lookup/parse-lookup "7\thttps://github.com/o/r/pull/7\tOPEN\tabc\n"))))
   (testing "open before merged before closed, newest first within a state"
     (is (= 9 (:pr-number (pr-lookup/parse-lookup
                           (str "10\thttps://x/pull/10\tCLOSED\n"

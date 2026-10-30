@@ -872,18 +872,20 @@
   "Create the pull request, unless the branch already has one.  Dispatches
    git backend based on :host-mode?.
 
-   Looks the branch's PR up first, in any state: an open or merged PR is
-   reused (a retried or resumed release), a closed one fails the release
-   rather than opening another, and a failed lookup fails it too, since
-   creating blind could duplicate. git/create-pr! and sandbox/create-pr!
-   also reuse a PR that gh reports as already existing."
+   Looks the branch's PR up first, in any state: an open PR is reused (a
+   retried or resumed release), and so is a merged one whose head is this
+   release's commit. A merged PR of another commit, or a closed PR, fails
+   the release rather than opening another or reporting work no PR holds;
+   a failed lookup fails it too, since creating blind could duplicate.
+   git/create-pr! and sandbox/create-pr! also reuse a PR that gh reports
+   as already existing."
   [state]
   (cond
     (failed? state)           state
     (not (:create-pr? state)) state
     :else
     (let [{:keys [release-meta base-branch host-mode? worktree-path
-                  executor environment-id branch]} state
+                  executor environment-id branch commit-sha]} state
           found    (if host-mode?
                      (git/find-pr! worktree-path branch (:github-token state))
                      (sandbox/find-pr! executor environment-id branch (gh-exec-opts state)))
@@ -895,6 +897,9 @@
 
         (= "CLOSED" (:pr-state existing))
         (fail state :pr-closed (msg/t :pr/closed {:branch branch :pr-url (:pr-url existing)}))
+
+        (and (= "MERGED" (:pr-state existing)) (not= commit-sha (:pr-head-sha existing)))
+        (fail state :pr-merged (msg/t :pr/merged-other {:branch branch :pr-url (:pr-url existing)}))
 
         existing
         (assoc state

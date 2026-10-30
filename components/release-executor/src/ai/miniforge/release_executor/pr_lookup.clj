@@ -30,26 +30,26 @@
 
 (defn ^{:stratum 0} lookup-argv
   "gh command listing every PR, in any state, whose head is `branch`: one
-   tab-separated `number url state` line per PR, newest first, nothing
-   when there is none."
+   tab-separated `number url state head-sha` line per PR, newest first,
+   nothing when there is none."
   [branch]
   ["gh" "pr" "list" "--head" branch "--state" "all" "--limit" "20"
-   "--json" "number,url,state"
-   "--jq" ".[] | [.number, .url, .state] | @tsv"])
+   "--json" "number,url,state,headRefOid"
+   "--jq" ".[] | [.number, .url, .state, .headRefOid] | @tsv"])
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} parse-lookup
   "The branch's PR from `lookup-argv` output as {:pr-number :pr-url
-   :pr-state}: an open PR before a merged one before a closed one, the
-   newest within a state. nil when the output lists none."
+   :pr-state :pr-head-sha}: an open PR before a merged one before a closed
+   one, the newest within a state. nil when the output lists none."
   [output]
   (->> (str/split-lines (str output))
        (keep (fn [line]
-               (let [[number url state] (str/split (str/trim line) #"\t")
+               (let [[number url state head-sha] (str/split (str/trim line) #"\t")
                      n (some-> number parse-long)]
                  (when (and n (not (str/blank? url)) (contains? state-order state))
-                   {:pr-number n :pr-url url :pr-state state}))))
+                   {:pr-number n :pr-url url :pr-state state :pr-head-sha head-sha}))))
        ;; sort-by is stable, so gh's newest-first order holds within a state.
        (sort-by (comp state-order :pr-state))
        first))

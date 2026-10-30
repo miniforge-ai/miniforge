@@ -63,15 +63,15 @@
 (deftest ^{:stratum 2} second-release-of-a-run-reuses-branch-and-pr-test
   (let [state  (atom (remote/initial-state))
         run-id (random-uuid)
-        first  (release! state run-id)
-        second (release! state run-id)]
-    (is (:success? first))
-    (is (:success? second))
+        once   (release! state run-id)
+        twice  (release! state run-id)]
+    (is (:success? once))
+    (is (:success? twice))
     (is (= 1 (count (:prs @state))) "one PR for the run")
     (is (= 1 (count (:pushed @state))) "one branch pushed")
-    (is (= (get-in first [:metrics :pr-url]) (get-in second [:metrics :pr-url])))
-    (is (= (get-in first [:metrics :branch]) (get-in second [:metrics :branch])))
-    (is (not= "feature/releaser-chosen" (get-in first [:metrics :branch]))
+    (is (= (get-in once [:metrics :pr-url]) (get-in twice [:metrics :pr-url])))
+    (is (= (get-in once [:metrics :branch]) (get-in twice [:metrics :branch])))
+    (is (not= "feature/releaser-chosen" (get-in once [:metrics :branch]))
         "the branch is the run's, not the releaser's")))
 
 (deftest ^{:stratum 2} different-runs-get-different-branches-test
@@ -92,3 +92,19 @@
       (is (not (:success? again)))
       (is (= :pr-closed (-> again :errors first :type)))
       (is (= 1 (count (:prs @state)))))))
+
+(deftest ^{:stratum 2} merged-pr-is-reused-only-for-its-own-commit-test
+  (let [state  (atom (remote/initial-state))
+        run-id (random-uuid)
+        once   (release! state run-id)
+        _      (swap! state update-in [:prs 0] assoc :state "MERGED")]
+    (testing "the same commit: the merged PR is the release"
+      (let [again (release! state run-id)]
+        (is (:success? again))
+        (is (= (get-in once [:metrics :pr-url]) (get-in again [:metrics :pr-url])))))
+    (testing "a new commit on the branch: no PR holds it, so the release fails"
+      (swap! state assoc :dirty? true)
+      (let [again (release! state run-id)]
+        (is (not (:success? again)))
+        (is (= :pr-merged (-> again :errors first :type)))
+        (is (= 1 (count (:prs @state))))))))
