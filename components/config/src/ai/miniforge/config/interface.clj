@@ -21,6 +21,7 @@
    [ai.miniforge.config.user :as user]
    [ai.miniforge.config.governance :as governance]
    [ai.miniforge.config.digest :as digest]
+   [ai.miniforge.config.execution :as execution]
    [ai.miniforge.config.profile :as profile]
    [ai.miniforge.config.resource :as resource]))
 
@@ -103,6 +104,11 @@
   (apply user/merge-configs configs))
 
 ;; Governance config functions
+(def ^{:stratum 0} governed-required?
+  "True when a user config requires governed (capsule) execution: any value
+   at [:execution :require-governed?] other than false or nil. Args: [cfg]."
+  execution/governed-required?)
+
 (defn ^{:stratum 0} load-governance-config
   "Load governance config with full merge chain (resource -> profile -> user -> pack -> compile)."
   ([config-key] (governance/load-governance-config config-key))

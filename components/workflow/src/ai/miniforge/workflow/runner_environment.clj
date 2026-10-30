@@ -22,6 +22,7 @@
    workspace persistence at phase boundaries. Extracted from runner.clj."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.logging.interface :as log]
@@ -332,10 +333,21 @@
    Returns env map, or nil (local) / throws (governed) on failure. Governed
    acquisition failure deliberately escalates for legacy runner callers that
    rely on try+ exception flow; prefer anomaly-returning helpers such as
-   `check-executor-for-mode` for non-boundary branching."
+   `check-executor-for-mode` for non-boundary branching.
+
+   Every run path acquires its environment here, so this is where the user
+   config's [:execution :require-governed?] is enforced for all of them: a
+   run that would execute locally is refused with an :anomalies/forbidden
+   anomaly. The check sits before the `try`, which turns a local-mode
+   failure into a warning and a local run."
   [workflow-id {:keys [repo-url branch repo-path execution-mode executor-config
                        runtime-config resume-workspace]}]
   (let [mode (get {:governed :governed} execution-mode :local)]
+    (when (and (not= :governed mode)
+               (config/governed-required? (config/load-merged-config)))
+      (response/throw-anomaly! :anomalies/forbidden
+                               (messages/t :env/governed-required {:workflow-id (str workflow-id)})
+                               {:workflow/id workflow-id :execution-mode mode}))
     (try
       (let [fns      (dag-executor-fns)
             config   (with-runtime-config (registry-config-for-mode mode executor-config)

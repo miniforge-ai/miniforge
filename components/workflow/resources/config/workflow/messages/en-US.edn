@@ -175,6 +175,7 @@
 
   ;; Environment lifecycle
   :env/acquisition-failed   "Environment acquisition failed: {error}"
+  :env/governed-required    "Refused: the config requires governed execution ([:execution :require-governed?]), and workflow {workflow-id} would run locally. DAG child tasks, resumed runs and other runs that do not carry the governed mode are refused too."
   :env/release-failed       "Environment release failed: {error}"
   :env/persist-message      "{phase} phase completed"
   :env/persist-failed       "Workspace persist failed: {error}"
