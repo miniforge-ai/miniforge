@@ -469,6 +469,10 @@
                            phase-path
                            (assoc :checkpoint/phase phase-name
                                   :checkpoint/phase-path phase-path))))))))]
+          ;; The lock wait turns an interrupt into its anomaly, clearing
+          ;; the flag: set it again so the cancel is not lost.
+          (when (= "java.lang.InterruptedException" (get-in written [:anomaly/data :anomaly/ex-class]))
+            (.interrupt (Thread/currentThread)))
           (if (anomaly/anomaly? written)
             (assoc-in written [:anomaly/data :phase/name] phase-name)
             written))

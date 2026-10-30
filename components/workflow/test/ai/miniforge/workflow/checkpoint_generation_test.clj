@@ -110,6 +110,15 @@
     (is (anomaly/anomaly? failed))
     (is (= before (set (map str (fs/list-dir generations)))) "nothing pruned, nothing new")))
 
+(defn- ^{:stratum 0} verify-lock-wait-interrupt-kept [root]
+  (let [written (with-redefs [checkpoint-lock/with-run-lock
+                              (fn [& _] (anomaly/anomaly :unavailable "interrupted while waiting"
+                                                         {:anomaly/ex-class "java.lang.InterruptedException"}))]
+                  (store/persist-execution-state! (fixture/plan-completed-context root {})))
+        interrupted? (Thread/interrupted)]
+    (is (anomaly/anomaly? written))
+    (is interrupted? "the interrupt the lock wait consumed is set again")))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} verify-crash-before-manifest [root]
@@ -202,6 +211,9 @@
 
 (deftest ^{:stratum 1} an-unforced-run-directory-stops-the-write-before-pruning
   (fixture/call-with-temp-checkpoint-root verify-unsynced-run-dir-prunes-nothing))
+
+(deftest ^{:stratum 1} an-interrupt-the-lock-wait-consumed-is-kept
+  (fixture/call-with-temp-checkpoint-root verify-lock-wait-interrupt-kept))
 
 ;------------------------------------------------------------------------------ Layer 2
 
