@@ -387,8 +387,8 @@
   "release-unpushed/unpushed-files in the worktree at `root-path`: on the
    host, or through `execute-fn` in the capsule when it is given. A scan
    git cannot answer is a :release/git-status-failed anomaly, never [].
-   `run-branch` is the run's release branch (see release-unpushed)."
-  [root-path execute-fn executor env-id run-branch]
+   `run-branches` are the run's own branches (see release-unpushed)."
+  [root-path execute-fn executor env-id run-branches]
   (let [run  (if execute-fn
                (fn [argv]
                  ;; The command runs under `sh -c`: quote any argument with
@@ -401,7 +401,7 @@
                     :err  (get-in r [:data :stderr] (:message (:error r)))}))
                (fn [argv] (apply shell/sh (concat argv [:dir root-path]))))
         {:keys [files failure]} (try
-                                  (release-unpushed/unpushed-files run run-branch)
+                                  (release-unpushed/unpushed-files run run-branches)
                                   (catch Exception e
                                     {:failure {:detail (or (ex-message e) (.getName (class e)))
                                                :data   {:exception/class (.getName (class e))}}}))]
@@ -662,9 +662,14 @@
                                    (git-dirty-files wt))]
                   (if (and (vector? dirty) (empty? dirty))
                     (let [{:keys [origin task]} (release-publish/provenance ctx)]
+                      ;; The run's own branches are not publication: its
+                      ;; release branch, and the checkpoint branches this
+                      ;; attempt persists to and a resume started from.
                       (unpushed-files wt (when governed? execute-fn) executor env-id
-                                      (release-executor/release-branch-name
-                                       origin task (release-description ctx))))
+                                      [(release-executor/release-branch-name
+                                        origin task (release-description ctx))
+                                       (get ctx :execution/task-branch)
+                                       (get-in ctx [:execution/opts :resume-workspace :branch])]))
                     dirty)))]
     ;; Short-circuit: skip release when there is nothing to release.
     ;; This covers:

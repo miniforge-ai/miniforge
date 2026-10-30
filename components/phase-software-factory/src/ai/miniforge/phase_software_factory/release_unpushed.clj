@@ -24,8 +24,9 @@
    Published means on origin, the remote the release pushes to: a chained
    DAG task's parent work is on its pushed branch there, and a
    single-branch clone has the ref it was cloned from. The run's own
-   release branch does not count: a release that pushed but opened no PR
-   is not done. Backend-neutral: the caller supplies how to run git (host
+   branches do not count: its release branch (a release that pushed but
+   opened no PR is not done) and its checkpoint branches (workspace
+   persistence pushes them, and a resume starts from one). Backend-neutral: the caller supplies how to run git (host
    or capsule).
 
    Split out of `release` (rule 210)."
@@ -35,13 +36,14 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} log-command
-  "The paths that commits on HEAD and on no origin ref (save
-   `excluded-branch`, the run's release branch, when given) touch,
-   merge commits' changes included, NUL-separated."
-  [excluded-branch]
-  (cond-> ["git" "log" "-m" "--format=" "--name-only" "-z" "HEAD" "--not"]
-    excluded-branch (conj (str "--exclude=origin/" excluded-branch))
-    true            (conj "--remotes=origin")))
+  "The paths that commits on HEAD and on no origin ref (save the
+   `excluded-branches`, the run's own) touch, merge commits' changes
+   included, NUL-separated."
+  [excluded-branches]
+  (conj (into ["git" "log" "-m" "--format=" "--name-only" "-z" "HEAD" "--not"]
+              (map #(str "--exclude=origin/" %))
+              (distinct (remove nil? excluded-branches)))
+        "--remotes=origin"))
 
 (defn ^{:stratum 0} nul-fields
   "`out` split on NUL, keeping every non-empty field as it is: a path of
@@ -76,10 +78,10 @@
    {:failure {:detail :data}}: an unanswered scan is not an empty one.
 
    `run` runs a git argv in the worktree and returns {:exit :out :err};
-   `run-branch` is the run's release branch, or nil."
-  [run run-branch]
+   `run-branches` are the run's own branches (release and checkpoint)."
+  [run run-branches]
   (let [origin-cmd ["git" "remote" "get-url" "origin"]
-        log-cmd    (log-command run-branch)
+        log-cmd    (log-command run-branches)
         head-cmd   ["git" "rev-parse" "--verify" "--quiet" "HEAD"]
         head       (run head-cmd)]
     (cond

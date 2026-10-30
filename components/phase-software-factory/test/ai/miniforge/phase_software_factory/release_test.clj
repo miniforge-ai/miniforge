@@ -308,16 +308,17 @@
 
 (defn- ^{:stratum 0} enter-already-implemented
   "Enter the release for an :already-implemented run over `worktree`, with
-   prepare stubbed. Returns {:skipped? bool :paths #{...}}, or the thrown
-   ex-data when enter fails."
-  [worktree]
+   prepare stubbed and `extra` merged into the context. Returns
+   {:skipped? bool :paths #{...}}, or the thrown ex-data when enter fails."
+  [worktree & [extra]]
   (let [seen (atom nil)
-        ctx  {:execution/id #uuid "00000000-0000-0000-0000-00000000c2d4"
-              :execution/input {:description "Already done" :title "Noop"}
-              :execution/metrics {:tokens 0 :duration-ms 0}
-              :execution/phase-results {:implement {:result {:status :already-implemented}}}
-              :worktree-path worktree
-              :phase-config {:phase :release}}]
+        ctx  (merge {:execution/id #uuid "00000000-0000-0000-0000-00000000c2d4"
+                     :execution/input {:description "Already done" :title "Noop"}
+                     :execution/metrics {:tokens 0 :duration-ms 0}
+                     :execution/phase-results {:implement {:result {:status :already-implemented}}}
+                     :worktree-path worktree
+                     :phase-config {:phase :release}}
+                    extra)]
     (try
       (with-redefs [release-executor/prepare-release
                     (fn [workflow-state _ _]
@@ -546,6 +547,18 @@
           (sh-must-succeed! worktree ["git" "fetch" "-q" "origin"]))
         (is (= {:skipped? false :paths #{"src/feature.clj" "test/feature_test.clj"}}
                (enter-already-implemented worktree))))))
+  (testing "the work is only on the run's checkpoint branches: not published"
+    (doseq [extra [{:execution/task-branch "task/env-now"}
+                   {:execution/opts {:resume-workspace {:branch "task/env-before"}}}]]
+      (with-test-worktree
+        (fn [worktree]
+          (publish-head! worktree)
+          (write-and-commit-mock-files! worktree)
+          (let [branch (or (:execution/task-branch extra)
+                           (get-in extra [:execution/opts :resume-workspace :branch]))]
+            (sh-must-succeed! worktree ["git" "push" "-q" "--no-verify" "origin" (str "HEAD:refs/heads/" branch)])
+            (sh-must-succeed! worktree ["git" "fetch" "-q" "origin"]))
+          (is (false? (:skipped? (enter-already-implemented worktree extra))) (pr-str extra))))))
   (testing "the work is on another remote, not on origin: not published"
     (with-test-worktree
       (fn [worktree]
