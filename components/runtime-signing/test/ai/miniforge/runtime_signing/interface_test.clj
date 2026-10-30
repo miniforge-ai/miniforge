@@ -99,6 +99,10 @@
       (is (string? (signing/sign k nested)))
       (is (< (- (System/nanoTime) started) 5000000000)
           "map keys nested 30 deep sign in linear, not exponential, time"))
+    (let [deep (reduce (fn [inner _] [inner]) 1 (range 100000))]
+      (is (thrown? IllegalArgumentException (signing/sign k deep)))
+      (is (false? (signing/signed? k deep (apply str (repeat 64 "0"))))
+          "deeply nested untrusted input is refused, not a stack overflow"))
     (is (thrown? IllegalArgumentException
                  (signing/sign k #{at (java.util.Date/from at)}))
         "entries that would encode alike are refused, not collapsed")
