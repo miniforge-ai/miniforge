@@ -34,29 +34,9 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.workflow.dag-merge :as dag-merge]
    [ai.miniforge.workflow.dag-merge-anomaly :as merge-anomaly]
-   [ai.miniforge.workflow.dag-plan :as dag-plan]
-   [ai.miniforge.workflow.stop-signal :as stop-signal]
-   [slingshot.slingshot :refer [try+]]))
+   [ai.miniforge.workflow.dag-plan :as dag-plan]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defn- ^{:stratum 0} merge-parents
-  "merge-parent-branches! for a multi-parent task, in its own interrupting
-   scope: it runs before the task's sub-workflow installs a stop hook. The
-   merge code turns an interrupt into an ordinary merge failure, so a merge
-   error under a stopped run, or an interruption that escapes, is the
-   task's stop."
-  [context task-def]
-  (let [control-state (:control-state context)
-        stopped (merge-anomaly/merge-stopped-anomaly (:task/id task-def))
-        merged (try+
-                 (stop-signal/interrupting-on-stop
-                  control-state #(dag-merge/merge-parent-branches! context task-def))
-                 (catch Exception e
-                   (if (stop-signal/stop-caused? control-state e) stopped (throw e))))]
-    (if (and (merge-anomaly/merge-error? merged) (some-> control-state deref :stopped))
-      stopped
-      merged)))
 
 (defn ^{:stratum 0} task-sub-workflow
   "Build a sub-workflow config for a single DAG task.
@@ -111,7 +91,11 @@
      (get-in context [:execution/input :spec/path])
      (assoc :spec/path (get-in context [:execution/input :spec/path]))
      (get context :execution/id)
-     (assoc :workflow/parent-id (get context :execution/id)))))
+     (assoc :workflow/parent-id (get context :execution/id))
+     ;; The parent's lineage, which outlives its attempt ids: the task's
+     ;; release branch and PR are keyed on it.
+     (get context :execution/origin-id)
+     (assoc :workflow/origin-id (get context :execution/origin-id)))))
 
 (defn- ^{:stratum 0} resolve-task-base-branch
   "Look up the branch task-def's scratch worktree should be forked from.
@@ -197,7 +181,7 @@
                        nil
 
                        (dag/multi-parent? deps)
-                       (merge-parents context task-def)
+                       (dag-merge/merge-parent-branches! context task-def)
 
                        :else
                        ;; v1 single-parent path returns a branch string for
