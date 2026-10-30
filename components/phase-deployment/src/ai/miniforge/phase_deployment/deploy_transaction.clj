@@ -111,13 +111,18 @@
                       #(apply-report operations (:effect/proposal %))))
 
 (defn ^{:stratum 2} reconcile!
+  "Observe the cluster and settle the record once the rollout is healthy.
+   An unhealthy observation (a slow rollout, a failed read) settles
+   nothing: the record stays reconcilable for a later attempt, and the
+   returned copy carries the observation for this attempt's outcome."
   [context transaction operations now]
   (if-not (contains? fx/reconcilable-states (:effect/state transaction))
     transaction
     (let [dir (store-dir context)
-          durable (fx/read-record dir (:effect/id transaction))]
-      (if (anomaly/anomaly? durable)
-        durable
-        (fx/reconcile! dir transaction
-                       (partial probe-answer operations (:effect/proposal durable))
-                       now)))))
+          durable (fx/read-record dir (:effect/id transaction))
+          answer (when-not (anomaly/anomaly? durable)
+                   (probe-answer operations (:effect/proposal durable) durable))]
+      (cond
+        (anomaly/anomaly? durable) durable
+        (:effect/matched? answer) (fx/reconcile! dir transaction (constantly answer) now)
+        :else (assoc transaction :effect/observed (:effect/observed answer))))))

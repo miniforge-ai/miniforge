@@ -24,6 +24,7 @@
    [ai.miniforge.phase-deployment.deploy-authority :as authority]
    [ai.miniforge.phase-deployment.deploy-outcome :as outcome]
    [ai.miniforge.phase-deployment.deploy-transaction :as transaction]
+   [ai.miniforge.phase-deployment.evidence :as evidence]
    [ai.miniforge.phase-deployment.messages :as msg]
    [ai.miniforge.schema.interface :as schema]
    [clojure.string :as str])
@@ -49,11 +50,13 @@
   (if (or (:flow/failure state) (:attempt/existing state)) state (step state)))
 
 (defn- ^{:stratum 0} effect-basis
-  "What fixes this deploy's effect id: run and exact target."
+  "What fixes this deploy's effect id: run, exact target, and the digest
+   of the rendered manifests, so a changed manifest is a new effect."
   [state]
   (let [{:keys [kustomize-dir context namespace deployment-name]} (:target state)]
     [:effect/deploy (get-in state [:context :execution/id])
-     kustomize-dir context namespace deployment-name]))
+     kustomize-dir context namespace deployment-name
+     (evidence/sha256 (:rendered-yaml state))]))
 
 (def ^{:stratum 0} unclaimed-states
   "Transaction states in which the deploy cannot have reached the cluster."
@@ -233,8 +236,8 @@
        :operations operations
        :now now}
       (advance resolve-target)
-      (advance open-attempt)
       (advance render-manifests)
+      (advance open-attempt)
       (advance check-manifest-policy)
       (advance server-dry-run)
       (advance prepare-authority)

@@ -91,3 +91,14 @@
                            :readiness {:ready? false :blocking [:branch-not-up-to-date]})]
       (is (= "squash" (get-in result [:data :merge/sha])))
       (is (= 1 @merges)))))
+
+(deftest ^{:stratum 2} a-pr-closed-unmerged-is-not-pending-test
+  (let [context (merge-context)
+        merges (atom 0)
+        closed "{\"state\":\"CLOSED\",\"mergeCommit\":null}"]
+    (attempt! context merges "{\"state\":\"OPEN\",\"mergeCommit\":null}" (dag/ok {}))
+    (testing "newly reconciled and reused records both report the closed PR"
+      (doseq [_ (range 2)]
+        (let [result (attempt! context merges closed (dag/ok {}))]
+          (is (= :merge-closed-unmerged (get-in result [:error :code]))))))
+    (is (= 1 @merges))))
