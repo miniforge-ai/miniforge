@@ -27,7 +27,8 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.cli.web.github :as sut]
-   [ai.miniforge.cli.web.risk :as risk]))
+   [ai.miniforge.cli.web.risk :as risk]
+   [ai.miniforge.llm.interface :as llm]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -59,6 +60,31 @@
     (with-redefs [babashka.process/process
                   (fn [& _] (throw (java.io.IOException. "Cannot run program \"gh\": error=2")))]
       (is (nil? (sut/fetch-pr-diff "o/r" 7))))))
+
+(deftest ^{:stratum 0} pr-chat-and-summary-run-claude-isolated-test
+  (testing "the dashboard's Claude calls carry the llm client's isolation flags"
+    (let [calls  (atom [])
+          record (fn [cmd opts] (swap! calls conj {:cmd cmd :opts opts}) {:out "answer" :err "" :exit 0})
+          create llm/create-client]
+      (with-redefs [sut/check-claude-cli (constantly true)
+                    sut/fetch-pr-diff    (constantly "diff --git a/x b/x")
+                    sut/fetch-pr-body    (constantly {:title "t" :body "b"})
+                    llm/create-client    (fn [opts]
+                                           (create (assoc opts :exec-fn (fn ([cmd] (record cmd nil))
+                                                                          ([cmd opts] (record cmd opts))))))]
+        (is (= {:success true :response "answer"} (sut/chat-about-pr "o/r" 1 "why?" "diff")))
+        (is (= {:success true :summary "answer"} (sut/generate-pr-summary "o/r" 1)))
+        (is (= 2 (count @calls)))
+        (doseq [{:keys [cmd]} @calls]
+          (is (= ["--tools" "" "--setting-sources" "" "--disable-slash-commands" "--strict-mcp-config"]
+                 (->> cmd (drop-while (complement #{"--tools"})) (take 6)))))
+        (is (str/includes? (str (get-in (first @calls) [:opts :stdin])) "User question: why?")
+            "the prompt reaches the CLI"))))
+  (testing "a failed call keeps the error prefixes, and an empty error reads Unknown"
+    (with-redefs [sut/check-claude-cli (constantly true)
+                  sut/ask-claude       (constantly {:success false :text "Unknown"})]
+      (is (= {:success false :response "❌ Claude CLI error: Unknown"}
+             (sut/chat-about-pr "o/r" 1 "why?" "diff"))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
