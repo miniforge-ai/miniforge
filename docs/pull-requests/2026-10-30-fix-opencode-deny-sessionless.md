@@ -45,7 +45,8 @@ Bash under OpenCode's defaults with no check.
 4. A backend entry may carry an `:env-fn` (OpenCode does). `complete-impl` passes its
    entries as `:env` exec options; `default-exec-fn` and `start-capture-process!` set
    them on top of the agent environment allowlist; the backend preflight probe passes
-   them too. The capsule exec adapter (`capsule-exec-fn`) refuses a call that carries
+   them too. A caller-supplied 1-arity `:exec-fn`, which cannot receive them, gets an
+   error result for such a call. The capsule exec adapter (`capsule-exec-fn`) refuses a call that carries
    them, returning its usual error result: the executors have no secret-safe way to pass
    them into a capsule, and running without them would drop the call's permissions. No
    governed LLM client installs that adapter today (`runner-preparation` only stores it

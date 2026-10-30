@@ -79,6 +79,17 @@
         (is (some #{"--pure"} cmd))
         (is (contains? (:env opts) "OPENCODE_CONFIG_CONTENT"))))))
 
+(deftest ^{:stratum 0} one-arity-exec-fn-refuses-env-entries-test
+  (let [calls (atom 0)
+        exec  (impl/normalize-exec-fn (fn [_cmd] (swap! calls inc) {:out "ok" :err "" :exit 0}))]
+    (testing "a 1-arity exec-fn cannot receive a call's env entries, so the call is refused, not run without them"
+      (is (= 1 (:exit (exec ["opencode" "run" "p"] {:env {"OPENCODE_CONFIG_CONTENT" "{}"}}))))
+      (is (zero? @calls)))
+    (testing "calls without env entries still run through it"
+      (is (= "ok" (:out (exec ["claude" "-p"] {:stdin "x"}))))
+      (is (= "ok" (:out (exec ["claude" "-p" "x"]))))
+      (is (= 2 @calls)))))
+
 (deftest ^{:stratum 0} capsule-exec-refuses-env-entries-test
   (let [seen (atom nil)
         exec (impl/capsule-exec-fn (fn [_executor _env-id cmd opts] (reset! seen (assoc opts :cmd cmd)) {:data {:stdout "ok"}})

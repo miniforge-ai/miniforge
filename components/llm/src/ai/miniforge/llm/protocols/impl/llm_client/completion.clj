@@ -65,15 +65,26 @@
    probe only happens when the caller actually passes opts; pure
    1-arity invocations stay one indirection.
 
+   A 1-arity fn cannot receive opts, so a call whose opts carry `:env`
+   entries (an OpenCode call's inline config, which holds its
+   permissions) gets an error result instead of running without them.
+
    Returns a fn equivalent to `f` for callers that already accept
    both arities."
   [f]
-  (let [arity (atom :unknown)]
+  (let [arity (atom :unknown)
+        one   (fn [cmd opts]
+                (if (seq (:env opts))
+                  {:out ""
+                   :err (str "exec-fn takes no exec opts, so it cannot pass this call's environment entries "
+                             (vec (sort (keys (:env opts)))))
+                   :exit 1}
+                  (f cmd)))]
     (fn
       ([cmd] (f cmd))
       ([cmd opts]
        (case @arity
-         :one (f cmd)
+         :one (one cmd opts)
          :two (f cmd opts)
          (try
            (let [r (f cmd opts)]
@@ -81,7 +92,7 @@
              r)
            (catch clojure.lang.ArityException _
              (reset! arity :one)
-             (f cmd))))))))
+             (one cmd opts))))))))
 
 (defn ^{:stratum 0} log-prompt-sent [logger backend prompt]
   (when logger
