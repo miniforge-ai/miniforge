@@ -23,14 +23,15 @@
    Mapped deliveries:
    - pull_request closed with merged = true → :pr/merged
    - pull_request opened / reopened         → :pr/opened
-   - check_suite completed                  → :pr/ci-passed or :pr/ci-failed,
-     one event per pull request GitHub lists on the suite, or one event
-     with no :pr/id when it lists none
+   - check_suite completed failure / timed_out → :pr/ci-failed, one per
+     same-repository pull request the suite lists, with the suite's app and
+     id (GitHub sends one suite per app and per Actions workflow run, so a
+     passing suite says nothing about the PR's other checks)
 
    A pull request from a fork is not mapped: its branch and code come from
    outside the repository, and a trigger would run a workflow on them. A
-   check suite with no head branch is not mapped either: GitHub reports
-   fork-associated suites that way.
+   check suite listing no pull request is not mapped either: fork suites
+   carry the fork's own branch name and list none.
    Every other delivery (ping included) maps to no events."
   (:require
    [clojure.string :as str]))
@@ -41,11 +42,9 @@
   "pull_request actions that announce an open pull request."
   #{"opened" "reopened"})
 
-(def ^{:stratum 0} conclusion->ci-event
-  "check_suite conclusions miniforge acts on, and the event each becomes."
-  {"success"   :pr/ci-passed
-   "failure"   :pr/ci-failed
-   "timed_out" :pr/ci-failed})
+(def ^{:stratum 0} failed-conclusions
+  "check_suite conclusions that mean the suite's checks failed."
+  #{"failure" "timed_out"})
 
 (defn ^{:stratum 0} delivery-event
   "The event-stream event for one GitHub delivery: the common envelope
@@ -60,6 +59,13 @@
           :github/sender   (get-in payload [:sender :login])
           :pr/repo         (get-in payload [:repository :full_name])}
          fields))
+
+(defn ^{:stratum 0} same-repo-pull-request?
+  "True for a check suite's pull-request entry whose head and base
+   repositories are the same (by id)."
+  [{:keys [head base]}]
+  (let [head-repo (get-in head [:repo :id])]
+    (and (some? head-repo) (= head-repo (get-in base [:repo :id])))))
 
 (defn ^{:stratum 0} fork-pull-request?
   "True when the pull request's head repository is not its base
@@ -98,17 +104,15 @@
   "Events for a check_suite delivery."
   [{:keys [payload] :as delivery}]
   (let [{:keys [action check_suite]} payload
-        event-type (when (= "completed" action)
-                     (get conclusion->ci-event (:conclusion check_suite)))
-        fields {:pr/branch     (:head_branch check_suite)
-                :pr/sha        (:head_sha check_suite)
-                :ci/conclusion (:conclusion check_suite)}]
-    (cond
-      (nil? event-type) []
-      (str/blank? (:head_branch check_suite)) []
-      (empty? (:pull_requests check_suite)) [(delivery-event event-type delivery fields)]
-      :else (mapv #(delivery-event event-type delivery (assoc fields :pr/id (:number %)))
-                  (:pull_requests check_suite)))))
+        fields {:pr/branch        (:head_branch check_suite)
+                :pr/sha           (:head_sha check_suite)
+                :ci/conclusion    (:conclusion check_suite)
+                :ci/app           (get-in check_suite [:app :slug])
+                :ci/check-suite-id (:id check_suite)}]
+    (if (and (= "completed" action) (contains? failed-conclusions (:conclusion check_suite)))
+      (mapv #(delivery-event :pr/ci-failed delivery (assoc fields :pr/id (:number %)))
+            (filter same-repo-pull-request? (:pull_requests check_suite)))
+      [])))
 
 ;------------------------------------------------------------------------------ Layer 2
 

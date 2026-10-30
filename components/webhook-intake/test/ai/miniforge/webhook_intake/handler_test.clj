@@ -38,7 +38,8 @@
    two :pr/ci-failed events."
   (-> "ai/miniforge/webhook_intake/github-fixtures/check_suite.completed.failure.json"
       io/resource slurp (json/parse-string true)
-      (assoc-in [:check_suite :pull_requests] [{:number 2244} {:number 2251}])
+      (assoc-in [:check_suite :pull_requests]
+                (for [n [2244 2251]] {:number n :head {:repo {:id 1}} :base {:repo {:id 1}}}))
       json/generate-string))
 
 (def ^{:stratum 0} merged-body
@@ -117,7 +118,7 @@
 (deftest ^{:stratum 2} in-flight-redelivery-is-not-acknowledged-test
   (testing "a redelivery while the delivery is still being published is 409, not 200"
     (let [{:keys [intake published]} (intake-with-collector)]
-      (deliveries/claim! (:seen intake) "d-1")
+      (deliveries/claim! (:seen intake) (get-in (delivery-request merged-body) [:headers "x-hub-signature-256"]))
       (is (= 409 (:status ((sut/create-handler intake) (delivery-request merged-body)))))
       (is (empty? @published)))))
 
@@ -143,3 +144,11 @@
                             (handler (delivery-request two-pr-failed-suite-body :event "check_suite"))))))
       (is (= 202 (:status (handler (delivery-request two-pr-failed-suite-body :event "check_suite")))))
       (is (= [2244 2251] (mapv :pr/id @published))))))
+
+(deftest ^{:stratum 2} replay-under-a-fresh-delivery-id-test
+  (testing "a captured delivery replayed with a new X-GitHub-Delivery is a redelivery, not a new event"
+    (let [{:keys [intake published]} (intake-with-collector)
+          handler (sut/create-handler intake)]
+      (is (= 202 (:status (handler (delivery-request merged-body :delivery "d-1")))))
+      (is (= 200 (:status (handler (delivery-request merged-body :delivery "d-replayed")))))
+      (is (= 1 (count @published))))))

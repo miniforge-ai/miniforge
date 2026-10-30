@@ -38,6 +38,10 @@
     :payload     (-> (str "ai/miniforge/webhook_intake/github-fixtures/" fixture ".json")
                      io/resource slurp (json/parse-string true) f)}))
 
+(def ^{:stratum 0} repo-1
+  "A webhook pull_requests entry's repo object for this repository."
+  {:id 1137151617 :name "miniforge"})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} merged-pull-request-test
@@ -71,17 +75,16 @@
                            #(assoc-in % [:pull_request :head :repo :full_name] "someone/fork")))))))
 
 (deftest ^{:stratum 1} failed-check-suite-test
-  (testing "a failed suite with no listed pull request becomes one :pr/ci-failed for its branch"
-    (is (= [{:event/type :pr/ci-failed :pr/branch "fix/checkpoint-directory-foundation"
-             :pr/sha "7f49767ab926f0c1bfb357182b5e2af8caa79b8c" :ci/conclusion "failure"}]
-           (map #(select-keys % [:event/type :pr/branch :pr/sha :ci/conclusion :pr/id])
-                (sut/delivery->events (delivery "check_suite" "check_suite.completed.failure"))))))
-  (testing "one event per pull request the suite lists"
-    (is (= [2244 2251]
-           (map :pr/id (sut/delivery->events
-                        (delivery "check_suite" "check_suite.completed.failure"
-                                  #(assoc-in % [:check_suite :pull_requests]
-                                             [{:number 2244} {:number 2251}]))))))))
+  (testing "a failed suite listing no pull request maps to nothing (fork suites look like this)"
+    (is (empty? (sut/delivery->events (delivery "check_suite" "check_suite.completed.failure")))))
+  (testing "one :pr/ci-failed per same-repository pull request, with the suite's app and id"
+    (is (= [[:pr/ci-failed 2244 "github-actions" 111056210235]]
+           (map (juxt :event/type :pr/id :ci/app :ci/check-suite-id)
+                (sut/delivery->events
+                 (delivery "check_suite" "check_suite.completed.failure"
+                           #(assoc-in % [:check_suite :pull_requests]
+                                      [{:number 2244 :head {:repo repo-1} :base {:repo repo-1}}
+                                       {:number 2251 :head {:repo {:id 9 :name "fork"}} :base {:repo repo-1}}]))))))))
 
 (deftest ^{:stratum 1} fork-check-suite-test
   (testing "a suite with no head branch (how GitHub reports fork suites) maps to nothing"
@@ -94,7 +97,12 @@
     (is (empty? (sut/delivery->events
                  (delivery "check_suite" "check_suite.completed.failure"
                            #(assoc % :action "requested")))))
-    (is (empty? (sut/delivery->events
-                 (delivery "check_suite" "check_suite.completed.failure"
-                           #(assoc-in % [:check_suite :conclusion] "neutral")))))
+    (doseq [conclusion ["neutral" "success"]]
+      (is (empty? (sut/delivery->events
+                   (delivery "check_suite" "check_suite.completed.failure"
+                             #(-> %
+                                  (assoc-in [:check_suite :conclusion] conclusion)
+                                  (assoc-in [:check_suite :pull_requests]
+                                            [{:number 1 :head {:repo repo-1} :base {:repo repo-1}}])))))
+          conclusion))
     (is (empty? (sut/delivery->events (delivery "ping" "pull_request.opened"))))))
