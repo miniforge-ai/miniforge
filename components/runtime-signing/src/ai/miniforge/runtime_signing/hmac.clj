@@ -6,7 +6,8 @@
   (:require
    [ai.miniforge.runtime-signing.canonical :as canonical])
   (:import
-   [java.nio.charset StandardCharsets]
+   [java.nio CharBuffer]
+   [java.nio.charset CodingErrorAction StandardCharsets]
    [java.security MessageDigest]
    [javax.crypto Mac]
    [javax.crypto.spec SecretKeySpec]))
@@ -20,8 +21,17 @@
   [^bytes bs]
   (apply str (map #(format "%02x" (bit-and (int %) 0xff)) bs)))
 
-(defn- ^{:stratum 0} utf8 ^bytes [^String s]
-  (.getBytes s StandardCharsets/UTF_8))
+(defn- ^{:stratum 0} utf8
+  "Strict UTF-8 bytes of `s`. Throws on malformed text, such as an
+   unpaired surrogate, which `String.getBytes` would replace with `?`."
+  ^bytes [^String s]
+  (let [encoder (-> StandardCharsets/UTF_8 .newEncoder
+                    (.onMalformedInput CodingErrorAction/REPORT)
+                    (.onUnmappableCharacter CodingErrorAction/REPORT))
+        buffer (.encode encoder (CharBuffer/wrap s))
+        out (byte-array (.remaining buffer))]
+    (.get buffer out)
+    out))
 
 ;------------------------------------------------------------------------------ Layer 1
 

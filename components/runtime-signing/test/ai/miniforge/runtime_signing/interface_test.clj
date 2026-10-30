@@ -83,6 +83,12 @@
         at (Instant/parse "2026-10-29T00:00:00Z")]
     (is (not= (signing/sign k #{1 1.0}) (signing/sign k #{1})))
     (is (not= (signing/sign k [1]) (signing/sign k [1.0])))
+    (is (not= (signing/sign k {:x nil}) (signing/sign k {:x (symbol "nil")})))
+    (is (not= (signing/sign k [(symbol "a b")]) (signing/sign k ['a 'b])))
+    (is (not= (signing/sign k [:a/b]) (signing/sign k [(keyword nil "a/b")])))
+    (is (thrown? Exception (signing/sign k {:x (str (char 0xd800))}))
+        "malformed text is refused, not replaced with ?")
+    (is (false? (signing/signed? k {:x (str (char 0xd800))} (signing/sign k {:x "?"}))))
     (is (thrown? IllegalArgumentException
                  (signing/sign k #{at (java.util.Date/from at)}))
         "entries that would encode alike are refused, not collapsed")
