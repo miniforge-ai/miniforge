@@ -28,7 +28,9 @@ checkpoint write (#2287) holds while it publishes a generation.
 1. `checkpoint-store-gc/delete-run!` re-checks the run's last change under the lock and keeps a
    run written since it was classified, reported under `[:kept :recent]`.
 2. `record-spec-path!` resolves the root once and holds the run's lock for its read and write,
-   reading the manifest through the resolved run directory. A pending interrupt is held off for
+   reading the manifest through the resolved run directory. The root and run directory are checked
+   as given (`directory/existing!`: ancestry and link ownership) before their real paths are used,
+   as a checkpoint write checks them. A pending interrupt is held off for
    the wait and the write and restored after; an interruption becomes a write-failure anomaly with
    the flag set again; a lock that stays busy is an anomaly.
 3. `persist-execution-state!` and `record-spec-path!` set the interrupt flag again when the lock
@@ -39,14 +41,17 @@ checkpoint write (#2287) holds while it publishes a generation.
 ## Testing Plan
 
 In `components/workflow/test/ai/miniforge/workflow/checkpoint_generation_test.clj`, each failing on
-the code before its fix:
+the code before its fix (the alias-retarget test waits for the recorder to ask for the lock before
+retargeting):
 
 1. `a-write-between-gc-classification-and-delete-keeps-the-run`
 2. `recording-the-spec-path-waits-for-the-run-lock`
 3. `recording-the-spec-path-holds-off-a-pending-interrupt`
 4. `recording-the-spec-path-keeps-the-root-it-locked`
 5. `recording-the-spec-path-reports-lock-failures`
-6. `an-interrupt-the-lock-wait-consumed-is-kept`
+6. `recording-the-spec-path-checks-the-root-as-given`: an alias in a world-writable directory is
+   refused
+7. `an-interrupt-the-lock-wait-consumed-is-kept`
 
 `spec_kanban_tracking_test/a-manifest-that-could-not-be-updated-is-warned-about` covers the CLI
 warning. Ran the GC, pin-race, checkpoint, spec-hash and kanban tracking tests.

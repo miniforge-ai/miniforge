@@ -146,18 +146,41 @@
            _ (fs/copy-tree (fs/path first-root (str id)) (fs/path second-root (str id)))
            entered (promise)
            release (promise)
+           locking (promise)
+           with-run-lock checkpoint-lock/with-run-lock
            spec-of #(:workflow/spec-path (edn/read-string (slurp (paths/manifest-path % id))))]
-       (future (checkpoint-lock/with-run-lock (str (fs/real-path first-root)) id
-                                              (fn [] (deliver entered true) @release)))
+       (future (with-run-lock (str (fs/real-path first-root)) id
+                 (fn [] (deliver entered true) @release)))
        (deref entered 5000 nil)
-       (let [recording (future (store/record-spec-path! id "/specs/done/spec.md" {:checkpoint/root (str alias)}))]
-         (Thread/sleep 200)
-         (fs/delete alias)
-         (fs/create-sym-link alias second-root)
-         (deliver release true)
-         (deref recording 5000 nil))
+       ;; The alias is retargeted once the recorder has resolved its root and
+       ;; asked for the lock, which the holder above keeps it waiting for.
+       (with-redefs [checkpoint-lock/with-run-lock (fn [lock-root run-id f]
+                                                     (deliver locking lock-root)
+                                                     (with-run-lock lock-root run-id f))]
+         (let [recording (future (store/record-spec-path! id "/specs/done/spec.md" {:checkpoint/root (str alias)}))]
+           (is (= (str (fs/real-path first-root)) (deref locking 5000 nil)))
+           (fs/delete alias)
+           (fs/create-sym-link alias second-root)
+           (deliver release true)
+           (deref recording 5000 nil)))
        (is (= "/specs/done/spec.md" (spec-of (str first-root))))
        (is (not= "/specs/done/spec.md" (spec-of (str second-root))))))))
+
+(deftest ^{:stratum 0} recording-the-spec-path-checks-the-root-as-given
+  ;; An alias in a directory others can write is refused, as a checkpoint
+  ;; write refuses it, though the directory it points to is private.
+  (fixture/call-with-posix-checkpoint-root
+   (fn [root]
+     (let [target (fs/create-dirs (fs/path root "private"))
+           shared (fs/create-dirs (fs/path root "shared"))
+           alias (fs/create-sym-link (fs/path shared "alias") target)
+           ctx (fixture/plan-completed-context (str target) {})
+           id (:execution/id ctx)]
+       (store/persist-execution-state! ctx)
+       (fs/set-posix-file-permissions shared "rwxrwxrwx")
+       (is (anomaly/anomaly? (store/record-spec-path! id "/specs/done/spec.md" {:checkpoint/root (str alias)})))
+       (is (not= "/specs/done/spec.md"
+                 (:workflow/spec-path (edn/read-string (slurp (paths/manifest-path (str target) id))))))))))
 
 (deftest ^{:stratum 0} recording-the-spec-path-reports-lock-failures
   (fixture/call-with-temp-checkpoint-root

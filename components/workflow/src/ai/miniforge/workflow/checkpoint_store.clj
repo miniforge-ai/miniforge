@@ -343,15 +343,17 @@
      (try+
        (let [;; As in persist-execution-state!: the root is resolved once,
              ;; and the lock and the manifest both come from it, so an alias
-             ;; retargeted meanwhile cannot split them.
+             ;; retargeted meanwhile cannot split them. The path as given is
+             ;; checked first (its ancestry and links), as a checkpoint write
+             ;; checks it; the run directory too.
              checkpoint-root (if (fs/exists? requested-root)
-                               (str (fs/real-path requested-root))
+                               (str (directory/existing! requested-root))
                                requested-root)
              recorded (checkpoint-lock/with-run-lock
                        checkpoint-root workflow-run-id
                        (fn []
                          (let [run-dir (checkpoint-paths/workflow-checkpoint-dir checkpoint-root workflow-run-id)
-                               path (str (fs/path (if (fs/exists? run-dir) (fs/real-path run-dir) run-dir)
+                               path (str (fs/path (if (fs/exists? run-dir) (directory/existing! run-dir) run-dir)
                                                   checkpoint-paths/manifest-filename))
                                manifest (read-checkpoint-file path)]
                            (when (and (map? manifest) (not (anomaly/anomaly? manifest)))
