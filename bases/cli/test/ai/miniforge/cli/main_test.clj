@@ -114,16 +114,16 @@
 
 (deftest ^{:stratum 0} reconstruction-failure-preserves-the-human-readable-message
   (let [message (messages/t :status/value-unknown)
-        failure (anomaly/anomaly :not-found message {})]
-    (let [printed (atom nil)
-          exits   (atom [])]
-      (with-redefs [es/read-workflow-events-by-id (constantly [])
-                    wr/reconstruct-context (constantly failure)
-                    display/print-error (fn [msg] (reset! printed msg))
-                    cmd-shared/exit! (fn [code] (swap! exits conj code) nil)]
-        (sut/status-cmd {:workflow-id "missing"}))
-      (is (= (messages/t :status/read-failed {:message message}) @printed))
-      (is (= [1] @exits)))))
+        failure (anomaly/anomaly :not-found message {})
+        printed (atom nil)
+        exits   (atom [])]
+    (with-redefs [es/read-workflow-events-by-id (constantly [])
+                  wr/reconstruct-context (constantly failure)
+                  display/print-error (fn [msg] (reset! printed msg))
+                  cmd-shared/exit! (fn [code] (swap! exits conj code) nil)]
+      (sut/status-cmd {:workflow-id "missing"}))
+    (is (= (messages/t :status/read-failed {:message message}) @printed))
+    (is (= [1] @exits))))
 
 ;; pr-monitor-cmd helpers
 (def ^{:stratum 0} ^:private test-bounds {:min-poll-interval-s 5 :max-poll-interval-s 3600})

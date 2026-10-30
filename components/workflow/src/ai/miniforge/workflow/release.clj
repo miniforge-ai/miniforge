@@ -17,7 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.workflow.release
   "Release phase executor for writing code artifacts to git worktree.
-   
+
    The release phase takes code artifacts from the implement phase and writes them
    to a git worktree, staging the changes for PR creation. PR creation itself is
    handled externally by human or CLI tools.

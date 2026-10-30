@@ -27,6 +27,7 @@
    [ai.miniforge.cli.workflow-runner.chain :as chain]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.cli.workflow-runner.execution :as execution]
+   [ai.miniforge.cli.workflow-runner.execution-mode :as execution-mode]
    [ai.miniforge.cli.workflow-runner.lifecycle :as lifecycle]
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.control :as control]
@@ -106,7 +107,10 @@
         stdout *out*]
     (binding [*out* (if json? *err* *out*)]
       (try
-        (let [{:keys [load-workflow run-pipeline]} (setup/resolve-workflow-interface)
+        (let [;; Named workflows always run in a host worktree; refused
+              ;; when the config requires governed execution.
+              _ (execution-mode/allowed-mode! {:execution-mode :local})
+              {:keys [load-workflow run-pipeline]} (setup/resolve-workflow-interface)
               ;; Create an event stream if none is provided. A --dashboard-url
               ;; run keeps it too: gates record each phase decision on it, and
               ;; without one every gated phase fails closed.
@@ -194,7 +198,10 @@
   ;; Piggyback deferred GC on each spec-driven workflow start.
   (run-gc-pass-best-effort!)
   (try+
-    (let [{:keys [load-workflow run-pipeline]} (setup/resolve-workflow-interface)
+    (let [;; Explicit --execution-mode, else the config's; refused before
+          ;; any setup when the config requires governed execution.
+          mode (execution-mode/allowed-mode! opts)
+          {:keys [load-workflow run-pipeline]} (setup/resolve-workflow-interface)
           ;; Create initial LLM client for workflow selection
           backend-override (:backend opts)
           selection-llm-client (context/create-llm-client nil spec quiet backend-override)
@@ -207,7 +214,7 @@
           repo-url (sandbox/infer-repo-url spec enriched-spec)
           ;; In governed mode, always clone main — the capsule creates a fresh
           ;; working copy, not a checkout of the host worktree's branch.
-          branch   (if (= :governed (:execution-mode opts))
+          branch   (if (= :governed mode)
                      (or (:spec/branch spec) "main")
                      (sandbox/infer-branch spec enriched-spec))
           workflow-input (context/spec->workflow-input enriched-spec)
@@ -245,7 +252,7 @@
                         (cond-> (assoc ctx
                                        :repo-url repo-url
                                        :branch branch
-                                       :execution-mode (get opts :execution-mode :local)
+                                       :execution-mode mode
                                        :runtime-config (runtime-env/selection-config))
 ))
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))

@@ -22,6 +22,7 @@
    workspace persistence at phase boundaries. Extracted from runner.clj."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.logging.interface :as log]
@@ -176,6 +177,24 @@
     (cond
       (some #(= :no-secrets (:gate %)) (:phase/gate-failures result)) :secrets-detected
       (seq (:phase/gate-errors result)) :gate-denied)))
+
+(defn ^{:stratum 0} refuse-local-when-governed-required!
+  "Throw an :anomalies/forbidden anomaly when the user config requires
+   governed execution (read strictly, see
+   `config/user-config-requires-governed?`) and the run is not governed:
+   its `execution-mode` is anything but :governed, or it was handed a
+   pre-acquired `executor` that runs on the host (a :worktree executor,
+   which a host-guarded wrapper reports too). Every pipeline run passes
+   through here before it acquires or reuses an environment, so this
+   covers DAG child tasks, resumed runs, chain steps and runs handed a
+   pre-acquired executor."
+  [workflow-id execution-mode executor]
+  (when (and (or (not= :governed execution-mode)
+                 (and executor (= :worktree (dag/executor-type executor))))
+             (config/user-config-requires-governed?))
+    (response/throw-anomaly! :anomalies/forbidden
+                             (messages/t :env/governed-required {:workflow-id (str workflow-id)})
+                             {:workflow/id workflow-id :execution-mode execution-mode})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -332,7 +351,10 @@
    Returns env map, or nil (local) / throws (governed) on failure. Governed
    acquisition failure deliberately escalates for legacy runner callers that
    rely on try+ exception flow; prefer anomaly-returning helpers such as
-   `check-executor-for-mode` for non-boundary branching."
+   `check-executor-for-mode` for non-boundary branching.
+
+   `runner-preparation/acquire-environment`, its only caller, runs
+   `refuse-local-when-governed-required!` first."
   [workflow-id {:keys [repo-url branch repo-path execution-mode executor-config
                        runtime-config resume-workspace]}]
   (let [mode (get {:governed :governed} execution-mode :local)]

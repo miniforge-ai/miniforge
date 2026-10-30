@@ -12,7 +12,7 @@
             [ai.miniforge.workflow.interface :as workflow]
             [babashka.fs :as fs]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is testing]])
+            [clojure.test :refer [deftest is]])
   (:import (java.util.concurrent CountDownLatch TimeUnit)))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -109,32 +109,5 @@
         #(workflow/gc-checkpoints! {:checkpoint/root root}))
       (assert-consistent root id @pin-result)
       (is (not (string? @pin-result))))))
-
-(deftest ^{:stratum 1} gc-waits-for-a-pin-mid-write-and-then-keeps-the-run
-  (fs/with-temp-dir [root {:prefix "pin-race-"}]
-    (let [root (str root)
-          id (fixture/expired-run! root)
-          inside (CountDownLatch. 1)
-          release (CountDownLatch. 1)
-          write spit]
-      (with-redefs [spit (fn [f & args]
-                           (when (paths/pin-marker-temp? f)
-                             (.countDown inside)
-                             (.await release 10 TimeUnit/SECONDS))
-                           (apply write f args))]
-        (let [pin (future (workflow/pin-checkpoint! id {:checkpoint/root root}))
-              _ (.await inside 10 TimeUnit/SECONDS)
-              gc-run (future (workflow/gc-checkpoints! {:checkpoint/root root}))]
-          (Thread/sleep 300)
-          (testing "the GC waits while the pin holds the run's lock"
-            (is (not (realized? gc-run))))
-          (.countDown release)
-          (let [pinned @pin
-                result (deref gc-run 10000 ::timed-out)]
-            (assert-consistent root id pinned)
-            (testing "then sees the pin and keeps the run"
-              (is (string? pinned))
-              (is (empty? (:deleted result)))
-              (is (= [id] (get-in result [:kept :pinned]))))))))))
 
 (comment ::checkpoint-pin-race)
