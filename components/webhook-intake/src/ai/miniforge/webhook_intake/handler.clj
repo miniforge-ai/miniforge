@@ -21,9 +21,9 @@
    `github/delivery->events`, and publishes each event to an event stream,
    where workflow triggers pick it up."
   (:require
-   [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.webhook-intake.deliveries :as deliveries]
    [ai.miniforge.webhook-intake.github :as github]
+   [ai.miniforge.webhook-intake.publish :as publish]
    [ai.miniforge.webhook-intake.signature :as signature]
    [cheshire.core :as json]
    [clojure.java.io :as io]
@@ -61,7 +61,9 @@
 
 (defn ^{:stratum 1} handle-github
   "Handle one request to `github-path`. `intake` holds :secret, :stream
-   and :seen."
+   and :seen. A redelivery of a published delivery is 200; one that
+   arrives while the delivery is still being published is 409; one after
+   a failed publish resumes from the first unpublished event."
   [{:keys [secret stream seen]} req]
   (let [body (body-bytes (:body req))
         {:strs [x-hub-signature-256 x-github-event x-github-delivery]} (:headers req)]
@@ -75,21 +77,18 @@
       (str/blank? x-github-delivery)
       (json-response 400 {:error "delivery-id-missing"})
 
-      (not (deliveries/remember-delivery! seen x-github-delivery))
-      (json-response 200 {:duplicate true})
-
       :else
       (if-let [payload (parse-payload body)]
-        (let [events (github/delivery->events {:event-name x-github-event
+        (let [{:keys [claimed? status published]} (deliveries/claim! seen x-github-delivery)
+              events (github/delivery->events {:event-name x-github-event
                                                :delivery-id x-github-delivery
                                                :payload payload})]
-          (try+
-            (doseq [event events]
-              (event-stream/publish! stream event))
+          (cond
+            (= :done status) (json-response 200 {:duplicate true})
+            (not claimed?) (json-response 409 {:error "delivery-in-progress"})
+            (publish/publish-delivery! stream seen x-github-delivery events published)
             (json-response 202 {:events (mapv :event/type events)})
-            (catch Exception _
-              (deliveries/forget-delivery! seen x-github-delivery)
-              (json-response 500 {:error "publish-failed"}))))
+            :else (json-response 500 {:error "publish-failed"})))
         (json-response 400 {:error "payload-invalid"})))))
 
 ;------------------------------------------------------------------------------ Layer 2

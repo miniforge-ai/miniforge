@@ -16,9 +16,16 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.webhook-intake.deliveries
-  "Delivery ids the intake has published, to drop GitHub redeliveries.
-   `seen` is an atom of {:ids #{} :order []} holding the newest
-   `recent-delivery-capacity` ids.")
+  "Progress of each GitHub delivery the intake has taken, so a
+   redelivery neither publishes an event twice nor is acknowledged before
+   its events are out.
+
+   `seen` is an atom of {:deliveries {id {:status :published}} :order [id]}
+   holding the newest `recent-delivery-capacity` ids, oldest first.
+   :status is :in-flight while a request publishes the delivery's events,
+   :done once all are published, and :failed after a publish failed;
+   :published counts the events already published, in the order
+   delivery->events returns them.")
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -27,27 +34,48 @@
   1024)
 
 (defn ^{:stratum 0} new-seen
-  "An empty record of seen delivery ids."
+  "An empty record of deliveries."
   []
-  (atom {:ids #{} :order []}))
+  (atom {:deliveries {} :order []}))
 
-(defn ^{:stratum 0} forget-delivery!
-  "Drop `delivery-id` from `seen`, so a redelivery after a failed publish
-   is processed again."
-  [seen delivery-id]
-  (swap! seen update :ids disj delivery-id))
+(defn ^{:stratum 0} record!
+  "Merge `progress` ({:status :published}) into delivery `id`'s entry, if
+   it is still remembered."
+  [seen id progress]
+  (swap! seen (fn [s]
+                (if (contains? (:deliveries s) id)
+                  (update-in s [:deliveries id] merge progress)
+                  s))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} remember-delivery!
-  "Record `delivery-id` in `seen`. True when it was not there yet."
-  [seen delivery-id]
-  (let [[before _] (swap-vals! seen
-                               (fn [{:keys [ids order] :as s}]
-                                 (if (contains? ids delivery-id)
-                                   s
-                                   (let [order (conj order delivery-id)
-                                         drop-n (max 0 (- (count order) recent-delivery-capacity))]
-                                     {:ids (reduce disj (conj ids delivery-id) (take drop-n order))
-                                      :order (vec (drop drop-n order))}))))]
-    (not (contains? (:ids before) delivery-id))))
+(defn ^{:stratum 1} claim
+  "[seen-state' claim] for claiming delivery `id` in `seen-state`. A new
+   id or a :failed one is claimed, set :in-flight, and the claim carries
+   how many of its events are already :published. An :in-flight or :done
+   id is not claimed; the claim carries its :status. A new id evicts the
+   oldest beyond `recent-delivery-capacity`."
+  [{:keys [deliveries order] :as s} id]
+  (let [{:keys [status published]} (get deliveries id)]
+    (case status
+      (:in-flight :done)
+      [s {:claimed? false :status status}]
+
+      :failed
+      [(assoc-in s [:deliveries id :status] :in-flight)
+       {:claimed? true :published published}]
+
+      (let [order (conj order id)
+            evicted (take (max 0 (- (count order) recent-delivery-capacity)) order)]
+        [{:deliveries (assoc (apply dissoc deliveries evicted)
+                             id {:status :in-flight :published 0})
+          :order (vec (drop (count evicted) order))}
+         {:claimed? true :published 0}]))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} claim!
+  "Claim delivery `id` in `seen` atomically; returns the claim (see `claim`)."
+  [seen id]
+  (let [[before _] (swap-vals! seen #(first (claim % id)))]
+    (second (claim before id))))

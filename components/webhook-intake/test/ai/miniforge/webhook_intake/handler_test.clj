@@ -23,6 +23,7 @@
    [ai.miniforge.webhook-intake.deliveries :as deliveries]
    [ai.miniforge.webhook-intake.handler :as sut]
    [ai.miniforge.webhook-intake.signature :as signature]
+   [cheshire.core :as json]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
@@ -31,6 +32,14 @@
 (def ^{:stratum 0} secret
   "Webhook secret the tests sign with."
   "test-webhook-secret")
+
+(def ^{:stratum 0} two-pr-failed-suite-body
+  "A failed check_suite delivery listing two pull requests, so it maps to
+   two :pr/ci-failed events."
+  (-> "ai/miniforge/webhook_intake/github-fixtures/check_suite.completed.failure.json"
+      io/resource slurp (json/parse-string true)
+      (assoc-in [:check_suite :pull_requests] [{:number 2244} {:number 2251}])
+      json/generate-string))
 
 (def ^{:stratum 0} merged-body
   "A real-shaped pull_request (closed, merged) delivery body."
@@ -102,3 +111,33 @@
                             (handler (delivery-request merged-body))))))
       (is (= 202 (:status (handler (delivery-request merged-body)))))
       (is (= 1 (count @published))))))
+
+(deftest ^{:stratum 2} in-flight-redelivery-is-not-acknowledged-test
+  (testing "a redelivery while the delivery is still being published is 409, not 200"
+    (let [{:keys [intake published]} (intake-with-collector)]
+      (deliveries/claim! (:seen intake) "d-1")
+      (is (= 409 (:status ((sut/create-handler intake) (delivery-request merged-body)))))
+      (is (empty? @published)))))
+
+(deftest ^{:stratum 2} rejected-publish-is-a-failure-test
+  (testing "publish! returning a rejection, not throwing, is still 500 and retryable"
+    (let [{:keys [intake published]} (intake-with-collector)
+          handler (sut/create-handler intake)]
+      (is (= 500 (:status (with-redefs [event-stream/publish! (fn [& _] {:rejected? true :reason :workflow-quiesced})]
+                            (handler (delivery-request merged-body))))))
+      (is (= 202 (:status (handler (delivery-request merged-body)))))
+      (is (= 1 (count @published))))))
+
+(deftest ^{:stratum 2} partial-publish-resumes-test
+  (testing "a retry after the second of two events failed publishes only the second"
+    (let [{:keys [intake published]} (intake-with-collector)
+          handler (sut/create-handler intake)
+          real-publish event-stream/publish!
+          calls (atom 0)]
+      (is (= 500 (:status (with-redefs [event-stream/publish! (fn [stream event]
+                                                                (if (= 2 (swap! calls inc))
+                                                                  (throw (Exception. "sink down"))
+                                                                  (real-publish stream event)))]
+                            (handler (delivery-request two-pr-failed-suite-body :event "check_suite"))))))
+      (is (= 202 (:status (handler (delivery-request two-pr-failed-suite-body :event "check_suite")))))
+      (is (= [2244 2251] (mapv :pr/id @published))))))
