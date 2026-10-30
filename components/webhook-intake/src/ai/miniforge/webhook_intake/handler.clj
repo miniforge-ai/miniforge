@@ -63,7 +63,9 @@
   "Handle one request to `github-path`. `intake` holds :secret, :stream
    and :seen. A redelivery of a published delivery is 200; one that
    arrives while the delivery is still being published is 409; one after
-   a failed publish resumes from the first unpublished event."
+   a refused publish resumes from the first unpublished event; one after
+   a publish that threw is 409, since its event may already have started
+   a workflow."
   [{:keys [secret stream seen]} req]
   (let [body (body-bytes (:body req))
         {:strs [x-hub-signature-256 x-github-event x-github-delivery]} (:headers req)]
@@ -85,10 +87,13 @@
                                                :payload payload})]
           (cond
             (= :done status) (json-response 200 {:duplicate true})
+            (= :unknown status) (json-response 409 {:error "publish-outcome-unknown"})
             (not claimed?) (json-response 409 {:error "delivery-in-progress"})
-            (publish/publish-delivery! stream seen x-github-delivery events published)
-            (json-response 202 {:events (mapv :event/type events)})
-            :else (json-response 500 {:error "publish-failed"})))
+            :else
+            (case (publish/publish-delivery! stream seen x-github-delivery events published)
+              :done (json-response 202 {:events (mapv :event/type events)})
+              :failed (json-response 500 {:error "publish-failed"})
+              (json-response 500 {:error "publish-outcome-unknown"}))))
         (json-response 400 {:error "payload-invalid"})))))
 
 ;------------------------------------------------------------------------------ Layer 2
