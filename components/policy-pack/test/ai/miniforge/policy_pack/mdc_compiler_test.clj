@@ -336,6 +336,37 @@
           rule (:rule (sut/mdc->rule "test.mdc" content))]
       (is (not (contains? (:rule/applies-to rule) :file-globs))))))
 
+(deftest ^{:stratum 0} mdc->rule-exclude-globs-test
+  (testing "excludeGlobs list → :rule/applies-to :exclude-globs"
+    (let [content (str "---\ndewey: \"740\"\n"
+                       "globs:\n  - \"**/*.sh\"\n"
+                       "excludeGlobs:\n  - \"examples/**\"\n"
+                       "---\nBody")
+          rule (:rule (sut/mdc->rule "bb-over-shell.mdc" content))]
+      (is (= ["**/*.sh"] (get-in rule [:rule/applies-to :file-globs])))
+      (is (= ["examples/**"] (get-in rule [:rule/applies-to :exclude-globs])))))
+
+  (testing "inline-array and bare-string forms normalize like globs does"
+    (let [inline (:rule (sut/mdc->rule
+                         "x.mdc" "---\ndewey: \"001\"\nexcludeGlobs: [\"a/**\", \"b/**\"]\n---\nBody"))
+          single (:rule (sut/mdc->rule
+                         "x.mdc" "---\ndewey: \"001\"\nexcludeGlobs: \"a/**\"\n---\nBody"))]
+      (is (= ["a/**" "b/**"] (get-in inline [:rule/applies-to :exclude-globs])))
+      (is (= ["a/**"] (get-in single [:rule/applies-to :exclude-globs])))))
+
+  (testing "excludeGlobs is kept without globs — an alwaysApply rule is still
+            path-tested by scanners and gates, so the carve-out must reach them"
+    (let [content (str "---\ndewey: \"001\"\nalwaysApply: true\n"
+                       "excludeGlobs:\n  - \"examples/**\"\n---\nBody")
+          rule (:rule (sut/mdc->rule "x.mdc" content))]
+      (is (not (contains? (:rule/applies-to rule) :file-globs)))
+      (is (= ["examples/**"] (get-in rule [:rule/applies-to :exclude-globs])))))
+
+  (testing "no excludeGlobs → key absent, not an empty vector"
+    (let [content "---\ndewey: \"001\"\nglobs: \"*.clj\"\n---\nBody"
+          rule (:rule (sut/mdc->rule "test.mdc" content))]
+      (is (not (contains? (:rule/applies-to rule) :exclude-globs))))))
+
 (deftest ^{:stratum 0} mdc->rule-error-handling-test
   (testing "returns failure result on exception"
     ;; Force an error by passing something that will cause parse issues

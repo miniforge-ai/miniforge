@@ -182,10 +182,17 @@
 (def ^{:stratum 2} RuleApplicability
   "Schema for when a rule applies.
 
-   All fields are optional - if omitted, rule applies to all matching contexts."
+   All fields are optional - if omitted, rule applies to all matching contexts.
+
+   :exclude-globs is the one field with inverse polarity: a path matching any
+   of its patterns is out of scope regardless of :file-globs, and regardless of
+   :file-globs being absent. It carries a scope carve-out a rule would
+   otherwise only be able to state in prose — `excludeGlobs` in MDC
+   frontmatter (see meta/rule-format in the standards submodule)."
   [:map
    [:task-types {:optional true} [:set TaskType]]
    [:file-globs {:optional true} [:vector string?]]
+   [:exclude-globs {:optional true} [:vector string?]]
    [:resource-patterns {:optional true} [:vector [:or string? [:fn {:error/message "should be a regex pattern"} #(instance? java.util.regex.Pattern %)]]]]
    [:repo-types {:optional true} [:set RepoType]]
    [:phases {:optional true} [:set keyword?]]])
