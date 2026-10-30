@@ -26,6 +26,7 @@
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.llm.network-health :as nh]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+   [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]
    [ai.miniforge.llm.protocols.records.llm-client :as records]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -124,7 +125,7 @@
   "`probe-endpoint-for` `backend-key` when the environment is exactly
    `env`."
   [backend-key env]
-  (with-redefs [impl/getenv-value (fn [k] (get env k))]
+  (with-redefs [settings/getenv-value (fn [k] (get env k))]
     (impl/probe-endpoint-for backend-key)))
 
 (defn- ^{:stratum 0} probe-request
@@ -160,10 +161,10 @@
                  :stream-exec-fn (fn [_cmd _on-line opts]
                                    (reset! seen opts)
                                    (impl/timeout-result [] stub-stream-timeout))})]
-    (with-redefs [impl/getenv-value (fn [k]
-                                      (if (= k monitor-env-var)
-                                        monitor-env-value
-                                        (System/getenv k)))]
+    (with-redefs [settings/getenv-value (fn [k]
+                                          (if (= k monitor-env-var)
+                                            monitor-env-value
+                                            (System/getenv k)))]
       (llm/complete-stream client {:prompt "test"} (fn [_] nil)))
     @seen))
 

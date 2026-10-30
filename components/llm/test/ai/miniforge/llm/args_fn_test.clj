@@ -22,7 +22,8 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
-   [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
+   [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+   [ai.miniforge.llm.protocols.impl.llm-client.completion :as completion]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -74,15 +75,51 @@
     (is (not (contains? (get impl/backends :opencode) :api-key-env)))
     (is (= :argv (get-in impl/backends [:opencode :prompt-via])))))
 
+(deftest ^{:stratum 0} with-client-config-test
+  (testing "an isolated client isolates every request"
+    (is (true? (:isolated? (completion/with-client-config {:prompt "p"} {:isolated? true})))))
+
+  (testing "a request may ask for isolation on a plain client"
+    (is (true? (:isolated? (completion/with-client-config {:prompt "p" :isolated? true} {})))))
+
+  (testing "model and context size still pass through"
+    (is (= {:prompt "p" :model "m" :num-ctx 8}
+           (completion/with-client-config {:prompt "p"} {:model "m" :num-ctx 8})))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================
 ;; claude-args
 ;; ============================================================================
 (deftest ^{:stratum 1} claude-args-minimal-test
-  (testing "minimal prompt produces [-p <prompt>]"
-    (let [args ((private-fn 'claude-args) {:prompt "hello"})]
-      (is (= ["-p" "hello"] args)))))
+  (testing "a minimal prompt with hook settings produces [-p --settings <path> <prompt>]"
+    (let [args ((private-fn 'claude-args) {:prompt "hello"
+                                           :supervision {:settings-path "/tmp/s.json"}})]
+      (is (= ["-p" "--settings" "/tmp/s.json" "hello"] args)))))
+
+(deftest ^{:stratum 1} claude-args-isolated-test
+  (testing "a call with no hook settings gets no tools, settings, skills, or host MCP config"
+    (is (= ["-p" "--tools" "" "--setting-sources" "" "--disable-slash-commands"
+            "--strict-mcp-config" "hello"]
+           ((private-fn 'claude-args) {:prompt "hello"}))))
+
+  (testing "isolated? isolates a call that has hook settings"
+    (let [args ((private-fn 'claude-args) {:prompt "p"
+                                           :isolated? true
+                                           :supervision {:settings-path "/tmp/s.json"}})]
+      (is (= ["--tools" "" "--setting-sources" "" "--disable-slash-commands" "--strict-mcp-config"]
+             (->> args (drop-while #(not= "--tools" %)) (take 6))))
+      (is (= "p" (last args)))))
+
+  (testing "with an --mcp-config, isolation does not repeat --strict-mcp-config"
+    (let [args ((private-fn 'claude-args) {:prompt "p" :mcp-config "/tmp/mcp.json"})]
+      (is (some #{"--setting-sources"} args))
+      (is (= 1 (count (filter #(= "--strict-mcp-config" %) args))))))
+
+  (testing "a call with hook settings and no isolated? gets none of the flags"
+    (let [args ((private-fn 'claude-args) {:prompt "p"
+                                           :supervision {:settings-path "/tmp/s.json"}})]
+      (is (not-any? #{"--tools" "--setting-sources" "--disable-slash-commands"} args)))))
 
 (deftest ^{:stratum 1} claude-args-streaming-test
   (testing "streaming adds output-format and verbose flags"
@@ -107,8 +144,9 @@
                   (take 3)))
           "--strict-mcp-config immediately follows the --mcp-config path")))
 
-  (testing "no mcp-config means no --strict-mcp-config"
-    (let [args ((private-fn 'claude-args) {:prompt "p"})]
+  (testing "a call with hook settings and no mcp-config gets no --strict-mcp-config"
+    (let [args ((private-fn 'claude-args) {:prompt "p"
+                                           :supervision {:settings-path "/tmp/s.json"}})]
       (is (not (some #(= "--strict-mcp-config" %) args))))))
 
 (deftest ^{:stratum 1} claude-args-allowed-tools-test

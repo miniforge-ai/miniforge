@@ -35,6 +35,9 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.coerce.interface :as coerce]
+   [ai.miniforge.workflow.boundary.checkpoint-directory :as directory]
+   [ai.miniforge.workflow.boundary.checkpoint-file :as checkpoint-file]
+   [ai.miniforge.workflow.boundary.checkpoint-history :as history]
    [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.checkpoint-store-records :as checkpoint-records]
@@ -43,14 +46,9 @@
    [ai.miniforge.workflow.schemas :as schemas]
    [babashka.fs :as fs]
    [clojure.edn :as edn]
-   [slingshot.slingshot :refer [try+]])
-  (:import [java.nio.file Files StandardCopyOption]))
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} temp-file-suffix
-  "Temporary suffix used for atomic checkpoint writes."
-  ".tmp")
 
 (defn- ^{:stratum 0} read-edn-file
   "Read a checkpoint EDN file, normalizing instants the same way the
@@ -134,6 +132,10 @@
                              data
                              e))
 
+(defn- ^{:stratum 0} write-edn-atomically!
+  [target-path data]
+  (checkpoint-file/write! target-path data))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} read-checkpoint-file
@@ -173,19 +175,6 @@
                                  {:checkpoint/path (str path)}
                                  e))))
 
-(defn- ^{:stratum 1} write-edn-atomically!
-  [target-path data]
-  (let [target (fs/file target-path)
-        temp-path (str target-path temp-file-suffix)]
-    (fs/create-dirs (fs/parent target))
-    (spit temp-path (pr-str data))
-    (Files/move (fs/path temp-path)
-               (fs/path target-path)
-               (into-array java.nio.file.CopyOption
-                           [StandardCopyOption/ATOMIC_MOVE
-                            StandardCopyOption/REPLACE_EXISTING]))
-    target-path))
-
 (defn- ^{:stratum 1} append-gate-history!
   "Append the phase's gate decision to the run's gate history when the
    phase result carries a decision envelope. Best-effort: a failed
@@ -206,13 +195,12 @@
                    ;; consumer reads.
                    :phase/gate-errors (:phase/gate-errors phase-result)
                    :phase/gate-failures (:phase/gate-failures phase-result)}]
-        (fs/create-dirs dir)
         ;; Same instant normalization the checkpoint records get: gate
         ;; errors carry java.time.Instant values (policy-pack violations'
         ;; :timestamp), which pr-str would emit as #object[...] and make
         ;; the history unreadable.
-        (with-open [w (java.io.FileOutputStream. (fs/file dir gate-history-filename) true)]
-          (.write w (.getBytes (str (pr-str (coerce/stringify-instants entry)) "\n") "UTF-8"))))
+        (history/append! (fs/path dir gate-history-filename)
+                         (str (pr-str (coerce/stringify-instants entry)) "\n")))
       (catch Exception _ nil))))
 
 (defn ^{:stratum 1} pin-checkpoint!
@@ -241,15 +229,9 @@
                              data)
             ;; Into the run directory by path, never creating it.
             (try+
-              (let [temp (str (fs/path (fs/parent path)
-                                       (str checkpoint-paths/pin-marker-temp-prefix
-                                            (random-uuid) temp-file-suffix)))]
-                (spit temp (pr-str {:pinned-at (str (java.time.Instant/now))}))
-                (Files/move (fs/path temp) (fs/path path)
-                            (into-array java.nio.file.CopyOption
-                                        [StandardCopyOption/ATOMIC_MOVE
-                                         StandardCopyOption/REPLACE_EXISTING]))
-                path)
+              (checkpoint-file/write! path {:pinned-at (str (java.time.Instant/now))}
+                                      {:prepare-directory! directory/existing!
+                                       :prefix checkpoint-paths/pin-marker-temp-prefix})
               (catch Exception e
                 (pin-failure workflow-run-id data e)))))))
      ;; Root resolution or the lock itself failing: still an anomaly.
@@ -343,7 +325,6 @@
      (when (and (map? manifest) (not (anomaly/anomaly? manifest)))
        (try+
          (write-edn-atomically! path (assoc manifest :workflow/spec-path (str spec-path)))
-         path
          (catch Exception e
            (write-failure (checkpoint-paths/resolve-checkpoint-root opts) workflow-run-id nil e)))))))
 
@@ -385,6 +366,8 @@
       ;; the manifest actually written (merged with it) is validated
       ;; before anything is written.
       (try+
+        (directory/prepare! checkpoint-root)
+        (directory/prepare! (checkpoint-paths/workflow-checkpoint-dir checkpoint-root workflow-run-id))
         (let [existing-manifest (read-edn-file manifest-path)
               merged-manifest (merge (checkpoint-records/build-manifest ctx checkpoint-root
                                                                         existing-manifest)
@@ -398,30 +381,26 @@
                       :let [path (checkpoint-paths/phase-checkpoint-path checkpoint-root workflow-run-id resumed-phase)]
                       :when (and resumed-result (not (fs/exists? path)))]
                 (write-edn-atomically! path (checkpoint-records/build-phase-checkpoint ctx resumed-phase resumed-result)))
-              (when (and phase-name phase-result)
-                (write-edn-atomically!
-                 (checkpoint-paths/phase-checkpoint-path checkpoint-root
-                                                         workflow-run-id
-                                                         phase-name)
-                 (checkpoint-records/build-phase-checkpoint ctx phase-name phase-result))
-                (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
-              (write-edn-atomically! snapshot-path snapshot)
-              (write-edn-atomically! manifest-path merged-manifest)
-              ;; A run started pinned (`mf resume --pin` under a new run id)
-              ;; is pinned with its first checkpoint, through the locked pin
-              ;; the GC excludes; a pin that fails is a failed checkpoint.
-              (let [pin (when (and (true? (get-in ctx [:execution/opts :checkpoint/pin?]))
-                                   (not (fs/exists? (checkpoint-paths/pin-marker-path
-                                                     checkpoint-root workflow-run-id))))
-                          (pin-checkpoint! workflow-run-id {:checkpoint/root checkpoint-root}))]
-                (if (anomaly/anomaly? pin)
-                  (assoc-in pin [:anomaly/data :phase/name] phase-name)
-                  (cond-> {:checkpoint/root checkpoint-root
-                           :checkpoint/machine-snapshot-path snapshot-path
-                           :checkpoint/manifest-path manifest-path}
-                    (and phase-name phase-result)
-                    (assoc :checkpoint/phase phase-name
-                           :checkpoint/phase-path (checkpoint-paths/phase-checkpoint-path
-                                                   checkpoint-root workflow-run-id phase-name))))))))
+              (let [phase-path (when (and phase-name phase-result)
+                                 (write-edn-atomically!
+                                  (checkpoint-paths/phase-checkpoint-path checkpoint-root workflow-run-id phase-name)
+                                  (checkpoint-records/build-phase-checkpoint ctx phase-name phase-result)))]
+                (when phase-path
+                  (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
+                ;; A failed initial pin must remain a failed checkpoint.
+                (let [snapshot-path (write-edn-atomically! snapshot-path snapshot)
+                      manifest-path (write-edn-atomically! manifest-path merged-manifest)
+                      pin (when (and (true? (get-in ctx [:execution/opts :checkpoint/pin?]))
+                                     (not (fs/exists? (checkpoint-paths/pin-marker-path
+                                                       checkpoint-root workflow-run-id))))
+                            (pin-checkpoint! workflow-run-id {:checkpoint/root checkpoint-root}))]
+                  (if (anomaly/anomaly? pin)
+                    (assoc-in pin [:anomaly/data :phase/name] phase-name)
+                    (cond-> {:checkpoint/root checkpoint-root
+                             :checkpoint/machine-snapshot-path snapshot-path
+                             :checkpoint/manifest-path manifest-path}
+                      phase-path
+                      (assoc :checkpoint/phase phase-name
+                             :checkpoint/phase-path phase-path))))))))
         (catch Exception e
           (write-failure checkpoint-root workflow-run-id phase-name e))))))

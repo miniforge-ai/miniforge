@@ -230,38 +230,6 @@
                :output (:output (:data result))})
       result)))
 
-(defn ^{:stratum 1} enable-auto-merge!
-  "Enable auto-merge for a PR (merges when all checks pass).
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: PR number
-   - policy: Merge policy
-
-   Returns result."
-  [worktree-path pr-number & {:keys [policy]
-                              :or {policy default-merge-policy}}]
-  (let [method-flag (case (:method policy :squash)
-                      :squash "--squash"
-                      :rebase "--rebase"
-                      :merge "--merge")
-        result (run-gh-command
-                ["gh" "pr" "merge" (str pr-number) method-flag "--auto"]
-                worktree-path)]
-    (if (dag/ok? result)
-      (dag/ok {:auto-merge-enabled? true})
-      result)))
-
-(defn ^{:stratum 1} disable-auto-merge!
-  "Disable auto-merge for a PR."
-  [worktree-path pr-number]
-  (let [result (run-gh-command
-                ["gh" "pr" "merge" (str pr-number) "--disable-auto"]
-                worktree-path)]
-    (if (dag/ok? result)
-      (dag/ok {:auto-merge-disabled? true})
-      result)))
-
 (defn ^{:stratum 1} rebase-pr!
   "Rebase a PR onto the latest base branch.
 
@@ -431,9 +399,6 @@
   ;; Merge a PR
   (merge-pr! "/path/to/repo" 123 :policy {:method :squash
                                           :delete-branch-after-merge? true})
-
-  ;; Enable auto-merge
-  (enable-auto-merge! "/path/to/repo" 123)
 
   ;; Rebase a PR
   (rebase-pr! "/path/to/repo" "feat/my-feature")
