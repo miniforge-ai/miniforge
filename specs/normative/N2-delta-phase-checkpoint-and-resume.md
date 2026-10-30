@@ -55,6 +55,7 @@ They extend N2's families; IDs are never reused.
 | N2D.CK.4 | MUST NOT | Silently resume a workflow whose spec has drifted; error and require the documented override (§4). |
 | N2D.CK.5 | MUST | Emit the checkpoint and resume events of N3 §3.21 at the points §9 defines. |
 | N2D.CK.6 | MUST | Honor the checkpoint store location and retention rules of §3 and §7. |
+| N2D.CK.7 | MUST | Force a write's checkpoint files to disk before publishing the manifest that names them, and hold the run's checkpoint lock while writing (§1). |
 
 ### Test Obligations
 
@@ -122,6 +123,15 @@ workflow runner MUST persist:
 The write MUST be atomic (write to a temp file in the same directory,
 then rename). A partial or corrupt checkpoint MUST NOT be observable by
 a later resume.
+
+The files of one write MUST be forced to disk before the manifest that
+names them is published (§2); the manifest is the commit point, so a
+write that stops before it leaves the previous checkpoint whole. The
+reference implementation writes each checkpoint's snapshot and phase
+files into a new generation directory under the run's directory and
+removes generations neither the current nor the replaced manifest names.
+A write MUST hold the run's checkpoint lock, which pinning and checkpoint
+GC also take.
 
 If one of these writes fails (disk full, permission denied, etc.), the
 workflow MUST NOT fail as a result. The runner MUST log the error and
