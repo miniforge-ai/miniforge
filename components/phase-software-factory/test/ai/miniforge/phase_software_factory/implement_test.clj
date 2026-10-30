@@ -1169,6 +1169,20 @@
           (is (false? @curated))
           (is (= :run-stopped (get-in result [:phase :result :error :data :code]))))))))
 
+(deftest ^{:stratum 2} a-cancel-during-the-curator-is-recorded-with-the-agents-spend-test
+  (testing "a cancel that lands while the curator runs ends the phase as stopped,
+            keeping what the agent spent"
+    (let [cs (atom {:paused false :stopped false})]
+      (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                    agent/invoke (fn [_ _ _] (response/success nil {:tokens 800 :duration-ms 1500}))
+                    agent/curate-implement-output (fn [m] (swap! cs assoc :stopped true) (mock-curator-success m))]
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :implement})
+                      (assoc-in [:execution/opts :control-state] cs))
+              result ((:enter (phase/get-phase-interceptor {:phase :implement})) ctx)]
+          (is (= :run-stopped (get-in result [:phase :result :error :data :code])))
+          (is (= 800 (get-in result [:phase :result :metrics :tokens]))))))))
+
 (use-fixtures :each
   (fn [f]
     (phase/reset-phase-loader!)
