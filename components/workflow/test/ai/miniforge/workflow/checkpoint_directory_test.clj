@@ -4,6 +4,7 @@
 (ns ai.miniforge.workflow.checkpoint-directory-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.boundary.checkpoint-directory-policy :as policy]
+            [ai.miniforge.workflow.boundary.checkpoint-file :as checkpoint-file]
             [ai.miniforge.workflow.checkpoint-directory-support :as directories]
             [ai.miniforge.workflow.checkpoint-store :as store]
             [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
@@ -41,8 +42,8 @@
   (let [source (fs/create-dir (fs/path root "source"))
         replacement (fs/create-dir (fs/path root "alternate"))
         alias (fs/create-sym-link (fs/path root "alias") source)
-        write! (partial directories/switch-alias! spit alias replacement)
-        published (with-redefs [spit write!]
+        write! (partial directories/switch-alias! checkpoint-file/fill! alias replacement)
+        published (with-redefs [checkpoint-file/fill! write!]
                     (support/write! (fs/path alias "snapshot.edn") :complete))]
     (is (= (fs/path (fs/real-path source) "snapshot.edn") (fs/path published)))
     (is (= :complete (directories/read-value (fs/path source "snapshot.edn"))))

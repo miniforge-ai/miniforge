@@ -96,6 +96,16 @@
   "(?i)^opencode\\.jsonc?$"
   "(?i)^\\.miniforge-session(/|$)"]
 
+ ;; The config paths above, as concrete paths. Each path a tool names is
+ ;; also checked under each of these once they are resolved: when `.claude`
+ ;; links to `shared/`, a write to `shared/settings.local.json` is a write to
+ ;; `.claude/settings.local.json`, and :tool/protected-paths refuses it.
+ :tool/managed-config-paths
+ [".claude" ".claude/settings.json" ".claude/settings.local.json" ".mcp.json"
+  ".codex" ".codex/config.toml" ".cursor" ".cursor/mcp.json" ".cursor/cli.json"
+  ".opencode" ".opencode/opencode.json" ".opencode/opencode.jsonc"
+  "opencode.json" "opencode.jsonc" ".miniforge-session"]
+
  ;; Bash commands longer than this are refused before any pattern runs, so
  ;; a padded command cannot make the checks below slow enough to time the
  ;; hook out. Long file content goes through Write.

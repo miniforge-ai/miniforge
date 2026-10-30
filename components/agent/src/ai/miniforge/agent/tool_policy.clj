@@ -38,6 +38,7 @@
    [:tool/path-keys [:map-of :string [:vector :keyword]]]
    [:tool/glob-keys [:map-of :string [:vector :keyword]]]
    [:tool/protected-paths [:vector :string]]
+   [:tool/managed-config-paths [:vector :string]]
    [:bash/max-command-length [:int {:min 1}]]
    [:bash/deny-patterns [:vector :string]]])
 
@@ -98,6 +99,51 @@
   [rel]
   (some-> rel (str/replace "\\" "/")))
 
+(defn ^{:stratum 0} follow-links
+  "`rel` (`/`-separated) under `root`, with each symlink on it replaced by
+   its target, hop by hop, whether the target exists or not.
+   getCanonicalFile alone stops at a link whose target is missing and
+   returns the link's own path, so a dangling `.mcp.json -> cfg/mcp.json`
+   would not show that `cfg/mcp.json` is the file Claude loads. A link's
+   target is walked one component at a time, as the kernel does: each
+   component is followed if it is a link before the next is applied, so
+   `..` steps back from where the links before it led, not from the text
+   of the target. Stops after 40 links on one path, the kernel's own loop
+   limit."
+  [root rel]
+  (loop [cur   (.toPath (io/file (str root)))
+         parts (remove str/blank? (str/split (str rel) #"/"))
+         hops  0]
+    (cond
+      (and (java.nio.file.Files/isSymbolicLink cur) (< hops 40))
+      (let [target (java.nio.file.Files/readSymbolicLink cur)]
+        (recur (if (.isAbsolute target) (.getRoot target) (.getParent cur))
+               (concat (map str target) parts)
+               (inc hops)))
+
+      (seq parts)
+      (let [[part & more] parts]
+        (recur (case part
+                 "."  cur
+                 ".." (or (.getParent cur) cur)
+                 (.resolve cur ^String part))
+               more
+               hops))
+
+      :else
+      cur)))
+
+(defn ^{:stratum 0} with-children
+  "The `managed` paths plus, for each that is a directory under `root`,
+   its direct entries: a file inside a managed directory can itself be a
+   link (`.miniforge-session/claude-settings.json -> ../cfg/s.json`), which
+   resolving the directory does not follow."
+  [root managed]
+  (mapcat (fn [m]
+            (cons m (for [^java.io.File f (or (.listFiles (io/file (str root) m)) [])]
+                      (str m "/" (.getName f)))))
+          managed))
+
 (defn ^{:stratum 0} escaping-glob?
   "True when glob `pattern` would search outside the directory it runs in:
    absolute (rooted at `/` or `\\`, or naming a Windows drive), starting
@@ -111,6 +157,28 @@
                  (some #{".."} (str/split p #"[/\\\\]"))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} managed-config-aliases
+  "The names `path` has under the `managed` config paths once each is
+   resolved: for each managed path whose resolved form (`follow-links`,
+   then canonical) is, or contains, the canonical form of `path`, that
+   managed path plus the rest of `path` below it. Each managed directory's
+   direct entries count as managed paths too (`with-children`). When
+   `.claude` links to
+   `shared/`, the path `shared/settings.local.json` is also
+   `.claude/settings.local.json`, so the protected patterns see the file
+   a later session loads. A relative `path` is taken as relative to
+   `root`."
+  [root managed path]
+  (let [canon  (fn [^java.io.File f] (.toPath (.getCanonicalFile f)))
+        file   (io/file (str path))
+        path-c (canon (if (.isAbsolute file) file (io/file (str root) (str path))))]
+    (keep (fn [m]
+            (let [m-c (canon (.toFile ^java.nio.file.Path (follow-links root m)))]
+              (when (.startsWith path-c m-c)
+                (let [below (str (.relativize m-c path-c))]
+                  (if (= "" below) m (str m "/" below))))))
+          (with-children root managed))))
 
 (defn ^{:stratum 1} read-tool-policy
   "Parse tool-policy.edn `text`, check it against `ToolPolicy`, and
@@ -127,7 +195,9 @@
         (update :tool/protected-paths #(mapv re-pattern %))
         (update :bash/deny-patterns #(mapv re-pattern %)))))
 
-(defn ^{:stratum 1} path-refusal
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} path-refusal
   "Why calling `tool-name` with `tool-input` reaches outside the worktree,
    or nil when it does not. `policy`'s :tool/path-keys and :tool/glob-keys
    say which inputs name a path or a glob. `session` carries :root, the
@@ -139,7 +209,9 @@
    component, resolve inside root (`worktree-relative`), and pass
    `path-ok?` both resolved and as written (`lexical-relative`), so the
    guard's own symlink and metadata checks see both; it is protected when
-   either form matches :tool/protected-paths, with `/` separators."
+   either form, or its name under a linked managed config path
+   (`managed-config-aliases`), matches :tool/protected-paths, with `/`
+   separators."
   [policy {:keys [root path-ok?]} tool-name tool-input]
   (let [path-keys (get-in policy [:tool/path-keys tool-name])
         glob-keys (get-in policy [:tool/glob-keys tool-name])
@@ -157,7 +229,10 @@
                                   (and lex (not (path-ok? root lex))))
                               (str (name k) " " (pr-str v) " is outside the worktree or in its git metadata")
 
-                              (or (protected rel) (and lex (protected lex)))
+                              (or (protected rel)
+                                  (and lex (protected lex))
+                                  (some protected (managed-config-aliases
+                                                   root (:tool/managed-config-paths policy) p)))
                               (str (name k) " " (pr-str v) " is agent or session config miniforge manages"))))
                         (path-candidates v)))
                 (named path-keys))
