@@ -22,13 +22,21 @@
    into an overall CI status. The polling loop lives in `ci-monitor`."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.pr-lifecycle.messages :as messages]
    [babashka.process :as process]
-   [clojure.edn :as edn]
-   [clojure.string :as str]))
+   [cheshire.core :as json]
+   [clojure.string :as str]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; GitHub CLI helpers
+(def ^{:stratum 0} check-json-fields
+  "Fields requested from `gh pr checks --json`. gh 2.102 accepts bucket,
+   completedAt, description, event, link, name, startedAt, state and
+   workflow; it rejects `conclusion` and `detailsUrl` with exit 1."
+  "name,state,bucket,link,workflow")
+
 (defn ^{:stratum 0} run-gh-command
   "Run a gh CLI command and return result."
   [args worktree-path]
@@ -47,54 +55,69 @@
     (catch Exception e
       (dag/err :gh-exception (.getMessage e)))))
 
-;; Value coercion
-(defn- ^{:stratum 0} keywordize-val
-  "Coerce a map value to a lower-case keyword, returning `default` when nil."
-  [m k default]
-  (or (some-> (get m k) str/lower-case keyword) default))
+;; Output parsing
+(defn ^{:stratum 0} parse-checks-json
+  "Parse `gh pr checks --json` output into an ok result of {:checks [...]},
+   or an error result when the output is not a JSON array."
+  [output]
+  (try+
+    (let [checks (json/parse-string output true)]
+      (if (sequential? checks)
+        (dag/ok {:checks (vec checks)})
+        (dag/err :gh-output-unparseable (messages/system-t :ci/checks-not-json)
+                 {:raw output})))
+    (catch Exception e
+      (dag/err :gh-output-unparseable (ex-message e) {:raw output}))))
 
-(defn ^{:stratum 0} get-check-logs
-  "Get logs for failed checks.
+;; Check classification
+(def ^{:stratum 0} bucket->group
+  "Status group for each value of the `bucket` field of `gh pr checks --json`.
+   gh derives the bucket from a check's state and conclusion."
+  {"pass"     :passed
+   "fail"     :failed
+   "pending"  :pending
+   "skipping" :neutral
+   "cancel"   :cancelled})
 
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: PR number
-   - check-name: Name of the check
+;; Failed-job logs
+(def ^{:stratum 0} max-log-chars
+  "Characters of failed-job log kept per workflow run."
+  12000)
 
-   Returns result with logs."
-  [_worktree-path _pr-number check-name]
-  ;; Note: gh doesn't have a direct way to get check logs
-  ;; This would typically go through the GitHub API or action artifacts
-  (dag/ok {:logs nil
-           :message "Log retrieval requires GitHub API access"
-           :check-name check-name}))
+(def ^{:stratum 0} failure-line-pattern
+  "Log lines that state a failure: clojure.test FAIL/ERROR headers and
+   expected/actual, Actions ##[error] annotations, compiler and lint
+   `error:` lines, exceptions. A long test log can put them far from its
+   end, and gh prints several failed jobs one after another."
+  #"FAIL in|ERROR in|##\[error\]|error:|Exception|expected:|actual:")
+
+(def ^{:stratum 0} log-elision
+  "Line separating the failure lines kept from the log's tail."
+  "...")
+
+(defn ^{:stratum 0} matching-lines
+  "The lines of `text` that `pattern` finds, joined, cut to `limit` chars."
+  [text pattern limit]
+  (let [joined (->> (str/split-lines text) (filter #(re-find pattern %)) (str/join "\n"))]
+    (subs joined 0 (min limit (count joined)))))
+
+(def ^{:stratum 0} max-log-runs
+  "Most workflow runs whose failed-job logs are fetched for one poll."
+  3)
+
+(defn ^{:stratum 0} run-id-from-link
+  "GitHub Actions run id from a check's `link`; nil for other CI providers."
+  [link]
+  (some->> link (re-find #"/actions/runs/(\d+)") second))
+
+(defn ^{:stratum 0} checks-not-started?
+  "True when a failed `gh pr checks` call means CI has not reported yet:
+   `no checks reported` right after a push, before any workflow has
+   registered a check. (With --json, gh exits 0 while checks are pending.)"
+  [result]
+  (str/starts-with? (str (get-in result [:error :message])) "no checks reported"))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} get-pr-checks
-  "Get CI check status for a PR.
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: PR number
-
-   Returns result with check information."
-  [worktree-path pr-number]
-  (let [result (run-gh-command
-                ["gh" "pr" "checks" (str pr-number) "--json"
-                 "name,state,conclusion,detailsUrl"]
-                worktree-path)]
-    (if (dag/ok? result)
-      (try
-        (let [checks (edn/read-string
-                      (str "[" (str/replace (:output (:data result))
-                                            #"\"(\w+)\":" ":$1 ")
-                           "]"))]
-          (dag/ok {:checks checks}))
-        (catch Exception _e
-          ;; Fallback: try to parse as JSON manually
-          (dag/ok {:checks [] :raw (:output (:data result))})))
-      result)))
 
 (defn ^{:stratum 1} get-pr-status
   "Get overall PR status including checks.
@@ -109,41 +132,104 @@
       (dag/ok {:raw (:output (:data result))})
       result)))
 
+;; Failed-job logs
+(defn ^{:stratum 1} clean-log
+  "Drop ANSI color codes (an ESC byte or, as gh prints them to a pipe, a
+   literal `^[`), byte-order marks and the per-line timestamp from
+   `gh run view --log-failed` output. A log longer than `max-log-chars`
+   keeps its failure lines (up to half) and then as much of its tail as
+   fits."
+  [text]
+  (let [cleaned (-> text
+                    (str/replace #"(?:\u001b|\^\[)\[[0-9;]*m|\uFEFF" "")
+                    (str/replace #"(?m)\t\d{4}-\d\d-\d\dT[0-9:.]+Z " "\t"))
+        n (count cleaned)
+        failures (when (> n max-log-chars)
+                   (matching-lines cleaned failure-line-pattern (quot max-log-chars 2)))
+        head (if (str/blank? failures) "" (str failures "\n" log-elision "\n"))
+        tail (- max-log-chars (count head))]
+    (if (> n max-log-chars)
+      (str head (subs cleaned (- n tail)))
+      cleaned)))
+
+;; Check classification
+(defn ^{:stratum 1} check-group
+  "Status group of one gh check, from its `bucket`; :unknown when absent."
+  [check]
+  (get bucket->group (:bucket check) :unknown))
+
+(defn ^{:stratum 1} get-pr-checks
+  "Get CI check status for a PR.
+
+   Arguments:
+   - worktree-path: Path to git worktree
+   - pr-number: PR number
+
+   Returns an ok result of {:checks [...]}, adding :pending? true when gh
+   reports that checks have not finished; otherwise gh's error result."
+  [worktree-path pr-number]
+  (let [result (run-gh-command
+                ["gh" "pr" "checks" (str pr-number) "--json" check-json-fields]
+                worktree-path)]
+    (cond
+      (dag/ok? result) (parse-checks-json (:output (:data result)))
+      (checks-not-started? result) (dag/ok {:checks [] :pending? true})
+      :else result)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} get-check-logs
+  "Failed-job logs for `failed-checks`, fetched with
+   `gh run view <run-id> --log-failed` once per GitHub Actions run.
+
+   Returns {:ci/logs string-or-nil :ci/log-errors [...]}. :ci/logs is nil
+   when no run produced log text, e.g. every failed check comes from a
+   CI provider other than GitHub Actions."
+  [worktree-path failed-checks]
+  (let [by-run (->> failed-checks
+                    (group-by #(run-id-from-link (:link %)))
+                    (remove (comp nil? key))
+                    (take max-log-runs))
+        fetched (for [[run-id run-checks] by-run]
+                  {:run-id run-id
+                   :names (map :name run-checks)
+                   :result (run-gh-command ["gh" "run" "view" run-id "--log-failed"]
+                                           worktree-path)})
+        sections (for [{:keys [run-id names result]} fetched
+                       :when (dag/ok? result)
+                       :let [text (clean-log (:output (:data result)))]
+                       :when (not (str/blank? text))]
+                   (str (messages/system-t :ci/log-section
+                                           {:run-id run-id :checks (str/join ", " names)})
+                        "\n" text))]
+    {:ci/logs (when (seq sections) (str/join "\n\n" sections))
+     :ci/log-errors (vec (for [{:keys [run-id result]} fetched
+                               :when (dag/err? result)]
+                           {:run-id run-id :error (:error result)}))}))
+
 ;; Status computation
-(defn ^{:stratum 1} compute-ci-status
+(defn ^{:stratum 2} compute-ci-status
   "Compute overall CI status from individual checks.
 
    Arguments:
-   - checks: Sequence of check maps with :state and :conclusion
+   - checks: Sequence of `gh pr checks --json` maps with :name :state :bucket
 
-   Returns {:status keyword :passed [] :failed [] :pending []}"
+   A cancelled check is not a pass: it outranks passed and neutral checks.
+
+   Returns {:status keyword :passed [] :failed [] :pending [] :neutral []
+            :cancelled [] :total n}"
   [checks]
-  (let [grouped (group-by (fn [check]
-                            (let [state      (keywordize-val check :state :unknown)
-                                  conclusion (keywordize-val check :conclusion :unknown)]
-                              (cond
-                                (= state :completed)
-                                (case conclusion
-                                  :success :passed
-                                  (:failure :action-required) :failed
-                                  (:neutral :skipped) :neutral
-                                  :cancelled :cancelled
-                                  :timed-out :timed-out
-                                  :failed)
-
-                                (#{:in-progress :queued :waiting :pending} state)
-                                :pending
-
-                                :else :unknown)))
-                          checks)
+  (let [grouped (group-by check-group checks)
         passed (vec (get grouped :passed []))
         failed (vec (get grouped :failed []))
         pending (vec (get grouped :pending []))
         neutral (vec (get grouped :neutral []))
+        cancelled (vec (get grouped :cancelled []))
 
         status (cond
                  (seq failed) :failure
                  (seq pending) :pending
+                 (seq cancelled) :cancelled
                  (seq passed) :success
                  (seq neutral) :neutral
                  :else :unknown)]
@@ -153,4 +239,5 @@
      :failed failed
      :pending pending
      :neutral neutral
+     :cancelled cancelled
      :total (count checks)}))
