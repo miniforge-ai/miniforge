@@ -39,6 +39,7 @@
   (:require
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.context :as context]
+   [ai.miniforge.workflow.boundary.checkpoint-permissions :as permissions]
    [babashka.fs :as fs]
    [slingshot.slingshot :refer [try+]])
   (:import
@@ -100,6 +101,9 @@
       (.setLastModified ^java.io.File f (- (System/currentTimeMillis) (* 90 24 60 60 1000))))
     id))
 
+(defn- ^{:stratum 0} call-in-posix-root [f root]
+  (when (permissions/posix? root) (f root)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} call-with-temp-checkpoint-root
@@ -118,6 +122,9 @@
         (delete-checkpoint-root! root)))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} call-with-posix-checkpoint-root [f]
+  (call-with-temp-checkpoint-root (partial call-in-posix-root f)))
 
 (defn ^{:stratum 2} with-temp-checkpoint-root
   "clojure.test fixture form of `call-with-temp-checkpoint-root`.

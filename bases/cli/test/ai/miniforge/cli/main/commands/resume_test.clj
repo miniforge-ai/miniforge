@@ -27,6 +27,7 @@
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.control :as control]
    [ai.miniforge.cli.main.commands.resume :as sut]
+   [ai.miniforge.cli.main.commands.resume-anomaly :as resume-anomaly]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
@@ -70,7 +71,7 @@
                                   "Invalid resume request"
                                   {:workflow-id "bad"})
           thrown (try+
-                  (#'sut/throw-resume-anomaly! source)
+                  (resume-anomaly/throw-resume-anomaly! source)
                   (catch [:anomaly/category :anomalies/incorrect] m m))]
       (is (= :anomalies/incorrect (:anomaly/category thrown)))
       (is (= :invalid-input (:anomaly/type thrown)))
@@ -152,6 +153,21 @@
         (is (= {:branch "task-a"
                 :bundle-path "/tmp/task-a.bundle"}
                (:resume-workspace @run-pipeline-opts)))))))
+
+(deftest ^{:stratum 0} required-operator-refuses-an-unowned-resume-before-writing-test
+  (let [pipeline-ran? (atom false)
+        pinned? (atom false)]
+    (with-redefs [wr/reconstruct-context
+                  (fn [_ _] {:machine-snapshot {:execution/id (random-uuid)}
+                             :phase-results {}})
+                  context/require-operator? (constantly true)
+                  workflow/pin-checkpoint! (fn [& _] (reset! pinned? true))
+                  main-display/print-info (fn [& _] nil)
+                  sut/run-pipeline (fn [& _] (reset! pipeline-ran? true))]
+      (is (thrown-with-msg? Exception #"Refusing to resume"
+                            (sut/resume-workflow (random-uuid) {:quiet true :pin true})))
+      (is (false? @pipeline-ran?) "the runner never sees the refused resume")
+      (is (false? @pinned?) "nothing is written for a refused resume"))))
 
 (deftest ^{:stratum 0} terminal-status-predicate-test
   (testing "explicit terminal statuses are accepted"
