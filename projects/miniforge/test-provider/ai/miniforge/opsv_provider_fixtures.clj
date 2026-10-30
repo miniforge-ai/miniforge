@@ -4,6 +4,7 @@
 (ns ai.miniforge.opsv-provider-fixtures
   "Coordinator/provider acceptance through real stores and a simulated API transport."
   (:require [ai.miniforge.decision-envelope.interface :as envelope]
+            [ai.miniforge.effect-transaction.interface :as effect]
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.opsv-provider-github.interface :as provider]
@@ -43,9 +44,12 @@
    :head {:ref (:pr/branch payload) :sha (:pr/head-sha payload)
           :repo {:full_name (:pr/repo payload)}}})
 
-(defn- ^{:stratum 0} allowing-envelope []
-  (envelope/envelope [] [] {:pins/pack-revision "opsv-test"
-                            :pins/rule-ids [] :pins/event-watermark 0}))
+(defn- ^{:stratum 0} allowing-envelope
+  "An allowing envelope signed by the runtime, as OPSV governance mints it."
+  []
+  (effect/sign-envelope
+   (envelope/envelope [] [] {:pins/pack-revision "opsv-test"
+                             :pins/rule-ids [] :pins/event-watermark 0})))
 
 ;------------------------------------------------------------------------------ Layer 1
 

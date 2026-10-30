@@ -7,6 +7,8 @@
   (:require
    [ai.miniforge.effect-transaction.fixtures :as fixture]
    [ai.miniforge.effect-transaction.interface :as fx]
+   [ai.miniforge.effect-transaction.store :as store]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -24,6 +26,14 @@
                             :proposal fixture/merge-proposal}
                      envelope (assoc :envelope envelope))
                fixture/now))
+
+(defn- ^{:stratum 0} commit-calls
+  "Commit `t` under `g`; return the record and how many times the effect ran."
+  [dir t g]
+  (let [calls (atom 0)
+        done (fx/commit-current! dir (:effect/id t) (constantly g) (constantly fixture/now)
+                                 (fn [_] (swap! calls inc) {:effect/outcome :succeeded}))]
+    [done @calls]))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -43,7 +53,34 @@
             done (fx/commit-current! dir (:effect/id t) (constantly g) (constantly fixture/now)
                                      (fn [_] (swap! calls inc) {:effect/outcome :succeeded}))]
         (is (= :failed (:effect/state done)))
+        (is (str/includes? (str (:effect/failure done)) "envelope-unsigned"))
         (is (zero? @calls))))))
+
+(deftest ^{:stratum 1} a-signed-allowing-envelope-commits-test
+  (let [dir (fixture/tmp-dir)
+        g (fixture/merge-grant)
+        envelope (fx/sign-envelope allowing)
+        [done calls] (commit-calls dir (propose-with! dir g (:envelope/id envelope) envelope) g)]
+    (is (= :succeeded (:effect/state done)) "the positive control for the refusals above")
+    (is (= 1 calls))))
+
+(deftest ^{:stratum 1} a-record-changed-in-the-store-never-runs-test
+  (doseq [[label change]
+          [[:swapped-proposal #(assoc-in % [:effect/proposal :pr/number] 8)]
+           [:copied-envelope #(let [other (fx/sign-envelope {:envelope/id (random-uuid)
+                                                             :envelope/decision :allow})]
+                                (assoc % :effect/envelope other
+                                       :effect/envelope-id (:envelope/id other)))]]]
+    (testing (name label)
+      (let [dir (fixture/tmp-dir)
+            g (fixture/merge-grant)
+            envelope (fx/sign-envelope allowing)
+            t (propose-with! dir g (:envelope/id envelope) envelope)
+            _ (store/transition! dir t (change t))
+            [done calls] (commit-calls dir t g)]
+        (is (= :failed (:effect/state done)))
+        (is (str/includes? (str (:effect/failure done)) "envelope-unsigned"))
+        (is (zero? calls))))))
 
 (deftest ^{:stratum 1} a-signed-allowing-envelope-survives-the-store-test
   (let [dir (fixture/tmp-dir)

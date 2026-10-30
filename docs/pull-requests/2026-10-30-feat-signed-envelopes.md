@@ -28,23 +28,29 @@ never looked at the envelope, so the record did not show that the runtime ever d
 3. `propose!` takes `:envelope` and keeps it on the record as `:effect/envelope`. The codec writes its `:envelope/at` as
   ISO text, like the record's own timestamps; a nested `Instant` was written as `#object[...]` and the record did not
   read back.
-4. Commit refuses with `:failed`, outcome `:envelope-unsigned`, when the proposal's envelope is missing, names another
-  id than `:effect/envelope-id`, does not allow, or does not verify. It runs right after the grant signature check, on
-  both commit paths. Release effects committed with `:authority/unenforced` are not checked, as before.
-5. Mint sites: merge and deploy sign the envelope `gate/decide` returns in their authority `prepare`; OPSV governance
+4. `propose!` also signs the record's binding (`:effect/signature` over effect id, class, grant id, envelope id,
+  envelope and proposal), so a signed envelope copied into another record, or a proposal changed in the store after it
+  was recorded (a swapped deploy YAML), does not commit.
+5. Commit refuses with `:failed`, outcome `:envelope-unsigned`, when the proposal's envelope is missing, names another
+  id than `:effect/envelope-id`, does not allow, or does not verify, or when the binding does not verify. It runs right
+  after the grant signature check, on both commit paths. Release effects committed with `:authority/unenforced` are not
+  checked, as before.
+6. Mint sites: merge and deploy sign the envelope `gate/decide` returns in their authority `prepare`; OPSV governance
   signs the envelope it mints. Each passes the envelope to `propose!`.
-6. `docs/architecture/rfc-ariadne-adoption.md` gains an implementation-status section: what "runtime-signed" means as
+7. `docs/architecture/rfc-ariadne-adoption.md` gains an implementation-status section: what "runtime-signed" means as
   built (one HMAC key, not public-key signatures), what is signed and where it is verified, which "attested" items
   remain targets, and the known limits.
 
 ## Testing Plan
 
 1. `signed_envelope_test`: a proposal with no envelope, an unsigned one, one naming another id, a signed refusing one,
-  and one altered from deny to allow after signing all record `:failed` without running the effect; a signed envelope
-  with an `Instant` survives the store and still verifies.
+  and one altered from deny to allow after signing all record `:failed` with outcome `envelope-unsigned` without running
+  the effect; a record whose proposal is swapped, or whose envelope is replaced by another signed one, in the store
+  after propose is refused the same way; a signed allowing envelope commits (positive control); a signed envelope with
+  an `Instant` survives the store and still verifies.
 2. Updated fixtures to propose with a signed allowing envelope: effect-transaction `fixtures/propose-merge!`,
-  opsv-actuation `execution_fixtures/allowing-envelope`. `phase-opsv/governance_test` now also asserts the minted
-  envelope is signed.
+  opsv-actuation `execution_fixtures/allowing-envelope`, and the `opsv-provider-test` fixture CI runs explicitly.
+  `phase-opsv/governance_test` now also asserts the minted envelope is signed.
 3. Ran locally: every test namespace in execution-grant, effect-transaction, opsv-actuation, phase-opsv,
   phase-deployment, decision-envelope, and pr-lifecycle's merge tests: 441 tests, 0 failures after the fixes above.
 

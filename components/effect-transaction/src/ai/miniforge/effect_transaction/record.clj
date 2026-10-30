@@ -19,6 +19,7 @@
   "Validation and durable lifecycle changes for effect transactions."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.effect-transaction.envelope-signature :as envelope-signature]
    [ai.miniforge.effect-transaction.messages :as msg]
    [ai.miniforge.effect-transaction.schema :as schema]
    [ai.miniforge.effect-transaction.store :as store]
@@ -102,7 +103,8 @@
             :effect/state :proposed
             :effect/at at
             :effect/updated-at at}
-         t (cond-> t envelope (assoc :effect/envelope envelope))]
+         t (cond-> t envelope (-> (assoc :effect/envelope envelope)
+                                  envelope-signature/bind))]
      (if (valid? t)
        (store/create! dir t)
        (invalid (msg/t :record/input-invalid) t)))))

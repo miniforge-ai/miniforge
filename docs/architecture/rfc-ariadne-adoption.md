@@ -219,11 +219,15 @@ or "attested", this is what is built.
    over its issued fields (revocation is recorded later as a separate
    marker and is outside the signature). The `DecisionEnvelope` that
    allows an effect, when it is minted for that effect: merge, deploy,
-   and OPSV PR creation. Envelopes from phase gating are not signed.
+   and OPSV PR creation. When the runtime proposes the effect it also
+   signs the record's binding: effect id, grant id, envelope and
+   proposal. Envelopes from phase gating are not signed.
 3. **Verified.** At effect commit, in `effect-transaction`. A grant
    that is unsigned or altered is denied (`:unsigned`). A proposal
    whose envelope is missing, names another id, does not allow, or does
-   not verify is denied (`:envelope-unsigned`). Either way the record
+   not verify, or whose binding does not verify, is denied
+   (`:envelope-unsigned`), so a signed envelope copied into another
+   record or a proposal edited in the store does not commit. Either way the record
    goes to `:failed` and the effect does not run. Effects committed
    with `:authority/unenforced` are not checked.
 4. **Not built.** Attested contracts, attested policy transforms and

@@ -2,12 +2,15 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.effect-transaction.envelope-signature
-  "The runtime's signature over the decision envelope that allows an effect.
+  "The runtime's signatures over the decision envelope that allows an
+   effect and over the record that binds it.
 
-   A durable proposal carries its allowing envelope. Commit refuses a
-   proposal whose envelope is missing, names another id, does not allow,
-   or does not verify against the runtime key, so an effect record written
-   outside the runtime cannot claim a decision the runtime never made."
+   The envelope is signed when it is minted. When the runtime proposes the
+   effect, it also signs the binding: effect id, class, grant id, envelope
+   and proposal together. Commit refuses a record whose envelope is
+   missing, names another id, does not allow, or does not verify, and one
+   whose binding does not verify, so a signed envelope copied into another
+   record, or a proposal changed after it was recorded, does not commit."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.runtime-signing.interface :as signing]))
@@ -15,6 +18,11 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} allowing-decisions #{:allow :allow-with-obligations})
+
+(def ^{:stratum 0} binding-keys
+  "The record fields the runtime signs when it proposes an effect."
+  [:effect/id :effect/class :effect/grant-id :effect/envelope-id
+   :effect/envelope :effect/proposal])
 
 (defn- ^{:stratum 0} unsigned-fields [envelope]
   (dissoc envelope :envelope/signature))
@@ -31,6 +39,22 @@
       (assoc envelope :envelope/signature
              (signing/sign key-bytes (unsigned-fields envelope))))))
 
+(defn ^{:stratum 1} bind
+  "`t` carrying the runtime signature over its binding fields, or `t`
+   unchanged when the key cannot load (commit then refuses it)."
+  [t]
+  (let [key-bytes (signing/load-or-create-key!)]
+    (if (anomaly/anomaly? key-bytes)
+      t
+      (assoc t :effect/signature (signing/sign key-bytes (select-keys t binding-keys))))))
+
+(defn ^{:stratum 1} binding-signed?
+  "True only when `t` carries this runtime's signature over its binding."
+  [t]
+  (let [key-bytes (signing/load-or-create-key!)]
+    (and (not (anomaly/anomaly? key-bytes))
+         (signing/signed? key-bytes (select-keys t binding-keys) (:effect/signature t)))))
+
 (defn ^{:stratum 1} signed?
   "True only when `envelope` carries this runtime's signature."
   [envelope]
@@ -44,13 +68,15 @@
 
 (defn ^{:stratum 2} refusal
   "Nil when `t` carries a runtime-signed, allowing envelope with the id it
-   names; otherwise an `:envelope-unsigned` denial."
+   names and a runtime signature over its binding; otherwise an
+   `:envelope-unsigned` denial."
   [t]
   (let [envelope (:effect/envelope t)]
     (when-not (and (map? envelope)
                    (= (:envelope/id envelope) (:effect/envelope-id t))
                    (contains? allowing-decisions (:envelope/decision envelope))
-                   (signed? envelope))
+                   (signed? envelope)
+                   (binding-signed? t))
       {:grant/outcome :envelope-unsigned :effect/id (:effect/id t)})))
 
 (comment

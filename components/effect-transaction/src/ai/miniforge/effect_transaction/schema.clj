@@ -74,6 +74,7 @@
    [:effect/grant-id [:maybe :uuid]]
    [:effect/envelope-id {:optional true} [:maybe :uuid]]
    [:effect/envelope {:optional true} [:map-of :keyword any?]]
+   [:effect/signature {:optional true} [:re #"\A[0-9a-f]{64}\z"]]
    [:effect/proposal [:map-of :keyword any?]]
    [:effect/state (into [:enum] states)]
    ;; Whether authority was CHECKED for this effect. `:unenforced` is
