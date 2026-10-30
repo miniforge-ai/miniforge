@@ -748,6 +748,7 @@
   :workflow-runner/resuming "\n🔄 Resuming workflow {workflow-id}"
 
   :resume/resuming "Resuming workflow: {workflow-id}"
+  :resume/operator-required "Refusing to resume: [:tenancy :require-operator?] is set and the recorded run has no valid operator identity ({reason})."
   :resume/already-completed "Workflow already completed successfully."
   :resume/completed-phases "Completed phases: {phases}"
   :resume/completed-phases-none "none"
@@ -794,6 +795,7 @@
   :workflow-runner/list-chains-failed "Failed to list chains: {error}"
   :workflow-runner/chain-step-completed "chain {chain-id} completed"
   :workflow-runner/unknown-backend "Unknown LLM backend {backend}. Known backends: {available}. Set one with `{command}` or --backend."
+  :workflow-runner/operator-required "Refusing to start: [:tenancy :require-operator?] is set and no operator identity resolved ({reason}). Set [:tenancy :operator-name]."
 
   ;; workflow-runner subcommand --help support (per-subcommand usage)
   :workflow-runner.help/subcommand-heading "{subcommand}"
