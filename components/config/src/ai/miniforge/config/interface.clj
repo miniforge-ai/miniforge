@@ -109,6 +109,11 @@
    at [:execution :require-governed?] other than false or nil. Args: [cfg]."
   execution/governed-required?)
 
+(def ^{:stratum 0} user-config-requires-governed?
+  "Whether the user config file requires governed execution, read strictly:
+   an unparseable or non-map file counts as requiring it. Args: [] or [path]."
+  execution/user-config-requires-governed?)
+
 (defn ^{:stratum 0} load-governance-config
   "Load governance config with full merge chain (resource -> profile -> user -> pack -> compile)."
   ([config-key] (governance/load-governance-config config-key))

@@ -178,6 +178,20 @@
       (some #(= :no-secrets (:gate %)) (:phase/gate-failures result)) :secrets-detected
       (seq (:phase/gate-errors result)) :gate-denied)))
 
+(defn ^{:stratum 0} refuse-local-when-governed-required!
+  "Throw an :anomalies/forbidden anomaly when the user config requires
+   governed execution (read strictly, see
+   `config/user-config-requires-governed?`) and `execution-mode` is
+   anything but :governed. Every pipeline run passes through here before it
+   acquires or reuses an environment, so this covers DAG child tasks,
+   resumed runs, chain steps and runs handed a pre-acquired executor."
+  [workflow-id execution-mode]
+  (when (and (not= :governed execution-mode)
+             (config/user-config-requires-governed?))
+    (response/throw-anomaly! :anomalies/forbidden
+                             (messages/t :env/governed-required {:workflow-id (str workflow-id)})
+                             {:workflow/id workflow-id :execution-mode execution-mode})))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} restore-local-workspace-checkpoint!
@@ -335,19 +349,11 @@
    rely on try+ exception flow; prefer anomaly-returning helpers such as
    `check-executor-for-mode` for non-boundary branching.
 
-   Every run path acquires its environment here, so this is where the user
-   config's [:execution :require-governed?] is enforced for all of them: a
-   run that would execute locally is refused with an :anomalies/forbidden
-   anomaly. The check sits before the `try`, which turns a local-mode
-   failure into a warning and a local run."
+   `runner-preparation/acquire-environment`, its only caller, runs
+   `refuse-local-when-governed-required!` first."
   [workflow-id {:keys [repo-url branch repo-path execution-mode executor-config
                        runtime-config resume-workspace]}]
   (let [mode (get {:governed :governed} execution-mode :local)]
-    (when (and (not= :governed mode)
-               (config/governed-required? (config/load-merged-config)))
-      (response/throw-anomaly! :anomalies/forbidden
-                               (messages/t :env/governed-required {:workflow-id (str workflow-id)})
-                               {:workflow/id workflow-id :execution-mode mode}))
     (try
       (let [fns      (dag-executor-fns)
             config   (with-runtime-config (registry-config-for-mode mode executor-config)

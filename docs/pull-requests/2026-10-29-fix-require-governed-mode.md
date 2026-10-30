@@ -24,6 +24,9 @@ unisolated runs impossible, only to remember the flag on each run.
 
 1. `config.execution/governed-required?` (config interface): fails closed; any value
    other than false or nil (a hand-edited `"true"`, `"yes"`, `1`) counts as required.
+   `user-config-requires-governed?` reads the user config file strictly: one that does
+   not parse, or is not a map, counts as requiring governed execution (the merged-config
+   loader would fall back to defaults and turn the requirement off).
 2. `workflow-runner.execution-mode` (CLI): `resolve-mode` takes the explicit mode (a
    keyword or its name), else governed when required, else local; a value outside
    `#{:local :governed}` is unknown. `allowed-mode!` throws `:anomalies/incorrect` for an
@@ -31,11 +34,12 @@ unisolated runs impossible, only to remember the flag on each run.
 3. `run-workflow-from-spec!` resolves the mode before workflow setup and uses it for the
    branch choice and the context; `run-workflow!` (named workflows, always local) is
    refused when governed execution is required.
-4. Backstop: `acquire-execution-environment!` refuses a non-governed run when the config
-   requires governed execution. Every run path reaches it, so chain steps, plan and DAG
-   files, resumed runs and DAG child tasks are covered. The check sits before the
-   function's `try`, which would otherwise turn the refusal into a warning and a local
-   run.
+4. Backstop: `runner-preparation/acquire-environment`, which every pipeline run passes,
+   calls `refuse-local-when-governed-required!` before it acquires an environment or
+   reuses a pre-acquired one. Chain steps, plan and DAG files, resumed runs, DAG child
+   tasks and runs handed a pre-acquired executor (such as `--sandbox`) are covered. It
+   runs before `acquire-execution-environment!`'s `try`, which would otherwise turn the
+   refusal into a warning and a local run.
 5. `mf pr respond --execution-mode <m>`: governed (requested or required by the config)
    and unknown modes exit 1 before `gh pr checkout`. The governed flow persists to a
    task branch and would not reach the PR branch, while the responder would still
@@ -51,9 +55,11 @@ unisolated runs impossible, only to remember the flag on each run.
    exits 1 without checking out for a governed request or a governed-only config, and
    checks out for a local run.
 3. `runner-environment-governed-required-test`: the backstop refuses no-mode and
-   `:local` runs, and lets a governed run through to capsule acquisition.
-4. The runner-environment, governed-environment, config, config-schema and runner
-   output tests (86 tests).
+   `:local` runs, fresh or pre-acquired, and lets governed ones through.
+4. `config.execution-test`: the strict read of missing, setting, unparseable and
+   non-map config files.
+5. The runner-environment, governed-environment, config, config-schema and runner
+   output tests (87 tests).
 
 ## Deployment Plan
 

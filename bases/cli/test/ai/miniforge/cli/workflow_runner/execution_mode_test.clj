@@ -22,7 +22,7 @@
    checks anything out."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.cli.config :as config]
+   [ai.miniforge.config.interface :as config-interface]
    [ai.miniforge.cli.main.commands.pr :as pr]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
@@ -32,10 +32,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} ^:private governed-only
-  "A user config that requires governed execution."
-  {:execution {:require-governed? true}})
-
 (defn- ^{:stratum 0} refusal
   "The anomaly `f` throws, or nil when it returns."
   [f]
@@ -43,36 +39,37 @@
        (catch clojure.lang.ExceptionInfo e (ex-data e))))
 
 (defn- ^{:stratum 0} respond
-  "Run `pr respond` with `opts` under user config `cfg`. Returns
-   {:exit code-or-nil :checkouts n}; `shared/exit!` is stubbed to stop."
-  [cfg opts]
+  "Run `pr respond` with `opts`, `required?` standing for whether the user
+   config requires governed execution. Returns {:exit code-or-nil
+   :checkouts n}; `shared/exit!` is stubbed to stop."
+  [required? opts]
   (let [checkouts (atom 0)
         exit      (atom nil)]
-    (with-redefs [config/load-config (constantly cfg)
+    (with-redefs [config-interface/user-config-requires-governed? (constantly required?)
                   pr/checkout-pr!    (fn [_] (swap! checkouts inc) nil)
                   shared/exit!       (fn [code] (reset! exit code) (throw (ex-info "exit" {::exit code})))]
       (try (with-out-str (pr/pr-respond-cmd (merge {:url "https://github.com/o/r/pull/7"} opts)))
            (catch clojure.lang.ExceptionInfo _ nil)))
     {:exit @exit :checkouts @checkouts}))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(deftest ^{:stratum 1} resolve-mode-test
+(deftest ^{:stratum 0} resolve-mode-test
   (testing "without the key, runs stay local unless asked for governed"
-    (is (= {:execution-mode :local} (sut/resolve-mode {} {})))
-    (is (= {:execution-mode :governed} (sut/resolve-mode {:execution-mode :governed} {})))
-    (is (= {:execution-mode :governed} (sut/resolve-mode {:execution-mode "governed"} {}))))
+    (is (= {:execution-mode :local} (sut/resolve-mode {} false)))
+    (is (= {:execution-mode :governed} (sut/resolve-mode {:execution-mode :governed} false)))
+    (is (= {:execution-mode :governed} (sut/resolve-mode {:execution-mode "governed"} false))))
   (testing "with the key, governed is the default and anything else is refused"
-    (is (= {:execution-mode :governed} (sut/resolve-mode {} governed-only)))
-    (is (= {:execution-mode :governed} (sut/resolve-mode {:execution-mode "governed"} governed-only)))
-    (is (= {:refused :local} (sut/resolve-mode {:execution-mode :local} governed-only))))
+    (is (= {:execution-mode :governed} (sut/resolve-mode {} true)))
+    (is (= {:execution-mode :governed} (sut/resolve-mode {:execution-mode "governed"} true)))
+    (is (= {:refused :local} (sut/resolve-mode {:execution-mode :local} true))))
   (testing "a value outside local and governed is unknown, not a mode"
-    (is (= {:unknown :docker} (sut/resolve-mode {:execution-mode :docker} {})))
-    (is (= {:unknown 7} (sut/resolve-mode {:execution-mode 7} governed-only)))))
+    (is (= {:unknown :docker} (sut/resolve-mode {:execution-mode :docker} false)))
+    (is (= {:unknown 7} (sut/resolve-mode {:execution-mode 7} true)))))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} runs-refuse-local-before-setup-test
   (let [setups (atom 0)]
-    (with-redefs [config/load-config                (constantly governed-only)
+    (with-redefs [config-interface/user-config-requires-governed? (constantly true)
                   gc-hooks/run-gc-pass-best-effort! (fn [& _] nil)
                   setup/resolve-workflow-interface  (fn [] (swap! setups inc) {})]
       (testing "a spec run asked to run locally is refused"
@@ -93,8 +90,8 @@
 
 (deftest ^{:stratum 1} pr-respond-refuses-governed-before-checkout-test
   (testing "--execution-mode governed exits 1 without checking the PR out"
-    (is (= {:exit 1 :checkouts 0} (respond {} {:execution-mode :governed}))))
+    (is (= {:exit 1 :checkouts 0} (respond false {:execution-mode :governed}))))
   (testing "a config that requires governed execution does the same"
-    (is (= {:exit 1 :checkouts 0} (respond governed-only {}))))
+    (is (= {:exit 1 :checkouts 0} (respond true {}))))
   (testing "a local run goes on to check the PR out"
-    (is (= 1 (:checkouts (respond {} {:execution-mode :local}))))))
+    (is (= 1 (:checkouts (respond false {:execution-mode :local}))))))

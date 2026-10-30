@@ -19,6 +19,7 @@
   "[:execution :require-governed?] fails closed: only false or an absent
    value leaves local execution allowed."
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.config.interface :as sut]))
 
@@ -28,6 +29,21 @@
   "A user config with `v` at [:execution :require-governed?]."
   [v]
   {:execution {:require-governed? v}})
+
+(deftest ^{:stratum 0} unreadable-user-config-requires-governed-test
+  (let [dir (doto (io/file (System/getProperty "java.io.tmpdir") (str "exec-config-" (random-uuid))) .mkdirs)
+        at  (fn [text] (let [f (io/file dir (str (random-uuid) ".edn"))] (spit f text) (str f)))]
+    (try
+      (testing "no file: the defaults decide (not required)"
+        (is (false? (sut/user-config-requires-governed? (str (io/file dir "absent.edn"))))))
+      (testing "a file that sets the key requires it; one that does not, does not"
+        (is (true? (sut/user-config-requires-governed? (at "{:execution {:require-governed? true}}"))))
+        (is (false? (sut/user-config-requires-governed? (at "{:llm {:backend :claude}}")))))
+      (testing "a file that does not parse, or is not a map, requires it"
+        (is (true? (sut/user-config-requires-governed? (at "{:execution {:require-governed? false"))))
+        (is (true? (sut/user-config-requires-governed? (at "[:not :a :map]")))))
+      (finally
+        (run! #(.delete ^java.io.File %) (reverse (file-seq dir)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

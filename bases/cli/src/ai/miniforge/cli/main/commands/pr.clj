@@ -24,7 +24,7 @@
    [clojure.string :as str]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
-   [ai.miniforge.cli.config :as config]
+   [ai.miniforge.config.interface :as config-interface]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.commands.pr-monitor :as pr-monitor]
@@ -211,7 +211,7 @@
    governed flow does not push to the PR branch yet."
   [opts]
   (let [{:keys [url]} opts
-        mode (execution-mode/resolve-mode opts (config/load-config))]
+        mode (execution-mode/resolve-mode opts (config-interface/user-config-requires-governed?))]
     (cond
       (not url)
       (display/print-error (messages/t :pr/respond-usage {:command (app-config/command-string "pr respond <pr-url>")}))

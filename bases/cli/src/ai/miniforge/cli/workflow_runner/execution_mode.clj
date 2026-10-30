@@ -26,7 +26,6 @@
    into isolation. The workflow runner checks again where it acquires a
    run's environment; this namespace refuses early, with the CLI's message."
   (:require
-   [ai.miniforge.cli.config :as config]
    [ai.miniforge.config.interface :as config-interface]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.response.interface :as response]))
@@ -40,15 +39,14 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} resolve-mode
-  "The execution mode for a run with `opts` under user config `cfg`: the
-   explicit :execution-mode (a keyword or its name), else :governed when
-   `cfg` requires it, else :local. Returns {:execution-mode mode};
-   {:unknown value} for a value outside `execution-modes`; or
-   {:refused mode} when `cfg` requires governed execution and the mode is
-   anything else."
-  [opts cfg]
-  (let [required? (config-interface/governed-required? cfg)
-        given     (get opts :execution-mode)
+  "The execution mode for a run with `opts`, where `required?` says whether
+   the user config requires governed execution: the explicit
+   :execution-mode (a keyword or its name), else :governed when required,
+   else :local. Returns {:execution-mode mode}; {:unknown value} for a
+   value outside `execution-modes`; or {:refused mode} when governed
+   execution is required and the mode is anything else."
+  [opts required?]
+  (let [given     (get opts :execution-mode)
         mode      (cond
                     (nil? given)    (if required? :governed :local)
                     (string? given) (keyword given)
@@ -67,7 +65,8 @@
    execution and the run would execute otherwise. The runners call it
    before workflow setup."
   [opts]
-  (let [{:keys [execution-mode refused] :as resolved} (resolve-mode opts (config/load-config))]
+  (let [{:keys [execution-mode refused] :as resolved}
+        (resolve-mode opts (config-interface/user-config-requires-governed?))]
     (when (contains? resolved :unknown)
       (response/throw-anomaly! :anomalies/incorrect
                                (messages/t :workflow-runner/unknown-execution-mode
