@@ -33,13 +33,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} github
-  "Answer the read-only gh calls a merge attempt makes."
-  [args _worktree]
-  (if (some #{"headRefOid"} args)
-    (dag/ok {:output (apply str (repeat 40 "a"))})
-    (dag/ok {:output "{\"state\":\"OPEN\",\"mergeCommit\":null}"})))
-
 (defn- ^{:stratum 0} merge-context []
   (let [tmp #(.getCanonicalPath
               (.toFile (Files/createTempDirectory % (into-array FileAttribute []))))]
@@ -47,6 +40,13 @@
      :pr-id 7
      :effect-store-dir (tmp "registry-effects")
      :grant-breach-dir (tmp "registry-grants")}))
+
+(defn- ^{:stratum 0} github
+  "Answer the read-only gh calls a merge attempt makes."
+  [args _worktree]
+  (if (some #{"headRefOid"} args)
+    (dag/ok {:output "0123456789abcdef0123456789abcdef01234567"})
+    (dag/ok {:output "{\"state\":\"OPEN\",\"mergeCommit\":null}"})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
