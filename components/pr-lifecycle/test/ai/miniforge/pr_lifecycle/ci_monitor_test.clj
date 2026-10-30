@@ -679,12 +679,15 @@
         (is (false? (:running? @monitor)))))))
 
 ;------------------------------------------------------------------------------ get-check-logs
-(deftest ^{:stratum 0} get-check-logs-returns-nil-logs-test
-  (testing "get-check-logs returns ok with nil logs (stub implementation)"
-    (let [result (checks/get-check-logs "/tmp" 42 "tests")]
-      (is (dag/ok? result))
-      (is (nil? (:logs (:data result))))
-      (is (= "tests" (:check-name (:data result)))))))
+(deftest ^{:stratum 0} get-check-logs-without-actions-run-test
+  (testing "failed checks with no GitHub Actions run link yield no logs and no gh call"
+    (let [calls (atom 0)]
+      (with-redefs [checks/run-gh-command (fn [& _] (swap! calls inc) (dag/ok {:output ""}))]
+        (is (= {:ci/logs nil :ci/log-errors []}
+               (checks/get-check-logs "/tmp" [{:name "tests" :bucket "fail"}
+                                              {:name "deploy" :bucket "fail"
+                                               :link "https://dash.cloudflare.com/x/builds/y"}])))
+        (is (zero? @calls))))))
 
 ;------------------------------------------------------------------------------ get-pr-status
 (deftest ^{:stratum 0} get-pr-status-success-test

@@ -83,21 +83,20 @@
    "skipping" :neutral
    "cancel"   :cancelled})
 
-(defn ^{:stratum 0} get-check-logs
-  "Get logs for failed checks.
+;; Failed-job logs
+(def ^{:stratum 0} max-log-chars
+  "Characters of failed-job log kept per workflow run: the tail, where
+   the error is."
+  12000)
 
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: PR number
-   - check-name: Name of the check
+(def ^{:stratum 0} max-log-runs
+  "Most workflow runs whose failed-job logs are fetched for one poll."
+  3)
 
-   Returns result with logs."
-  [_worktree-path _pr-number check-name]
-  ;; Note: gh doesn't have a direct way to get check logs
-  ;; This would typically go through the GitHub API or action artifacts
-  (dag/ok {:logs nil
-           :message "Log retrieval requires GitHub API access"
-           :check-name check-name}))
+(defn ^{:stratum 0} run-id-from-link
+  "GitHub Actions run id from a check's `link`; nil for other CI providers."
+  [link]
+  (some->> link (re-find #"/actions/runs/(\d+)") second))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -122,6 +121,19 @@
     (if (dag/ok? result)
       (dag/ok {:raw (:output (:data result))})
       result)))
+
+;; Failed-job logs
+(defn ^{:stratum 1} clean-log
+  "Drop ANSI color codes, byte-order marks and the per-line timestamp from
+   `gh run view --log-failed` output, then keep the last `max-log-chars`."
+  [text]
+  (let [cleaned (-> text
+                    (str/replace #"\u001b\[[0-9;]*m|\uFEFF" "")
+                    (str/replace #"(?m)\t\d{4}-\d\d-\d\dT[0-9:.]+Z " "\t"))
+        n (count cleaned)]
+    (if (> n max-log-chars)
+      (subs cleaned (- n max-log-chars))
+      cleaned)))
 
 ;; Check classification
 (defn ^{:stratum 1} check-group
@@ -148,6 +160,34 @@
       (dag/ok? result) (parse-checks-json (:output (:data result)))
       (checks-not-started? result) (dag/ok {:checks [] :pending? true})
       :else result)))
+
+(defn ^{:stratum 2} get-check-logs
+  "Failed-job logs for `failed-checks`, fetched with
+   `gh run view <run-id> --log-failed` once per GitHub Actions run.
+
+   Returns {:ci/logs string-or-nil :ci/log-errors [...]}. :ci/logs is nil
+   when no run produced log text, e.g. every failed check comes from a
+   CI provider other than GitHub Actions."
+  [worktree-path failed-checks]
+  (let [by-run (->> failed-checks
+                    (group-by #(run-id-from-link (:link %)))
+                    (remove (comp nil? key))
+                    (take max-log-runs))
+        fetched (for [[run-id run-checks] by-run]
+                  {:run-id run-id
+                   :names (map :name run-checks)
+                   :result (run-gh-command ["gh" "run" "view" run-id "--log-failed"]
+                                           worktree-path)})
+        sections (for [{:keys [run-id names result]} fetched
+                       :when (dag/ok? result)
+                       :let [text (clean-log (:output (:data result)))]
+                       :when (not (str/blank? text))]
+                   (str "## gh run view " run-id " --log-failed"
+                        " (failed: " (str/join ", " names) ")\n" text))]
+    {:ci/logs (when (seq sections) (str/join "\n\n" sections))
+     :ci/log-errors (vec (for [{:keys [run-id result]} fetched
+                               :when (dag/err? result)]
+                           {:run-id run-id :error (:error result)}))}))
 
 ;; Status computation
 (defn ^{:stratum 2} compute-ci-status

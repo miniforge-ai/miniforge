@@ -78,6 +78,18 @@
          :polls 0
          :running? false}))
 
+(defn ^{:stratum 0} fetch-failure-logs
+  "Failed-job logs for a :failure poll; logs a warning when none came back."
+  [worktree-path pr-number computed logger]
+  (let [logs (ci-checks/get-check-logs worktree-path (:failed computed))]
+    (when (and logger (nil? (:ci/logs logs)))
+      (log/warn logger :pr-lifecycle :ci/logs-unavailable
+                {:message "No failed-job logs for failing CI checks"
+                 :data {:pr-number pr-number
+                        :failed (mapv :name (:failed computed))
+                        :errors (:ci/log-errors logs)}}))
+    logs))
+
 (defn ^{:stratum 0} stop-ci-monitor
   "Stop a running CI monitor."
   [monitor]
@@ -91,6 +103,9 @@
    Arguments:
    - monitor: Monitor state atom
    - logger: Optional logger
+
+   On :failure, also fetches the failed jobs' logs into :ci/logs (nil
+   when none could be fetched) and :ci/log-errors.
 
    Returns {:status keyword :checks [...] :event event-or-nil}"
   [monitor logger]
@@ -129,15 +144,17 @@
                               :from prev-status
                               :to status}})))
 
-        {:status status
-         :checks computed
-         :event (when (contains? terminal-statuses status)
-                  (if (= status :success)
-                    (events/ci-passed dag-id run-id task-id pr-number nil)
-                    (events/ci-failed dag-id run-id task-id pr-number nil
-                                      (str "Failed checks: "
-                                           (str/join ", "
-                                                     (map :name (:failed computed)))))))}))))
+        (cond-> {:status status
+                 :checks computed
+                 :event (when (contains? terminal-statuses status)
+                          (if (= status :success)
+                            (events/ci-passed dag-id run-id task-id pr-number nil)
+                            (events/ci-failed dag-id run-id task-id pr-number nil
+                                              (str "Failed checks: "
+                                                   (str/join ", "
+                                                             (map :name (:failed computed)))))))}
+          (= :failure status)
+          (merge (fetch-failure-logs worktree-path pr-number computed logger)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

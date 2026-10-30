@@ -44,12 +44,20 @@
      (ci/create-ci-monitor (random-uuid) (random-uuid) (random-uuid) pr-number "/tmp")
      nil)))
 
+(deftest ^{:stratum 0} log-tail-is-capped-test
+  (testing "clean-log keeps only the last max-log-chars characters"
+    (let [text (str (apply str (repeat checks/max-log-chars "a")) "the error")]
+      (is (= checks/max-log-chars (count (checks/clean-log text))))
+      (is (str/ends-with? (checks/clean-log text) "the error")))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} fake-gh
-  "babashka.process/shell stand-in answering `gh pr checks` like gh 2.102:
-   exit 1 with gh's error text when a --json field is not one gh lists as
-   available, else `response` ({:exit :out :err})."
+  "babashka.process/shell stand-in answering like gh 2.102. `gh run view`
+   returns the captured failed-job log for the captured run id and exit 1
+   for any other run. `gh pr checks` exits 1 with gh's error text when a
+   --json field is not one gh lists as available, else returns `response`
+   ({:exit :out :err})."
   [response]
   (let [stderr (:checks/unknown-field-stderr gh-2-102)
         available (->> (str/split-lines stderr)
@@ -60,9 +68,15 @@
     (fn [_opts & args]
       (let [fields (some-> (second (drop-while #(not= "--json" %) args))
                            (str/split #","))]
-        (if (every? available fields)
-          response
-          {:exit 1 :out "" :err stderr})))))
+        (cond
+          (not= ["gh" "run" "view"] (take 3 args))
+          (if (every? available fields) response {:exit 1 :out "" :err stderr})
+
+          (= (:run/failed-run-id gh-2-102) (nth args 3))
+          {:exit 0 :out (:run/log-failed gh-2-102) :err ""}
+
+          :else
+          {:exit 1 :out "" :err (str "could not find any workflow run with ID " (nth args 3))})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -94,3 +108,22 @@
     (is (= :pending (:status (poll-once (fake-gh {:exit 1 :out "" :err (:checks/no-checks-stderr gh-2-102)}) 2244)))))
   (testing "the plain-output pending exit code is pending, not an error"
     (is (= :pending (:status (poll-once (fake-gh {:exit 8 :out "" :err ""}) 2244))))))
+
+(deftest ^{:stratum 2} failing-pr-poll-carries-failed-job-logs-test
+  (testing "a :failure poll fetches the failing run's logs into :ci/logs"
+    (let [result (poll-once (fake-gh {:exit 0 :out (:checks/failing-json gh-2-102) :err ""}) 2244)
+          logs (:ci/logs result)]
+      (is (str/starts-with? logs "## gh run view 40968057793 --log-failed (failed: Structure)\n"))
+      (is (str/includes? logs "Polylith workspace check failed with exit code: 1"))
+      (is (not (re-find #"\u001b|\d{4}-\d\d-\d\dT\d\d:" logs))
+          "ANSI codes and per-line timestamps are stripped")
+      (is (= [] (:ci/log-errors result))))))
+
+(deftest ^{:stratum 2} unfetchable-logs-are-reported-test
+  (testing "a run gh cannot show leaves :ci/logs nil and records the error"
+    (let [failed [{:name "Test" :bucket "fail"
+                   :link "https://github.com/miniforge-ai/miniforge/actions/runs/1/job/2"}]
+          result (with-redefs [process/shell (fake-gh {:exit 0 :out "[]" :err ""})]
+                   (checks/get-check-logs "/tmp" failed))]
+      (is (nil? (:ci/logs result)))
+      (is (= ["1"] (mapv :run-id (:ci/log-errors result)))))))
