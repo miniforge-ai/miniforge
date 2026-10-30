@@ -22,7 +22,6 @@
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.execution-grant.interface :as grant]
-   [ai.miniforge.phase-deployment.evidence :as evidence]
    [ai.miniforge.phase-deployment.messages :as msg]
    [ai.miniforge.schema.interface :as schema])
   (:import
@@ -62,26 +61,6 @@
   [context]
   ((get context :clock #(Instant/now))))
 
-(defn- ^{:stratum 0} running-proposed-images?
-  "True when the observed pods run at least one image the proposal
-   rendered: an old deployment on other images does not. A kustomization
-   may render other workloads' or init-container images, and a mesh may
-   inject sidecars, so the check asks for overlap, not equality. A
-   proposal with no images, or one that keeps the running image, cannot
-   be told apart from the old deployment this way."
-  [proposal observed]
-  (let [running (set (mapcat :images (get-in observed [:deployment/pods :pods])))
-        wanted (map :image (evidence/extract-image-digests
-                            (str (:deploy/rendered-yaml proposal))))]
-    (or (empty? wanted) (boolean (some running wanted)))))
-
-(defn ^{:stratum 0} spent?
-  "A deploy record that definitely did not leave the proposal running: it
-   failed, or a healthy rollout ran other images."
-  [t]
-  (or (= :failed (:effect/state t))
-      (and (= :reconciled (:effect/state t)) (false? (:effect/matched? t)))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} store-dir
@@ -104,16 +83,10 @@
        :effect/observed {:provider/result (select-keys result provider-result-keys)}})))
 
 (defn- ^{:stratum 1} probe-answer
-  "The cluster's answer. A healthy rollout settles the record: matched
-   when it runs the proposed images, a mismatch when it runs others (the
-   apply never happened). An unhealthy one settles nothing."
   [operations proposal _transaction]
-  (let [observation ((:observe! operations) (select-keys proposal target-keys))
-        observed (:provider/observed observation)
-        healthy? (true? (:provider/matched? observation))]
-    {:effect/observed observed
-     :effect/matched? (and healthy? (running-proposed-images? proposal observed))
-     :deploy/settles? healthy?}))
+  (let [observation ((:observe! operations) (select-keys proposal target-keys))]
+    {:effect/observed (:provider/observed observation)
+     :effect/matched? (:provider/matched? observation)}))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -143,7 +116,12 @@
    nothing: the record stays reconcilable for a later attempt, and the
    returned copy carries the observation for this attempt's outcome. The
    provider call runs inside `fx/reconcile!`, so one that throws leaves
-   the record reconcilable and returns its anomaly."
+   the record reconcilable and returns its anomaly.
+
+   Limit: a healthy rollout is taken as this proposal's. A process that
+   died after claiming the commit but before applying leaves the old,
+   healthy deployment in place, and reconciliation reads it as applied.
+   Telling them apart needs cluster evidence tied to the proposal."
   [context transaction operations now]
   (if-not (contains? fx/reconcilable-states (:effect/state transaction))
     transaction
@@ -153,8 +131,7 @@
           healthy-only (fn [t]
                          (let [answer (probe-answer operations (:effect/proposal durable) t)]
                            (reset! seen answer)
-                           (when (:deploy/settles? answer)
-                             (dissoc answer :deploy/settles?))))]
+                           (when (:effect/matched? answer) answer)))]
       (if (anomaly/anomaly? durable)
         durable
         (let [reconciled (fx/reconcile! dir transaction healthy-only now)]
