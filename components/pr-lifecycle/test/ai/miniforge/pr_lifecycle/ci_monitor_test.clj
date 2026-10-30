@@ -228,14 +228,14 @@
         (is (vector? (:checks (:data result))))))))
 
 (deftest ^{:stratum 0} get-pr-checks-unparseable-output-test
-  (testing "get-pr-checks falls back to empty checks on parse error"
+  (testing "get-pr-checks reports unparseable output as an error, not as no checks"
     (with-redefs [checks/run-gh-command
                   (fn [_args _path]
-                    (dag/ok {:output "not valid json at all {{{"}))] 
+                    (dag/ok {:output "not valid json at all {{{"}))]
       (let [result (checks/get-pr-checks "/tmp/repo" 42)]
-        (is (dag/ok? result))
-        (is (= [] (:checks (:data result))))
-        (is (some? (:raw (:data result))))))))
+        (is (dag/err? result))
+        (is (= :gh-output-unparseable (get-in result [:error :code])))
+        (is (some? (get-in result [:error :data :raw])))))))
 
 (deftest ^{:stratum 0} get-pr-checks-failure-propagates-test
   (testing "get-pr-checks propagates error when gh command fails"

@@ -23,12 +23,24 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [babashka.process :as process]
-   [clojure.edn :as edn]
-   [clojure.string :as str]))
+   [cheshire.core :as json]
+   [clojure.string :as str]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; GitHub CLI helpers
+(def ^{:stratum 0} check-json-fields
+  "Fields requested from `gh pr checks --json`. gh 2.102 accepts bucket,
+   completedAt, description, event, link, name, startedAt, state and
+   workflow; it rejects `conclusion` and `detailsUrl` with exit 1."
+  "name,state,bucket,link,workflow")
+
+(def ^{:stratum 0} checks-pending-exit-code
+  "Exit code of plain-output `gh pr checks` while checks are pending.
+   With --json gh 2.102 exits 0 instead; both mean the same thing here."
+  8)
+
 (defn ^{:stratum 0} run-gh-command
   "Run a gh CLI command and return result."
   [args worktree-path]
@@ -46,6 +58,20 @@
                  {:exit-code (:exit result)})))
     (catch Exception e
       (dag/err :gh-exception (.getMessage e)))))
+
+;; Output parsing
+(defn ^{:stratum 0} parse-checks-json
+  "Parse `gh pr checks --json` output into an ok result of {:checks [...]},
+   or an error result when the output is not a JSON array."
+  [output]
+  (try+
+    (let [checks (json/parse-string output true)]
+      (if (sequential? checks)
+        (dag/ok {:checks (vec checks)})
+        (dag/err :gh-output-unparseable "gh pr checks did not return a JSON array"
+                 {:raw output})))
+    (catch Exception e
+      (dag/err :gh-output-unparseable (ex-message e) {:raw output}))))
 
 ;; Check classification
 (def ^{:stratum 0} bucket->group
@@ -75,30 +101,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} get-pr-checks
-  "Get CI check status for a PR.
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: PR number
-
-   Returns result with check information."
-  [worktree-path pr-number]
-  (let [result (run-gh-command
-                ["gh" "pr" "checks" (str pr-number) "--json"
-                 "name,state,conclusion,detailsUrl"]
-                worktree-path)]
-    (if (dag/ok? result)
-      (try
-        (let [checks (edn/read-string
-                      (str "[" (str/replace (:output (:data result))
-                                            #"\"(\w+)\":" ":$1 ")
-                           "]"))]
-          (dag/ok {:checks checks}))
-        (catch Exception _e
-          ;; Fallback: try to parse as JSON manually
-          (dag/ok {:checks [] :raw (:output (:data result))})))
-      result)))
+(defn ^{:stratum 1} checks-not-started?
+  "True when a failed `gh pr checks` call means CI has not finished
+   reporting: the pending exit code, or `no checks reported` right after a
+   push, before any workflow has registered a check."
+  [result]
+  (let [{:keys [message data]} (:error result)]
+    (or (= checks-pending-exit-code (:exit-code data))
+        (str/starts-with? (str message) "no checks reported"))))
 
 (defn ^{:stratum 1} get-pr-status
   "Get overall PR status including checks.
@@ -120,6 +130,24 @@
   (get bucket->group (:bucket check) :unknown))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} get-pr-checks
+  "Get CI check status for a PR.
+
+   Arguments:
+   - worktree-path: Path to git worktree
+   - pr-number: PR number
+
+   Returns an ok result of {:checks [...]}, adding :pending? true when gh
+   reports that checks have not finished; otherwise gh's error result."
+  [worktree-path pr-number]
+  (let [result (run-gh-command
+                ["gh" "pr" "checks" (str pr-number) "--json" check-json-fields]
+                worktree-path)]
+    (cond
+      (dag/ok? result) (parse-checks-json (:output (:data result)))
+      (checks-not-started? result) (dag/ok {:checks [] :pending? true})
+      :else result)))
 
 ;; Status computation
 (defn ^{:stratum 2} compute-ci-status

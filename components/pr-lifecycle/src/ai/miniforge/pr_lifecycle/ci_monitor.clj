@@ -110,8 +110,9 @@
                             :error (:error checks-result)}}))
         {:status :unknown :error (:error checks-result)})
 
-      (let [checks (:checks (:data checks-result))
-            computed (ci-checks/compute-ci-status checks)
+      (let [{:keys [checks pending?]} (:data checks-result)
+            computed (cond-> (ci-checks/compute-ci-status checks)
+                       pending? (assoc :status :pending))
             status (:status computed)
             prev-status (:status @monitor)]
 
