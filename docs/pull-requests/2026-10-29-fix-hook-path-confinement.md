@@ -59,7 +59,9 @@ same worktree. The Bash deny list covered destructive commands only;
 3. The real `bb miniforge hook-eval` under babashka: a write inside the worktree is
    allowed; `.git/config`, the hooks directory, `/etc/passwd`, `.claude/` settings and
    a missing `--root` are refused.
-4. All deny patterns take 21 ms on an adversarial 32 KB command.
+4. All deny patterns take 21 ms on an adversarial 32 KB command, and 25 ms on 32,760
+   newlines followed by `true` (`deny-patterns-stay-linear-test`; 83 s before the
+   leading-whitespace fix, long enough to time the hook out).
 5. Copilot review fixes: a newline counts as a command separator ((?m) patterns); path
    inputs are trimmed before the check, as the MCP handlers trim them; the path as
    written (symlinks unresolved) is also checked against the protected list and is what
