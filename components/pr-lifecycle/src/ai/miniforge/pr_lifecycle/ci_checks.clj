@@ -37,11 +37,6 @@
    workflow; it rejects `conclusion` and `detailsUrl` with exit 1."
   "name,state,bucket,link,workflow")
 
-(def ^{:stratum 0} checks-pending-exit-code
-  "Exit code of plain-output `gh pr checks` while checks are pending.
-   With --json gh 2.102 exits 0 instead; both mean the same thing here."
-  8)
-
 (defn ^{:stratum 0} run-gh-command
   "Run a gh CLI command and return result."
   [args worktree-path]
@@ -86,9 +81,25 @@
 
 ;; Failed-job logs
 (def ^{:stratum 0} max-log-chars
-  "Characters of failed-job log kept per workflow run: the tail, where
-   the error is."
+  "Characters of failed-job log kept per workflow run."
   12000)
+
+(def ^{:stratum 0} failure-line-pattern
+  "Log lines that state a failure: clojure.test FAIL/ERROR headers and
+   expected/actual, Actions ##[error] annotations, compiler and lint
+   `error:` lines, exceptions. A long test log can put them far from its
+   end, and gh prints several failed jobs one after another."
+  #"FAIL in|ERROR in|##\[error\]|error:|Exception|expected:|actual:")
+
+(def ^{:stratum 0} log-elision
+  "Line separating the failure lines kept from the log's tail."
+  "...")
+
+(defn ^{:stratum 0} matching-lines
+  "The lines of `text` that `pattern` finds, joined, cut to `limit` chars."
+  [text pattern limit]
+  (let [joined (->> (str/split-lines text) (filter #(re-find pattern %)) (str/join "\n"))]
+    (subs joined 0 (min limit (count joined)))))
 
 (def ^{:stratum 0} max-log-runs
   "Most workflow runs whose failed-job logs are fetched for one poll."
@@ -99,16 +110,14 @@
   [link]
   (some->> link (re-find #"/actions/runs/(\d+)") second))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} checks-not-started?
-  "True when a failed `gh pr checks` call means CI has not finished
-   reporting: the pending exit code, or `no checks reported` right after a
-   push, before any workflow has registered a check."
+(defn ^{:stratum 0} checks-not-started?
+  "True when a failed `gh pr checks` call means CI has not reported yet:
+   `no checks reported` right after a push, before any workflow has
+   registered a check. (With --json, gh exits 0 while checks are pending.)"
   [result]
-  (let [{:keys [message data]} (:error result)]
-    (or (= checks-pending-exit-code (:exit-code data))
-        (str/starts-with? (str message) "no checks reported"))))
+  (str/starts-with? (str (get-in result [:error :message])) "no checks reported"))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} get-pr-status
   "Get overall PR status including checks.
@@ -125,15 +134,22 @@
 
 ;; Failed-job logs
 (defn ^{:stratum 1} clean-log
-  "Drop ANSI color codes, byte-order marks and the per-line timestamp from
-   `gh run view --log-failed` output, then keep the last `max-log-chars`."
+  "Drop ANSI color codes (an ESC byte or, as gh prints them to a pipe, a
+   literal `^[`), byte-order marks and the per-line timestamp from
+   `gh run view --log-failed` output. A log longer than `max-log-chars`
+   keeps its failure lines (up to half) and then as much of its tail as
+   fits."
   [text]
   (let [cleaned (-> text
-                    (str/replace #"\u001b\[[0-9;]*m|\uFEFF" "")
+                    (str/replace #"(?:\u001b|\^\[)\[[0-9;]*m|\uFEFF" "")
                     (str/replace #"(?m)\t\d{4}-\d\d-\d\dT[0-9:.]+Z " "\t"))
-        n (count cleaned)]
+        n (count cleaned)
+        failures (when (> n max-log-chars)
+                   (matching-lines cleaned failure-line-pattern (quot max-log-chars 2)))
+        head (if (str/blank? failures) "" (str failures "\n" log-elision "\n"))
+        tail (- max-log-chars (count head))]
     (if (> n max-log-chars)
-      (subs cleaned (- n max-log-chars))
+      (str head (subs cleaned (- n tail)))
       cleaned)))
 
 ;; Check classification
@@ -142,9 +158,7 @@
   [check]
   (get bucket->group (:bucket check) :unknown))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} get-pr-checks
+(defn ^{:stratum 1} get-pr-checks
   "Get CI check status for a PR.
 
    Arguments:
@@ -161,6 +175,8 @@
       (dag/ok? result) (parse-checks-json (:output (:data result)))
       (checks-not-started? result) (dag/ok {:checks [] :pending? true})
       :else result)))
+
+;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} get-check-logs
   "Failed-job logs for `failed-checks`, fetched with
