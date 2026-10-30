@@ -148,7 +148,17 @@
                                       extras))
       (anomaly/ref-write-failed-anomaly task-id ref-name commit-sha upd))))
 
-(defn ^{:stratum 0} derive-resolution-overrides
+(defn- ^{:stratum 0} stop-guarded-edit-fn
+  "`edit` (a resolution agent-edit-fn) that does nothing once
+   `control-state` is stopped: an agent error response can swallow the
+   interrupt, and the resolution loop would call the agent again."
+  [control-state edit]
+  (fn [& args]
+    (when-not (:stopped @control-state) (apply edit args))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} derive-resolution-overrides
   "Build the resolution-overrides map handed to `resolve-conflict!`.
    Combines:
    - explicit overrides on `context` under `:dag/resolution-overrides`
@@ -165,14 +175,18 @@
   [context]
   (let [explicit (get context :dag/resolution-overrides)
         llm-backend (:llm-backend context)
+        control-state (:control-state context)
         auto (when (and llm-backend (not (:agent-edit-fn explicit)))
                {:agent-edit-fn
                 (merge-resolution/agent-driven-edit-fn
                  (cond-> {:llm-backend llm-backend}
-                   (:logger context) (assoc :logger (:logger context))))})]
-    (merge auto explicit)))
-
-;------------------------------------------------------------------------------ Layer 1
+                   (:logger context) (assoc :logger (:logger context))))})
+        overrides (merge auto explicit)
+        edit (:agent-edit-fn overrides)]
+    ;; Once the run is cancelled the agent is not called again; the loop
+    ;; then ends within its budget without an LLM call.
+    (cond-> overrides
+      (and control-state edit) (assoc :agent-edit-fn (stop-guarded-edit-fn control-state edit)))))
 
 (defn ^{:stratum 1} attempt-resolution!
   "Spec §6.1 conflict path. The merge produced a conflict; spawn the
@@ -229,44 +243,49 @@
                                 :parents    parents
                                 :collapsed  collapsed
                                 :cache-hit? true})
-      (let [worktree (anomaly/temp-merge-worktree-path run-id task-id input-key)
-            setup    (ensure-clean-worktree! host-repo worktree
-                                             (:commit-sha (first parents)))]
-        (if-not (zero? (:exit setup))
-          (do (cleanup-worktree! host-repo worktree)
-              (anomaly/worktree-setup-failed-anomaly task-id setup))
-          (let [outcome (run-merge! worktree task-id strategy parents input-key)]
-            (cond
-              ;; Merge succeeded — outcome is response/success carrying
-              ;; the commit-sha.
-              (response/success? outcome)
-              (let [success (write-ref-and-build-success
-                             host-repo task-id ref-name
-                             (get-in outcome [:output :commit-sha])
-                             input-key strategy parents collapsed nil)]
-                (cleanup-worktree! host-repo worktree)
-                success)
-
-              ;; Conflict — spawn the resolution sub-workflow on the same
-              ;; worktree. The conflict anomaly carries parents, paths,
-              ;; strategy, input-key, exit-code, stderr — everything the
-              ;; resolution agent (or its mock) needs.
-              (= :anomalies/dag-multi-parent-conflict
-                 (:anomaly/category outcome))
-              (let [result (attempt-resolution!
-                            host-repo task-id ref-name input-key strategy
-                            parents collapsed
-                            outcome worktree resolution-overrides)]
-                (cleanup-worktree! host-repo worktree)
-                result)
-
-              ;; Non-conflict failure (e.g. rev-parse HEAD failed after a
-              ;; successful merge — `:dag-multi-parent-merge-failed`).
-              ;; This is an infrastructure error, not a conflict to
-              ;; resolve. Surface it directly so the operator sees the
-              ;; real cause; routing it through the resolution loop
-              ;; would hide the original git failure behind a generic
-              ;; `:dag-multi-parent-unresolvable`.
-              :else
+      (let [worktree (anomaly/temp-merge-worktree-path run-id task-id input-key)]
+        ;; An interrupted git call (a cancel) ends the merge: run-git has
+        ;; killed git by then, and the worktree goes before it propagates.
+        (try
+          (let [setup (ensure-clean-worktree! host-repo worktree (:commit-sha (first parents)))]
+            (if-not (zero? (:exit setup))
               (do (cleanup-worktree! host-repo worktree)
-                  outcome))))))))
+                  (anomaly/worktree-setup-failed-anomaly task-id setup))
+              (let [outcome (run-merge! worktree task-id strategy parents input-key)]
+                (cond
+                  ;; Merge succeeded — outcome is response/success carrying
+                  ;; the commit-sha.
+                  (response/success? outcome)
+                  (let [success (write-ref-and-build-success
+                                 host-repo task-id ref-name
+                                 (get-in outcome [:output :commit-sha])
+                                 input-key strategy parents collapsed nil)]
+                    (cleanup-worktree! host-repo worktree)
+                    success)
+
+                  ;; Conflict — spawn the resolution sub-workflow on the same
+                  ;; worktree. The conflict anomaly carries parents, paths,
+                  ;; strategy, input-key, exit-code, stderr — everything the
+                  ;; resolution agent (or its mock) needs.
+                  (= :anomalies/dag-multi-parent-conflict
+                     (:anomaly/category outcome))
+                  (let [result (attempt-resolution!
+                                host-repo task-id ref-name input-key strategy
+                                parents collapsed
+                                outcome worktree resolution-overrides)]
+                    (cleanup-worktree! host-repo worktree)
+                    result)
+
+                  ;; Non-conflict failure (e.g. rev-parse HEAD failed after a
+                  ;; successful merge — `:dag-multi-parent-merge-failed`).
+                  ;; This is an infrastructure error, not a conflict to
+                  ;; resolve. Surface it directly so the operator sees the
+                  ;; real cause; routing it through the resolution loop
+                  ;; would hide the original git failure behind a generic
+                  ;; `:dag-multi-parent-unresolvable`.
+                  :else
+                  (do (cleanup-worktree! host-repo worktree)
+                      outcome)))))
+          (catch InterruptedException e
+            (cleanup-worktree! host-repo worktree)
+            (throw e)))))))

@@ -21,20 +21,35 @@
    graph stays shallow — a shared leaf like `run-git` contributes zero
    stratification depth to a file that merely requires it, versus
    nonzero depth if it were defined alongside its callers."
-  (:require
-   [clojure.java.shell :as shell]))
+  (:import
+   (java.lang ProcessHandle)
+   (java.util.concurrent TimeUnit)))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} run-git
   "Invoke git in `cwd` with `args`. Returns `{:exit :out :err}` matching
    `clojure.java.shell/sh`. Defensive against shell exceptions so callers
-   can branch on `:exit` rather than wrapping in try/catch."
+   can branch on `:exit` rather than wrapping in try/catch. An interrupt
+   (a cancel) is not a failed command: git and every process it started
+   (a merge driver, a hook) are killed and waited for, and the
+   InterruptedException is rethrown, so the merge stops there."
   [cwd & args]
-  (try
-    (apply shell/sh "git" "-C" cwd args)
-    (catch Exception e
-      {:exit -1 :out "" :err (or (ex-message e) (.getName (class e)))})))
+  (let [proc (try (.start (ProcessBuilder. ^java.util.List (into ["git" "-C" cwd] args)))
+                  (catch Exception e e))]
+    (if (instance? Exception proc)
+      {:exit -1 :out "" :err (or (ex-message proc) (.getName (class proc)))}
+      (let [^Process proc proc
+            out (future (slurp (.getInputStream proc)))
+            err (future (slurp (.getErrorStream proc)))]
+        (.close (.getOutputStream proc))
+        (try
+          {:exit (.waitFor proc) :out @out :err @err}
+          (catch InterruptedException e
+            (let [tree (conj (vec (iterator-seq (.iterator (.descendants proc)))) (.toHandle proc))]
+              (run! #(.destroyForcibly ^ProcessHandle %) tree)
+              (run! #(try (.get (.onExit ^ProcessHandle %) 5 TimeUnit/SECONDS) (catch Exception _ nil)) tree))
+            (throw e)))))))
 
 (defn ^{:stratum 0} host-repo-path
   "Resolve the host repository path for orchestrator-level git operations.

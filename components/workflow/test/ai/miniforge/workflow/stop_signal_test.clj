@@ -25,9 +25,14 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.workflow.dag-merge :as dag-merge]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.dag-sub-workflow :as dag-sub-workflow]
    [ai.miniforge.workflow.execution :as exec]
    [ai.miniforge.workflow.execution-step :as execution-step]
+   [ai.miniforge.workflow.dag-merge-attempt :as dag-merge-attempt]
+   [ai.miniforge.workflow.dag-merge-git :as merge-git]
+   [clojure.string :as str]
    [ai.miniforge.workflow.monitoring :as monitoring]
    [ai.miniforge.workflow.runner-checkpoint :as runner-checkpoint]
    [ai.miniforge.workflow.runner-environment :as env]
@@ -150,6 +155,18 @@
         (is (= :completed (:execution/status result)))
         (is (not-any? #{:dashboard-stop} (map :type (:execution/errors result))))))))
 
+(deftest ^{:stratum 0} an-interrupted-git-call-ends-git-and-its-children-test
+  ;; The alias runs `sleep` as git's child, standing in for a merge driver.
+  (let [thread (Thread/currentThread)
+        _      (future (Thread/sleep 300) (.interrupt thread))
+        thrown (try (merge-git/run-git "." "-c" "alias.wait=!sleep 30" "wait")
+                    (catch InterruptedException e e))
+        alive  (filter #(and (.isAlive ^java.lang.ProcessHandle %)
+                             (str/includes? (.orElse (.commandLine (.info ^java.lang.ProcessHandle %)) "") "sleep 30"))
+                       (iterator-seq (.iterator (.descendants (java.lang.ProcessHandle/current)))))]
+    (is (instance? InterruptedException thrown))
+    (is (empty? alive))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} cancel-interrupts-the-running-phase-test
@@ -223,6 +240,28 @@
                 cs #(#'dag-orch/await-launch-clearance! cs logger))))
     (is (not (Thread/interrupted)))))
 
+(deftest ^{:stratum 1} a-cancel-during-a-parent-merge-stops-the-task-test
+  (let [cs (es/create-control-state)
+        _  (cancel-after! cs 300)]
+    ;; As the real merge code does, the stub swallows the interrupt and
+    ;; reports an ordinary merge failure.
+    (with-redefs [dag-merge/merge-parent-branches!
+                  (fn [_ _]
+                    (try (Thread/sleep 10000) nil
+                         (catch InterruptedException _
+                           {:anomaly/category :anomalies/dag-multi-parent-merge-failed})))]
+      (let [opts (dag-sub-workflow/task-sub-opts {:control-state cs}
+                                                 {:task/id :c :task/deps [:a :b]})]
+        (is (= :anomalies/dag-merge-stopped (get-in opts [:dag/merge-anomaly :anomaly/category])))
+        (is (not (Thread/interrupted))))))
+  (testing "a merge that finished after the cancel is the task's stop too"
+    (let [cs (es/create-control-state)]
+      (with-redefs [dag-merge/merge-parent-branches! (fn [_ _] (es/cancel! cs) {:branch "merged"})]
+        (is (= :anomalies/dag-merge-stopped
+               (get-in (dag-sub-workflow/task-sub-opts {:control-state cs} {:task/id :c :task/deps [:a :b]})
+                       [:dag/merge-anomaly :anomaly/category])))
+        (is (not (Thread/interrupted)))))))
+
 (deftest ^{:stratum 1} cancel-at-callback-cooldown-and-resolution-boundaries-test
   (testing "an interrupted boundary callback refuses the boundary (the context
             keeps its results) and keeps the interrupt"
@@ -252,4 +291,14 @@
           started (System/currentTimeMillis)]
       (stop-signal/interrupting-on-stop cs #(#'dag-orch/stop-aware-sleep cs 10000))
       (is (< (- (System/currentTimeMillis) started) 5000))
-      (is (not (Thread/interrupted))))))
+      (is (not (Thread/interrupted)))))
+  (testing "the merge-resolution agent is not called once the run is stopped"
+    (let [attempts (atom 0)
+          cs (atom {:stopped false})
+          {edit :agent-edit-fn} (dag-merge-attempt/derive-resolution-overrides
+                                 {:control-state cs
+                                  :dag/resolution-overrides {:agent-edit-fn (fn [& _] (swap! attempts inc))}})]
+      (edit "/tmp/wt" {} 0)
+      (swap! cs assoc :stopped true)
+      (edit "/tmp/wt" {} 1)
+      (is (= 1 @attempts)))))
