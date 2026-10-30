@@ -220,8 +220,12 @@
           (let [cwd (System/getProperty "user.dir")
                 result (pr-lifecycle/respond-to-comments!
                         url cwd
+                        ;; The fix run gets this command's --execution-mode,
+                        ;; and the PR branch, which a governed capsule clones.
                         (fn [spec run-opts]
-                          (workflow-runner/run-workflow-from-spec! spec (merge {:quiet true} run-opts)))
+                          (workflow-runner/run-workflow-from-spec!
+                           (assoc spec :spec/branch branch)
+                           (merge {:quiet true} run-opts (select-keys opts [:execution-mode]))))
                         push!
                         opts)]
             (if (anomaly/anomaly? result)

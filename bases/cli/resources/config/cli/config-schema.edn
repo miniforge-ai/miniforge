@@ -35,6 +35,7 @@
 {:config/keys
  {[:llm :backend]                                   :backend
   [:llm :model]                                     :string
+  [:execution :require-governed?]                   :boolean
   [:agents :default-models :thinking]               :string
   [:agents :default-models :execution]              :string
 

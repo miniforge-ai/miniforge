@@ -708,6 +708,7 @@
   :workflow-runner/validation-failed "Workflow validation failed: {errors}"
   :workflow-runner/artifact-store-warning "Warning: Could not create artifact store, running without persistence"
   :workflow-runner/artifact-store-close-warning "Warning: some artifacts may not have been saved or indexed in the artifact store"
+  :workflow-runner/governed-required "Refused: this config requires governed execution ([:execution :require-governed?] is true), and this run would execute in {mode} mode. Run with --execution-mode governed, or set [:execution :require-governed?] to false."
   :workflow-runner/local-mode-notice "   Local mode: the agent runs on this machine with your user's privileges, unisolated. Run with --execution-mode governed to isolate it in a container capsule."
   :workflow-runner/runtime-source "   Source: {path}"
   :workflow-runner/runtime-worktree "   Worktree: {path}"
