@@ -63,12 +63,17 @@
   ((get context :clock #(Instant/now))))
 
 (defn- ^{:stratum 0} running-proposed-images?
-  "True when the observed pods run every image the proposal rendered. A
-   proposal with no images cannot be told apart from the old deployment."
+  "True when the observed pods run at least one image the proposal
+   rendered: an old deployment on other images does not. A kustomization
+   may render other workloads' or init-container images, and a mesh may
+   inject sidecars, so the check asks for overlap, not equality. A
+   proposal with no images, or one that keeps the running image, cannot
+   be told apart from the old deployment this way."
   [proposal observed]
-  (let [running (set (mapcat :images (get-in observed [:deployment/pods :pods])))]
-    (every? running (map :image (evidence/extract-image-digests
-                                 (str (:deploy/rendered-yaml proposal)))))))
+  (let [running (set (mapcat :images (get-in observed [:deployment/pods :pods])))
+        wanted (map :image (evidence/extract-image-digests
+                            (str (:deploy/rendered-yaml proposal))))]
+    (or (empty? wanted) (boolean (some running wanted)))))
 
 (defn ^{:stratum 0} spent?
   "A deploy record that definitely did not leave the proposal running: it

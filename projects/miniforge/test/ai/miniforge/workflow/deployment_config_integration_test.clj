@@ -6,6 +6,7 @@
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase-deployment.interface]
             [ai.miniforge.phase-deployment.deploy-operations :as deploy-operations]
+            [ai.miniforge.phase-deployment.evidence :as evidence]
             [ai.miniforge.phase-deployment.shell :as shell]
             [ai.miniforge.phase-deployment.shell.exec :as exec]
             [ai.miniforge.response.interface :as response]
@@ -56,7 +57,9 @@
                {:provider/matched? true
                 :provider/observed {:deployment/ready? true
                                     :deployment/pods {:pod-count 1 :ready-count 1
-                                                      :pods [{:ready? true}]}}})})
+                                                      ;; As deploy-provider pod-summary reports a pod.
+                                                      :pods [{:ready? true
+                                                              :images (mapv :image (evidence/extract-image-digests rendered))}]}}})})
 
 (defn- ^{:stratum 0} provision-context [stream]
   {:execution/id (random-uuid)
