@@ -32,4 +32,24 @@
   "Invalid policy pack trust root: {key-id}"
 
   :trust-roots/invalid-config
-  "Invalid policy pack trust-root config: {source}"}}
+  "Invalid policy pack trust-root config: {source}"
+
+  ;; MDC compile diagnostics. Developer-facing: they reach the output of
+  ;; `bb standards:pack` and the pack's :warnings, not a product surface.
+  :mdc/nested-block-frontmatter
+  "{filename}: frontmatter key '{key}' is a nested YAML block, which the MDC grammar cannot represent — its indented children parsed as separate top-level keys, so '{key}.*' resolved to nothing and the rule compiled with detection {detection} and enforcement {action}. Rewrite as dotted keys: '{key}.<child>: <value>'."
+
+  :mdc/nested-block-compile-failed
+  "{filename}: frontmatter key '{key}' is a nested YAML block, which the MDC grammar cannot represent. The compile error reported for this file is a symptom of it — an indented dotted child collides with the parent key during grouping. Rewrite as dotted keys: '{key}.<child>: <value>'."
+
+  :mdc/commented-list-value
+  "{filename}: frontmatter key '{key}' has a comment as its only value, so the '- item' list written under it was discarded and the key compiled as the comment text ({value}). Put the comment on its own line above the key."
+
+  :mdc/interrupted-list
+  "{filename}: a comment containing a colon sits inside the '- item' list under frontmatter key '{key}', so the parser read it as a key and dropped the list items after it — the key compiled as {value}. Remove the colon from the comment, or move the comment above the key."
+
+  :mdc/compile-failed
+  "Failed to compile {filename}: {error}"
+
+  :mdc/always-inject-no-phases
+  "Some always-inject rules have no applicable phases (Dewey 900 meta range)"}}
