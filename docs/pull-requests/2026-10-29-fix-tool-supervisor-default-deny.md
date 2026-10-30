@@ -32,7 +32,12 @@ not start (exit 127). Claude blocks a PreToolUse call only on exit code 2.
    capsule; command words with characters outside a plain set are shell-quoted.
 5. `create-base-agent` calls `invoke-fn` and `repair-fn` with `:agent/role` in the
    context; `with-session` and `with-readonly-session` read it.
-6. The task-list tools (`TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate`) join `:common`.
+6. The task-list tools (`TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate`) join `:common`;
+   the implementer and tester get `TaskStop` and `TaskOutput` for their background Bash
+   commands.
+7. A keyword role keeps its namespace in `--role` (`:custom/implementer` becomes
+   `custom/implementer`), so a role the policy does not list is refused instead of read
+   as a listed role of the same name.
 
 ## Testing Plan
 

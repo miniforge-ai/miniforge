@@ -209,6 +209,10 @@
    blocks too instead of letting the call through. A nil `role` leaves
    `--role` off, and hook-eval then refuses every tool.
 
+   A keyword role keeps its namespace (`:custom/implementer` becomes
+   `--role custom/implementer`), so a role the policy does not list is
+   refused rather than read as a listed role with the same name.
+
    A word holding anything beyond letters, digits and `_./:=@%+,-` is
    shell-quoted, so a checkout path with a space stays one argument."
   [words role]
@@ -218,7 +222,9 @@
                  (file-artifacts/shell-quote w)))]
     (str/join " " (concat (map word words)
                           ["hook-eval"]
-                          (when role ["--role" (word (name role))])
+                          (when role ["--role" (word (if (keyword? role)
+                                                        (subs (str role) 1)
+                                                        (str role)))])
                           ["||" "exit" "2"]))))
 
 (defn ^{:stratum 0} pre-tool-use-settings

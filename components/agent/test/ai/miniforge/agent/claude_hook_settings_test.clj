@@ -109,6 +109,9 @@
   (testing "a missing miniforge command exits 2, the code Claude reads as block, not 127"
     (let [cmd (session/hook-eval-command ["/nonexistent/miniforge-cmd"] :implementer)]
       (is (= 2 (:exit (shell/sh "sh" "-c" cmd :in "{}"))))))
+  (testing "a namespaced role keeps its namespace, so it does not pass as a listed role"
+    (is (= "mf hook-eval --role custom/implementer || exit 2"
+           (session/hook-eval-command ["mf"] :custom/implementer))))
   (testing "a miniforge command whose path has a space stays one word"
     (let [dir (java.nio.file.Files/createTempDirectory "hook dir " (make-array java.nio.file.attribute.FileAttribute 0))
           mf  (str dir "/mf")]
