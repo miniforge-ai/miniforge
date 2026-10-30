@@ -36,9 +36,11 @@ some other way on the host (see Known limits).
    `MINIFORGE_AGENT_ENV_ALLOW`, to `host-env` (miniforge's environment, a var tests
    redefine). `llm/agent-env` exposes it.
 3. `start-capture-process!` (non-streaming) and `start-stream-process!` (streaming)
-   always set the process environment to `agent-env`, and so does the workflow
-   runner's `run-cli-command`, which the backend preflight probe uses, so a probe
-   passes only where the run will.
+   always set the process environment to `agent-env`. The workflow runner's
+   `run-cli-command` takes an `:env`; the backend preflight probes (version, health
+   round trip) pass `llm/agent-env`, so a probe passes only where the run will.
+   Host-side checks that run through it without `:env`, such as `mf doctor`'s
+   `gh auth status`, keep miniforge's environment.
 
 ## Testing Plan
 
@@ -50,8 +52,9 @@ some other way on the host (see Known limits).
    of the withheld names. (On main the child inherits the JVM's environment; the test
    needs `host-env`, added here, to supply one.)
 3. `deny-prefix-wins-test`, `names-match-without-case-test`,
-   `operator-can-add-names-test`; `probe-process-gets-the-agent-env-test` (CLI): the
-   preflight's process gets `llm/agent-env` and not the JVM's environment.
+   `operator-can-add-names-test`; `probe-process-gets-the-agent-env-test` (CLI): with
+   `:env` the process gets exactly that environment, without it the JVM's, and every
+   backend probe passes `llm/agent-env`.
 4. A real `claude` call through the llm client under the allowlist authenticates and
    answers.
 5. llm component tests pass.
