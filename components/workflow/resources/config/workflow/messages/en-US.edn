@@ -155,6 +155,7 @@
 
   ;; Execution mode
   :governed/no-capsule      "No capsule executor available for governed workflow"
+  :tenancy/operator-required "This run requires an operator identity and has no valid acting context"
   :governed/no-capsule-hint "Start Docker or configure a Kubernetes cluster"
   :governed/runtime-selection-failed
   "No capsule executor available for governed workflow: container runtime selection failed. {detail}"
