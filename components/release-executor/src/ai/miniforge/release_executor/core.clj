@@ -284,11 +284,13 @@
 
 (defn- ^{:stratum 0} effect-report
   "An effect transaction report from a shell result: success, an unknown
-   outcome when the call timed out, else a definite failure."
+   outcome when the call timed out or was interrupted, else a definite
+   failure."
   [result observed]
   (cond
     (result/succeeded? result) {:effect/outcome :succeeded :effect/observed observed}
-    (:timed-out? result)       {:effect/outcome :accepted :effect/failure (str (:error result))}
+    (or (:timed-out? result) (:interrupted? result))
+    {:effect/outcome :accepted :effect/failure (str (:error result))}
     :else                      {:effect/outcome :failed :effect/failure (str (:error result))}))
 
 ;------------------------------------------------------------------------------ Layer 1

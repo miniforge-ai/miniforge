@@ -88,6 +88,10 @@
       (str/starts-with? line "git rev-parse HEAD") (ok sha)
       (str/starts-with? line "git push -u origin ")
       (do (swap! state assoc-in [:pushed (last-word line)] sha) (ok))
+      (str/starts-with? line "git remote get-url --push")
+      (ok (get @state :push-url (get @state :origin-url "git@github.com:o/r.git")))
+      (str/starts-with? line "git remote get-url")
+      (ok (get @state :origin-url "git@github.com:o/r.git"))
       (str/starts-with? line "git ls-remote origin refs/heads/")
       (let [b (str/replace (last-word line) "refs/heads/" "")]
         (ok (if-let [pushed (get-in @state [:pushed b])] (str pushed "\trefs/heads/" b) "")))
