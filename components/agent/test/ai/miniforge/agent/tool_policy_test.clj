@@ -127,7 +127,7 @@
 
 (deftest ^{:stratum 2} missing-or-unknown-role-denies-every-tool-test
   (testing "with no role, or one the policy does not list, nothing is allowed"
-    (doseq [role [nil :curator "implementer"]]
+    (doseq [role [nil :curator "implementer" :custom/implementer]]
       (is (= "deny" (decision role "mcp__context__context_read" {:path "x.clj"}))
           (str "role " (pr-str role))))))
 

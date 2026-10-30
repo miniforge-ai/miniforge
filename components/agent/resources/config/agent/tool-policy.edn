@@ -35,15 +35,17 @@
   :planner     #{"mcp__context__context_write" "Write" "Edit" "MultiEdit"
                  "WebSearch" "WebFetch"}
 
-  ;; Edits the worktree and runs build and git steps. TaskStop stops a
-  ;; Bash command it ran in the background. Monitor and PowerShell also
-  ;; run commands but skip the Bash checks, so no role gets them.
+  ;; Edits the worktree and runs build and git steps. TaskStop and
+  ;; TaskOutput stop and read a Bash command it ran in the background
+  ;; (Claude Code before 2.1.277 reads that output with TaskOutput).
+  ;; Monitor and PowerShell also run commands but skip the Bash checks, so
+  ;; no role gets them.
   :implementer #{"mcp__context__context_write" "Write" "Edit" "MultiEdit"
-                 "NotebookEdit" "Bash" "TaskStop"}
+                 "NotebookEdit" "Bash" "TaskStop" "TaskOutput"}
 
   ;; Writes test files and runs them.
   :tester      #{"mcp__context__context_write" "Write" "Edit" "MultiEdit" "Bash"
-                 "TaskStop"}
+                 "TaskStop" "TaskOutput"}
 
   ;; Inspects only: no write path, MCP or native, and no shell.
   :reviewer    #{}

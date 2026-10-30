@@ -211,6 +211,10 @@
    `--role` off, and hook-eval then refuses every tool; a nil `root`
    leaves `--root` off, and it refuses every file tool.
 
+   A keyword role keeps its namespace (`:custom/implementer` becomes
+   `--role custom/implementer`), so a role the policy does not list is
+   refused rather than read as a listed role with the same name.
+
    A word holding anything beyond letters, digits and `_./:=@%+,-` is
    shell-quoted, so a checkout path with a space stays one argument."
   [words role root]
@@ -220,7 +224,9 @@
                  (file-artifacts/shell-quote w)))]
     (str/join " " (concat (map word words)
                           ["hook-eval"]
-                          (when role ["--role" (word (name role))])
+                          (when role ["--role" (word (if (keyword? role)
+                                                        (subs (str role) 1)
+                                                        (str role)))])
                           (when root ["--root" (word (str root))])
                           ["||" "exit" "2"]))))
 
