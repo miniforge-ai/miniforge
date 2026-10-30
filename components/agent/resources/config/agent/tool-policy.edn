@@ -4,7 +4,10 @@
 ;; Default-deny: the hook refuses a tool that is in neither :common nor the
 ;; role's set under :roles, and refuses every tool when it gets no role or
 ;; a role this file does not list. A tool that passes still has its input
-;; checked (Bash commands against :bash/deny-patterns).
+;; checked: the paths a file tool names must stay inside the session's
+;; worktree (`hook-eval --root`) and out of its git metadata and the agent
+;; config files below, and a Bash command must be no longer than
+;; :bash/max-command-length and match none of :bash/deny-patterns.
 ;;
 ;; Claude names MCP tools mcp__<server>__<tool>. The server is the
 ;; "context" key artifact_session writes into mcp-config.json; the tools
@@ -51,24 +54,116 @@
   ;; it keeps the read tools.
   :releaser    #{"mcp__context__context_write" "Write" "Read" "Glob" "Grep" "LS"}}
 
+ ;; For each tool that names a file system path: the tool_input keys
+ ;; holding one. Each path must resolve inside the session's worktree (the
+ ;; hook's --root) and out of its git metadata, per pr-lifecycle's
+ ;; safe-worktree-path, and must not match :tool/protected-paths. A tool
+ ;; listed here is refused when the hook has no root to check against.
+ :tool/path-keys
+ {"Read"                        [:file_path]
+  "Write"                       [:file_path]
+  "Edit"                        [:file_path]
+  "MultiEdit"                   [:file_path]
+  "NotebookEdit"                [:notebook_path]
+  "Glob"                        [:path]
+  "Grep"                        [:path]
+  "LS"                          [:path]
+  "mcp__context__context_read"  [:path]
+  "mcp__context__context_write" [:path]
+  "mcp__context__context_grep"  [:path]
+  "mcp__context__consider_situation" [:codex_path]}
+
+ ;; Glob-pattern inputs: refused when absolute, starting with ~, or with a
+ ;; .. segment, since the search would then leave the worktree.
+ :tool/glob-keys
+ {"Glob"                       [:pattern]
+  "Grep"                       [:glob]
+  "mcp__context__context_glob" [:pattern]
+  "mcp__context__context_grep" [:glob]}
+
+ ;; Worktree files no agent tool may touch, as regexes over the path
+ ;; relative to the worktree: the agent CLI and MCP config files a later
+ ;; session in the same worktree would load (settings, hooks, MCP servers),
+ ;; and the session directory miniforge writes inside a capsule. miniforge
+ ;; writes these itself. The rest of .claude/ and .cursor/ (skills,
+ ;; commands, rules) stays editable: repositories track them as content.
+ :tool/protected-paths
+ ["(?i)^\\.claude/settings(\\.local)?\\.json$"
+  "(?i)^\\.mcp\\.json$"
+  "(?i)^\\.codex/config\\.toml$"
+  "(?i)^\\.cursor/(mcp|cli)\\.json"
+  "(?i)^\\.opencode/opencode\\.jsonc?$"
+  "(?i)^opencode\\.jsonc?$"
+  "(?i)^\\.miniforge-session(/|$)"]
+
+ ;; Bash commands longer than this are refused before any pattern runs, so
+ ;; a padded command cannot make the checks below slow enough to time the
+ ;; hook out. Long file content goes through Write.
+ :bash/max-command-length 32768
+
  ;; Bash commands the hook refuses: java.util.regex patterns, each matched
- ;; anywhere in the command (re-find). Destructive or exfiltration-risk
- ;; commands.
+ ;; anywhere in the command (re-find). Repetition is bounded ({0,200}) so
+ ;; no pattern scans a command quadratically. Patterns that look for the
+ ;; start of a command use (?m), so a newline counts as a separator just
+ ;; as `;` does.
+ ;;
+ ;; A deny list cannot stop a determined agent (indirection, quoting,
+ ;; aliases, a script it writes and runs). It is defense in depth; the
+ ;; environment allowlist for the agent process and capsule egress rules
+ ;; are the controls meant to hold.
  :bash/deny-patterns
- ["rm\\s+-rf\\s+/"
+ [;; Credential files and stores (dot files under the home directory, not
+  ;; project files of the same name).
+  "(~|\\$HOME|\\$\\{HOME\\})/\\.aws\\b"
+  "\\.aws/(credentials|config)\\b"
+  "\\.ssh/"
+  "\\bid_(rsa|dsa|ecdsa|ed25519)\\b"
+  "(~|\\$HOME|\\$\\{HOME\\})/\\.(netrc|npmrc|pypirc|gnupg)\\b"
+  "\\.git-credentials\\b"
+  "\\.config/gh/"
+  "\\.docker/config\\.json"
+  "\\.kube/config"
+  "\\.claude/\\.credentials"
+  "/proc/[^\\s/]+/environ"
+  ;; Commands that print tokens or the environment.
+  "\\bgh\\s+auth\\s+(token|status)\\b"
+  "\\bgh\\s+(gist|secret|ssh-key|gpg-key|api)\\b"
+  "\\bprintenv\\b"
+  "(?m)(^|[;&|(`])[ \\t]*(env|export|declare|typeset)(\\s+-[a-zA-Z0-9]+){0,4}\\s*($|[|;&>)`])"
+  "(?m)(^|[;&|(`])[ \\t]*set[ \\t]*($|[|;&>)`])"
+  "\\$\\{?[A-Z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|PRIVATE_KEY)[A-Z0-9_]*"
+  "\\$\\{?AWS_[A-Z0-9_]+"
+  "\\bgit\\s+credential\\b"
+  "\\bsecurity\\s+(find|dump)-"
+  "\\baws\\s+(configure|sts)\\b"
+  "\\bgcloud\\s+auth\\s+print-"
+  ;; Network clients where a command starts (not inside an argument such as
+  ;; a commit message). Build tools still fetch their dependencies.
+  "(?m)(^|[;&|(`]|\\$\\(|\\b(then|do|else|xargs|exec|command|nohup|time|sudo)\\b)[ \\t]*(\\S{0,200}/)?(curl|wget|nc|ncat|netcat|socat|telnet|ftp|tftp|sftp|scp|ssh|rsync)(\\s|$)"
+  "/dev/(tcp|udp)/"
+  ;; Git commands that reach a remote the run did not configure, publish,
+  ;; or change git's own behaviour. miniforge's release step pushes; the
+  ;; agent never does. Git config keys are case-insensitive.
+  "\\bgit(\\s+-\\S+(\\s+[^-\\s]\\S*)?){0,8}\\s+(push|remote\\s+(add|set-url))(\\s|$)"
+  "\\bgit(\\s+-\\S+(\\s+[^-\\s]\\S*)?){0,8}\\s+(fetch|pull|clone|ls-remote)(\\s+\\S+){0,8}?\\s+\\S{0,200}(://|@)"
+  "(?i)\\bgit(\\s+\\S+){0,8}?\\s+-c\\s+\\S{0,200}(url\\.|credential|sshcommand|askpass|hookspath|fsmonitor|remote\\.|core\\.gitproxy)"
+  "(?i)\\bgit(\\s+-\\S+(\\s+[^-\\s]\\S*)?){0,8}\\s+config\\b[^;&|\\n]{0,200}(core\\.(sshcommand|hookspath|fsmonitor|askpass|gitproxy)|url\\.|remote\\.\\S{0,100}\\.(url|pushurl)|credential\\.|include\\.path|includeif)"
+  "(?i)\\bGIT_(SSH_COMMAND|SSH|ASKPASS|PROXY_COMMAND|CONFIG_[A-Z0-9_]*|DIR|WORK_TREE)\\s*="
+  ;; Git metadata and agent config the file tools refuse, reached through
+  ;; the shell instead.
+  "(?i)(^|[\\s'\"=:/<>])\\.git(/|\\s|$|['\"])"
+  "(?i)(^|[\\s'\"=:/<>])(\\.claude/settings(\\.local)?\\.json|\\.mcp\\.json|\\.codex/config\\.toml|\\.cursor/(mcp|cli)\\.json|opencode\\.jsonc?|\\.miniforge-session/)"
+  ;; Destructive commands.
+  "rm\\s+-rf\\s+/"
   "rm\\s+-rf\\s+~"
   "rm\\s+-rf\\s+\\*"
   "mkfs\\b"
-  "dd\\s+.*of=/dev/"
+  "\\bdd\\s+[^;&|\\n]{0,200}of=/dev/"
   "chmod\\s+-R\\s+777\\s+/"
-  "chown\\s+-R\\s+.*\\s+/"
+  "chown\\s+-R\\s+[^;&|\\n]{0,200}\\s+/"
   ">\\s*/dev/sd"
-  "curl\\s+.*\\|\\s*sh"
-  "curl\\s+.*\\|\\s*bash"
-  "wget\\s+.*\\|\\s*sh"
-  "wget\\s+.*\\|\\s*bash"
-  "eval\\s+.*\\$\\("
-  ":()\\s*\\{\\s*:\\|:\\s*&\\s*\\}\\s*;"  ; fork bomb
+  "\\beval\\s+[^;&|\\n]{0,200}\\$\\("
+  ":\\(\\)\\s*\\{\\s*:\\|:\\s*&\\s*\\}\\s*;"  ; fork bomb
   "shutdown\\b"
   "reboot\\b"
   "init\\s+0"

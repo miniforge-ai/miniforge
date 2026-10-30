@@ -586,7 +586,14 @@
                           :tags [(msg/t :rate-limit-test.system/security-tag)
                                  (msg/t :rate-limit-test.system/in-progress-tag)
                                  (msg/t :rate-limit-test.system/risk-tag)]}]}))))
-    (is (not (impl/rate-limited? nil)))))
+    (is (not (impl/rate-limited? nil))))
+
+  (testing "an answer that mentions a rate limit or HTTP 429 is not a notice"
+    (is (not (impl/rate-limited? "This PR adds a rate limit and returns HTTP 429.")))
+    (is (not (impl/rate-limited? "Fixed the 429 handling in the retry loop.")))
+    (is (not (impl/rate-limited? (str (apply str (repeat 40 "Implementation notes. "))
+                                      "Requests over quota get a rate limit exceeded error.")))
+        "a long answer is never read as a notice")))
 
 (deftest ^{:stratum 0} rate-limited-success-response-test
   (testing "rate limit content in success-response returns error"
