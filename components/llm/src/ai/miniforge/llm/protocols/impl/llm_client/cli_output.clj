@@ -72,12 +72,17 @@
           (vary-meta assoc ::message-id message-id)))))
 
 (defn ^{:stratum 0} rate-limited?
-  "Detect Claude CLI rate limit messages in content.
-   Claude CLI returns exit 0 but emits a rate limit message as content."
+  "True when `content` is a CLI rate-limit notice rather than an answer.
+   The Claude CLI exits 0 and prints the notice as its whole output
+   (\"You've hit your limit - resets 7pm (America/Los_Angeles)\"), so the
+   check reads only output of at most 300 characters, and only notice
+   phrasing: an answer about a PR that adds a rate limit or returns HTTP
+   429 is not a notice."
   [content]
   (and (string? content)
-       (re-find #"(?i)you've hit your limit|too many requests|\b429\b|rate limit(?:ed| exceeded)?\b|resets \d+[ap]m"
-                content)))
+       (<= (count (str/trim content)) 300)
+       (some? (re-find #"(?i)you've hit your limit|usage limit reached|too many requests|rate limit(?:ed| exceeded| reached)\b|resets \d+[ap]m"
+                       content))))
 
 (defn ^{:stratum 0} record-parsed-progress!
   [progress-monitor parsed accumulated-content]
