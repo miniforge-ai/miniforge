@@ -41,7 +41,8 @@
         (is (false? (sut/user-config-requires-governed? (at "{:llm {:backend :claude}}")))))
       (testing "a file that does not parse, or is not exactly one map, requires it"
         (doseq [text ["{:execution {:require-governed? false" "[:not :a :map]" "" "nil"
-                      "{} {:execution {:require-governed? true}}"]]
+                      "{} {:execution {:require-governed? true}}"
+                      "{} :ai.miniforge.config.execution/eof {:execution {:require-governed? true}}"]]
           (is (true? (sut/user-config-requires-governed? (at text))) (pr-str text))))
       (finally
         (run! #(.delete ^java.io.File %) (reverse (file-seq dir)))))))

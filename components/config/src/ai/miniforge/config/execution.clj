@@ -42,14 +42,17 @@
 
 (defn ^{:stratum 0} config-file-forms
   "Every top-level form in the EDN file at `path`, or ::unreadable when it
-   cannot be read or parsed. nil when no file exists there."
+   cannot be read or parsed. nil when no file exists there. The end-of-file
+   marker is a fresh object compared with `identical?`, so no form the file
+   holds (a keyword spelt like a marker, say) can end the read early."
   [path]
   (when (.exists (io/file (str path)))
     (try+
-     (with-open [rdr (java.io.PushbackReader. (io/reader (str path)))]
-       (loop [forms []]
-         (let [form (edn/read {:eof ::eof} rdr)]
-           (if (= ::eof form) forms (recur (conj forms form))))))
+     (let [eof (Object.)]
+       (with-open [rdr (java.io.PushbackReader. (io/reader (str path)))]
+         (loop [forms []]
+           (let [form (edn/read {:eof eof} rdr)]
+             (if (identical? eof form) forms (recur (conj forms form)))))))
      (catch Object _ ::unreadable))))
 
 ;------------------------------------------------------------------------------ Layer 1

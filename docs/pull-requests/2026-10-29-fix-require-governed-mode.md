@@ -26,7 +26,8 @@ unisolated runs impossible, only to remember the flag on each run.
    other than false or nil (a hand-edited `"true"`, `"yes"`, `1`) counts as required.
    `user-config-requires-governed?` reads the user config file strictly: it must hold
    exactly one map, and anything else (a parse error, an empty file, nil, a vector, a
-   second form) counts as requiring governed execution. The merged-config loader would
+   second form) counts as requiring governed execution. The read ends on a private
+   end-of-file object, not a keyword a file could contain. The merged-config loader would
    fall back to defaults and turn the requirement off; the one map is merged over the
    defaults as that loader would.
 2. `workflow-runner.execution-mode` (CLI): `resolve-mode` takes the explicit mode (a
