@@ -1156,6 +1156,19 @@
         (is (= :failed (get-in final-ctx [:phase :status])))
         (is (= :implement/backend-timeout (get-in final-ctx [:phase :verdict])))))))
 
+(deftest ^{:stratum 2} a-cancelled-run-skips-the-curator-test
+  (testing "once the run is stopped, enter-implement calls no curator after the agent"
+    (let [curated (atom false)]
+      (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                    agent/invoke (fn [_ _ _] (response/failure (InterruptedException. "cancelled")))
+                    agent/curate-implement-output (fn [m] (reset! curated true) (mock-curator-success m))]
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :implement})
+                      (assoc-in [:execution/opts :control-state] (atom {:paused false :stopped true})))
+              result ((:enter (phase/get-phase-interceptor {:phase :implement})) ctx)]
+          (is (false? @curated))
+          (is (= :run-stopped (get-in result [:phase :result :error :data :code]))))))))
+
 (use-fixtures :each
   (fn [f]
     (phase/reset-phase-loader!)

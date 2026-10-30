@@ -872,6 +872,10 @@
         ;; Clear any leftover interrupt flag set by the kill-fn so it does not
         ;; poison the curator run or subsequent work on this thread.
         _ (when stalled? (Thread/interrupted))
+        ;; A cancel interrupted the agent, or came while it ran: no curator
+        ;; (its git collection and fallback may call an LLM) runs after it.
+        ;; The runner records the stop when the phase returns.
+        stopped? (some-> (get-in ctx [:execution/opts :control-state]) deref :stopped)
         ;; Curator post-processes the implementer's environment writes into a
         ;; structured :code artifact. The environment is the artifact, so we
         ;; invoke the curator regardless of the implementer's self-reported
@@ -880,24 +884,26 @@
         ;; the implementer truly wrote nothing, the curator fast-fails with a
         ;; clear "no files" error instead of silently retrying.
         curator-result
-        (try
-          (agent/curate-implement-output
-           {:implementer-result impl-result
-            :env-id (get ctx :execution/environment-id)
-            ;; Capsule collection reads the capsule's checkout, not the host path.
-            :worktree-path (or (when (get ctx :execution/execute-fn)
-                                 (get ctx :execution/capsule-workdir))
-                               (resolve-worktree-path ctx))
-            :executor (get ctx :execution/executor)
-            :execute-fn (get ctx :execution/execute-fn)
-            :pre-session-snapshot (get ctx :execution/pre-session-snapshot)
-            :base-refs (get ctx :execution/task-base-refs)
-            :intent-scope (get-in ctx [:execution/input :intent :scope])
-            :spec-description (get-in ctx [:execution/input :description])
-            :llm-client (get ctx :llm-backend)
-            :logger logger})
-          (catch Exception e
-            (response/failure e)))
+        (if stopped?
+          impl-result
+          (try
+            (agent/curate-implement-output
+             {:implementer-result impl-result
+              :env-id (get ctx :execution/environment-id)
+              ;; Capsule collection reads the capsule's checkout, not the host path.
+              :worktree-path (or (when (get ctx :execution/execute-fn)
+                                   (get ctx :execution/capsule-workdir))
+                                 (resolve-worktree-path ctx))
+              :executor (get ctx :execution/executor)
+              :execute-fn (get ctx :execution/execute-fn)
+              :pre-session-snapshot (get ctx :execution/pre-session-snapshot)
+              :base-refs (get ctx :execution/task-base-refs)
+              :intent-scope (get-in ctx [:execution/input :intent :scope])
+              :spec-description (get-in ctx [:execution/input :description])
+              :llm-client (get ctx :llm-backend)
+              :logger logger})
+            (catch Exception e
+              (response/failure e))))
         ;; The curator's verdict is the source of truth about whether the
         ;; implementer produced useful work (the environment is the artifact).
         ;; Its terminal :code (e.g. :curator/no-files-written) carries
@@ -945,6 +951,8 @@
              (= :mcp (get-in impl-result [:error :data :artifact-source])))
         degraded-handoff? (and impl-errored? (not metadata-only-submit?))
         result (cond
+                 stopped?
+                 (response/error (messages/t :implement/run-stopped) {:data {:code :run-stopped}})
                  ;; Stream watchdog fired: the agent stalled silently and was
                  ;; killed mid-stream, so the empty diff is a stall symptom, not
                  ;; a genuine no-files verdict. Re-code the implementer error as
