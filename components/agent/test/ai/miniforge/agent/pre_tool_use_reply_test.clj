@@ -34,14 +34,14 @@
   #{"allow" "deny" "ask" "defer"})
 
 (defn- ^{:stratum 0} hook-reply
-  "Run hook-eval for `role` on one PreToolUse request and return its
-   stdout, parsed."
+  "Run hook-eval for `role`, in a session whose every path passes, on one
+   PreToolUse request and return its stdout, parsed."
   [role tool-name tool-input]
   (let [payload (json/generate-string {:tool_name tool-name :tool_input tool-input})]
     (json/parse-string
      (with-out-str
        (binding [*in* (java.io.StringReader. payload)]
-         (sut/hook-eval-stdin! {:role role}))))))
+         (sut/hook-eval-stdin! {:role role :root "/work/repo" :path-ok? (constantly true)}))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
