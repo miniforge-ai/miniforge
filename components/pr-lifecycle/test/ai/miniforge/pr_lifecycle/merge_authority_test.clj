@@ -125,6 +125,23 @@
         (is (= :head-unavailable (get-in result [:error :code])))
         (is (zero? @merge-calls))))))
 
+(deftest ^{:stratum 1} a-failed-registration-revokes-the-issued-grant-test
+  (let [context (merge-context)
+        register grant/register!]
+    (with-redefs [grant/register!
+                  (fn [dir issued]
+                    (register dir issued)
+                    (anomaly/anomaly :unavailable "publication not confirmed" {}))]
+      (let [refused (authority/prepare context (random-uuid)
+                                       {:pr/repo "miniforge-ai/miniforge" :pr/number 123
+                                        :pr/head-sha head-sha}
+                                       {:ready? true :blocking []} :squash (Instant/now))]
+        (is (anomaly/anomaly? refused))
+        (is (= :revocation/superseded
+               (:grant/revocation-reason
+                (grant/current (:grant-breach-dir context)
+                               (get-in refused [:anomaly/data :grant/id])))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} governed-merge-records-authority-before-provider-test

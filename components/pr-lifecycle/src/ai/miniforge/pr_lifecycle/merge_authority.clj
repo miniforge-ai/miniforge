@@ -103,13 +103,19 @@
    :authority/envelope envelope})
 
 (defn- ^{:stratum 1} issue-registered
-  "Issue a grant and register it, so commit can re-read and revoke it."
+  "Issue a grant and register it, so commit can re-read and revoke it.
+   Registration can fail after the record became readable, so a failure
+   revokes the issued id and reports both."
   [context request now]
   (let [dir (breach-dir context)
-        issued (grant/issue-for-effect dir request now)]
-    (if (anomaly/anomaly? issued)
-      issued
-      (grant/register! dir issued))))
+        issued (grant/issue-for-effect dir request now)
+        registered (if (anomaly/anomaly? issued) issued (grant/register! dir issued))]
+    (if (and (anomaly/anomaly? registered) (not (anomaly/anomaly? issued)))
+      (update registered :anomaly/data assoc
+              :grant/id (:grant/id issued)
+              :grant/revocation (grant/revoke-stored! dir (:grant/id issued)
+                                                      :revocation/superseded now))
+      registered)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
