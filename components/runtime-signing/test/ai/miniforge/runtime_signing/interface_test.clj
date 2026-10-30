@@ -56,6 +56,11 @@
       (Files/setPosixFilePermissions (.toPath (.getParentFile file))
                                      (PosixFilePermissions/fromString "rwxrwxrwx"))
       (is (anomaly/anomaly? (signing/load-or-create-key! file)))))
+  (testing "given a FIFO in place of the key → refused without blocking"
+    (let [file (key-file)]
+      (.mkdirs (.getParentFile file))
+      (.waitFor (.start (ProcessBuilder. ["mkfifo" (str file)])))
+      (is (anomaly/anomaly? (deref (future (signing/load-or-create-key! file)) 5000 :hung)))))
   (testing "given malformed key text → refused"
     (let [file (key-file)]
       (signing/load-or-create-key! file)
