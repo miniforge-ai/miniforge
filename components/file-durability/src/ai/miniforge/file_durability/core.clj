@@ -22,5 +22,9 @@
 (defn ^{:stratum 0} confirm! [file]
   (boundary/call-with-exception-handling :confirm file (partial file-io/confirm! file)))
 
+(defn ^{:stratum 0} publish-bytes! [file bytes publish!]
+  (boundary/call-with-exception-handling
+   :publish file (partial file-io/publish-bytes! file bytes publish!) identity))
+
 (comment
   ::durability-boundary)
