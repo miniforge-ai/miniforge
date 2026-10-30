@@ -113,9 +113,10 @@
                    :app-label (get-in state [:target :app-label])}
         prepared (authority/prepare (:context state) (random-uuid)
                                     (:target state) preflight (:now state))
-        revocation (get-in prepared [:anomaly/data :grant/revocation])]
+        {:grant/keys [id revocation]} (:anomaly/data prepared)]
     (if (anomaly/anomaly? prepared)
       (cond-> (fail state :authority (:anomaly/message prepared))
+        id (assoc :grant/id id)
         (anomaly/anomaly? revocation) (assoc :grant/revocation-failure revocation))
       (assoc state :authority prepared))))
 

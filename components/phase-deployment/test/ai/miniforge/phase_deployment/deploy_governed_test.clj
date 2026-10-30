@@ -228,3 +228,17 @@
         (is (= :failed (:deploy/status result)))
         (is (uuid? (:deploy/grant-id result)))
         (is (anomaly/anomaly? (:deploy/revocation-failure result)))))))
+
+(deftest ^{:stratum 2} a-failed-registration-keeps-the-grant-id-test
+  (let [register grant/register!]
+    (with-redefs [grant/register!
+                  (fn [dir issued]
+                    (register dir issued)
+                    (anomaly/anomaly :unavailable "publication not confirmed" {}))
+                  grant/revoke-stored!
+                  (fn [& _] (anomaly/anomaly :unavailable "registry unwritable" {}))]
+      (let [result (governed/transact! (context) deploy-config
+                                       (recording-operations (atom [])) now)]
+        (is (= :authority (:deploy/stage result)))
+        (is (uuid? (:deploy/grant-id result)) "the possibly live grant stays identifiable")
+        (is (anomaly/anomaly? (:deploy/revocation-failure result)))))))
