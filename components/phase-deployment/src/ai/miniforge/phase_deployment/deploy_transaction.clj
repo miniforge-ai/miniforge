@@ -114,15 +114,22 @@
   "Observe the cluster and settle the record once the rollout is healthy.
    An unhealthy observation (a slow rollout, a failed read) settles
    nothing: the record stays reconcilable for a later attempt, and the
-   returned copy carries the observation for this attempt's outcome."
+   returned copy carries the observation for this attempt's outcome. The
+   provider call runs inside `fx/reconcile!`, so one that throws leaves
+   the record reconcilable and returns its anomaly."
   [context transaction operations now]
   (if-not (contains? fx/reconcilable-states (:effect/state transaction))
     transaction
     (let [dir (store-dir context)
           durable (fx/read-record dir (:effect/id transaction))
-          answer (when-not (anomaly/anomaly? durable)
-                   (probe-answer operations (:effect/proposal durable) durable))]
-      (cond
-        (anomaly/anomaly? durable) durable
-        (:effect/matched? answer) (fx/reconcile! dir transaction (constantly answer) now)
-        :else (assoc transaction :effect/observed (:effect/observed answer))))))
+          seen (atom nil)
+          healthy-only (fn [t]
+                         (let [answer (probe-answer operations (:effect/proposal durable) t)]
+                           (reset! seen answer)
+                           (when (:effect/matched? answer) answer)))]
+      (if (anomaly/anomaly? durable)
+        durable
+        (let [reconciled (fx/reconcile! dir transaction healthy-only now)]
+          (if (and (anomaly/anomaly? reconciled) @seen)
+            (assoc transaction :effect/observed (:effect/observed @seen))
+            reconciled))))))

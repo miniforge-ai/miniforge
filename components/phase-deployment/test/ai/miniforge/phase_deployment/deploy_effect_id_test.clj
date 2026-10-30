@@ -80,3 +80,14 @@
     (is (= "rollout timed out" (:deploy/failure first-try)))
     (is (= :success (:deploy/status (deploy! context applies (schema/success :stdout "applied") true))))
     (is (= 1 @applies) "the retry observed the cluster again; it did not apply twice")))
+
+(deftest ^{:stratum 2} a-throwing-observation-leaves-the-deploy-reconcilable-test
+  (let [context (deploy-context)
+        applies (atom 0)
+        ops (assoc (operations applies target (schema/success :stdout "applied") true)
+                   :observe! (fn [_] (throw (ex-info "cluster unreachable" {}))))
+        result (governed/transact! context target ops (Instant/now))]
+    (is (= :failed (:deploy/status result)) "the exception does not escape transact!")
+    (is (= [:unknown-outcome] (mapv :effect/state (fx/list-records (:effect-store-dir context)))))
+    (is (= :success (:deploy/status (deploy! context applies (schema/success :stdout "applied")))))
+    (is (= 1 @applies))))
