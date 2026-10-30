@@ -128,8 +128,8 @@ The files of one write MUST be forced to disk before the manifest that
 names them is published (§2); the manifest is the commit point, so a
 write that stops before it leaves the previous checkpoint whole. The
 reference implementation writes each checkpoint's snapshot and phase
-files into a new generation directory under the run's directory and
-removes generations neither the current nor the replaced manifest names.
+files into a new generation directory under the run's directory, and
+first removes the generations the current manifest does not name.
 A write MUST hold the run's checkpoint lock, which pinning and checkpoint
 GC also take.
 

@@ -9,10 +9,11 @@
    current checkpoint, so a write that dies before its manifest leaves
    an unreferenced generation and the previous checkpoint whole.
 
-   Pruning keeps every generation that the new manifest or the one it
-   replaced names: a reader that has just read the previous manifest
-   still finds its files. Files outside `generations/` (a run written
-   before generations existed) are never pruned."
+   A write prunes before it creates its generation, keeping every
+   generation the current manifest names: a reader that has just read it
+   still finds its files, and a generation a failed write left goes.
+   Files outside `generations/` (a run written before generations
+   existed) are never pruned."
   (:require [ai.miniforge.workflow.boundary.checkpoint-directory :as directory]
             [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
             [babashka.fs :as fs]))

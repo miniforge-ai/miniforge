@@ -57,6 +57,14 @@
       (is (every? #(< % manifest-fill) generation-syncs))
       (is (= [:sync run-dir] (last @events))))))
 
+(defn- ^{:stratum 0} verify-pending-interrupt [root]
+  (let [written (do (.interrupt (Thread/currentThread))
+                    (store/persist-execution-state! (fixture/plan-completed-context root {})))
+        ;; Read before `is`, which clears a pending interrupt.
+        restored? (Thread/interrupted)]
+    (is (not (anomaly/anomaly? written)) "a pending interrupt does not fail the write")
+    (is restored? "and is still pending after it")))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} verify-crash-before-manifest [root]
@@ -103,6 +111,23 @@
 (deftest ^{:stratum 1} every-file-is-forced-before-the-manifest-names-it
   (fixture/call-with-temp-checkpoint-root verify-forced-before-manifest))
 
+(defn- ^{:stratum 1} verify-failed-phase-recovered [root]
+  (let [planned (fixture/plan-completed-context root {})
+        id (:execution/id planned)
+        implemented (implement-completed planned)]
+    (store/persist-execution-state! planned)
+    (with-redefs [checkpoint-file/write! (failing-manifest-write checkpoint-file/write!)]
+      (store/persist-execution-state! implemented))
+    (store/persist-execution-state! (-> implemented
+                                        (assoc :execution/current-phase :verify)
+                                        (assoc-in [:execution/phase-results :verify] {:status :completed})))
+    (is (= {:status :completed}
+           (get-in (workflow/load-checkpoint-data id {:checkpoint/root root}) [:phase-results :implement]))
+        "the next write writes the phase the failed one lost")))
+
+(deftest ^{:stratum 1} a-pending-interrupt-is-held-off-and-restored
+  (fixture/call-with-temp-checkpoint-root verify-pending-interrupt))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} a-write-that-dies-before-its-manifest-leaves-the-previous-checkpoint
@@ -110,6 +135,9 @@
 
 (deftest ^{:stratum 2} only-the-current-and-previous-generations-are-kept
   (fixture/call-with-temp-checkpoint-root verify-pruning))
+
+(deftest ^{:stratum 2} a-phase-a-failed-write-lost-is-written-by-the-next
+  (fixture/call-with-temp-checkpoint-root verify-failed-phase-recovered))
 
 (deftest ^{:stratum 2} a-run-written-in-the-flat-layout-keeps-its-files
   (fixture/call-with-temp-checkpoint-root verify-flat-layout-run))

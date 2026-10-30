@@ -180,14 +180,14 @@
   "Append the phase's gate decision to the run's gate history when the
    phase result carries a decision envelope. Best-effort: a failed
    append logs nothing and changes nothing — the checkpoint write is the
-   authority, this is the audit trail."
-  [checkpoint-root workflow-run-id phase-name phase-result ctx]
+   authority, this is the audit trail. `run-dir` is the run's resolved
+   checkpoint directory."
+  [run-dir phase-name phase-result ctx]
   (when-let [envelope (:phase/decision-envelope phase-result)]
     ;; Plain try, class-only catch at an absolute boundary (std 211 ex. a):
     ;; the audit append must never fail the checkpoint write.
     (try
-      (let [dir (checkpoint-paths/workflow-checkpoint-dir checkpoint-root workflow-run-id)
-            entry {:phase phase-name
+      (let [entry {:phase phase-name
                    :at (str (java.time.Instant/now))
                    :decision (:envelope/decision envelope)
                    :redirect-count (get ctx :execution/redirect-count 0)
@@ -200,19 +200,19 @@
         ;; errors carry java.time.Instant values (policy-pack violations'
         ;; :timestamp), which pr-str would emit as #object[...] and make
         ;; the history unreadable.
-        (history/append! (fs/path dir gate-history-filename)
+        (history/append! (fs/path run-dir gate-history-filename)
                          (str (pr-str (coerce/stringify-instants entry)) "\n")))
       (catch Exception _ nil))))
 
 (defn- ^{:stratum 1} write-pin-marker!
   "Write run `workflow-run-id`'s pin marker into its existing run
-   directory, never creating it. The caller holds the run's lock. Returns
-   the marker path, or an anomaly: `:not-found` when the run has no
-   manifest, `:unavailable` when the marker cannot be written."
-  [checkpoint-root workflow-run-id]
-  (let [path (checkpoint-paths/pin-marker-path checkpoint-root workflow-run-id)
+   directory `run-dir`, never creating it. The caller holds the run's
+   lock. Returns the marker path, or an anomaly: `:not-found` when the run
+   has no manifest, `:unavailable` when the marker cannot be written."
+  [run-dir workflow-run-id]
+  (let [path (str (fs/path run-dir checkpoint-paths/pin-marker-filename))
         data {:workflow/run-id workflow-run-id :checkpoint/path path}]
-    (if-not (fs/exists? (checkpoint-paths/manifest-path checkpoint-root workflow-run-id))
+    (if-not (fs/exists? (fs/path run-dir checkpoint-paths/manifest-filename))
       (anomaly/anomaly :not-found
                        (messages/t :checkpoint/pin-no-manifest {:run-id workflow-run-id})
                        data)
@@ -242,7 +242,8 @@
      (let [checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)]
        (checkpoint-lock/with-run-lock
         checkpoint-root workflow-run-id
-        #(write-pin-marker! checkpoint-root workflow-run-id)))
+        #(write-pin-marker! (checkpoint-paths/workflow-checkpoint-dir checkpoint-root workflow-run-id)
+                            workflow-run-id)))
      ;; Root resolution or the lock itself failing: still an anomaly.
      (catch Exception e
        (pin-failure workflow-run-id {:workflow/run-id workflow-run-id} e)))))
@@ -348,8 +349,12 @@
    forced to disk, and the manifest naming them is published last. A
    crash before the manifest leaves the previous checkpoint whole. The
    write holds the run's lock (`checkpoint-store-lock`) throughout, so a
-   pin, a GC or another write of the same run waits for it. Generations
-   neither this manifest nor the one it replaced names are then removed.
+   pin, a GC or another write of the same run waits for it. Before it
+   creates its generation, a write removes the generations the current
+   manifest does not name (those it replaced, and any a failed write left).
+   Every phase result the manifest names no readable file for is written
+   too, so a phase whose write failed is not lost. A pending interrupt is
+   held off for the write and restored after it.
 
    Returns the written paths (with `:checkpoint/phase` and
    `:checkpoint/phase-path` when a phase checkpoint was written), nil for
@@ -375,8 +380,10 @@
           checkpoint-data {:checkpoint/root requested-root
                            :manifest (checkpoint-records/build-manifest ctx requested-root)
                            :machine-snapshot snapshot
-                           :phase-results (or (:execution/phase-results ctx) {})}]
-      (schemas/validate-checkpoint-data! checkpoint-data)
+                           :phase-results (or (:execution/phase-results ctx) {})}
+          _ (schemas/validate-checkpoint-data! checkpoint-data)
+          ;; Interruptible channel I/O and lock waits would fail on it.
+          interrupted? (Thread/interrupted)]
       ;; Every read and write below is I/O: a failure becomes the returned
       ;; anomaly, never an exception that would end the run. The existing
       ;; manifest is read here, inside the guard, for the same reason, and
@@ -402,38 +409,37 @@
                                           :manifest merged-manifest))]
                    (if (anomaly/anomaly? validation)
                      (invalid-manifest checkpoint-root workflow-run-id phase-name manifest-path validation)
-                     (let [generation (generation/create! run-dir)
-                           to-write (cond-> (into []
+                     (let [_ (try
+                               ;; Best effort, class-only catch at an absolute
+                               ;; boundary (std 211 ex. a): the next write retries.
+                               (generation/prune! run-dir [existing-manifest])
+                               (catch Exception _ nil))
+                           generation (generation/create! run-dir)
+                           to-write (cond-> (into {}
                                                   (remove (fn [[phase result]]
                                                             (or (nil? result)
                                                                 (some-> (get existing-paths phase) fs/exists?))))
-                                                  (get-in ctx [:execution/opts :resume-phase-results]))
-                                      (and phase-name phase-result) (conj [phase-name phase-result]))
+                                                  (merge (get-in ctx [:execution/opts :resume-phase-results])
+                                                         (:execution/phase-results ctx)))
+                                      (and phase-name phase-result) (assoc phase-name phase-result))
                            phase-paths (into {}
                                              (map (fn [[phase result]]
                                                     [phase (write-edn-atomically!
                                                             (generation/phase-path generation phase)
                                                             (checkpoint-records/build-phase-checkpoint ctx phase result))]))
                                              to-write)
+                           phase-path (when (and phase-name phase-result) (get phase-paths phase-name))
+                           _ (when phase-path
+                               (append-gate-history! run-dir phase-name phase-result ctx))
                            snapshot-path (write-edn-atomically! (generation/snapshot-path generation) snapshot)
                            manifest (assoc merged-manifest
                                            :workflow/machine-snapshot-path snapshot-path
                                            :workflow/phase-checkpoints (merge existing-paths phase-paths))
                            manifest-path (write-edn-atomically! manifest-path manifest)
-                           phase-path (when (and phase-name phase-result) (get phase-paths phase-name))
                            ;; A failed initial pin must remain a failed checkpoint.
                            pin (when (and (true? (get-in ctx [:execution/opts :checkpoint/pin?]))
-                                          (not (fs/exists? (checkpoint-paths/pin-marker-path
-                                                            checkpoint-root workflow-run-id))))
-                                 (write-pin-marker! checkpoint-root workflow-run-id))]
-                       (when phase-path
-                         (append-gate-history! checkpoint-root workflow-run-id phase-name phase-result ctx))
-                       ;; Plain try, class-only catch at an absolute boundary
-                       ;; (std 211 ex. a): the checkpoint is published; a
-                       ;; generation left behind goes on the next write.
-                       (try
-                         (generation/prune! run-dir [manifest existing-manifest])
-                         (catch Exception _ nil))
+                                          (not (fs/exists? (fs/path run-dir checkpoint-paths/pin-marker-filename))))
+                                 (write-pin-marker! run-dir workflow-run-id))]
                        (if (anomaly/anomaly? pin)
                          pin
                          (cond-> {:checkpoint/root checkpoint-root
@@ -445,5 +451,10 @@
           (if (anomaly/anomaly? written)
             (assoc-in written [:anomaly/data :phase/name] phase-name)
             written))
+        (catch InterruptedException e
+          (.interrupt (Thread/currentThread))
+          (write-failure requested-root workflow-run-id phase-name e))
         (catch Exception e
-          (write-failure requested-root workflow-run-id phase-name e))))))
+          (write-failure requested-root workflow-run-id phase-name e))
+        (finally
+          (when interrupted? (.interrupt (Thread/currentThread))))))))
