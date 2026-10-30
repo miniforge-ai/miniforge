@@ -72,14 +72,21 @@ Bash under OpenCode's defaults with no check.
 
 ## Deployment Plan
 
-Ships with the next release. OpenCode calls inside an artifact session are unchanged
+Ships with the next release. Isolated OpenCode calls, and the backend preflight probe,
+no longer read the worktree's `opencode.json`: providers, endpoints and models defined
+only there must move to the operator's global OpenCode config
+(`~/.config/opencode/opencode.json`) or `OPENCODE_CONFIG_CONTENT`, or the preflight
+probe fails before the run starts. OpenCode calls inside an artifact session are unchanged
 here; giving them each role's tool permissions is the next change.
 
 ## Known limits
 
-1. Upstream OpenCode reports project-local plugins still loading under `--pure` and
-   `OPENCODE_PURE=1` on 1.18.31 and later (anomalyco/opencode#49836). With project
-   config off they should not be found, but that is not checked on those versions.
+1. Upstream OpenCode reports project-local plugins still loading on 1.18.31 and later
+   (anomalyco/opencode#49836), with `--pure`, `OPENCODE_PURE=1` and
+   `OPENCODE_DISABLE_PROJECT_CONFIG=1` all set. None of the three is a mitigation on
+   those versions; such a plugin runs code at startup outside tool permissions, and the
+   agent environment allowlist (#2284) only limits what it can read from the
+   environment.
 2. The operator's global OpenCode config still loads (provider settings); its
    permission rules come before the agent's, so the agent's `"*"` deny still wins.
 3. The operator's global OpenCode config is the operator's own and still loads: its
