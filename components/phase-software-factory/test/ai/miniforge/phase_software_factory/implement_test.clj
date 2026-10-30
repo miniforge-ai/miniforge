@@ -1170,27 +1170,22 @@
           (is (= :run-stopped (get-in result [:phase :result :error :data :code]))))))))
 
 (deftest ^{:stratum 2} a-cancel-during-the-curator-is-recorded-with-the-agents-spend-test
-  (testing "a cancel that lands while the curator runs ends the phase as stopped,
-            keeping what the agent spent"
-    (let [cs (atom {:paused false :stopped false})]
-      (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
-                    agent/invoke (fn [_ _ _] (response/success nil {:tokens 800 :duration-ms 1500}))
-                    agent/curate-implement-output (fn [m] (swap! cs assoc :stopped true) (mock-curator-success m))]
-        (let [ctx (-> (create-base-context)
-                      (assoc :phase-config {:phase :implement})
-                      (assoc-in [:execution/opts :control-state] cs))
-              result ((:enter (phase/get-phase-interceptor {:phase :implement})) ctx)]
-          (is (= :run-stopped (get-in result [:phase :result :error :data :code])))
-          (is (= 800 (get-in result [:phase :result :metrics :tokens]))))))))
-
-(use-fixtures :each
-  (fn [f]
-    (phase/reset-phase-loader!)
-    (try
-      (binding [loader/phase-loader-config-resource phase-test-config-resource]
-        (f))
-      (finally
-        (phase/reset-phase-loader!)))))
+  (let [enter (fn [curate]
+                (let [cs (atom {:paused false :stopped false})]
+                  (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                                agent/invoke (fn [_ _ _] (response/success nil {:tokens 800 :duration-ms 1500}))
+                                agent/curate-implement-output (fn [m] (swap! cs assoc :stopped true) (curate m))]
+                    ((:enter (phase/get-phase-interceptor {:phase :implement}))
+                     (-> (create-base-context)
+                         (assoc :phase-config {:phase :implement})
+                         (assoc-in [:execution/opts :control-state] cs))))))]
+    (testing "a curator that fails after the cancel ends the phase as stopped, keeping the agent's spend"
+      (let [result (enter mock-curator-error)]
+        (is (= :run-stopped (get-in result [:phase :result :error :data :code])))
+        (is (= 800 (get-in result [:phase :result :metrics :tokens])))))
+    (testing "a curator that succeeded keeps its work: the cancel came after it was done"
+      (let [result (enter mock-curator-success)]
+        (is (not= :run-stopped (get-in result [:phase :result :error :data :code])))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

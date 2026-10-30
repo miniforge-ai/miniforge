@@ -873,9 +873,10 @@
         ;; poison the curator run or subsequent work on this thread.
         _ (when stalled? (Thread/interrupted))
         ;; A cancel interrupted the agent, or came while it ran: no curator
-        ;; (its git collection and fallback may call an LLM) runs after it,
-        ;; and one that comes during the curator stops its fallbacks and
-        ;; enrichment. The runner records the stop when the phase returns.
+        ;; (its git collection and fallback may call an LLM) runs after it.
+        ;; One that lands during a curator that then fails ends the phase as
+        ;; stopped too; a curator that succeeded keeps its work. The runner
+        ;; records the stop when the phase returns.
         run-stopped? #(boolean (some-> (get-in ctx [:execution/opts :control-state]) deref :stopped))
         stopped? (run-stopped?)
         ;; Curator post-processes the implementer's environment writes into a
@@ -903,7 +904,6 @@
               :intent-scope (get-in ctx [:execution/input :intent :scope])
               :spec-description (get-in ctx [:execution/input :description])
               :llm-client (get ctx :llm-backend)
-              :stopped? run-stopped?
               :logger logger})
             (catch Exception e
               (response/failure e))))
@@ -955,7 +955,8 @@
         degraded-handoff? (and impl-errored? (not metadata-only-submit?))
         result (cond
                  ;; The agent's spend is kept: it ran.
-                 (or stopped? (run-stopped?))
+                 (or stopped?
+                     (and (run-stopped?) (not (phase/result-succeeded? curator-result))))
                  (merge (response/error (messages/t :implement/run-stopped) {:data {:code :run-stopped}})
                         (select-keys impl-result [:metrics :cost-usd]))
                  ;; Stream watchdog fired: the agent stalled silently and was
