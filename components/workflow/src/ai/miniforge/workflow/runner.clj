@@ -104,7 +104,8 @@
                                            (cond-> opts
                                              restored? (merge (:resume-machine-snapshot opts)))))
          _ (when (anomaly/anomaly? root) (throw+ root))
-         opts (cond-> (assoc opts :checkpoint/root root)
+         ;; Both option keys: root resolution reads :execution/checkpoint-root first.
+         opts (cond-> (assoc opts :checkpoint/root root :execution/checkpoint-root root)
                 restored? (assoc-in [:resume-machine-snapshot :execution/checkpoint-root] root))]
      (owner/with-run-owner
       root

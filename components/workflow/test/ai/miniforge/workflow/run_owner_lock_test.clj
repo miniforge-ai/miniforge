@@ -134,11 +134,13 @@
                          (fn [_ _ opts] (reset! seen opts) (throw (ex-info "stop here" {})))}
           #(try (runner/run-pipeline {:workflow/id :owner-test :workflow/pipeline []} {}
                                      {:checkpoint/root (str alias)
+                                      :execution/checkpoint-root (str alias)
                                       :resume-machine-snapshot {:execution/id (random-uuid)
                                                                 :execution/checkpoint-root (str alias)}
                                       :resume-phase-results {}})
                 (catch clojure.lang.ExceptionInfo _ nil)))
         (is (= (str (fs/real-path real)) (:checkpoint/root @seen)))
+        (is (= (str (fs/real-path real)) (:execution/checkpoint-root @seen)))
         (is (= (str (fs/real-path real))
                (get-in @seen [:resume-machine-snapshot :execution/checkpoint-root])))))
     (testing "a snapshot without phase results is not restored: the options' root is locked"
