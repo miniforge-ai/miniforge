@@ -44,8 +44,6 @@
   "Could not read the pull request head commit"
   :merge/closed-unmerged
   "GitHub reports the pull request closed without merging"
-  :merge/effect-unsettled
-  "An earlier attempt at this merge was proposed but never committed; reconcile it before retrying"
   :merge/grant-substituted
   "The merge proposal names a grant this attempt did not issue"
   :controller/lifecycle-starting

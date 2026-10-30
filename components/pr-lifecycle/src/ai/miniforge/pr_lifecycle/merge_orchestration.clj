@@ -74,23 +74,15 @@
     (outcome/settlement-result operations worktree-path pr-number policy context
                                (:data transaction-result))))
 
-(defn- ^{:stratum 0} prior-attempt
-  "The answer for an earlier attempt at this exact merge, or nil. Checked
-   before readiness: a PR that already merged no longer reads as ready."
+(defn- ^{:stratum 0} settled-pr
+  "GitHub's answer for a PR that can no longer merge (merged, or closed
+   without merging), or nil. Asked before readiness: a PR that already
+   merged no longer reads as ready, and GitHub's state, not an earlier
+   attempt's record, says whether the merge happened."
   [operations worktree-path pr-number policy context head-result]
-  (let [repository-result (when (dag/ok? head-result)
-                            ((:read-repository operations) worktree-path))
-        settled (when (dag/ok? repository-result)
-                  (governed/settle-prior!
-                   operations worktree-path
-                   {:pr/repo (:pr/repo (:data repository-result))
-                    :pr/number pr-number
-                    :pr/head-sha (:pr/head-sha (:data head-result))}
-                   context (Instant/now)))]
-    (if (dag/ok? settled)
-      (outcome/settlement-result operations worktree-path pr-number policy context
-                                 (:data settled))
-      settled)))
+  (when (dag/ok? head-result)
+    (outcome/terminal-result operations worktree-path pr-number policy context
+                             (:data head-result))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -116,8 +108,8 @@
               {:message (messages/system-t :merge/attempting)
                :data {:pr-number pr-number}}))
   (let [head-result ((:read-head operations) worktree-path pr-number)
-        prior (prior-attempt operations worktree-path pr-number policy context
-                             head-result)
+        prior (settled-pr operations worktree-path pr-number policy context
+                          head-result)
         readiness-result (when-not prior
                            ((:evaluate-readiness operations)
                             worktree-path pr-number policy))

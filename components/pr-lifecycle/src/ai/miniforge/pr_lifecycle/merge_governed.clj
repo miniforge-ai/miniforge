@@ -57,32 +57,17 @@
            (cond-> data
              (anomaly/anomaly? revoked) (assoc :grant/revocation-failure revoked))))
 
-(defn- ^{:stratum 0} settle-existing
-  "Answer for an earlier attempt at the same merge instead of merging again:
-   ask GitHub about one still in flight, report a settled one as it is,
-   and refuse one proposed but never committed."
-  [context t pr-number now run-gh]
-  (cond
-    (contains? fx/reconcilable-states (:effect/state t))
-    (let [reconciled (transaction/reconcile! context t pr-number now run-gh)]
-      (dag/ok (if (anomaly/anomaly? reconciled) t reconciled)))
-
-    (= :proposed (:effect/state t))
-    (dag/err :merge-effect-unsettled (messages/t :merge/effect-unsettled)
-             {:effect/id (:effect/id t)})
-
-    :else (dag/ok t)))
-
-(defn- ^{:stratum 0} open-attempt
-  "The effect id for this merge attempt, fixed by run and exact target, or
-   the earlier attempt's record. A context with no run gets a fresh id;
+(defn- ^{:stratum 0} attempt-id
+  "This attempt's effect id: the next free attempt at this run and exact
+   target. Ids repeat across processes, so two racing for one attempt
+   collide on its record. A context with no run gets a fresh id;
    authority then refuses it."
   [context target]
   (if (uuid? (:run-id context))
-    (fx/open-attempt (transaction/store-dir context)
-                     [:effect/merge (:run-id context) (:pr/repo target)
-                      (:pr/number target) (:pr/head-sha target)])
-    {:effect/id (random-uuid)}))
+    (fx/free-attempt-id (transaction/store-dir context)
+                        [:effect/merge (:run-id context) (:pr/repo target)
+                         (:pr/number target) (:pr/head-sha target)])
+    (random-uuid)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -111,45 +96,25 @@
 
       :else (dag/ok committed))))
 
-(defn ^{:stratum 1} settle-prior!
-  "Settle an earlier attempt at this exact merge of `target`, or nil when
-   there is none and a new attempt may start."
-  [operations worktree-path target context ^Instant now]
-  (let [opened (open-attempt context target)]
-    (cond
-      (anomaly/anomaly? opened)
-      (dag/err :merge-proposal-failed (messages/t :merge/proposal-failed)
-               {:proposal/result opened})
-
-      (:effect/existing opened)
-      (settle-existing context (:effect/existing opened) (:pr/number target) now
-                       (partial provider-command operations worktree-path))
-
-      :else nil)))
-
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} transact!
   "Prepare and register authority, then durably propose and commit an
    allowed merge of `target` (`:pr/repo`, `:pr/number`, `:pr/head-sha`).
-   The effect id is fixed per run and target, so an earlier attempt that
-   did not definitely fail is settled rather than merged again. Every
+   The effect id is the next free attempt at this run and target. Every
    attempt that ends before a commit revokes its grant."
   [operations worktree-path target readiness policy context ^Instant now]
   (let [pr-number (:pr/number target)
         run-gh (partial provider-command operations worktree-path)
         enable! (partial enable-merge operations worktree-path pr-number policy)
-        opened (open-attempt context target)
-        prepared (when-let [effect-id (:effect/id opened)]
+        effect-id (attempt-id context target)
+        prepared (when-not (anomaly/anomaly? effect-id)
                    (authority/prepare context effect-id target readiness
                                       (:method policy) now))]
     (cond
-      (anomaly/anomaly? opened)
+      (anomaly/anomaly? effect-id)
       (dag/err :merge-proposal-failed (messages/t :merge/proposal-failed)
-               {:proposal/result opened})
-
-      (:effect/existing opened)
-      (settle-existing context (:effect/existing opened) pr-number now run-gh)
+               {:proposal/result effect-id})
 
       (anomaly/anomaly? prepared)
       (dag/err :merge-authority-unavailable
