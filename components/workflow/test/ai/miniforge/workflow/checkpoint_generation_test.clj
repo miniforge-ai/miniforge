@@ -123,7 +123,16 @@
                                         (assoc-in [:execution/phase-results :verify] {:status :completed})))
     (is (= {:status :completed}
            (get-in (workflow/load-checkpoint-data id {:checkpoint/root root}) [:phase-results :implement]))
-        "the next write writes the phase the failed one lost")))
+        "the next write writes the phase the failed one lost")
+    (testing "a re-entered phase whose write failed is not left at its older result"
+      (let [replanned (-> implemented
+                          (assoc :execution/current-phase :plan)
+                          (assoc-in [:execution/phase-results :plan] {:status :completed :attempt 2}))]
+        (with-redefs [checkpoint-file/write! (failing-manifest-write checkpoint-file/write!)]
+          (store/persist-execution-state! replanned))
+        (store/persist-execution-state! (assoc replanned :execution/current-phase :implement))
+        (is (= {:status :completed :attempt 2}
+               (get-in (workflow/load-checkpoint-data id {:checkpoint/root root}) [:phase-results :plan])))))))
 
 (deftest ^{:stratum 1} a-pending-interrupt-is-held-off-and-restored
   (fixture/call-with-temp-checkpoint-root verify-pending-interrupt))

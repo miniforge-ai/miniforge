@@ -352,8 +352,9 @@
    pin, a GC or another write of the same run waits for it. Before it
    creates its generation, a write removes the generations the current
    manifest does not name (those it replaced, and any a failed write left).
-   Every phase result the manifest names no readable file for is written
-   too, so a phase whose write failed is not lost. A pending interrupt is
+   Every phase result the manifest does not name a file holding that same
+   result for is written too, so a phase whose write failed (a first run or
+   a re-entry) is not lost or left stale. A pending interrupt is
    held off for the write and restored after it.
 
    Returns the written paths (with `:checkpoint/phase` and
@@ -415,10 +416,18 @@
                                (generation/prune! run-dir [existing-manifest])
                                (catch Exception _ nil))
                            generation (generation/create! run-dir)
+                           ;; The manifest's file for `phase` holds this very
+                           ;; result; one gone, unreadable or holding another
+                           ;; result is written again.
+                           reusable? (fn [phase result]
+                                       (when-let [path (get existing-paths phase)]
+                                         (try+
+                                           (= (coerce/stringify-instants result)
+                                              (:phase/result (read-edn-file path)))
+                                           (catch Exception _ false))))
                            to-write (cond-> (into {}
                                                   (remove (fn [[phase result]]
-                                                            (or (nil? result)
-                                                                (some-> (get existing-paths phase) fs/exists?))))
+                                                            (or (nil? result) (reusable? phase result))))
                                                   (merge (get-in ctx [:execution/opts :resume-phase-results])
                                                          (:execution/phase-results ctx)))
                                       (and phase-name phase-result) (assoc phase-name phase-result))
