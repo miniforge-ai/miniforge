@@ -402,7 +402,17 @@
                               (resume-with {:completed-phases [:plan]
                                             :machine-snapshot {:execution/id (random-uuid)}}
                                            {}))))
-      (is (false? @ran)))))
+      (is (false? @ran))))
+  (testing "a root that cannot be looked up refuses the resume; --force checks the default root"
+    (let [roots (atom [])
+          unknown (anomaly/anomaly :unavailable "events unreadable" {})
+          recorded {:completed-phases [:plan] :machine-snapshot {:execution/id (random-uuid)}}]
+      (with-redefs [workflow/run-checkpoint-root (constantly unknown)
+                    workflow/run-owner (fn [_ root] (swap! roots conj root) nil)]
+        (is (thrown? clojure.lang.ExceptionInfo (resume-with recorded {})))
+        (is (= [] @roots) "no lock is looked up under an unknown root")
+        (is (map? (resume-with recorded {:force true})))
+        (is (= [nil] @roots) "with --force the default root is checked")))))
 
 (deftest ^{:stratum 1} new-attempt-keeps-the-run-lineage-test
   (let [snapshot-id (random-uuid)

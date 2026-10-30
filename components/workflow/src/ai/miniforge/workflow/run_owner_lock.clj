@@ -53,24 +53,22 @@
 (defonce ^{:stratum 0} ^:private local-owners
   (atom {}))
 
+(def ^{:stratum 0} probe-retry-ms
+  "How long acquire! waits before its one retry: a probe holds the lock
+   for an instant to test it."
+  50)
+
 (defn ^{:stratum 0} owner-file
-  "Run `run-id`'s owner lock file under `checkpoint-root`, from the real
-   path of the root's deepest existing ancestor plus the rest, normalized,
-   so every path to one root names one file, before and after the root is
-   created. Normalizing is exact there: no segment past that ancestor
-   exists, so none is a link a `..` would have to resolve through. It can
-   expose an existing directory again (`<dir>/unused/../alias`), so the
-   result is resolved a second time; that pass finds no `..` to drop."
+  "Run `run-id`'s owner lock file under `checkpoint-root`, under the root's
+   real path when it exists, so every spelling of one root (links, `..`)
+   names one file. acquire! makes the root before naming the file. A root
+   that does not exist as spelled is left as spelled, not normalized: the
+   OS reaches nothing through it, so no lock this process holds is opened
+   (and released) through it."
   [checkpoint-root run-id]
-  (let [resolve (fn [start]
-                  (loop [path (fs/absolutize start)
-                         missing ()]
-                    (cond
-                      (fs/exists? path) (fs/normalize (reduce fs/path (fs/real-path path) missing))
-                      (fs/parent path)  (recur (fs/parent path) (cons (str (fs/file-name path)) missing))
-                      :else             (fs/normalize (reduce fs/path path missing)))))
-        root (resolve (resolve checkpoint-root))]
-    (fs/path root ".owners" (str run-id ".lock"))))
+  (let [root (fs/absolutize checkpoint-root)]
+    (fs/path (if (fs/exists? root) (fs/real-path root) root)
+             ".owners" (str run-id ".lock"))))
 
 (defn- ^{:stratum 0} try-lock
   "The lock on `channel`, or nil when another holder has it (another
@@ -78,7 +76,7 @@
    throwing OverlappingFileLockException, matched by name since babashka
    does not expose the class)."
   ^java.lang.AutoCloseable [^FileChannel channel]
-  (try
+  (try+
     (.tryLock channel)
     (catch Exception e
       (if (= "java.nio.channels.OverlappingFileLockException" (.getName (class e)))
@@ -86,12 +84,13 @@
         (throw e)))))
 
 (defn- ^{:stratum 0} read-owner
-  "The owner record in `channel`'s file, or {} when it is empty or not one."
+  "The owner record in `channel`'s file, or {} when it is empty or not one.
+   Reads at most 4096 bytes: a record is a few dozen."
   [^FileChannel channel]
   (let [buffer (ByteBuffer/allocate (int (min 4096 (.size channel))))]
     (.read channel buffer 0)
     (let [content (String. (.array buffer) 0 (.position buffer) StandardCharsets/UTF_8)
-          record  (try (edn/read-string content) (catch Exception _ nil))]
+          record  (try+ (edn/read-string content) (catch Exception _ nil))]
       (if (map? record) record {}))))
 
 (defn- ^{:stratum 0} write-owner!
@@ -110,7 +109,12 @@
                    {:workflow/run-id run-id :run/owner owner}))
 
 (defn- ^{:stratum 0} failed
+  "An :unavailable anomaly for `e`. An interruption sets the thread's
+   interrupt flag again, so the anomaly does not swallow a cancel."
   [run-id path e]
+  (when (or (instance? InterruptedException e)
+            (= "java.nio.channels.ClosedByInterruptException" (.getName (class e))))
+    (.interrupt (Thread/currentThread)))
   (anomaly/exception-anomaly :unavailable
                              (messages/t :run/owner-lock-failed
                                          {:run-id (str run-id)
@@ -126,7 +130,7 @@
    writes' own directory check."
   ^FileChannel [path create?]
   (when (or (fs/sym-link? (fs/parent path)) (fs/sym-link? path))
-    (throw (ex-info "owner lock path is a symbolic link" {:path (str path)})))
+    (throw (ex-info (messages/t :run/owner-lock-symlink {:path (str path)}) {:path (str path)})))
   (when create? (directory/prepare! (fs/parent path)))
   (FileChannel/open path (into-array OpenOption
                                      (cond-> [StandardOpenOption/READ StandardOpenOption/WRITE
@@ -165,7 +169,8 @@
           (try+
             (let [channel (open-channel path true)]
               (try+
-                (if-let [lock (try-lock channel)]
+                (if-let [lock (or (try-lock channel)
+                                  (do (Thread/sleep (long probe-retry-ms)) (try-lock channel)))]
                   (let [record {:owner/run-id (str run-id)
                                 :owner/pid (.pid (java.lang.ProcessHandle/current))
                                 :owner/started-at (str (Instant/now))}]
@@ -221,3 +226,6 @@
       (throw+ held)
       (try (f)
            (finally (release! held))))))
+
+(comment
+  (with-run-owner "/tmp/checkpoints" (random-uuid) (constantly :ran)))

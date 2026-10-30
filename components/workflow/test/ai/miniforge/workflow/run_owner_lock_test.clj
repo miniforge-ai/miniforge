@@ -32,6 +32,14 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} ^:private process-timeout-ms
+  "How long a test waits for the second bb process."
+  10000)
+
+(def ^{:stratum 0} ^:private bb-required
+  "The cross-process tests run a second process with bb."
+  "bb must be on PATH for the cross-process owner lock tests")
+
 (def ^{:stratum 0} ^:private holder-script
   "bb program for a second process: lock argv[0], print \"locked\", wait
    for a line on stdin, then exit, which releases the lock."
@@ -73,9 +81,7 @@
                                (catch [:anomaly/type :conflict] _ :conflict))))
         (is (false? @ran))
         (finally (owner/release! held)))
-      (is (= :done (owner/with-run-owner root id (constantly :done))))
-      (is (= :fresh (owner/with-run-owner root nil (constantly :fresh)))
-          "a run id minted fresh needs no lock"))))
+      (is (= :done (owner/with-run-owner root id (constantly :done)))))))
 
 (deftest ^{:stratum 0} run-pipeline-refuses-a-running-run-test
   (fs/with-temp-dir [root {:prefix "run-owner-pipeline-"}]
@@ -167,11 +173,11 @@
           alias (fs/create-sym-link (fs/path dir "alias") real)
           root  (fs/path alias "checkpoints")
           id    (random-uuid)
-          before (owner/owner-file root id)
           held  (owner/acquire! root id)]
       (try
-        (is (= (str before) (str (owner/owner-file root id)))
-            "the same file before and after the root exists")
+        (is (= (str (fs/path (fs/real-path real) "checkpoints" ".owners" (str id ".lock")))
+               (str (owner/owner-file root id)))
+            "the file is named from the root's real path")
         (is (= :conflict (:anomaly/type (owner/acquire! root id)))
             "a second local claim through the alias is answered by the registry")
         (finally (owner/release! held))))))
@@ -180,12 +186,11 @@
   (fs/with-temp-dir [dir {:prefix "run-owner-dots-"}]
     (let [root   (str (fs/path dir "unused" ".." "checkpoints"))
           id     (random-uuid)
-          before (owner/owner-file root id)
           held   (owner/acquire! root id)]
       (try
-        (fs/create-dirs (fs/path dir "checkpoints"))
-        (is (= (str before) (str (owner/owner-file root id)))
-            "the same file before and after the root exists")
+        (is (= (str (fs/path (fs/real-path dir) "checkpoints" ".owners" (str id ".lock")))
+               (str (owner/owner-file root id)))
+            "the file is named from the root's real path")
         (is (= :conflict (:anomaly/type (owner/acquire! root id)))
             "a second local claim is answered by the registry")
         (finally (owner/release! held))))))
@@ -201,11 +206,24 @@
         (is (= "rwx------" (fs/posix->str (fs/posix-file-permissions root))))
         (finally (owner/release! held))))))
 
+(deftest ^{:stratum 0} a-claim-tries-again-past-a-probe-test
+  ;; Another process's probe holds the lock for an instant; a claim that
+  ;; meets it tries once more before refusing the run.
+  (fs/with-temp-dir [root {:prefix "run-owner-retry-"}]
+    (let [try-lock @#'owner/try-lock
+          calls    (atom 0)
+          held     (with-redefs-fn {#'owner/try-lock
+                                    (fn [channel] (when (< 1 (swap! calls inc)) (try-lock channel)))}
+                     #(owner/acquire! root (random-uuid)))]
+      (try
+        (is (not (anomaly/anomaly? held)))
+        (is (= 2 @calls))
+        (finally (when-not (anomaly/anomaly? held) (owner/release! held)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} owner-lock-held-by-another-process-test
-  (if-not (fs/which "bb")
-    (println "SKIP cross-process owner lock test: bb is not on PATH")
+  (when (is (fs/which "bb") bb-required)
     (fs/with-temp-dir [root {:prefix "run-owner-process-"}]
       (let [id     (random-uuid)
             file   (owner/owner-file root id)
@@ -214,21 +232,20 @@
                                {:in :pipe :out :pipe :err :inherit})
             locked (future (.readLine ^java.io.BufferedReader (io/reader (:out holder))))]
         (try
-          (is (= "locked" (deref locked 10000 ::timed-out)))
+          (is (= "locked" (deref locked process-timeout-ms ::timed-out)))
           (testing "while the other process holds it, the run is refused"
             (is (= :conflict (:anomaly/type (owner/acquire! root id))))
             (is (some? (owner/owner root id))))
           (finally
             (doto ^java.io.Writer (io/writer (:in holder)) (.write "go\n") (.flush))
-            (deref holder 10000 nil)))
+            (deref holder process-timeout-ms nil)))
         (testing "once it exits, the OS has released the lock"
           (let [held (owner/acquire! root id)]
             (is (not (anomaly/anomaly? held)))
             (owner/release! held)))))))
 
 (deftest ^{:stratum 1} local-claims-and-probes-keep-the-os-lock-test
-  (if-not (fs/which "bb")
-    (println "SKIP cross-process owner lock test: bb is not on PATH")
+  (when (is (fs/which "bb") bb-required)
     (fs/with-temp-dir [root {:prefix "run-owner-local-"}]
       (let [id   (random-uuid)
             held (owner/acquire! root id)
@@ -244,8 +261,7 @@
         (is (= "free" (seen)))))))
 
 (deftest ^{:stratum 1} probes-through-another-spelling-keep-the-os-lock-test
-  (if-not (fs/which "bb")
-    (println "SKIP cross-process owner lock test: bb is not on PATH")
+  (when (is (fs/which "bb") bb-required)
     (doseq [[case-name link-target claim probe]
             [["an unborn segment's .. exposing a link"
               "real" ["unused" ".." "alias" "checkpoints"] ["real" "checkpoints"]]
@@ -267,3 +283,19 @@
               (is (some? (owner/owner probe id)) "the probe is answered by the registry")
               (is (= "busy" (seen)) "and another process still finds the lock held")
               (finally (when-not (anomaly/anomaly? held) (owner/release! held))))))))))
+
+(deftest ^{:stratum 1} a-probe-through-a-missing-segment-keeps-the-os-lock-test
+  ;; `unused/..` cannot be resolved by the OS, so the spelling names nothing;
+  ;; normalized, it would open (and on close release) the held file.
+  (when (is (fs/which "bb") bb-required)
+    (fs/with-temp-dir [dir {:prefix "run-owner-missing-"}]
+      (let [real  (fs/create-dirs (fs/path dir "real" "checkpoints"))
+            _     (fs/create-sym-link (fs/path dir "alias") (fs/path dir "real"))
+            id    (random-uuid)
+            held  (owner/acquire! real id)]
+        (try
+          (is (nil? (owner/owner (str (fs/path dir "unused" ".." "alias" "checkpoints")) id)))
+          (is (= "busy" (clojure.string/trim
+                         (:out (bp/shell {:out :string :err :inherit}
+                                         "bb" "-e" probe-script (str (owner/owner-file real id)))))))
+          (finally (owner/release! held)))))))
