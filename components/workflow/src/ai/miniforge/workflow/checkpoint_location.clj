@@ -42,7 +42,7 @@
 
 (defn ^{:stratum 2} from-event [id event]
   (cond
-    (nil? event) :unknown
+    (not (and (map? event) (qualified-keyword? (:event/type event)))) :unknown
     (not (legacy/written? event)) nil
     (not= (str id) (str (:workflow/id event))) :unknown
     (not (compatible? event)) :unknown

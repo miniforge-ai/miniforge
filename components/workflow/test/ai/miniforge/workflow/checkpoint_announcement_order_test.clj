@@ -38,16 +38,25 @@
   (let [id (random-uuid)
         events-dir (fs/path root "events")
         directory (fs/create-dirs (fs/path events-dir "archived" (str id)))
+        newest (fs/file directory later-snowflake-name)
+        current-name (if (= :impossible-date kind) "20260301T000000000Z-current.json" later-snowflake-name)
         old (locator root "deleted" id)
         current (locator root "current" id)
         run (fs/create-dirs (:checkpoint/run-directory current))]
-    (spit (fs/file run "machine.edn") "{}")
+    (when-not (= :impossible-date kind) (spit (fs/file run "machine.edn") "{}"))
     (archive! directory legacy-name (announcement id old))
-    (archive! directory later-snowflake-name (announcement id current))
+    (archive! directory current-name (announcement id current))
     (case kind
-      :unreadable (spit (fs/file directory later-snowflake-name) "not transit")
+      :unreadable (spit newest "not transit")
+      :empty-record (spit newest "{}")
+      :array-record (spit newest "[]")
+      :scalar-record (spit newest "false")
+      :invalid-type (spit newest "{\"~:event/type\":42}")
+      :unqualified-type (spit newest "{\"~:event/type\":\"~:invalid\"}")
       :unknown (archive! directory "unrecognized.json" (announcement id old))
       :malformed-time (archive! directory "20269999T999999Z-invalid.json" (announcement id old))
+      :impossible-date (archive! directory "20260230T000000000Z-invalid.json" (announcement id old))
+      :invalid-snowflake (archive! directory "ffffffffffffffff__000000000001.transit.json" (announcement id old))
       :conflicting-tie (archive! directory tied-legacy-name (announcement id old))
       :same-location-tie (archive! directory tied-legacy-name (announcement id current))
       :mixed nil)
@@ -66,7 +75,11 @@
   (fixture/call-with-temp-checkpoint-root (partial verify-ordering :unreadable)))
 
 (deftest ^{:stratum 2} unknown-or-malformed-filename-times-preserve-uncertainty
-  (doseq [kind [:unknown :malformed-time]]
+  (doseq [kind [:unknown :malformed-time :impossible-date :invalid-snowflake]]
+    (fixture/call-with-temp-checkpoint-root (partial verify-ordering kind))))
+
+(deftest ^{:stratum 2} parsed-json-without-an-identifiable-event-type-is-uncertain
+  (doseq [kind [:empty-record :array-record :scalar-record :invalid-type :unqualified-type]]
     (fixture/call-with-temp-checkpoint-root (partial verify-ordering kind))))
 
 (deftest ^{:stratum 2} ties-cannot-choose-between-distinct-physical-locations

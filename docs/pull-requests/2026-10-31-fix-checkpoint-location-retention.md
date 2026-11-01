@@ -82,6 +82,16 @@ suites passed again (2m49s). A fresh CLI build and isolated packaged acceptance
 passed 29 tests with 114 assertions, including the mixed-format ordering cases.
 Normal hooks and signing passed; the final reportable PR size is 528 lines.
 
+Fresh review found two additional boundary gaps: SMART calendar parsing could
+normalize impossible dates, and parsed JSON without a valid type was skipped.
+New regressions reproduced 13 failures. Strict calendar validation and valid
+Snowflake identity checks now precede ordering. Non-map records and missing or
+unqualified event types remain uncertain, while identifiable non-writes can
+still be skipped. Focused acceptance passes 23 tests and 94 assertions.
+All three workflow-consuming product suites then passed again. A fresh CLI
+build and isolated packaged acceptance passed 30 tests and 128 assertions.
+The corrected complete PR remains within the normal budget at 550 lines.
+
 ## Deployment Plan
 
 No journal migration; retain both legacy forms. No change to filesystem trust,
