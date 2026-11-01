@@ -25,7 +25,7 @@
     :refer [chain-container-command container-exec-fn container-git-count]]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.git-credentials
     :refer [combine-git-env credential-git-check git-auth git-config-entries git-credential-env
-            git-network-command? git-remote git-trace-off-env]]
+            git-network-command? git-remote git-trace-off-env string-keys]]
    [ai.miniforge.dag-executor.result :as result]
    [clojure.string :as str]))
 
@@ -48,9 +48,12 @@
    combined (`combine-git-env`), the caller's last, so a caller's own git
    config, such as release's push retry, is kept and wins. An env left
    holding GIT_CONFIG_* entries gets `git-trace-off-env` last, so a
-   caller's own header is not traced when no credential resolved."
+   caller's own header is not traced when no credential resolved. The
+   caller's env is read by string name first (`string-keys`), so a keyword
+   and a string spelling of one variable cannot both reach the command."
   [opts cred-env]
   (let [opts (cond-> opts
+               (:env opts)              (update :env string-keys)
                (:git-credentials? opts) (update :env #(combine-git-env @cred-env %)))]
     (cond-> opts
       (seq (git-config-entries (:env opts))) (update :env merge git-trace-off-env))))
@@ -65,12 +68,28 @@
   [descriptor container-id https-url auth]
   (let [cred (git-credential-env https-url auth)]
     (if (seq cred)
-      (merge (combine-git-env {"GIT_CONFIG_COUNT" (str (container-git-count descriptor container-id))}
-                              cred)
-             git-trace-off-env)
+      (let [container-config {"GIT_CONFIG_COUNT" (str (container-git-count descriptor container-id))}]
+        (merge (combine-git-env container-config cred) git-trace-off-env))
       cred)))
 
-(defn ^{:stratum 0} workspace-exec-fn
+(defn- ^{:stratum 0} network-command-for
+  "`cmd` as a remote command runs with credential env `env`: with no HTTP
+   credential, the recorded `remote`'s :https-url becomes its :clone-url,
+   the URL `bootstrap-workspace!` actually cloned."
+  [cmd env {:keys [https-url clone-url]}]
+  (if (or (seq env) (= clone-url https-url))
+    cmd
+    (replace {https-url clone-url} cmd)))
+
+(defn ^{:stratum 0} recorded-remote
+  "The remote acquire records for persist and restore: `git-remote` of
+   `env-config`, with the :clone-url bootstrap used."
+  [env-config clone-url]
+  (some-> (git-remote env-config) (assoc :clone-url clone-url)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} workspace-exec-fn
   "exec-fn for `workspace/git-persist!` and `git-restore!`. `cred-env` is a
    delay that only ls-remote, push and fetch force, so add, status and
    commit, which run hooks and fsmonitor the untrusted workspace defines,
@@ -81,19 +100,14 @@
    `remote`'s :https-url goes to its :clone-url instead, the URL
    `bootstrap-workspace!` actually cloned: an SSH clone made with the
    image's key stays on SSH, and a repository cloned over HTTPS stays
-   there, anonymously. Without a recorded :clone-url, :https-url is kept."
-  [descriptor container-id workdir cred-env {:keys [https-url clone-url] :as _remote}]
+   there, anonymously (`network-command-for`)."
+  [descriptor container-id workdir cred-env remote]
   (let [exec! (container-exec-fn descriptor container-id workdir)]
     (fn [cmd]
       (if (git-network-command? cmd)
         (let [env @cred-env]
-          (exec! (if (or (seq env) (nil? clone-url) (= clone-url https-url))
-                   cmd
-                   (mapv #(if (= https-url %) clone-url %) cmd))
-                 env))
+          (exec! (network-command-for cmd env remote) env))
         (exec! cmd nil)))))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} remote-credential-env
   "Credential env (`capsule-credential-env`) for the git remote recorded

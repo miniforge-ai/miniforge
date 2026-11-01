@@ -22,8 +22,8 @@
   (:require
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli-test-support
-    :refer [basic-auth env-file-path fake-token git-config-of private-fn recorded-remote-executor
-            supported-kinds-under-test token-in? with-fake-runtime]]
+    :refer [basic-auth env-file-path fake-token git-config-of inspect-env-result private-fn
+            recorded-remote-executor supported-kinds-under-test token-in? with-fake-runtime]]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.container :as oci-ctr]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.git-credentials :as oci-git]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.process :as oci-run]
@@ -184,10 +184,9 @@
         (with-redefs [oci-git/resolve-git-token (fn [_url _opts] fake-token)
                       oci-run/run-runtime-timed
                       (fn [_ms _d & _]
-                        {:exit 0
-                         :out  (clojure.string/join "\n" (map pr-str ["GIT_CONFIG_COUNT=1"
-                                                                      "GIT_CONFIG_KEY_0=http.sslCAInfo"
-                                                                      "GIT_CONFIG_VALUE_0=-----BEGIN CERT\nabc"]))})]
+                        (inspect-env-result "GIT_CONFIG_COUNT=1"
+                                            "GIT_CONFIG_KEY_0=http.sslCAInfo"
+                                            "GIT_CONFIG_VALUE_0=-----BEGIN CERT\nabc"))]
           (let [r        (proto/execute! (assoc (recorded-remote-executor) :descriptor descriptor)
                                          "c1" ["git" "push"] {:git-credentials? true})
                 env-file (:env-file (first (calls)))]

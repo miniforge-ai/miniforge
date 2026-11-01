@@ -372,7 +372,7 @@
     (let [depth-args (when (:depth opts) ["--depth" (str (:depth opts))])
           ;; Use a vector (no shell) + "--" end-of-options separator so git
           ;; cannot interpret a leading-dash repo-url as an option flag.
-          ;; Matches the pattern in protocols/impl/runtime/oci_cli.clj:826.
+          ;; Matches the clone in oci_cli/capsule_git.clj's bootstrap-workspace!.
           clone-cmd (into ["git" "clone"] (concat (or depth-args []) ["--" repo-url "."]))
           clone-result (execute! executor environment-id clone-cmd
                                  {:timeout-ms 300000})]

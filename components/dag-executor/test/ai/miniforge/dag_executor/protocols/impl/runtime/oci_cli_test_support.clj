@@ -66,12 +66,22 @@
   (second (drop-while #(not= "--env-file" %) argv)))
 
 (defn ^{:stratum 0} recorded-remote-executor
-  "An executor that bootstrapped `c1` from https://github.com/o/r.git."
-  []
-  (doto (oci-cli/create-docker-executor {:image "test:latest"})
-    (-> :git-remotes (reset! {"c1" {:repo-url  "https://github.com/o/r.git"
-                                    :https-url "https://github.com/o/r.git"
-                                    :host-kind :github}}))))
+  "An executor that bootstrapped `c1` from https://github.com/o/r.git, with
+   `overrides` merged into the remote it recorded."
+  ([] (recorded-remote-executor {}))
+  ([overrides]
+   (doto (oci-cli/create-docker-executor {:image "test:latest"})
+     (-> :git-remotes (reset! {"c1" (merge {:repo-url  "https://github.com/o/r.git"
+                                            :https-url "https://github.com/o/r.git"
+                                            :clone-url "https://github.com/o/r.git"
+                                            :host-kind :github}
+                                           overrides)})))))
+
+(defn ^{:stratum 0} inspect-env-result
+  "A runtime `inspect` result whose stdout lists `entries` as
+   `env-inspect-format` prints them: one JSON string per line."
+  [& entries]
+  {:exit 0 :out (clojure.string/join "\n" (map pr-str entries))})
 
 ;------------------------------------------------------------------------------ Layer 1
 

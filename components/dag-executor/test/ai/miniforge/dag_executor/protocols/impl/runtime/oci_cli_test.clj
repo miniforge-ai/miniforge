@@ -27,8 +27,8 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli-test-support
-    :refer [basic-auth env-file-path fake-token git-config-of private-fn recorded-remote-executor
-            supported-kinds-under-test token-in?]]
+    :refer [basic-auth env-file-path fake-token git-config-of inspect-env-result private-fn
+            recorded-remote-executor supported-kinds-under-test token-in?]]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.acquisition :as oci-acq]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.container :as oci-ctr]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.git-credentials :as oci-git]
@@ -138,7 +138,7 @@
 ;; create-container --stop-timeout (N11 §2.2)
 ;; ============================================================================
 (defn- ^{:stratum 0} capture-create-container-args
-  "Run create-container with `oci-cli/run-runtime-process` stubbed and return
+  "Run create-container with `oci-run/run-runtime-process` stubbed and return
    the captured argv. Keeps the parameterized stop-timeout tests focused on
    the assertions rather than mock plumbing."
   [descriptor & {:as create-opts}]
@@ -522,10 +522,9 @@
       (with-redefs [oci-git/resolve-git-token (fn [_url _opts] fake-token)
                     oci-run/run-runtime-timed (fn [_ms _d & args]
                                                 (when (= "inspect" (first args))
-                                                  {:exit 0
-                                                   :out  (clojure.string/join "\n" (map pr-str ["PATH=/bin" "GIT_CONFIG_COUNT=1"
-                                                                                      "GIT_CONFIG_KEY_0=http.proxy"
-                                                                                      "GIT_CONFIG_VALUE_0=http://proxy:3128"]))}))
+                                                  (inspect-env-result "PATH=/bin" "GIT_CONFIG_COUNT=1"
+                                                                      "GIT_CONFIG_KEY_0=http.proxy"
+                                                                      "GIT_CONFIG_VALUE_0=http://proxy:3128")))
                     oci-ctr/exec-in-container (fn [_d _id _cmd opts] (reset! seen opts)
                                                 (result/ok {:exit-code 0}))]
         (proto/execute! (recorded-remote-executor) "c1" ["git" "push"] {:git-credentials? true})
@@ -588,22 +587,32 @@
       (is (instance? java.io.File @written))
       (is (not (.exists ^java.io.File @written))))))
 
-(deftest ^{:stratum 0} combine-git-env-keeps-keyword-keyed-entries-test
-  (testing "a caller's GIT_CONFIG_* entries named by keyword, which plain exec
-            accepts, are kept and renumbered after the base's like string-named
-            ones, not dropped"
-    (is (= {"GIT_CONFIG_COUNT"   "2"
-            "GIT_CONFIG_KEY_0"   "core.hooksPath"
-            "GIT_CONFIG_VALUE_0" "/dev/null"
-            "GIT_CONFIG_KEY_1"   "http.proxy"
-            "GIT_CONFIG_VALUE_1" "http://proxy.example:3128"
-            "HOME"               "/capsule-home"}
-           ((private-fn 'combine-git-env)
-            {"GIT_CONFIG_COUNT" "1" "GIT_CONFIG_KEY_0" "core.hooksPath" "GIT_CONFIG_VALUE_0" "/dev/null"}
-            {:GIT_CONFIG_COUNT   "1"
-             :GIT_CONFIG_KEY_0   "http.proxy"
-             :GIT_CONFIG_VALUE_0 "http://proxy.example:3128"
-             :HOME               "/capsule-home"})))))
+(deftest ^{:stratum 0} with-git-credentials-reads-keyword-keyed-env-test
+  (testing "a caller's env named by keyword, which plain exec accepts, is read
+            by string name: with :git-credentials? its GIT_CONFIG_* entries are
+            kept and numbered after the credential's; without it they still get
+            git tracing off, and no variable reaches the command under both a
+            keyword and a string name"
+    (let [with-git-credentials (private-fn 'with-git-credentials)
+          caller-env           {:GIT_CONFIG_COUNT   "1"
+                                :GIT_CONFIG_KEY_0   "http.proxy"
+                                :GIT_CONFIG_VALUE_0 "http://proxy.example:3128"
+                                :GIT_TRACE          "1"
+                                :HOME               "/capsule-home"}
+          cred                 (delay {"GIT_CONFIG_COUNT" "1"
+                                       "GIT_CONFIG_KEY_0" "core.hooksPath"
+                                       "GIT_CONFIG_VALUE_0" "/dev/null"})
+          credentialed         (:env (with-git-credentials {:git-credentials? true :env caller-env} cred))
+          plain                (:env (with-git-credentials {:env caller-env} cred))]
+      (is (= [["core.hooksPath" "/dev/null"] ["http.proxy" "http://proxy.example:3128"]]
+             ((private-fn 'git-config-entries) credentialed)))
+      (doseq [env [credentialed plain]]
+        (is (every? string? (keys env)))
+        (is (= "" (get env "GIT_TRACE")))
+        (is (= "1" (get env "GIT_TRACE_REDACT")))
+        (is (= "/capsule-home" (get env "HOME"))))
+      (is (= [["http.proxy" "http://proxy.example:3128"]]
+             ((private-fn 'git-config-entries) plain))))))
 
 (deftest ^{:stratum 0} execute-git-credentials-keeps-keyword-keyed-git-config-test
   (testing "with :git-credentials? and no recorded credential, a caller's
@@ -627,18 +636,14 @@
     (doseq [[clone-url expected unexpected]
             [["git@github.com:o/r.git" "git@github.com:o/r.git" "https://github.com/o/r.git"]
              ["https://github.com/o/r.git" "https://github.com/o/r.git" "git@github.com:o/r.git"]]]
-      (let [executor (doto (oci-cli/create-docker-executor {:image "test:latest"})
-                       (-> :git-remotes (reset! {"c1" {:repo-url  "git@github.com:o/r.git"
-                                                       :https-url "https://github.com/o/r.git"
-                                                       :clone-url clone-url
-                                                       :host-kind :github}})))
+      (let [executor (recorded-remote-executor {:repo-url "git@github.com:o/r.git" :clone-url clone-url})
             calls    (atom [])]
         (with-redefs [oci-git/resolve-git-token (fn [_url _opts] nil)
                       oci-ctr/exec-in-container
                       (fn [_d _id cmd opts]
                         (swap! calls conj [cmd opts])
-                        {:data {:exit-code 0
-                                :stdout (if (= cmd "git status --porcelain") " M f" "sha")}})]
+                        (result/ok {:exit-code 0
+                                    :stdout (if (= cmd "git status --porcelain") " M f" "sha")}))]
           (is (true? (get-in (proto/persist-workspace! executor "c1" {:branch "task/x"})
                              [:data :persisted?])))
           (is (true? (get-in (proto/restore-workspace! executor "c1" {:branch "task/x"})
@@ -1011,11 +1016,10 @@
       (with-redefs [oci-run/run-runtime-timed
                     (fn [_ms _d & a]
                       (reset! args a)
-                      {:exit 0
-                       :out  (clojure.string/join "\n" (map pr-str ["GIT_CONFIG_COUNT=1"
-                                                                    "GIT_CONFIG_KEY_0=http.extraHeader"
-                                                                    "GIT_CONFIG_VALUE_0=a\nb"
-                                                                    "BANNER=hi\nGIT_CONFIG_COUNT=7"]))})]
+                      (inspect-env-result "GIT_CONFIG_COUNT=1"
+                                          "GIT_CONFIG_KEY_0=http.extraHeader"
+                                          "GIT_CONFIG_VALUE_0=a\nb"
+                                          "BANNER=hi\nGIT_CONFIG_COUNT=7"))]
         (is (= 1 ((private-fn 'container-git-count) (docker-descriptor) "c1")))
         (is (= ["inspect" "--format" "{{range .Config.Env}}{{json .}}{{println}}{{end}}" "c1"] @args))))))
 

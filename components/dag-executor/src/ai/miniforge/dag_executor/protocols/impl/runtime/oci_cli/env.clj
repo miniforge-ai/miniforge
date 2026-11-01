@@ -26,7 +26,8 @@
     :refer [git-config-env-pattern]]
    [ai.miniforge.redaction.interface :as redaction]
    [clojure.edn :as edn]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -50,7 +51,7 @@
   (let [file (.toFile (java.nio.file.Files/createTempFile
                        "miniforge-env-" ".env"
                        (make-array java.nio.file.attribute.FileAttribute 0)))]
-    (try
+    (try+
       (spit file (str/join (for [[k v] entries] (str (name k) "=" v "\n"))))
       file
       (catch Throwable t
@@ -117,7 +118,7 @@
       (not (re-find execution-plan/env-name-pattern n))))
 
 ;; ============================================================================
-;; Capsule security gate — runtime enforcement of the runtime-* policies
+;; Plan env and image ENV reading
 ;; ============================================================================
 (defn ^{:stratum 0} normalize-plan-env
   "Normalize an env-config :env map to the string→string shape
@@ -136,14 +137,19 @@
    string on its own line, so a value with a line break stays one entry."
   "{{range .Config.Env}}{{json .}}{{println}}{{end}}")
 
-(defn ^{:stratum 0} parse-inspected-env
-  "{name value} from `env-inspect-format` output: each line is a JSON string,
-   which the EDN reader reads, split once at the first `=`."
-  [out]
-  (into {} (map #(let [[k v] (str/split (edn/read-string %) #"=" 2)] [k (or v "")]))
-        (remove str/blank? (str/split-lines out))))
+(defn- ^{:stratum 0} inspected-env-entry
+  "[name value] of one `env-inspect-format` line: a JSON string, which the
+   EDN reader reads, split once at the first `=`."
+  [line]
+  (let [[k v] (str/split (edn/read-string line) #"=" 2)]
+    [k (or v "")]))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} parse-inspected-env
+  "{name value} from `env-inspect-format` output, one entry per line."
+  [out]
+  (into {} (map inspected-env-entry) (remove str/blank? (str/split-lines out))))
 
 (defn- ^{:stratum 1} untrusted-env-allowed?
   "True when an untrusted capsule may take env var `n` from env-config:

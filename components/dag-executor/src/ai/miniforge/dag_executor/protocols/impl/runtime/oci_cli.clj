@@ -32,7 +32,7 @@
    and the executor picks it up without code changes.
 
    The executor record and its constructors live here. The definitions they
-   are built from are split by concern (rule 210) into `oci-cli.process`,
+   are built from are split by concern into `oci-cli.process`,
    `oci-cli.env`, `oci-cli.git-credentials`, `oci-cli.image`,
    `oci-cli.container`, `oci-cli.capsule-git`, `oci-cli.acquisition` and
    `oci-cli.launch`; this namespace refers to them."
@@ -43,13 +43,11 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.acquisition
     :refer [default-acquisition-timeout-ms with-acquisition-timeout without-interrupt]]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.capsule-git
-    :refer [bootstrap-workspace! remote-credential-env with-git-credentials workspace-exec-fn
-            workspace-opts]]
+    :refer [bootstrap-workspace! recorded-remote remote-credential-env with-git-credentials
+            workspace-exec-fn workspace-opts]]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.container
     :refer [container-name-prefix container-name-uuid-slice copy-from-container copy-to-container
             create-container exec-in-container inspect-container remove-container stop-container]]
-   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.git-credentials
-    :refer [git-remote]]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.image
     :refer [container-image-digest ensure-image! image-env image-exists? resolve-image-digest!
             task-runner-images]]
@@ -153,10 +151,7 @@
                                      image-digest (assoc :image-digest image-digest)
                                      (seq gate-warnings) (assoc :security/warnings gate-warnings)
                                      (seq gate-review)   (assoc :security/review gate-review))
-                          ;; The URL the clone used rides with the remote for
-                          ;; persist and restore (`workspace-exec-fn`).
-                          remote   (some-> (git-remote env-config)
-                                           (cond-> clone-url (assoc :clone-url clone-url)))]
+                          remote   (recorded-remote env-config clone-url)]
                       (when remote
                         (some-> git-remotes (swap! assoc container-name remote)))
                       ;; The record is returned to callers, so it carries the

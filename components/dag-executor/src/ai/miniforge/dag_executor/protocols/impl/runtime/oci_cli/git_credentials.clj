@@ -33,7 +33,7 @@
   #"GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)")
 
 ;; ============================================================================
-;; Workspace Bootstrap (N11 §4.2)
+;; Repository host and token resolution (N11 §4.2)
 ;; ============================================================================
 (defn- ^{:stratum 0} infer-host-kind
   "Infer the git hosting provider from a repository URL.
@@ -118,9 +118,10 @@
        (= "git" (first cmd))
        (contains? #{"ls-remote" "push" "fetch"} (second cmd))))
 
-(defn- ^{:stratum 0} string-keys
+(defn ^{:stratum 0} string-keys
   "`env` with each key as its name: an exec env may name a variable by
-   keyword or string, and the GIT_CONFIG_* readers look names up as strings."
+   keyword or string, and the GIT_CONFIG_* readers look names up as strings.
+   `with-git-credentials` applies it where execute! opts come in."
   [env]
   (update-keys env name))
 
@@ -140,12 +141,10 @@
 
 (defn ^{:stratum 1} git-config-entries
   "The [key value] pairs GIT_CONFIG_COUNT / KEY_n / VALUE_n in `env` set,
-   in order, whether `env` names them by keyword or string. An empty or
-   non-numeric count, as git reads it, sets none."
+   in order. An empty or non-numeric count, as git reads it, sets none."
   [env]
-  (let [env (string-keys env)]
-    (for [i (range (or (parse-long (get env "GIT_CONFIG_COUNT" "")) 0))]
-      [(get env (str "GIT_CONFIG_KEY_" i)) (get env (str "GIT_CONFIG_VALUE_" i))])))
+  (for [i (range (git-config-count env))]
+    [(get env (str "GIT_CONFIG_KEY_" i)) (get env (str "GIT_CONFIG_VALUE_" i))]))
 
 (defn- ^{:stratum 1} split-userinfo
   "[url auth] for an http(s) URL: the URL with its scheme lowercased (the
@@ -226,11 +225,8 @@
    base's GIT_CONFIG_COUNT, so they apply later and win, and base's entries
    stay as they are, including ones it counts but does not hold (the
    container's own, which its env keeps). Other variables merge, `extra`
-   winning. Both maps' keys are read as names first, so entries a caller
-   names by keyword are kept and renumbered like string-named ones."
+   winning."
   [base extra]
-  (let [base    (string-keys base)
-        extra   (string-keys extra)
-        entries (git-config-entries extra)]
+  (let [entries (git-config-entries extra)]
     (cond-> (merge base (without-git-config extra))
       (seq entries) (merge (git-config-env entries (git-config-count base))))))
