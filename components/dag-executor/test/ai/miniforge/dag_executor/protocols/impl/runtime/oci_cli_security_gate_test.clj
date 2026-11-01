@@ -135,7 +135,12 @@
              (:env (oci-cli/build-launch-plan valid-digest {:env env :agent-backend :codex}))))
       (with-redefs [config/load-merged-config (constantly {:llm {:backend :cursor}})]
         (is (= {"CURSOR_API_KEY" "c"}
-               (:env (oci-cli/build-launch-plan valid-digest {:env env}))))))))
+               (:env (oci-cli/build-launch-plan valid-digest {:env env})))))))
+  (testing "an OAuth-only :claude agent keeps its CLAUDE_CODE_OAUTH_TOKEN"
+    (is (= {"CLAUDE_CODE_OAUTH_TOKEN" "a"}
+           (:env (oci-cli/build-launch-plan valid-digest
+                                            {:env {:CLAUDE_CODE_OAUTH_TOKEN "a" :GH_TOKEN "t"}
+                                             :agent-backend :claude}))))))
 
 (deftest ^{:stratum 1} build-launch-plan-treats-unknown-trust-as-untrusted-test
   (testing "a nil or unknown :trust-level launches as :untrusted: secrets

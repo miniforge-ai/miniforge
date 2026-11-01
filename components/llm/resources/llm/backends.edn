@@ -44,7 +44,8 @@
           :description "Claude via Anthropic CLI"
           :provider "Anthropic"
           :requires-cli? true
-          :credential-env ["ANTHROPIC_API_KEY"]
+          ;; The Claude CLI authenticates with an API key or an OAuth token.
+          :credential-env ["ANTHROPIC_API_KEY" "CLAUDE_CODE_OAUTH_TOKEN"]
           :catalog-backend :claude
           ;; Prompt delivery: stdin. The planner path's system-prompt +
           ;; spec text + existing-files context regularly pushes argv

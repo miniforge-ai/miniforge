@@ -35,6 +35,7 @@
 
 (deftest ^{:stratum 0} backend-credential-env-test
   (testing "CLI backends name the env their CLI reads, HTTP backends their :api-key-env"
+    (is (= #{"ANTHROPIC_API_KEY" "CLAUDE_CODE_OAUTH_TOKEN"} (llm/backend-credential-env :claude)))
     (is (= #{"ANTHROPIC_API_KEY" "OPENAI_API_KEY"} (llm/backend-credential-env :opencode)))
     (is (= #{"OPENAI_API_KEY"} (llm/backend-credential-env :openai-api)))
     (is (= #{} (llm/backend-credential-env nil)))))
