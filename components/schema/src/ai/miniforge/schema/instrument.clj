@@ -16,14 +16,9 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.schema.instrument
-  "Test-time checking of Malli function schemas.
-
-   A component declares the argument and return shapes of its interface
-   functions as `:malli/schema` var metadata (or with `m/=>`).
-   Production never checks those declarations; a test namespace turns
-   them on with `instrument-fixture`, so a call or return value that
-   breaks the declared shape fails the test that made it, at the
-   boundary where it happened."
+  "Test-time checking of Malli function schemas. Production never checks
+   a function's declared schema (`:malli/schema` metadata or `m/=>`); a
+   test namespace turns the checks on with `instrument-fixture`."
   (:require
    [malli.instrument :as mi]))
 
@@ -35,15 +30,21 @@
    functions. A schema is declared as `:malli/schema` var metadata or
    with `m/=>`. An invalid argument list or return value throws ex-info
    whose ex-data `:type` is `:malli.core/invalid-input` or
-   `:malli.core/invalid-output`.
+   `:malli.core/invalid-output`. Throws IllegalArgumentException when
+   `ns-syms` declare no function schema, so a fixture naming the wrong
+   namespace cannot leave tests running unchecked.
 
    Example:
      (use-fixtures :once (schema/instrument-fixture 'ai.miniforge.gate.interface))"
   [& ns-syms]
   (let [filters [(apply mi/-filter-ns ns-syms)]]
     (fn [run-tests]
-      (mi/collect! {:ns ns-syms})
-      (mi/instrument! {:filters filters})
+      (when (seq ns-syms)
+        (mi/collect! {:ns ns-syms}))
+      (when-not (some some? (mi/instrument! {:filters filters}))
+        (throw (IllegalArgumentException.
+                (str "instrument-fixture: no function schema declared in "
+                     (pr-str ns-syms)))))
       (try
         (run-tests)
         (finally

@@ -16,15 +16,11 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.gate.schema
-  "Malli schemas for what the gate interface returns.
-
-   A gate's check returns either the gate convention
-   `{:passed? bool :errors [...]}` or a response map (`response/success`,
-   `response/error` or `response/failure`), and `interface/passed?` reads
-   both. A result in neither shape reads as failed, which is safe but
-   silent: a gate that drifts out of both shapes fails every phase that
-   runs it. These schemas name the
-   shapes so instrumented tests catch that drift at the gate.")
+  "Malli schemas for what the gate interface returns. A gate result is
+   the gate convention (`{:passed? bool ...}` or `{:success? bool ...}`
+   for repairs) or a `response/*` map; `interface/passed?` reads any
+   other shape as failed. Instrumented tests check results against
+   these schemas.")
 
 ;------------------------------------------------------------------------------ Layer 0
 

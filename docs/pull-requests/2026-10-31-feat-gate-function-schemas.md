@@ -29,7 +29,12 @@ a component boundary, in tests, without changing runtime behaviour.
 1. `schema.instrument/instrument-fixture` (re-exported from the schema
    interface): collects `:malli/schema` metadata in the given namespaces,
    instruments them while the wrapped tests run, and restores the original
-   functions afterwards. `m/=>` declarations work too.
+   functions afterwards. `m/=>` declarations work too. It throws
+   IllegalArgumentException when the namespaces declare no function schema, so
+   a fixture naming the wrong namespace cannot leave tests running unchecked.
+   The schema interface now loads `malli.instrument` (and through it
+   `malli.generator` and test.check) wherever it is required, about 16 ms under
+   Babashka; moving the fixture to a test-only component would avoid that.
 2. `gate.schema`: `CheckResult` (the gate convention or a response map —
    `response/success`, `response/error`, or `response/failure`'s
    `{:success false}` — tagged with `:gate`), `RepairResult` (the same, with
@@ -41,7 +46,7 @@ a component boundary, in tests, without changing runtime behaviour.
    `repair-gate`, `passed?`, `failed?`. Inputs: gate keyword(s), any
    artifact, a map or nil context.
 4. The six gate test namespaces that call the interface use the fixture;
-   their 102 tests pass with every call checked.
+   their 100 tests pass with every call checked.
 5. `gate/deps.edn` declares the schema component, which `gate.interface`
    already required without declaring.
 
@@ -49,7 +54,8 @@ a component boundary, in tests, without changing runtime behaviour.
 
 1. `schema.instrument-test`: invalid input and invalid output throw under the
    fixture (for both `m/=>` and metadata declarations); outside the fixture the
-   original function runs unchecked.
+   original function runs unchecked; a fixture over a namespace with no function
+   schema, or over no namespace, throws IllegalArgumentException.
 2. `gate.interface-schema-test`: a test gate whose check returns `{:verdict :ok}`
    makes `check-gate` and `check-gates` throw `:malli.core/invalid-output`; its
    repair does the same for `repair-gate`; a string gate name throws

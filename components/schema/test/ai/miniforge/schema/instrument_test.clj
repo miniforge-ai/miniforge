@@ -43,6 +43,14 @@
   [f]
   (:type (ex-data (is (thrown? clojure.lang.ExceptionInfo (f))))))
 
+(deftest ^{:stratum 0} fixture-without-function-schemas-throws-test
+  (testing "a namespace that declares no function schema is refused, not run unchecked"
+    (is (thrown? IllegalArgumentException
+                 ((schema/instrument-fixture 'ai.miniforge.schema.interface) (fn [])))))
+  (testing "so is a fixture given no namespace"
+    (is (thrown? IllegalArgumentException
+                 ((schema/instrument-fixture) (fn []))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} instrumented-call-is-checked-test
@@ -51,7 +59,7 @@
      (testing "a valid call returns the function's value"
        (is (= 4 (double-it 2))))
      (testing "an argument that breaks the input schema throws invalid-input"
-       ;; The wrong argument type is the point; clj-kondo reads the m/=> schema and flags it.
+       ;; The wrong argument type is the point; CI's clj-kondo reports it as a type mismatch.
        (is (= ::m/invalid-input
               (thrown-type #_{:clj-kondo/ignore [:type-mismatch]} #(double-it "2")))))
      (testing "a return value that breaks the output schema throws invalid-output"
