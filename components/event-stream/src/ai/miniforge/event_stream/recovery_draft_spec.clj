@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.event-stream.recovery-draft-spec
   "N3 §3.21 checkpoint, snapshot and resume admission contracts."
-  (:require [ai.miniforge.event-stream.workflow-draft-spec :as workflow]
+  (:require [ai.miniforge.event-stream.recovery-location-spec :as location]
+            [ai.miniforge.event-stream.workflow-draft-spec :as workflow]
             [ai.miniforge.failure-classifier.interface :as failure]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -23,32 +24,33 @@
 (def ^{:stratum 0} Drift
   [:map [:expected-hash :string] [:actual-hash :string]])
 
+(def ^{:stratum 0} WrittenIdentity
+  [:and workflow/ScopeIdentity
+   [:map [:event/version [:enum "1.0.0" "1.1.0"]]]])
+
 ;------------------------------------------------------------------------------ Layer 1
 
-;; :checkpoint/root is optional so a journal holding announcements written
-;; before it existed still recovers; the constructors always set it.
 (def ^{:stratum 1} CheckpointWritten
-  [:and Phase [:map [:checkpoint/path :string] [:checkpoint/size-bytes Size]
-               [:checkpoint/root {:optional true} :string]]])
+  [:and WrittenIdentity location/Located Phase
+   [:map [:checkpoint/path :string] [:checkpoint/size-bytes Size]]])
 
 (def ^{:stratum 1} SnapshotWritten
-  [:and Machine [:map [:snapshot/path :string] [:snapshot/size-bytes Size]
-                 [:checkpoint/root {:optional true} :string]]])
+  [:and WrittenIdentity location/Located Machine
+   [:map [:snapshot/path :string] [:snapshot/size-bytes Size]]])
 
-(def ^{:stratum 1} CheckpointFailed [:and Phase Failure])
+(def ^{:stratum 1} CheckpointFailed [:and workflow/Identity Phase Failure])
 
-(def ^{:stratum 1} SnapshotFailed [:and Machine Failure])
+(def ^{:stratum 1} SnapshotFailed [:and workflow/Identity Machine Failure])
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (def ^{:stratum 2} Draft
-  [:and workflow/Identity
-   [:multi {:dispatch :event/type}
+  [:multi {:dispatch :event/type}
     [:workflow/checkpoint-written CheckpointWritten]
     [:workflow/checkpoint-write-failed CheckpointFailed]
     [:workflow/machine-snapshot-written SnapshotWritten]
     [:workflow/machine-snapshot-write-failed SnapshotFailed]
-    [:workflow/resumed Resumed]
-    [:workflow/spec-hash-mismatch Drift]]])
+    [:workflow/resumed [:and workflow/Identity Resumed]]
+    [:workflow/spec-hash-mismatch [:and workflow/Identity Drift]]])
 
 (comment ::workflow-recovery-contracts)
