@@ -9,8 +9,8 @@
 ## Overview
 
 Workflow integration for the product-owner-approved N3 paired-location amendment.
-Base: main. Depends on #2299, the checkpoint-announcement-identity foundation;
-it must merge before this integration is published or merged.
+Base: main. Contract foundation #2299 is merged and integrated, including its
+payload-version admission correction.
 
 ## Motivation
 
@@ -52,6 +52,16 @@ Fresh CLI build succeeded: 6,880,604-byte stripped jar. Isolated packaged
 Babashka acceptance passed 24 tests and 101 assertions from `/private/tmp`, using
 only that jar and workflow test fixtures (no production-source overlays).
 
+After merging actual main, including concurrent runtime/release changes, all
+four workflow consumer suites passed again (3m41s). A fresh CLI rebuild and
+the same isolated packaged acceptance also passed: 24 tests, 101 assertions.
+
+The adversarial pass traced captured aliases through producer, journal and
+retention boundaries. It also checked first-write snapshots, deployed root-only
+records, future minor profiles, unknown locators and newer unreadable events.
+No code changes were needed after that pass. The tracked-head standards scan
+has zero violations; the complete integration has 431 reportable lines.
+
 ## Deployment Plan
 
 No journal migration; retain both legacy forms. No change to filesystem trust,
@@ -64,5 +74,5 @@ Follows #2094, #2280, #2287 and #2288. This integration is not an N7 completion 
 ## Checklist
 
 - [x] Implement and verify regression tests
-- [ ] Standards/adversarial review, normal hooks and size gates
+- [x] Standards/adversarial review, normal hooks and size gates
 - [ ] Fresh Copilot review and all CI gates
