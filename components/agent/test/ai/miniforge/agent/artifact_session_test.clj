@@ -483,19 +483,6 @@
           "a reviewer's recorded answers survive session cleanup")
       (is (= :recorded (:codex-answer-log result)))))
 
-  (testing "§7.4.2: context-reads.edn is read BEFORE cleanup too"
-    (let [reads [(context-read-record ".miniforge/codex-pin.md" :cache)]
-          result (session/with-readonly-session
-                  {}
-                  (fn [s]
-                    (spit (str (:dir s) "/context-reads.edn") (pr-str reads))
-                    :review-result))]
-      (is (= reads (:context-reads result))
-          "a reviewer's recorded context_reads survive session cleanup")))
-
-  (testing "no context-reads.edn means unknown (nil), not an empty record"
-    (is (nil? (:context-reads (session/with-readonly-session {} (constantly :r))))))
-
   (testing "§7.7.2 lost-vs-unanswered: a torn answers.edn marks :unreadable"
     (let [err (java.io.StringWriter.)
           result (binding [*err* err]
@@ -510,10 +497,9 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} read-capsule-readonly-outputs-test
-  ;; The read-only capsule reader (with-readonly-session): context-reads
-  ;; and answers in ONE round-trip, reads segment first, the §7.7.2
-  ;; marker on the answers segment.
+(deftest ^{:stratum 1} read-capsule-codex-answers-test
+  ;; The lean answers-only reader for read-only capsule sessions
+  ;; (with-readonly-session): one cat, one file, the §7.7.2 marker.
   (let [make-session (fn [stdout calls]
                        {:dir            "/workspace/.miniforge-session"
                         :workdir        "/workspace"
@@ -522,49 +508,32 @@
                         :exec!          (fn [_executor _env-id cmd _opts]
                                           (swap! calls conj cmd)
                                           {:data {:stdout stdout}})})
-        stdout-of    (fn [reads-part answers-part]
-                       (str reads-part "\n" capsule-boundary "\n" answers-part))
         answers [{:peg-id "contract-verified-against-producer"
-                  :answer "yes" :timestamp "2026-10-03T00:00:00Z"}]
-        reads   [(context-read-record ".miniforge/codex-pin.md" :cache)]]
-    (testing "reads and answers come back together in one round-trip"
+                  :answer "yes" :timestamp "2026-10-03T00:00:00Z"}]]
+    (testing "recorded answers come back with :recorded in one round-trip"
       (let [calls (atom [])
-            r (session/read-capsule-readonly-outputs
-               (make-session (stdout-of (pr-str reads)
-                                        (str answers-present-marker "\n" (pr-str answers)))
+            r (session/read-capsule-codex-answers
+               (make-session (str answers-present-marker "\n" (pr-str answers))
                              calls))]
         (is (= 1 (count @calls)))
-        (is (str/includes? (first @calls) "context-reads.edn"))
         (is (str/includes? (first @calls) "answers.edn"))
-        (is (= reads (:context-reads r)))
         (is (= answers (:answers r)))
         (is (= :recorded (:answer-log r)))))
-    (testing "no files (only the boundary) read back as nil reads and :absent"
-      (let [r (session/read-capsule-readonly-outputs
-               (make-session (stdout-of "" "") (atom [])))]
-        (is (nil? (:context-reads r)) "no reads log is unknown, not an empty record")
+    (testing "no file (empty stdout, no presence marker) reads back :absent"
+      (let [r (session/read-capsule-codex-answers (make-session "" (atom [])))]
         (is (nil? (:answers r)))
         (is (= :absent (:answer-log r)))))
-    (testing "empty stdout (exec produced nothing) degrades to nil / :absent"
-      (let [r (session/read-capsule-readonly-outputs (make-session "" (atom [])))]
-        (is (nil? (:context-reads r)))
-        (is (= :absent (:answer-log r)))))
-    (testing "reads without answers: the reads survive, the channel is :absent"
-      (let [r (session/read-capsule-readonly-outputs
-               (make-session (stdout-of (pr-str reads) "") (atom [])))]
-        (is (= reads (:context-reads r)))
-        (is (= :absent (:answer-log r)))))
-    (testing "a torn answers log reads back :unreadable, not :absent"
+    (testing "a torn log reads back :unreadable, not :absent"
       (let [err (java.io.StringWriter.)
             r (binding [*err* err]
-                (session/read-capsule-readonly-outputs
-                 (make-session (stdout-of "" (str answers-present-marker "\n{{{not edn"))
+                (session/read-capsule-codex-answers
+                 (make-session (str answers-present-marker "\n{{{not edn")
                                (atom []))))]
         (is (nil? (:answers r)))
         (is (= :unreadable (:answer-log r)))))
-    (testing "a present-but-EMPTY answers file (marker, no bytes) reads back :unreadable"
-      (let [r (session/read-capsule-readonly-outputs
-               (make-session (stdout-of "" answers-present-marker) (atom [])))]
+    (testing "a present-but-EMPTY file (marker, no bytes) reads back :unreadable"
+      (let [r (session/read-capsule-codex-answers
+               (make-session answers-present-marker (atom [])))]
         (is (nil? (:answers r)))
         (is (= :unreadable (:answer-log r))
             "a write torn before any bytes landed is LOST, not absent")))))

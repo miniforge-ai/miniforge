@@ -478,9 +478,11 @@
         _ (phase/emit-agent-completed! agent-ctx :review :reviewer result)
 
         ;; SPEC §7.4.3 consultation provenance, prompt-section flavor. The
-        ;; reviewer result carries its read-only sessions' recorded
-        ;; context_reads (§7.4.2); :pin-read? is nil (unknown) only when
-        ;; no session surfaced a reads log. Attached before enter-context stores the result so
+        ;; reviewer's landings arrive in its prompt, not as a pin file in
+        ;; the context cache, so there is nothing for it to context_read:
+        ;; :pin-read? is nil (not applicable). Passing the session's reads
+        ;; would make it false on every review and the consultation gate
+        ;; would warn :codex-pin-not-fetched on every run. Attached before enter-context stores the result so
         ;; gates and the gap ledger can see it — on FAILURES too (:output
         ;; starts nil on response/failure): the consultation happened in
         ;; build-review-task whatever the reviewer did next, and §7.7.2.1
@@ -490,8 +492,7 @@
         ;; through.
         result (codex-pin/attach-consultation
                  result
-                 (codex-pin/consultation-summary codex-outcome
-                                                 (:context-reads result)
+                 (codex-pin/consultation-summary codex-outcome nil
                                                  (:codex-answers result)
                                                  (:codex-answer-log result)))]
 

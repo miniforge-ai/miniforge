@@ -356,12 +356,6 @@
         ;; answer record is their concatenation. nil (not []) when no
         ;; session recorded any, matching the single-session shape.
         codex-answers (not-empty (into [] (mapcat :codex-answers) sessions))
-        ;; §7.4.2: each split session records its own context_reads. A
-        ;; pinned landing read in ANY session was read, so the run's
-        ;; record is their concatenation; nil when no session surfaced one
-        ;; (unknown, not "read nothing").
-        context-reads (when (some (comp some? :context-reads) sessions)
-                        (into [] (mapcat :context-reads) sessions))
         ;; Any torn per-session log marks the whole run's record as
         ;; partially lost — see merge-answer-logs for the ordering.
         answer-log (artifact-session/merge-answer-logs
@@ -376,7 +370,6 @@
                                :parse-response llm-response/parse-review-response})
                             responses)))]
     (assoc normalized
-           :context-reads context-reads
            :codex-answers codex-answers
            :codex-answer-log answer-log)))
 
@@ -786,8 +779,6 @@
                                           :llm? true})
 
                     (artifact/build-review-result review counts duration tokens :cost-usd cost-usd)))
-                 (some? (:context-reads normalized))
-                 (assoc :context-reads (:context-reads normalized))
                  (some? (:codex-answers normalized))
                  (assoc :codex-answers (:codex-answers normalized))
                  (some? (:codex-answer-log normalized))
