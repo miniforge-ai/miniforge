@@ -124,3 +124,15 @@
           (is (= ["AGENTS.md"] (:files result))))
         (finally
           (delete-tree dir))))))
+
+(deftest ^{:stratum 0} load-project-docs-hard-link-loads-once-test
+  (testing "given CLAUDE.md hard-linked to AGENTS.md → the file loads once, as AGENTS.md"
+    (let [dir (temp-project-root {"AGENTS.md" "# Agents"})]
+      (try
+        (Files/createLink (.toPath (io/file dir "CLAUDE.md"))
+                          (.toPath (io/file dir "AGENTS.md")))
+        (let [{:keys [result]} (load-docs-from dir)]
+          (is (= 1 (:loaded result)))
+          (is (= ["AGENTS.md"] (:files result))))
+        (finally
+          (delete-tree dir))))))

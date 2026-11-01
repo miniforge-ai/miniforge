@@ -76,7 +76,9 @@
   "Load a markdown file and convert to zettel.
    For project instruction files like AGENTS.md, CLAUDE.md, etc.
    `origin` is the file's path relative to the project root, with its
-   real name; the uid is the origin without its .md extension."
+   real name; the uid is the origin without a trailing lowercase \".md\".
+   Only that exact suffix is stripped, so files whose names differ only
+   in the extension's case (CLAUDE.md, CLAUDE.MD) keep distinct uids."
   [file zettel-type origin]
   (try
     (let [content (slurp file)
@@ -142,26 +144,25 @@
        (reduce descend-ignoring-case [(io/file root)])
        (filter #(.isFile ^java.io.File %))))
 
-(defn- ^{:stratum 0} real-path
-  "The path `file` resolves to, through symlinks and with the
-   filesystem's own name case."
-  [^java.io.File file]
-  (.toRealPath (.toPath file) (make-array java.nio.file.LinkOption 0)))
+(defn- ^{:stratum 0} same-file?
+  "True when `a` and `b` are the same physical file, through symlinks
+   and hard links, on every platform."
+  [^java.io.File a ^java.io.File b]
+  (java.nio.file.Files/isSameFile (.toPath a) (.toPath b)))
 
 (defn- ^{:stratum 0} keep-unseen-file
-  "Reducer step over [seen-real-paths kept-files]: keeps `file` unless a
-   kept file already resolves to the same real path."
-  [[seen kept] file]
-  (let [real (real-path file)]
-    (if (contains? seen real)
-      [seen kept]
-      [(conj seen real) (conj kept file)])))
+  "Reducer step: adds `file` to `kept` unless a kept file is the same
+   physical file. Pairwise, as there are only a handful of candidates."
+  [kept file]
+  (if (some #(same-file? % file) kept)
+    kept
+    (conj kept file)))
 
 (defn- ^{:stratum 0} distinct-files
-  "`files` without later entries that resolve to the same file as an
-   earlier one, e.g. a CLAUDE.md symlinked to AGENTS.md."
+  "`files` without later entries that are the same physical file as an
+   earlier one, e.g. a CLAUDE.md symlinked or hard-linked to AGENTS.md."
   [files]
-  (second (reduce keep-unseen-file [#{} []] files)))
+  (reduce keep-unseen-file [] files))
 
 (defn- ^{:stratum 0} relative-origin
   "`file`'s path relative to `root`, '/'-separated."

@@ -32,13 +32,16 @@ Linux those repos' instructions never reached the knowledge store.
      entries whose name `equalsIgnoreCase` the segment. A listing returns each
      entry once under its real name. On a case-insensitive filesystem a file
      therefore matches once, not once per spelling.
-   - `distinct-files`: drops a file that resolves (`toRealPath`) to one
-     already kept, so a `CLAUDE.md` symlinked to `AGENTS.md` loads once, as
-     `AGENTS.md`.
+   - `distinct-files`: drops a file that `Files/isSameFile` reports is the
+     same physical file as one already kept, on every platform. A `CLAUDE.md` symlinked or
+     hard-linked to `AGENTS.md` loads once, as `AGENTS.md`.
    - `load-markdown-file` takes the file's root-relative `origin`, with its
      real name. That origin is `:zettel/source :origin`, and the uid is the
-     origin without `.md`. `.claude/CLAUDE.md` gets the uid `.claude/CLAUDE`,
-     so it does not overwrite a root `CLAUDE.md` in the store.
+     origin without a trailing lowercase `.md`. `.claude/CLAUDE.md` gets the
+     uid `.claude/CLAUDE`, so it does not overwrite a root `CLAUDE.md` in the
+     store. Only that exact suffix is stripped: `CLAUDE.MD` keeps the uid
+     `CLAUDE.MD`, so it cannot collide with a `CLAUDE.md` beside it on a
+     case-sensitive filesystem.
 2. `knowledge/interface.clj`: the `load-project-docs` docstring describes the
    case-insensitive match, the single load per file, and what `:files` holds.
 
@@ -67,9 +70,10 @@ in a temp project root:
 3. `CLAUDE.md` plus `.claude/CLAUDE.md`: both load, with distinct origins and
    uids.
 4. `CLAUDE.md` symlinked to `AGENTS.md`: one zettel, origin `AGENTS.md`.
+5. `CLAUDE.md` hard-linked to `AGENTS.md`: one zettel, origin `AGENTS.md`
+   (from Copilot's review: comparing real paths alone loaded it twice).
 
-Cases 2–4 fail against the old loader (8 failed assertions); all pass with
-this change.
+Cases 2–5 fail against the old loader; all pass with this change.
 
 `context-pack`'s `interface_test.clj` passes `"claude.md"` in
 `:files-in-scope`. That reads this repo's own lowercase `claude.md` through
