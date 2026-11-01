@@ -40,6 +40,7 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
    [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes :as k8s]
+   [ai.miniforge.dag-executor.protocols.impl.unavailable :as unavailable]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -97,6 +98,27 @@
    - :image - container image for tasks (default from images.edn :default entry)
    - :network - network to attach to"
   oci-cli/create-oci-cli-executor)
+
+(defn ^{:stratum 0} create-selected-oci-executor
+  "Create an OCI-CLI executor on the runtime `select-runtime` picks for
+   `config` (N11-delta §3): an explicit :runtime-kind wins, otherwise the
+   auto-probe winner (Podman first, then Docker). The legacy :docker-path
+   alias names a Docker binary, so it counts as an explicit :docker.
+
+   When selection fails (no runtime answers, an explicit kind is down, or
+   an :executable override comes without a kind) the slot gets an
+   UnavailableExecutor carrying the selection error: `available?` reports
+   it and `select-executor` skips the slot. A rejected configuration never
+   becomes a usable executor, and nothing switches runtime silently."
+  [config]
+  (let [config    (cond-> config
+                    (and (:docker-path config) (nil? (:runtime-kind config)))
+                    (assoc :runtime-kind :docker))
+        selection (selector/select-runtime config)]
+    (if (result/ok? selection)
+      (oci-cli/create-oci-cli-executor
+       (assoc config :runtime-kind (get-in selection [:data :kind])))
+      (unavailable/->UnavailableExecutor (:error selection)))))
 
 (def ^{:stratum 0} create-kubernetes-executor
   "Create a Kubernetes executor.
@@ -192,7 +214,9 @@
       :docker {:image string :network string ...}
       :worktree {:base-path string :max-concurrent int ...}}
 
-   Returns map of executor-type -> executor instance.
+   Returns map of executor-type -> executor instance. The :docker slot
+   holds the OCI-CLI executor on the selected container runtime (see
+   `create-selected-oci-executor`), Docker or Podman.
 
    The worktree entry is wrapped in the host-git guard. Its environments
    are linked worktrees of the host checkout and share that checkout's
@@ -205,7 +229,7 @@
     (assoc :kubernetes (create-kubernetes-executor (:kubernetes config)))
 
     (:docker config)
-    (assoc :docker (create-docker-executor (:docker config)))
+    (assoc :docker (create-selected-oci-executor (:docker config)))
 
     ;; Worktree is always available as fallback
     true

@@ -24,6 +24,8 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.interface.gate :as phase-gate]
+   [ai.miniforge.phase.interface.task-base :as task-base]
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
    [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
@@ -425,7 +427,8 @@
         (load-files-from-capsule execute-fn
                                  (get ctx :execution/executor)
                                  (get ctx :execution/environment-id)
-                                 worktree-path files-in-scope))
+                                 (or (get ctx :execution/capsule-workdir) worktree-path)
+                                 files-in-scope))
       (phase/load-files-in-scope worktree-path files-in-scope)))
 
 (defn- ^{:stratum 1} suspicious-short-termination?
@@ -471,6 +474,12 @@
    :iterations iterations})
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} task-base-refs
+  "The task base refs to carry: the ones a previous implement attempt
+   recorded (a resumed run restores them), else fresh candidates."
+  [ctx]
+  (or (task-base/recorded-refs ctx) (base-ref-candidates ctx)))
 
 (defn- ^{:stratum 2} failure-focused-output
   "The failure blocks first, verbatim, then the head/tail excerpt. Head and
@@ -543,7 +552,7 @@
         ;; underlying `:timeout :type` is mutually exclusive.
         backend-timeout? (and (= :error agent-status)
                               (backend-timeout-in-result? result))
-        gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))
         ;; Curator's empty-diff verdict: the implementer wrote no files to the
         ;; environment. Retrying with the same prompt won't change that — the
         ;; next attempt would just burn another 10+ minutes producing nothing.
@@ -803,6 +812,11 @@
         {:keys [task rules-manifest codex-outcome]} (build-implement-task ctx)
         ;; Cache loaded files and context pack for subsequent retries
         ctx (cond-> ctx
+              ;; Resolved once and carried: the artifact collector, the
+              ;; :no-secrets gate and every later persistence boundary
+              ;; measure the change from the same resume-aware base.
+              (not (get ctx :execution/task-base-refs))
+              (assoc :execution/task-base-refs (task-base-refs ctx))
               (not (get-in ctx [:execution/cached-files]))
               (assoc-in [:execution/cached-files] (:task/existing-files task))
               (and (:task/context-pack task) (not (get-in ctx [:execution/pack-context])))
@@ -870,11 +884,14 @@
           (agent/curate-implement-output
            {:implementer-result impl-result
             :env-id (get ctx :execution/environment-id)
-            :worktree-path (resolve-worktree-path ctx)
+            ;; Capsule collection reads the capsule's checkout, not the host path.
+            :worktree-path (or (when (get ctx :execution/execute-fn)
+                                 (get ctx :execution/capsule-workdir))
+                               (resolve-worktree-path ctx))
             :executor (get ctx :execution/executor)
             :execute-fn (get ctx :execution/execute-fn)
             :pre-session-snapshot (get ctx :execution/pre-session-snapshot)
-            :base-refs (base-ref-candidates ctx)
+            :base-refs (get ctx :execution/task-base-refs)
             :intent-scope (get-in ctx [:execution/input :intent :scope])
             :spec-description (get-in ctx [:execution/input :description])
             :llm-client (get ctx :llm-backend)
@@ -990,7 +1007,13 @@
                    (:codex-answers impl-result)
                    ;; §7.7.2 lost-vs-unanswered: the session's answer-log
                    ;; marker (:absent|:recorded|:unreadable).
-                   (:codex-answer-log impl-result)))]
+                   (:codex-answer-log impl-result)))
+        ;; The refs the artifact collector diffs against travel with the
+        ;; artifact, so the :no-secrets gate measures the change from the
+        ;; same task base rather than from HEAD.
+        result (cond-> result
+                 (map? (:output result))
+                 (assoc-in [:output :code/base-refs] (get ctx :execution/task-base-refs)))]
     (-> (phase/enter-context ctx :implement :implementer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest)
         (assoc-in [:phase :watchdog-state]

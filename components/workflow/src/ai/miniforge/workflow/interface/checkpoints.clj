@@ -39,3 +39,7 @@
      (if (anomaly/anomaly? loaded)
        loaded
        (some-> loaded schemas/validate-checkpoint-data!)))))
+
+(def ^{:stratum 0} pin-checkpoint!
+  "Pin a run's checkpoint so the checkpoint GC keeps it."
+  checkpoint-store/pin-checkpoint!)

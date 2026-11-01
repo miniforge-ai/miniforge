@@ -25,7 +25,9 @@
    [ai.miniforge.workflow.isolation-support :as isolation]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.runner :as runner]
-   [ai.miniforge.agent.interface :as agent]))
+   [ai.miniforge.agent.interface :as agent]
+   [ai.miniforge.event-stream.interface :as events]
+   [ai.miniforge.llm.interface.protocols.llm-client :as llm-client]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -53,26 +55,44 @@
     {:phase :done}]})
 
 ;------------------------------------------------------------------------------ Helper functions
-(defn ^{:stratum 0} create-streaming-mock-llm
-  "Create a mock LLM that simulates streaming with chunks.
+(def ^{:stratum 0} plan-content
+  "A one-task plan inside the ```clojure fence the planner parses. The
+   plan phase's plan-complete gate rejects a plan with no tasks."
+  (str "```clojure\n"
+       (pr-str {:plan/id (random-uuid)
+                :plan/name "meta-agent-test-plan"
+                :plan/tasks [{:task/id (random-uuid)
+                              :task/description "Implement feature"
+                              :task/type :implement
+                              :task/acceptance-criteria ["Feature works"]
+                              :task/estimated-effort :small}]
+                :plan/estimated-complexity :low
+                :plan/risks []})
+       "\n```"))
 
-   Each response will include streaming chunks to test meta-agent
-   streaming activity tracking."
-  [responses]
-  (let [responses (if (map? responses) [responses] responses)
-        counter (atom 0)]
-    (reify
-      clojure.lang.IFn
-      (invoke [_this _messages _opts]
-        (let [idx @counter
-              response (get responses idx (last responses))]
-          (swap! counter inc)
-          ;; Simulate streaming by including chunks
-          (merge response
-                 {:streaming-chunks (or (:streaming-chunks response)
-                                        ["chunk1" "chunk2" "chunk3"])
-                  :usage (or (:usage response)
-                             {:input-tokens 50 :output-tokens 25})}))))))
+(defrecord ^{:stratum 0} StreamingMockLLM [config responses calls]
+  ;; A record, not a reify: agent model resolution assoc-es the role's
+  ;; model into [:config :model] of the client it is handed.
+  llm-client/LLMClient
+  (complete* [_this _request]
+    (let [idx (dec (swap! calls inc))]
+      (assoc (get responses idx (peek responses)) :success true)))
+
+  (complete-stream* [_this _request on-chunk]
+    (let [idx (dec (swap! calls inc))
+          response (assoc (get responses idx (peek responses)) :success true)]
+      (doseq [chunk (:streaming-chunks response)]
+        (on-chunk {:delta chunk :done? false}))
+      (on-chunk {:delta "" :done? true :content (:content response)})
+      response))
+
+  (get-config [_this] config))
+
+(defn ^{:stratum 0} quiet-event-stream
+  "An event stream with no sinks. Gated phases advance only on an
+   acknowledged :gate/decision, which needs a stream to publish to."
+  []
+  (events/create-event-stream {:sinks []}))
 
 (defn ^{:stratum 0} count-health-checks
   "Count how many health checks were performed during execution."
@@ -82,13 +102,32 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} create-streaming-mock-llm
+  "Create a mock LLM client that streams each response's chunks before
+   returning it, so meta-agent streaming activity tracking has input.
+
+   Reports the :claude backend, which serves the default planner model,
+   so agent model resolution keeps this client instead of building a
+   real one."
+  [responses]
+  (let [responses (if (map? responses) [responses] (vec responses))]
+    (->StreamingMockLLM {:backend :claude}
+                        (mapv (fn [response]
+                                (merge {:streaming-chunks ["chunk1" "chunk2" "chunk3"]
+                                        :usage {:input-tokens 50 :output-tokens 25}}
+                                       response))
+                              responses)
+                        (atom 0))))
+
+;------------------------------------------------------------------------------ Layer 2
+
 ;------------------------------------------------------------------------------ Meta-agent initialization tests
-(deftest ^{:stratum 1} test-meta-coordinator-initialized
+(deftest ^{:stratum 2} test-meta-coordinator-initialized
   (testing "Meta-coordinator is initialized in workflow context"
     (let [workflow simple-workflow-with-meta-agents
-          mock-llm (create-streaming-mock-llm {:content "(defn plan [] :ok)"})
+          mock-llm (create-streaming-mock-llm {:content plan-content})
           input {:task "Test meta-agent initialization"}
-          result (runner/run-pipeline workflow input {:llm-backend mock-llm})]
+          result (runner/run-pipeline workflow input {:llm-backend mock-llm :event-stream (quiet-event-stream)})]
 
       ;; Workflow should complete
       (is (= :completed (:execution/status result))
@@ -110,12 +149,12 @@
           (is (some #(= :progress-monitor (:id %)) (:agents stats))
               "Should have progress monitor agent"))))))
 
-(deftest ^{:stratum 1} test-meta-coordinator-default-creation
+(deftest ^{:stratum 2} test-meta-coordinator-default-creation
   (testing "Meta-coordinator created with default progress monitor when no config"
     (let [workflow workflow-without-meta-agents
-          mock-llm (create-streaming-mock-llm {:content "(defn plan [] :ok)"})
+          mock-llm (create-streaming-mock-llm {:content plan-content})
           input {:task "Test default meta-agents"}
-          result (runner/run-pipeline workflow input {:llm-backend mock-llm})]
+          result (runner/run-pipeline workflow input {:llm-backend mock-llm :event-stream (quiet-event-stream)})]
 
       ;; Should still have meta-coordinator (with defaults)
       (is (contains? result :execution/meta-coordinator)
@@ -128,15 +167,15 @@
             "Should have at least one meta-agent (default progress monitor)")))))
 
 ;------------------------------------------------------------------------------ Health check execution tests
-(deftest ^{:stratum 1} test-health-checks-run-during-execution
+(deftest ^{:stratum 2} test-health-checks-run-during-execution
   (testing "Health checks are executed during workflow phases"
     (let [workflow simple-workflow-with-meta-agents
           mock-llm (create-streaming-mock-llm
-                    [{:content "(defn plan [] :ok)"
+                    [{:content plan-content
                       :streaming-chunks (repeat 10 "chunk")}  ; Many chunks to trigger multiple iterations
                      {:content ":done"}])
           input {:task "Test health check execution"}
-          result (runner/run-pipeline workflow input {:llm-backend mock-llm})]
+          result (runner/run-pipeline workflow input {:llm-backend mock-llm :event-stream (quiet-event-stream)})]
 
       (is (= :completed (:execution/status result))
           "Workflow should complete")
@@ -155,16 +194,16 @@
           (is (some #(= :progress-monitor (:id %)) (:agents stats))
               "Should have progress monitor configured"))))))
 
-(deftest ^{:stratum 1} test-streaming-activity-tracking
+(deftest ^{:stratum 2} test-streaming-activity-tracking
   (testing "Streaming activity is tracked in workflow context"
     (let [workflow simple-workflow-with-meta-agents
           ;; Create mock with lots of streaming chunks
           chunks (vec (repeatedly 50 #(str "streaming-chunk-" (rand-int 1000))))
           mock-llm (create-streaming-mock-llm
-                    {:content "(defn plan [] :ok)"
+                    {:content plan-content
                      :streaming-chunks chunks})
           input {:task "Test streaming tracking"}
-          result (runner/run-pipeline workflow input {:llm-backend mock-llm})]
+          result (runner/run-pipeline workflow input {:llm-backend mock-llm :event-stream (quiet-event-stream)})]
 
       (is (= :completed (:execution/status result))
           "Workflow should complete")
@@ -187,7 +226,7 @@
             "Should have meta-agent configuration")))))
 
 ;------------------------------------------------------------------------------ Progress detection tests
-(deftest ^{:stratum 1} test-progress-vs-stagnation-detection
+(deftest ^{:stratum 2} test-progress-vs-stagnation-detection
   (testing "Meta-agents detect real progress vs stagnation"
     ;; This test verifies the progress monitor can distinguish between:
     ;; 1. Active streaming (making progress)
@@ -196,10 +235,10 @@
     (let [workflow simple-workflow-with-meta-agents
           ;; Simulate continuous streaming activity
           mock-llm (create-streaming-mock-llm
-                    {:content "(defn plan [] :ok)"
+                    {:content plan-content
                      :streaming-chunks (repeat 20 "active-work")})
           input {:task "Test progress detection"}
-          result (runner/run-pipeline workflow input {:llm-backend mock-llm})]
+          result (runner/run-pipeline workflow input {:llm-backend mock-llm :event-stream (quiet-event-stream)})]
 
       ;; Should complete successfully (no stagnation detected)
       (is (= :completed (:execution/status result))
@@ -214,10 +253,10 @@
             "All health checks should be healthy or warning (no halts)")))))
 
 ;------------------------------------------------------------------------------ Callback integration tests
-(deftest ^{:stratum 1} test-meta-monitoring-with-callbacks
+(deftest ^{:stratum 2} test-meta-monitoring-with-callbacks
   (testing "Meta-agent monitoring works with phase callbacks"
     (let [workflow simple-workflow-with-meta-agents
-          mock-llm (create-streaming-mock-llm {:content "(defn plan [] :ok)"})
+          mock-llm (create-streaming-mock-llm {:content plan-content})
           phase-starts (atom [])
           phase-completes (atom [])
           input {:task "Test with callbacks"}
@@ -225,6 +264,7 @@
                   workflow
                   input
                   {:llm-backend mock-llm
+                   :event-stream (quiet-event-stream)
                    :on-phase-start (fn [_ctx ic]
                                      (swap! phase-starts conj
                                             (get-in ic [:config :phase])))
@@ -249,12 +289,12 @@
           "Meta-coordinator should be present with callbacks"))))
 
 ;------------------------------------------------------------------------------ Response chain integration tests
-(deftest ^{:stratum 1} test-meta-monitoring-response-chain
+(deftest ^{:stratum 2} test-meta-monitoring-response-chain
   (testing "Meta-agent checks are reflected in response chain"
     (let [workflow simple-workflow-with-meta-agents
-          mock-llm (create-streaming-mock-llm {:content "(defn plan [] :ok)"})
+          mock-llm (create-streaming-mock-llm {:content plan-content})
           input {:task "Test response chain"}
-          result (runner/run-pipeline workflow input {:llm-backend mock-llm})]
+          result (runner/run-pipeline workflow input {:llm-backend mock-llm :event-stream (quiet-event-stream)})]
 
       (is (= :completed (:execution/status result))
           "Workflow should complete")
@@ -272,12 +312,12 @@
             "Response chain should indicate success")))))
 
 ;------------------------------------------------------------------------------ FSM integration tests
-(deftest ^{:stratum 1} test-meta-monitoring-fsm-transitions
+(deftest ^{:stratum 2} test-meta-monitoring-fsm-transitions
   (testing "Meta-agent monitoring integrates with FSM state transitions"
     (let [workflow simple-workflow-with-meta-agents
-          mock-llm (create-streaming-mock-llm {:content "(defn plan [] :ok)"})
+          mock-llm (create-streaming-mock-llm {:content plan-content})
           input {:task "Test FSM transitions"}
-          result (runner/run-pipeline workflow input {:llm-backend mock-llm})]
+          result (runner/run-pipeline workflow input {:llm-backend mock-llm :event-stream (quiet-event-stream)})]
 
       ;; Check FSM state progression
       (is (contains? result :execution/fsm-state)
@@ -292,16 +332,16 @@
           "Execution status should match FSM state"))))
 
 ;------------------------------------------------------------------------------ Metrics accumulation tests
-(deftest ^{:stratum 1} test-meta-monitoring-metrics
+(deftest ^{:stratum 2} test-meta-monitoring-metrics
   (testing "Metrics are accumulated correctly with meta-agent monitoring"
     (let [workflow simple-workflow-with-meta-agents
           mock-llm (create-streaming-mock-llm
-                    [{:content "(defn plan [] :ok)"
+                    [{:content plan-content
                       :usage {:input-tokens 100 :output-tokens 50}}
                      {:content ":done"
                       :usage {:input-tokens 10 :output-tokens 5}}])
           input {:task "Test metrics"}
-          result (runner/run-pipeline workflow input {:llm-backend mock-llm})]
+          result (runner/run-pipeline workflow input {:llm-backend mock-llm :event-stream (quiet-event-stream)})]
 
       (is (= :completed (:execution/status result))
           "Workflow should complete")
@@ -317,12 +357,12 @@
             "Token count should be a number")))))
 
 ;------------------------------------------------------------------------------ Artifact tracking tests
-(deftest ^{:stratum 1} test-meta-monitoring-artifacts
+(deftest ^{:stratum 2} test-meta-monitoring-artifacts
   (testing "Artifacts are tracked with meta-agent monitoring"
     (let [workflow simple-workflow-with-meta-agents
-          mock-llm (create-streaming-mock-llm {:content "(defn plan [] :ok)"})
+          mock-llm (create-streaming-mock-llm {:content plan-content})
           input {:task "Test artifacts"}
-          result (runner/run-pipeline workflow input {:llm-backend mock-llm})]
+          result (runner/run-pipeline workflow input {:llm-backend mock-llm :event-stream (quiet-event-stream)})]
 
       (is (= :completed (:execution/status result))
           "Workflow should complete")

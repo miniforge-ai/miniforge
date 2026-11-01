@@ -147,19 +147,26 @@
              (set-env (oci-cli/build-launch-plan valid-digest {:env env :agent-backend :codex}))))
       (with-redefs [config/load-merged-config (constantly {:llm {:backend :cursor}})]
         (is (= {"CURSOR_API_KEY" "c"}
-               (set-env (oci-cli/build-launch-plan valid-digest {:env env}))))))))
+               (set-env (oci-cli/build-launch-plan valid-digest {:env env})))))))
+  (testing "an OAuth-only :claude agent keeps its CLAUDE_CODE_OAUTH_TOKEN"
+    (is (= {"CLAUDE_CODE_OAUTH_TOKEN" "a"}
+           (set-env (oci-cli/build-launch-plan valid-digest
+                                               {:env {:CLAUDE_CODE_OAUTH_TOKEN "a" :GH_TOKEN "t"}
+                                                :agent-backend :claude}))))))
 
 (deftest ^{:stratum 1} build-launch-plan-allows-only-listed-env-for-untrusted-test
   (testing "an :untrusted plan keeps a shell's basics, LC_*, CLAUDE_CODE_*
             knobs and :env-passthrough names, and drops every other name,
-            such as AUTHORIZATION, PASSPHRASE or CLAUDE_CODE_OAUTH_TOKEN"
+            such as AUTHORIZATION, PASSPHRASE or, for an agent that does not
+            read it, CLAUDE_CODE_OAUTH_TOKEN"
     (is (= {"PATH" "/bin" "LC_ALL" "C" "CLAUDE_CODE_MAX_OUTPUT_TOKENS" "8000" "MY_FLAG" "1"}
            (set-env (oci-cli/build-launch-plan
                      valid-digest
                      {:env {"PATH" "/bin" "LC_ALL" "C" "CLAUDE_CODE_MAX_OUTPUT_TOKENS" "8000"
                             "MY_FLAG" "1" "OTHER" "x" "AUTHORIZATION" "Bearer t"
                             "PASSPHRASE" "p" "CLAUDE_CODE_OAUTH_TOKEN" "o"}
-                      :env-passthrough [:MY_FLAG]}))))))
+                      :env-passthrough [:MY_FLAG]
+                      :agent-backend :codex}))))))
 
 (deftest ^{:stratum 1} build-launch-plan-blanks-image-secrets-and-proxies-test
   (testing "an :untrusted plan sets an empty value for each proxy variable it

@@ -17,8 +17,13 @@
 ;; limitations under the License.
 (ns ai.miniforge.knowledge.loader-test
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.knowledge.loader :as sut]))
+   [ai.miniforge.knowledge.loader :as sut]
+   [ai.miniforge.knowledge.store :as store])
+  (:import
+   [java.nio.file Files]
+   [java.nio.file.attribute FileAttribute]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -44,3 +49,19 @@
         (let [result (sut/initialize-knowledge-store! ::store {:rules-dir ".standards"})]
           (is (= ".standards" @captured-rules-dir))
           (is (= 3 (:total result))))))))
+
+(deftest ^{:stratum 0} load-project-docs-names-loaded-files-test
+  (testing "returns the loaded doc files' names; it used to call .getName
+            on the loaded zettel maps and throw whenever a doc file existed"
+    (let [dir (.toFile (Files/createTempDirectory "loader-test"
+                                                  (make-array FileAttribute 0)))
+          doc (io/file dir "agents.md")]
+      (try
+        (spit doc "# Agents\n\nProject guidance.")
+        (let [result (sut/load-project-docs (store/create-store) (str dir))]
+          (is (= 1 (:loaded result)))
+          (is (= 0 (:failed result)))
+          (is (= ["agents.md"] (:files result))))
+        (finally
+          (io/delete-file doc true)
+          (io/delete-file dir true))))))

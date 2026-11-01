@@ -23,6 +23,7 @@
             [ai.miniforge.llm.messages :as msg]
             [ai.miniforge.llm.protocols.records.llm-client]
             [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+            [ai.miniforge.llm.protocols.impl.llm-client.stream-exec :as stream-exec]
             [ai.miniforge.llm.progress-monitor :as pm]
             [ai.miniforge.logging.interface :as log]
             [cheshire.core :as json]))
@@ -34,6 +35,7 @@
 
 (deftest ^{:stratum 0} backend-credential-env-test
   (testing "CLI backends name the env their CLI reads, HTTP backends their :api-key-env"
+    (is (= #{"ANTHROPIC_API_KEY" "CLAUDE_CODE_OAUTH_TOKEN"} (llm/backend-credential-env :claude)))
     (is (= #{"ANTHROPIC_API_KEY" "OPENAI_API_KEY"} (llm/backend-credential-env :opencode)))
     (is (= #{"OPENAI_API_KEY"} (llm/backend-credential-env :openai-api)))
     (is (= #{} (llm/backend-credential-env nil)))))
@@ -591,7 +593,14 @@
                           :tags [(msg/t :rate-limit-test.system/security-tag)
                                  (msg/t :rate-limit-test.system/in-progress-tag)
                                  (msg/t :rate-limit-test.system/risk-tag)]}]}))))
-    (is (not (impl/rate-limited? nil)))))
+    (is (not (impl/rate-limited? nil))))
+
+  (testing "an answer that mentions a rate limit or HTTP 429 is not a notice"
+    (is (not (impl/rate-limited? "This PR adds a rate limit and returns HTTP 429.")))
+    (is (not (impl/rate-limited? "Fixed the 429 handling in the retry loop.")))
+    (is (not (impl/rate-limited? (str (apply str (repeat 40 "Implementation notes. "))
+                                      "Requests over quota get a rate limit exceeded error.")))
+        "a long answer is never read as a notice")))
 
 (deftest ^{:stratum 0} rate-limited-success-response-test
   (testing "rate limit content in success-response returns error"
@@ -885,6 +894,19 @@
                :done? true
                :content "fallback answer"}]
              @chunks)))))
+
+(defn- ^{:stratum 0} recording-claude-client
+  "A claude client whose exec-fn and stream-exec-fn record every command
+   into `cmds` and return an empty successful result."
+  [cmds opts]
+  (let [record! (fn [cmd] (swap! cmds conj cmd) {:out "ok" :err "" :exit 0})]
+    (llm/create-client
+     (merge {:backend :claude
+             :stream-exec-fn (fn [cmd _on-line _opts] (record! cmd) {:out "" :err "" :exit 0})
+             :exec-fn (fn
+                        ([cmd] (record! cmd))
+                        ([cmd _opts] (record! cmd)))}
+            opts))))
 
 ;; Claude backend args-fn budget tests (PR #288)
 (deftest ^{:stratum 0} claude-args-fn-budget-usd-test
@@ -1194,7 +1216,7 @@
           "subprocess saw stdin content split by line"))))
 
 (defn- ^{:stratum 0} fake-stream-process
-  "Stub for `#'impl/start-stream-process!`. Returns a map matching the
+  "Stub for `#'stream-exec/start-stream-process!`. Returns a map matching the
    shape `stream-exec-fn` consumes, with a `Process` proxy whose
    stdout is `input-stream`. `.destroyForcibly` closes the supplied
    `on-destroy!` closure (used for tests that need to release a
@@ -1556,6 +1578,29 @@
       (is (nil? (:usage resp)))
       (is (= 0.42 (:cost-usd resp))))))
 
+(defn- ^{:stratum 0} assistant-frame
+  "A Claude stream-json assistant frame with `text`, written by `model`."
+  [model text]
+  (json/generate-string {:type "assistant"
+                         :message {:model model :content [{:type "text" :text text}]}}))
+
+(defn- ^{:stratum 0} fragment-frame
+  [text]
+  (json/generate-string {:type "stream_event" :event {:delta {:text text}}}))
+
+(defn- ^{:stratum 0} streamed-response
+  "The response of a streamed Claude run that emits `lines` and exits 0."
+  [lines]
+  (let [client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                {:backend :claude
+                 :stream-exec-fn (fn [_cmd on-line _opts]
+                                   (doseq [line lines] (on-line line))
+                                   {:out "" :err "" :exit 0})})]
+    (llm/complete-stream client {:prompt "test"} (fn [_] nil))))
+
+(def ^{:stratum 0} ^:private long-answer
+  (json/generate-string {:claims (repeat 40 {:claim "Shipped the billing service."})}))
+
 (deftest ^{:stratum 0} parse-claude-stream-line-carries-per-message-usage-test
   (testing "assistant events surface :message-usage + :message-id"
     (let [parse-line (:stream-parser (get impl/backends :claude))
@@ -1626,6 +1671,58 @@
       (is (= {:input-tokens 2400 :output-tokens 100} @accumulated-usage)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} streaming-limit-notice-after-answer-text-test
+  (testing "the CLI's own limit notice after earlier answer text is a rate limit"
+    (let [resp (streamed-response [(assistant-frame "claude-opus-5" long-answer)
+                                   (assistant-frame "<synthetic>" "You've hit your limit · resets 7pm (America/Los_Angeles)")])]
+      (is (< 300 (count long-answer)) "the answer alone is longer than any notice")
+      (is (not (:success resp)))
+      (is (= "rate_limit" (get-in resp [:error :type])))))
+  (testing "a model's short final answer that mentions a limit is not a limit"
+    (let [resp (streamed-response [(assistant-frame "claude-opus-5" long-answer)
+                                   (assistant-frame "claude-opus-5" "{\"summary\":\"Added handling for too many requests.\"}")])]
+      (is (:success resp))))
+  (testing "a model answer after the CLI's notice ends the run as a success"
+    (let [resp (streamed-response [(assistant-frame "<synthetic>" "You've hit your limit · resets 7pm (America/Los_Angeles)")
+                                   (assistant-frame "claude-opus-5" long-answer)])]
+      (is (:success resp))))
+  (testing "a streamed fragment that mentions a limit is not a limit"
+    (let [resp (streamed-response [(fragment-frame long-answer)
+                                   (fragment-frame " and retries on rate limit exceeded.")])]
+      (is (:success resp)))))
+
+(deftest ^{:stratum 1} isolated-client-sends-isolation-flags-test
+  (testing "an isolated claude client sends the isolation flags on complete and complete-stream"
+    (let [cmds (atom [])
+          client (recording-claude-client cmds {:isolated? true})
+          supervised {:prompt "test" :supervision {:settings-path "/tmp/s.json"}}]
+      (llm/complete client supervised)
+      (llm/complete-stream client supervised (fn [_chunk] nil))
+      (is (<= 2 (count @cmds)))
+      (is (every? #(= ["--tools" ""] (take 2 (drop-while (complement #{"--tools"}) %))) @cmds))
+      (is (every? #(some #{"--setting-sources"} %) @cmds))
+      (is (every? #(some #{"--disable-slash-commands"} %) @cmds)))))
+
+(deftest ^{:stratum 1} sessionless-claude-call-is-isolated-test
+  (testing "a plain claude client isolates a call that carries no hook settings"
+    (let [cmds (atom [])
+          client (recording-claude-client cmds {})]
+      (llm/complete client {:prompt "test"})
+      (llm/complete-stream client {:prompt "test"} (fn [_chunk] nil))
+      (is (<= 2 (count @cmds)))
+      (is (every? #(= ["--tools" ""] (take 2 (drop-while (complement #{"--tools"}) %))) @cmds))
+      (is (every? #(some #{"--setting-sources"} %) @cmds))))
+
+  (testing "a call inside an artifact session (hook settings present) keeps its tools"
+    (let [cmds (atom [])
+          client (recording-claude-client cmds {})
+          supervised {:prompt "test" :supervision {:settings-path "/tmp/s.json"}}]
+      (llm/complete client supervised)
+      (llm/complete-stream client supervised (fn [_chunk] nil))
+      (is (<= 2 (count @cmds)))
+      (is (every? #(not-any? #{"--tools" "--disable-slash-commands"} %) @cmds))
+      (is (every? #(some #{"dontAsk"} %) @cmds)))))
 
 (deftest ^{:stratum 1} stagnation-fires-on-silence-without-keepalive-test
   (testing "without keepalive, a silent monitor stagnates after the threshold"
@@ -1784,8 +1881,8 @@
     ;; closes the pipe. With a stub probe-fn returning false, the
     ;; monitor fires within ~30ms (10ms interval × 3 strikes) and
     ;; forces stream-exec-fn to return. No real subprocess; portable.
-    (with-redefs [impl/start-stream-process! (fn [_cmd _opts]
-                                               (fake-blocking-stream-process))]
+    (with-redefs [stream-exec/start-stream-process! (fn [_cmd _opts]
+                                                      (fake-blocking-stream-process))]
       (let [handler (fn [_line] nil)
             monitor (pm/create-progress-monitor {:min-activity-interval-ms 1
                                                  :stagnation-threshold-ms  120000
@@ -1812,8 +1909,8 @@
   ;; `:echo` test backend) supply no `:backend-key`. The network
   ;; monitor must stay dormant so they keep working unchanged.
   (testing "without :backend-key, no probe traffic is generated"
-    (with-redefs [impl/start-stream-process! (fn [_cmd _opts]
-                                               (fake-eof-stream-process))]
+    (with-redefs [stream-exec/start-stream-process! (fn [_cmd _opts]
+                                                      (fake-eof-stream-process))]
       (let [probe-calls (atom 0)
             handler (fn [_line] nil)
             monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})

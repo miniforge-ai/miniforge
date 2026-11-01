@@ -20,14 +20,17 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.interface.gate :as phase-gate]
    [ai.miniforge.phase-opsv.artifact-boundary :as artifacts]
    [ai.miniforge.phase-opsv.artifact-model :as artifact-model]
    [ai.miniforge.phase-opsv.evidence-runtime :as evidence-runtime]
    [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
+   [ai.miniforge.phase-opsv.finalization-config :as finalization-config]
    [ai.miniforge.phase-opsv.terminal-evidence :as terminal]
    [ai.miniforge.phase-opsv.flow :as flow]
    [ai.miniforge.phase-opsv.post-actuation-checkpoint :as checkpoint]
-   [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]))
+   [ai.miniforge.phase-opsv.lifecycle-result :as lifecycle-result]
+   [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -58,19 +61,73 @@
     (phase/enter-context retained phase-key (:agent config) (:gates config)
                          (:budget config) start-time (lifecycle-result/phase-result published))))
 
-(defn- ^{:stratum 0} leave-phase
+(defn- ^{:stratum 0} gate-failure-result
+  "An :opsv/actuate attempt its gates failed, recorded as a failed actuation
+   that keeps its output (:opsv/phase-failure names the gate failure). The
+   terminal path then journals its events, publishes its material and
+   finalizes evidence with :outcome/success false. A result that already
+   failed (for example its first artifact publication) is returned unchanged."
+  [failure phase-result]
+  (let [output (:output phase-result)]
+    (if (and (map? output) (not (anomaly/any-anomaly? output)))
+      (lifecycle-result/phase-result
+       (anomaly/anomaly (:anomaly/type failure) (:anomaly/message failure)
+                        {:opsv/phase-output (assoc output :opsv/phase-failure failure)}))
+      phase-result)))
+
+(defn- ^{:stratum 0} actuation-ran?
+  "True when this attempt ran the actuation: its output, or the output its
+   failure kept, carries the actuation record. An attempt refused before it
+   ran (an earlier actuation's evidence is still pending) is not one."
+  [phase-result]
+  (let [output (:output phase-result)]
+    (map? (:opsv/actuation-record (get-in output [:anomaly/data :opsv/phase-output] output)))))
+
+(defn- ^{:stratum 0} publication-failure
+  "The small diagnostic of an attempt whose own result failed before its gate
+   (its first artifact publication), or nil."
+  [phase-key phase-result]
+  (let [output (:output phase-result)]
+    (when (anomaly/any-anomaly? output)
+      (assoc (select-keys output [:anomaly/type :anomaly/message]) :phase phase-key))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} leave-phase
+  "A gate failure stops success claims, never the record of what happened.
+   Phase events are journaled either way (they record effects that already
+   ran). With evidence enabled, an :opsv/actuate attempt its gates failed is
+   finalized as a failed actuation, and, when that attempt ran the actuation,
+   the gate failure is recorded beside the post-actuation snapshot, so
+   recovery cannot finalize it as a success. A later attempt (a retry or a
+   redirect back) is refused while that evidence is pending and leaves the
+   record as it is. The phase completes as failed."
   [ctx]
   (let [phase-key (get-in ctx [:phase :name])
-        published (lifecycle-result/after-publication ctx phase-key (get-in ctx [:phase :result]))
-        result (terminal/complete-failure! ctx phase-key published)
-        completed-ctx (assoc-in ctx [:phase :result] result)
-        success? (phase/result-succeeded? result)
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))
+        ;; Without evidence there is nothing to finalize: the actuation's
+        ;; events are published normally and the success? guard fails the phase.
+        evidence-failure? (and gate-failed? (= :opsv/actuate phase-key)
+                               (finalization-config/enabled? ctx))
+        raw-result (get-in ctx [:phase :result])
+        gate-failure {:anomaly/type :unauthorized
+                      :anomaly/message (msg/t :gate/actuation-gate-failed)}
+        recorded (if evidence-failure? (gate-failure-result gate-failure raw-result) raw-result)
+        ;; Recorded by the attempt that ran the actuation, including when its
+        ;; result already failed its first artifact publication (that error is
+        ;; kept in the result and in the record).
+        recovery-ctx (if (and evidence-failure? (actuation-ran? raw-result))
+                       (checkpoint/record-gate-failure
+                        ctx gate-failure (publication-failure phase-key raw-result))
+                       ctx)
+        published (lifecycle-result/after-publication recovery-ctx phase-key recorded)
+        result (terminal/complete-failure! recovery-ctx phase-key published)
+        completed-ctx (assoc-in recovery-ctx [:phase :result] result)
+        success? (and (not gate-failed?) (phase/result-succeeded? result))
         end-time (System/currentTimeMillis)
         duration-ms (- end-time (get-in ctx [:phase :started-at]))]
     (lifecycle-result/complete-phase completed-ctx phase-key success? end-time
                                      duration-ms)))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} enter-phase
   [phase-key transform config ctx]
@@ -92,6 +149,8 @@
   (let [merged (phase/merge-with-defaults config)]
     {:name phase-key
      :config merged
+     ;; A fresh run drops a caller's record; re-entry never strips it.
+     :owned-input-keys #{checkpoint/gate-failure-key}
      :enter (partial enter-phase phase-key transform merged)
      :leave leave-phase
      :error lifecycle-result/fail-phase}))

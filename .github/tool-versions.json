@@ -1,3 +1,7 @@
 {
-  "deps-clj": "1.12.4.1618"
+  "deps-clj": "1.12.4.1618",
+  "clojure-cli": "1.12.6.1673",
+  "babashka": "1.13.229",
+  "clj-kondo": "2026.10.26",
+  "markdownlint-cli": "0.50.0"
 }

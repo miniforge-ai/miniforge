@@ -9,6 +9,22 @@
   :merge/attempting
   "Attempting PR merge"
 
+  ;; PR monitor state files (monitor-store, monitor-budget, pr-poller)
+  :monitor-state/unreadable
+  "PR monitor state file {path} is not a single EDN map ({error}). Fix it or move it aside; miniforge will not overwrite it."
+
+  :monitor-state/no-repo
+  "PR monitor state is kept per repository and needs an owner/name repo slug; got {repo}."
+
+  :monitor-state/invalid-budget
+  "PR monitor budget file {path} does not hold a budget for PR #{pr-number}; miniforge will not overwrite it."
+
+  :monitor-state/invalid-watermarks
+  "PR monitor watermarks file {path} does not hold a map of PR number to watermark; miniforge will not overwrite it."
+
+  :monitor-state/budget-held
+  "Budget for PR #{pr-number} was not saved: it stands in for state that could not be read."
+
   ;; WorklistEntry schema validation failure (operator tooling, not user UI)
   :worklist/validation-failed
   "WorklistEntry schema validation failed"

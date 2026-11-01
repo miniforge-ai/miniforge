@@ -28,6 +28,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.connector-linter.interface :as linter]
    [ai.miniforge.compliance-scanner.interface :as scanner]
+   [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.llm.interface :as llm]
@@ -54,20 +55,6 @@
       (anomaly/sub-anomaly :invalid-input :anomalies.scan/edn-parse-error
                            (ex-message e)
                            {:source source-label}))))
-
-(defn- ^{:stratum 0} resolve-pack
-  "Resolve a pack by name or path. Returns the loaded pack map, nil when not
-   found, or a canonical `:invalid-input` anomaly (subtype `:anomalies.scan/edn-parse-error`)
-   when the file exists but is malformed."
-  [pack-ref]
-  (cond
-    (fs/exists? pack-ref)
-    (safe-read-edn (str pack-ref) (slurp (str pack-ref)))
-
-    :else
-    (let [resource-path (str "policy_pack/packs/" pack-ref ".pack.edn")]
-      (when-let [url (io/resource resource-path)]
-        (safe-read-edn resource-path (slurp url))))))
 
 (defn- ^{:stratum 0} resolve-rules-selector
   "Parse the --rules option into a selector value."
@@ -181,6 +168,20 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} resolve-pack
+  "Resolve a pack by name or path. Returns the loaded pack map, nil when not
+   found, or a canonical `:invalid-input` anomaly (subtype `:anomalies.scan/edn-parse-error`)
+   when the file exists but is malformed."
+  [pack-ref]
+  (cond
+    (fs/exists? pack-ref)
+    (safe-read-edn (str pack-ref) (slurp (str pack-ref)))
+
+    :else
+    (let [resource-path (str "policy_pack/packs/" pack-ref ".pack.edn")]
+      (when-let [url (io/resource resource-path)]
+        (safe-read-edn resource-path (slurp url))))))
+
 (defn- ^{:stratum 1} load-repo-config
   "Load .miniforge/config.edn from the repo root. Returns nil if absent,
    or a canonical `:invalid-input` anomaly (subtype `:anomalies.scan/edn-parse-error`)
@@ -189,19 +190,6 @@
   (let [path (fs/path repo-path repo-config-path)]
     (when (fs/exists? path)
       (safe-read-edn (str path) (slurp (str path))))))
-
-(defn- ^{:stratum 1} resolve-packs-from-config
-  "Load all packs declared in :repo/packs.
-   Returns merged pack map, nil (no packs declared / no rules), or
-   the first parse-error anomaly if any declared pack failed to parse."
-  [repo-config]
-  (let [pack-names (get repo-config :repo/packs [])]
-    (when (seq pack-names)
-      (let [results (mapv resolve-pack pack-names)]
-        (if-let [err (some #(when (anomaly/anomaly? %) %) results)]
-          err
-          (let [rules (vec (mapcat :pack/rules (remove nil? results)))]
-            (when (seq rules) {:pack/rules rules})))))))
 
 (defn- ^{:stratum 1} run-semantic-analysis
   "Run LLM-based semantic analysis on behavioral rules in parallel.
@@ -236,8 +224,23 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn- ^{:stratum 2} resolve-packs-from-config
+  "Load all packs declared in :repo/packs.
+   Returns merged pack map, nil (no packs declared / no rules), or
+   the first parse-error anomaly if any declared pack failed to parse."
+  [repo-config]
+  (let [pack-names (get repo-config :repo/packs [])]
+    (when (seq pack-names)
+      (let [results (mapv resolve-pack pack-names)]
+        (if-let [err (some #(when (anomaly/anomaly? %) %) results)]
+          err
+          (let [rules (vec (mapcat :pack/rules (remove nil? results)))]
+            (when (seq rules) {:pack/rules rules})))))))
+
+;------------------------------------------------------------------------------ Layer 3
+
 ;; Pipeline steps
-(defn- ^{:stratum 2} build-scan-opts
+(defn- ^{:stratum 3} build-scan-opts
   "Build scan options from CLI opts and repo config.
    Priority: --pack flag > repo config :repo/packs > no pack.
    Returns a scan-opts map on success, or a canonical `:invalid-input`
@@ -263,9 +266,9 @@
           pack  (assoc :pack pack)
           since (assoc :since since))))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 4
 
-(defn- ^{:stratum 3} run-scan
+(defn- ^{:stratum 4} run-scan
   "Execute the scan→linters→semantic→classify→plan→execute pipeline.
    Returns a canonical `:invalid-input` anomaly when build-scan-opts fails;
    nil on success."
@@ -330,16 +333,18 @@
               (run-linter-fixes! repo-path repo-config))
             (execute-if-requested plan-result repo-path true)))))))))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 5
 
 ;; Command entry point
-(defn ^{:stratum 4} scan-cmd
-  "CLI entry point for the scan command."
+(defn ^{:stratum 5} scan-cmd
+  "CLI entry point for the scan command. Exits 1 when the repository does
+   not exist, when a config file does not parse, and when the scan throws."
   [opts]
   (let [repo-path (get opts :repo (str (fs/cwd)))]
     (cond
       (not (fs/exists? repo-path))
-      (display/print-error (messages/t :scan/repo-not-found {:path repo-path}))
+      (do (display/print-error (messages/t :scan/repo-not-found {:path repo-path}))
+          (shared/exit! 1))
 
       :else
       (try
@@ -347,7 +352,9 @@
           (when (anomaly/anomaly? result)
             (display/print-error (messages/t :scan/edn-parse-error
                                              {:source  (get-in result [:anomaly/data :source])
-                                              :message (:anomaly/message result)}))))
+                                              :message (:anomaly/message result)}))
+            (shared/exit! 1)))
         (catch Exception e
           (display/print-error (messages/t :scan/scan-failed
-                                           {:message (ex-message e)})))))))
+                                           {:message (ex-message e)}))
+          (shared/exit! 1))))))

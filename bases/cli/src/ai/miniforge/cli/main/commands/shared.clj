@@ -64,6 +64,12 @@
   "Explicitly composed optional CLI providers, keyed by their legacy symbol IDs."
   {})
 
+(def ^{:stratum 0} usage-exit-code
+  "Exit code for a usage error (a missing or bad argument), as for the
+   command-line errors `parse-errors` reports. A command that ran and
+   failed exits 1."
+  2)
+
 (defn ^{:stratum 0} exit!
   "Wrapper around System/exit that can be redef'd in tests."
   [code]
@@ -91,11 +97,12 @@
   (get optional-functions fn-sym))
 
 (defn ^{:stratum 1} usage-error!
-  "Print a usage error with the given message key and command string, then exit 1."
+  "Print a usage error with the given message key and command string, then
+   exit 2 (`usage-exit-code`)."
   [message-key command-suffix]
   (display/print-error
    (messages/t message-key {:command (app-config/command-string command-suffix)}))
-  (exit! 1))
+  (exit! usage-exit-code))
 
 ;------------------------------------------------------------------------------ Layer 2
 

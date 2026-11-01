@@ -58,6 +58,38 @@
   {"GIT_TERMINAL_PROMPT" "0"
    "GH_PROMPT_DISABLED"  "1"})
 
+(defn ^{:stratum 0} parent-env
+  "The environment children start from: this process's. A function so
+   tests can supply a fixed environment."
+  []
+  (into {} (System/getenv)))
+
+(def ^{:stratum 0} repository-env-vars
+  "What `git rev-parse --local-env-vars` prints: the variables that bind a
+   git command to one repository, which git itself clears when it moves
+   to another. A child that inherits one (a git hook exports GIT_DIR,
+   GIT_INDEX_FILE and others) acts on that repository, not on the
+   worktree it runs in. The 15 names of git 2.40 and later, then
+   GIT_INTERNAL_SUPER_PREFIX, which git 2.11 through 2.39 also list; the
+   same list #2013 strips in the test launchers. A list, not the `GIT_`
+   prefix: GIT_SSH_COMMAND, GIT_CONFIG_GLOBAL and the author and
+   committer variables bind no repository."
+  ["GIT_ALTERNATE_OBJECT_DIRECTORIES" "GIT_CONFIG" "GIT_CONFIG_PARAMETERS"
+   "GIT_CONFIG_COUNT" "GIT_OBJECT_DIRECTORY" "GIT_DIR" "GIT_WORK_TREE"
+   "GIT_IMPLICIT_WORK_TREE" "GIT_GRAFT_FILE" "GIT_INDEX_FILE"
+   "GIT_NO_REPLACE_OBJECTS" "GIT_REPLACE_REF_BASE" "GIT_PREFIX"
+   "GIT_SHALLOW_FILE" "GIT_COMMON_DIR" "GIT_INTERNAL_SUPER_PREFIX"])
+
+(defn ^{:stratum 0} trace-env-var?
+  "True for git's tracing variables: GIT_TRACE, GIT_TRACE_* (CURL, PACKET,
+   REDACT, ...), GIT_TRACE2*, and GIT_CURL_VERBOSE. With a credential in a
+   child's environment, GIT_TRACE_CURL or GIT_CURL_VERBOSE can write the
+   Authorization header to a log, and GIT_TRACE_REDACT=0 turns git's
+   default redaction off."
+  [var-name]
+  (or (str/starts-with? var-name "GIT_TRACE")
+      (= "GIT_CURL_VERBOSE" var-name)))
+
 (def ^{:stratum 0} poll-ms
   "How often a running call's descendants are recorded. A helper whose
    parent exits (git-remote-https, a credential helper) is reparented and
@@ -82,6 +114,11 @@
   (str/join " " (take 3 args)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} without-repository-env
+  "`env` (a map) without `repository-env-vars`."
+  [env]
+  (apply dissoc (into {} env) repository-env-vars))
 
 (defn- ^{:stratum 1} wait-recording-descendants
   "Wait up to `timeout-ms` for `done`, recording `proc`'s descendants every
@@ -127,11 +164,20 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} local-git-env
+  "`parent-env` without `repository-env-vars`: the environment every git
+   call here starts from, so each acts on the worktree it runs in."
+  []
+  (without-repository-env (parent-env)))
+
 (defn ^{:stratum 2} run-bounded
   "Run argv `args` with empty stdin, `non-interactive-env`, and a deadline.
 
    opts: :dir, :extra-env (merged over `non-interactive-env`), :timeout-ms
-   (default `default-timeout-ms`).
+   (default `default-timeout-ms`), :no-trace? (drop `trace-env-var?`
+   variables from the child's environment; set it for any call that
+   carries a credential). The child starts from `parent-env` without
+   `repository-env-vars`.
 
    Returns {:exit :out :err} when the process finishes. At the deadline it
    kills the process, its descendants, and any process recorded as a
@@ -140,14 +186,16 @@
    :anomaly <:timeout anomaly> :readers-done? <bool>}. :readers-done? is
    false when an output reader had to be cancelled. A process that cannot
    be started throws, as `process/shell` does; callers already catch that."
-  [args {:keys [dir extra-env timeout-ms]}]
+  [args {:keys [dir extra-env timeout-ms no-trace?]}]
   (let [timeout-ms (or timeout-ms default-timeout-ms)
         label      (command-label args)
+        base-env   (cond->> (without-repository-env (parent-env))
+                     no-trace? (into {} (remove #(trace-env-var? (key %)))))
         proc       (apply process/process
-                          (cond-> {:in        ""
-                                   :out       :string
-                                   :err       :string
-                                   :extra-env (merge non-interactive-env extra-env)}
+                          (cond-> {:in  ""
+                                   :out :string
+                                   :err :string
+                                   :env (merge base-env non-interactive-env extra-env)}
                             dir (assoc :dir (str dir)))
                           args)
         ;; bb's process record has no timed deref, so wait on a future.

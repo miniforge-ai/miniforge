@@ -66,7 +66,8 @@
 
 (def ^{:stratum 0} workflow-gc-checkpoints-flag-spec
   (flags/with-help-flag
-    {:max-age-days {:coerce :int :alias :a}}))
+    {:max-age-days {:coerce :int :alias :a}
+     :root         {:coerce :string}}))
 
 (def ^{:stratum 0} chain-run-flag-spec
   (flags/with-help-flag

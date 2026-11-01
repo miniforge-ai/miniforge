@@ -110,6 +110,23 @@
           (is (= 42 (get-in workflow [:metrics :tokens])))
           (is (= 3000 (get-in workflow [:metrics :duration-ms]))))))))
 
+(deftest ^{:stratum 2} get-workflows-keeps-publish-order-among-tied-timestamps-test
+  (testing "more events than an array map holds, all in one millisecond"
+    (let [stream (es/create-event-stream {:sinks []})
+          state  (core/create-state {:event-stream stream})
+          wf-id  (random-uuid)
+          at     "2026-03-28T12:00:00Z"
+          deltas (map str "abcdefghijkl")]
+      (es/publish! stream (wf-event :workflow/started wf-id at :workflow/spec {:name "Tied"}))
+      (es/publish! stream (wf-event :workflow/phase-started wf-id at :workflow/phase :plan))
+      (doseq [d deltas]
+        (es/publish! stream (wf-event :agent/chunk wf-id at :agent/id :plan :chunk/delta d)))
+      (es/publish! stream (wf-event :workflow/phase-started wf-id at :workflow/phase :implement))
+      (with-redefs [sut/events-dir-path (.getPath (temp-events-dir))]
+        (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)]
+          (is (= (apply str deltas) (:latest-output workflow)) "chunks in publish order")
+          (is (= :implement (:phase workflow)) "the phase started last"))))))
+
 (deftest ^{:stratum 2} get-workflows-projects-dependency-health-test
   (testing "workflow summaries expose active dependency issues with attribution"
     (let [stream     (es/create-event-stream {:sinks []})

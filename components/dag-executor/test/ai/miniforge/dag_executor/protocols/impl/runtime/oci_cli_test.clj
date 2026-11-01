@@ -401,7 +401,22 @@
     (testing "a username alone is stripped and carries no credential"
       (is (= "https://github.com/o/r.git"
              (:https-url (git-remote {:repo-url "https://bob@github.com/o/r.git"}))))
-      (is (nil? (:url-auth (git-remote {:repo-url "https://bob@github.com/o/r.git"})))))))
+      (is (nil? (:url-auth (git-remote {:repo-url "https://bob@github.com/o/r.git"})))))
+    (testing "a mixed-case scheme is lowercased, with or without userinfo,
+              so the credential env still matches the URL"
+      (doseq [[given url auth k]
+              [["HTTPS://bob:pw@git.example.com/r.git" "https://git.example.com/r.git"
+                {:user "bob" :token "pw"} "http.https://git.example.com/.extraheader"]
+               ["Http://bob:pw@git.example.com/r.git" "http://git.example.com/r.git"
+                {:user "bob" :token "pw"} "http.http://git.example.com/.extraheader"]
+               ["HTTPS://git.example.com/r.git" "https://git.example.com/r.git"
+                nil "http.https://git.example.com/.extraheader"]]]
+        (let [remote (git-remote {:repo-url given})]
+          (is (= url (:repo-url remote) (:https-url remote)))
+          (is (= auth (:url-auth remote)))
+          (is (contains? (git-config-of ((private-fn 'git-credential-env) (:https-url remote)
+                                                                          {:user "u" :token "t"}))
+                         k)))))))
 
 (deftest ^{:stratum 1} git-auth-test
   (let [git-auth (private-fn 'git-auth)]
@@ -752,10 +767,11 @@
           (is (clojure.string/includes? (get-in r [:error :message]) "2.30.2"))
           (is (= [["git" "--version"]] @cmds)))))))
 
-(deftest ^{:stratum 1} persist-workspace-authenticates-push-only-test
-  (testing "with a recorded remote, only the push gets the credential, and
-            it pushes to the recorded URL rather than the capsule's origin;
-            add/commit (which run workspace hooks) never see it"
+(deftest ^{:stratum 1} persist-workspace-authenticates-remote-calls-only-test
+  (testing "with a recorded remote, only ls-remote and push get the
+            credential, with hooks off, and both target the recorded URL
+            rather than the capsule's origin; add/commit (which run
+            workspace hooks) never see it"
     (let [executor (recorded-remote-executor)
           calls    (atom [])]
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
@@ -769,11 +785,16 @@
                               :stdout (if (= cmd "git status --porcelain") " M f" "sha")}})]
         (is (true? (get-in (proto/persist-workspace! executor "c1" {:branch "task/x"})
                            [:data :persisted?])))
-        (let [[[cmd opts] & more] (credentialed-calls @calls)]
-          (is (empty? more))
-          (is (= ["git" "push" "https://github.com/o/r.git" "HEAD:task/x" "--force"] cmd))
-          (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
-                 (get (git-config-of (:env opts)) "http.https://github.com/.extraheader"))))
+        (let [authed (credentialed-calls @calls)]
+          (is (= [["git" "ls-remote" "https://github.com/o/r.git" "refs/heads/task/x"]
+                  ["git" "push" "--force-with-lease=task/x:sha" "https://github.com/o/r.git"
+                   "HEAD:task/x"]]
+                 (map first authed)))
+          (is (every? #(= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
+                          (get (git-config-of (:env (second %))) "http.https://github.com/.extraheader"))
+                      authed))
+          (is (every? #(= "/dev/null" (get (git-config-of (:env (second %))) "core.hooksPath"))
+                      authed)))
         (proto/release-environment! executor "c1")
         (is (= {} @(:git-remotes executor)))))))
 
@@ -908,15 +929,17 @@
                  (get env (str "GIT_CONFIG_VALUE_" (dec n)))))
           (is (not (contains? env "PATH"))))))))
 
-(deftest ^{:stratum 1} persist-without-changes-resolves-no-token-test
-  (testing "a persist with nothing to push never resolves the credential,
-            so a slow token lookup (gh auth token) cannot hold it up"
+(deftest ^{:stratum 1} persist-without-push-resolves-no-token-test
+  (testing "a persist that reaches no remote (:push? false, nothing to
+            commit) never resolves the credential, so a slow token lookup
+            (gh auth token) cannot hold it up. With :push? true the
+            ls-remote that checks for a held commit needs the credential."
     (let [lookups (atom 0)]
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] (swap! lookups inc) fake-token)
                     oci-cli/exec-in-container (fn [_d _id _cmd _opts]
                                                 {:data {:exit-code 0 :stdout ""}})]
         (is (true? (get-in (proto/persist-workspace! (recorded-remote-executor) "c1"
-                                                     {:branch "task/x"})
+                                                     {:branch "task/x" :push? false})
                            [:data :no-changes?])))
         (is (zero? @lookups))))))
 

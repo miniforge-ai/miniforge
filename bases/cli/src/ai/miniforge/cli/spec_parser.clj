@@ -22,7 +22,9 @@
    and validation. This thin wrapper exists so existing CLI callers don't
    need to change their require paths."
   (:require
-   [ai.miniforge.spec-parser.interface :as spec-parser]))
+   [ai.miniforge.spec-parser.interface :as spec-parser]
+   [ai.miniforge.workflow.interface :as workflow]
+   [babashka.fs :as fs]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -49,6 +51,22 @@
    - {:valid? false :errors [...]} if invalid"
   [spec]
   (spec-parser/validate-spec spec))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} read-spec-file
+  "`parse-spec-file` that reads the file once and records the digest of the
+   text it parsed under `[:spec/provenance :content-hash]`. The run's
+   checkpoint manifest records that digest, so it always describes the
+   spec that ran, even if the file changes before the run starts. A
+   missing file fails as `parse-spec-file` does."
+  [path]
+  (if (fs/regular-file? path)
+    (let [content (slurp (str path))]
+      (assoc-in (spec-parser/parse-spec-file path content)
+                [:spec/provenance :content-hash]
+                (workflow/spec-content-hash content)))
+    (parse-spec-file path)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

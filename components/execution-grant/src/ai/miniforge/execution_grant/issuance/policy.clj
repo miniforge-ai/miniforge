@@ -51,11 +51,23 @@
 (def ^{:stratum 1} policies
   "Explicit issuance policy catalog keyed by irreversible effect class."
   {:effect/merge
-   (effect-policy pull-request-grant-ttl-seconds [:pr/repo :pr/number])
+   (effect-policy pull-request-grant-ttl-seconds [:pr/repo :pr/number :pr/head-sha])
 
    :effect/pr-create
    (effect-policy pull-request-grant-ttl-seconds
                   [:pr/repo :pr/base :pr/branch :pr/head-sha :pr/payload-hash :pr/governance-hash])
+
+   :effect/push
+   (effect-policy pull-request-grant-ttl-seconds
+                  [:git/remote-url :git/branch :git/sha :git/force?])
+
+   :effect/comment
+   (effect-policy pull-request-grant-ttl-seconds
+                  [:pr/repo :pr/number :github/action :github/payload-hash])
+
+   :effect/provision
+   (effect-policy (* 30 60)
+                  [:pulumi/stack :pulumi/stack-dir :pulumi/plan-hash])
 
    :effect/deploy
    (effect-policy (* 30 60)
