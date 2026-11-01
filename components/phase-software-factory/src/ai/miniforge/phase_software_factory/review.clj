@@ -483,12 +483,8 @@
         ;; Emit agent-completed telemetry event
         _ (phase/emit-agent-completed! agent-ctx :review :reviewer result)
 
-        ;; SPEC §7.4.3 consultation provenance, prompt-section flavor. The
-        ;; reviewer's landings arrive in its prompt, not as a pin file in
-        ;; the context cache, so there is nothing for it to context_read:
-        ;; :pin-read? is nil (not applicable). Passing the session's reads
-        ;; would make it false on every review and the consultation gate
-        ;; would warn :codex-pin-not-fetched on every run. Attached before enter-context stores the result so
+        ;; SPEC §7.4.3 provenance. nil reads: landings arrive in the prompt, so no pin file exists to read.
+        ;; Attached before enter-context stores the result so
         ;; gates and the gap ledger can see it — on FAILURES too (:output
         ;; starts nil on response/failure): the consultation happened in
         ;; build-review-task whatever the reviewer did next, and §7.7.2.1

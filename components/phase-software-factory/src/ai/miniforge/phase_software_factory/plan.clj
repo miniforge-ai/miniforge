@@ -233,10 +233,7 @@
                                                       :tokens toks
                                                       :metrics {:tokens toks}}))))
                    r (validate-dag-readiness invoked)]
-               ;; SPEC §7.4.3 consultation provenance. The planner result carries
-               ;; the session's recorded context_reads (§7.4.2), so :pin-read?
-               ;; answers whether the pinned landings were fetched; nil
-               ;; (unknown) only when no session surfaced a reads log.
+               ;; SPEC §7.4.3 consultation provenance; :pin-read? comes from the planner's §7.4.2 reads.
                ;; Attached on failures too (:output starts nil on
                ;; response/failure): a failed plan that consulted must not be
                ;; ledgered as one that never did. §7.7.2: the planner result

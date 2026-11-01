@@ -256,10 +256,7 @@
                                          :answer (get answer-of id)
                                          :landings branch-landings})
                                       pegs)))
-              ;; A read is a resolution that returned content. The MCP
-              ;; server also records failed lookups (:source :absent); one
-              ;; of those for the pin path means the agent asked and got
-              ;; nothing, so it must not count as having seen the pin.
+              ;; Failed lookups are logged too (:source :absent); those are not reads.
               :pin-read? (when (some? context-reads)
                            (boolean (some #(and (= pin-path (:path %))
                                                 (not= :absent (:source %)))

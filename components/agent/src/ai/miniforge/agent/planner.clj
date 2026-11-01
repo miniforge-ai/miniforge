@@ -823,10 +823,7 @@
                ;; (last-recording-wins includes an answer revised during
                ;; the retry) and a torn log in either session wins the
                ;; marker.
-               ;; §7.4.2 recorded context_reads, primary then retry: a
-               ;; pinned landing read in either session was read. Absent
-               ;; from both stays absent, so :pin-read? reads nil
-               ;; (unknown), not false.
+               ;; §7.4.2: a pin read in either session counts; absent from both stays absent (unknown).
                (or (some? context-reads)
                    (some? (:context-reads retry-result)))
                (assoc :context-reads
