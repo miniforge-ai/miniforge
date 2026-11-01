@@ -43,6 +43,11 @@
    only fires for paths with an on-disk file."
   ".miniforge/codex-consider.md")
 
+;; Failed lookups are logged too (:source :absent); asking for the pin is not seeing it.
+(defn- ^{:stratum 0} pin-fetch?
+  [{:keys [path source]}]
+  (and (= pin-path path) (not= :absent source)))
+
 (def ^{:stratum 0} phase->situation
   "Which codex situation each phase enters at. This map IS the push
    mechanism's routing: the orchestrator supplies the situation, the codex
@@ -256,11 +261,8 @@
                                          :answer (get answer-of id)
                                          :landings branch-landings})
                                       pegs)))
-              ;; Failed lookups are logged too (:source :absent); those are not reads.
               :pin-read? (when (some? context-reads)
-                           (boolean (some #(and (= pin-path (:path %))
-                                                (not= :absent (:source %)))
-                                          context-reads)))}
+                           (boolean (some pin-fetch? context-reads)))}
        unmatched (assoc :unmatched-answers (vec unmatched))))))
 
 ;------------------------------------------------------------------------------ Layer 2
