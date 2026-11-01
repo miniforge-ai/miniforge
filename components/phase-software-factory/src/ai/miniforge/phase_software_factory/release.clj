@@ -240,6 +240,13 @@
         (assoc-in [:phase :verdict] verdict)
         (assoc-in [:phase :result :output :phase/verdict] verdict))))
 
+(defn- ^{:stratum 0} release-file-paths
+  "The distinct paths of the files `workflow-state` releases."
+  [workflow-state]
+  (into []
+        (comp (mapcat (comp :code/files :artifact/content)) (keep :path) (distinct))
+        (:workflow/artifacts workflow-state)))
+
 (defn ^{:stratum 0} build-executor-context
   "Build context for the release executor from phase context: the
    publish context (release-publish/build-publish-context) plus what the
@@ -250,30 +257,35 @@
    `:task/behavior-addendum` so `release-executor/invoke-releaser` can
    forward it into the agent input. Mirrors the wiring review (#945)
    and plan use; closes the gap where the releaser ran without the
-   compiled standards pack."
-  [ctx config logger]
-  (let [on-chunk (phase/create-streaming-callback ctx :release)
-        input (get-in ctx [:execution/input])
-        ;; Codex consultation for the release situation, delivered through
-        ;; the same addendum channel as the compiled standards pack — the
-        ;; releaser has no existing-files channel (SPEC T1 s7.4). The
-        ;; outcome rides on the exec-context so enter-release can attach
-        ;; provenance without consulting twice.
-        codex-outcome (codex-pin/landings-outcome :release logger)
-        pack-addendum (phase/load-and-filter-behaviors
-                        :release {:task {:task/intent (:intent input)}})
-        behavior-addendum (let [t (:text codex-outcome)]
-                            (cond
-                              (and pack-addendum t) (str pack-addendum "\n\n" t)
-                              t t
-                              :else pack-addendum))]
-    (cond-> (assoc (release-publish/build-publish-context ctx config logger)
-                   :llm-backend (get-in ctx [:execution/llm-backend]))
-      on-chunk (assoc :on-chunk on-chunk)
-      behavior-addendum (assoc :task/behavior-addendum behavior-addendum)
-      ;; :text already rode into the behavior addendum; the summary only
-      ;; needs the status fields — don't ship the rendered prose twice.
-      codex-outcome (assoc :codex/outcome (dissoc codex-outcome :text)))))
+   compiled standards pack. Rules are filtered by `changed-paths`, the
+   files being released, so glob-scoped rules apply; the 3-arity passes
+   none."
+  ([ctx config logger]
+   (build-executor-context ctx config logger []))
+  ([ctx config logger changed-paths]
+   (let [on-chunk (phase/create-streaming-callback ctx :release)
+         input (get-in ctx [:execution/input])
+         ;; Codex consultation for the release situation, delivered through
+         ;; the same addendum channel as the compiled standards pack — the
+         ;; releaser has no existing-files channel (SPEC T1 s7.4). The
+         ;; outcome rides on the exec-context so enter-release can attach
+         ;; provenance without consulting twice.
+         codex-outcome (codex-pin/landings-outcome :release logger)
+         pack-addendum (phase/load-and-filter-behaviors
+                         :release {:task     {:task/intent (:intent input)}
+                                   :artifact {:artifact/paths changed-paths}})
+         behavior-addendum (let [t (:text codex-outcome)]
+                             (cond
+                               (and pack-addendum t) (str pack-addendum "\n\n" t)
+                               t t
+                               :else pack-addendum))]
+     (cond-> (assoc (release-publish/build-publish-context ctx config logger)
+                    :llm-backend (get-in ctx [:execution/llm-backend]))
+       on-chunk (assoc :on-chunk on-chunk)
+       behavior-addendum (assoc :task/behavior-addendum behavior-addendum)
+       ;; :text already rode into the behavior addendum; the summary only
+       ;; needs the status fields — don't ship the rendered prose twice.
+       codex-outcome (assoc :codex/outcome (dissoc codex-outcome :text))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -671,7 +683,8 @@
                      {:data {:artifact-count (count (:workflow/artifacts workflow-state))
                              :file-count (count (get-in (first (:workflow/artifacts workflow-state))
                                                         [:artifact/content :code/files]))}})
-        exec-context (build-executor-context ctx config logger)
+        exec-context (build-executor-context ctx config logger
+                                             (release-file-paths workflow-state))
         releaser-agent (get config :releaser-agent)
         ;; Execute the release phase
         ;; Emit agent-started telemetry event for release executor
