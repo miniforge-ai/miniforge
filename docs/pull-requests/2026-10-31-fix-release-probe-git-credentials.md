@@ -19,10 +19,10 @@ Origin in the capsule holds no credential. On a private HTTPS remote the probe's
 therefore fails. A push that crashed, timed out or was interrupted after it reached origin is
 then reported `:push-unresolved`, even though the branch was published.
 
-`:git-credentials?` is the executor option the capsule credential work (#2139) adds. With it,
-the OCI executor gives that one command the recorded remote's credential as per-command git
-config. #2139 makes the release's push and fetches ask for it. Until #2139 merges, executors
-on main ignore the option, so this change takes effect when it lands.
+`:git-credentials?` is the executor option the capsule credential work (#2139, merged) added.
+With it, the OCI executor gives that one command the recorded remote's credential as
+per-command git config. #2139 made the release's push and fetches ask for it; the probe was the
+one network call left without it.
 
 ## Changes in Detail
 
@@ -42,12 +42,12 @@ on main ignore the option, so this change takes effect when it lands.
 
 ## Deployment Plan
 
-Ships with the next release. It takes effect once #2139 lands.
+Ships with the next release; no configuration or data change.
 
 ## Related Issues/PRs
 
-1. Stacked on the mechanical split of `sandbox.clj` (rule 210), which this change needs to pass
-   stratum-lint.
+1. Stacked on #2300, the mechanical split of `sandbox.clj` (rule 210), which this change needs
+   to pass stratum-lint.
 2. #2139: the executor-side `:git-credentials?` and the review thread that found this gap.
 
 ## Checklist
