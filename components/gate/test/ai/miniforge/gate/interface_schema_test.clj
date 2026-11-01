@@ -46,6 +46,12 @@
   [f]
   (:type (ex-data (is (thrown? clojure.lang.ExceptionInfo (f))))))
 
+(defmethod ^{:stratum 0} registry/get-gate ::string-verdict
+  [_]
+  {:name ::string-verdict
+   :check (fn [_artifact _ctx] {:passed? "false" :status :error})
+   :repair (fn [_artifact _errors _ctx] {:success? "false" :status :error})})
+
 (defmethod ^{:stratum 0} registry/get-gate ::failure-shaped
   [_]
   {:name ::failure-shaped
@@ -76,6 +82,12 @@
     (is (= :malli.core/invalid-output (thrown-type #(gate/check-gate ::shapeless {} {})))))
   (testing "check-gates surfaces the same break instead of a failed verdict"
     (is (= :malli.core/invalid-output (thrown-type #(gate/check-gates [::shapeless] {} {}))))))
+
+(deftest ^{:stratum 1} non-boolean-verdict-is-rejected-test
+  (testing "a string :passed? beside a valid :status breaks check-gate's schema"
+    (is (= :malli.core/invalid-output (thrown-type #(gate/check-gate ::string-verdict {} {})))))
+  (testing "a string :success? beside a valid :status breaks repair-gate's schema"
+    (is (= :malli.core/invalid-output (thrown-type #(gate/repair-gate ::string-verdict {} [] {}))))))
 
 (deftest ^{:stratum 1} shapeless-repair-result-is-rejected-test
   (testing "a repair result with neither :success? nor :status breaks repair-gate's schema"

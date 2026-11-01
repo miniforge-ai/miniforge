@@ -53,17 +53,24 @@
 
 (def ^{:stratum 1} CheckResult
   "What `check-gate` returns: the gate's own result in either accepted
-   shape, tagged with the gate that produced it."
+   shape, tagged with the gate that produced it. `passed?` reads
+   `:passed?` before any response key, so a present `:passed?` must be a
+   boolean whatever else the map carries."
   [:and
-   [:map [:gate :keyword]]
+   [:map
+    [:gate :keyword]
+    [:passed? {:optional true} :boolean]]
    [:or GateVerdict ResponseStatus ResponseFailure]])
 
 (def ^{:stratum 1} RepairResult
   "What `repair-gate` returns: the gate's repair result in either
    accepted shape, or the failure it builds when the gate has no repair
-   or the repair throws, tagged with the gate in every case."
+   or the repair throws, tagged with the gate in every case. A present
+   `:success?` must be a boolean, since it is read first."
   [:and
-   [:map [:gate :keyword]]
+   [:map
+    [:gate :keyword]
+    [:success? {:optional true} :boolean]]
    [:or RepairVerdict ResponseStatus ResponseFailure]])
 
 ;------------------------------------------------------------------------------ Layer 2

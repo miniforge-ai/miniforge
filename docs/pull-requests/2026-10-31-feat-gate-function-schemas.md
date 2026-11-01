@@ -34,7 +34,9 @@ a component boundary, in tests, without changing runtime behaviour.
    `response/success`, `response/error`, or `response/failure`'s
    `{:success false}` — tagged with `:gate`), `RepairResult` (the same, with
    `{:success? bool}` as the convention), and `ChecksResult` (closed:
-   `:passed?`, `:results`, `:failed-gates`).
+   `:passed?`, `:results`, `:failed-gates`). Because `passed?` and the repair
+   check read `:passed?` / `:success?` before any response key, a present
+   verdict key must be a boolean even when `:status` is valid.
 3. `gate.interface`: schema metadata on `check-gate`, `check-gates`,
    `repair-gate`, `passed?`, `failed?`. Inputs: gate keyword(s), any
    artifact, a map or nil context.
@@ -55,7 +57,8 @@ a component boundary, in tests, without changing runtime behaviour.
    results pass, including the behavioral gate's real repair, which returns
    `response/failure`. The rejection tests fail without instrumentation, so
    they show the fixture is active; the failure-shape test fails against a
-   schema without `{:success false}`.
+   schema without `{:success false}`. A string `:passed?` or `:success?` beside
+   a valid `:status` is rejected.
 3. The existing gate tests (interface, format, policy-pack, opsv, no-secrets,
    tests-pass) pass with the fixture on.
 
