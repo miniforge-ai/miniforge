@@ -33,6 +33,7 @@
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.interface.gate :as phase-gate]
+            [ai.miniforge.phase.interface.task-base :as task-base]
             [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
             [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [ai.miniforge.phase-software-factory.messages :as messages]
@@ -90,28 +91,24 @@
   [ctx]
   (workspace/resolve-execution-workdir ctx "release"))
 
-(defn- ^{:stratum 0} committed-since-base
-  "Substantive `:code/files` the task branch holds beyond the environment's
-   base commit (committed and dirty alike), [] when there are none or the
-   base commit is unknown. A clean worktree is not \"nothing to release\"
-   when an earlier implement iteration's commits are still unreleased.
+(def ^{:stratum 0} ^:private commit-sha-pattern
+  #"[0-9a-f]{7,40}")
 
-   The exact base commit only, never a branch name or the commit the CLI
+(defn- ^{:stratum 0} release-base-shas
+  "The exact commits the task branch is measured from: the shas among the
+   task base refs implement recorded (checkpointed, so a resumed run
+   restores the first attempt's base, which its own environment's base is
+   already past), then the environment's base commit.
+
+   Commits only, never a branch name, a range, or the commit the CLI
    started on: `git diff <ref>` compares the working tree with the ref
    itself, so a ref behind the task's real base would count upstream
    changes as this run's work."
-  [ctx worktree-path]
-  (let [base-sha   (get-in ctx [:execution/environment-metadata :base-sha])
-        base-shas  (when (and (string? base-sha) (not (str/blank? base-sha))) [base-sha])
-        execute-fn (get ctx :execution/execute-fn)
-        executor   (get ctx :execution/executor)
-        env-id     (get ctx :execution/environment-id)
-        artifact   (when base-shas
-                     (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
-                       (agent/collect-worktree-files-via-executor
-                        execute-fn executor env-id worktree-path base-shas)
-                       (agent/collect-worktree-files worktree-path base-shas)))]
-    (filterv agent/substantive-file? (:code/files artifact))))
+  [ctx]
+  (into []
+        (comp (filter #(and (string? %) (re-matches commit-sha-pattern %))) (distinct))
+        (concat (task-base/recorded-refs ctx)
+                [(get-in ctx [:execution/environment-metadata :base-sha])])))
 
 (defn- ^{:stratum 0} command-failure
   "Failure detail for one scan command, or nil when it exited 0. A capsule
@@ -395,6 +392,23 @@
     (catch Exception e
       (git-status-failed root-path {:detail (or (ex-message e) (.getName (class e)))
                                     :data   {:exception/class (.getName (class e))}}))))
+
+(defn- ^{:stratum 1} committed-since-base
+  "Substantive `:code/files` the task branch holds beyond its base commits
+   (committed and dirty alike), [] when there are none or no base commit is
+   known. A clean worktree is not \"nothing to release\" when an earlier
+   implement iteration's commits are still unreleased."
+  [ctx worktree-path]
+  (let [base-shas  (not-empty (release-base-shas ctx))
+        execute-fn (get ctx :execution/execute-fn)
+        executor   (get ctx :execution/executor)
+        env-id     (get ctx :execution/environment-id)
+        artifact   (when base-shas
+                     (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
+                       (agent/collect-worktree-files-via-executor
+                        execute-fn executor env-id worktree-path base-shas)
+                       (agent/collect-worktree-files worktree-path base-shas)))]
+    (filterv agent/substantive-file? (:code/files artifact))))
 
 (defn- ^{:stratum 1} release-files-result
   "Return release file data, the failed scan's own anomaly when `dirty` is

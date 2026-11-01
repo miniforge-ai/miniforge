@@ -30,17 +30,22 @@ parts.
 
 1. `release.clj`: `skip-probe` runs the existing dirty scan. When that comes
    back clean it adds `committed-since-base`: the files the worktree differs by
-   from `[:execution/environment-metadata :base-sha]`, read through
-   `agent/collect-worktree-files` (or its capsule twin in governed mode) and
-   filtered with `agent/substantive-file?`. A failed dirty scan still returns
-   its anomaly.
-2. Only the exact base commit is diffed. `git diff <ref>` compares the working
-   tree with the ref itself, so a base branch name, or the commit the CLI
-   started on, would count upstream changes as this run's work and turn a no-op
+   from the task's base commits, read through `agent/collect-worktree-files`
+   (or its capsule twin in governed mode) and filtered with
+   `agent/substantive-file?`. A failed dirty scan still returns its anomaly.
+2. The base commits are the commit shas among the task base refs implement
+   recorded (`task-base/recorded-refs`, the resume-aware base the `:no-secrets`
+   gate already uses), then `[:execution/environment-metadata :base-sha]`.
+   The recorded refs are checkpointed, so a resumed run, whose environment is
+   acquired on a worktree already holding its earlier commits, still measures
+   from the first attempt's base.
+3. Only exact commits are diffed. `git diff <ref>` compares the working tree
+   with the ref itself, so a base branch name, a range, or the commit the CLI
+   started on would count upstream changes as this run's work and turn a no-op
    into a release failure.
-3. Committed-only work then takes the release executor's existing
+4. Committed-only work then takes the release executor's existing
    `:preexisting-commits` path, as the boundary-commit case already does.
-4. `agent` interface exposes `collect-worktree-files-via-executor`.
+5. `agent` interface exposes `collect-worktree-files-via-executor`.
 
 ## Testing Plan
 
@@ -48,16 +53,11 @@ parts.
 
 1. `:already-implemented`, clean worktree, one commit beyond the base: release
    prepares, and the committed file is in the release artifact.
-2. Clean worktree at its base commit: release skips as before.
+2. Resumed run: environment base at HEAD, implement's recorded base refs name
+   the earlier commit: the committed file is released.
+3. Clean worktree at its base commit: release skips as before.
 
 Existing skip tests carry no base commit and keep their behaviour.
-
-## Not in this PR
-
-A resumed run whose environment is acquired on a worktree that already holds
-its earlier commits gets a `:base-sha` past that work, so the check finds
-nothing and the skip behaves as before. Fixing that needs the first attempt's
-base commit carried across resume, not the CLI's start commit.
 
 ## Checklist
 

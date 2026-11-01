@@ -19,7 +19,8 @@
   "Release skips only when the task branch holds nothing to release. An
    implement that reports :already-implemented after an earlier iteration
    committed its work leaves a clean worktree; release used to read that
-   as nothing to release, skip, and drop the committed work."
+   as nothing to release, skip, and drop the committed work. A resumed run
+   measures from the task base its first implement attempt recorded."
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.java.io :as io]
@@ -109,6 +110,18 @@
         (let [{:keys [prepared]} (enter-release
                                   (release-ctx dir :already-implemented {:base-sha base}))]
           (is (some? prepared) "release must prepare, not skip")
+          (is (= #{"src/feature.clj"} (released-paths prepared))))))))
+
+(deftest ^{:stratum 3} resumed-run-measures-from-the-recorded-task-base-test
+  (testing "a resumed run whose environment base is already past the work
+            measures from the base the first implement attempt recorded"
+    (with-task-branch
+      (fn [dir base head]
+        (let [ctx (assoc-in (release-ctx dir nil {:base-sha head})
+                            [:execution/phase-results :implement :artifact :code/base-refs]
+                            [(str base "...HEAD") base "origin/main"])
+              {:keys [prepared]} (enter-release ctx)]
+          (is (some? prepared))
           (is (= #{"src/feature.clj"} (released-paths prepared))))))))
 
 (deftest ^{:stratum 3} branch-with-nothing-beyond-base-still-skips-test
