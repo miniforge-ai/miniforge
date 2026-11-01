@@ -34,10 +34,17 @@
    releaser's prompt, so a symlink's target (possibly outside the
    worktree) or a submodule directory must never be read into it. A
    committed entry carries its git mode, and only modes 100644/100755 are
-   read. An entry from `git status` has no mode: the readers themselves
-   refuse a symlink (the host reader by canonical path, the capsule reader
-   by `test -L`) and read a path that exists but is not a regular file as
-   empty; a missing or unreadable path is a failure.
+   read. An entry from `git status` has no mode, and the dirty scans guard
+   it themselves: release's host scan keeps a symlink's path with empty
+   content and never reads it, and the capsule reader skips a symlink
+   (`test -L`) and a path that exists but is not a regular file, reading
+   it as empty; a missing or unreadable path is a failure.
+
+   The host reader carries no such guard. It only refuses a path whose
+   canonical target leaves the worktree: it follows a symlink inside the
+   worktree and fails on a directory. It reads only entries already known
+   to be regular files (committed entries by git mode), so callers must
+   not rely on it to skip symlinks.
    Deletions carry empty content.
 
    Layer 0: failure shapes, output parsing, constants
@@ -147,8 +154,9 @@
 
 (defn ^{:stratum 1} host-reader
   "Read `path` under `root-path` on the host: {:content s} or {:failure f}.
-   Refuses a path whose canonical target leaves `root-path`, which covers a
-   symlink pointing out of the worktree."
+   Refuses a path whose canonical target leaves `root-path` (a symlink out
+   of the worktree). It follows a symlink inside the worktree and fails on a
+   directory: pass it only paths known to be regular files."
   [root-path]
   (fn [path]
     (try
