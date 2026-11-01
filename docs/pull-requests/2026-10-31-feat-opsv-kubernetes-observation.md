@@ -50,6 +50,13 @@ depending on a hybrid keyword/string fixture or recursively keywordizing labels.
 Request and response admission share one external boundary, keeping the public
 interface thin without an extra forwarding namespace.
 
+After current-main alignment, both consuming product suites pass again. The
+new contract tests pass eight tests and 52 assertions. A fresh CLI build
+produced a 6,880,334-byte stripped jar. Isolated packaged acceptance, including
+the existing seven-phase value flow, passes 13 tests and 84 assertions.
+Only the built jar and test fixtures were on the classpath; production-source
+overlays were absent. Normal signed commits, lint and inferred strata pass.
+
 ## Deployment Plan
 
 Staging and recommend-only remain the intended backend defaults. This pure
@@ -64,7 +71,7 @@ Protocol reference: [Prometheus HTTP API](https://prometheus.io/docs/prometheus/
 
 ## Checklist
 
-- [ ] Boundary implementation and failure regressions
-- [ ] Affected-project and packaged tests
+- [x] Boundary implementation and failure regressions
+- [x] Affected-project and packaged tests
 - [ ] Adversarial standards review and normal gates
 - [ ] Fresh Copilot review and all CI gates
