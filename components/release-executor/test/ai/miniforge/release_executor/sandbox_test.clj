@@ -285,6 +285,21 @@
        (environment-status [_ _] (dag/ok {:status :running})))
      commands]))
 
+(deftest ^{:stratum 1} fetches-ask-for-git-credentials-test
+  (testing "fetch-branch! and create-branch!'s fetch ask the executor for
+            git credentials, since origin in the capsule holds none"
+    (let [fetch-opts (atom [])
+          exec (reify
+                 dag/TaskExecutor
+                 (execute! [_ _env-id command opts]
+                   (when (clojure.string/includes? (cmd-str command) "git fetch")
+                     (swap! fetch-opts conj opts))
+                   (dag/ok {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""})))]
+      (sandbox/fetch-branch! exec "env-1" "parent/branch")
+      (sandbox/create-branch! exec "env-1" "feat/x")
+      (is (= 2 (count @fetch-opts)))
+      (is (every? :git-credentials? @fetch-opts)))))
+
 (deftest ^{:stratum 1} timed-out-push-is-not-retried-over-https-test
   (testing "a push stopped at its deadline may have reached origin: it comes
             back as timed out, with no HTTPS token retry behind it"
