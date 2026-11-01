@@ -325,7 +325,8 @@
    implement does — produced by `phase/load-and-filter-behaviors`
    from rules that target `:review` AND carry `:rule/agent-behavior`
    or `:rule/knowledge-content` (rules with neither field, or whose
-   context filter excludes the current task, are not appended). This
+   context filter excludes the current task, are not appended). Rules are
+   filtered by the changed files' paths, so glob-scoped rules apply. This
    closes the gap where reviewer was applying generic 'is this good?'
    judgment instead of checking against the rules the standards pack
    surfaces for review-phase consumers.
@@ -343,8 +344,13 @@
         ;; reviewer IS a quality signal deciding whether to trust itself.
         codex-outcome (codex-pin/landings-outcome :review (get-in ctx [:execution/logger]))
         codex-landings (:text codex-outcome)
+        ;; Filter by the files implement changed; without paths every
+        ;; glob-scoped rule fails to match and never reaches the reviewer.
         behavior-addendum (phase/load-and-filter-behaviors
-                            :review {:task {:task/intent (:intent input)}})
+                            :review {:task     {:task/intent (:intent input)}
+                                     :artifact {:artifact/paths
+                                                (into (mapv :path (:code/files artifact))
+                                                      (:code/file-paths artifact))}})
         task (cond-> {:task/id (random-uuid)
                       :task/type :review
                       :task/description (:description input)

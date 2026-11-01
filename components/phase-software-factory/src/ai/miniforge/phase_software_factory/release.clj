@@ -33,12 +33,14 @@
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.interface.gate :as phase-gate]
+            [ai.miniforge.phase.interface.task-base :as task-base]
             [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
             [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [ai.miniforge.phase-software-factory.messages :as messages]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
             [ai.miniforge.phase-software-factory.release-publish :as release-publish]
+            [ai.miniforge.phase-software-factory.release-scan :as release-scan]
             [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
 
@@ -90,17 +92,32 @@
   [ctx]
   (workspace/resolve-execution-workdir ctx "release"))
 
-(defn- ^{:stratum 0} command-failure
-  "Failure detail for one scan command, or nil when it exited 0. A capsule
-   executor that could not run the command returns `{:ok? false :error ...}`
-   with no exit code; a missing exit code counts as failure, as in verify."
-  [command exit stderr executor-error]
-  (when-not (= 0 exit)
-    {:detail (or (not-empty (str/trim (str stderr)))
-                 (:message executor-error)
-                 (str command " exited " exit))
-     :data   (cond-> {:command command :exit exit :stderr stderr}
-               executor-error (assoc :executor/error executor-error))}))
+(def ^{:stratum 0} ^:private commit-sha-pattern
+  #"[0-9a-f]{7,40}")
+
+(defn- ^{:stratum 0} release-base-shas
+  "The exact commits the task branch is measured from: the shas among the
+   task base refs implement recorded (checkpointed, so a resumed run
+   restores the first attempt's base, which its own environment's base is
+   already past), then the environment's base commit.
+
+   Commits only, never a branch name, a range, or the commit the CLI
+   started on: `git diff <ref>` compares the working tree with the ref
+   itself, so a ref behind the task's real base would count upstream
+   changes as this run's work."
+  [ctx]
+  (into []
+        (comp (filter #(and (string? %) (re-matches commit-sha-pattern %))) (distinct))
+        (concat (task-base/recorded-refs ctx)
+                [(get-in ctx [:execution/environment-metadata :base-sha])])))
+
+(def ^{:stratum 0} ^:private command-failure
+  "See release-scan/command-failure."
+  release-scan/command-failure)
+
+(def ^{:stratum 0} ^:private git-status-failed
+  "See release-scan/git-status-failed."
+  release-scan/git-status-failed)
 
 (defn- ^{:stratum 0} porcelain-z-entries
   "Parse `git status --porcelain -z` output into [status path] pairs.
@@ -118,23 +135,6 @@
           (recur (if (some #{\R \C} status) (nnext records) (next records))
                  (conj entries [status (subs record 3)]))))
       entries)))
-
-(defn- ^{:stratum 0} git-status-failed
-  "Anomaly for a working-tree scan that could not run (git exited non-zero,
-   the capsule executor failed, or a listed file could not be read).
-   Distinct from the terminal `:release/zero-files`: a failed scan says
-   nothing about whether there is work to release. `error-release` retries
-   it in place like any non-terminal release error (what a held index.lock
-   needs). `failure` is `{:detail string :data map}`."
-  [root-path {:keys [detail data]}]
-  (anomaly/sub-anomaly :unavailable
-                       :anomalies.phase/enter-failed
-                       (messages/t :release/git-status-failed
-                                   {:worktree-path root-path :detail detail})
-                       (merge {:type          :release/git-status-failed
-                               :phase         :release
-                               :worktree-path root-path}
-                              data)))
 
 (defn- ^{:stratum 0} rehydrate-committed-files
   "Read content for the `:code/file-paths` recorded by the implement
@@ -373,6 +373,15 @@
       (git-status-failed root-path {:detail (or (ex-message e) (.getName (class e)))
                                     :data   {:exception/class (.getName (class e))}}))))
 
+(defn- ^{:stratum 1} committed-since-base
+  "Substantive `:code/files` the task branch holds beyond its base commits
+   (committed and dirty alike), [] when there are none or no base commit is
+   known, or a `:release/git-status-failed` anomaly when the scan fails. A
+   clean worktree is not \"nothing to release\" when an earlier implement
+   iteration's commits are still unreleased."
+  [ctx worktree-path]
+  (release-scan/committed-since ctx worktree-path (release-base-shas ctx)))
+
 (defn- ^{:stratum 1} release-files-result
   "Return release file data, the failed scan's own anomaly when `dirty` is
    one, or a canonical anomaly when there is no substantive work to release."
@@ -503,6 +512,30 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn- ^{:stratum 2} skip-probe
+  "The scan enter-release skips on: the worktree's dirty files, or when it
+   has none, the files the task branch committed beyond its base. An
+   implement that reports :already-implemented after an earlier iteration
+   committed its work leaves a clean worktree, and that work must still be
+   released. A failed scan is raised (as release-files! raises), never
+   returned as \"no changes\"."
+  [ctx]
+  (let [wt         (ctx-worktree-path ctx)
+        execute-fn (get ctx :execution/execute-fn)
+        executor   (get ctx :execution/executor)
+        env-id     (get ctx :execution/environment-id)
+        dirty      (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
+                     (git-dirty-files-capsule execute-fn executor env-id wt)
+                     (git-dirty-files wt))]
+    (let [probe (if (and (vector? dirty) (empty? dirty))
+                  (committed-since-base ctx wt)
+                  dirty)]
+      ;; Raised here, not carried: build-workflow-state reads the probe only
+      ;; when implement recorded no files, so a carried anomaly could be lost.
+      (if (anomaly/anomaly? probe)
+        (throw (ex-info (:anomaly/message probe) (:anomaly/data probe)))
+        probe))))
+
 (defn- ^{:stratum 2} release-files!
   "Boundary wrapper around the anomaly-returning `release-files-result`;
    retained for release phase control flow that treats `:release/zero-files`
@@ -619,20 +652,15 @@
         _ (phase/emit-phase-started! ctx :release)
         ;; Skip probe: scan only when an empty worktree means "nothing to release".
         probe (when (contains? #{:already-implemented :already-satisfied nil} impl-status)
-                (let [wt         (ctx-worktree-path ctx)
-                      execute-fn (get ctx :execution/execute-fn)
-                      executor   (get ctx :execution/executor)
-                      env-id     (get ctx :execution/environment-id)]
-                  (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
-                    (git-dirty-files-capsule execute-fn executor env-id wt)
-                    (git-dirty-files wt))))]
+                (skip-probe ctx))]
     ;; Short-circuit: skip release when there is nothing to release.
     ;; This covers:
     ;; - implement returned :already-implemented (no new code)
     ;; - plan returned :already-satisfied (DAG had 0 tasks, no implement ran)
-    ;; In both cases, only skip if there are also no git changes from other phases.
-    ;; A failed scan returns an anomaly, which does not skip; build-workflow-state
-    ;; reuses the probe rather than rescanning, so the anomaly is what it raises.
+    ;; In both cases, only skip if there are also no git changes from other phases,
+    ;; neither in the worktree nor committed on the task branch beyond its base.
+    ;; A failed scan is raised by skip-probe, so it never skips;
+    ;; build-workflow-state reuses a successful probe rather than rescanning.
     (if (and (vector? probe) (empty? probe))
       (-> (phase/enter-context ctx :release nil gates budget start-time
                                       (phase/skipped :already-implemented))
