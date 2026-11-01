@@ -36,6 +36,9 @@
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.recovery-location-spec :as recovery-location]
    [ai.miniforge.event-stream.sinks :as sinks]
+   [ai.miniforge.event-stream.sinks.cleanup :as cleanup]
+   [ai.miniforge.event-stream.sinks.file :as file]
+   [ai.miniforge.event-stream.sinks.naming :as naming]
    [ai.miniforge.event-stream.workflow-discovery :as discovery]
    [ai.miniforge.event-stream.timeline :as timeline]))
 
@@ -186,7 +189,7 @@
    reference this path so archival's live → archived rename moves them
    together. Arities: (workflow-id) defaults base-dir to
    ~/.miniforge/events; (base-dir workflow-id)."
-  sinks/workflow-dir)
+  file/workflow-dir)
 
 (def ^{:stratum 0} retention-hold
   "Multimethod `(retention-hold hold-key workflow-id events-dir)`: register
@@ -194,14 +197,14 @@
    past their TTL while your store still needs them (the event cleanup
    asks every registered hold). Workflow id is the events directory name;
    events-dir is the events root being cleaned."
-  sinks/retention-hold)
+  cleanup/retention-hold)
 
 (def ^{:stratum 0} cleanup-stale-events!
   "`(cleanup-stale-events! {:events-dir dir :ttl-ms ms})`: run the event
    retention pass now, as the file sink does in the background when it is
    created (which runs are archived or pruned: see the sinks namespace).
    Returns the number of files removed."
-  sinks/cleanup-stale-events!)
+  cleanup/cleanup-stale-events!)
 
 (def ^{:stratum 0} default-events-dir
   "The default events root (`~/.miniforge/events`) as a java.io.File —
@@ -231,7 +234,7 @@
 (def ^{:stratum 0} event-file-ms
   "`(event-file-ms file-name)`: the epoch ms an event file name records,
    in any grammar the sink has used; nil for any other name."
-  sinks/event-file-ms)
+  naming/event-file-ms)
 
 (def ^{:stratum 0} serialize-event
   "Serialize an event map to the canonical Transit-JSON wire string —
