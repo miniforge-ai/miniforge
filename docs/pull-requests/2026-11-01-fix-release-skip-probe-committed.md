@@ -43,14 +43,23 @@ parts.
    into a release failure.
 4. New `release-scan` namespace does the committed scan, on the host or in the
    capsule:
-   - `git diff --name-status --no-renames -z`, so a path with non-ASCII bytes
-     is read as the file it names (without -z git C-quotes it).
-   - Every failure (git exit, executor error, unreadable file) is a
-     `:release/git-status-failed` anomaly, which release raises and retries.
-     A failed scan never reads as "no changes", so it never skips.
-   - A base sha that names no commit in the repository (`rev-parse --verify`
-     exit 1: an older base a fresh clone never fetched) is passed over, not
-     an error.
+   - `git diff --raw --no-renames -z`, so a path with non-ASCII bytes is read
+     as the file it names (without -z git C-quotes it), and each entry carries
+     its git mode.
+   - Only regular files (modes 100644/100755) are read. A symlink, a submodule
+     or a deletion carries its path and action with empty content. File
+     content feeds the PR metadata and the releaser's prompt, never a write
+     back, so a symlink's target (possibly outside the worktree) is never
+     read into it. The host reader also refuses a path whose canonical target
+     leaves the worktree.
+   - The first base sha that is a commit here decides, an empty diff
+     included; a later one is only a fallback for an earlier one the
+     repository lacks (`rev-parse --verify` exit 1). Work a repair reverted is
+     not counted against a newer environment base.
+   - Every failure (git exit, executor error, unreadable regular file) is a
+     `:release/git-status-failed` anomaly. `skip-probe` raises it at once, so
+     it is never read as "no changes" and never lost behind files implement
+     recorded.
    - `command-failure` and `git-status-failed` move here from `release.clj`,
      which keeps private aliases, so its call sites and layers are unchanged.
      The new namespace keeps `release.clj` (already over its layer budget)
@@ -72,7 +81,13 @@ parts.
 5. A base sha the repository does not have is passed over; release skips as
    before (real repo).
 6. Capsule: a failing `git diff`, and an executor that cannot run the command,
-   each raise `:release/git-status-failed` instead of skipping.
+   each raise `:release/git-status-failed` instead of skipping; so does a
+   failing diff when implement recorded files release could rehydrate.
+7. A committed symlink to a file outside the worktree is released by path
+   with empty content; the target's content appears nowhere (real repo).
+8. A committed submodule is released by path, not raised (real repo).
+9. Resume after a repair reverted the work: the recorded base diffs clean and
+   release skips, though the newer environment base differs (real repo).
 
 Existing skip tests carry no base commit and keep their behaviour.
 

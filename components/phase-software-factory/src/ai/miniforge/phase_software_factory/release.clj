@@ -517,7 +517,8 @@
    has none, the files the task branch committed beyond its base. An
    implement that reports :already-implemented after an earlier iteration
    committed its work leaves a clean worktree, and that work must still be
-   released. A failed dirty scan is returned as its anomaly."
+   released. A failed scan is raised (as release-files! raises), never
+   returned as \"no changes\"."
   [ctx]
   (let [wt         (ctx-worktree-path ctx)
         execute-fn (get ctx :execution/execute-fn)
@@ -526,9 +527,14 @@
         dirty      (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
                      (git-dirty-files-capsule execute-fn executor env-id wt)
                      (git-dirty-files wt))]
-    (if (and (vector? dirty) (empty? dirty))
-      (committed-since-base ctx wt)
-      dirty)))
+    (let [probe (if (and (vector? dirty) (empty? dirty))
+                  (committed-since-base ctx wt)
+                  dirty)]
+      ;; Raised here, not carried: build-workflow-state reads the probe only
+      ;; when implement recorded no files, so a carried anomaly could be lost.
+      (if (anomaly/anomaly? probe)
+        (throw (ex-info (:anomaly/message probe) (:anomaly/data probe)))
+        probe))))
 
 (defn- ^{:stratum 2} release-files!
   "Boundary wrapper around the anomaly-returning `release-files-result`;
@@ -653,8 +659,8 @@
     ;; - plan returned :already-satisfied (DAG had 0 tasks, no implement ran)
     ;; In both cases, only skip if there are also no git changes from other phases,
     ;; neither in the worktree nor committed on the task branch beyond its base.
-    ;; A failed scan returns an anomaly, which does not skip; build-workflow-state
-    ;; reuses the probe rather than rescanning, so the anomaly is what it raises.
+    ;; A failed scan is raised by skip-probe, so it never skips;
+    ;; build-workflow-state reuses a successful probe rather than rescanning.
     (if (and (vector? probe) (empty? probe))
       (-> (phase/enter-context ctx :release nil gates budget start-time
                                       (phase/skipped :already-implemented))

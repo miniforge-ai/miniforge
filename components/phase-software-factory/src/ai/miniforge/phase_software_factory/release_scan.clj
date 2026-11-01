@@ -26,7 +26,14 @@
 
    Paths come from `git diff -z`, which never quotes them: without -z git
    wraps a path with non-ASCII bytes in C-style quotes, which names no file
-   on disk."
+   on disk.
+
+   Only regular files are read. Release ships the committed work as the
+   commits themselves; file content feeds the PR metadata and the
+   releaser's prompt, so a symlink's target (possibly outside the
+   worktree) or a submodule directory must never be read into it. Those
+   entries, like deletions, carry their path and action with empty
+   content."
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
@@ -65,15 +72,23 @@
                                :worktree-path root-path}
                               data)))
 
-(defn ^{:stratum 0} name-status-z-entries
-  "Parse `git diff --name-status --no-renames -z` output into [status path]
-   pairs: with -z the status and the path are separate NUL-terminated
-   fields, and the path is never quoted."
+(def ^{:stratum 0} regular-file-modes
+  "Git modes of a regular file (plain and executable)."
+  #{"100644" "100755"})
+
+(defn ^{:stratum 0} raw-z-entries
+  "Parse `git diff --raw --no-renames -z` output into
+   {:status :mode :path} entries, `:mode` being the worktree side's. With
+   -z each record is `:<old-mode> <new-mode> <old-sha> <new-sha> <status>`
+   and its path as separate NUL-terminated fields, the path never quoted."
   [out]
   (->> (str/split (or out "") #"\u0000")
        (remove empty?)
        (partition 2)
-       (mapv vec)))
+       (mapv (fn [[record path]]
+               (let [[_old-mode new-mode _old-sha _new-sha status]
+                     (str/split (subs record 1) #" ")]
+                 {:status status :mode new-mode :path path})))))
 
 (defn ^{:stratum 0} entry-action
   [status]
@@ -83,11 +98,17 @@
     :modify))
 
 (defn ^{:stratum 0} host-reader
-  "Read `path` under `root-path` on the host: {:content s} or {:failure f}."
+  "Read `path` under `root-path` on the host: {:content s} or {:failure f}.
+   Refuses a path whose canonical target leaves `root-path`."
   [root-path]
   (fn [path]
     (try
-      {:content (slurp (io/file root-path path))}
+      (let [root   (.getCanonicalFile (io/file root-path))
+            target (.getCanonicalFile (io/file root-path path))]
+        (if (.startsWith (.toPath target) (.toPath root))
+          {:content (slurp target)}
+          {:failure {:detail (str path " resolves outside the worktree")
+                     :data   {:path path}}}))
       (catch Exception e
         {:failure {:detail (or (ex-message e) (.getName (class e)))
                    :data   {:path path :exception/class (.getName (class e))}}}))))
@@ -139,31 +160,31 @@
                      :data   {:command command :exception/class (.getName (class e))}}})))))
 
 (defn ^{:stratum 1} base-diff
-  "The substantive [status path] pairs the worktree differs by from commit
-   `sha`; nil when `sha` names no commit in this repository (an older base
-   a fresh clone never fetched); a `:release/git-status-failed` anomaly when
-   git fails."
+  "The substantive {:status :mode :path} entries the worktree differs by
+   from commit `sha`; nil when `sha` names no commit in this repository (an
+   older base a fresh clone never fetched); a `:release/git-status-failed`
+   anomaly when git fails."
   [run root-path sha]
   (let [{:keys [exit failure]} (run ["rev-parse" "--verify" "--quiet" (str sha "^{commit}")])]
     (cond
       (= 1 exit) nil
       failure    (git-status-failed root-path failure)
       :else
-      (let [{:keys [out failure]} (run ["diff" "--name-status" "--no-renames" "-z" sha "--"])]
+      (let [{:keys [out failure]} (run ["diff" "--raw" "--no-renames" "-z" sha "--"])]
         (if failure
           (git-status-failed root-path failure)
-          (filterv (fn [[_status path]] (agent/substantive-file? {:path path}))
-                   (name-status-z-entries out)))))))
+          (filterv agent/substantive-file? (raw-z-entries out)))))))
 
 (defn ^{:stratum 1} read-entries
-  "`:code/files` for the [status path] `entries`, read with `read-file`; a
-   `:release/git-status-failed` anomaly for the first file that cannot be
-   read."
+  "`:code/files` for `entries`: a regular file's content read with
+   `read-file`; a deletion, symlink or submodule with empty content (see
+   the namespace doc). A `:release/git-status-failed` anomaly for the first
+   regular file that cannot be read."
   [read-file root-path entries]
-  (reduce (fn [files [status path]]
+  (reduce (fn [files {:keys [status mode path]}]
             (let [action (entry-action status)]
-              (if (= :delete action)
-                (conj files {:path path :content "" :action :delete})
+              (if (or (= :delete action) (not (contains? regular-file-modes mode)))
+                (conj files {:path path :content "" :action action})
                 (let [{:keys [content failure]} (read-file path)]
                   (if failure
                     (reduced (git-status-failed root-path failure))
@@ -174,16 +195,19 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} committed-files
-  "`:code/files` for the first of `base-shas` the worktree differs from
-   substantively; [] when it differs from none (or none is a commit here);
-   a `:release/git-status-failed` anomaly when a diff or a read fails."
+  "`:code/files` for what the worktree holds beyond the first of
+   `base-shas` that is a commit here, [] when it holds nothing beyond it
+   (or none is); a `:release/git-status-failed` anomaly when a diff or a
+   read fails. The first commit found decides, an empty diff included: a
+   later base is only a fallback for an earlier one the repository lacks,
+   so work a repair reverted is not counted against a newer base."
   [run read-file root-path base-shas]
   (reduce (fn [_ sha]
             (let [entries (base-diff run root-path sha)]
               (cond
+                (nil? entries)             []
                 (anomaly/anomaly? entries) (reduced entries)
-                (seq entries)              (reduced (read-entries read-file root-path entries))
-                :else                      [])))
+                :else                      (reduced (read-entries read-file root-path entries)))))
           []
           base-shas))
 
