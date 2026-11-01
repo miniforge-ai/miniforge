@@ -29,7 +29,8 @@
    [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.event-stream.retention :as retention]
-   [ai.miniforge.event-stream.sinks :as sinks]))
+   [ai.miniforge.event-stream.sinks.factory :as factory]
+   [ai.miniforge.event-stream.sinks.file :as file]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -76,7 +77,7 @@
      (create-event-stream)
 
      ;; Custom sinks
-     (create-event-stream {:sinks [(sinks/file-sink) (sinks/stdout-sink)]})
+     (create-event-stream {:sinks [(file/file-sink) (factory/create-sink :stdout)]})
 
      ;; From config
      (create-event-stream {:config user-config})
@@ -90,8 +91,8 @@
   (let [;; Create sinks from config or use provided sinks or default
         event-sinks (cond
                       (:sinks opts) (:sinks opts)
-                      (:config opts) (sinks/create-sinks-from-config (:config opts))
-                      :else [(sinks/file-sink)])] ;; Default to file sink
+                      (:config opts) (factory/create-sinks-from-config (:config opts))
+                      :else [(file/file-sink)])] ;; Default to file sink
     (atom {:events []
            :subscribers {}
            :filters {}
