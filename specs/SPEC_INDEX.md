@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.26.0-draft
-**Date:** 2026-10-20
+**Version:** 0.27.0-draft
+**Date:** 2026-10-31
 **Status:** Living specification during OSS development
 
 ---
@@ -540,6 +540,14 @@ Documents superseded by normative specs. Retained for reference during migration
 
 ### Approved contract decisions
 
+On 2026-10-31 the product owner approved optional `:checkpoint/location` on
+checkpoint/snapshot write receipts. The record pairs the validated canonical root
+and physical run directory. Payload 1.1.0 retains 1.0.0 compatibility and unchanged
+logical Workflow UUIDs. This is the decision source for N3 §3.21; it prevents path aliases
+from confusing root discovery or releasing event retention prematurely. It does
+not assert N7 completion. The associated PR record is
+`docs/pull-requests/2026-10-31-fix-checkpoint-announcement-identity.md`.
+
 On 2026-10-17 the product owner approved formalizing `gate/decision` and
 `gate/rule-applied` in N3 and registering their typed current-journal contracts.
 This is the decision source for N3 §3.9.1: preserve runtime decision and per-rule
@@ -636,6 +644,10 @@ Normative specs are enforced by:
 ---
 
 ## Version History
+
+- **0.27.0-draft** (2026-10-31) - Approved paired checkpoint storage identity
+  in N3 0.13.0, payload 1.1.0, with retained 1.0.0 compatibility and conservative
+  retention when storage identity is uncertain.
 
 - **0.26.0-draft** (2026-10-20) - Product owner approved the N3 heartbeat
   amendment: Workflow scope, ephemeral retention of at least 24 hours, and
