@@ -2,6 +2,7 @@
  :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
         ai.miniforge/artifact {:local/root "../artifact"}
         ai.miniforge/content-hash {:local/root "../content-hash"}
+        ai.miniforge/config {:local/root "../config"}
         ai.miniforge/decision-envelope {:local/root "../decision-envelope"}
         ai.miniforge/effect-transaction {:local/root "../effect-transaction"}
         ai.miniforge/execution-grant {:local/root "../execution-grant"}
@@ -13,9 +14,11 @@
         ai.miniforge/opsv-actuation {:local/root "../opsv-actuation"}
         ai.miniforge/opsv-provider-github {:local/root "../opsv-provider-github"}
         ai.miniforge/phase {:local/root "../phase"}
+        ai.miniforge/resource-cleanup {:local/root "../resource-cleanup"}
         ai.miniforge/schema {:local/root "../schema"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
         metosin/malli {:mvn/version "0.16.4"}
+        org.babashka/http-client {:mvn/version "0.4.22"}
         slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases {:test {:extra-paths ["test" "test-resources"]
-                  :extra-deps {ai.miniforge/response {:local/root "../response"}
-                               cheshire/cheshire {:mvn/version "5.13.0"}}}}}
+                  :extra-deps {ai.miniforge/response {:local/root "../response"}}}}}
