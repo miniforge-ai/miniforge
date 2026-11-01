@@ -62,7 +62,10 @@ Cause selection reuses cycle-safe cleanup traversal, preserving fatal and interr
 Cleanup passes in all four products, and workflow passes in all three.
 The final pass also reproduced synchronous timeout masking of a fatal cause.
 Removing the special timeout catch routes every failure through shared cause priority.
-Focused JVM acceptance passes 13 tests and 44 assertions.
+Focused JVM acceptance passes 14 tests and 47 assertions.
+A real blocked pipe now tests deadline expiry after reader entry, original-task
+cancellation and owned stream closure. Promise waits are bounded; no sleeps are used.
+Disabling cancellation or release independently makes its corresponding assertion fail.
 Upstream warning-test fixtures now reuse the acknowledged gate context instead
 of claiming durable publication from a sinkless stream. Production remains fail-closed.
 

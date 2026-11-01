@@ -10,15 +10,22 @@
             [ai.miniforge.phase-opsv.prometheus-test-support :as fixture :refer [failed-future]]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]])
-  (:import [java.io ByteArrayInputStream]
+  (:import [java.io ByteArrayInputStream PipedInputStream PipedOutputStream]
            [java.net URI]
            [java.net.http HttpHeaders HttpResponse HttpClient$Version HttpTimeoutException HttpConnectTimeoutException]
            [java.nio.charset StandardCharsets]
            [java.util Optional]
            [java.util.function BiPredicate]
-           [java.util.concurrent CompletionException]))
+           [java.util.concurrent CompletionException FutureTask TimeoutException]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private reader-wait-ms 10000)
+
+(defn- ^{:stratum 0} stalled-body [started closed writer]
+  (proxy [PipedInputStream] [writer]
+    (readNBytes [limit] (deliver started true) (proxy-super readNBytes limit))
+    (close [] (deliver closed true) (proxy-super close))))
 
 (defn- ^{:stratum 0} body [calls text]
   (proxy [ByteArrayInputStream] [(.getBytes ^String text StandardCharsets/UTF_8)]
@@ -39,6 +46,13 @@
       (is (not (re-find #"secret" (pr-str result)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} timeout-started-reader! [started reader original pending until]
+  (if (instance? FutureTask pending)
+    (do (deliver reader pending)
+        (assert (deref started reader-wait-ms false))
+        (throw (TimeoutException.)))
+    (original pending until)))
 
 (deftest ^{:stratum 1} timeout-wrappers-never-mask-critical-causes
   (is (thrown? AssertionError
@@ -65,6 +79,17 @@
       (version [_] HttpClient$Version/HTTP_1_1))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} test-stalled-reader-is-cancelled-and-owned-body-is-closed
+  (let [[started closed reader] [(promise) (promise) (promise)]
+        original io/await!]
+    (with-open [writer (PipedOutputStream.)
+                stream (stalled-body started closed writer)]
+      (let [pending (fixture/completed (fixture/response "" {:body stream}))]
+        (with-redefs [io/await! (partial timeout-started-reader! started reader original)]
+          (is (= :timeout (:anomaly/type (fixture/observe (fixture/settings) pending (atom []))))))
+        (is (some-> ^FutureTask (deref reader reader-wait-ms nil) .isCancelled))
+        (is (true? (deref closed reader-wait-ms false)))))))
 
 (deftest ^{:stratum 2} real-jdk-bodies-are-closed-on-success-rejection-and-parse-failure
   (doseq [[status text] [[200 (fixture/successful-text)] [302 ""] [200 "not-json"]]]
