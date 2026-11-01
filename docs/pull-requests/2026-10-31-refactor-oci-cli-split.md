@@ -61,7 +61,7 @@ Tests follow the moved definitions:
 2. stratum-lint on every new file: no findings, and `--fix` leaves each file unchanged.
 3. clj-kondo on dag-executor's src and test: no warnings beyond those already on the base.
 4. dag-executor, release-executor, redaction, task-executor and llm-interface tests, under the
-   shared JVM lock: 974 pass, on the split as regenerated from #2221's head after it merged main.
+   shared JVM lock: 984 pass, with every review fix and #2221's head merged in.
 
 When the base moves, the split is regenerated from the base's `oci_cli.clj` and test files with
 the same name-to-namespace assignment, the checks above are rerun, and this PR's own commits are
@@ -69,12 +69,30 @@ re-applied on top.
 
 ## Review Fixes
 
-Capsule stack review fixes that edit `oci_cli.clj` land here, one commit each:
+Capsule stack review fixes that edit `oci_cli.clj` land here, one commit each. Items 5 to 9 come
+from the merge-gate review (rule 720 and the rules review), whose comment on this PR lists the
+traced flow and what was left:
 
 1. A failed env-file write deletes the temp file (#2143 thread).
 2. Persist and restore of a capsule cloned without an HTTP credential go to the URL it cloned
-   (#2166 thread; the clone URL is recorded at bootstrap, from a thread on this PR).
+   (#2166 thread).
 3. A caller's keyword-keyed `GIT_CONFIG_*` entries survive `:git-credentials?` (#2166 thread).
+4. The no-credential fallback uses the URL bootstrap cloned. Bootstrap returns its `:clone-url`
+   and acquire records it with the remote (a thread on this PR).
+5. A Dockerfile read from a JAR is extracted into a directory of its own, so the build context
+   is that directory rather than the whole system temp directory (rule 720 re-trace of the
+   moved image code). The moved image and copy functions, which had only Docker-gated tests,
+   get unit tests in `oci-cli-image-test` and `oci-cli-container-test`.
+6. The catch sites #2221 added in `container-git-count` and `image-env` use `try+`, and
+   dag-executor's `deps.edn` declares slingshot (rule 211).
+7. `security-gate-check` loses its four-argument arity, which read no image ENV and still passed
+   the fail-closed check (rule 008).
+8. `with-git-credentials` reads `execute!` env names as strings once, so a caller's keyword
+   `:GIT_TRACE` and the added `"GIT_TRACE"` can no longer both reach the env file (rule 010).
+9. Smaller rules-review fixes: `network-command-for` and `recorded-remote` (002, 004), a let
+   binding for the launch-plan env and `inspected-env-entry` (210), `try+` in `write-env-file!`
+   (211), two section banners renamed for the code under them (001), and shared test helpers
+   (400).
 
 ## Deployment Plan
 
