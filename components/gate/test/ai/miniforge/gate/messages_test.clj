@@ -16,13 +16,23 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.gate.messages-test
-  "Every gate message key used in the gate sources has a catalog entry.
+  "Every gate message key the gate sources can render has a catalog entry.
 
    A missing key does not throw: the translator renders the bare key name
    (\"skipped\", \"description\") and warns once on stderr. A gate result
    carrying a key name instead of a sentence reads as a word, not as a
-   defect, so this test makes the gap fail loudly instead."
-  (:require [clojure.edn :as edn]
+   defect, so this test makes the gap fail loudly instead.
+
+   Two collectors, because keys reach the translator two ways:
+   - in the call itself: (t :k), and selected inline, (t (if c :a :b)).
+     A reader walk takes every keyword literal in a translator call's
+     first argument.
+   - through a data table: opsv's gate-copy maps each gate to its
+     :description / :failure / :remediation keys, and the call site
+     passes a looked-up value. The test reads that table from the
+     namespace itself, so the inventory is the one the gate renders."
+  (:require [ai.miniforge.gate.opsv.core]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]))
 
@@ -40,27 +50,66 @@
     (->> (file-seq root)
          (filter #(.endsWith (.getName ^java.io.File %) ".clj")))))
 
-(def ^{:stratum 0} ^:private key-use
-  ;; (messages/t :k ...), (msg/t :k ...), (messages/system-t :k ...)
-  #"\((?:messages|msg)/(t|system-t)\s+:([a-z0-9-]+/[a-z0-9-]+)")
+(def ^{:stratum 0} ^:private permissive-resolver
+  ;; Sources are read, not loaded: ::alias keywords resolve to a
+  ;; placeholder instead of needing each file's ns aliases.
+  (reify clojure.lang.LispReader$Resolver
+    (currentNS [_] 'user)
+    (resolveClass [_ s] s)
+    (resolveAlias [_ s] s)
+    (resolveVar [_ s] s)))
 
-(defn- ^{:stratum 0} used-keys
-  "[{:file name :fn \"t\"|\"system-t\" :key kw}] for every literal key use."
-  []
-  (for [f (gate-sources)
-        [_ fn-name k] (re-seq key-use (slurp f))]
-    {:file (.getName ^java.io.File f) :fn fn-name :key (keyword k)}))
+(defn- ^{:stratum 0} read-forms
+  [^java.io.File f]
+  (with-open [r (java.io.PushbackReader. (io/reader f))]
+    (binding [*read-eval* false
+              *reader-resolver* permissive-resolver]
+      (into [] (take-while #(not= ::eof %))
+            (repeatedly #(read {:eof ::eof :read-cond :allow} r))))))
+
+(def ^{:stratum 0} ^:private translators
+  "Translator call heads -> which catalog they read."
+  {'messages/t :user 'msg/t :user
+   'messages/system-t :system 'msg/system-t :system})
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} every-used-key-has-a-catalog-entry
-  (let [user-facing (catalog "config/gate/messages/en-US.edn" :gate/messages)
-        system      (catalog "config/gate/messages/system.edn" :gate/system)
-        uses        (used-keys)]
-    (testing "the scan sees the sources (an empty scan would pass vacuously)"
-      (is (< 30 (count uses))))
+(defn- ^{:stratum 1} call-keys
+  "[{:file :catalog :key}] for every namespace-qualified keyword literal
+   in the first argument of every translator call in the gate sources.
+   Catalog keys are all qualified (:gate-area/name); an unqualified
+   keyword there is a lookup path, as in
+   (t (get-in gate-copy [gate-id :description])), not a message key."
+  []
+  (for [f (gate-sources)
+        form (read-forms f)
+        node (tree-seq coll? seq form)
+        :when (and (seq? node) (contains? translators (first node)))
+        k (filter qualified-keyword? (tree-seq coll? seq (second node)))]
+    {:file (.getName ^java.io.File f) :catalog (translators (first node)) :key k}))
+
+(defn- ^{:stratum 1} opsv-table-keys
+  "[{:file :catalog :key}] for every message key in opsv's gate-copy."
+  []
+  (for [[gate copy] @#'ai.miniforge.gate.opsv.core/gate-copy
+        field [:description :failure :remediation]]
+    {:file (str "opsv/core.clj gate-copy " gate) :catalog :user :key (get copy field)}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} every-renderable-key-has-a-catalog-entry
+  (let [catalogs {:user   (catalog "config/gate/messages/en-US.edn" :gate/messages)
+                  :system (catalog "config/gate/messages/system.edn" :gate/system)}
+        calls    (call-keys)
+        table    (opsv-table-keys)]
+    (testing "the collectors see the sources (an empty scan would pass vacuously)"
+      (is (< 60 (count calls)))
+      (is (= 18 (count table)) "six opsv gates x three copy fields"))
+    (testing "keys selected inline in a call are collected"
+      (is (some #(= :tests-pass/failed-one (:key %)) calls)
+          "(t (if (= 1 n) :tests-pass/failed-one :tests-pass/failed))"))
     (testing "each key resolves in the catalog its translator reads"
-      (doseq [{:keys [file fn key]} uses
-              :let [cat (if (= "t" fn) user-facing system)]]
-        (is (string? (get cat key))
-            (str file " uses " key " via " fn " but the catalog has no entry"))))))
+      (doseq [{:keys [file catalog key]} (concat calls table)]
+        (is (string? (get-in catalogs [catalog key]))
+            (str file " renders " key " from the " (name catalog)
+                 " catalog, which has no entry"))))))

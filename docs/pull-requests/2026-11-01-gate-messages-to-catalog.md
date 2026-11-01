@@ -39,13 +39,22 @@ failure. 39 strings in all.
   now require `ai.miniforge.gate.messages`. That namespace depends only on
   the messages component, so this adds no require cycle. `registry` gains
   its first require.
-- New `messages_test.clj`. It scans the gate sources on the classpath for
-  `(messages/t :k)`, `(msg/t :k)` and `(messages/system-t :k)` and asserts
-  each key has an entry in the catalog that translator reads. A missing
-  key does not throw: it renders as the bare key name, so a gate result
-  saying "skipped" would read as a word rather than a defect. The test
-  also asserts the scan found more than 30 uses, so an empty scan cannot
-  pass vacuously.
+- New `messages_test.clj` checks that every key a gate can render has a
+  catalog entry. A missing key does not throw. It renders as the bare key
+  name, so a gate result saying "skipped" reads as a word rather than a
+  defect. Keys reach the translator in two ways, and the test collects
+  both:
+  - Directly in the call, including keys chosen inline, as in
+    `(t (if (= 1 n) :tests-pass/failed-one :tests-pass/failed))`. A
+    reader walk collects every namespace-qualified keyword literal in
+    the first argument of each `t` or `system-t` call. Unqualified
+    keywords are skipped, because there they are lookup paths, such as
+    `(get-in gate-copy [gate-id :description])`.
+  - Through opsv's `gate-copy` table. The test reads the namespace's own
+    table, so it checks the inventory the gate renders: six gates, three
+    fields each.
+
+  Minimum-count guards keep an empty scan from passing vacuously.
 
 The only literals left are inside rich-comment example blocks.
 
@@ -55,7 +64,10 @@ Run here with Clojure 1.12 from Maven Central. Clojars is 403 through
 this environment's proxy, so only namespaces without Clojars
 dependencies could load:
 
-- `messages-test`: 1 test, 80 assertions, pass.
+- `messages-test`: 1 test, 104 assertions, passing. It was also run against
+  a copy of the catalog with `:tests-pass/failed-one` and
+  `:opsv/abort-remediation` deleted. Both deletions were reported, so the
+  test catches the indirect keys.
 - `codex-consultation-test`: 6 tests, 13 assertions, pass.
 - `precommit-discipline-test`: 12 tests, 43 assertions, pass. It asserts
   on the moved message text.
