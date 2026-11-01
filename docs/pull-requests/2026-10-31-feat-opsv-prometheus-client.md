@@ -66,6 +66,7 @@ Focused JVM acceptance passes 14 tests and 47 assertions.
 A real blocked pipe now tests deadline expiry after reader entry, original-task
 cancellation and owned stream closure. Promise waits are bounded; no sleeps are used.
 Disabling cancellation or release independently makes its corresponding assertion fail.
+Endpoint admission also rejects URI ports above the protocol range before transport.
 Upstream warning-test fixtures now reuse the acknowledged gate context instead
 of claiming durable publication from a sinkless stream. Production remains fail-closed.
 

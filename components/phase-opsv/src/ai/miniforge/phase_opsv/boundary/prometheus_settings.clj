@@ -13,20 +13,24 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} ^:private maximum-port 65535)
+
 (defn- ^{:stratum 0} invalid []
   (anomaly/anomaly :invalid-input (msg/ts :prometheus/invalid-settings) {}))
 
-(defn- ^{:stratum 0} endpoint? [settings]
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} endpoint? [settings]
   (let [uri (URI. (:prometheus/base-url settings))
         scheme (.getScheme uri)
         secure? (= "https" scheme)]
-    (and (#{"http" "https"} scheme) (.getHost uri)
+    (and (#{"http" "https"} scheme) (.getHost uri) (<= (.getPort uri) maximum-port)
          (nil? (.getRawUserInfo uri)) (nil? (.getRawQuery uri)) (nil? (.getRawFragment uri))
          (or secure? (not (contains? settings :prometheus/bearer-token))))))
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 1} load-settings
+(defn ^{:stratum 2} load-settings
   "Load schema-checked defaults and explicit overrides at the configuration boundary."
   [overrides]
   (try+
