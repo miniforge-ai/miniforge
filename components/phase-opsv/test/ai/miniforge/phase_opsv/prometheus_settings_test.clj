@@ -1,0 +1,38 @@
+;; Title: Miniforge.ai
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;; Licensed under the Apache License, Version 2.0.
+(ns ai.miniforge.phase-opsv.prometheus-settings-test
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.phase-opsv.boundary.prometheus-settings :as settings]
+            [ai.miniforge.phase-opsv.prometheus-test-support :as fixture]
+            [clojure.test :refer [deftest is]]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} explicit-endpoints-load-validated-operational-defaults
+  (let [loaded (settings/load-settings (fixture/settings))]
+    (is (= 15000 (:prometheus/timeout-ms loaded)))
+    (is (= 1048576 (:prometheus/max-response-bytes loaded)))
+    (is (= 10000 (:measurement/max-samples loaded)))
+    (is (not (anomaly/anomaly? loaded)))))
+
+(deftest ^{:stratum 0} malformed-settings-never-leak-secrets
+  (doseq [overrides [{:prometheus/base-url "https://user:secret@metrics.invalid"}
+                    {:prometheus/base-url "https://metrics.invalid?token=secret"}
+                    {:prometheus/base-url "https://metrics.invalid#secret"}
+                    {:prometheus/base-url "file:///secret"}
+                    {:prometheus/base-url "http://metrics.invalid"
+                     :prometheus/bearer-token "secret"}
+                    {:prometheus/bearer-token "secret\r\nInjected: value"}
+                    {:prometheus/timeout-ms 0} {:prometheus/timeout-ms 2147483648}
+                    {:prometheus/max-response-bytes 2147483647}
+                    {:measurement/max-samples 1} {:unknown "secret"}]]
+    (let [result (settings/load-settings (fixture/settings overrides))]
+      (is (anomaly/anomaly? result))
+      (is (not (re-find #"secret" (pr-str result)))))))
+
+(deftest ^{:stratum 0} endpoint-is-never-invented
+  (doseq [overrides [nil {}]]
+    (is (anomaly/anomaly? (settings/load-settings overrides)))))
+
+(comment ::admitted-transport-settings)

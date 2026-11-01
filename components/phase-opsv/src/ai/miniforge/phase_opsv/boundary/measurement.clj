@@ -12,24 +12,42 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} decode-response [request response]
-  (cond
-    (not (m/validate schema/RangeResponse response)) (window/invalid-response)
-    (> (count (get-in response ["data" "result" 0 "values"])) (:measurement/max-samples request))
-    (window/invalid-response)
-    :else (try+ (window/decode request response)
-            (catch Exception _ (window/invalid-response)))))
+(defn- ^{:stratum 0} within-size? [request response]
+  (let [series (get-in response ["data" "result"])
+        values (get-in response ["data" "result" 0 "values"])]
+    (and (vector? series) (= 1 (count series))
+         (vector? values) (<= (count values) (:measurement/max-samples request)))))
+
+(defn ^{:stratum 0} invalid-request []
+  (anomaly/anomaly :invalid-input (msg/ts :measurement/invalid-request) {}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} decode-window
+(defn ^{:stratum 1} request-failure
+  "Admit the declared window once, before external acquisition or decoding."
+  [request]
+  (when-not (and (m/validate schema/WindowRequest request) (window/bounded? request))
+    (invalid-request)))
+
+(defn ^{:stratum 1} decode-response
+  "Admit external response data for an already admitted request."
+  [request response]
+  (cond
+    (not (within-size? request response)) (window/invalid-response)
+    (not (m/validate schema/RangeResponse response)) (window/invalid-response)
+    :else (try+ (window/decode request response)
+            (catch Exception _ (window/invalid-response)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} decode-window
   "Decode a parsed Prometheus response against a predeclared bounded grid.
    Response fields and labels retain native JSON string keys. Require one
    complete float series without API warnings; return observations, never
    a verification verdict or execution authority."
   [request response]
-  (if (and (m/validate schema/WindowRequest request) (window/bounded? request))
-    (decode-response request response)
-    (anomaly/anomaly :invalid-input (msg/ts :measurement/invalid-request) {})))
+  (if-let [failure (request-failure request)]
+    failure
+    (decode-response request response)))
 
 (comment ::external-range-response)
