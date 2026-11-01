@@ -170,8 +170,7 @@
             task-id (random-uuid)]
 
         (testing "acquire environment creates container"
-          ;; An untrusted capsule takes only allowlisted env, so the test
-          ;; variable is passed through explicitly.
+          ;; An untrusted capsule keeps only allowlisted env: pass TEST_VAR through.
           (let [env-result (executor/acquire-environment! exec task-id
                                                           {:env {:TEST_VAR "hello"}
                                                            :env-passthrough [:TEST_VAR]})]
