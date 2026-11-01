@@ -33,7 +33,8 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.dag-executor.result :as result]
    [clojure.java.io]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -230,7 +231,7 @@
   [descriptor container-id]
   (let [r (run-runtime-timed default-exec-timeout-ms descriptor "inspect" "--format"
                              env-inspect-format container-id)]
-    (try
+    (try+
       (if (zero? (:exit r)) (git-config-count (parse-inspected-env (:out r))) 0)
       (catch Exception _ 0))))
 

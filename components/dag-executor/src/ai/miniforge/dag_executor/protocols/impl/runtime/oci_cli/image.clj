@@ -26,7 +26,8 @@
     :refer [run-runtime]]
    [ai.miniforge.dag-executor.result :as result]
    [clojure.java.io]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -95,7 +96,7 @@
   "The ENV of local image `image` as {name value} (`parse-inspected-env`),
    or nil on failure."
   [descriptor image]
-  (try
+  (try+
     (let [result (run-runtime descriptor "image" "inspect" image "--format" env-inspect-format)]
       (when (zero? (:exit result))
         (parse-inspected-env (:out result))))
