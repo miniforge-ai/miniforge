@@ -34,7 +34,7 @@
         relative (subs file-path (inc (count src-path)))]
     (-> relative
         (str/replace #"\.clj$" "")
-        (str/replace "/" ".")
+        (str/replace #"[\\/]" ".")
         (str/replace "_" "-")
         symbol)))
 

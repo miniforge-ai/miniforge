@@ -54,6 +54,10 @@ Scopes follow the [Clojure manifest reference](https://clojure.org/reference/dep
 and [Babashka task options](https://book.babashka.org/#_task_local_options).
 Root declarations use `:deps`; task-local declarations use `:extra-deps`.
 
+Review also found the extracted discovery helper retained a Unix-only separator
+assumption. A Windows-path regression failed before normalizing both separator
+forms. The compatibility gate now retains Unix and Windows discovery assertions.
+
 ## Deployment Plan
 
 This changes test policy only. It installs no production dependency and grants

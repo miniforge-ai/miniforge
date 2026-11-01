@@ -40,6 +40,7 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [graalvm.discovery-files :as discovery]
+   [graalvm.discovery-files-test]
    [graalvm.dependency-policy-test]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -182,7 +183,8 @@
 (defn ^{:stratum 0} -main
   "Entry point for running tests from command line."
   []
-  (let [result (run-tests 'graalvm-compatibility-test 'graalvm.dependency-policy-test)]
+  (let [result (run-tests 'graalvm-compatibility-test 'graalvm.dependency-policy-test
+                         'graalvm.discovery-files-test)]
     (System/exit (if (zero? (+ (:fail result) (:error result))) 0 1))))
 
 (defn ^{:stratum 0} jvm-only-component?
