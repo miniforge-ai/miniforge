@@ -10,8 +10,8 @@
 
 ## Overview
 
-Miniforge now has a comprehensive, user-friendly configuration system that makes it simple to discover, configure, and
-switch between LLM backends. Configuration is no longer a "rite of passage" - it's discoverable, helpful, and
+Miniforge's configuration system lets users discover, configure, and switch between LLM backends. Configuration is no
+longer a "rite of passage" - it's discoverable, helpful, and
 frictionless.
 
 ## Features Implemented
@@ -172,19 +172,18 @@ Configuration is merged from three sources (in order of precedence):
    - `MINIFORGE_AGENT_THINKING_MODEL`
    - `MINIFORGE_AGENT_EXECUTION_MODEL`
 
-   A role's model is its tier variable or key (`THINKING` for the planner
-   and architect, `EXECUTION` for every other role), else `llm.model`,
-   else miniforge's default for the backend, else the backend's own. The
+   A role's model first comes from its tier variable or key.
+   `THINKING` covers the planner and architect; `EXECUTION` covers every other role.
+   The remaining sources are `llm.model`, miniforge's backend default, and the backend's own default, in that order. The
    shipped defaults set no model. A setting naming a catalog model the
    backend does not serve is skipped with a warning.
    `docs/configuration.md` gives the full rules.
 
    These four are the only LLM variables mapped into the user config.
-   Backends also read their own variables directly, outside the config:
-   `ANTHROPIC_API_KEY` (anthropic-api), `OPENAI_API_KEY` (openai-api),
-   `OPENROUTER_API_KEY` (openrouter), `GEMINI_API_KEY` (gemini-api), and
-   `MINIFORGE_OPENAI_COMPAT_BASE_URL` and `MINIFORGE_OPENAI_COMPAT_API_KEY`
-   (openai-compat endpoint and key).
+   Backends also read their own variables directly, outside the config.
+   `ANTHROPIC_API_KEY` configures anthropic-api; `OPENAI_API_KEY` configures openai-api.
+   `OPENROUTER_API_KEY` configures openrouter; `GEMINI_API_KEY` configures gemini-api.
+   `MINIFORGE_OPENAI_COMPAT_BASE_URL` and `MINIFORGE_OPENAI_COMPAT_API_KEY` configure the openai-compat endpoint and key.
    `MINIFORGE_LLM_TIMEOUT`, `MINIFORGE_LLM_LINE_TIMEOUT`,
    `MINIFORGE_LLM_MAX_TOKENS`, `MINIFORGE_MAX_ITERATIONS`,
    `MINIFORGE_MAX_TOKENS`, `MINIFORGE_FAILURE_STRATEGY`,
@@ -314,19 +313,19 @@ All commands tested and working:
 
 ✅ **Users can set backend in <30 seconds**
 
-- Just run `miniforge config backend <name>`
+Run `miniforge config backend <name>`.
 
 ✅ **Zero confusion about what backends exist**
 
-- `miniforge config backends` shows all with status
+`miniforge config backends` shows all with status.
 
 ✅ **Clear path from 'want Codex' to 'using Codex'**
 
-- Error messages guide users step-by-step
+Error messages guide users step-by-step.
 
 ✅ **No need to read docs or edit files**
 
-- All operations via CLI commands
+All operations use CLI commands.
 
 ✅ **Helpful errors guide users to success**
 

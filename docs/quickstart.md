@@ -57,9 +57,8 @@ cannot push there, so fork the repository on GitHub and clone your fork.
 
 Building `mf` from source currently needs read access to the private
 `miniforge-ai/workbench-contract` repository, a dependency of the CLI
-build. Until that dependency is published or removed, this path works
-only for GitHub accounts with that access; for others, `bb bootstrap`
-stops before the build and says so.
+build. Until that dependency is published or removed, this path works only for GitHub accounts with that access.
+For others, `bb bootstrap` stops before the build and explains why.
 
 ```bash
 git clone https://github.com/<you>/miniforge.git
@@ -68,10 +67,9 @@ gh repo set-default <you>/miniforge   # gh opens the PR on your fork
 bb bootstrap
 ```
 
-This installs Java, Clojure, linters, Polylith, prefetches the coverage
-tool used by `bb ccov`, builds the CLI and installs it as
-`~/.local/bin/mf`, and (on macOS) brew-installs Podman and initializes a
-default `podman machine`. If `~/.local/bin` is not on your `PATH`,
+This installs Java, Clojure, linters, and Polylith, then prefetches the coverage tool used by `bb ccov`.
+It builds the CLI and installs it as `~/.local/bin/mf`.
+On macOS, it also brew-installs Podman and initializes a default `podman machine`. If `~/.local/bin` is not on your `PATH`,
 bootstrap says so; add it before running `mf`. After a `git pull`, run
 `bb install:local` to rebuild `mf`.
 
@@ -80,10 +78,8 @@ Bootstrap installs the repo's git hooks only when your git email is
 miniforge's release phase commits in a worktree of this clone, which
 runs the same hooks.
 
-Linux users install Podman via their distro package manager (`apt install
-podman`, `dnf install podman`, `pacman -S podman`); Docker users can stay
-on Docker by setting `MINIFORGE_RUNTIME=docker` or `:runtime-kind :docker`
-in config.
+Linux users install Podman via their distro package manager: `apt install podman`, `dnf install podman`, or `pacman -S podman`.
+Docker users can stay on Docker by setting `MINIFORGE_RUNTIME=docker` or `:runtime-kind :docker` in config.
 
 ## Container runtime
 

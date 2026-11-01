@@ -339,7 +339,8 @@
   opsv/actuation-disposition)
 
 (def ^{:stratum 0} checkpoint-written
-  "Construct a checkpoint write fact: stream, workflow UUID, phase, path, byte size."
+  "Construct a checkpoint write fact: stream, workflow UUID, phase, path, byte size,
+   checkpoint root."
   events/checkpoint-written)
 
 (def ^{:stratum 0} checkpoint-write-failed
@@ -347,7 +348,8 @@
   events/checkpoint-write-failed)
 
 (def ^{:stratum 0} machine-snapshot-written
-  "Construct a snapshot write fact: stream, workflow UUID, state, path, byte size."
+  "Construct a snapshot write fact: stream, workflow UUID, state, path, byte size,
+   checkpoint root."
   events/machine-snapshot-written)
 
 (def ^{:stratum 0} machine-snapshot-write-failed

@@ -143,7 +143,7 @@
                                  :app-label "api" :deployment-name "api"}
                :execution/phase-results {:provision {:result {:output {:steps []}}}}
                :effect-store-dir (str (fs/path dir "effects"))
-               :grant-breach-dir (str (fs/path dir "breaches"))
+               :grant-breach-dir (str (fs/path (fs/canonicalize dir) "breaches"))
                :execution/metrics {} :execution/errors []
                :execution/response-chain (response/create :deploy-policy)}]
       (with-redefs [deploy-operations/operations (constantly (deploy-operations rendered calls))]

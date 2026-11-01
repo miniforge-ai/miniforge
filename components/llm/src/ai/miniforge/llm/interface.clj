@@ -22,6 +22,7 @@
    [ai.miniforge.llm.cost :as cost]
    [ai.miniforge.llm.interface.protocols.llm-client :as p]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+   [ai.miniforge.llm.protocols.impl.llm-client.subprocess :as subprocess]
    [ai.miniforge.llm.protocols.records.llm-client :as records]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.llm.model-registry :as registry]
@@ -76,6 +77,11 @@
    - :model   - Optional model id passed through to the backend
    - :api-key - Optional API key for the direct HTTP providers;
                 falls back to the backend's :api-key-env variable
+   - :isolated? - Optional; true keeps every call off the operator's
+                Claude Code setup (no built-in tools, user settings,
+                hooks, plugins, or skills). For single-turn completions
+                that need no tools; claude backend only. A claude call
+                outside an artifact session is isolated without it.
    - :logger  - Optional logger for request/response logging
 
    Example:
@@ -392,6 +398,14 @@
      (explain-selection selection)"
   [selection]
   (selector/explain-selection selection))
+
+(defn ^{:stratum 0} agent-env
+  "The environment the llm client gives an agent CLI process: miniforge's
+   own environment filtered by the :agent-env allowlist in
+   llm/client-defaults.edn. For callers that start a backend CLI
+   themselves, such as the backend preflight probe."
+  []
+  (subprocess/agent-env))
 
 ;; Capsule integration
 (def ^{:stratum 0} capsule-exec-fn

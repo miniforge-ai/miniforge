@@ -16,6 +16,8 @@
   :deploy/preflight-failed       "Deployment preflight failed"
   :deploy/authority-input-invalid "Deployment authority requires canonical execution and target inputs"
   :deploy/authority-denied       "Deployment authority denied"
+  :deploy/stopped                "Deployment stopped before apply because the run was cancelled"
+  :deploy/grant-substituted      "The deployment proposal names a grant this attempt did not issue"
   :deploy/authority-failed       "Deployment authority check failed"
   :deploy/proposal-failed        "Deployment proposal persistence failed"
   :deploy/reconciliation-incomplete "Deployment reconciliation incomplete"

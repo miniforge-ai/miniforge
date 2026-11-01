@@ -526,6 +526,23 @@
                                                      {:workflow-id "session-label"}))]
       (is (uuid? adopted)))))
 
+(deftest ^{:stratum 2} context-carries-the-run-lineage-test
+  (let [wid (random-uuid) origin (random-uuid)]
+    (testing "a new run is its own lineage"
+      (is (= wid (:execution/origin-id (ctx/create-context minimal-rollup-test-workflow
+                                                           {:task "T"} {:workflow-id wid})))))
+    (testing "a resume attempt under a new id continues the run in :origin-id"
+      (is (= origin (:execution/origin-id (ctx/create-context minimal-rollup-test-workflow
+                                                              {:task "T"}
+                                                              {:workflow-id wid :origin-id (str origin)})))))
+    (testing "a restored snapshot keeps its lineage; an older one without it falls back"
+      (is (= origin (:execution/origin-id
+                     (ctx/restore-context minimal-rollup-test-workflow {:task "T"}
+                                          {:execution/id wid :execution/origin-id origin} {} {}))))
+      (is (= wid (:execution/origin-id
+                  (ctx/restore-context minimal-rollup-test-workflow {:task "T"}
+                                       {:execution/id wid} {} {})))))))
+
 (deftest ^{:stratum 2} apply-dag-success-rolls-dag-metrics-into-execution-test
   (testing "DAG sub-workflow tokens/cost/duration roll into :execution/metrics on success"
     ;; `apply-phase-transition` ignores its `pipeline` arg (see _pipeline in

@@ -72,13 +72,13 @@
     (is (= :persist-push-failed (get-in r [:error :code])))))
 
 (deftest ^{:stratum 0} git-restore!-fetch-and-checkout-failures-are-errors-test
-  (let [failing (fn [needle code]
+  (let [failing (fn [needle]
                   (fn [cmd]
                     (if (and (vector? cmd) (some #{needle} cmd))
                       (result/ok {:exit-code 1 :stdout "" :stderr (str needle " failed")})
                       (result/ok {:exit-code 0 :stdout "abc\n" :stderr ""}))))]
-    (is (= :restore-fetch-failed (get-in (sut/git-restore! (failing "fetch" 1) {:branch "task/x"}) [:error :code])))
-    (is (= :restore-checkout-failed (get-in (sut/git-restore! (failing "checkout" 1) {:branch "task/x"}) [:error :code])))))
+    (is (= :restore-fetch-failed (get-in (sut/git-restore! (failing "fetch") {:branch "task/x"}) [:error :code])))
+    (is (= :restore-checkout-failed (get-in (sut/git-restore! (failing "checkout") {:branch "task/x"}) [:error :code])))))
 
 (deftest ^{:stratum 0} rev-parse-failure-is-an-error-test
   (let [exec-fn (fn [cmd]

@@ -285,7 +285,12 @@
     
     (if release-opts
       ;; Custom release executor for testing
-      (with-redefs [release-executor/execute-release-phase (:executor release-opts)]
+      ;; The stub stands in for prepare-release; leave-release then
+      ;; publishes the :prepared data through the publish-release stub.
+      (with-redefs [release-executor/prepare-release
+                    (fn [& args] (assoc (apply (:executor release-opts) args) :prepared {}))
+                    release-executor/publish-release
+                    (constantly {:success? true :artifacts [] :metrics {}})]
         (-> release-ctx
             ((:enter release-interceptor))
             ((:leave release-interceptor))))

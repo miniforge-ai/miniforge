@@ -194,7 +194,8 @@
                            str/split-lines
                            (mapv edn/read-string))
               phase-file (edn/read-string
-                          (slurp (str run-dir "/phases/implement.edn")))]
+                          (slurp (:implement (checkpoint-test-support/recorded-paths
+                                              checkpoint-root (:execution/id base)))))]
           (is (= 2 (count history)) "both iterations recorded")
           (is (= [:deny :allow] (mapv :decision history)))
           (is (= :stale-references (-> history first :phase/gate-failures first :gate)))

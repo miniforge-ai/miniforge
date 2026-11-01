@@ -59,13 +59,18 @@
            :context context}))))))
 
 (defn- ^{:stratum 0} merge-ready!
-  [operations worktree-path pr-number policy context]
+  "Merge the head read before readiness ran. `--match-head-commit` makes
+   GitHub refuse the merge request if the head moved after that read."
+  [operations worktree-path pr-number policy context readiness head-result]
   (dag/when-let-ok
-   [repository-result ((:read-repository operations) worktree-path)
+   [head head-result
+    repository-result ((:read-repository operations) worktree-path)
     transaction-result (governed/transact!
-                        operations worktree-path pr-number
-                        (:pr/repo (:data repository-result))
-                        policy context (Instant/now))]
+                        operations worktree-path
+                        {:pr/repo (:pr/repo (:data repository-result))
+                         :pr/number pr-number
+                         :pr/head-sha (:pr/head-sha (:data head))}
+                        readiness policy context (Instant/now))]
     (outcome/settlement-result operations worktree-path pr-number policy context
                                (:data transaction-result))))
 
@@ -92,12 +97,14 @@
     (log/info logger :pr-lifecycle :merge/attempting
               {:message (messages/system-t :merge/attempting)
                :data {:pr-number pr-number}}))
-  (let [readiness-result ((:evaluate-readiness operations)
+  (let [head-result ((:read-head operations) worktree-path pr-number)
+        readiness-result ((:evaluate-readiness operations)
                           worktree-path pr-number policy)
         stale? (some #{:branch-not-up-to-date}
                      (:blocking readiness-result))]
     (if (:ready? readiness-result)
-      (merge-ready! operations worktree-path pr-number policy context)
+      (merge-ready! operations worktree-path pr-number policy context
+                    readiness-result head-result)
       (let [branch-raw (get-in (:checks readiness-result) [:branch :data :raw])
             conflict-result (when stale?
                               (attempt-conflict-resolution!

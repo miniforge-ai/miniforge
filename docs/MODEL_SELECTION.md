@@ -47,14 +47,16 @@ of this page listed were never read. It does read provider API-key variables (se
 (agent/create-agent :implementer {:privacy-required true :cost-limit 0.05})
 ```
 
-When the chosen strategy picks no candidate, `select-model` returns Claude Sonnet 4.6 with `:fallback-used true`;
-another strategy might have found one (`:cost-optimized` skips the local tiers of `:privacy-sensitive`). The result,
-the fallback included, is checked against each constraint the caller set (`:require-local`, `:context-size`,
-`:cost-limit`); a model that fails one becomes a `:not-found` anomaly naming the unmet constraints.
+When the chosen strategy finds no candidate, `select-model` returns Claude Sonnet 4.6 with `:fallback-used true`.
+Another strategy might find a candidate: `:cost-optimized` skips the local tiers of `:privacy-sensitive`.
+Every result, including the fallback, is checked against the caller's `:require-local`, `:context-size`, and
+`:cost-limit` constraints.
+A model that fails a constraint becomes a `:not-found` anomaly naming the unmet constraints.
 
-**Selection routes nothing.** `create-agent` stores the selected model id in the agent's config; `invoke` sends the
-task to the `:llm-backend` (an `agent/LLMBackend`) in its context and never reads the selection, so
-`:privacy-required` keeps nothing on the machine. A client from `llm/create-client` is not an `agent/LLMBackend` and
+**Selection routes nothing.** `create-agent` stores the selected model id in the agent's config.
+`invoke` sends the task to the context's `:llm-backend`, an `agent/LLMBackend`, and never reads the selection.
+Thus, `:privacy-required` alone does not keep work on the machine. A client from `llm/create-client` is not an
+`agent/LLMBackend` and
 needs an adapter. When `select-model` returns an anomaly, `create-agent` still returns an agent with the role's
 default model and keeps the anomaly at `[:state :model-selection]`; check it.
 

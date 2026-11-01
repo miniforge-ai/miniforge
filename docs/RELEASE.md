@@ -122,9 +122,9 @@ The release workflow (`.github/workflows/release.yml`) then:
 1. Refuses to continue (`gate` job) unless the tagged commit is on `main` and its newest `ci.yml` push run on `main`
    passed. It waits up to 40 minutes for a run that is still going.
 2. Rejects a version that is not DateVer.
-3. Builds the CLI jar on macOS arm64 and Linux x86_64, with the version stamped into it, and checks that the built
-   jar's `version` command reports that version. Builds the Windows x86_64 zip (preview; its failure does not block
-   the release).
+3. Builds the CLI jar on macOS arm64 and Linux x86_64 with the version stamped into it.
+   Checks that the jar's `version` command reports that version.
+   Also builds the Windows x86_64 zip as a preview; its failure does not block the release.
 4. Generates SHA256 checksums
 5. Creates a GitHub release with the assets
 6. Updates the Homebrew formula in `homebrew-tap`

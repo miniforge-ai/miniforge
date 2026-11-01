@@ -58,6 +58,7 @@
    deliberately — identity that did not survive a checkpoint would let a
    resumed run be reattributed to whoever resumed it."
   [:execution/id
+   :execution/origin-id
    :workflow/evidence-bundle-id
    :execution/acting
    :execution/workflow-id
