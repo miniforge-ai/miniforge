@@ -35,6 +35,13 @@ with no errors. After the change, all ten assertions pass. It initializes the
 compiled workflow's authoritative pending state and uses an unwritable temporary
 checkpoint root, rather than constructing an artificial failure event.
 
+Expanded source acceptance passed eight tests and 41 assertions, including
+the existing phase-checkpoint cases. Missing and observer-only streams warn
+without publication; legacy streams retain their event contract. Resource
+classification follows the original exception, not its generic anomaly wrapper.
+Refused or nonfatal failed publication preserves the original write anomaly;
+fatal publication errors propagate.
+
 ## Deployment Plan
 
 No journal migration or new schema version. Failure events remain payload 1.0.0.
