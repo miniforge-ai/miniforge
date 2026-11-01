@@ -3,9 +3,9 @@
  :deps {ai.miniforge/content-hash {:local/root "../content-hash"}
         ai.miniforge/schema       {:local/root "../schema"}
         cheshire/cheshire         {:mvn/version "5.13.0"}
-        io.github.miniforge-ai/workbench-contract
-        {:git/url "ssh://git@github.com/miniforge-ai/workbench-contract.git"
-         :git/sha "5212f32ed9bdbfbc982e9ff746352c2f190d8e12"
+        io.github.miniforge-ai/miniforge-app-foundation
+        {:git/url "https://github.com/miniforge-ai/miniforge-app-foundation.git"
+         :git/sha "658e618378d0ba9d8dc07538fc733c51ca56e06a"
          :deps/root "bindings/clojure"}}
 
  :aliases {:test {:extra-paths ["test"]
