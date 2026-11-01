@@ -239,7 +239,9 @@
 (defn ^{:stratum 0} push-branch!
   "Push branch to origin inside the sandbox container.
    Optional opts supports :env for credential injection.
-   Retries with GH_TOKEN HTTPS auth if SSH push fails."
+   If the push fails and opts carry GH_TOKEN, retries once with the token in
+   that push's environment (`token-auth-env`), which also covers an SSH
+   origin; origin and .git/config are never modified."
   ([executor env-id branch-name] (push-branch! executor env-id branch-name {}))
   ([executor env-id branch-name opts]
    (or (commands/validate-safe-branch-name branch-name)
@@ -250,11 +252,10 @@
        result
        (if-let [token (get-in opts [:env "GH_TOKEN"])]
          (let [url-r (commands/exec! executor env-id "git remote get-url origin" opts)
-               remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
-               https-url (commands/ssh->https-with-token remote-url token)]
-           (if https-url
-             (commands/push-with-https-fallback! executor env-id branch-name remote-url https-url
-                                                 (:error result) opts)
+               remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))]
+           (if-let [auth-env (commands/token-auth-env remote-url token)]
+             (commands/exec! executor env-id (str "git push -u origin " branch-name)
+                             (update opts :env merge auth-env))
              result))
          result))))))
 
