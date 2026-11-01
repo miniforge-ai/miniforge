@@ -37,7 +37,7 @@
   (let [window (select-keys request window-keys)]
     {:prometheus/query (:prometheus/query request)
      :measurement/window window
-     :measurement/labels (:metric series)
+     :measurement/labels (get series "metric")
      :measurement/samples samples}))
 
 (defn ^{:stratum 1} bounded? [request]
@@ -52,8 +52,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} decode [request response]
-  (let [series (first (get-in response [:data :result]))
-        samples (mapv sample (:values series))]
+  (let [series (first (get-in response ["data" "result"]))
+        samples (mapv sample (get series "values"))]
     (if (complete? request samples)
       (measurement request series samples)
       (invalid-response))))

@@ -17,12 +17,12 @@
 
 (defn ^{:stratum 0} series
   ([] (series [[100 "2"] [110 "3"] [120 "0"]]))
-  ([values] {:metric {"namespace" "catalog"} :values values}))
+  ([values] {"metric" {"namespace" "catalog"} "values" values}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} response
   ([] (response [(series)]))
-  ([results] {:status "success" :data {:resultType "matrix" :result results}}))
+  ([results] {"status" "success" "data" {"resultType" "matrix" "result" results}}))
 
 (comment ::prometheus-api-range-vector-shape)

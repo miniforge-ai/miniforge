@@ -8,9 +8,9 @@
 
 (def ^{:stratum 0} RangeSeries
   [:map
-   [:metric [:map-of :string :string]]
-   [:values [:vector {:min 1} [:tuple number? :string]]]
-   [:histograms {:optional true} [:vector {:max 0} :any]]])
+   ["metric" [:map-of :string :string]]
+   ["values" [:vector {:min 1} [:tuple number? :string]]]
+   ["histograms" {:optional true} [:vector {:max 0} :any]]])
 
 (def ^{:stratum 0} EmptyAnnotations [:maybe [:vector {:max 0} :string]])
 
@@ -26,13 +26,13 @@
 
 (def ^{:stratum 1} RangeResponse
   [:map
-   [:status [:= "success"]]
-   [:error {:optional true} [:not :any]]
-   [:errorType {:optional true} [:not :any]]
-   [:warnings {:optional true} EmptyAnnotations]
-   [:infos {:optional true} EmptyAnnotations]
-   [:data [:map
-           [:resultType [:= "matrix"]]
-           [:result [:vector {:min 1 :max 1} RangeSeries]]]]])
+   ["status" [:= "success"]]
+   ["error" {:optional true} [:not :any]]
+   ["errorType" {:optional true} [:not :any]]
+   ["warnings" {:optional true} EmptyAnnotations]
+   ["infos" {:optional true} EmptyAnnotations]
+   ["data" [:map
+           ["resultType" [:= "matrix"]]
+           ["result" [:vector {:min 1 :max 1} RangeSeries]]]]])
 
 (comment ::prometheus-range-wire-contract)

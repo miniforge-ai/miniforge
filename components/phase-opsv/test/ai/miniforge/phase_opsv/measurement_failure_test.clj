@@ -22,7 +22,7 @@
   (doseq [response [(fixture/response [])
                      (fixture/response [(fixture/series) (fixture/series)])
                      (fixture/response [(fixture/series [[100 "0"] [120 "0"]])])
-                     (assoc (fixture/response) :warnings ["partial data"])]]
+                     (assoc (fixture/response) "warnings" ["partial data"])]]
     (is (anomaly/anomaly? (observation/decode-measurement-window (fixture/request) response)))))
 
 (deftest ^{:stratum 0} only-complete-finite-float-windows-can-support-conclusions
@@ -42,13 +42,13 @@
 
 (deftest ^{:stratum 0} unsupported-or-contradictory-wire-shapes-are-refused
   (doseq [response [nil false [] {}
-                     (assoc (fixture/response) :status "error")
-                     (assoc (fixture/response) :error "query failed")
-                     (assoc (fixture/response) :errorType nil)
-                     (assoc (fixture/response) :infos ["mixed samples"])
-                     (assoc-in (fixture/response) [:data :resultType] "vector")
-                     (assoc-in (fixture/response) [:data :result 0 :histograms] [[100 {}]])
-                     (assoc-in (fixture/response) [:data :result 0 :values] [])]]
+                     (assoc (fixture/response) "status" "error")
+                     (assoc (fixture/response) "error" "query failed")
+                     (assoc (fixture/response) "errorType" nil)
+                     (assoc (fixture/response) "infos" ["mixed samples"])
+                     (assoc-in (fixture/response) ["data" "resultType"] "vector")
+                     (assoc-in (fixture/response) ["data" "result" 0 "histograms"] [[100 {}]])
+                     (assoc-in (fixture/response) ["data" "result" 0 "values"] [])]]
     (is (anomaly/anomaly? (observation/decode-measurement-window (fixture/request) response)))))
 
 (comment ::bounded-observation-admission)

@@ -23,7 +23,7 @@
    [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
    [ai.miniforge.phase-opsv.adapter-factory :as adapter-factory]
    [ai.miniforge.phase-opsv.model :as model]
-   [ai.miniforge.phase-opsv.measurement-admission :as measurement]
+   [ai.miniforge.phase-opsv.boundary.measurement :as measurement]
    [ai.miniforge.phase-opsv.run-control :as run-control]
    [ai.miniforge.phase-opsv.run-control-state :as control-state]
    [ai.miniforge.phase-opsv.protocol :as protocol]

@@ -17,4 +17,5 @@
         metosin/malli {:mvn/version "0.16.4"}
         slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases {:test {:extra-paths ["test" "test-resources"]
-                  :extra-deps {ai.miniforge/response {:local/root "../response"}}}}}
+                  :extra-deps {ai.miniforge/response {:local/root "../response"}
+                               cheshire/cheshire {:mvn/version "5.13.0"}}}}}

@@ -44,6 +44,11 @@ All `phase-opsv` tests pass in both Miniforge product compositions (54s),
 including the seven new measurement tests and 49 assertions per composition.
 Lint reports zero warnings/errors and inferred namespace depth stays within
 three strata. Numeric timestamp comparison avoids lossy float coercion.
+An actual JSON serialization/read round-trip also checks the external producer
+shape. Response fields and metric labels retain native string keys, instead of
+depending on a hybrid keyword/string fixture or recursively keywordizing labels.
+Request and response admission share one external boundary, keeping the public
+interface thin without an extra forwarding namespace.
 
 ## Deployment Plan
 
