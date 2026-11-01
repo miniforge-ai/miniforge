@@ -34,11 +34,11 @@ Use captured-shape fixtures only, with no cluster access. Verify drift sensitivi
 stable ordering, malformed observations and sanitized diagnostics. Run affected
 product tests, packaged acceptance, adversarial standards review and normal gates.
 
-Resource projections and captured-resource schemas pass 5 native source tests and
-15 assertions. The snapshot contract requires explicit cluster and node-pool
+Resource projections, captured-resource schemas and assembly pass 8 native source
+tests and 30 assertions. The snapshot contract requires explicit cluster and node-pool
 selection, physical resource UIDs and immutable image IDs. Shared factories retain
 native Kubernetes string keys across both test namespaces.
-The complete snapshot boundary, fingerprint assembly and live acquisition remain
+The complete snapshot boundary and live acquisition remain
 unfinished. No environment-fingerprint conformance claim is made by this slice.
 
 ## Deployment Plan
