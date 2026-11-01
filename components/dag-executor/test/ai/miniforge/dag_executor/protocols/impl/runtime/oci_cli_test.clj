@@ -603,33 +603,54 @@
         (is (= [["url.https://github.com/.insteadOf" "git@github.com:"]]
                ((private-fn 'git-config-entries) (:env @seen))))))))
 
-(deftest ^{:stratum 0} persist-and-restore-keep-an-ssh-clone-on-ssh-test
-  (testing "a capsule cloned over SSH with no HTTP token persists and restores
-            through the recorded SSH URL it cloned, not the unauthenticated
-            https-url"
-    (let [executor (doto (oci-cli/create-docker-executor {:image "test:latest"})
-                     (-> :git-remotes (reset! {"c1" {:repo-url  "git@github.com:o/r.git"
-                                                     :https-url "https://github.com/o/r.git"
-                                                     :host-kind :github}})))
-          calls    (atom [])]
-      (with-redefs [oci-git/resolve-git-token (fn [_url _opts] nil)
-                    oci-ctr/exec-in-container
-                    (fn [_d _id cmd opts]
-                      (swap! calls conj [cmd opts])
-                      {:data {:exit-code 0
-                              :stdout (if (= cmd "git status --porcelain") " M f" "sha")}})]
-        (is (true? (get-in (proto/persist-workspace! executor "c1" {:branch "task/x"})
-                           [:data :persisted?])))
-        (is (true? (get-in (proto/restore-workspace! executor "c1" {:branch "task/x"})
-                           [:data :restored?])))
-        (let [network (filter (fn [[cmd _]] (and (vector? cmd) (some #{"push" "fetch" "ls-remote"} cmd)))
-                              @calls)]
-          (is (seq network))
-          (is (every? (fn [[cmd _]] (some #{"git@github.com:o/r.git"} cmd)) network))
-          (is (not-any? (fn [[cmd _]] (some #{"https://github.com/o/r.git"} cmd)) network))
-          (is (not-any? (fn [[_ opts]] (seq (:env opts))) network)))))))
+(deftest ^{:stratum 0} persist-and-restore-use-the-clone-url-without-a-credential-test
+  (testing "with no HTTP credential, persist and restore go to the URL bootstrap
+            cloned: an SSH clone stays on SSH, and a repository cloned over
+            HTTPS (with a token since gone) stays on HTTPS, anonymously"
+    (doseq [[clone-url expected unexpected]
+            [["git@github.com:o/r.git" "git@github.com:o/r.git" "https://github.com/o/r.git"]
+             ["https://github.com/o/r.git" "https://github.com/o/r.git" "git@github.com:o/r.git"]]]
+      (let [executor (doto (oci-cli/create-docker-executor {:image "test:latest"})
+                       (-> :git-remotes (reset! {"c1" {:repo-url  "git@github.com:o/r.git"
+                                                       :https-url "https://github.com/o/r.git"
+                                                       :clone-url clone-url
+                                                       :host-kind :github}})))
+            calls    (atom [])]
+        (with-redefs [oci-git/resolve-git-token (fn [_url _opts] nil)
+                      oci-ctr/exec-in-container
+                      (fn [_d _id cmd opts]
+                        (swap! calls conj [cmd opts])
+                        {:data {:exit-code 0
+                                :stdout (if (= cmd "git status --porcelain") " M f" "sha")}})]
+          (is (true? (get-in (proto/persist-workspace! executor "c1" {:branch "task/x"})
+                             [:data :persisted?])))
+          (is (true? (get-in (proto/restore-workspace! executor "c1" {:branch "task/x"})
+                             [:data :restored?])))
+          (let [network (filter (fn [[cmd _]] (and (vector? cmd) (some #{"push" "fetch" "ls-remote"} cmd)))
+                                @calls)]
+            (is (seq network) clone-url)
+            (is (every? (fn [[cmd _]] (some #{expected} cmd)) network) clone-url)
+            (is (not-any? (fn [[cmd _]] (some #{unexpected} cmd)) network) clone-url)
+            (is (not-any? (fn [[_ opts]] (seq (:env opts))) network) clone-url)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} bootstrap-workspace-returns-the-url-it-cloned-test
+  (testing "bootstrap reports the URL it cloned: :https-url with a credential,
+            the given :repo-url without one"
+    (doseq [[token expected] [[fake-token "https://github.com/o/r.git"]
+                              [nil "git@github.com:o/r.git"]]]
+      (with-redefs [oci-git/resolve-git-token (fn [_url _opts] token)
+                    oci-ctr/container-git-count  (fn [_ _] 0)
+                    oci-ctr/exec-in-container (fn [_d _c cmd _opts]
+                                                (result/ok {:exit-code 0
+                                                            :stdout (if (= ["git" "--version"] cmd)
+                                                                      "git version 2.43.0\n"
+                                                                      "")}))]
+        (let [r ((private-fn 'bootstrap-workspace!) (docker-descriptor) "c1" "/workspace"
+                                                    {:repo-url "git@github.com:o/r.git"})]
+          (is (result/ok? r))
+          (is (= expected (get-in r [:data :clone-url])) (str "token " (pr-str token))))))))
 
 ;; ============================================================================
 ;; image-exists? (public)

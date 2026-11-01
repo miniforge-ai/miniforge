@@ -76,17 +76,18 @@
    resolves no token, and add, status and commit, which run hooks and
    fsmonitor the untrusted workspace defines, never see the credential.
    When the delay yields no HTTP credential, a network command addressed to
-   the recorded `remote`'s :https-url goes to its :repo-url instead, the URL
-   `bootstrap-workspace!` cloned without one (an SSH clone with the image's
-   key), rather than unauthenticated HTTPS."
-  [descriptor container-id workdir cred-env {:keys [repo-url https-url] :as _remote}]
+   the recorded `remote`'s :https-url goes to its :clone-url instead, the
+   URL `bootstrap-workspace!` actually cloned: an SSH clone made with the
+   image's key stays on SSH, and a repository cloned over HTTPS stays there,
+   anonymously. Without a recorded :clone-url, :https-url is kept."
+  [descriptor container-id workdir cred-env {:keys [https-url clone-url] :as _remote}]
   (let [exec! (container-exec-fn descriptor container-id workdir)]
     (fn [cmd]
       (if (git-network-command? cmd)
         (let [env @cred-env]
-          (exec! (if (or (seq env) (= repo-url https-url))
+          (exec! (if (or (seq env) (nil? clone-url) (= clone-url https-url))
                    cmd
-                   (mapv #(if (= https-url %) repo-url %) cmd))
+                   (mapv #(if (= https-url %) clone-url %) cmd))
                  env))
         (exec! cmd nil)))))
 
@@ -110,7 +111,9 @@
    (`credential-git-check`), clones the plain URL and hands the credential
    to the clone command alone (`capsule-credential-env`): origin's URL in the
    capsule carries none, and no push URL is set. Clones every branch, so
-   release can compare against a base other than the checked-out branch."
+   release can compare against a base other than the checked-out branch.
+   The result carries the :clone-url it cloned, which persist and restore
+   fall back to when no credential resolves later (`workspace-exec-fn`)."
   [descriptor container-name workdir env-config]
   (if-let [{:keys [repo-url https-url] :as remote} (git-remote env-config)]
     (let [branch    (get env-config :branch "main")
@@ -134,7 +137,7 @@
         (let [sha-r (exec! ["git" "-C" workdir "rev-parse" "HEAD"])]
           (if (result/ok? sha-r)
             (let [base-sha (str/trim (get-in sha-r [:data :stdout] ""))]
-              (result/ok (cond-> {:base-branch (str branch)}
+              (result/ok (cond-> {:base-branch (str branch) :clone-url clone-url}
                            (seq base-sha) (assoc :base-sha base-sha))))
             sha-r))))
     (result/ok nil)))

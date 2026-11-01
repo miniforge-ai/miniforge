@@ -201,6 +201,29 @@
         (is (= :untrusted (:trust-level plan)))
         (is (= {:valid? true} (execution-plan/validate-plan plan)))))))
 
+(deftest ^{:stratum 1} acquire-records-the-clone-url-with-the-remote-test
+  (testing "the URL bootstrap cloned is recorded with the remote for persist
+            and restore, and stays out of the environment record"
+    (let [executor (oci-cli/map->OciCliExecutor
+                    {:descriptor  {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                     :image       "task-runner:latest"
+                     :git-remotes (atom {})})]
+      (with-redefs [oci-img/image-exists?          (fn [_ _] true)
+                    oci-img/resolve-image-digest!  (fn [_ _] valid-digest)
+                    oci-img/image-env              (fn [_ _] {})
+                    oci-ctr/create-container       (fn [_d container-name & _]
+                                                     (result/ok {:container-name container-name}))
+                    cap-git/bootstrap-workspace!   (fn [& _] (result/ok {:base-branch "main"
+                                                                         :clone-url "git@github.com:o/r.git"}))
+                    oci-img/container-image-digest (fn [_ _] valid-digest)]
+        (let [r (proto/acquire-environment! executor "abcd1234efgh"
+                                            {:workdir "/workspace"
+                                             :repo-url "git@github.com:o/r.git"})]
+          (is (result/ok? r))
+          (is (= "git@github.com:o/r.git"
+                 (get-in @(:git-remotes executor) ["miniforge-task-abcd1234" :clone-url])))
+          (is (not (contains? (get-in r [:data :metadata]) :clone-url))))))))
+
 (deftest ^{:stratum 1} acquire-records-git-remote-for-persist-test
   (testing "a bootstrapped acquire records the caller's remote (not one read
             back from the capsule) under the environment id"

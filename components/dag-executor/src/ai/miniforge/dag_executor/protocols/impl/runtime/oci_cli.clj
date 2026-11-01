@@ -140,7 +140,8 @@
                 ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
                 (let [bootstrap-result (bootstrap-workspace! descriptor container-name workdir env-config)]
                   (if (result/ok? bootstrap-result)
-                    (let [bootstrap-metadata (:data bootstrap-result)
+                    (let [clone-url (get-in bootstrap-result [:data :clone-url])
+                          bootstrap-metadata (dissoc (:data bootstrap-result) :clone-url)
                           ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
                           image-digest (container-image-digest descriptor container-name)
                           ;; Surface the gate's non-blocking findings (rootless
@@ -152,7 +153,10 @@
                                      image-digest (assoc :image-digest image-digest)
                                      (seq gate-warnings) (assoc :security/warnings gate-warnings)
                                      (seq gate-review)   (assoc :security/review gate-review))
-                          remote   (git-remote env-config)]
+                          ;; The URL the clone used rides with the remote for
+                          ;; persist and restore (`workspace-exec-fn`).
+                          remote   (some-> (git-remote env-config)
+                                           (cond-> clone-url (assoc :clone-url clone-url)))]
                       (when remote
                         (some-> git-remotes (swap! assoc container-name remote)))
                       ;; The record is returned to callers, so it carries the
