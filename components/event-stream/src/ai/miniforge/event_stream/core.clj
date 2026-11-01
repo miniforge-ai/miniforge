@@ -29,6 +29,7 @@
    [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.event-stream.retention :as retention]
+   [ai.miniforge.event-stream.sink-durability :as durability]
    [ai.miniforge.event-stream.sinks.factory :as factory]
    [ai.miniforge.event-stream.sinks.file :as file]))
 
@@ -130,16 +131,21 @@
 
 (defn- ^{:stratum 0} deliver-to-sink!
   "Invoke `sink` with `event`, swallowing exceptions and logging them.
-   A failing sink must not break others or the publish path."
+   A failing sink must not break others or the publish path. Returns the
+   sink's outcome, {:sink/durable? :sink/persisted?}: a durable sink
+   persisted the event when it returned without throwing."
   [sink event logger]
-  (try
-    (sink event)
-    (catch Exception e
-      (when logger
-        (log/warn logger :event-stream :sink-error
-                  {:message "Event sink failed"
-                   :data    {:event-type (:event/type event)
-                             :anomaly    (response/from-exception e)}})))))
+  (let [durable? (durability/durable-sink? sink)]
+    (try
+      (sink event)
+      {:sink/durable? durable? :sink/persisted? durable?}
+      (catch Exception e
+        (when logger
+          (log/warn logger :event-stream :sink-error
+                    {:message "Event sink failed"
+                     :data    {:event-type (:event/type event)
+                               :anomaly    (response/from-exception e)}}))
+        {:sink/durable? durable? :sink/persisted? false}))))
 
 (defn- ^{:stratum 0} deliver-to-subscriber!
   "Invoke `callback` for `event` when `filter-fn` accepts it,
@@ -270,10 +276,9 @@
 
 (defn- ^{:stratum 1} deliver-to-sinks!
   "Fan `event` out to every configured sink. Each sink runs in
-   isolation via `deliver-to-sink!`."
+   isolation via `deliver-to-sink!`. Returns the sink outcomes in order."
   [sinks event logger]
-  (doseq [sink sinks]
-    (deliver-to-sink! sink event logger)))
+  (mapv #(deliver-to-sink! % event logger) sinks))
 
 (defn- ^{:stratum 1} deliver-to-subscribers!
   "Fan `event` out to every subscriber that accepts it via its filter."
@@ -402,7 +407,10 @@
    When the event's workflow has been quiesced (BD-2a), short-circuits
    with a structured `{:rejected? true ...}` map and runs no sinks or
    subscribers. Otherwise: fan out to sinks, append to the in-memory
-   log, fan out to subscribers, log, and return `event`.
+   log, fan out to subscribers, log, and return `event`. The returned
+   event carries the sink outcomes as metadata under
+   `sink-durability/outcomes-key`; a sink failure is logged, not raised,
+   so only those outcomes show whether the event was persisted.
 
    In-flight publishes are tracked so `quiesce!` / `drain!` can wait
    for the stream to settle before reporting at-rest.
@@ -426,13 +434,14 @@
       (or (fence/rejection-if-quiesced stream event)
           (let [result (fence/with-in-flight stream event
                          (fn []
-                           (let [{:keys [sinks subscribers filters logger]} @stream]
-                             (when-not (contains? *replaying* stream)
-                               (deliver-to-sinks! sinks event logger))
+                           (let [{:keys [sinks subscribers filters logger]} @stream
+                                 outcomes (if (contains? *replaying* stream)
+                                            []
+                                            (deliver-to-sinks! sinks event logger))]
                              (record-event! stream event)
                              (deliver-to-subscribers! subscribers filters event logger)
                              (log-published! logger event)
-                             event)))]
+                             (vary-meta event assoc durability/outcomes-key outcomes))))]
             ;; with-in-flight returns quiesced-sentinel when the workflow was
             ;; fenced during the atomic acquire (the TOCTOU window). Convert
             ;; to the canonical rejection shape so callers see a consistent
