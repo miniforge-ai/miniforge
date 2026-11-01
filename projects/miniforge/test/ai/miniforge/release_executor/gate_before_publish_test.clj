@@ -25,6 +25,7 @@
    [ai.miniforge.phase-software-factory.release]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.release-executor.interface :as release-executor]
+   [ai.miniforge.workflow.durable-stream-support :as durable]
    [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
    [babashka.fs :as fs]
    [clojure.java.shell :as shell]
@@ -48,7 +49,7 @@
                                                :output {:review/decision decision}}}}
    :execution/errors []
    :worktree-path worktree
-   :event-stream (es/create-event-stream {:sinks []})})
+   :event-stream (durable/durable-event-stream)})
 
 ;------------------------------------------------------------------------------ Layer 1
 
