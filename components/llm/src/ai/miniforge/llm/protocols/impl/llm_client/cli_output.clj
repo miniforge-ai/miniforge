@@ -147,7 +147,21 @@
        (zero? tool-call-count)
        (nil? usage)))
 
-(defn ^{:stratum 0} parse-codex-stream-line
+(defn ^{:stratum 0} ^:private codex-error-delta
+  "The text a Codex failed turn or error event appends: its message, or the
+   catalog's placeholder when the event carries none."
+  [message]
+  (msg/t :cli-output.system/codex-stream-error
+         {:message (or message (msg/t :cli-output.system/codex-error-unknown))}))
+
+(defn ^{:stratum 0} error-response [output exit-code stderr]
+  (let [error-message (if (and stderr (str/blank? output)) stderr output)]
+    (responses/llm-error :anomalies.agent/llm-error "cli_error" (str/trim error-message)
+               {:exit-code exit-code :stderr stderr :stdout output})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} parse-codex-stream-line
   "Parse a line from Codex CLI streaming output.
 
    Codex emits JSONL events:
@@ -241,22 +255,15 @@
 
           ;; Turn failed
           "turn.failed"
-          {:delta (str "\nError: " (get-in data [:error :message] "unknown")) :done? true}
+          {:delta (codex-error-delta (get-in data [:error :message])) :done? true}
 
           "error"
-          {:delta (str "\nError: " (:message data "unknown")) :done? true}
+          {:delta (codex-error-delta (:message data)) :done? true}
 
           ;; thread.started, turn.started, item.started — ignore
           nil)))
     (catch Exception _e
       nil)))
-
-(defn ^{:stratum 0} error-response [output exit-code stderr]
-  (let [error-message (if (and stderr (str/blank? output)) stderr output)]
-    (responses/llm-error :anomalies.agent/llm-error "cli_error" (str/trim error-message)
-               {:exit-code exit-code :stderr stderr :stdout output})))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} terminated-by
   "Return the `:llm/terminated-by` marker for an adaptive-timeout envelope,
