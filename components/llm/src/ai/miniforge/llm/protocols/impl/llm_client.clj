@@ -716,6 +716,17 @@
    :cache-write-input-tokens (get-in usage [:prompt_tokens_details :cache_write_tokens])
    :reasoning-output-tokens (get-in usage [:completion_tokens_details :reasoning_tokens])})
 
+(defn ^{:stratum 0} appended-text
+  "The text a swap appended to `old` to make `new`, or nil when `new` does
+   not extend `old`. Each Claude assistant frame appends one whole message,
+   so this is that message."
+  [old new]
+  (when (and (string? old)
+             (string? new)
+             (> (count new) (count old))
+             (str/starts-with? new old))
+    (subs new (count old))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} rate-limited?
@@ -1608,20 +1619,28 @@
    - :stop-reason          — why the model stopped (\"end_turn\", \"max_turns\", etc.)
    - :num-turns            — number of conversation turns consumed
    - :tool-call-count      — total number of tool invocations during the run
-   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)"
-  [content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview stderr]
-  (if (rate-limited? content)
-    (llm-error :anomalies.agent/rate-limited "rate_limit"
-               (str "Claude CLI rate limited: " (str/trim content))
-               {:exit-code exit-code :stdout content
-                :stop-reason stop-reason :num-turns num-turns})
-    (cond-> (llm-success content {:exit-code exit-code :usage usage})
-      cost-usd                    (assoc :cost-usd cost-usd)
-      stop-reason                 (assoc :stop-reason stop-reason)
-      num-turns                   (assoc :num-turns num-turns)
-      (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
-      (seq final-message-preview) (assoc :final-message-preview final-message-preview)
-      (seq stderr)                (assoc :stderr stderr))))
+   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)
+
+   `last-message` is the run's last assistant message, checked for the CLI's
+   rate-limit notice on its own: a notice that follows earlier answer text
+   is too long, together with it, to read as a notice."
+  ([content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview stderr]
+   (streaming-success-response content exit-code usage cost-usd stop-reason num-turns
+                               tool-call-count final-message-preview stderr nil))
+  ([content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview stderr
+    last-message]
+   (if-let [notice (first (filter rate-limited? [content last-message]))]
+     (llm-error :anomalies.agent/rate-limited "rate_limit"
+                (str "Claude CLI rate limited: " (str/trim notice))
+                {:exit-code exit-code :stdout content
+                 :stop-reason stop-reason :num-turns num-turns})
+     (cond-> (llm-success content {:exit-code exit-code :usage usage})
+       cost-usd                    (assoc :cost-usd cost-usd)
+       stop-reason                 (assoc :stop-reason stop-reason)
+       num-turns                   (assoc :num-turns num-turns)
+       (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
+       (seq final-message-preview) (assoc :final-message-preview final-message-preview)
+       (seq stderr)                (assoc :stderr stderr)))))
 
 (defn ^{:stratum 3} streaming-error-response
   "Build a streaming error response with diagnostic metadata.
@@ -2271,7 +2290,15 @@
         accumulated-tools (atom [])
         accumulated-session-id (atom nil)
         accumulated-stop-reason (atom nil)
-        accumulated-turns (atom nil)]
+        accumulated-turns (atom nil)
+        last-message (atom nil)]
+    ;; The last assistant message, kept apart from the accumulated answer,
+    ;; so a rate-limit notice after earlier text is still read as one.
+    (add-watch accumulated-content ::last-message
+               (fn [_ _ old new]
+                 (when-let [text (appended-text old new)]
+                   (when-not (str/blank? text)
+                     (reset! last-message text)))))
     (when logger
       (log/info logger :system :agent/streaming-prompt-sent
                 {:data (assoc (prompt-size-telemetry (:system request) prompt)
@@ -2351,7 +2378,7 @@
                                                   usage resolved-cost
                                                   stop-reason num-turns
                                                   tool-call-count final-message-preview
-                                                  (:err result))
+                                                  (:err result) @last-message)
                 (seq tools) (assoc :tools-called tools)
                 session-id  (assoc :session-id session-id))
               ;; A run that was cut (timeout) or died still consumed

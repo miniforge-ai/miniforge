@@ -1560,6 +1560,36 @@
       (is (nil? (:usage resp)))
       (is (= 0.42 (:cost-usd resp))))))
 
+(deftest ^{:stratum 0} streaming-limit-notice-after-answer-text-test
+  (testing "a limit notice after earlier assistant text is still a rate limit"
+    (let [answer (json/generate-string {:claims (repeat 40 {:claim "Shipped the billing service."})})
+          notice "You've hit your limit · resets 7pm (America/Los_Angeles)"
+          assistant-line (fn [text]
+                           (json/generate-string {:type "assistant"
+                                                  :message {:content [{:type "text" :text text}]}}))
+          client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude
+                   :stream-exec-fn (fn [_cmd on-line _opts]
+                                     (on-line (assistant-line answer))
+                                     (on-line (assistant-line notice))
+                                     {:out "" :err "" :exit 0})})
+          resp (llm/complete-stream client {:prompt "test"} (fn [_] nil))]
+      (is (< 500 (count answer)) "the answer alone is longer than any notice")
+      (is (not (:success resp)))
+      (is (= "rate_limit" (get-in resp [:error :type])))))
+  (testing "an answer that ends the run is not a limit, whatever came before"
+    (let [assistant-line (fn [text]
+                           (json/generate-string {:type "assistant"
+                                                  :message {:content [{:type "text" :text text}]}}))
+          client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude
+                   :stream-exec-fn (fn [_cmd on-line _opts]
+                                     (on-line (assistant-line "Working on it."))
+                                     (on-line (assistant-line "(defn foo [] 42)"))
+                                     {:out "" :err "" :exit 0})})
+          resp (llm/complete-stream client {:prompt "test"} (fn [_] nil))]
+      (is (:success resp)))))
+
 (deftest ^{:stratum 0} parse-claude-stream-line-carries-per-message-usage-test
   (testing "assistant events surface :message-usage + :message-id"
     (let [parse-line (:stream-parser (get impl/backends :claude))
