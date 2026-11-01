@@ -20,19 +20,20 @@
 
    Polls open miniforge-authored PRs for new review comments.
    Watermarks track the last-seen comment timestamp per PR to avoid
-   reprocessing. State persisted in ~/.miniforge/state/pr-monitor/.
+   reprocessing. They are saved per repository (see monitor-store), and each
+   save merges with what other monitors of that repository already saved.
 
    Uses the gh CLI for all GitHub API access — no long-lived tokens
    needed beyond the local gh auth configuration."
   (:require
-   [ai.miniforge.config.interface :as mf-config]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.pr-lifecycle.messages :as msg]
+   [ai.miniforge.pr-lifecycle.monitor-store :as store]
    [ai.miniforge.schema.interface :as schema]
    [babashka.process :as process]
    [cheshire.core :as json]
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -67,9 +68,19 @@
   [result-schema value]
   (schema/validate result-schema value))
 
-(def ^{:stratum 0} ^:private state-dir
-  "Base directory for PR monitor state."
-  (str (mf-config/miniforge-home) "/state/pr-monitor"))
+(def ^{:stratum 0} ^:private watermarks-file-name
+  "watermarks.edn")
+
+(defn ^{:stratum 0} empty-watermarks
+  "Watermarks of repo `repo-slug` before any comment was seen."
+  [repo-slug]
+  {:repo-slug repo-slug :prs {}})
+
+(defn- ^{:stratum 0} invalid-watermarks
+  [file]
+  (anomaly/anomaly :invalid-input
+                   (msg/system-t :monitor-state/invalid-watermarks {:path (str file)})
+                   {:monitor-state/path (str file)}))
 
 ;; GitHub CLI helpers
 (defn- ^{:stratum 0} run-gh
@@ -95,6 +106,19 @@
     (catch Exception e
       (dag/err :gh-exception (.getMessage e)))))
 
+(defn ^{:stratum 0} merge-watermarks
+  "Per PR, the entry with the later :last-seen-at from `on-disk` or `mine`
+   (a tie keeps `mine`). A monitor saving a stale copy can then neither drop
+   PRs another monitor saved nor move a PR's watermark back."
+  [on-disk mine]
+  (merge-with (fn [disk-entry my-entry]
+                (if (pos? (compare (str (:last-seen-at disk-entry))
+                                   (str (:last-seen-at my-entry))))
+                  disk-entry
+                  my-entry))
+              on-disk
+              mine))
+
 (defn ^{:stratum 0} comments-since
   "Filter comments to only those created after a watermark timestamp.
 
@@ -113,15 +137,13 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} Watermarks
+(def ^{:stratum 1} PrWatermarks
+  "PR number → watermark; also what a repo's watermarks.edn holds."
   [:map-of int? WatermarkEntry])
 
-(defn- ^{:stratum 1} ensure-state-dir!
-  "Ensure the state directory exists."
-  []
-  (let [dir (io/file state-dir)]
-    (when-not (.exists dir)
-      (.mkdirs dir))))
+(def ^{:stratum 1} Watermarks
+  "The watermarks of one repository, with the slug they are saved under."
+  [:map [:repo-slug [:maybe :string]] [:prs [:map-of int? WatermarkEntry]]])
 
 ;; PR listing
 (defn- ^{:stratum 1} normalize-pr
@@ -146,6 +168,17 @@
     (when (dag/ok? result)
       (let [login (str/trim (:output (:data result) ""))]
         (when (seq login) login)))))
+
+(defn ^{:stratum 1} resolve-repo-slug
+  "owner/name of the repository gh picks for `worktree-path`: the one
+   `{owner}/{repo}` expands to in `fetch-pr-comments`. nil when gh cannot
+   tell."
+  [worktree-path]
+  (let [result (run-gh ["gh" "repo" "view" "--json" "nameWithOwner" "--jq" ".nameWithOwner"]
+                       worktree-path)]
+    (when (dag/ok? result)
+      (let [slug (str/trim (:output (:data result) ""))]
+        (when (seq slug) slug)))))
 
 ;; Comment fetching
 (defn- ^{:stratum 1} normalize-comment
@@ -192,27 +225,36 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} load-watermarks
-  "Load watermarks from persistent storage.
-
-   Returns map of PR number → {:last-seen-at string :advanced-at string}.
-   Safe to call on restart — returns empty map when no state exists."
-  []
-  (let [f (io/file state-dir "watermarks.edn")]
-    (if (.exists f)
-      (try
-        (->> f
-             slurp
-             edn/read-string
-             (validate! Watermarks))
-        (catch Exception _e {}))
-      {})))
+  "The watermarks saved for repo `repo-slug` (owner/name), as {:repo-slug s
+   :prs {pr-number {:last-seen-at string :advanced-at string}}}. An anomaly
+   when the slug is not owner/name or the file does not hold a watermark
+   map, since then nobody can tell which comments were handled."
+  [repo-slug]
+  (let [file   (store/repo-file repo-slug watermarks-file-name)
+        loaded (if file (store/read-map file) (store/no-repo repo-slug))]
+    (cond
+      (nil? loaded)                       (empty-watermarks repo-slug)
+      (anomaly/anomaly? loaded)           loaded
+      (schema/valid? PrWatermarks loaded) (assoc (empty-watermarks repo-slug) :prs loaded)
+      :else                               (invalid-watermarks file))))
 
 (defn ^{:stratum 2} save-watermarks!
-  "Persist watermarks to disk. Idempotent and safe to call every cycle."
-  [watermarks]
-  (ensure-state-dir!)
-  (spit (io/file state-dir "watermarks.edn")
-        (pr-str watermarks)))
+  "Merge `watermarks` into those saved for their repo (see
+   `merge-watermarks`) under the file lock, and write them atomically.
+   Returns the merged watermarks, which include PRs other monitors saved, or
+   an anomaly with nothing written. Every save carries every PR, so the next
+   successful save also writes what a failed one missed."
+  [{:keys [repo-slug prs]}]
+  (let [file  (store/repo-file repo-slug watermarks-file-name)
+        saved (if file
+                (store/update-file! file #(if (or (nil? %) (schema/valid? PrWatermarks %))
+                                            (merge-watermarks % prs)
+                                            %))
+                (store/no-repo repo-slug))]
+    (cond
+      (anomaly/anomaly? saved)           saved
+      (schema/valid? PrWatermarks saved) (assoc (empty-watermarks repo-slug) :prs saved)
+      :else                              (invalid-watermarks file))))
 
 (defn ^{:stratum 2} advance-watermark
   "Advance the watermark for a PR to the given timestamp.
@@ -221,9 +263,9 @@
   [watermarks pr-number timestamp]
   (validate!
    Watermarks
-   (assoc watermarks pr-number
-          {:last-seen-at timestamp
-           :advanced-at (str (java.util.Date.))})))
+   (assoc-in watermarks [:prs pr-number]
+             {:last-seen-at timestamp
+              :advanced-at (str (java.util.Date.))})))
 
 (defn ^{:stratum 2} poll-open-prs
   "Poll GitHub for open PRs authored by a given login.
@@ -330,7 +372,7 @@
    Returns DAG result with:
    {:new-comments [...] :watermarks updated-map :pr-number int}"
   [worktree-path pr-number watermarks logger]
-  (let [wm (get watermarks pr-number)
+  (let [wm (get-in watermarks [:prs pr-number])
         since (:last-seen-at wm)
         result (fetch-pr-comments worktree-path pr-number)]
     (if (dag/ok? result)
@@ -360,8 +402,8 @@
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Load/save watermarks
-  (load-watermarks)
-  ;; => {}
+  (load-watermarks "miniforge-ai/miniforge")
+  ;; => {:repo-slug "miniforge-ai/miniforge" :prs {}}
 
   ;; Poll open PRs
   (poll-open-prs "/path/to/repo" "miniforge[bot]")
@@ -381,7 +423,7 @@
   (post-comment "/path/to/repo" 123 "Fixed in commit abc123")
 
   ;; Orchestrated poll with watermark
-  (let [wm (load-watermarks)]
+  (let [wm (load-watermarks "miniforge-ai/miniforge")]
     (poll-pr-for-new-comments "/path/to/repo" 123 wm nil))
 
   :leave-this-here)

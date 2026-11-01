@@ -26,6 +26,7 @@
    Agent: nil (no LLM — deterministic file loading)
    Default gates: []"
   (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate]
             
             [ai.miniforge.knowledge.interface :as knowledge]))
 
@@ -51,14 +52,16 @@
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
-        file-count (get-in result [:output :exploration/file-count] 0)]
+        file-count (get-in result [:output :exploration/file-count] 0)
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))]
     (-> ctx
         (assoc-in [:phase :ended-at] end-time)
         (assoc-in [:phase :duration-ms] duration-ms)
-        (assoc-in [:phase :status] :completed)
+        (assoc-in [:phase :status] (if gate-failed? :failed :completed))
         (assoc-in [:phase :metrics] {:file-count file-count
                                      :duration-ms duration-ms})
-        (update-in [:execution :phases-completed] (fnil conj []) :explore)
+        (cond-> (not gate-failed?)
+          (update-in [:execution :phases-completed] (fnil conj []) :explore))
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
 (defn ^{:stratum 0} error-explore

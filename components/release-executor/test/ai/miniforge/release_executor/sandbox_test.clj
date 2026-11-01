@@ -24,7 +24,8 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [clojure.string]
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.release-executor.sandbox :as sandbox]))
+   [ai.miniforge.release-executor.sandbox :as sandbox]
+   [ai.miniforge.release-executor.sandbox.commands :as commands]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -115,6 +116,25 @@
                           (environment-status [_ _] (dag/ok {:status :running})))]
       (is (= "main" (sandbox/detect-default-branch failing-exec "env-1"))))))
 
+(deftest ^{:stratum 0} push-probe-asks-one-checkout-test
+  (testing "the probe's destination checks and its ls-remote all run in the
+            checkout the caller's opts select"
+    (let [seen (atom [])
+          exec (reify
+                 dag/TaskExecutor
+                 (executor-type [_] :mock)
+                 (available? [_] (dag/ok {:available? true}))
+                 (acquire-environment! [_ _ _] (dag/ok {}))
+                 (execute! [_ _env-id command opts]
+                   (swap! seen conj (:workdir opts))
+                   (dag/ok {:exit-code 0 :stdout "git@github.com:org/repo.git" :stderr ""}))
+                 (copy-to! [_ _ _ _] (dag/ok {}))
+                 (copy-from! [_ _ _ _] (dag/ok {}))
+                 (release-environment! [_ _] (dag/ok {}))
+                 (environment-status [_ _] (dag/ok {:status :running})))]
+      (sandbox/remote-branch-sha! exec "env-1" "feat/test" {:workdir "/repo"})
+      (is (= ["/repo" "/repo" "/repo"] @seen)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} push-branch-token-retry-test
@@ -155,7 +175,7 @@
         (is (:success? (sandbox/push-branch! (push-recording-executor origin calls)
                                              "env-1" "feat/test" {:env {"GH_TOKEN" "tok123"}}))
             origin)))
-    (is (nil? (#'sandbox/token-auth-env "https://github.com:8443/org/repo.git" "tok")))))
+    (is (nil? (commands/token-auth-env "https://github.com:8443/org/repo.git" "tok")))))
 
 (defn ^{:stratum 1} create-mock-executor
   "Create a mock executor that records commands and returns configurable results.
@@ -202,6 +222,43 @@
       (sandbox/create-branch! exec "env-1" "feat/x")
       (is (= 2 (count @fetch-opts)))
       (is (every? :git-credentials? @fetch-opts)))))
+
+(deftest ^{:stratum 1} timed-out-push-is-not-retried-over-https-test
+  (testing "a push stopped at its deadline may have reached origin: it comes
+            back as timed out, with no HTTPS token retry behind it"
+    (let [cmds (atom [])
+          exec (reify dag/TaskExecutor
+                 (executor-type [_] :mock)
+                 (available? [_] (dag/ok {:available? true}))
+                 (acquire-environment! [_ _ _] (dag/ok {:environment-id "e"}))
+                 (execute! [_ _ command _]
+                   (swap! cmds conj (cmd-str command))
+                   (dag/ok (if (clojure.string/starts-with? (cmd-str command) "git push")
+                             {:exit-code 124 :stdout "" :stderr "timed out"}
+                             {:exit-code 0 :stdout "git@github.com:o/r.git" :stderr ""})))
+                 (copy-to! [_ _ _ _] (dag/ok {}))
+                 (copy-from! [_ _ _ _] (dag/ok {}))
+                 (release-environment! [_ _] (dag/ok {:released? true}))
+                 (environment-status [_ _] (dag/ok {:status :running})))
+          r    (sandbox/push-branch! exec "e" "feature/x" {:env {"GH_TOKEN" "t"}})]
+      (is (not (:success? r)))
+      (is (:timed-out? r))
+      (is (not-any? #(clojure.string/includes? % "set-url") @cmds)))))
+
+(deftest ^{:stratum 1} push-probe-ls-remote-asks-for-git-credentials-test
+  (testing "remote-branch-sha!'s ls-remote asks the executor for git
+            credentials; its local get-url checks do not"
+    (let [calls (atom [])
+          exec (reify
+                 dag/TaskExecutor
+                 (execute! [_ _env-id command opts]
+                   (swap! calls conj [(cmd-str command) (:git-credentials? opts)])
+                   (dag/ok {:exit-code 0 :stdout "https://github.com/o/r.git" :stderr ""})))]
+      (sandbox/remote-branch-sha! exec "env-1" "feat/x" {:workdir "/repo"})
+      (is (= [["git remote get-url origin" nil]
+              ["git remote get-url --push --all origin" nil]
+              ["git ls-remote origin refs/heads/feat/x" true]]
+             @calls)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -80,122 +80,98 @@ bb hooks:install      # Install pre-commit hook
 
 ## Core Principles (Always Apply)
 
-See `standards/miniforge/CLAUDE.md` for authoritative descriptions. Summary:
+See `standards/miniforge/CLAUDE.md` for authoritative descriptions.
 
-- **Stratified Design** — dependencies flow downward only; no cycles; pure Domain layer
-- **Simple Made Easy** — values over state; data over syntax; no speculative complexity
-- **PR Discipline** — one stratum per PR, commits <200 reportable
-  lines / whole PRs <600 reportable lines (post blank/comment/
-  generated-path exclusion, not raw diff lines; `bb commit-budget`
-  enforces the commit-level number at commit time via the pre-commit
-  hook, `bb pr-budget` enforces the PR-level number in CI; see
-  `## PR Size and Review Discipline` below for why the two numbers
-  differ), branch from main, never bypass hooks
-- **Specification-Driven** — N-series specs are implementation contracts; code conforms to specs
-- **Adversarial Review Before Push** — before opening or pushing to any
-  PR, review your own diff adversarially: read every changed file
-  assuming something is wrong until you've verified it isn't, not just
-  clj-kondo/tests passing. This applies doubly to mechanical/generated
-  diffs (codemods, autofixers, bulk renames) — a diff being "supposed
-  to be" behavior-neutral is a claim to verify, not a fact to assume.
-  GitHub Copilot's automated review silently declines to comment at
-  all past its own size threshold, so a large PR that skips this step
-  may receive zero real review. See `## PR Size and Review Discipline`
-  below for the incident that motivated this.
+- **Stratified Design** — dependencies flow downward only; no cycles; pure Domain layer.
+- **Simple Made Easy** — values over state; data over syntax; no speculative complexity.
+- **PR Discipline** — one stratum per PR. Commits must stay below 200 reportable lines; whole PRs must stay below 600.
+  Counts exclude blanks, comments, and generated paths, rather than using raw diff lines.
+  `bb commit-budget` enforces commits through the pre-commit hook; `bb pr-budget` enforces PRs in CI.
+  See the size rationale below. Branch from main; never bypass hooks.
+- **Specification-Driven** — N-series specs are implementation contracts; code conforms to specs.
+- **Adversarial Review Before Push** — read every changed file assuming something is wrong until verified.
+  Passing clj-kondo and tests alone is insufficient.
+  Apply this especially to generated and mechanical changes, including codemods, autofixers, and bulk renames.
+  A supposedly behavior-neutral diff still requires verification.
+  Copilot silently declines to comment past its own size threshold.
+  A large PR that skips self-review can therefore receive no real review.
+  The incident below explains this rule.
 
 ## PR Size and Review Discipline
 
-Two related, previously-missing gates, added 2026-07-26:
+Two gates were added on 2026-07-26:
 
-- **`bb pr-budget`** (CI, `pull_request` events only): rejects a PR
-  whose whole merge-base..head diff exceeds 600 reportable lines
-  (same blank/comment/generated-path exclusions as `bb commit-budget`).
-  This is distinct from `commit-budget`, which only ever looked at one
-  commit's staged diff — a PR made of a single large commit (or several
-  commits each individually under budget) sailed through unchecked
-  before this existed. Override via a `MINIFORGE_PR_BUDGET_OVERRIDE:
-  <rationale>` line in the PR description, visible to every reviewer
-  on the PR (unlike the commit-level env-var override, visible only in
-  local shell history / CI logs).
-  **Why 600, not 200:** the commit-level 200 is Smartbear 2010 / Cisco
-  2018 human review-throughput research; there's no equivalent
-  published number for LLM-driven review, and this codebase is
-  overwhelmingly agent-written and agent-reviewed. 600 is 3x the
-  commit ceiling (a PR bundling a small, coherent handful of
-  commit-sized steps, not a monolith) — an order of magnitude above the
-  human number, two orders of magnitude below the ~10-12k raw lines
-  where Copilot's own review actually broke down (below). Treat 600 as
-  calibrated-not-fixed, the same as the commit-level 200.
-- **Merge commits are exempt from `bb commit-budget`** (added
-  2026-08-07). A merge's staged diff carries every line arriving from
-  the merged-in branch, which the merging author did not write and
-  which was already budgeted on the PR that introduced it — a routine
-  `git merge github/main` to pick up an unrelated merged PR was failing
-  the gate on 491 lines of someone else's reviewed code. Requiring
-  `MINIFORGE_COMMIT_BUDGET_OVERRIDE` for that trains people to reach
-  for the override and dilutes its signal for the cases it exists for.
-  `bb pr-budget` still covers the whole PR diff in CI, and is not
-  affected: it diffs merge-base..head, so content the branch merged in
-  from the base is already excluded. The same exemption covers the
-  stratum-lint gate (`lint/stratum-staged`, added 2026-08-10, sharing
-  `commit-budget/merge-in-progress?`): a merge stages files from the
-  merged-in branch the merging author never touched, and a file
-  legitimately mid-way through its own namespace-split wave on main
-  (still SL003 there by design) was blocking unrelated merges,
-  forcing `MINIFORGE_STRATUM_BUDGET_MODE=warn`. Incoming files were
-  stratum-linted on their own PRs; CI lints the PR's own diff.
-- **Adversarial self-review before every push**, not just for PRs that
-  trip the size gate. Read the actual diff like a skeptical reviewer,
-  not the tool's own "this should be safe" framing.
+- **`bb pr-budget`** runs in CI on `pull_request` events.
+  It rejects a PR whose merge-base..head diff exceeds 600 reportable lines.
+  It uses the same blank, comment, and generated-path exclusions as `bb commit-budget`.
+  Commit-budget checks only one commit's staged diff.
+  Before PR-budget, one large commit or several smaller commits could produce an unchecked oversized PR.
+  An override requires `MINIFORGE_PR_BUDGET_OVERRIDE: <rationale>` in the PR description, visible to every reviewer.
+  Commit-level overrides appear only in local shell history or CI logs.
 
-**Why both, together:** a mechanical stratum-lint autofix program
-(2026-07 Wave 1 remediation, tracked in
-`work/stratum-lint-baseline-2026-07-24.md`) shipped several PRs of
-74-98 changed files and 10,000+ changed lines each, each as one
-`MINIFORGE_COMMIT_BUDGET_OVERRIDE`'d commit — legal under the
-commit-only gate that existed at the time. GitHub Copilot's automated
-review silently declined to post any comments at all on the largest of
-these (confirmed empirically: engaged fully at 9,906 raw changed
-lines, declined outright at 12,592 — somewhere in between is a real
-wall for automated coverage, undocumented by GitHub), so the only real
-review those PRs got was a dedicated adversarial pass run by hand,
-*after* several had already merged, itself costing 170-210k tokens per
-PR and still needing follow-up rounds to converge. That pass found
-real defects (a comment-attachment bug, an undisclosed behavior change
-buried inside a PR whose description claimed "mechanical, no logic
-changes," several stale/contradictory comments) that plain CI (lint +
-tests green) had not and could not catch. `pr-budget` exists so a PR
-that size can't reach merge without either being split up or
-explicitly flagging its own size with a reviewable rationale; the
-adversarial-review principle exists because passing CI was never
-sufficient evidence of correctness for a mechanical diff this large,
-and treating it as sufficient is what let the gap open in the first
-place.
+  **Why 600, not 200:** the commit ceiling follows Smartbear 2010 and Cisco 2018 human review-throughput research.
+  Equivalent published research does not exist for LLM-driven review.
+  This codebase is overwhelmingly agent-written and agent-reviewed.
+  The PR ceiling is three times the commit ceiling, allowing a small, coherent set of commits.
+  It remains far below the roughly 10–12k raw lines where Copilot's review broke down.
+  Treat 600 as calibrated, not fixed, just as with the commit ceiling.
+
+- **Merge commits are exempt from `bb commit-budget`**, added 2026-08-07.
+  A merge stages incoming code that its author did not write and whose original PR already counted it.
+  For example, merging main failed the gate on 491 lines from someone else's reviewed code.
+  Requiring an override for this trains people to use overrides routinely and dilutes their signal.
+  `bb pr-budget` still covers the PR's own diff.
+  Its merge-base..head comparison excludes content merged from the base.
+
+  The same exemption covers stratum-lint, through `lint/stratum-staged`, added 2026-08-10.
+  Both gates use `commit-budget/merge-in-progress?`.
+  Incoming files can still be mid-way through a namespace-split wave and carry SL003 by design.
+  Linting these files again blocked unrelated merges and encouraged warn-mode overrides.
+  Their original PRs ran stratum-lint; CI checks the current PR's own diff.
+
+- **Adversarial self-review before every push**, regardless of size.
+  Read the actual diff skeptically, including code presented as behavior-neutral.
+
+**Why both gates and review are needed:** the July 2026 stratum-lint remediation shipped PRs with 74–98 changed files
+  and 10,000+ changed lines.
+The work is tracked in `work/stratum-lint-baseline-2026-07-24.md`.
+Each PR used a commit-budget override.
+The commit-only gate permitted this; no PR-size gate existed.
+
+Copilot declined to post comments on the largest PRs.
+It reviewed a 9,906-line diff but declined a 12,592-line diff.
+The review threshold lies somewhere between those sizes and is undocumented by GitHub.
+Dedicated adversarial reviews ran after several PRs had merged, costing 170–210k tokens per PR and requiring follow-ups.
+
+Those reviews found a comment-attachment bug, an undisclosed behavior change, and stale or contradictory comments.
+Lint and tests had not caught them.
+PR-budget requires oversized work to be split or explicitly flagged with a reviewable rationale.
+Adversarial review remains necessary because green CI alone cannot establish correctness.
 
 ## Writing Spec Task Descriptions (`work/*.spec.edn`)
 
-Task descriptions in `work/` specs are the primary context given to agents.
-Stale descriptions cause agents to misidentify what's done and try to re-implement
-existing work — which leads to syntax errors and broken commits.
+Task descriptions in `work/` specs are agents' primary context.
+Stale descriptions cause agents to reimplement completed work, leading to syntax errors and broken commits.
 
 **Rules:**
 
-- **Never use line numbers** (e.g., "In foo (line 123)"). Lines shift with every edit.
-  Use function/variable names instead: "In the `foo` function".
-- **Reference function and variable names** — these survive refactors far better.
-  Agents use grep/read tools to locate code by name, not by line.
+- **Never use line numbers**, such as "In foo (line 123)." Lines shift with every edit.
+  Use function and variable names instead.
+- **Reference function and variable names** so agents can locate code through search.
 - **Describe WHAT to implement and WHY**, not WHERE in the file.
-- **Keep scope small** — one acceptance criterion per task where possible.
-- **Remove tasks that are already done** rather than leaving them with stale descriptions.
-  Agents that find "already implemented" tasks may still try to change things; removing
-  the task from the spec is cleaner than hoping the agent's judgment holds.
+- **Keep scope small** — one acceptance criterion per task.
+- **Remove completed tasks.**
+  Leaving them in the spec can cause agents to reimplement them.
+  Remove the task instead of expecting every agent to recognize that it is done.
 
 Bad: `In enter-verify (line 116): remove artifact retrieval (lines 139-148).`
-Good: `In the enter-verify function: remove artifact retrieval from [:execution/phase-results :implement].`
+Good: `In enter-verify: remove artifact retrieval from [:execution/phase-results :implement].`
 
 ## Container Runtime (N11-delta)
 
-Miniforge runs every task inside an OCI container. The runtime adapter
+In governed mode (`--execution-mode governed`) miniforge runs every task
+inside an OCI container; the default local mode runs it in a host git
+worktree, unisolated. The runtime adapter
 (see `components/dag-executor/src/.../runtime/`) treats Docker, Podman,
 and nerdctl as interchangeable providers of the same OCI surface.
 

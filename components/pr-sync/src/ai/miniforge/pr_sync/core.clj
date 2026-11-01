@@ -27,17 +27,16 @@
 
    Pure status mapping lives in ai.miniforge.pr-sync.status."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.config.interface.file :as config-file]
    [ai.miniforge.pr-sync.messages :as messages]
    [ai.miniforge.pr-sync.status :as status]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
    [clojure.string :as str]
-   [cheshire.core :as json])
-  (:import
-   [java.nio.channels FileChannel]
-   [java.nio.file Paths StandardOpenOption]))
+   [cheshire.core :as json]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -50,18 +49,6 @@
 
 (def ^{:stratum 0} gitlab-repo-slug-pattern
   #"^gitlab:[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+$")
-
-(def ^{:stratum 0} ^:private config-lock-timeout-ms
-  "Upper bound (ms) on how long `with-config-lock!` polls for the advisory
-   file lock before giving up.  Bounded so a contended lock never stalls a CLI
-   command for more than half a second."
-  500)
-
-(def ^{:stratum 0} ^:private config-lock-poll-ms
-  "Backoff (ms) between `.tryLock` attempts while waiting for the config lock.
-   Small relative to `config-lock-timeout-ms` so contention resolves promptly
-   without busy-spinning."
-  25)
 
 ;------------------------------------------------------------------------------ Layer 0b
 ;; Pure helpers
@@ -246,63 +233,6 @@
     repo))
 
 ;; Fleet config I/O
-(defn- ^{:stratum 1} with-config-lock!
-  "Acquire an exclusive advisory JVM file lock on `path`, call `thunk`, release.
-
-   Polls for up to `config-lock-timeout-ms` (500 ms) in `config-lock-poll-ms`
-   (25 ms) increments before giving up.  Returns `(result-failure ...)` when
-   the lock cannot be acquired — the expected no-op for concurrent callers.
-   Exception: same-JVM re-entrancy (OverlappingFileLockException) and a
-   concurrently closed channel (ClosedChannelException) return a failure
-   immediately without entering the poll loop.
-
-   The file at `path` is created if absent so the FileChannel can open before
-   the first write occurs.
-
-   Why advisory locking: the OS provides no blocking tryLock-with-timeout on
-   file locks; `.tryLock` is non-blocking and `.lock` waits forever.  We poll
-   with a bounded deadline (≤ 500 ms); callers block for at most one timeout
-   window regardless of calling context."
-  [path thunk]
-  (let [_        (some-> (io/file path) .getParentFile .mkdirs)
-        nio-path (Paths/get path (make-array String 0))
-        opts     (into-array StandardOpenOption
-                             [StandardOpenOption/READ
-                              StandardOpenOption/WRITE
-                              StandardOpenOption/CREATE])]
-    (try
-      (with-open [^FileChannel ch (FileChannel/open nio-path opts)]
-        (let [deadline (+ (System/currentTimeMillis) config-lock-timeout-ms)]
-          (loop []
-            (if-let [^java.lang.AutoCloseable lk (.tryLock ch)]
-              ;; FileLock implements AutoCloseable; .close releases the lock.
-              ;; Hinting AutoCloseable keeps the ns loadable under babashka,
-              ;; which does not expose java.nio.channels.FileLock.
-              (try
-                (thunk)
-                (catch Exception thunk-e
-                  (result-failure (messages/t :config-lock/update-failed {:error (ex-msg thunk-e)})
-                                  {:path path :exception (ex-msg thunk-e)}))
-                (finally (.close lk)))
-              (if (< (System/currentTimeMillis) deadline)
-                (do (Thread/sleep config-lock-poll-ms) (recur))
-                (result-failure (messages/t :config-lock/locked)
-                                {:path path}))))))
-      (catch InterruptedException _
-        ;; Restore interrupt flag for cooperative-cancellation callers.
-        (.interrupt (Thread/currentThread))
-        (result-failure (messages/t :config-lock/interrupted) {:path path}))
-      (catch Exception e
-        ;; OverlappingFileLockException — same-JVM re-entrant attempt.
-        ;; ClosedChannelException — channel closed concurrently.
-        ;; Both mean the lock is unavailable; surface the expected :locked no-op.
-        (if (contains? #{"java.nio.channels.OverlappingFileLockException"
-                         "java.nio.channels.ClosedChannelException"}
-                       (.getName (class e)))
-          (result-failure (messages/t :config-lock/unavailable) {:path path})
-          (result-failure (messages/t :config-lock/acquire-failed {:error (ex-msg e)})
-                          {:path path}))))))
-
 (defn ^{:stratum 1} load-fleet-config
   "Load fleet configuration from ~/.miniforge/config.edn.
    Returns {:fleet {:repos [...]}} or default empty config."
@@ -319,12 +249,21 @@
        {:fleet {:repos []}}))))
 
 (defn ^{:stratum 1} save-fleet-config!
-  "Write fleet configuration to disk."
+  "Write fleet configuration to disk under the shared config lock. Refuses, with
+   an anomaly, to replace a config.edn that does not parse."
   ([config] (save-fleet-config! config default-fleet-config-path))
   ([config path]
-   (let [file (io/file path)]
-     (.mkdirs (.getParentFile file))
-     (spit file (pr-str config)))))
+   (config-file/update-config! path (constantly config))))
+
+(defn ^{:stratum 1} update-fleet-repos!
+  "Set [:fleet :repos] to `(f config)` under the shared config lock, keeping every
+   other key. `(result-success (summarize old-config new-repos))`, or a failure
+   naming the file when it does not parse or cannot be written."
+  [path f summarize]
+  (let [result (config-file/update-config! path #(assoc-in % [:fleet :repos] (f %)))]
+    (if (anomaly/anomaly? result)
+      (result-failure (:anomaly/message result) {:path path :anomaly result})
+      (result-success (summarize (:before result) (get-in result [:after :fleet :repos]))))))
 
 (defn ^{:stratum 1} fetch-gitlab-diff-stats-batch
   "Fetch diff stats for multiple MRs in a single GraphQL query.
@@ -516,17 +455,12 @@
 
        :else
        (merge {:repo repo}
-              (with-config-lock! path
-                (fn []
-                  (let [cfg (load-fleet-config path)
-                        repos (normalized-repos cfg)
-                        exists? (some #{repo} repos)
-                        next-repos (if exists? repos (conj repos repo))
-                        next-cfg (assoc-in cfg [:fleet :repos] (vec (distinct next-repos)))]
-                    (save-fleet-config! next-cfg path)
-                    (result-success {:added? (not (boolean exists?))
-                                     :repo repo
-                                     :repos (get-in next-cfg [:fleet :repos])})))))))))
+              (update-fleet-repos! path
+                                   #(vec (distinct (conj (normalized-repos %) repo)))
+                                   (fn [before after]
+                                     {:added? (not (some #{repo} (normalized-repos before)))
+                                      :repo repo
+                                      :repos after})))))))
 
 (defn ^{:stratum 3} remove-repo!
   "Remove a repository slug from fleet configuration.
@@ -537,17 +471,12 @@
      (if (str/blank? repo)
        (result-failure (messages/t :repo/required-short) {:repo repo})
        (merge {:repo repo}
-              (with-config-lock! path
-                (fn []
-                  (let [cfg (load-fleet-config path)
-                        repos (normalized-repos cfg)
-                        existed? (some #{repo} repos)
-                        next-repos (vec (remove #{repo} repos))
-                        next-cfg (assoc-in cfg [:fleet :repos] next-repos)]
-                    (save-fleet-config! next-cfg path)
-                    (result-success {:removed? (boolean existed?)
-                                     :repo repo
-                                     :repos next-repos})))))))))
+              (update-fleet-repos! path
+                                   #(vec (remove #{repo} (normalized-repos %)))
+                                   (fn [before after]
+                                     {:removed? (boolean (some #{repo} (normalized-repos before)))
+                                      :repo repo
+                                      :repos after})))))))
 
 (defn ^{:stratum 3} fetch-open-github-prs
   [repo]
@@ -622,22 +551,16 @@
                          distinct
                          (take limit*)
                          vec)]
-          ;; Hold the advisory lock across the read→merge→write so a concurrent
-          ;; add-repo! or remove-repo! cannot overwrite our merged result.
           (merge {:owner owner*}
-                 (with-config-lock! path
-                   (fn []
-                     (let [cfg (load-fleet-config path)
-                           existing (normalized-repos cfg)
-                           merged (vec (distinct (concat existing repos)))
-                           added (vec (remove (set existing) merged))
-                           next-cfg (assoc-in cfg [:fleet :repos] merged)]
-                       (save-fleet-config! next-cfg path)
-                       (result-success {:owner owner*
-                                        :discovered (count repos)
-                                        :added (count added)
-                                        :repos merged
-                                        :added-repos added}))))))
+                 (update-fleet-repos! path
+                                      #(vec (distinct (concat (normalized-repos %) repos)))
+                                      (fn [before after]
+                                        (let [added (vec (remove (set (normalized-repos before)) after))]
+                                          {:owner owner*
+                                           :discovered (count repos)
+                                           :added (count added)
+                                           :repos after
+                                           :added-repos added})))))
         (catch Exception e
           (result-failure "Failed to parse repository list."
                           {:error (ex-msg e)}))))))

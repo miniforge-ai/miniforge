@@ -34,7 +34,9 @@
   (let [workflow-config (:workflow
                          (workflow/load-workflow
                           :opsv "1.0.0" {:skip-cache? true}))
-        stream (event-stream/create-event-stream)
+        ;; In-memory: the default file sink would write this run under the
+        ;; developer's real ~/.miniforge/events.
+        stream (event-stream/create-event-stream {:sinks []})
         result (workflow/run-pipeline workflow-config
                                       (support/workflow-input)
                                       (support/workflow-options
@@ -118,6 +120,9 @@
         verification-run (:opsv/verification-run verification)
         actuation (:opsv/actuation-record
                    (support/phase-output result :opsv/actuate))]
+    (testing "nothing is written under the real ~/.miniforge/events"
+      (is (not-any? #(.exists (event-stream/workflow-dir %))
+                    (distinct (keep :workflow/id lifecycle-events)))))
     (testing "the shared runner executes all registered phases"
       (is (= :completed (:execution/status result)))
       (is (= (set (conj opsv/phase-keys :done))

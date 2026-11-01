@@ -26,7 +26,8 @@
   (:require
    [babashka.fs :as fs]
    [clojure.string :as str]
-   [ai.miniforge.cli.app-config.profile :as profile]))
+   [ai.miniforge.cli.app-config.profile :as profile]
+   [ai.miniforge.config.interface :as config]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -43,8 +44,12 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} home-dir []
-  (or (profile/getenv "MINIFORGE_HOME")
+(defn ^{:stratum 1} home-dir
+  "MINIFORGE_HOME when set and not blank, else the profile's default. A
+   blank value is unset through config's one normalizer, so the CLI and
+   core agree on the home (`mf resume` reads where runs record)."
+  []
+  (or (config/miniforge-home-override (profile/getenv "MINIFORGE_HOME"))
       (default-home-dir)))
 
 ;------------------------------------------------------------------------------ Layer 2

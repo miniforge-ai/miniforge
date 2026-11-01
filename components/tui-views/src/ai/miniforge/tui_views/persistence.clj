@@ -341,7 +341,8 @@
   [workflow-id events]
   (or (get-in (workflow-start-event events) [:workflow/spec :name])
       (get-in (workflow-start-event events) [:workflow/spec :workflow/name])
-      (str "workflow-" (subs (str workflow-id) 0 8))))
+      (let [s (if (keyword? workflow-id) (name workflow-id) (str workflow-id))]
+        (str "workflow-" (subs s 0 (min 8 (count s)))))))
 
 (defn ^{:stratum 1} derive-phase
   "Derive current/last phase from events."

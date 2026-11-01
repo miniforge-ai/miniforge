@@ -6,8 +6,8 @@
 
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.12.0-draft
-**Date:** 2026-10-20
+**Version:** 0.13.0-draft
+**Date:** 2026-10-31
 **Status:** Draft
 **Conformance:** MUST
 
@@ -2370,6 +2370,9 @@ originating `control-action/requested` (§3.15).
  :phase/name keyword
  :checkpoint/path string
  :checkpoint/size-bytes long
+ :checkpoint/location                 ; OPTIONAL paired storage identity, payload 1.1.0
+ {:checkpoint/root string
+  :checkpoint/run-directory string}
 
  :message "Checkpoint written for phase {phase/name}"}
 ```
@@ -2394,9 +2397,29 @@ originating `control-action/requested` (§3.15).
  :machine/state keyword
  :snapshot/path string
  :snapshot/size-bytes long
+ :checkpoint/location                 ; OPTIONAL paired storage identity, payload 1.1.0
+ {:checkpoint/root string
+  :checkpoint/run-directory string}
 
  :message "Machine snapshot written at state {machine/state}"}
 ```
+
+For both successful-write event types, `:checkpoint/location` MAY be absent.
+When present, it MUST contain both nonempty paths: the validated canonical
+checkpoint root and the physical canonical run directory captured for that write.
+The producer MUST use payload version `1.1.0` when supplying this record.
+`:workflow/id` MUST remain the logical Workflow UUID; neither the physical
+directory's basename nor an inferred parent of the published file replaces it.
+The run directory and file MAY lie outside the root through trusted aliases.
+
+Consumers MUST retain support for payload `1.0.0`, including records without
+location metadata and the deployed optional top-level `:checkpoint/root` string.
+That legacy field MUST NOT be reinterpreted as a run directory. When the paired
+record is present, consumers MUST use its physical run directory rather than
+derive it from a file path or root plus UUID. An unreadable or invalid locator
+MUST NOT authorize pruning retained events; uncertainty MUST preserve the hold.
+Scope and durable retention class remain unchanged (§6). The product-owner
+approval recorded in the specification index is this amendment's decision source.
 
 #### workflow/machine-snapshot-write-failed
 
@@ -3660,6 +3683,9 @@ N3 amendment per §6.1, not silent acceptance.
 
 **Version History:**
 
+- 0.13.0-draft (2026-10-31): Product owner approved optional paired
+  `:checkpoint/location` on checkpoint/snapshot write receipts, payload 1.1.0,
+  preserving 1.0.0 compatibility, logical Workflow identity and retention safety.
 - 0.12.0-draft (2026-10-20): Product owner approved registration of
   `workflow/phase-heartbeat` with Workflow scope, ephemeral retention (24-hour
   minimum), and separate liveness/progress. Payload 2.0.0 introduces explicit

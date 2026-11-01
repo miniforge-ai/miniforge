@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dogfood-test
   "Dogfooding tests - using miniforge to improve miniforge.
 
@@ -25,6 +24,8 @@
    - The meta-meta loop (this session) only intervenes when needed
 
    Tests marked ^:dogfood require real LLM access and have higher budgets.
+   The ones that call the real claude CLI are also marked ^:external;
+   bb test:dev skips those unless MINIFORGE_TEST_EXTERNAL=true.
    Run with: clojure -M:dev:test -e \"(require 'ai.miniforge.dogfood-test) (clojure.test/run-tests 'ai.miniforge.dogfood-test)\""
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
@@ -35,7 +36,6 @@
 ;; ============================================================================
 ;; Fixtures
 ;; ============================================================================
-
 (use-fixtures :each
   (fn [f]
     (try
@@ -43,11 +43,12 @@
       (finally
         (harness/cleanup-test-state!)))))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Dogfooding Scenarios
 ;; ============================================================================
-
-(def dogfood-specs
+(def ^{:stratum 0} dogfood-specs
   "Test specifications for dogfooding."
 
   {:add-docstring
@@ -89,8 +90,7 @@
 ;; ============================================================================
 ;; Helper Functions
 ;; ============================================================================
-
-(defn extract-code
+(defn ^{:stratum 0} extract-code
   "Extract code from LLM response, handling markdown code blocks."
   [content]
   (when content
@@ -98,7 +98,7 @@
       (second match)
       content)))
 
-(defn valid-clojure?
+(defn ^{:stratum 0} valid-clojure?
   "Check if string is valid Clojure code."
   [code]
   (when code
@@ -107,11 +107,12 @@
         true)
       (catch Exception _ false))))
 
+;------------------------------------------------------------------------------ Layer 1
+
 ;; ============================================================================
 ;; Mock Tests (Fast, deterministic)
 ;; ============================================================================
-
-(deftest mock-dogfood-workflow-test
+(deftest ^{:stratum 1} mock-dogfood-workflow-test
   (testing "Dogfood workflow structure with mock LLM"
     (let [mock-plan (str "## Implementation Plan\n\n"
                          "1. Add docstring to the function\n"
@@ -137,7 +138,7 @@
         (is (keyword? (:status result))
             "Result should have a status")))))
 
-(deftest code-extraction-test
+(deftest ^{:stratum 1} code-extraction-test
   (testing "Extracts code from markdown"
     (let [content "Here is the code:\n```clojure\n(defn foo [] 42)\n```"
           code (extract-code content)]
@@ -151,7 +152,7 @@
   (testing "Handles nil"
     (is (nil? (extract-code nil)))))
 
-(deftest clojure-validation-test
+(deftest ^{:stratum 1} clojure-validation-test
   (testing "Valid Clojure is recognized"
     (is (valid-clojure? "(defn foo [] 42)")))
 
@@ -161,8 +162,7 @@
 ;; ============================================================================
 ;; Real LLM Tests (Requires Claude CLI)
 ;; ============================================================================
-
-(deftest ^:dogfood ^:integration real-docstring-addition-test
+(deftest ^{:stratum 1} ^:dogfood ^:integration ^:external real-docstring-addition-test
   (testing "Add docstring to real function using Claude CLI"
     (when (harness/cli-available? :claude)
       (let [client (llm/create-client {:backend :claude})
@@ -181,7 +181,7 @@
             (is (re-find #"\"[^\"]+\"" code)
                 "Code should contain a docstring")))))))
 
-(deftest ^:dogfood ^:integration real-test-generation-test
+(deftest ^{:stratum 1} ^:dogfood ^:integration ^:external real-test-generation-test
   (testing "Generate tests for function using Claude CLI"
     (when (harness/cli-available? :claude)
       (let [client (llm/create-client {:backend :claude})
@@ -204,7 +204,7 @@
             (is (re-find #"is\s*\(" code)
                 "Code should contain test assertions")))))))
 
-(deftest ^:dogfood ^:integration real-bug-fix-test
+(deftest ^{:stratum 1} ^:dogfood ^:integration ^:external real-bug-fix-test
   (testing "Fix nil-handling bug using Claude CLI"
     (when (harness/cli-available? :claude)
       (let [client (llm/create-client {:backend :claude})
@@ -233,8 +233,7 @@
 ;; ============================================================================
 ;; Self-Healing Test (Meta-loop validation)
 ;; ============================================================================
-
-(deftest ^:dogfood self-healing-mock-test
+(deftest ^{:stratum 1} ^:dogfood self-healing-mock-test
   (testing "Self-healing workflow with mock responses"
     ;; Simulate a workflow that fails, then succeeds after self-healing
     (let [;; First attempt fails with bad code
@@ -258,7 +257,6 @@
 ;; ============================================================================
 ;; Rich Comment
 ;; ============================================================================
-
 (comment
   ;; Run all mock tests (fast)
   (clojure.test/run-tests 'ai.miniforge.dogfood-test)

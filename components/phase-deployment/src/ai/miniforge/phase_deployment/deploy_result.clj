@@ -80,7 +80,9 @@
     (-> (phase-context
          ctx start-time :completed
          {:status :success
-          :output {:pod-state pod-state :images images}
+          ;; The :deploy-healthy gate validates the output: pod counts at
+          ;; the top level, as in :artifact :content.
+          :output (assoc pod-state :pod-state pod-state :images images)
           :artifact {:content pod-state
                      :type :deployment-state
                      :app-label (:app-label deploy-config)
@@ -96,8 +98,12 @@
         (get failure-details (:deploy/stage deployment)
              (get failure-details :apply))]
     (log/error logger :deploy event
-               {:data {:stage (:deploy/stage deployment)
-                       :error (:deploy/failure deployment)}})
+               {:data (cond-> {:stage (:deploy/stage deployment)
+                               :error (:deploy/failure deployment)}
+                        (:deploy/revocation-failure deployment)
+                        (assoc :grant-id (:deploy/grant-id deployment)
+                               :grant-revocation-failure
+                               (:anomaly/message (:deploy/revocation-failure deployment))))})
     (-> (phase-context
          ctx start-time :failed
          {:status status

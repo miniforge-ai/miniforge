@@ -7,6 +7,7 @@
             [ai.miniforge.dag-executor.interface :as dag-exec]
             [ai.miniforge.llm.interface :as llm-impl]
             [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.tenancy.interface :as tenancy]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.fsm :as workflow-fsm]
             [ai.miniforge.workflow.messages :as messages]
@@ -35,8 +36,12 @@
 
 (defn ^{:stratum 0} acquire-environment
   "Acquire an isolated execution environment (worktree or Docker capsule).
-   Returns [acquired-env opts'] where acquired-env is nil when pre-acquired."
+   Returns [acquired-env opts'] where acquired-env is nil when pre-acquired.
+   First refuses a run that is not governed when the user config requires
+   governed execution, whether or not its environment was pre-acquired."
   [workflow input opts]
+  (env/refuse-local-when-governed-required! (:workflow/id workflow) (:execution-mode opts)
+                                            (:executor opts))
   (if (and (:executor opts) (:environment-id opts))
     [nil opts]
     (let [repo-url (get opts :repo-url (get input :repo-url))
@@ -49,14 +54,40 @@
                      :repo-path       repo-path
                      :execution-mode  (:execution-mode opts)
                      :executor-config (:executor-config opts)
+                     :runtime-config  (:runtime-config opts)
                      :resume-workspace (:resume-workspace opts)})]
       [acquired (if acquired
                   (merge opts {:branch branch} acquired)
                   opts)])))
 
+(defn ^{:stratum 0} admit-input
+  "Caller input as a fresh run admits it, once: without the input keys a
+   pipeline phase's lifecycle owns (its interceptor's :owned-input-keys).
+   Only that lifecycle writes them, so a caller's value is never trusted. A
+   resume is not admitted: it continues the checkpointed run's input whole,
+   lifecycle-owned keys included."
+  [pipeline input opts]
+  (if (or (not (map? input)) (:resume-machine-snapshot opts) (:resume-phase-results opts))
+    input
+    (apply dissoc input (mapcat :owned-input-keys pipeline))))
+
 (defn- ^{:stratum 0} governed-capsule? [opts]
   (boolean (and (= :governed (:execution-mode opts))
                 (:executor opts) (:environment-id opts))))
+
+(defn- ^{:stratum 0} unowned-run-anomaly
+  "With `:require-operator?` set, an anomaly when a fresh run has no valid
+   `:acting` context; otherwise nil. A resume is not checked here: the
+   runner would persist the refusal over the run's checkpoint, so the
+   resume command refuses before it writes anything."
+  [opts]
+  (when (and (:require-operator? opts)
+             (not (:resume-machine-snapshot opts)))
+    (let [acting (tenancy/require-acting opts :acting)]
+      (when (anomaly/anomaly? acting)
+        (anomaly/anomaly :invalid-input
+                         (messages/t :tenancy/operator-required)
+                         {:tenancy/refusal acting})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -89,7 +120,11 @@
                            dag-exec/execute!
                            (get opts :executor)
                            (get opts :environment-id)
-                           (get opts :worktree-path (defaults/default-workdir))))
+                           ;; The capsule's own checkout: the host worktree path
+                           ;; a runner-acquired capsule records does not exist in it.
+                           (or (get opts :capsule-workdir)
+                               (get opts :worktree-path)
+                               (defaults/default-workdir))))
         base-context (if (and resume-machine-snapshot resume-phase-results)
                        (ctx/restore-context workflow input
                                             resume-machine-snapshot
@@ -104,6 +139,7 @@
                :execution/worktree-path (get opts :worktree-path
                                              (get opts :sandbox-workdir))
                :execution/mode mode
+               :execution/capsule-workdir (get opts :capsule-workdir)
                :execution/started-at (java.time.Instant/now)
                :execution/environment-metadata environment-metadata
                :execution/execute-fn (when governed? dag-exec/execute!)
@@ -129,13 +165,15 @@
 
    Returns the assembled execution context on success, or an
    `:invalid-input` anomaly when `:governed` mode is requested but no
-   capsule executor + `:environment-id` were supplied in `opts`. Governed
-   mode forbids worktree fallback (N11 §7.4).
+   capsule executor + `:environment-id` were supplied in `opts` (governed
+   mode forbids worktree fallback, N11 §7.4), or when `:require-operator?`
+   is set and a fresh run has no valid acting context.
 
    The supplied run-pipeline port is stored unchanged for nested execution;
    context preparation has no dependency on the runner namespace."
   [workflow input opts run-pipeline]
   (or (governed-capsule-missing-anomaly opts)
+      (unowned-run-anomaly opts)
       (assemble-initial-context workflow input opts run-pipeline)))
 
 (comment ::runner-preparation)
