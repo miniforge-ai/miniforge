@@ -208,13 +208,15 @@
   (persist-workspace! [_this environment-id opts]
     (let [cred-env (delay (remote-credential-env descriptor git-remotes environment-id))
           exec!    (workspace-exec-fn descriptor environment-id
-                                      (get opts :workdir default-workdir) cred-env)]
+                                      (get opts :workdir default-workdir) cred-env
+                                      (some-> git-remotes deref (get environment-id)))]
       (workspace/git-persist! exec! (workspace-opts opts git-remotes environment-id))))
 
   (restore-workspace! [_this environment-id opts]
     (let [cred-env (delay (remote-credential-env descriptor git-remotes environment-id))
           exec!    (workspace-exec-fn descriptor environment-id
-                                      (get opts :workdir default-workdir) cred-env)]
+                                      (get opts :workdir default-workdir) cred-env
+                                      (some-> git-remotes deref (get environment-id)))]
       (workspace/git-restore! exec! (workspace-opts opts git-remotes environment-id)))))
 
 ;------------------------------------------------------------------------------ Layer 1

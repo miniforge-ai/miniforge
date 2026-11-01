@@ -74,11 +74,21 @@
   "exec-fn for `workspace/git-persist!` and `git-restore!`. `cred-env` is a
    delay that only push and fetch force: a persist with nothing to push
    resolves no token, and add, status and commit, which run hooks and
-   fsmonitor the untrusted workspace defines, never see the credential."
-  [descriptor container-id workdir cred-env]
+   fsmonitor the untrusted workspace defines, never see the credential.
+   When the delay yields no HTTP credential, a network command addressed to
+   the recorded `remote`'s :https-url goes to its :repo-url instead, the URL
+   `bootstrap-workspace!` cloned without one (an SSH clone with the image's
+   key), rather than unauthenticated HTTPS."
+  [descriptor container-id workdir cred-env {:keys [repo-url https-url] :as _remote}]
   (let [exec! (container-exec-fn descriptor container-id workdir)]
     (fn [cmd]
-      (exec! cmd (when (git-network-command? cmd) @cred-env)))))
+      (if (git-network-command? cmd)
+        (let [env @cred-env]
+          (exec! (if (or (seq env) (= repo-url https-url))
+                   cmd
+                   (mapv #(if (= https-url %) repo-url %) cmd))
+                 env))
+        (exec! cmd nil)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
