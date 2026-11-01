@@ -34,6 +34,7 @@
    [ai.miniforge.event-stream.layout-tail :as layout-tail]
    [ai.miniforge.event-stream.operator-requests :as operator-requests]
    [ai.miniforge.event-stream.reader :as reader]
+   [ai.miniforge.event-stream.recovery-location-spec :as recovery-location]
    [ai.miniforge.event-stream.sinks :as sinks]
    [ai.miniforge.event-stream.workflow-discovery :as discovery]
    [ai.miniforge.event-stream.timeline :as timeline]))
@@ -338,9 +339,17 @@
   "Construct an N3 governed OPSV effect disposition event."
   opsv/actuation-disposition)
 
+(def ^{:stratum 0} CheckpointLocation
+  "Paired nonempty root/run-directory strings; producers supply validated canonical paths."
+  recovery-location/Location)
+
+(def ^{:stratum 0} checkpoint-location
+  "Construct paired canonical root and physical run-directory metadata from validated paths; no I/O."
+  events/checkpoint-location)
+
 (def ^{:stratum 0} checkpoint-written
   "Construct a checkpoint write fact: stream, workflow UUID, phase, path, byte size,
-   checkpoint root."
+   optional location record (1.1.0) or legacy root string (1.0.0)."
   events/checkpoint-written)
 
 (def ^{:stratum 0} checkpoint-write-failed
@@ -349,7 +358,7 @@
 
 (def ^{:stratum 0} machine-snapshot-written
   "Construct a snapshot write fact: stream, workflow UUID, state, path, byte size,
-   checkpoint root."
+   optional location record (1.1.0) or legacy root string (1.0.0)."
   events/machine-snapshot-written)
 
 (def ^{:stratum 0} machine-snapshot-write-failed

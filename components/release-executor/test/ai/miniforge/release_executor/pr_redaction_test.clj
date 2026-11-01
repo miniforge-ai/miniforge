@@ -22,6 +22,7 @@
    [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.release-executor.git :as git]
    [ai.miniforge.release-executor.sandbox :as sandbox]
+   [ai.miniforge.release-executor.sandbox.commands :as commands]
    [babashka.process :as process]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
@@ -46,12 +47,13 @@
     @calls))
 
 (defn- ^{:stratum 0} capture-sandbox-cmds
-  "Call `f` with sandbox/exec! captured; returns each command string."
+  "Call `f` with commands/exec! (which the sandbox operations call) captured;
+   returns each command string."
   [f]
   (let [cmds (atom [])]
-    (with-redefs [sandbox/exec! (fn [_executor _env-id cmd & _]
-                                  (swap! cmds conj cmd)
-                                  {:success? true :output "https://github.com/o/r/pull/7"})]
+    (with-redefs [commands/exec! (fn [_executor _env-id cmd & _]
+                                   (swap! cmds conj cmd)
+                                   {:success? true :output "https://github.com/o/r/pull/7"})]
       (f))
     @cmds))
 
