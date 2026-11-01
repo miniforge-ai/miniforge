@@ -93,7 +93,9 @@
   (workspace/resolve-execution-workdir ctx "release"))
 
 (def ^{:stratum 0} ^:private commit-sha-pattern
-  #"[0-9a-f]{7,40}")
+  "A full or abbreviated commit sha: 7 to 40 hex digits (SHA-1), up to 64
+   (SHA-256 repositories). A branch name, a range or any other ref fails it."
+  #"[0-9a-f]{7,64}")
 
 (defn- ^{:stratum 0} release-base-shas
   "The exact commits the task branch is measured from: the shas among the
@@ -111,13 +113,31 @@
         (concat (task-base/recorded-refs ctx)
                 [(get-in ctx [:execution/environment-metadata :base-sha])])))
 
-(def ^{:stratum 0} ^:private command-failure
-  "See release-scan/command-failure."
-  release-scan/command-failure)
+(defn- ^{:stratum 0} capsule-target
+  "The capsule a governed run executes in, as {:execute-fn :executor
+   :env-id :workdir}, or nil for a host run. `:workdir` is the capsule's own
+   checkout (`:execution/capsule-workdir`): the host worktree path
+   `worktree-path` does not exist inside the capsule."
+  [ctx worktree-path]
+  (let [execute-fn (get ctx :execution/execute-fn)
+        executor   (get ctx :execution/executor)
+        env-id     (get ctx :execution/environment-id)]
+    (when (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
+      {:execute-fn execute-fn
+       :executor   executor
+       :env-id     env-id
+       ;; The runner sets the key on every run, nil without a capsule
+       ;; checkout, so a get default would never apply.
+       :workdir    (or (get ctx :execution/capsule-workdir) worktree-path)})))
 
-(def ^{:stratum 0} ^:private git-status-failed
-  "See release-scan/git-status-failed."
-  release-scan/git-status-failed)
+(defn- ^{:stratum 0} porcelain-scan-entry
+  "A release-scan entry for one `git status` [status path] pair: no mode,
+   so release-scan reads it as a file unless it was deleted."
+  [[xy path]]
+  {:status (cond (str/includes? xy "D") "D"
+                 (= "??" xy)            "A"
+                 :else                  "M")
+   :path   path})
 
 (defn- ^{:stratum 0} porcelain-z-entries
   "Parse `git status --porcelain -z` output into [status path] pairs.
@@ -308,8 +328,8 @@
   [root-path]
   (try
     (let [{:keys [exit out err]} (shell/sh "git" "status" "--porcelain" "-uall" "-z" :dir root-path)]
-      (if-let [failure (command-failure "git status --porcelain -uall -z" exit err nil)]
-        (git-status-failed root-path failure)
+      (if-let [failure (release-scan/command-failure "git status --porcelain -uall -z" exit err nil)]
+        (release-scan/git-status-failed root-path failure)
         (->> (porcelain-z-entries out)
              (keep (fn [[xy path]]
                      (let [file (io/file root-path path)]
@@ -323,13 +343,14 @@
              (filter agent/substantive-file?)
              vec)))
     (catch Exception e
-      (git-status-failed root-path {:detail (or (ex-message e) (.getName (class e)))
-                                    :data   {:exception/class (.getName (class e))}}))))
+      (release-scan/git-status-failed root-path {:detail (or (ex-message e) (.getName (class e)))
+                                                 :data   {:exception/class (.getName (class e))}}))))
 
 (defn- ^{:stratum 1} git-dirty-files-capsule
   "Scan git working tree inside a task capsule via execute-fn (N11 §9.3).
    Used for K8s executors where the filesystem is not locally accessible.
    execute-fn is dag-exec/execute! passed through context to avoid cross-component requires.
+   `workdir` is the capsule's checkout (see capsule-target).
 
    Applies the same `agent/substantive-file?` filter as the local variant so
    session markers and miniforge runtime artifacts don't slip through the
@@ -337,50 +358,37 @@
 
    Returns a `:release/git-status-failed` anomaly when `git status` or a
    file's `cat` fails in the capsule, rather than `[]` or empty content."
-  [execute-fn executor env-id root-path]
-  (try
-    (let [run (fn [command]
-                (let [result (execute-fn executor env-id command {:workdir root-path})]
-                  {:out     (or (get-in result [:data :stdout]) "")
-                   :failure (command-failure command
-                                             (get-in result [:data :exit-code])
-                                             (get-in result [:data :stderr])
-                                             (:error result))}))
-          read-entry (fn [[status path]]
-                       (if (str/includes? status "D")
-                         {:path path :content "" :action :delete}
-                         ;; The command runs under `sh -c`: quote the path so
-                         ;; spaces, `$`, `;` and the like reach cat as-is.
-                         (let [{:keys [out failure]}
-                               (run (str "cat " (agent/shell-quote (str root-path "/" path))))]
-                           (if failure
-                             (git-status-failed root-path failure)
-                             {:path    path
-                              :content out
-                              :action  (if (= "??" status) :create :modify)}))))
-          {:keys [out failure]} (run "git status --porcelain -uall -z")]
-      (if failure
-        (git-status-failed root-path failure)
-        (reduce (fn [files entry]
-                  (let [entry (read-entry entry)]
-                    (if (anomaly/anomaly? entry)
-                      (reduced entry)
-                      (conj files entry))))
-                []
-                (filter (fn [[_status path]] (agent/substantive-file? {:path path}))
-                        (porcelain-z-entries out)))))
-    (catch Exception e
-      (git-status-failed root-path {:detail (or (ex-message e) (.getName (class e)))
-                                    :data   {:exception/class (.getName (class e))}}))))
+  [execute-fn executor env-id workdir]
+  (let [run                   (release-scan/capsule-runner execute-fn executor env-id workdir)
+        read-file             (release-scan/capsule-reader execute-fn executor env-id workdir)
+        {:keys [out failure]} (run ["status" "--porcelain" "-uall" "-z"])
+        entries               (->> (porcelain-z-entries out)
+                                   (filter (fn [[_status path]] (agent/substantive-file? {:path path})))
+                                   (map porcelain-scan-entry))]
+    (if failure
+      (release-scan/git-status-failed workdir failure)
+      (release-scan/read-entries read-file workdir entries))))
 
 (defn- ^{:stratum 1} committed-since-base
   "Substantive `:code/files` the task branch holds beyond its base commits
    (committed and dirty alike), [] when there are none or no base commit is
    known, or a `:release/git-status-failed` anomaly when the scan fails. A
    clean worktree is not \"nothing to release\" when an earlier implement
-   iteration's commits are still unreleased."
-  [ctx worktree-path]
-  (release-scan/committed-since ctx worktree-path (release-base-shas ctx)))
+   iteration's commits are still unreleased. Runs in the capsule for a
+   governed run (`capsule`, from capsule-target), else on the host."
+  [ctx worktree-path capsule]
+  (let [{:keys [execute-fn executor env-id workdir]} capsule
+        root      (or workdir worktree-path)
+        run       (if capsule
+                    (release-scan/capsule-runner execute-fn executor env-id root)
+                    (release-scan/host-runner root))
+        read-file (if capsule
+                    (release-scan/capsule-reader execute-fn executor env-id root)
+                    (release-scan/host-reader root))
+        entries   (release-scan/first-base-diff run root (release-base-shas ctx))]
+    (if (anomaly/anomaly? entries)
+      entries
+      (release-scan/read-entries read-file root entries))))
 
 (defn- ^{:stratum 1} release-files-result
   "Return release file data, the failed scan's own anomaly when `dirty` is
@@ -517,24 +525,18 @@
    has none, the files the task branch committed beyond its base. An
    implement that reports :already-implemented after an earlier iteration
    committed its work leaves a clean worktree, and that work must still be
-   released. A failed scan is raised (as release-files! raises), never
-   returned as \"no changes\"."
+   released. A failed scan is returned as its anomaly, which never reads as
+   \"no changes\": build-workflow-state raises it unless implement's
+   recorded files carry the release."
   [ctx]
-  (let [wt         (ctx-worktree-path ctx)
-        execute-fn (get ctx :execution/execute-fn)
-        executor   (get ctx :execution/executor)
-        env-id     (get ctx :execution/environment-id)
-        dirty      (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
-                     (git-dirty-files-capsule execute-fn executor env-id wt)
-                     (git-dirty-files wt))]
-    (let [probe (if (and (vector? dirty) (empty? dirty))
-                  (committed-since-base ctx wt)
-                  dirty)]
-      ;; Raised here, not carried: build-workflow-state reads the probe only
-      ;; when implement recorded no files, so a carried anomaly could be lost.
-      (if (anomaly/anomaly? probe)
-        (throw (ex-info (:anomaly/message probe) (:anomaly/data probe)))
-        probe))))
+  (let [wt      (ctx-worktree-path ctx)
+        capsule (capsule-target ctx wt)
+        dirty   (if-let [{:keys [execute-fn executor env-id workdir]} capsule]
+                  (git-dirty-files-capsule execute-fn executor env-id workdir)
+                  (git-dirty-files wt))]
+    (if (and (vector? dirty) (empty? dirty))
+      (committed-since-base ctx wt capsule)
+      dirty)))
 
 (defn- ^{:stratum 2} release-files!
   "Boundary wrapper around the anomaly-returning `release-files-result`;
@@ -573,9 +575,10 @@
         instead, carrying git's error.
 
    `probe` is the scan enter-release already ran to decide whether to
-   skip (nil when it ran none). It stands in for step 2's rescan, so a
-   failed probe raises its own error instead of a clean rescan turning
-   it into zero-files.
+   skip (nil when it ran none): dirty files, else files committed beyond
+   the task's base. It stands in for step 2's rescan, so a failed probe
+   raises its own error instead of a clean rescan turning it into
+   zero-files.
 
    Stage-3 dogfood (2026-05-07) tripped on the missing #1 path:
    plan/implement/verify/review all green, files committed on the
@@ -587,16 +590,13 @@
         impl-status   (:status impl-result)]
     (log-already-implemented! ctx impl-status)
     (let [worktree-path  (ctx-worktree-path ctx)
-          governed?      (= :governed (get ctx :execution/mode))
-          execute-fn     (get ctx :execution/execute-fn)
-          executor       (get ctx :execution/executor)
-          env-id         (get ctx :execution/environment-id)
+          capsule        (capsule-target ctx worktree-path)
           committed      (rehydrate-committed-files impl-artifact worktree-path)
           dirty          (when (empty? committed)
                            (cond
                              (some? probe) probe
-                             (and governed? execute-fn executor env-id)
-                             (git-dirty-files-capsule execute-fn executor env-id worktree-path)
+                             capsule (let [{:keys [execute-fn executor env-id workdir]} capsule]
+                                       (git-dirty-files-capsule execute-fn executor env-id workdir))
                              :else (git-dirty-files worktree-path)))
           files          (release-files! committed dirty impl-result worktree-path)
           code-artifacts [{:artifact/type    :code

@@ -29,6 +29,7 @@
    [babashka.fs :as fs]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-software-factory.release]
+   [ai.miniforge.phase-software-factory.release-scan :as release-scan]
    [ai.miniforge.release-executor.interface :as release-executor]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -85,7 +86,7 @@
 (defn ^{:stratum 0} failing-diff
   "Capsule executor stub: every commit resolves, every `git diff` fails."
   [_executor _env-id command _opts]
-  (if (str/includes? command "'rev-parse'")
+  (if (str/includes? command "rev-parse")
     {:ok? true :data {:exit-code 0 :stdout some-sha}}
     {:ok? true :data {:exit-code 128 :stdout "" :stderr "fatal: bad object"}}))
 
@@ -209,19 +210,58 @@
       (is (= :release/git-status-failed (:type (ex-data ex))))
       (is (str/includes? (str (ex-message ex)) "container not running")))))
 
-(deftest ^{:stratum 3} failed-scan-is-raised-when-implement-recorded-files-test
-  (testing "a failed committed scan raises even when implement recorded
-            files release could rehydrate instead"
+(deftest ^{:stratum 3} recorded-files-carry-the-release-when-the-scan-fails-test
+  (testing "when the committed scan fails but implement recorded files,
+            release goes ahead with the recorded files: the branch's commits
+            ship either way, and the files only feed the PR metadata"
     (let [dir (str (fs/create-temp-dir {:prefix "release-recorded-"}))]
       (try
         (spit (io/file dir "a.clj") "(ns a)")
-        (let [ex (enter-error
-                  (assoc-in (capsule-ctx dir some-sha failing-diff)
-                            [:execution/phase-results :implement :artifact]
-                            {:code/file-paths ["a.clj"] :code/file-actions [:create]}))]
-          (is (= :release/git-status-failed (:type (ex-data ex)))))
+        (let [{:keys [prepared]} (enter-release
+                                  (assoc-in (capsule-ctx dir some-sha failing-diff)
+                                            [:execution/phase-results :implement :artifact]
+                                            {:code/file-paths ["a.clj"] :code/file-actions [:create]}))]
+          (is (= #{"a.clj"} (released-paths prepared))))
         (finally
           (fs/delete-tree dir))))))
+
+(deftest ^{:stratum 3} capsule-scan-runs-in-the-capsule-checkout-test
+  (testing "a governed run scans the capsule's own checkout, not the host
+            worktree path, and keeps a SHA-256 base sha"
+    (let [calls      (atom [])
+          sha256     (apply str (repeat 64 "a"))
+          execute-fn (fn [_executor _env-id command {:keys [workdir]}]
+                       (swap! calls conj [command workdir])
+                       {:ok? true :data {:exit-code 0 :stdout ""}})
+          ctx        (assoc (release-ctx "/host/worktree" :already-implemented {:base-sha sha256})
+                            :execution/mode            :governed
+                            :execution/executor        :mock-executor
+                            :execution/environment-id  "env-1"
+                            :execution/execute-fn      execute-fn
+                            :execution/capsule-workdir "/workspace")]
+      (enter-release ctx)
+      (is (some #(str/starts-with? (first %) "git status") @calls))
+      (is (every? #(= "/workspace" (second %)) @calls))
+      (is (some #(str/includes? (first %) sha256) @calls)))))
+
+(deftest ^{:stratum 3} exit-one-with-output-is-a-failure-not-a-missing-commit-test
+  (testing "rev-parse exiting 1 with an error (a capsule whose container is
+            gone) raises instead of reading as a missing commit and skipping"
+    (let [ex (enter-error
+              (capsule-ctx "/workspace" some-sha
+                           (fn [_executor _env-id _command _opts]
+                             {:ok? true :data {:exit-code 1 :stdout ""
+                                               :stderr "Error: No such container: env-1"}})))]
+      (is (= :release/git-status-failed (:type (ex-data ex))))
+      (is (str/includes? (str (ex-message ex)) "No such container")))))
+
+(deftest ^{:stratum 3} host-reader-refuses-a-path-outside-the-worktree-test
+  (testing "the host reader does not read a path whose target leaves the worktree"
+    (with-task-branch "src/feature.clj"
+      (fn [dir _base _head]
+        (let [{:keys [content failure]} ((release-scan/host-reader dir) "../outside.clj")]
+          (is (nil? content))
+          (is (str/includes? (:detail failure) "outside the worktree")))))))
 
 (deftest ^{:stratum 3} committed-symlink-is-released-without-its-target-test
   (testing "a committed symlink to a file outside the worktree is released by

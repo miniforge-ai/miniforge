@@ -12,7 +12,8 @@ Release skips when implement reports `:already-implemented` (or plan
 `:already-satisfied`) and there is nothing to release. It decided "nothing to
 release" from `git status` alone, so committed work on a clean worktree was
 skipped and never pushed. The skip check now also counts files the task branch
-holds beyond the environment's base commit.
+holds beyond the task's base commits: the shas implement recorded, then the
+environment's base commit.
 
 ## Motivation
 
@@ -30,7 +31,8 @@ parts.
 
 1. `release.clj`: `skip-probe` runs the existing dirty scan. When that comes
    back clean it adds `committed-since-base`: the files the worktree differs by
-   from the task's base commits. A failed dirty scan still returns its anomaly.
+   from the task's base commits. A failed scan comes back as its anomaly
+   (as merged, `skip-probe` threw it; the follow-up below returns it again).
 2. The base commits are the commit shas among the task base refs implement
    recorded (`task-base/recorded-refs`, the resume-aware base the `:no-secrets`
    gate already uses), then `[:execution/environment-metadata :base-sha]`.
@@ -91,8 +93,21 @@ parts.
 
 Existing skip tests carry no base commit and keep their behaviour.
 
+## Deployment Plan
+
+No configuration or migration. A release that used to skip as
+`:already-implemented` over committed work now prepares and publishes it.
+
+## Related Issues/PRs
+
+- #2255, #2261: the retry and duplicate-PR parts of R3.
+- Follow-up `fix/release-scan-followups`: post-merge review fixes (governed
+  runs scanned the host worktree path instead of the capsule checkout; a
+  literal user-facing string; see its PR doc).
+
 ## Checklist
 
 - [x] Regression test for the drop path
-- [x] No user-facing strings added
+- [ ] No user-facing strings added (as merged, `release_scan.clj` built one
+      inline; the follow-up moves it to the messages catalog)
 - [x] Stratum metadata consistent in edited namespaces
