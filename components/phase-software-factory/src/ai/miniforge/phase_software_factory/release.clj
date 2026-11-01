@@ -32,11 +32,13 @@
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase.interface.gate :as phase-gate]
             [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
             [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [ai.miniforge.phase-software-factory.messages :as messages]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
+            [ai.miniforge.phase-software-factory.release-publish :as release-publish]
             [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
 
@@ -99,6 +101,23 @@
                  (str command " exited " exit))
      :data   (cond-> {:command command :exit exit :stderr stderr}
                executor-error (assoc :executor/error executor-error))}))
+
+(defn- ^{:stratum 0} porcelain-z-entries
+  "Parse `git status --porcelain -z` output into [status path] pairs.
+   With -z each entry is NUL-terminated and its path is never quoted or
+   escaped (without -z git wraps a path with spaces or non-ASCII bytes in
+   C-style quotes). A rename or copy entry is followed by its source
+   path, which is skipped."
+  [out]
+  (loop [records (str/split (or out "") #"\u0000")
+         entries []]
+    (if-let [record (first records)]
+      (if (< (count record) 4)
+        (recur (next records) entries)
+        (let [status (subs record 0 2)]
+          (recur (if (some #{\R \C} status) (nnext records) (next records))
+                 (conj entries [status (subs record 3)]))))
+      entries)))
 
 (defn- ^{:stratum 0} git-status-failed
   "Anomaly for a working-tree scan that could not run (git exited non-zero,
@@ -170,23 +189,6 @@
    :environment-id (:environment-id impl-result)
    :worktree-path  worktree-path})
 
-(defn- ^{:stratum 0} resolve-github-token
-  "Resolve GitHub token for capsule PR operations.
-   Mirrors the resolution order from docker.clj's resolve-git-token:
-   1. Execution context (passed by task runner)
-   2. MINIFORGE_GIT_TOKEN env var (universal override)
-   3. GH_TOKEN env var (GitHub-specific)
-   4. `gh auth token` CLI fallback (host-side only, pre-capsule)"
-  [ctx]
-  (or (get-in ctx [:execution/opts :github-token])
-      (get-in ctx [:execution/github-token])
-      (System/getenv "MINIFORGE_GIT_TOKEN")
-      (System/getenv "GH_TOKEN")
-      (try (let [r (shell/sh "gh" "auth" "token")]
-             (when (zero? (:exit r))
-               (str/trim (:out r))))
-           (catch Exception _ nil))))
-
 (defn- ^{:stratum 0} compute-verdict
   "Pick the verdict that should flow on the phase result.
 
@@ -208,6 +210,21 @@
     :else
     :approved))
 
+(defn- ^{:stratum 0} readiness-check
+  "One phase's readiness evidence: verify completed, or review completed
+   with an approving decision. A phase with no recorded result fails."
+  [ctx phase-name]
+  (let [phase-result (get-in ctx [:execution/phase-results phase-name])
+        completed?   (and (some? phase-result) (phase/succeeded? phase-result))
+        decision     (when (= :review phase-name)
+                       (response/review-decision (response/phase-output phase-result)))]
+    (cond-> {:phase   phase-name
+             :passed? (and completed?
+                           (or (not= :review phase-name)
+                               (contains? #{:approved :conditionally-approved} decision)))}
+      (nil? phase-result)     (assoc :reason :no-result)
+      (= :review phase-name)  (assoc :decision decision))))
+
 (defn- ^{:stratum 0} attach-error-verdict
   "Phase 3b: when error-release fails terminally, attach the verdict to
    the result so the FSM's guarded :phase/fail array reads it. The
@@ -223,7 +240,53 @@
         (assoc-in [:phase :verdict] verdict)
         (assoc-in [:phase :result :output :phase/verdict] verdict))))
 
+(defn ^{:stratum 0} build-executor-context
+  "Build context for the release executor from phase context: the
+   publish context (release-publish/build-publish-context) plus what the
+   releaser agent needs.
+
+   Also computes the phase-filtered policy-pack behavior addendum via
+   `phase/load-and-filter-behaviors :release` and threads it as
+   `:task/behavior-addendum` so `release-executor/invoke-releaser` can
+   forward it into the agent input. Mirrors the wiring review (#945)
+   and plan use; closes the gap where the releaser ran without the
+   compiled standards pack."
+  [ctx config logger]
+  (let [on-chunk (phase/create-streaming-callback ctx :release)
+        input (get-in ctx [:execution/input])
+        ;; Codex consultation for the release situation, delivered through
+        ;; the same addendum channel as the compiled standards pack — the
+        ;; releaser has no existing-files channel (SPEC T1 s7.4). The
+        ;; outcome rides on the exec-context so enter-release can attach
+        ;; provenance without consulting twice.
+        codex-outcome (codex-pin/landings-outcome :release logger)
+        pack-addendum (phase/load-and-filter-behaviors
+                        :release {:task {:task/intent (:intent input)}})
+        behavior-addendum (let [t (:text codex-outcome)]
+                            (cond
+                              (and pack-addendum t) (str pack-addendum "\n\n" t)
+                              t t
+                              :else pack-addendum))]
+    (cond-> (assoc (release-publish/build-publish-context ctx config logger)
+                   :llm-backend (get-in ctx [:execution/llm-backend]))
+      on-chunk (assoc :on-chunk on-chunk)
+      behavior-addendum (assoc :task/behavior-addendum behavior-addendum)
+      ;; :text already rode into the behavior addendum; the summary only
+      ;; needs the status fields — don't ship the rendered prose twice.
+      codex-outcome (assoc :codex/outcome (dissoc codex-outcome :text)))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} release-readiness
+  "Whether the release may publish: each of verify and review that the
+   workflow pipeline configures must have passed. A pipeline configuring
+   neither has no evidence and is not ready. The :release-ready gate reads
+   this from the phase output's :release/readiness."
+  [ctx]
+  (let [configured (set (map :phase (get-in ctx [:execution/workflow :workflow/pipeline])))
+        checks     (mapv #(readiness-check ctx %) (filter configured [:verify :review]))]
+    {:ready? (boolean (and (seq checks) (every? :passed? checks)))
+     :checks (if (seq checks) checks [{:phase :verify :passed? false :reason :not-configured}])}))
 
 (defn- ^{:stratum 1} git-dirty-files
   "Scan git working tree for new/modified/deleted files; return as :code/files entries.
@@ -236,19 +299,20 @@
    these must not count as releasable work. Matches the same filter the
    curator applies upstream (iter-23 regression: empty-diff PRs).
 
+   Reads `git status -z`, whose paths are never quoted: without -z git
+   wraps a path with a space or non-ASCII bytes in C-style quotes, which
+   names no file on disk, and the file was left out of the release.
+
    Returns a `:release/git-status-failed` anomaly when the scan cannot
    run, never `[]` (which release would report as zero files)."
   [root-path]
   (try
-    (let [{:keys [exit out err]} (shell/sh "git" "status" "--porcelain" "-uall" :dir root-path)]
-      (if-let [failure (command-failure "git status --porcelain -uall" exit err nil)]
+    (let [{:keys [exit out err]} (shell/sh "git" "status" "--porcelain" "-uall" "-z" :dir root-path)]
+      (if-let [failure (command-failure "git status --porcelain -uall -z" exit err nil)]
         (git-status-failed root-path failure)
-        (->> (str/split-lines (or out ""))
-             (remove str/blank?)
-             (keep (fn [line]
-                     (let [xy   (subs line 0 2)
-                           path (str/trim (subs line 3))
-                           file (io/file root-path path)]
+        (->> (porcelain-z-entries out)
+             (keep (fn [[xy path]]
+                     (let [file (io/file root-path path)]
                        (cond
                          (str/includes? xy "D") {:path path :content "" :action :delete}
                          (.isFile file)         {:path path
@@ -282,33 +346,29 @@
                                              (get-in result [:data :exit-code])
                                              (get-in result [:data :stderr])
                                              (:error result))}))
-          path-of (fn [line] (str/trim (subs line 3)))
-          substantive-line? (fn [line]
-                              (and (>= (count line) 3)
-                                   (agent/substantive-file? {:path (path-of line)})))
-          read-entry (fn [line]
-                       (let [status (str/trim (subs line 0 2))
-                             path   (path-of line)]
-                         (if (str/includes? status "D")
-                           {:path path :content "" :action :delete}
-                           (let [{:keys [out failure]} (run (str "cat " root-path "/" path))]
-                             (if failure
-                               (git-status-failed root-path failure)
-                               {:path    path
-                                :content out
-                                :action  (if (= "??" status) :create :modify)})))))
-          {:keys [out failure]} (run "git status --porcelain -uall")]
+          read-entry (fn [[status path]]
+                       (if (str/includes? status "D")
+                         {:path path :content "" :action :delete}
+                         ;; The command runs under `sh -c`: quote the path so
+                         ;; spaces, `$`, `;` and the like reach cat as-is.
+                         (let [{:keys [out failure]}
+                               (run (str "cat " (agent/shell-quote (str root-path "/" path))))]
+                           (if failure
+                             (git-status-failed root-path failure)
+                             {:path    path
+                              :content out
+                              :action  (if (= "??" status) :create :modify)}))))
+          {:keys [out failure]} (run "git status --porcelain -uall -z")]
       (if failure
         (git-status-failed root-path failure)
-        (reduce (fn [files line]
-                  (let [entry (read-entry line)]
+        (reduce (fn [files entry]
+                  (let [entry (read-entry entry)]
                     (if (anomaly/anomaly? entry)
                       (reduced entry)
                       (conj files entry))))
                 []
-                (->> (str/split-lines out)
-                     (remove str/blank?)
-                     (filter substantive-line?)))))
+                (filter (fn [[_status path]] (agent/substantive-file? {:path path}))
+                        (porcelain-z-entries out)))))
     (catch Exception e
       (git-status-failed root-path {:detail (or (ex-message e) (.getName (class e)))
                                     :data   {:exception/class (.getName (class e))}}))))
@@ -327,82 +387,11 @@
                          (messages/t :release/zero-files)
                          (zero-files-data impl-result worktree-path))))
 
-(defn ^{:stratum 1} build-executor-context
-  "Build context for the release executor from phase context.
-   Includes :github-token so the release executor can inject GH_TOKEN
-   into the capsule's environment for gh CLI authentication.
-
-   The phase-local `logger` is threaded in so the release executor's
-   log calls (phase-started / fail / phase-completed) are emitted
-   even when the workflow ctx lacks :execution/logger — observed in
-   the 2026-05-03 dogfood, where release failed in 0ms with zero
-   visible log lines because the executor's logger was nil.
-
-   Also computes the phase-filtered policy-pack behavior addendum via
-   `phase/load-and-filter-behaviors :release` and threads it as
-   `:task/behavior-addendum` so `release-executor/invoke-releaser` can
-   forward it into the agent input. Mirrors the wiring review (#945)
-   and plan use; closes the gap where the releaser ran without the
-   compiled standards pack."
-  [ctx config logger]
-  (let [on-chunk (phase/create-streaming-callback ctx :release)
-        input (get-in ctx [:execution/input])
-        ;; Codex consultation for the release situation, delivered through
-        ;; the same addendum channel as the compiled standards pack — the
-        ;; releaser has no existing-files channel (SPEC T1 s7.4). The
-        ;; outcome rides on the exec-context so enter-release can attach
-        ;; provenance without consulting twice.
-        codex-outcome (codex-pin/landings-outcome :release logger)
-        pack-addendum (phase/load-and-filter-behaviors
-                        :release {:task {:task/intent (:intent input)}})
-        behavior-addendum (let [t (:text codex-outcome)]
-                            (cond
-                              (and pack-addendum t) (str pack-addendum "\n\n" t)
-                              t t
-                              :else pack-addendum))]
-    (cond-> {;; Preserve the original precedence — explicit ctx worktree paths
-             ;; win over config; the blessed resolver is the LAST resort,
-             ;; adding the opts key + the governed-fail / CWD decision (no
-             ;; silent user.dir downgrade) in place of the old bare fallback.
-             :worktree-path (or (get-in ctx [:execution/worktree-path])
-                                (get-in ctx [:worktree-path])
-                                (get-in config [:worktree-path])
-                                (workspace/resolve-execution-workdir ctx "release"))
-             :executor (get-in ctx [:execution/executor])
-             :environment-id (get-in ctx [:execution/environment-id])
-             :logger (or (get-in ctx [:execution/logger]) logger)
-             :llm-backend (get-in ctx [:execution/llm-backend])
-             :artifact-store (get-in ctx [:execution/artifact-store])
-             :event-stream (:event-stream ctx)
-             ;; Allow disabling PR creation via config or execution opts
-             :create-pr? (or (get-in ctx [:execution/opts :create-pr?])
-                             (get config :create-pr? true))
-             ;; PR base override for a dependency-chained DAG task: the DAG
-             ;; orchestrator passes the parent task's branch so this task's PR
-             ;; STACKS on the parent (base = parent branch) instead of opening
-             ;; against the default branch with a cumulative diff. Absent (root
-             ;; tasks / non-DAG runs) → executor falls back to the default branch.
-             :base-branch (get-in ctx [:execution/opts :release/base-branch])
-             ;; PR provenance → rendered as YAML frontmatter on the PR body so
-             ;; a PR maps deterministically back to its workflow run + spec.
-             ;; :workflow is the PARENT run id for a DAG sub-task (shared across
-             ;; the run's PRs) else this run's id; :task distinguishes DAG tasks.
-             :provenance {:workflow (or (get-in ctx [:execution/input :workflow/parent-id])
-                                        (get-in ctx [:execution/id]))
-                          :spec     (get-in ctx [:execution/input :spec/path])
-                          :task     (get-in ctx [:execution/input :task/id])}
-             ;; Resolve and inject GitHub token for capsule gh CLI auth
-             :github-token (resolve-github-token ctx)}
-      on-chunk (assoc :on-chunk on-chunk)
-      behavior-addendum (assoc :task/behavior-addendum behavior-addendum)
-      ;; :text already rode into the behavior addendum; the summary only
-      ;; needs the status fields — don't ship the rendered prose twice.
-      codex-outcome (assoc :codex/outcome (dissoc codex-outcome :text)))))
-
 (defn ^{:stratum 1} leave-release
   "Post-processing for release phase.
 
-   Records release metrics and PR info.
+   Publishes what enter-release prepared (push and PR) unless a gate
+   failed, then records release metrics and PR info.
 
    Phase 3b: attaches a `:phase/verdict` to the phase result so the
    FSM's verdict-driven guarded `:phase/fail` array picks the right
@@ -414,7 +403,8 @@
   ;; must never change the outcome it measures. Consultation provenance
   ;; was attached at enter, so it is visible here.
   (gap-wiring/record-phase-misses! ctx :release)
-  (let [start-time (get-in ctx [:phase :started-at])
+  (let [ctx (release-publish/publish-when-allowed ctx)
+        start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
         duration-ms (if start-time (- end-time start-time) 0)
         result (get-in ctx [:phase :result])
@@ -427,7 +417,10 @@
                                (get-in default-config [:budget :iterations]))
         zero-files? (= :release/zero-files
                        (get-in result [:error :data :type]))
-        phase-status (if zero-files?
+        ;; A gate denial (projected onto :phase/status by the workflow's
+        ;; gate validation) fails the release whatever the agent returned.
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))
+        phase-status (if (or zero-files? gate-failed?)
                        :failed
                        (phase/determine-phase-status
                         agent-status iterations max-iterations))
@@ -604,14 +597,16 @@
 ;------------------------------------------------------------------------------ Layer 4
 
 (defn ^{:stratum 4} enter-release
-  "Execute release phase.
+  "Prepare the release.
 
-   Uses the workflow release executor to:
+   Uses the release executor to:
    - Generate release metadata (branch name, commit message, PR title/body)
    - Create git branch
    - Write files and stage them
    - Commit changes
-   - Push branch and create PR (if enabled)"
+
+   and records release readiness. Pushing and creating the PR happen in
+   leave-release, after the gates."
   [ctx]
   (let [config (phase/merge-with-defaults (get-in ctx [:phase-config]))
         {:keys [gates budget]} config
@@ -661,26 +656,23 @@
                             :releaser-agent? (some? releaser-agent)
                             :artifact-count (count (:workflow/artifacts workflow-state))}})
 
+        ;; Prepare only (branch and commit). The push and the PR wait for
+        ;; leave-release, which runs after the gates.
         result (try
-                 (let [exec-result (release-executor/execute-release-phase
+                 (let [exec-result (release-executor/prepare-release
                                     workflow-state
                                     exec-context
                                     {:releaser releaser-agent})
                        r (if (:success? exec-result)
-                     (let [release-artifact (first (:artifacts exec-result))
-                           content (:artifact/content release-artifact)]
+                     (let [release-artifact (first (:artifacts exec-result))]
                        (response/success
-                        (merge
-                         {:release/id (get release-artifact :artifact/id (random-uuid))
-                          :release/status :completed
-                          :release/artifacts (:artifacts exec-result)}
-                         ;; Include PR info for evidence bundle
-                         (when (:pr-url content)
-                           {:workflow/pr-info {:pr-number (:pr-number content)
-                                               :pr-url (:pr-url content)
-                                               :branch (:branch content)
-                                               :commit-sha (:commit-sha content)}})
-                         {:release/metrics (:metrics exec-result)})))
+                        {:release/id (get release-artifact :artifact/id (random-uuid))
+                         :release/status :prepared
+                         :release/artifacts (:artifacts exec-result)
+                         :release/prepared (:prepared exec-result)
+                         ;; Read by the :release-ready gate.
+                         :release/readiness (release-readiness ctx)
+                         :release/metrics (:metrics exec-result)}))
                      ;; Execution failed — surface the executor's :errors
                      ;; so the next dogfood run can diagnose root cause from
                      ;; the event log instead of staring at a generic
@@ -721,17 +713,7 @@
         ;; plan carry). Release has no recorded context-reads channel.
         result (attach-consultation result (:codex/outcome exec-context))]
 
-    (-> (phase/enter-context ctx :release :releaser gates budget start-time result)
-        ;; Single derived projection of the canonical pr-info onto ctx-level
-        ;; :workflow/pr-info, which several consumers still read directly
-        ;; (runner_events completion event, CLI summary, evidence-bundle) until
-        ;; they migrate to response/release-pr-info. The projected value is
-        ;; derived from the authority via that accessor ({:result result} is the
-        ;; phase-result shape it expects), so this copy can never hold a value
-        ;; the authority doesn't — a derived cache of one reader, not a second
-        ;; source of truth.
-        (cond-> (phase/result-succeeded? result)
-          (assoc :workflow/pr-info (response/release-pr-info {:result result}))))))))
+    (phase/enter-context ctx :release :releaser gates budget start-time result)))))
 
 ;------------------------------------------------------------------------------ Layer 5
 

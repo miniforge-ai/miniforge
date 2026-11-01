@@ -16,15 +16,27 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.workflow.release-test
-  "Unit tests for release helpers that do not require git."
+  "Unit tests for release helpers. Temp dirs are git repositories: the
+   file actions ask git where its metadata is and refuse every path when
+   git cannot answer."
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.workflow.release :as release]
-   [babashka.fs :as fs]))
+   [babashka.fs :as fs]
+   [babashka.process :as process]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ^:dynamic *temp-dirs* (atom []))
+
+(defn ^{:stratum 0} git!
+  "Run git in `dir` without the repository variables a git hook exports."
+  [dir & args]
+  (apply process/sh {:dir (str dir)
+                     :env (apply dissoc (into {} (System/getenv))
+                                 ["GIT_DIR" "GIT_WORK_TREE" "GIT_INDEX_FILE" "GIT_COMMON_DIR"])}
+         "git" args))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -32,6 +44,7 @@
   []
   (let [dir (fs/create-temp-dir {:prefix "release-unit-"})]
     (swap! *temp-dirs* conj dir)
+    (git! dir "init" "-q")
     dir))
 
 (defn ^{:stratum 1} cleanup-temp-dirs
@@ -223,7 +236,7 @@
         (is (false? (fs/exists? (fs/path outside "newdir")))
             "no directory is created outside the worktree"))))
 
-  (testing "'..' within an existing directory still resolves normally"
+  (testing "'..' is refused outright, even within an existing directory"
     (let [worktree (create-temp-dir)]
       (fs/create-dirs (fs/path worktree "src"))
       (let [result (release/process-file-action worktree
@@ -231,8 +244,8 @@
                                                  :path    "src/../README.md"
                                                  :content "ok"}
                                                 nil)]
-        (is (true? (:success? result)))
-        (is (= "ok" (slurp (str (fs/path worktree "README.md")))))))))
+        (is (false? (:success? result)))
+        (is (false? (fs/exists? (fs/path worktree "README.md"))))))))
 
 (deftest ^{:stratum 2} process-file-action-delete-removes-only-entries-inside-test
   (testing "delete rejects an entry whose parent resolves outside, even if it links back in"
@@ -255,7 +268,8 @@
         (is (re-find #"(?i)traversal" (:error result)))
         (is (fs/exists? link {:nofollow-links true}) "the outside entry is still there"))))
 
-  (testing "delete removes a symlink inside the worktree without touching its target"
+  (testing "delete refuses a symlink inside the worktree; the link and its target stay"
+    ;; The shared worktree guard denies every path with a symlink component.
     (let [worktree (create-temp-dir)
           outside  (create-temp-dir)
           target   (fs/path outside "target.txt")]
@@ -264,8 +278,8 @@
       (let [result (release/process-file-action worktree
                                                 {:action :delete :path "link.txt"}
                                                 nil)]
-        (is (true? (:success? result)))
-        (is (false? (fs/exists? (fs/path worktree "link.txt") {:nofollow-links true})))
+        (is (false? (:success? result)))
+        (is (fs/exists? (fs/path worktree "link.txt") {:nofollow-links true}))
         (is (= "outside" (slurp (str target))) "the link's target is untouched"))))
 
   (testing "delete refuses the worktree root itself"
@@ -274,5 +288,69 @@
                                                           {:action :delete :path "."}
                                                           nil))))
       (is (fs/exists? worktree)))))
+
+(deftest ^{:stratum 2} process-file-action-refuses-git-metadata-test
+  (let [worktree (create-temp-dir)
+        _        (git! worktree "config" "core.hooksPath" ".githooks")
+        config   (str (fs/path worktree ".git" "config"))
+        before   (slurp config)
+        refused? (fn [action path]
+                   (false? (:success? (release/process-file-action
+                                       worktree {:action action :path path
+                                                 :content "#!/bin/sh\necho planted\n"}
+                                       nil))))]
+    (fs/create-dirs (fs/path worktree ".githooks"))
+    (fs/create-sym-link (fs/path worktree "tools") (fs/path worktree ".git"))
+    (fs/create-sym-link (fs/path worktree " ") (fs/path worktree ".git"))
+    (testing "an agent-written path into git metadata is refused"
+      (doseq [[action path] [[:create ".git/hooks/pre-commit"]
+                             [:create "./x/../.git/hooks/pre-commit"]
+                             [:modify "./.git/config"]
+                             [:create "tools/hooks/pre-commit"]
+                             [:create ".GIT/hooks/pre-commit"]
+                             [:modify " /config"]
+                             [:create ".githooks/pre-commit"]
+                             [:delete ".git/config"]
+                             [:delete ".git"]]]
+        (is (refused? action path) (str action " " path)))
+      (is (= before (slurp config)))
+      (is (not (fs/exists? (fs/path worktree ".git" "hooks" "pre-commit"))))
+      (is (not (fs/exists? (fs/path worktree ".githooks" "pre-commit")))))
+    (testing "an ordinary write still applies"
+      (is (true? (:success? (release/process-file-action
+                             worktree {:action :create :path "src/a.clj" :content "(ns a)"}
+                             nil)))))))
+
+(deftest ^{:stratum 2} process-file-action-checks-the-path-as-written-test
+  (testing "with tools -> .git/hooks, tools/../config would reach .git/config"
+    (let [worktree (create-temp-dir)
+          config   (str (fs/path worktree ".git" "config"))
+          before   (slurp config)]
+      (fs/create-sym-link (fs/path worktree "tools") (fs/path worktree ".git" "hooks"))
+      (doseq [action [:create :modify :delete]]
+        (is (false? (:success? (release/process-file-action
+                                worktree {:action action :path "tools/../config"
+                                          :content "[core]\n\thooksPath = tools\n"}
+                                nil)))
+            (str action)))
+      (is (= before (slurp config))))))
+
+(deftest ^{:stratum 2} stage-files-runs-no-hook-test
+  (testing "staging agent output runs no hook, even one linked to a tracked script"
+    (let [worktree (create-temp-dir)
+          ran      (str (fs/path (create-temp-dir) "hook-ran"))
+          script   (fs/path worktree "scripts" "index-hook")]
+      (fs/create-dirs (fs/parent script))
+      (spit (str script) (str "#!/bin/sh\necho ran >> '" ran "'\n"))
+      (fs/set-posix-file-permissions script "rwxr-xr-x")
+      (git! worktree "add" "scripts/index-hook")
+      (fs/create-sym-link (fs/path worktree ".git" "hooks" "post-index-change")
+                          (fs/path ".." ".." "scripts" "index-hook"))
+      (spit (str (fs/path worktree "agent.txt")) "agent output\n")
+      (is (true? (:success? (release/stage-files! worktree :all))))
+      (is (true? (:success? (release/stage-files! worktree ["agent.txt"]))))
+      (is (not (fs/exists? ran)))
+      (is (= "A  agent.txt" (first (filter #(str/includes? % "agent.txt")
+                                           (str/split-lines (:out (git! worktree "status" "--short"))))))))))
 
 (use-fixtures :each cleanup-temp-dirs)

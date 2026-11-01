@@ -18,14 +18,13 @@
 (ns ai.miniforge.pr-lifecycle.ci-monitor
   "CI status monitoring for PRs.
 
-   Polls GitHub for CI check status and emits events
+   Polls GitHub for CI check status (via `ci-checks`) and emits events
    when checks complete (pass or fail)."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.pr-lifecycle.ci-checks :as ci-checks]
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.logging.interface :as log]
-   [babashka.process :as process]
-   [clojure.edn :as edn]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -44,47 +43,6 @@
 (def ^{:stratum 0} terminal-statuses
   "CI statuses that indicate checks are complete."
   #{:success :failure :neutral :cancelled :timed-out})
-
-;; GitHub CLI helpers
-(defn ^{:stratum 0} run-gh-command
-  "Run a gh CLI command and return result."
-  [args worktree-path]
-  (try
-    (let [result (apply process/shell
-                        {:dir (str worktree-path)
-                         :out :string
-                         :err :string
-                         :continue true}
-                        args)]
-      (if (zero? (:exit result))
-        (dag/ok {:output (str/trim (:out result ""))})
-        (dag/err :gh-command-failed
-                 (str/trim (:err result ""))
-                 {:exit-code (:exit result)})))
-    (catch Exception e
-      (dag/err :gh-exception (.getMessage e)))))
-
-;; Value coercion
-(defn- ^{:stratum 0} keywordize-val
-  "Coerce a map value to a lower-case keyword, returning `default` when nil."
-  [m k default]
-  (or (some-> (get m k) str/lower-case keyword) default))
-
-(defn ^{:stratum 0} get-check-logs
-  "Get logs for failed checks.
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: PR number
-   - check-name: Name of the check
-
-   Returns result with logs."
-  [_worktree-path _pr-number check-name]
-  ;; Note: gh doesn't have a direct way to get check logs
-  ;; This would typically go through the GitHub API or action artifacts
-  (dag/ok {:logs nil
-           :message "Log retrieval requires GitHub API access"
-           :check-name check-name}))
 
 ;; Monitoring loop
 (defn ^{:stratum 0} create-ci-monitor
@@ -127,93 +85,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} get-pr-checks
-  "Get CI check status for a PR.
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: PR number
-
-   Returns result with check information."
-  [worktree-path pr-number]
-  (let [result (run-gh-command
-                ["gh" "pr" "checks" (str pr-number) "--json"
-                 "name,state,conclusion,detailsUrl"]
-                worktree-path)]
-    (if (dag/ok? result)
-      (try
-        (let [checks (edn/read-string
-                      (str "[" (str/replace (:output (:data result))
-                                            #"\"(\w+)\":" ":$1 ")
-                           "]"))]
-          (dag/ok {:checks checks}))
-        (catch Exception _e
-          ;; Fallback: try to parse as JSON manually
-          (dag/ok {:checks [] :raw (:output (:data result))})))
-      result)))
-
-(defn ^{:stratum 1} get-pr-status
-  "Get overall PR status including checks.
-
-   Returns result with :state :mergeable :reviewDecision etc."
-  [worktree-path pr-number]
-  (let [result (run-gh-command
-                ["gh" "pr" "view" (str pr-number) "--json"
-                 "state,mergeable,reviewDecision,statusCheckRollup,headRefOid"]
-                worktree-path)]
-    (if (dag/ok? result)
-      (dag/ok {:raw (:output (:data result))})
-      result)))
-
-;; Status computation
-(defn ^{:stratum 1} compute-ci-status
-  "Compute overall CI status from individual checks.
-
-   Arguments:
-   - checks: Sequence of check maps with :state and :conclusion
-
-   Returns {:status keyword :passed [] :failed [] :pending []}"
-  [checks]
-  (let [grouped (group-by (fn [check]
-                            (let [state      (keywordize-val check :state :unknown)
-                                  conclusion (keywordize-val check :conclusion :unknown)]
-                              (cond
-                                (= state :completed)
-                                (case conclusion
-                                  :success :passed
-                                  (:failure :action-required) :failed
-                                  (:neutral :skipped) :neutral
-                                  :cancelled :cancelled
-                                  :timed-out :timed-out
-                                  :failed)
-
-                                (#{:in-progress :queued :waiting :pending} state)
-                                :pending
-
-                                :else :unknown)))
-                          checks)
-        passed (vec (get grouped :passed []))
-        failed (vec (get grouped :failed []))
-        pending (vec (get grouped :pending []))
-        neutral (vec (get grouped :neutral []))
-
-        status (cond
-                 (seq failed) :failure
-                 (seq pending) :pending
-                 (seq passed) :success
-                 (seq neutral) :neutral
-                 :else :unknown)]
-
-    {:status status
-     :passed passed
-     :failed failed
-     :pending pending
-     :neutral neutral
-     :total (count checks)}))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} poll-ci-status
+(defn ^{:stratum 1} poll-ci-status
   "Poll CI status once.
 
    Arguments:
@@ -223,7 +95,7 @@
    Returns {:status keyword :checks [...] :event event-or-nil}"
   [monitor logger]
   (let [{:keys [dag-id run-id task-id pr-number worktree-path]} @monitor
-        checks-result (get-pr-checks worktree-path pr-number)]
+        checks-result (ci-checks/get-pr-checks worktree-path pr-number)]
 
     (swap! monitor assoc
            :last-poll (java.util.Date.)
@@ -239,7 +111,7 @@
         {:status :unknown :error (:error checks-result)})
 
       (let [checks (:checks (:data checks-result))
-            computed (compute-ci-status checks)
+            computed (ci-checks/compute-ci-status checks)
             status (:status computed)
             prev-status (:status @monitor)]
 
@@ -266,9 +138,9 @@
                                            (str/join ", "
                                                      (map :name (:failed computed)))))))}))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 3} run-ci-monitor
+(defn ^{:stratum 2} run-ci-monitor
   "Run the CI monitor until checks complete or timeout.
 
    Arguments:
@@ -344,7 +216,7 @@
   (poll-ci-status monitor nil)
 
   ;; Compute status from checks
-  (compute-ci-status
+  (ci-checks/compute-ci-status
    [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}
     {:name "lint" :state "COMPLETED" :conclusion "FAILURE"}
     {:name "build" :state "IN_PROGRESS" :conclusion nil}])

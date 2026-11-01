@@ -97,7 +97,9 @@
       (is (contains? registry :kubernetes))
       (is (contains? registry :worktree))
 
-      (is (= :docker (executor/executor-type (:docker registry))))
+      ;; The :docker slot runs on whichever container runtime the host's
+      ;; selection picks; :unavailable when none answers.
+      (is (#{:docker :podman :unavailable} (executor/executor-type (:docker registry))))
       (is (= :kubernetes (executor/executor-type (:kubernetes registry))))
       (is (= :worktree (executor/executor-type (:worktree registry)))))))
 
@@ -112,10 +114,10 @@
     (let [registry (executor/create-executor-registry
                     {:docker {:image "alpine:latest"}
                      :worktree {:base-path "/tmp/test-worktrees"}})
-          ;; Should select docker if available, otherwise worktree
+          ;; Should select the container runtime if available, otherwise worktree
           selected (executor/select-executor registry)]
       (is (some? selected))
-      (is (#{:docker :worktree} (executor/executor-type selected))))))
+      (is (#{:docker :podman :worktree} (executor/executor-type selected))))))
 
 (deftest ^{:stratum 0} select-executor-preferred-test
   (testing "select-executor respects preferred option"

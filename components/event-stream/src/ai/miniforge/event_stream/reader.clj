@@ -41,6 +41,22 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Transit-JSON prefix stripping
+(defn ^{:stratum 0} event-order-key
+  "An event's place in creation order: its :event/timestamp in epoch ms,
+   then its :event/sequence-number. File names order events only to their
+   recorded time (a legacy name to the second), so a caller picking the
+   newest event sorts by this. Takes the timestamp as this reader returns
+   it (an RFC-3339 string) or as a live event carries it (a Date or an
+   Instant); an absent or unparseable one sorts first."
+  [event]
+  (let [ts (:event/timestamp event)]
+    [(cond
+       (inst? ts)   (inst-ms ts)
+       (string? ts) (try (.toEpochMilli (java.time.Instant/parse ts))
+                         (catch Exception _ 0))
+       :else        0)
+     (get event :event/sequence-number 0)]))
+
 (defn ^{:stratum 0} strip-transit-prefix
   "Turn the raw transit-JSON parse back into idiomatic Clojure data.
 
