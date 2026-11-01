@@ -558,6 +558,19 @@
         (finally
           (run! #(.delete ^java.io.File %) (reverse (file-seq dir))))))))
 
+(deftest ^{:stratum 0} write-env-file-deletes-the-file-when-the-write-fails-test
+  (testing "a write that fails after the temp file exists (a full /tmp)
+            deletes it before the error propagates, so no partial
+            credential file stays on disk"
+    (let [written (atom nil)]
+      (with-redefs [spit (fn [f _content]
+                           (reset! written f)
+                           (throw (java.io.IOException. "No space left on device")))]
+        (is (thrown-with-msg? java.io.IOException #"No space left"
+                              ((private-fn 'write-env-file!) [["GH_TOKEN" "t"]]))))
+      (is (instance? java.io.File @written))
+      (is (not (.exists ^java.io.File @written))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================

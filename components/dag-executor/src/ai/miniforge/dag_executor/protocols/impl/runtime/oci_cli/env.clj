@@ -43,13 +43,19 @@
 
 (defn- ^{:stratum 0} write-env-file!
   "Write `entries` as NAME=value lines to a new temp file for `--env-file`.
-   Files/createTempFile makes it owner-only (rw-------) on POSIX."
+   Files/createTempFile makes it owner-only (rw-------) on POSIX. A write
+   that fails (a full /tmp) deletes the file before the error propagates,
+   since the caller never receives it to delete."
   ^java.io.File [entries]
-  (let [path (java.nio.file.Files/createTempFile
-              "miniforge-env-" ".env"
-              (make-array java.nio.file.attribute.FileAttribute 0))]
-    (spit (.toFile path) (str/join (for [[k v] entries] (str (name k) "=" v "\n"))))
-    (.toFile path)))
+  (let [file (.toFile (java.nio.file.Files/createTempFile
+                       "miniforge-env-" ".env"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (try
+      (spit file (str/join (for [[k v] entries] (str (name k) "=" v "\n"))))
+      file
+      (catch Throwable t
+        (.delete file)
+        (throw t)))))
 
 (defn ^{:stratum 0} run-with-runtime-env
   "Call (run-fn), then delete the env file `prepare-runtime-env!` wrote.
