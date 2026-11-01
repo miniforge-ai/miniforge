@@ -74,12 +74,14 @@
 
 (defn ^{:stratum 0} load-markdown-file
   "Load a markdown file and convert to zettel.
-   For files like agents.md, claude.md, etc."
-  [file zettel-type]
+   For project instruction files like AGENTS.md, CLAUDE.md, etc.
+   `origin` is the file's path relative to the project root, with its
+   real name; the uid is the origin without its .md extension."
+  [file zettel-type origin]
   (try
     (let [content (slurp file)
           filename (.getName file)
-          uid (str/replace filename #"\.md$" "")
+          uid (str/replace origin #"\.md$" "")
 
           ;; Extract title from first # heading or use filename
           title (if-let [match (re-find #"^#\s+(.+)$" (first (str/split-lines content)))]
@@ -98,7 +100,7 @@
        :zettel/tags [:documentation :project]
        :zettel/links []
        :zettel/source {:type :migration
-                      :origin filename
+                      :origin origin
                       :confidence 1.0}
        :zettel/author "system"
        :zettel/created (java.util.Date.)
@@ -107,6 +109,66 @@
     (catch Exception e
       (println (messages/t :loader/error-loading {:file (.getName file) :error (.getMessage e)}))
       nil)))
+
+(def ^{:stratum 0} project-doc-paths
+  "Project instruction files, each as path segments under the project root.
+   Every segment matches case-insensitively, so AGENTS.md and agents.md
+   both match on case-sensitive filesystems (Linux) as well as on
+   case-insensitive ones (macOS default). .claude/CLAUDE.md is the
+   project file Claude Code loads."
+  [["agents.md"] ["claude.md"] [".clauderc"] ["claude_instructions.md"]
+   [".claude" "claude.md"]])
+
+(defn- ^{:stratum 0} children-named
+  "Entries of `dir` whose name equals `entry-name`, ignoring case, sorted
+   by name. Listing the directory yields each entry once under its real
+   name, whatever the filesystem's case sensitivity. Empty when `dir` is
+   not a readable directory."
+  [dir ^String entry-name]
+  (->> (.listFiles ^java.io.File (io/file dir))
+       (filter #(.equalsIgnoreCase entry-name (.getName ^java.io.File %)))
+       (sort-by #(.getName ^java.io.File %))))
+
+(defn- ^{:stratum 0} descend-ignoring-case
+  "Entries named `segment`, ignoring case, inside each of `dirs`."
+  [dirs segment]
+  (mapcat #(children-named % segment) dirs))
+
+(defn- ^{:stratum 0} find-ignoring-case
+  "Regular files under `root` at `segments`, each segment matched
+   ignoring case."
+  [root segments]
+  (->> segments
+       (reduce descend-ignoring-case [(io/file root)])
+       (filter #(.isFile ^java.io.File %))))
+
+(defn- ^{:stratum 0} real-path
+  "The path `file` resolves to, through symlinks and with the
+   filesystem's own name case."
+  [^java.io.File file]
+  (.toRealPath (.toPath file) (make-array java.nio.file.LinkOption 0)))
+
+(defn- ^{:stratum 0} keep-unseen-file
+  "Reducer step over [seen-real-paths kept-files]: keeps `file` unless a
+   kept file already resolves to the same real path."
+  [[seen kept] file]
+  (let [real (real-path file)]
+    (if (contains? seen real)
+      [seen kept]
+      [(conj seen real) (conj kept file)])))
+
+(defn- ^{:stratum 0} distinct-files
+  "`files` without later entries that resolve to the same file as an
+   earlier one, e.g. a CLAUDE.md symlinked to AGENTS.md."
+  [files]
+  (second (reduce keep-unseen-file [#{} []] files)))
+
+(defn- ^{:stratum 0} relative-origin
+  "`file`'s path relative to `root`, '/'-separated."
+  [root ^java.io.File file]
+  (-> (.relativize (.toPath ^java.io.File (io/file root)) (.toPath file))
+      str
+      (str/replace java.io.File/separator "/")))
 
 (defn ^{:stratum 0} load-files-from-directory
   "Load files from directory using provided loader function.
@@ -174,13 +236,14 @@
 (defn ^{:stratum 1} load-project-docs
   [knowledge-store project-root]
   (let [root (io/file project-root)
-        doc-files ["agents.md" "claude.md" ".clauderc" "claude_instructions.md"]
-        existing-files (filter #(.exists %) (map #(io/file root %) doc-files))
-        loader (fn [file] (load-markdown-file file :hub))
-        result (load-files-from-directory knowledge-store existing-files loader)]
+        doc-files (distinct-files
+                   (mapcat #(find-ignoring-case root %) project-doc-paths))
+        loader (fn [file]
+                 (load-markdown-file file :hub (relative-origin root file)))
+        result (load-files-from-directory knowledge-store doc-files loader)]
     (-> result
         ;; :items are the loaded zettels, not Files; each records its
-        ;; file name as its source origin.
+        ;; root-relative path, with the file's real name, as its origin.
         (assoc :files (mapv #(get-in % [:zettel/source :origin]) (:items result)))
         (dissoc :items))))
 
