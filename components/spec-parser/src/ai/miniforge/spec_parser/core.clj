@@ -356,26 +356,33 @@
    - Missing :spec/title or :spec/description (normalize-spec's shape check)
 
    Full Malli schema validation (`validate-spec`) is a separate,
-   caller-invoked step — this function does not call it."
-  [path]
-  (when-let [anom (file-not-found-anomaly path)]
-    (escalate! anom))
+   caller-invoked step — this function does not call it.
 
-  (let [format (detect-format path)
-        _      (when (anomaly/anomaly? format) (escalate! format))
-        content    (slurp path)
-        parsed     (parse-content format content)
-        _          (when (anomaly/anomaly? parsed) (escalate! parsed))
-        normalized (normalize-spec parsed)
-        _          (when (anomaly/anomaly? normalized) (escalate! normalized))]
+   With `content`, that text is parsed as the file at `path` and the file
+   is not read: a caller that also hashes the spec reads it once and hands
+   the same text to both, so the hash describes what was parsed."
+  ([path]
+   (parse-spec-file path nil))
+  ([path content]
+   (when-not content
+     (when-let [anom (file-not-found-anomaly path)]
+       (escalate! anom)))
 
-    ;; Add provenance decoration
-    (assoc normalized
-           :spec/provenance
-           {:source-file (str path)
-            :source-format format
-            :loaded-at (java.util.Date.)
-            :file-size (.length (fs/file path))})))
+   (let [format (detect-format path)
+         _      (when (anomaly/anomaly? format) (escalate! format))
+         content    (or content (slurp path))
+         parsed     (parse-content format content)
+         _          (when (anomaly/anomaly? parsed) (escalate! parsed))
+         normalized (normalize-spec parsed)
+         _          (when (anomaly/anomaly? normalized) (escalate! normalized))]
+
+     ;; Add provenance decoration
+     (assoc normalized
+            :spec/provenance
+            {:source-file (str path)
+             :source-format format
+             :loaded-at (java.util.Date.)
+             :file-size (count (.getBytes ^String content "UTF-8"))}))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

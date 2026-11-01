@@ -52,6 +52,14 @@
   (testing "given a .clj path → suffix is stripped"
     (is (= 'foo.bar-test (sut/path->ns-symbol "foo/bar_test.clj")))))
 
+(deftest ^{:stratum 0} test-path->ns-symbol-windows-separators
+  (testing "given a native Windows relative path → same symbol as POSIX"
+    (is (= 'ai.miniforge.bb-paths.core-test
+           (sut/path->ns-symbol "ai\\miniforge\\bb_paths\\core_test.clj"))))
+  (testing "given mixed separators → one dotted symbol"
+    (is (= 'ai.miniforge.bb-paths.core-test
+           (sut/path->ns-symbol "ai\\miniforge/bb_paths\\core_test.clj")))))
+
 (deftest ^{:stratum 0} test-path->ns-symbol-returns-symbol-type
   (testing "given any path → result is a symbol, not a string"
     (is (symbol? (sut/path->ns-symbol "x/y_test.clj")))))

@@ -144,6 +144,13 @@
                                                (phase-result-with-plan one-task-plan)
                                                {}))))))
 
+(deftest ^{:stratum 1} skip-reason-failed-plan
+  (testing "A failed plan phase (e.g. one its gates denied) keeps its plan but never activates the DAG"
+    (is (= :plan-failed
+           (execution-dag/dag-skip-reason :plan
+                                          (assoc (phase-result-with-plan valid-plan) :status :failed)
+                                          {})))))
+
 ;; dag-skip-diagnostic, against a phase result built from a plan fixture
 (deftest ^{:stratum 1} diagnostic-no-tasks-includes-task-count
   (testing ":no-tasks skip includes :plan/task-count"

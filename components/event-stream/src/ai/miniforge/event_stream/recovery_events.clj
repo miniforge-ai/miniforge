@@ -19,17 +19,19 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} checkpoint-written [stream workflow-id phase path size]
+(defn ^{:stratum 1} checkpoint-written [stream workflow-id phase path size root]
   (create :workflow/checkpoint-written stream workflow-id
-          {:phase/name phase :checkpoint/path path :checkpoint/size-bytes size}))
+          {:phase/name phase :checkpoint/path path :checkpoint/size-bytes size
+           :checkpoint/root root}))
 
 (defn ^{:stratum 1} checkpoint-write-failed [stream workflow-id phase failure]
   (create :workflow/checkpoint-write-failed stream workflow-id
           (assoc (failure-fields failure) :phase/name phase)))
 
-(defn ^{:stratum 1} machine-snapshot-written [stream workflow-id state path size]
+(defn ^{:stratum 1} machine-snapshot-written [stream workflow-id state path size root]
   (create :workflow/machine-snapshot-written stream workflow-id
-          {:machine/state state :snapshot/path path :snapshot/size-bytes size}))
+          {:machine/state state :snapshot/path path :snapshot/size-bytes size
+           :checkpoint/root root}))
 
 (defn ^{:stratum 1} machine-snapshot-write-failed [stream workflow-id state failure]
   (create :workflow/machine-snapshot-write-failed stream workflow-id

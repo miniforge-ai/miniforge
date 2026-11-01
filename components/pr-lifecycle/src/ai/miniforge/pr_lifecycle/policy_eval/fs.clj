@@ -32,6 +32,7 @@
    are public: `fix-loop/apply-fix-to-worktree` reuses them."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
    [babashka.fs :as fs]
    [clojure.java.io :as io]
    [clojure.string :as str]))
@@ -43,23 +44,30 @@
   "Resolve `relative-path` under `worktree-root`. Returns the
    canonical absolute path string when the target stays inside the
    worktree root, or returns nil when `relative-path` escapes
-   (path-traversal guard). Use it for reads and writes, which follow
-   a final symlink; deletes use `safe-worktree-entry-path`. With
+   (path-traversal guard). Use it for reads and writes; deletes use
+   `safe-worktree-entry-path`. With
    `{:allow-root? true}` a path that resolves to the root itself also
    passes, as a delete's parent directory may.
 
-   Three layers of defense:
+   Five layers of defense:
    1. Syntactic — reject absolute paths (leading `/`) and any
       `..`-bearing segments up front. Java's `File(parent, child)`
       constructor converts absolute children into relative ones,
       so a `getCanonicalPath` check alone wouldn't catch
       `/etc/passwd` (it'd resolve to `<worktree>/etc/passwd`).
-   2. Canonicalization — resolve symlinks and `.` segments via
-      `getCanonicalPath`.
-   3. Containment — require the canonical target to live under
-      the canonical worktree root, and not be a dangling symlink:
-      `getCanonicalPath` cannot resolve one, so it looks inside, but a
-      write follows it and creates the file wherever it points."
+   2. Symlinks — refuse a path any existing component of which, the
+      last included, is a symbolic link, dangling or not. A fix has no
+      need to write through a link, and each link is a way to alias
+      the git metadata (`policy-eval.git-dir/symlink-on-path?`).
+   3. Canonicalization — resolve `.` segments via `getCanonicalPath`.
+   4. Containment — require the canonical target to live under
+      the canonical worktree root.
+   5. Git metadata — refuse a `.git` segment in the path as given,
+      and a path whose target is in the git dir, common dir, or hooks
+      dir git reports, or is an untracked file a symlink in that
+      metadata points at (see `policy-eval.git-dir`). A written hook or
+      config runs on the fix loop's next git command. When git cannot
+      report them, every path is refused."
   ([worktree-root relative-path]
    (safe-worktree-path worktree-root relative-path nil))
   ([worktree-root relative-path {:keys [allow-root?]}]
@@ -77,15 +85,23 @@
          (some #{".."} (str/split path-str #"[/\\\\]"))
          nil
 
+         (some git-dir/git-dir-name? (git-dir/segments path-str))
+         nil
+
+         (git-dir/symlink-on-path? worktree-root path-str)
+         nil
+
          :else
          (let [root   (.getCanonicalPath (io/file (str worktree-root)))
                target (.getCanonicalPath (io/file (str worktree-root) path-str))]
            (when (and (or (str/starts-with? target (str root java.io.File/separator))
                           (and allow-root? (= target root)))
-                      (not (and (fs/sym-link? target) (not (fs/exists? target)))))
+                      (not (git-dir/reaches-metadata? root path-str)))
              target))))
      (catch java.io.IOException _ nil)
-     (catch SecurityException _ nil))))
+     (catch SecurityException _ nil)
+     ;; java.nio rejects names it cannot represent (a NUL byte, say).
+     (catch IllegalArgumentException _ nil))))
 
 ;; ── content read/write (trailing-newline preserving) ─────────────────
 (defn- ^{:stratum 0} read-content
@@ -119,24 +135,30 @@
 (defn ^{:stratum 1} safe-worktree-entry-path
   "Resolve the directory entry `relative-path` names under
    `worktree-root`, for a delete. Returns its absolute path string, or
-   nil when the entry would sit outside the worktree.
+   nil when the entry would sit outside the worktree or is refused.
 
-   A delete removes the last component and does not follow it, so only
-   the parent goes through `safe-worktree-path`, which may resolve to
-   the worktree root itself (no parent, `.`, or a link to the root), and
-   the last component must be a plain name (not `.` or `..`). Resolving
-   the whole path would follow a final symlink and validate where it
-   points instead of the entry being removed: with `link` pointing
-   outside and `outside/back` pointing back in, `link/back` resolves
-   inside while the delete removes `outside/back`."
+   The parent goes through `safe-worktree-path`, which may resolve to
+   the worktree root itself (no parent, or `.`), and the last component
+   must be a plain name (not `.` or `..`). A path with a symbolic link
+   anywhere, the entry itself included, is refused: the fix loop does
+   not delete links or anything reached through one.
+
+   The entry itself must not be git metadata either: deleting a linked
+   worktree's `.git` file sends the next git command to whatever
+   repository contains the worktree directory."
   [worktree-root relative-path]
   (let [file   (io/file (str relative-path))
         leaf   (.getName file)
         parent (.getParent file)]
-    (when-not (or (str/blank? leaf) (contains? #{"." ".."} leaf))
-      (some-> (safe-worktree-path worktree-root (or parent ".") {:allow-root? true})
-              (io/file leaf)
-              str))))
+    (when-not (or (str/blank? leaf)
+                  (contains? #{"." ".."} leaf)
+                  (git-dir/git-dir-name? leaf)
+                  (git-dir/symlink-on-path? worktree-root relative-path))
+      (let [entry (some-> (safe-worktree-path worktree-root (or parent ".") {:allow-root? true})
+                          (io/file leaf)
+                          str)]
+        (when-not (and entry (git-dir/metadata-entry? worktree-root entry))
+          entry)))))
 
 ;; ── pipeline guards ──────────────────────────────────────────────────
 ;;
@@ -147,12 +169,15 @@
 (defn- ^{:stratum 1} guard-path
   "Step 1: resolve `relative-path` under `worktree-path`. Bails out
    with `:policy-eval/path-traversal` on absolute paths, ..-segments,
-   or canonicalization escapes."
+   canonicalization escapes, a symlink on the path, or a path that
+   reaches git metadata."
   [worktree-path relative-path]
   (if-let [abs (safe-worktree-path worktree-path relative-path)]
     (dag/ok {:abs abs :relative-path relative-path :worktree-path worktree-path})
     (dag/err :policy-eval/path-traversal
-             (str "relative-path escapes worktree root: " relative-path)
+             (str "relative-path escapes worktree root, passes through a symlink "
+                  "(fixes never need to write through one), or reaches its git dir: "
+                  relative-path)
              {:path relative-path :worktree-path (str worktree-path)})))
 
 (defn- ^{:stratum 1} guard-line-in-range

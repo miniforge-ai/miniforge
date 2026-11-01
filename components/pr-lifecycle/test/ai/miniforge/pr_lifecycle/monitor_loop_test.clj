@@ -69,6 +69,7 @@
                         :event-bus                   nil
                         :logger                      nil
                         :worktree-path               "/dev/null"
+                        :repo-slug                   "example/repo"
                         :self-author                 "bot"
                         :generate-fn                 nil
                         :max-fix-attempts-per-comment   3

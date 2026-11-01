@@ -18,6 +18,7 @@
 (ns ai.miniforge.cli.workflow-runner.display-ansi
   "ANSI escape-code styling for workflow-runner terminal output."
   (:require
+   [ai.miniforge.cli.color :as color]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -37,5 +38,10 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} colorize [color text]
-  (str (get ansi-codes color "") text (:reset ansi-codes)))
+(defn ^{:stratum 1} colorize
+  "`text` in `color`, or as is when color is off (NO_COLOR, or stdout not
+   a terminal)."
+  [color text]
+  (if (color/enabled?)
+    (str (get ansi-codes color "") text (:reset ansi-codes))
+    (str text)))

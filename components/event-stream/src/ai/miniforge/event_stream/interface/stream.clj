@@ -77,6 +77,12 @@
    `create-event-stream`; merge over it to change a limit."
   retention/bounded-policy)
 
+(def ^{:stratum 0} compact-events
+  "`(compact-events events policy)`: the events of `events` (a vector in
+   publish order) that a retention policy such as `bounded-retention`
+   keeps, still in publish order. Pure."
+  retention/compact)
+
 (def ^{:stratum 0} create-envelope
   "Build an event envelope map with an atomically-assigned per-workflow
    sequence number. Returns a map carrying :event/type, :event/id (a
@@ -103,6 +109,11 @@
    :workflow-quiesced :workflow-id ... :event-type ...} map without
    running sinks or subscribers."
   core/publish!)
+
+(def ^{:stratum 0} replay!
+  "Deliver a stored event to a legacy stream's log and subscribers
+   without its sinks. See `core/replay!`."
+  core/replay!)
 
 (def ^{:stratum 0} subscribe!
   "Register a callback for events. 3-arg form subscribes to all events;

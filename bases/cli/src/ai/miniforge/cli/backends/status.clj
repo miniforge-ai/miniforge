@@ -27,7 +27,7 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.backends.config :as backend-config]
    [ai.miniforge.cli.messages :as messages]
-   [babashka.process :as process]))
+   [babashka.fs :as fs]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -40,13 +40,10 @@
 
 ;; Status checking
 (defn ^{:stratum 0} check-command-available?
-  "Check if a command is available on PATH."
+  "Check if a command is available on PATH. `fs/which` resolves it on
+   every OS (with PATHEXT on Windows, which has no `which` binary)."
   [cmd]
-  (try
-    (let [result (process/sh "which" cmd)]
-      (zero? (:exit result)))
-    (catch Exception _
-      false)))
+  (boolean (some-> cmd fs/which)))
 
 (defn ^{:stratum 0} get-current-backend
   "Get the currently configured backend from config or env var."

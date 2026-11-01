@@ -18,6 +18,8 @@ Get from zero to a miniforge-generated pull request in under 5 minutes.
   - An API key configured through OpenCode
 - An OCI-compatible local container runtime — see "Container runtime" below.
   [Podman](https://podman.io/) is the recommended default; Docker is supported.
+- The [GitHub CLI](https://cli.github.com/) (`gh`), signed in with
+  `gh auth login`. The release phase opens pull requests with it.
 
 Install Babashka:
 
@@ -47,25 +49,46 @@ scoop install babashka
 > Linux instructions above. See [Platform Support](platform-support.md) for
 > the current matrix and known gaps.
 
-## 1. Clone and Bootstrap
+## 1. Fork, Clone and Bootstrap
+
+The workflow in step 3 ends by pushing a branch to `origin` and opening
+a pull request with `gh pr create`. A clone of `miniforge-ai/miniforge`
+cannot push there, so fork the repository on GitHub and clone your fork.
+
+Building `mf` from source currently needs read access to the private
+`miniforge-ai/workbench-contract` repository, a dependency of the CLI
+build. Until that dependency is published or removed, this path works only for GitHub accounts with that access.
+For others, `bb bootstrap` stops before the build and explains why.
 
 ```bash
-git clone https://github.com/miniforge-ai/miniforge.git
+git clone https://github.com/<you>/miniforge.git
 cd miniforge
+gh repo set-default <you>/miniforge   # gh opens the PR on your fork
 bb bootstrap
 ```
 
-This installs Java, Clojure, linters, Polylith, prefetches the coverage
-tool used by `bb ccov`, and (on macOS) brew-installs Podman and
-initializes a default `podman machine`. Linux users install Podman via
-their distro package manager (`apt install podman`, `dnf install
-podman`, `pacman -S podman`); Docker users can stay on Docker by setting
-`MINIFORGE_RUNTIME=docker` or `:runtime-kind :docker` in config.
+This installs Java, Clojure, linters, and Polylith, then prefetches the coverage tool used by `bb ccov`.
+It builds the CLI and installs it as `~/.local/bin/mf`.
+On macOS, it also brew-installs Podman and initializes a default `podman machine`. If `~/.local/bin` is not on your `PATH`,
+bootstrap says so; add it before running `mf`. After a `git pull`, run
+`bb install:local` to rebuild `mf`.
+
+Bootstrap installs the repo's git hooks only when your git email is
+`@miniforge.ai`. The pre-commit hook rejects other commit emails, and
+miniforge's release phase commits in a worktree of this clone, which
+runs the same hooks.
+
+Linux users install Podman via their distro package manager: `apt install podman`, `dnf install podman`, or `pacman -S podman`.
+Docker users can stay on Docker by setting `MINIFORGE_RUNTIME=docker` or `:runtime-kind :docker` in config.
 
 ## Container runtime
 
-Miniforge runs every task inside an isolated OCI container. Any
-OCI-compatible local runtime works; Podman is the recommended default.
+By default (`--execution-mode local`) miniforge runs each task in a git
+worktree on your machine. The agent has your user's privileges: your
+files, network and credentials. Nothing isolates it, and `mf run` says
+so when it starts. With `--execution-mode governed`, each task runs
+inside an isolated OCI container (a capsule) instead. Any OCI-compatible
+local runtime works; Podman is the recommended default.
 
 ```bash
 # Verify the resolved runtime
@@ -100,9 +123,11 @@ opencode models
 Then select the backend in your miniforge config:
 
 ```edn
-{:llm {:backend :opencode
-       :model "anthropic/claude-sonnet-4-5"}}
+{:llm {:backend :opencode}}
 ```
+
+Leave `:model` out to use miniforge's per-role defaults for the backend;
+see [Models](configuration.md#models) for how to set one.
 
 Claude Code and Codex remain supported direct CLI backends for users who
 already have those CLIs configured. Provider API keys for miniforge agent

@@ -390,7 +390,22 @@
     (testing "a username alone is stripped and carries no credential"
       (is (= "https://github.com/o/r.git"
              (:https-url (git-remote {:repo-url "https://bob@github.com/o/r.git"}))))
-      (is (nil? (:url-auth (git-remote {:repo-url "https://bob@github.com/o/r.git"})))))))
+      (is (nil? (:url-auth (git-remote {:repo-url "https://bob@github.com/o/r.git"})))))
+    (testing "a mixed-case scheme is lowercased, with or without userinfo,
+              so the credential env still matches the URL"
+      (doseq [[given url auth k]
+              [["HTTPS://bob:pw@git.example.com/r.git" "https://git.example.com/r.git"
+                {:user "bob" :token "pw"} "http.https://git.example.com/.extraheader"]
+               ["Http://bob:pw@git.example.com/r.git" "http://git.example.com/r.git"
+                {:user "bob" :token "pw"} "http.http://git.example.com/.extraheader"]
+               ["HTTPS://git.example.com/r.git" "https://git.example.com/r.git"
+                nil "http.https://git.example.com/.extraheader"]]]
+        (let [remote (git-remote {:repo-url given})]
+          (is (= url (:repo-url remote) (:https-url remote)))
+          (is (= auth (:url-auth remote)))
+          (is (contains? (git-config-of ((private-fn 'git-credential-env) (:https-url remote)
+                                                                          {:user "u" :token "t"}))
+                         k)))))))
 
 (deftest ^{:stratum 1} git-auth-test
   (let [git-auth (private-fn 'git-auth)]
@@ -708,10 +723,11 @@
           (is (some #{"http://git.example.com/r.git"} cmd))
           (is (some #{(str "Authorization: Basic " (basic-auth "bob" "pw"))} (vals env))))))))
 
-(deftest ^{:stratum 1} persist-workspace-authenticates-push-only-test
-  (testing "with a recorded remote, only the push gets the credential, and
-            it pushes to the recorded URL rather than the capsule's origin;
-            add/commit (which run workspace hooks) never see it"
+(deftest ^{:stratum 1} persist-workspace-authenticates-remote-calls-only-test
+  (testing "with a recorded remote, only ls-remote and push get the
+            credential, with hooks off, and both target the recorded URL
+            rather than the capsule's origin; add/commit (which run
+            workspace hooks) never see it"
     (let [executor (recorded-remote-executor)
           calls    (atom [])]
       (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
@@ -724,11 +740,16 @@
                               :stdout (if (= cmd "git status --porcelain") " M f" "sha")}})]
         (is (true? (get-in (proto/persist-workspace! executor "c1" {:branch "task/x"})
                            [:data :persisted?])))
-        (let [[[cmd opts] & more] (credentialed-calls @calls)]
-          (is (empty? more))
-          (is (= ["git" "push" "https://github.com/o/r.git" "HEAD:task/x" "--force"] cmd))
-          (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
-                 (get (git-config-of (:env opts)) "http.https://github.com/.extraheader"))))
+        (let [authed (credentialed-calls @calls)]
+          (is (= [["git" "ls-remote" "https://github.com/o/r.git" "refs/heads/task/x"]
+                  ["git" "push" "--force-with-lease=task/x:sha" "https://github.com/o/r.git"
+                   "HEAD:task/x"]]
+                 (map first authed)))
+          (is (every? #(= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
+                          (get (git-config-of (:env (second %))) "http.https://github.com/.extraheader"))
+                      authed))
+          (is (every? #(= "/dev/null" (get (git-config-of (:env (second %))) "core.hooksPath"))
+                      authed)))
         (proto/release-environment! executor "c1")
         (is (= {} @(:git-remotes executor)))))))
 

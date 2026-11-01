@@ -26,6 +26,7 @@
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.llm.network-health :as nh]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+   [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]
    [ai.miniforge.llm.protocols.records.llm-client :as records]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -124,15 +125,15 @@
   "`probe-endpoint-for` `backend-key` when the environment is exactly
    `env`."
   [backend-key env]
-  (with-redefs [impl/getenv-value (fn [k] (get env k))]
+  (with-redefs [settings/getenv-value (fn [k] (get env k))]
     (impl/probe-endpoint-for backend-key)))
 
 (defn- ^{:stratum 0} probe-request
-  "The request map `network-healthy?` sends for `url` under environment
+  "The request map `probe-network` sends for `url` under environment
    `env`."
   [url env]
   (let [captured (atom nil)]
-    (nh/network-healthy? url {:env env
+    (nh/probe-network url {:env env
                               :http-client (fn [request]
                                              (reset! captured request)
                                              (delay {:status 200}))})
@@ -160,10 +161,10 @@
                  :stream-exec-fn (fn [_cmd _on-line opts]
                                    (reset! seen opts)
                                    (impl/timeout-result [] stub-stream-timeout))})]
-    (with-redefs [impl/getenv-value (fn [k]
-                                      (if (= k monitor-env-var)
-                                        monitor-env-value
-                                        (System/getenv k)))]
+    (with-redefs [settings/getenv-value (fn [k]
+                                          (if (= k monitor-env-var)
+                                            monitor-env-value
+                                            (System/getenv k)))]
       (llm/complete-stream client {:prompt "test"} (fn [_] nil)))
     @seen))
 
@@ -237,6 +238,14 @@
                                           "no_proxy" "api.anthropic.com"
                                           "NO_PROXY" "other.example"}))))))
 
+(deftest ^{:stratum 1} probe-proxy-host-leaves-out-credentials-test
+  (testing "the proxy host for diagnostics is host:port, never the credentials in the URL"
+    (is (= "proxy.corp.example:3128"
+           (nh/probe-proxy-host anthropic-probe-url
+                                {"HTTPS_PROXY" "http://user:secret@proxy.corp.example:3128"}))))
+  (testing "nil when the probe goes direct"
+    (is (nil? (nh/probe-proxy-host anthropic-probe-url {})))))
+
 (deftest ^{:stratum 1} probe-goes-direct-without-proxy-env-test
   (testing "no proxy variables: the request is the plain probe"
     (let [request (probe-request anthropic-probe-url {})]
@@ -296,7 +305,7 @@
             env {"HTTPS_PROXY" (str "http://127.0.0.1:" (.getLocalPort server))}]
         (serve-connects! server seen connect-established-reply)
         (dotimes [_ probe-count]
-          (is (true? (nh/network-healthy? anthropic-probe-url {:env env}))))
+          (is (= :healthy (nh/probe-network anthropic-probe-url {:env env}))))
         (is (= (mapv (fn [n] [n expected-connect-line]) (range 1 (inc probe-count)))
                @seen)
             "one connection per probe, each a CONNECT to api.anthropic.com:443")))))
@@ -306,13 +315,14 @@
     (doseq [status-line failed-connect-status-lines]
       (with-open [server (java.net.ServerSocket. 0)]
         (serve-connects! server (atom []) (connect-reply status-line))
-        (is (false? (nh/network-healthy? anthropic-probe-url {:env (local-proxy-env server)}))
+        (is (= :unreachable (nh/probe-network anthropic-probe-url {:env (local-proxy-env server)}))
             status-line))))
 
-  (testing "a CONNECT answered 407 still counts as reachable"
+  (testing "a CONNECT answered 407 is reported as proxy-auth-required, not healthy"
     (with-open [server (java.net.ServerSocket. 0)]
       (serve-connects! server (atom []) (connect-reply auth-required-status-line))
-      (is (true? (nh/network-healthy? anthropic-probe-url {:env (local-proxy-env server)}))))))
+      (is (= :proxy-auth-required
+             (nh/probe-network anthropic-probe-url {:env (local-proxy-env server)}))))))
 
 (deftest ^{:stratum 2} handle-streaming-starts-network-monitor-test
   (testing "a streaming CLI call passes :backend-key, which starts the network-drop monitor"

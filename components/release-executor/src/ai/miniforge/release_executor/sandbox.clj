@@ -27,6 +27,7 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.release-executor.messages :as msg]
+   [ai.miniforge.release-executor.pr-lookup :as pr-lookup]
    [ai.miniforge.release-executor.result :as result]
    [ai.miniforge.redaction.interface :as redaction]
    [clojure.string :as str]))
@@ -40,7 +41,11 @@
 
 (defn ^{:stratum 0} exec!
   "Execute a command in the sandbox environment.
-   Returns {:success? bool :output string :error string}.
+   Returns {:success? bool :output string :error string}, plus
+   :timed-out? true when the runtime stopped the command at its deadline
+   (exit 124, coreutils timeout(1)'s convention), or :interrupted? true
+   when it was interrupted (exit 130, or the executor's :exec-interrupted):
+   either way it may have taken effect.
    Optional opts map is merged with {:capture-output? true} and
    forwarded to the executor (supports :env, :timeout-ms, :workdir)."
   ([executor env-id command] (exec! executor env-id command {}))
@@ -52,8 +57,13 @@
          (if (zero? exit-code)
            (result/shell-success {:output (str/trim (or stdout ""))})
            (result/shell-failure (str/trim (or stderr ""))
-                                 {:output (str/trim (or stdout ""))})))
-       (result/shell-failure (str "Executor error: " (:error r)) {:output ""})))))
+                                 (cond-> {:output (str/trim (or stdout ""))}
+                                   (= 124 exit-code) (assoc :timed-out? true)
+                                   (= 130 exit-code) (assoc :interrupted? true)))))
+       (result/shell-failure (str "Executor error: " (:error r))
+                             (cond-> {:output ""}
+                               (= :exec-interrupted (get-in r [:error :code]))
+                               (assoc :interrupted? true)))))))
 
 (defn- ^{:stratum 0} token-auth-env
   "Environment for one push that authenticates to GitHub with `token`, or
@@ -291,6 +301,37 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} remote-branch-sha!
+  "The commit origin's `branch` points at, via `git ls-remote` in the
+   sandbox: {:success? true :sha sha-or-nil} (nil: no such branch), or the
+   failed command's result."
+  [executor env-id branch exec-opts]
+  (or (validate-safe-branch-name branch)
+      (let [fetch  (exec! executor env-id "git remote get-url origin" exec-opts)
+            pushes (exec! executor env-id "git remote get-url --push --all origin" exec-opts)]
+        ;; ls-remote asks origin's fetch URL; it speaks for the push only
+        ;; when the push goes there and nowhere else.
+        (if-not (and (result/succeeded? fetch) (result/succeeded? pushes)
+                     (= [(str/trim (:output fetch))]
+                        (remove str/blank? (str/split-lines (:output pushes)))))
+          (result/shell-failure (msg/t :push/probe-destination-differs))
+          (let [r (exec! executor env-id ["git" "ls-remote" "origin" (str "refs/heads/" branch)]
+                         exec-opts)]
+            (if (result/succeeded? r)
+              (result/shell-success {:sha (-> (str/trim (:output r "")) (str/split #"\s+") first not-empty)})
+              r))))))
+
+(defn ^{:stratum 2} find-pr!
+  "Look up the PR `branch` already has, in any state, via gh in the sandbox
+   (see pr-lookup). Optional exec-opts supports :env for GH_TOKEN. Returns
+   {:success? true :pr pr-or-nil}, or the failed command's result."
+  [executor env-id branch exec-opts]
+  (or (validate-safe-branch-name branch)
+      (let [r (exec! executor env-id (pr-lookup/lookup-argv branch) exec-opts)]
+        (if (result/succeeded? r)
+          (result/shell-success {:pr (pr-lookup/parse-lookup (:output r))})
+          r))))
+
 (defn ^{:stratum 2} stage-files!
   "Stage files in the sandbox container. Returns a shell failure result if
    any path is unsafe (see validate-safe-container-path) — an unvalidated
@@ -316,8 +357,11 @@
              (str "git add " (str/join " " (map #(str "'" % "'") file-paths)))))))
 
 (defn ^{:stratum 2} try-checkout-branch
-  "Try to checkout a new branch off the current HEAD, retrying with a
-   timestamp suffix if the desired name already exists.
+  "Try to checkout a new branch off the current HEAD. When the name already
+   exists and the branch contains HEAD, check it out instead: a retried or
+   resumed release of the same run, whose branch name is fixed, carries on
+   with the branch it made rather than a renamed one (which would get a
+   second PR). Fails when the existing branch does not contain HEAD.
 
    Branches off HEAD (not `origin/<base-branch>`) so the new branch
    inherits whatever commits the task worktree already carries — e.g.
@@ -333,13 +377,23 @@
                             (str "git checkout -b " branch-name))]
     (if (result/succeeded? checkout-r)
       (result/shell-success {:branch branch-name :base-branch base-branch})
-      (let [ts-name (str branch-name "-" (System/currentTimeMillis))
-            retry-r (exec! executor env-id
-                           (str "git checkout -b " ts-name))]
-        (if (result/succeeded? retry-r)
-          (result/shell-success {:branch ts-name :base-branch base-branch})
-          (result/shell-failure (str "Failed to create branch: " (:error retry-r))
-                               {:branch nil})))))))
+      (let [exists?  (result/succeeded?
+                      (exec! executor env-id ["git" "rev-parse" "--verify" "--quiet"
+                                              (str "refs/heads/" branch-name)]))
+            holds?   (and exists?
+                          (result/succeeded?
+                           (exec! executor env-id ["git" "merge-base" "--is-ancestor"
+                                                   "HEAD" branch-name])))
+            checkout (when holds? (exec! executor env-id ["git" "checkout" branch-name]))]
+        (cond
+          (not exists?) (result/shell-failure (str "Failed to create branch: " (:error checkout-r))
+                                              {:branch nil})
+          (not holds?)  (result/shell-failure (msg/t :branch/diverged {:branch branch-name})
+                                              {:branch nil})
+          (result/succeeded? checkout)
+          (result/shell-success {:branch branch-name :base-branch base-branch :reused? true})
+          :else (result/shell-failure (str "Failed to check out branch: " (:error checkout))
+                                      {:branch nil})))))))
 
 (defn ^{:stratum 2} fetch-branch!
   "Fetch origin/<branch> into the sandbox. `create-branch!` fetches only the
@@ -402,7 +456,9 @@
   ([executor env-id branch-name opts]
    (or (validate-safe-branch-name branch-name)
        (let [result (exec! executor env-id (str "git push -u origin " branch-name) opts)]
-         (if (result/succeeded? result)
+         ;; A push stopped mid-way may have reached origin: retrying it over
+         ;; HTTPS would hide that unknown outcome behind the retry's.
+         (if (or (result/succeeded? result) (:timed-out? result) (:interrupted? result))
        result
        (if-let [token (get-in opts [:env "GH_TOKEN"])]
          (let [url-r (exec! executor env-id "git remote get-url origin" opts)
@@ -450,7 +506,8 @@
              (reuse-existing-pr! executor env-id exec-opts (:error r))
 
              :else
-             (result/shell-failure (:error r) {:pr-url nil :pr-number nil})))))))
+             (result/shell-failure (:error r) (merge {:pr-url nil :pr-number nil}
+                                                     (select-keys r [:timed-out? :interrupted?])))))))))
 
 (defn ^{:stratum 2} diff-stats-range
   "Get diff stats for the changes this branch introduced since branching

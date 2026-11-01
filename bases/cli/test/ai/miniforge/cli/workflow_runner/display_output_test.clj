@@ -25,11 +25,16 @@
    focuses on pure formatting) or progress-integration-test.clj
    (which focuses on event lifecycle)."
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.string :as str]
    [cheshire.core :as json]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.cli.color :as color]
    [ai.miniforge.cli.workflow-runner.display :as display]))
+
+;; These tests check the colored output; tests run without a terminal,
+;; where color is off.
+(use-fixtures :each (fn [f] (with-redefs [color/enabled? (constantly true)] (f))))
 
 ;------------------------------------------------------------------------------ Layer 0
 
