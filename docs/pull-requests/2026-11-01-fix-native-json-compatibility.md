@@ -32,9 +32,15 @@ The paired client PR retains actual lossless-decimal packaged execution coverage
 
 The old substring policy failed 16 regression assertions without errors.
 Besides rejecting the portable release, it missed namespaced-map dependency forms.
-The structured policy passes 3 tests and 176 assertions. It checks brick,
+The initial structured policy passed 3 tests and 176 assertions. It checks brick,
 project and root manifests, including alias overrides, without loading dependencies.
 Java JDBC rejection and all existing native execution tests remain in place.
+
+Fresh review found classifier and task-manifest coverage gaps. Regressions reproduced
+five assertion failures and one reader error. The corrected policy passes 5 tests
+and 186 assertions, including native task dependency sites and disabled reader evaluation.
+Both `deps.edn` and `bb.edn` manifests are scanned. Classifier artifacts remain rejected
+even when their declared version matches the approved artifact.
 
 ## Deployment Plan
 
