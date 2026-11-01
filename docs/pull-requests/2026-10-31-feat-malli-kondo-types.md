@@ -35,7 +35,10 @@ mistakes in calls no test reaches, at lint time: a gate named by string
    1 when the committed file is missing or different.
 2. `bb.edn`: `lint:malli-types` and `lint:malli-types:check` (JVM, `-X:dev`,
    about 26 s locally).
-3. `ci.yml`: the Lint job runs the check after clj-kondo and uploads its log.
+3. `ci.yml`: the Test job runs the check after the development tests and
+   uploads its log. It runs there, not in Lint, because the `:dev` classpath
+   includes the private `workbench-contract` git dependency, which only the
+   Test job has access to.
 4. `.clj-kondo/metosin/malli-types-clj/config.edn`: generated from the gate
    interface's schemas.
 5. `gate/interface_schema_test.clj`: the one deliberate wrong-type call (it

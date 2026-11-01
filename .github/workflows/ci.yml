@@ -129,15 +129,6 @@ jobs:
           bb lint:clj:all 2>&1 | tee clj-kondo.log
           echo "::endgroup::"
 
-      # clj-kondo reads the types generated from Malli function schemas. A
-      # schema change without `bb lint:malli-types` leaves them stale.
-      - name: Check Malli clj-kondo types
-        run: |
-          set -o pipefail
-          echo "::group::Malli clj-kondo types"
-          bb lint:malli-types:check 2>&1 | tee malli-types.log
-          echo "::endgroup::"
-
       # Guards the hand-maintained :extra-paths lists in bb.edn: loads each
       # such task's entry namespaces in a fresh bb process (no execution).
       # Without this, a grown require chain breaks `bb miniforge run` etc.
@@ -163,7 +154,6 @@ jobs:
           name: lint-logs-${{ github.sha }}
           path: |
             clj-kondo.log
-            malli-types.log
             bb-classpaths.log
             markdownlint.log
           retention-days: 7
@@ -266,6 +256,18 @@ jobs:
           bb test:dev 2>&1 | tee dev-test-output.log
           echo "::endgroup::"
 
+      # clj-kondo reads the types generated from Malli function schemas. A
+      # schema change without `bb lint:malli-types` leaves them stale. It runs
+      # here rather than in Lint because loading the :dev classpath needs the
+      # workbench-contract access configured at the top of this job.
+      - name: Check Malli clj-kondo types
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          echo "::group::Malli clj-kondo types"
+          bb lint:malli-types:check 2>&1 | tee malli-types.log
+          echo "::endgroup::"
+
       # Loads the miniforge CLI's bricks under Babashka, the CLI's runtime,
       # and runs the bb-only checks in tests/graalvm_compatibility_test.clj.
       # Only the pre-commit hook ran this, and bootstrap skips that hook for
@@ -302,6 +304,7 @@ jobs:
             test-output.log
             integration-output.log
             dev-test-output.log
+            malli-types.log
             graalvm-output.log
           retention-days: 7
 
