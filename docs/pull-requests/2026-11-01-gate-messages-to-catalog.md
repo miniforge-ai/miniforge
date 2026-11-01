@@ -19,7 +19,7 @@ verdicts and its description), syntax, lint, format, pre-verify lint,
 plan / review / quality / release / policy, coverage, pre-commit
 discipline, the mechanical capability descriptions, the registry's
 unknown-gate and noop entries, and the interface's missing-repair
-failure. 44 strings in all, counting the five added in review.
+failure. 45 strings in all, counting the six added in review.
 
 ## Changes
 
@@ -59,10 +59,17 @@ failure. 44 strings in all, counting the five added in review.
 Literals still left in gate sources: the rich-comment example blocks,
 machine strings (git argv, URIs, glob prefixes), and one programmer-error
 `ex-info` in `pre_verify_lint/execution.clj`. Dewey 050 exempts all three
-classes. The first sweep missed five prose literals: the capability
-failure line and its fallback, the missing format-check-contract message,
-the formattable-file count, and the response-chain "Gate validation
-failed" anomaly. Copilot caught them, and they are now catalogued. The
+classes. Regex sweeps missed six prose literals, all of which Copilot
+caught and which are now catalogued:
+- the capability failure line and its fallback
+- the missing format-check-contract message
+- the formattable-file count
+- the "Gate validation failed" anomaly in the response chain
+- the "<gate> gate check threw: <exception>" diagnostic
+
+The final inventory came from a reader walk that collected every string
+literal outside a docstring in the gate sources. The only prose left is
+the one programmer-error `ex-info`. The
 anomaly text goes to `system.edn`, the default when the audience is
 unclear (050).
 

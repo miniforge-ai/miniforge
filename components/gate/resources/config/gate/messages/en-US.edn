@@ -314,4 +314,8 @@
 
   ;; Format gate — how many changed files an LSP formatter can handle
   :format/formattable-count
-  "{count} file(s) support LSP formatting"}}
+  "{count} file(s) support LSP formatting"
+
+  ;; Mechanical capability — the wrapped gate's check threw; exception is its message
+  :capability/gate-threw
+  "{gate} gate check threw: {exception}"}}

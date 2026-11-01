@@ -138,9 +138,9 @@
                           (check artifact context)
                           (catch Exception e
                             {:passed? false
-                             :errors  [{:message (str (name gate-kw)
-                                                      " gate check threw: "
-                                                      (ex-message e))}]}))]
+                             :errors  [{:message (messages/t :capability/gate-threw
+                                                             {:gate      (name gate-kw)
+                                                              :exception (ex-message e)})}]}))]
     (gate-result->violation capability result artifact)))
 
 (defn ^{:stratum 2} check-format
