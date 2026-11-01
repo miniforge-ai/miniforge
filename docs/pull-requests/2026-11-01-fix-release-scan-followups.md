@@ -74,9 +74,10 @@ The reviews found:
    - `exception-failure`: one factory for a thrown exception's failure.
    - `capsule-runner` quotes only arguments that are not shell-safe, so plain
      git commands reach `sh -c` unchanged.
-   - `capsule-reader` reads only a regular file that is not a symlink
-     (`if [ -f p ] && [ ! -L p ]; then cat p; fi`); anything else reads as
-     empty. A real `cat` failure still raises.
+   - `capsule-reader` skips a symlink, and a path that exists but is not a
+     regular file (`if [ -L p ] || { [ -e p ] && [ ! -f p ]; }; then :; else
+     cat p; fi`), which reads as empty; anything else is `cat`, so a missing
+     or inaccessible path fails and is retried.
    - `missing-commit?`: exit 1 with no output; an exit 1 that printed an
      error is a failure.
    - `read-entry`: an entry with no mode (from `git status`) is passed to the

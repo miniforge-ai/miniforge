@@ -362,3 +362,15 @@
         (finally
           (fs/delete outside))))))
 
+(deftest ^{:stratum 3} capsule-reader-fails-on-a-missing-path-test
+  (testing "the capsule reader, run through a real sh -c, fails on a path it
+            cannot read instead of returning empty content"
+    (with-task-branch "src/feature.clj"
+      (fn [dir _base _head]
+        (let [sh-exec (fn [_executor _env-id command {:keys [workdir]}]
+                        (let [{:keys [exit out err]} (shell/sh "sh" "-c" command :dir workdir)]
+                          {:ok? true :data {:exit-code exit :stdout out :stderr err}}))
+              read    (release-scan/capsule-reader sh-exec :mock-executor "env-1" dir)]
+          (is (= "(ns feature)\n" (:content (read "src/feature.clj"))))
+          (is (some? (:failure (read "src/missing.clj")))))))))
+

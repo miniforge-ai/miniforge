@@ -36,7 +36,8 @@
    committed entry carries its git mode, and only modes 100644/100755 are
    read. An entry from `git status` has no mode: the readers themselves
    refuse a symlink (the host reader by canonical path, the capsule reader
-   by `test -L`) and read anything that is not a regular file as empty.
+   by `test -L`) and read a path that exists but is not a regular file as
+   empty; a missing or unreadable path is a failure.
    Deletions carry empty content.
 
    Layer 0: failure shapes, output parsing, constants
@@ -162,12 +163,15 @@
 
 (defn ^{:stratum 1} capsule-reader
   "Read `path` under `workdir` inside a capsule: {:content s} or
-   {:failure f}. A symlink, or anything that is not a regular file, reads
-   as empty: its target is never followed."
+   {:failure f}. A symlink, or a path that exists but is not a regular file
+   (a directory, a FIFO cat would block on), reads as empty: a symlink's
+   target is never followed. Anything else is cat, so a missing or
+   inaccessible path fails instead of reading as empty."
   [execute-fn executor env-id workdir]
   (fn [path]
     (let [file    (agent/shell-quote (str workdir "/" path))
-          command (str "if [ -f " file " ] && [ ! -L " file " ]; then cat " file "; fi")]
+          command (str "if [ -L " file " ] || { [ -e " file " ] && [ ! -f " file " ]; }; "
+                       "then :; else cat " file "; fi")]
       (try
         (let [result  (execute-fn executor env-id command {:workdir workdir})
               exit    (get-in result [:data :exit-code])
