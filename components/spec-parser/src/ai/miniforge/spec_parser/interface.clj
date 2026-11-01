@@ -84,9 +84,13 @@
 
    Supported formats: .edn, .json, .md, .yaml/.yml (coming soon)
 
-   Returns normalized spec map ready for workflow engine."
-  [path]
-  (core/parse-spec-file path))
+   Returns normalized spec map ready for workflow engine. With `content`,
+   that text is parsed as the file at `path` and the file is not read (a
+   caller hashing the spec reads it once for both)."
+  ([path]
+   (core/parse-spec-file path))
+  ([path content]
+   (core/parse-spec-file path content)))
 
 (defn ^{:stratum 0} parse-content
   "Parse raw content string using the specified format parser.

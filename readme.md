@@ -10,9 +10,8 @@
 
 Write a spec. Get a pull request.
 
-Miniforge is an autonomous software factory. You describe what you want — in
-plain English or structured EDN — and miniforge plans the work, writes the code,
-runs the tests, reviews itself, and opens a PR. No prompt engineering. No
+Miniforge is an autonomous software factory. You describe what you want in plain English or structured EDN.
+Miniforge plans the work, writes the code, runs tests, reviews itself, and opens a PR. No prompt engineering. No
 copy-paste. Full SDLC.
 
 ## Before and After
@@ -42,9 +41,9 @@ BEFORE                              AFTER
 
 ## How It Works
 
-Miniforge runs four nested control loops — a team of agents does the work,
-a tight inner loop enforces quality at every step, a monitor resolves
-reviewer feedback after delivery, and meta-agents govern the whole operation.
+Miniforge runs four nested control loops.
+A team of agents does the work; a tight inner loop enforces quality at every step.
+A monitor resolves reviewer feedback after delivery, and meta-agents govern the whole operation.
 
 **Team loop** — specialized agents collaborate through phases, like a dev team
 handing off work:
@@ -133,13 +132,20 @@ enforce hard stops. All decisions produce evidence bundles for traceability.
 - An OCI-compatible local container runtime (see below). [Podman](https://podman.io/)
   is the recommended default; [Docker](https://www.docker.com/) is supported.
   Other Docker-CLI hosts (Colima, OrbStack) work as `:runtime-kind :docker`.
+- The [GitHub CLI](https://cli.github.com/) (`gh`), signed in with
+  `gh auth login`. The release phase opens pull requests with it.
 
 ### Install and Run
 
+The first workflow opens a pull request: miniforge pushes a branch to
+`origin` and runs `gh pr create`. Fork `miniforge-ai/miniforge` and clone
+your fork, so the push goes to a repository you can write to.
+
 ```bash
-git clone https://github.com/miniforge-ai/miniforge.git
+git clone https://github.com/<you>/miniforge.git
 cd miniforge
-bb bootstrap
+gh repo set-default <you>/miniforge   # gh opens the PR on your fork
+bb bootstrap                          # also installs mf to ~/.local/bin
 
 # Configure provider auth for agent runs:
 # opencode auth login
@@ -148,13 +154,15 @@ bb bootstrap
 mf run examples/workflows/simple-refactor.edn
 ```
 
-`bb bootstrap` installs the development dependencies (Java, Clojure CLI,
-clj-kondo, Polylith, markdownlint), configures the repo, prefetches the
-coverage tool used by `bb ccov`, and on macOS brew-installs Podman and
-initializes a default `podman machine`. Linux users install Podman via
-their distro package manager (`apt install podman`, `dnf install podman`,
-etc.); Docker users can stay on Docker by setting
-`MINIFORGE_RUNTIME=docker` or `:runtime-kind :docker` in config.
+`bb bootstrap` installs Java, Clojure CLI, clj-kondo, Polylith, and markdownlint.
+It prefetches the coverage tool used by `bb ccov`, builds the CLI, and installs it as `~/.local/bin/mf`.
+It reports if that directory is missing from your `PATH`.
+Run `bb install:local` after pulling to update `mf`.
+On macOS, bootstrap also brew-installs Podman and initializes a default `podman machine`.
+It installs the repo's git hooks only when your git email is `@miniforge.ai`.
+The pre-commit hook rejects other commit emails, including commits made by miniforge's release phase.
+Linux users install Podman through their distro package manager, such as `apt install podman` or `dnf install podman`.
+Docker users can stay on Docker by setting `MINIFORGE_RUNTIME=docker` or `:runtime-kind :docker` in config.
 
 To check the resolved runtime: `mf doctor` (which now reports the
 selected runtime + version + override hint) or `mf runtime info`

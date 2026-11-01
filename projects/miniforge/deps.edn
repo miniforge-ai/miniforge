@@ -1,4 +1,7 @@
-{:paths ["test" "integration" "e2e"]
+;; No :paths of its own. test/, integration/ and e2e/ hold only test code;
+;; as :paths they were classpath roots of every build of this project
+;; (build.clj reads them), so they live under aliases instead.
+{:paths []
 
  :deps {ai.miniforge/cli {:local/root "../../bases/cli"}
         ai.miniforge/mcp-context-server {:local/root "../../bases/mcp-context-server"}
@@ -135,5 +138,14 @@
                        "../../components/phase-opsv/test"
                        "../../components/workflow/test"
                        "../../components/phase-opsv/test-resources"]}
+  ;; Project integration tests. `bb test:integration` runs every *_test.clj
+  ;; under these directories (tasks/test_runner.clj discovers them on disk).
+  ;; Not under :test: Polylith runs :test paths as project tests, so
+  ;; `poly test :all` would run them a second time inside `bb test:all`.
+  :integration {:extra-paths ["test" "integration"]}
+  ;; Real-backend tests (claude CLI, Docker). Not run in CI; see e2e/README.md.
+  ;; Carries test/ too: the e2e namespaces require its support namespaces
+  ;; (ai.miniforge.workflow.isolation-support).
+  :e2e {:extra-paths ["test" "e2e"]}
   :uberjar
   {:main ai.miniforge.cli.main}}}

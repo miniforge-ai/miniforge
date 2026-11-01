@@ -169,7 +169,8 @@
     (with-redefs [readiness/evaluate
                   (fn [_ _ _ _] {:ready? false
                                 :checks {}
-                                :blocking [:ci-not-green]})]
+                                :blocking [:ci-not-green]})
+                  merge/read-pr-head (constantly (dag/err :head-unavailable "not read"))]
       (let [policy (assoc merge/default-merge-policy :auto-rebase-on-stale? false)
             context {:dag-id (random-uuid) :run-id (random-uuid)
                      :task-id (random-uuid) :pr-id 123}
@@ -235,6 +236,7 @@
                                 :pr-branch "feat/x"})]
       (with-redefs [readiness/evaluate
                     (fn [_ _ _ _] conflicting-readiness)
+                    merge/read-pr-head (constantly (dag/err :head-unavailable "not read"))
                     conflict-resolution/resolve-pr-conflicts!
                     (fn [_]
                       (reset! resolver-called? true)
@@ -266,7 +268,8 @@
             rebase / not-ready logic. With auto-rebase off, ends
             up as :not-ready."
     (with-redefs [readiness/evaluate
-                  (fn [_ _ _ _] conflicting-readiness)]
+                  (fn [_ _ _ _] conflicting-readiness)
+                  merge/read-pr-head (constantly (dag/err :head-unavailable "not read"))]
       (let [policy (assoc merge/default-merge-policy
                           :auto-rebase-on-stale? false)
             context {:dag-id (random-uuid) :run-id (random-uuid)

@@ -29,6 +29,7 @@
    [clojure.edn :as edn]
    [cheshire.core :as json]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.color :as color]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.logging.interface :as logging]))
 
@@ -52,7 +53,7 @@
       (.format (java.time.LocalDateTime/ofInstant inst (java.time.ZoneId/systemDefault))
                formatter))))
 
-;;------------------------------------------------------------------------------ Layer 0: File Discovery
+;; File Discovery
 (defn ^{:stratum 0} event-file-path
   "Get path to event file for a workflow.
 
@@ -231,8 +232,13 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} colorize [color text]
-  (str (get ansi-codes color "") text (:reset ansi-codes)))
+(defn ^{:stratum 1} colorize
+  "`text` in `color`, or as is when color is off (NO_COLOR, or stdout not
+   a terminal)."
+  [color text]
+  (if (color/enabled?)
+    (str (get ansi-codes color "") text (:reset ansi-codes))
+    (str text)))
 
 (defn- ^{:stratum 1} read-workflow-events
   "Read + parse every .json event file under the workflow directory, sorted
@@ -276,7 +282,7 @@
          (when (seq context)
            (str " " (colorize :gray (pr-str context)))))))
 
-;;------------------------------------------------------------------------------ Layer 2: Event Parsing
+;; Event Parsing
 (defn ^{:stratum 2} format-event
   "Format an event for display.
 

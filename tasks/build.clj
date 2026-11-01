@@ -21,6 +21,7 @@
    [babashka.fs :as fs]
    [babashka.process :as p]
    [clojure.string :as str]
+   [jar-slim]
    [version-stamp]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -128,6 +129,12 @@
   (println "🔨 Building miniforge CLI uberjar...")
   (let [command (build-command "bb-uberjar" ":project" "miniforge")]
     (run-build-command! command "❌ Build failed with exit code:"))
+  ;; bb loads only source and resources; drop JVM classes and native libs.
+  (let [{:keys [entries-before entries-after dropped bytes-before bytes-after]}
+        (jar-slim/slim-jar! "dist/miniforge.jar")]
+    (println "🧹 Dropped" (get dropped :class 0) "class files and" (get dropped :native 0)
+             "native libraries:" entries-before "->" entries-after "entries,"
+             bytes-before "->" bytes-after "bytes"))
   (version-stamp/stamp-from-env! "dist/miniforge.jar"))
 
 (defn ^{:stratum 2} kernel []

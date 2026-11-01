@@ -18,14 +18,15 @@
    Budget limits are hard stops — when exhausted, all autonomous action
   ceases and an escalation event is emitted.
 
-   Budget state is persisted in ~/.miniforge/state/pr-monitor/ so that
-   restarts do not reset counters."
+   Budget state is persisted per repository and PR (see monitor-store) so
+   that restarts do not reset counters. A budget file that cannot be read
+   loads as an exhausted budget, never as a fresh one."
   (:require
-   [ai.miniforge.config.interface :as mf-config]
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.pr-lifecycle.messages :as msg]
    [ai.miniforge.pr-lifecycle.monitor-config :as config]
-   [ai.miniforge.schema.interface :as schema]
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [ai.miniforge.pr-lifecycle.monitor-store :as store]
+   [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -41,29 +42,40 @@
    [:total-attempts nat-int?]
    [:started-at inst?]
    [:questions-answered nat-int?]
-   [:fixes-pushed nat-int?]])
+   [:fixes-pushed nat-int?]
+   ;; What the counters above are derived from (see `with-counts`).
+   [:attempts {:optional true} [:map-of :string int?]]
+   [:answered {:optional true} [:set int?]]
+   [:pushed {:optional true} [:set :string]]
+   [:floor {:optional true} [:maybe [:map
+                                     [:total-attempts {:optional true} nat-int?]
+                                     [:comment-attempts {:optional true} [:map-of int? nat-int?]]
+                                     [:questions-answered {:optional true} nat-int?]
+                                     [:fixes-pushed {:optional true} nat-int?]]]]])
 
 (defn- ^{:stratum 0} validate!
   [result-schema value]
   (schema/validate result-schema value))
 
-;; Budget operations
-(defn ^{:stratum 0} record-fix-attempt
-  "Record a fix attempt for a comment. Returns updated budget state."
-  [budget comment-id]
-  (-> budget
-      (update-in [:comment-attempts comment-id] (fnil inc 0))
-      (update :total-attempts inc)))
-
-(defn ^{:stratum 0} record-question-answered
-  "Record a question answered (does not consume fix budget)."
+(defn ^{:stratum 0} with-counts
+  "`budget` with its counters derived from what it recorded by id: fix
+   attempts (:attempts, attempt id → comment id), answered comment ids
+   (:answered) and pushed-fix ids (:pushed), on top of :floor, the counts
+   saved before ids were recorded. A budget without :attempts predates ids;
+   its counters become the floor. Counting ids makes recording, merging and
+   replaying the same change idempotent."
   [budget]
-  (update budget :questions-answered inc))
-
-(defn ^{:stratum 0} record-fix-pushed
-  "Record a successful fix push."
-  [budget]
-  (update budget :fixes-pushed inc))
+  (let [b     (if (contains? budget :attempts)
+                budget
+                (assoc budget :attempts {} :answered #{} :pushed #{}
+                       :floor (select-keys budget [:total-attempts :comment-attempts
+                                                   :questions-answered :fixes-pushed])))
+        floor (:floor b)]
+    (assoc b
+           :total-attempts     (+ (get floor :total-attempts 0) (count (:attempts b)))
+           :comment-attempts   (merge-with + (get floor :comment-attempts {}) (frequencies (vals (:attempts b))))
+           :questions-answered (+ (get floor :questions-answered 0) (count (:answered b)))
+           :fixes-pushed       (+ (get floor :fixes-pushed 0) (count (:pushed b))))))
 
 (defn ^{:stratum 0} comment-attempts-remaining
   "How many fix attempts remain for a specific comment."
@@ -87,10 +99,69 @@
     (/ (double (- now started)) 3600000.0)))
 
 ;; Budget persistence
-(def ^{:stratum 0} ^:private state-dir
-  (str (mf-config/miniforge-home) "/state/pr-monitor"))
+(defn ^{:stratum 0} budget-file-name
+  "Name of PR `pr-number`'s budget file inside its repo's state directory."
+  [pr-number]
+  (str "budget-" pr-number ".edn"))
+
+(defn ^{:stratum 0} invalid-budget
+  [file pr-number]
+  (anomaly/anomaly :invalid-input
+                   (msg/system-t :monitor-state/invalid-budget {:path (str file) :pr-number pr-number})
+                   {:monitor-state/path (str file)}))
+
+(defn ^{:stratum 0} exhausted-budget
+  "A budget that fails every check, standing in for one that could not be
+   read. `load-error` says why and reaches the escalation event through
+   `budget-summary`. Loading this, not a fresh budget, keeps the hard stop
+   when a budget file is damaged."
+  [pr-number load-error]
+  (let [limits (config/budget-defaults)]
+    {:pr-number pr-number :limits limits :comment-attempts {}
+     :total-attempts (:max-total-fix-attempts-per-pr limits)
+     :started-at (java.util.Date. 0) :questions-answered 0 :fixes-pushed 0
+     :load-error load-error}))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} merge-budgets
+  "The union of what `on-disk` and `mine` recorded by id (and the larger
+   :floor counts), each limit at its lower value and the earlier start time,
+   with counters derived from that. Recording is by id, so a change merged
+   or replayed twice counts once, and the merge only moves toward
+   exhaustion: a stale copy or other limits cannot lower what another
+   monitor saved or reopen a budget exhausted on disk."
+  [on-disk mine]
+  (if-not on-disk
+    (with-counts mine)
+    (let [disk (with-counts on-disk)]
+      (with-counts
+        (-> (with-counts mine)
+            (update :attempts merge (:attempts disk))
+            (update :answered (fnil into #{}) (:answered disk))
+            (update :pushed (fnil into #{}) (:pushed disk))
+            (update :floor #(merge-with (fn [a b] (if (map? a) (merge-with max a b) (max a b))) (:floor disk) %))
+            (update :limits #(merge-with min (:limits disk) %))
+            (update :started-at #(if (neg? (compare (:started-at disk) %)) (:started-at disk) %)))))))
+
+;; Budget operations: each records an id, so recording it again changes nothing
+(defn ^{:stratum 1} record-fix-attempt
+  "Record fix attempt `attempt-id` (default: a new id) on `comment-id`."
+  ([budget comment-id]
+   (record-fix-attempt budget comment-id (str (random-uuid))))
+  ([budget comment-id attempt-id]
+   (with-counts (assoc-in (with-counts budget) [:attempts attempt-id] comment-id))))
+
+(defn ^{:stratum 1} record-question-answered
+  "Record that the question in comment `comment-id` was answered (does not
+   consume fix budget)."
+  [budget comment-id]
+  (with-counts (update (with-counts budget) :answered (fnil conj #{}) comment-id)))
+
+(defn ^{:stratum 1} record-fix-pushed
+  "Record that fix `fix-id` (its attempt id) was pushed."
+  [budget fix-id]
+  (with-counts (update (with-counts budget) :pushed (fnil conj #{}) fix-id)))
 
 ;; Budget state
 (defn ^{:stratum 1} create-budget
@@ -111,7 +182,10 @@
       :total-attempts 0
       :started-at (java.util.Date.)
       :questions-answered 0
-      :fixes-pushed 0})))
+      :fixes-pushed 0
+      :attempts {}
+      :answered #{}
+      :pushed #{}})))
 
 (defn ^{:stratum 1} time-remaining-hours
   "Hours remaining before abandon deadline."
@@ -130,22 +204,11 @@
   [budget]
   (zero? (total-attempts-remaining budget)))
 
-(defn ^{:stratum 1} save-budget!
-  "Persist budget state to disk."
-  [budget]
-  (let [dir (io/file state-dir)
-        _ (when-not (.exists dir) (.mkdirs dir))
-        f (io/file state-dir (str "budget-" (:pr-number budget) ".edn"))]
-    (spit f (pr-str budget))))
-
-(defn ^{:stratum 1} load-budget
-  "Load persisted budget for a PR, if it exists."
-  [pr-number]
-  (let [f (io/file state-dir (str "budget-" pr-number ".edn"))]
-    (when (.exists f)
-      (try
-        (edn/read-string (slurp f))
-        (catch Exception _e nil)))))
+(defn ^{:stratum 1} valid-budget?
+  "True when `persisted` is a BudgetState for PR `pr-number`."
+  [persisted pr-number]
+  (and (schema/valid? BudgetState persisted)
+       (= pr-number (:pr-number persisted))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -157,15 +220,66 @@
 (defn ^{:stratum 2} budget-summary
   "Generate a summary of current budget status for events and logging."
   [budget]
-  {:total-attempts-used (:total-attempts budget)
-   :total-attempts-remaining (total-attempts-remaining budget)
-   :hours-elapsed (hours-elapsed budget)
-   :hours-remaining (time-remaining-hours budget)
-   :fixes-pushed (:fixes-pushed budget)
-   :questions-answered (:questions-answered budget)
-   :comment-attempts (:comment-attempts budget)})
+  (cond-> {:total-attempts-used (:total-attempts budget)
+           :total-attempts-remaining (total-attempts-remaining budget)
+           :hours-elapsed (hours-elapsed budget)
+           :hours-remaining (time-remaining-hours budget)
+           :fixes-pushed (:fixes-pushed budget)
+           :questions-answered (:questions-answered budget)
+           :comment-attempts (:comment-attempts budget)}
+    (:load-error budget) (assoc :load-error (:load-error budget))))
+
+(defn ^{:stratum 2} load-budget
+  "The budget saved for PR `pr-number` of repo `repo-slug` (owner/name); nil
+   when none was saved; `exhausted-budget` when the slug is not owner/name or
+   the file does not hold this PR's budget. The file is left as it is."
+  [repo-slug pr-number]
+  (let [file   (store/repo-file repo-slug (budget-file-name pr-number))
+        loaded (if file (store/read-map file) (store/no-repo repo-slug))]
+    (cond
+      (nil? loaded)                    nil
+      (valid-budget? loaded pr-number) (with-counts loaded)
+      :else (exhausted-budget pr-number (:anomaly/message (if (anomaly/anomaly? loaded)
+                                                            loaded
+                                                            (invalid-budget file pr-number)))))))
+
+(defn ^{:stratum 2} change-saved-budget!
+  "Under the budget file's lock, apply `f` to the copy saved for `budget`'s
+   PR in repo `repo-slug` merged with `budget` (see `merge-budgets`), so `f`
+   sees what other monitors saved, and write the result atomically. `f`
+   returns the new budget, or an anomaly to refuse, and then nothing changes
+   on disk. Returns the budget written, or an anomaly: `f`'s refusal, a
+   stand-in from `exhausted-budget`, a slug that is not owner/name, a file
+   that does not hold this PR's budget, a busy lock or a failed write."
+  [repo-slug budget f]
+  (let [pr-number (:pr-number budget)
+        file      (store/repo-file repo-slug (budget-file-name pr-number))
+        refusal   (volatile! nil)
+        apply-f   (fn [on-disk]
+                    (if (or (nil? on-disk) (valid-budget? on-disk pr-number))
+                      (let [changed (f (merge-budgets on-disk budget))]
+                        (if (anomaly/anomaly? changed)
+                          (do (vreset! refusal changed) on-disk)
+                          changed))
+                      on-disk))
+        saved     (cond
+                    (:load-error budget) (anomaly/anomaly :conflict
+                                                          (msg/system-t :monitor-state/budget-held {:pr-number pr-number})
+                                                          {:pr-number pr-number})
+                    (nil? file)          (store/no-repo repo-slug)
+                    :else                (store/update-file! file apply-f))]
+    (cond
+      @refusal                                                      @refusal
+      (or (anomaly/anomaly? saved) (valid-budget? saved pr-number)) saved
+      :else                                                         (invalid-budget file pr-number))))
 
 ;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} save-budget!
+  "Merge `budget` into the copy saved for its PR (see
+   `change-saved-budget!`). The budget now on disk, or an anomaly."
+  [repo-slug budget]
+  (change-saved-budget! repo-slug budget identity))
 
 (defn ^{:stratum 3} any-budget-exhausted?
   "Check if any budget dimension is exhausted.
@@ -205,7 +319,7 @@
   (budget-summary b3)
 
   ;; Persistence
-  (save-budget! b3)
-  (load-budget 123)
+  (save-budget! "miniforge-ai/miniforge" b3)
+  (load-budget "miniforge-ai/miniforge" 123)
 
   :leave-this-here)

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.persistence
   "Persistence layer for workflow configuration.
    Handles filesystem I/O for active workflow management.
@@ -24,30 +23,30 @@
    - Layer 0: Pure functions for path handling
    - Layer 1: File I/O operations (load/save)"
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.edn]
    [clojure.java.io]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Pure functions for path handling
-
-(defn active-config-path
+(defn ^{:stratum 0} active-config-path
   "Get path to active workflow config file.
-   Defaults to ~/.miniforge/workflows/active.edn"
+   Defaults to <miniforge-home>/workflows/active.edn"
   []
-  (let [home (System/getProperty "user.home")
-        config-dir (str home "/.miniforge/workflows")]
-    (str config-dir "/active.edn")))
+  (str (config/miniforge-home) "/workflows/active.edn"))
 
-(defn ensure-config-dir
+(defn ^{:stratum 0} ensure-config-dir
   "Ensure the config directory exists.
    Returns the directory path."
   []
-  (let [home (System/getProperty "user.home")
-        config-dir (str home "/.miniforge/workflows")]
+  (let [config-dir (str (config/miniforge-home) "/workflows")]
     (.mkdirs (java.io.File. config-dir))
     config-dir))
 
-(defn event-log-path
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} event-log-path
   "Get path to event log file for a workflow.
    Format: ~/.miniforge/workflows/events/<workflow-id>.edn"
   [workflow-id]
@@ -56,10 +55,8 @@
     (.mkdirs (java.io.File. events-dir))
     (str events-dir "/" workflow-id ".edn")))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; File I/O operations
-
-(defn load-active-config
+(defn ^{:stratum 1} load-active-config
   "Load active workflow configuration from ~/.miniforge/workflows/active.edn
 
    Returns map of task-type -> {:workflow-id :version}
@@ -74,7 +71,7 @@
         ;; Return empty config on error
         {}))))
 
-(defn save-active-config
+(defn ^{:stratum 1} save-active-config
   "Save active workflow configuration to ~/.miniforge/workflows/active.edn
 
    Arguments:
@@ -93,7 +90,9 @@
       (catch Exception _e
         false))))
 
-(defn get-active-workflow-id
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} get-active-workflow-id
   "Get the active workflow ID for a task type.
 
    Arguments:
@@ -104,7 +103,7 @@
   (let [config (load-active-config)]
     (get config task-type)))
 
-(defn set-active-workflow
+(defn ^{:stratum 2} set-active-workflow
   "Set the active workflow for a task type.
 
    Arguments:
@@ -119,10 +118,8 @@
                                             :version version})]
     (save-active-config new-config)))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Event log persistence
-
-(defn append-event
+(defn ^{:stratum 2} append-event
   "Append an event to a workflow's event log.
    Events are appended to ~/.miniforge/workflows/events/<workflow-id>.edn
    
@@ -143,7 +140,7 @@
       (catch Exception _e
         false))))
 
-(defn load-event-log
+(defn ^{:stratum 2} load-event-log
   "Load all events for a workflow from its event log.
    
    Arguments:

@@ -1,5 +1,6 @@
 <!--
   Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
 
@@ -22,22 +23,21 @@ lock `config.edn` itself, while this one locks `config.edn.lock`.
 
 1. `state/trains.clj`: `add-configured-repo!` and `discover-configured-repos!`
    go through `update-fleet-repos!`, built on `config-file/update-config!`. It
-   sets `[:fleet :repos]`, keeps every other key, and on a file that is not a
-   single EDN map returns a failure naming the file, with the anomaly under
-   `:anomaly`, and writes nothing.
+   sets `[:fleet :repos]` and keeps every other key.
+   A file that is not a single EDN map produces a failure naming the file, with the anomaly under `:anomaly`.
+   Nothing is written in that case.
 2. The private `with-config-lock!`, `save-fleet-config!` and lock messages are
    removed.
 
 ## Verification plan
 
-Regression test per writer: a truncated map in a temp config file; the writer
-returns `:success? false` with the path in `:error` and an `:invalid-input`
-anomaly, and the file is unchanged. Fails against main's code. All 109
+Each writer has a regression test using a truncated map in a temp config file.
+It returns `:success? false`, the path in `:error`, and an `:invalid-input` anomaly; the file stays unchanged. Fails
+against main's code. All 109
 trains tests pass.
 
 ## Scope and deployment
 
 Normal deployment; no format change. `load-fleet-config` (reads) still falls
-back to an empty fleet. Known, pre-existing: `json-response` cannot encode the
-`java.time.Instant` in `:anomaly/at`, so a failed add/discover returns an error
-from the JSON encoder rather than this message (true of every trains failure).
+back to an empty fleet. `json-response` already cannot encode the `java.time.Instant` in `:anomaly/at`.
+A failed add/discover therefore returns a JSON encoder error rather than this message, as with every trains failure.

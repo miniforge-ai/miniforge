@@ -18,7 +18,10 @@
 
 ;; Fallback user config applied when no user config file exists.
 ;; The :artifacts :dir value is resolved in code from the runtime home dir.
-{:llm {:backend :opencode
-       :model "anthropic/claude-sonnet-4-5"}
+;; No :model: `config init` writes these defaults into the user's file,
+;; where a model counts as the user's choice for every role on every
+;; backend. Without one, each role's model follows the backend
+;; (ai.miniforge.agent.model/default-model-for-role).
+{:llm {:backend :opencode}
  :dashboard {:port 7878
              :auto-open false}}

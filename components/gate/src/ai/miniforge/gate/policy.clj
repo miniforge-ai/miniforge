@@ -25,20 +25,15 @@
    - :plan-complete - Plan completeness check"
   (:require [ai.miniforge.gate.messages  :as msg]
             [ai.miniforge.gate.registry  :as registry]
+            [ai.miniforge.gate.no-secrets :as no-secrets]
             [ai.miniforge.policy-pack.interface :as policy-pack]
             [ai.miniforge.response.interface :as response]
+            [cheshire.core               :as json]
             [slingshot.slingshot         :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Policy checks
-(def ^{:stratum 0} secret-patterns
-  "Patterns that might indicate hardcoded secrets."
-  [#"(?i)(password|secret|api[_-]?key|token)\s*=\s*[\"'][^\"']{8,}"
-   #"(?i)aws[_-]?(access|secret)[_-]?key[_-]?id?\s*=\s*[\"'][A-Z0-9]{16,}"
-   #"sk-[a-zA-Z0-9]{32,}"  ; OpenAI keys
-   #"ghp_[a-zA-Z0-9]{36}"])  ; GitHub tokens
-
 (defn ^{:stratum 0} check-plan-complete
   "Check if plan artifact is complete."
   [artifact _ctx]
@@ -97,16 +92,25 @@
        :errors quality-issues})))
 
 (defn ^{:stratum 0} check-release-ready
-  "Check release readiness."
+  "Check release readiness.
+
+   Reads `:release/readiness` from the release phase output, where the
+   release phase records it from the verify and review outcomes. Passes
+   only on `:ready? true`; an absent, false or non-boolean value fails. A
+   skipped release (nothing to publish) passes. The gate runner passes the
+   phase `:output` as the artifact."
   [artifact _ctx]
-  (let [ready? (or (get-in artifact [:metadata :release-ready])
-                   (get-in artifact [:release :ready])
-                   true)]  ; Default to ready
-    (if ready?
+  (let [readiness (:release/readiness artifact)
+        {:keys [ready? checks]} readiness]
+    (if (or (true? ready?) (true? (:skipped artifact)))
       {:passed? true}
       {:passed? false
-       :errors [{:type :not-release-ready
-                 :message "Artifact not ready for release"}]})))
+       :errors [{:type    :not-release-ready
+                 :message (if (map? readiness)
+                            (msg/t :release/not-ready
+                                   {:checks (pr-str (remove :passed? checks))})
+                            (msg/t :release/no-readiness))
+                 :checks  (vec checks)}]})))
 
 ;; Policy Pack Gate (classifies by enforcement action, via policy-pack)
 (defn ^{:stratum 0} check-policy-pack
@@ -125,8 +129,11 @@
 
    Arguments:
      artifact - Artifact with :artifact/content (and optional :artifact/path),
-                forwarded to policy-pack/check-artifact
-     ctx      - Execution context with :policy-packs, :task-type, :phase
+                forwarded to policy-pack/check-artifact. A map without content
+                is scanned as its JSON encoding.
+     ctx      - Execution context with :policy-packs, :task-type and :phase
+                (a phase keyword, or the lifecycle's phase map, whose :name
+                is used)
 
    Returns:
      {:passed? bool :errors [] :warnings [] :approval-required []}. Blocking
@@ -137,7 +144,21 @@
   (try+
     (let [packs (get ctx :policy-packs [])
           task-type (get ctx :task-type :implement)
-          phase (get ctx :phase :implement)]
+          ;; In the workflow lifecycle ctx :phase is the phase MAP; reading it
+          ;; as the phase matched no phase-scoped rule, so none applied.
+          ctx-phase (:phase ctx)
+          phase (cond
+                  (keyword? ctx-phase) ctx-phase
+                  (map? ctx-phase) (get ctx-phase :name (get ctx :execution/current-phase :implement))
+                  :else (get ctx :execution/current-phase :implement))
+          ;; Rules scan text. A structured artifact without content (the
+          ;; provision phase's parsed Pulumi preview) is scanned as its JSON
+          ;; encoding, the format deployment rules are written against;
+          ;; scanning nothing let every rule pass.
+          artifact (if (and (map? artifact)
+                            (not-any? #(contains? artifact %) [:artifact/content :content :code/files]))
+                     (assoc artifact :artifact/content (json/generate-string artifact))
+                     artifact)]
       (if (empty? packs)
         {:passed? false
          :errors [{:type :no-policy-packs
@@ -168,30 +189,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} check-no-secrets
-  "Check for hardcoded secrets in content."
-  [artifact _ctx]
-  (let [content (or (:content artifact)
-                    (get-in artifact [:artifact/content])
-                    "")
-        content-str (if (string? content) content (pr-str content))
-        matches (for [pattern secret-patterns
-                      :let [matches (re-seq pattern content-str)]
-                      :when (seq matches)]
-                  {:pattern (str pattern)
-                   :count (count matches)})]
-    (if (empty? matches)
-      {:passed? true}
-      {:passed? false
-       :errors [{:type :secrets-detected
-                 :message "Potential hardcoded secrets detected"
-                 :matches matches}]})))
-
 (defmethod ^{:stratum 1} registry/get-gate :no-secrets
   [_]
   {:name :no-secrets
-   :description "Validates no hardcoded secrets in content"
-   :check check-no-secrets
+   :description (msg/t :no-secrets/description)
+   :check no-secrets/check-no-secrets
    :repair nil})
 
 (defmethod ^{:stratum 1} registry/get-gate :plan-complete
@@ -244,7 +246,5 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (check-no-secrets {:content "(def password \"secret123\")"} {})
-  (check-no-secrets {:content "(def x 42)"} {})
   (check-plan-complete {:plan {:steps [{:name "step1"}]}} {})
   :leave-this-here)

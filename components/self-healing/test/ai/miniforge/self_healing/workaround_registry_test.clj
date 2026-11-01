@@ -18,15 +18,12 @@
 (ns ai.miniforge.self-healing.workaround-registry-test
   "Unit tests for workaround registry."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [clojure.java.io :as io]
-            [ai.miniforge.config.interface :as config]
+            [ai.miniforge.self-healing.home-test-support :as home]
             [ai.miniforge.self-healing.workaround-registry :as registry]))
 
-;------------------------------------------------------------------------------ Layer 0
+(use-fixtures :each home/with-temp-home)
 
-;;------------------------------------------------------------------------------ Test fixtures
-(def ^{:stratum 0} test-registry-path
-  (str (config/miniforge-home) "/test_workarounds.edn"))
+;------------------------------------------------------------------------------ Layer 0
 
 ;; Basic load/save operations
 (deftest ^{:stratum 0} test-load-workarounds-empty
@@ -209,19 +206,3 @@
   (testing "Delete non-existent workaround returns nil"
     (let [result (registry/delete-workaround! (java.util.UUID/randomUUID))]
       (is (nil? result)))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} cleanup-test-registry
-  [f]
-  (with-redefs [registry/workaround-registry-path (constantly test-registry-path)]
-    (try
-      ;; Clean before test to ensure isolation
-      (when (.exists (io/file test-registry-path))
-        (.delete (io/file test-registry-path)))
-      (f)
-      (finally
-        (when (.exists (io/file test-registry-path))
-          (.delete (io/file test-registry-path)))))))
-
-(use-fixtures :each cleanup-test-registry)

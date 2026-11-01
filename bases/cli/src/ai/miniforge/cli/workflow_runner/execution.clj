@@ -39,10 +39,16 @@
         (println (display/colorize :yellow (messages/t :workflow-runner/artifact-store-warning))))
       nil)))
 
-(defn ^{:stratum 0} close-artifact-store [artifact-store]
+(defn ^{:stratum 0} close-artifact-store
+  "Close the store. When it reports writes it could not finish or index
+   (close-store returns false), warn on stderr: stdout may carry the
+   run's JSON output."
+  [artifact-store]
   (when artifact-store
     (try
-      (artifact/close-store artifact-store)
+      (when (false? (artifact/close-store artifact-store))
+        (binding [*out* *err*]
+          (println (display/colorize :yellow (messages/t :workflow-runner/artifact-store-close-warning)))))
       (catch Exception _))))
 
 (defn- ^{:stratum 0} sandbox-failure-result

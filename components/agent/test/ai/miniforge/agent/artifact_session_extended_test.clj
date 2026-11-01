@@ -302,13 +302,13 @@
   (testing "writes a valid JSON settings file with hook"
     (let [s (session/create-session!)]
       (try
-        (let [path (session/write-claude-settings! (:dir s))
+        (let [path (session/write-claude-settings! (:dir s) :implementer "/work")
               content (json/parse-string (slurp path) true)]
           (is (str/ends-with? path "claude-settings.json"))
           (is (map? content))
           (is (vector? (get-in content [:hooks :PreToolUse])))
-          (is (= "command" (get-in content [:hooks :PreToolUse 0 :type])))
-          (is (str/includes? (get-in content [:hooks :PreToolUse 0 :command])
+          (is (= "command" (get-in content [:hooks :PreToolUse 0 :hooks 0 :type])))
+          (is (str/includes? (get-in content [:hooks :PreToolUse 0 :hooks 0 :command])
                              "hook-eval")))
         (finally
           (session/cleanup-session! s))))))

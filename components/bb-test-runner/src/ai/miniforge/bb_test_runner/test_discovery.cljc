@@ -38,14 +38,16 @@
 
 (defn ^{:stratum 0} path->ns-symbol
   "Convert a `*_test.clj` file path, relative to a classpath `/test`
-   root, into its namespace symbol. Strips `.clj`, converts `/` to `.`,
-   and underscores to hyphens."
+   root, into its namespace symbol. Builds the name from the path's
+   segments, split on either separator, so a native Windows relative
+   path (`ai\\miniforge\\core_test.clj`) gives the same symbol as a
+   POSIX one. Strips `.clj` and converts underscores to hyphens."
   [relative-path]
-  (-> relative-path
-      (str/replace #"\.clj$" "")
-      (str/replace "/" ".")
-      (str/replace "_" "-")
-      symbol))
+  (->> (str/split (str/replace relative-path #"\.clj$" "") #"[/\\]")
+       (remove str/blank?)
+       (map #(str/replace % "_" "-"))
+       (str/join ".")
+       symbol))
 
 (defn- ^{:stratum 0} classpath-test-roots
   "Return the `/test` roots on the current Babashka classpath. Under

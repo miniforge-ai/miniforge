@@ -72,14 +72,16 @@
 
 (defn ^{:stratum 0} workspace-exec-fn
   "exec-fn for `workspace/git-persist!` and `git-restore!`. `cred-env` is a
-   delay that only push and fetch force: a persist with nothing to push
-   resolves no token, and add, status and commit, which run hooks and
-   fsmonitor the untrusted workspace defines, never see the credential.
-   When the delay yields no HTTP credential, a network command addressed to
-   the recorded `remote`'s :https-url goes to its :clone-url instead, the
-   URL `bootstrap-workspace!` actually cloned: an SSH clone made with the
-   image's key stays on SSH, and a repository cloned over HTTPS stays there,
-   anonymously. Without a recorded :clone-url, :https-url is kept."
+   delay that only ls-remote, push and fetch force, so add, status and
+   commit, which run hooks and fsmonitor the untrusted workspace defines,
+   never see the credential, and a call that reaches no remote (a persist
+   with :push? false) resolves no token. The credential env itself turns
+   hooks and helpers off (`git-credential-config`). When the delay yields
+   no HTTP credential, a network command addressed to the recorded
+   `remote`'s :https-url goes to its :clone-url instead, the URL
+   `bootstrap-workspace!` actually cloned: an SSH clone made with the
+   image's key stays on SSH, and a repository cloned over HTTPS stays
+   there, anonymously. Without a recorded :clone-url, :https-url is kept."
   [descriptor container-id workdir cred-env {:keys [https-url clone-url] :as _remote}]
   (let [exec! (container-exec-fn descriptor container-id workdir)]
     (fn [cmd]
