@@ -196,6 +196,13 @@
     (let [pr {:result {}}]
       (is (= pr (transition/apply-gate-validation {:config {:gates []}} pr {}))))))
 
+;; A durable sink acknowledges the decision, as the file sink does in production.
+(defn- ^{:stratum 0} acknowledging-ctx
+  []
+  {:execution/id (random-uuid)
+   :event-stream (events/create-event-stream
+                  {:sinks [(events/durable-sink (fn [_event] nil))]})})
+
 (deftest ^{:stratum 0} gate-warnings-test
   (testing "one {:gate :warnings} per gate that warned, in gate order"
     (is (= [{:gate :codex-consultation
@@ -218,7 +225,7 @@
     (let [pr  {:result {:output {:codex/consultation {:status :consulted
                                                       :pinned? true
                                                       :pin-read? false}}}}
-          ctx {:execution/id (random-uuid) :event-stream (events/create-event-stream {:sinks []})}
+          ctx (acknowledging-ctx)
           out (transition/apply-gate-validation {:config {:gates [:codex-consultation]}}
                                                 pr ctx)]
       (is (= :allow (get-in out [:phase/decision-envelope :envelope/decision])))
@@ -241,7 +248,7 @@
     (let [out (transition/apply-gate-validation
                {:config {:gates [:review-approved]}}
                {:result {:output {:review/decision :approved}}}
-               {:execution/id (random-uuid) :event-stream (events/create-event-stream {:sinks []})})]
+               (acknowledging-ctx))]
       (is (not (contains? out :phase/status)))
       (is (not (contains? out :phase/gate-warnings))))))
 
