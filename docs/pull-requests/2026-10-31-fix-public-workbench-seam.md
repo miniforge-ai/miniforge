@@ -46,8 +46,8 @@ fetch it. This blocked the first public release.
 
 ## Deployment Plan
 
-None. Merge after miniforge-app-foundation#5; the pin then moves to its merge
-commit on that repository's main.
+None. The pin is 792d2ae, the merge of miniforge-app-foundation#5 on that
+repository's main.
 
 ## Related Issues/PRs
 
@@ -56,5 +56,5 @@ miniforge-ai/miniforge-app-foundation#5 publishes the binding.
 ## Checklist
 
 - [x] Clean-credential dependency resolution checked
-- [ ] Pin moved to miniforge-app-foundation main after #5 merges
+- [x] Pin is a commit on miniforge-app-foundation main
 - [ ] CI green, Copilot comments resolved

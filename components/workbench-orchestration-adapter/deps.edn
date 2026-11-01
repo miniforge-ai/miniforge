@@ -5,7 +5,7 @@
         cheshire/cheshire         {:mvn/version "5.13.0"}
         io.github.miniforge-ai/miniforge-app-foundation
         {:git/url "https://github.com/miniforge-ai/miniforge-app-foundation.git"
-         :git/sha "658e618378d0ba9d8dc07538fc733c51ca56e06a"
+         :git/sha "792d2ae93549c182a806ac771c0b5dcfcf75b6aa"
          :deps/root "bindings/clojure"}}
 
  :aliases {:test {:extra-paths ["test"]
