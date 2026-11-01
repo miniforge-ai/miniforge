@@ -21,6 +21,7 @@
    `sinks.naming`), and starts one background retention pass
    (`sinks.cleanup`) when it is created."
   (:require
+   [ai.miniforge.event-stream.sink-durability :as durability]
    [ai.miniforge.event-stream.sinks :as sinks]
    [ai.miniforge.event-stream.sinks.cleanup :as cleanup]
    [ai.miniforge.event-stream.sinks.naming :as naming]
@@ -87,7 +88,10 @@
        :base-dir - Base directory (default: ~/.miniforge/events)
        :ttl-ms   - Retention for that cleanup pass in ms (default: 7 days)
 
-   Returns: Sink function (fn [event] -> nil)"
+   Returns: a durable sink function (fn [event] -> nil). A failed write
+   prints a warning to stderr and rethrows, so the stream logs it and
+   records that the event was not persisted (`publish-persisted!` refuses
+   it); the stream's other sinks and subscribers still run."
   [& [opts]]
   ;; The directory is resolved once, at creation (an explicit nil
   ;; :base-dir included): the background cleanup and every write use the
@@ -98,30 +102,32 @@
     ;; Non-blocking cleanup on sink creation
     (future (try (cleanup/cleanup-stale-events! (update opts :events-dir #(or % base-dir)))
                  (catch Exception _ nil)))
-    (fn [event]
-      (try
-        (let [file-path (if-let [workflow-id (:workflow/id event)]
-                          (event-file-path base-dir workflow-id event)
-                          (sinks/operator-event-file-path base-dir event))
-              f   (io/file file-path)
-              dir (or (.getParentFile f) (io/file "."))
-              _   (.mkdirs dir)
-              tmp (java.io.File/createTempFile ".es-" ".transit.tmp" dir)]
-          (try
-            ;; Explicit UTF-8: payload strings can carry non-ASCII and these
-            ;; files are a cross-language contract surface — platform default
-            ;; encoding must never decide the on-disk bytes.
-            (spit tmp (sinks/event->transit-json event) :encoding "UTF-8")
-            (Files/move (.toPath tmp) (.toPath f)
-                        (into-array StandardCopyOption
-                                    [StandardCopyOption/ATOMIC_MOVE
-                                     StandardCopyOption/REPLACE_EXISTING]))
-            (catch Throwable e
-              (try (Files/deleteIfExists (.toPath tmp))
-                   (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
-              (throw e))))
-        (catch Exception e
-          ;; Log to stderr so failures are visible without breaking the event stream
-          (binding [*out* *err*]
-            (println (str "WARNING: Event sink write failed: " (ex-message e))))
-          nil)))))
+    (durability/durable-sink
+     (fn [event]
+       (try
+         (let [file-path (if-let [workflow-id (:workflow/id event)]
+                           (event-file-path base-dir workflow-id event)
+                           (sinks/operator-event-file-path base-dir event))
+               f   (io/file file-path)
+               dir (or (.getParentFile f) (io/file "."))
+               _   (.mkdirs dir)
+               tmp (java.io.File/createTempFile ".es-" ".transit.tmp" dir)]
+           (try
+             ;; Explicit UTF-8: payload strings can carry non-ASCII and these
+             ;; files are a cross-language contract surface — platform default
+             ;; encoding must never decide the on-disk bytes.
+             (spit tmp (sinks/event->transit-json event) :encoding "UTF-8")
+             (Files/move (.toPath tmp) (.toPath f)
+                         (into-array StandardCopyOption
+                                     [StandardCopyOption/ATOMIC_MOVE
+                                      StandardCopyOption/REPLACE_EXISTING]))
+             (catch Throwable e
+               (try (Files/deleteIfExists (.toPath tmp))
+                    (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))
+               (throw e))))
+         (catch Exception e
+           ;; stderr keeps the failure visible on a stream with no logger; the
+           ;; rethrow tells the stream this durable sink did not persist it.
+           (binding [*out* *err*]
+             (println (str "WARNING: Event sink write failed: " (ex-message e))))
+           (throw e)))))))

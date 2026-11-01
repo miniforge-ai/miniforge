@@ -151,6 +151,20 @@
    running sinks or subscribers."
   stream/publish!)
 
+(def ^{:stratum 0} publish-persisted!
+  "Like publish!, but returns the result only when the event was persisted.
+   A current stream's receipt passes through. On a legacy stream an anomaly or
+   rejection passes through, and the event passes only when the stream has a
+   durable sink (the file sink) and every durable sink wrote it; otherwise an
+   :unavailable anomaly with :publication/reason :no-durable-sink or
+   :sink-write-failed."
+  stream/publish-persisted!)
+
+(def ^{:stratum 0} durable-sink
+  "Mark a legacy-stream sink as persisting each event it returns from without
+   throwing, so publish-persisted! can count it."
+  stream/durable-sink)
+
 (def ^{:stratum 0} replay!
   "Deliver an event another process already stored to a legacy stream's
    log and subscribers without its sinks (also for publishes to this

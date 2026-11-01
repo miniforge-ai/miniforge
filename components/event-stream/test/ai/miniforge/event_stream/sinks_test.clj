@@ -459,7 +459,7 @@
 
 ;; file-sink error reporting
 (deftest ^{:stratum 1} file-sink-reports-write-errors-to-stderr-test
-  (testing "file-sink logs write failures to stderr instead of swallowing"
+  (testing "file-sink warns on stderr and rethrows a failed write, so the stream records it as not persisted"
     (with-temp-dir
       (fn [dir]
         ;; Create a regular file at {dir}/live/{wf-id} so that when the
@@ -473,11 +473,11 @@
           (spit (str collision) "not a dir")
           (let [sink (file/file-sink {:base-dir dir})
                 event (sample-event {:workflow/id wf-id})
-                stderr-output (let [w (java.io.StringWriter.)]
-                                (binding [*err* (java.io.PrintWriter. w)]
-                                  (sink event))
-                                (str w))]
-            (is (str/includes? stderr-output "WARNING"))))))))
+                w     (java.io.StringWriter.)]
+            (is (thrown? Exception
+                         (binding [*err* (java.io.PrintWriter. w)]
+                           (sink event))))
+            (is (str/includes? (str w) "WARNING"))))))))
 
 ;; cleanup-stale-events!
 (deftest ^{:stratum 1} cleanup-stale-events-test
