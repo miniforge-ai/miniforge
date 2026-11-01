@@ -90,6 +90,29 @@
   [ctx]
   (workspace/resolve-execution-workdir ctx "release"))
 
+(defn- ^{:stratum 0} committed-since-base
+  "Substantive `:code/files` the task branch holds beyond the environment's
+   base commit (committed and dirty alike), [] when there are none or the
+   base commit is unknown. A clean worktree is not \"nothing to release\"
+   when an earlier implement iteration's commits are still unreleased.
+
+   The exact base commit only, never a branch name or the commit the CLI
+   started on: `git diff <ref>` compares the working tree with the ref
+   itself, so a ref behind the task's real base would count upstream
+   changes as this run's work."
+  [ctx worktree-path]
+  (let [base-sha   (get-in ctx [:execution/environment-metadata :base-sha])
+        base-shas  (when (and (string? base-sha) (not (str/blank? base-sha))) [base-sha])
+        execute-fn (get ctx :execution/execute-fn)
+        executor   (get ctx :execution/executor)
+        env-id     (get ctx :execution/environment-id)
+        artifact   (when base-shas
+                     (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
+                       (agent/collect-worktree-files-via-executor
+                        execute-fn executor env-id worktree-path base-shas)
+                       (agent/collect-worktree-files worktree-path base-shas)))]
+    (filterv agent/substantive-file? (:code/files artifact))))
+
 (defn- ^{:stratum 0} command-failure
   "Failure detail for one scan command, or nil when it exited 0. A capsule
    executor that could not run the command returns `{:ok? false :error ...}`
@@ -503,6 +526,24 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn- ^{:stratum 2} skip-probe
+  "The scan enter-release skips on: the worktree's dirty files, or when it
+   has none, the files the task branch committed beyond its base. An
+   implement that reports :already-implemented after an earlier iteration
+   committed its work leaves a clean worktree, and that work must still be
+   released. A failed dirty scan is returned as its anomaly."
+  [ctx]
+  (let [wt         (ctx-worktree-path ctx)
+        execute-fn (get ctx :execution/execute-fn)
+        executor   (get ctx :execution/executor)
+        env-id     (get ctx :execution/environment-id)
+        dirty      (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
+                     (git-dirty-files-capsule execute-fn executor env-id wt)
+                     (git-dirty-files wt))]
+    (if (and (vector? dirty) (empty? dirty))
+      (committed-since-base ctx wt)
+      dirty)))
+
 (defn- ^{:stratum 2} release-files!
   "Boundary wrapper around the anomaly-returning `release-files-result`;
    retained for release phase control flow that treats `:release/zero-files`
@@ -619,18 +660,13 @@
         _ (phase/emit-phase-started! ctx :release)
         ;; Skip probe: scan only when an empty worktree means "nothing to release".
         probe (when (contains? #{:already-implemented :already-satisfied nil} impl-status)
-                (let [wt         (ctx-worktree-path ctx)
-                      execute-fn (get ctx :execution/execute-fn)
-                      executor   (get ctx :execution/executor)
-                      env-id     (get ctx :execution/environment-id)]
-                  (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
-                    (git-dirty-files-capsule execute-fn executor env-id wt)
-                    (git-dirty-files wt))))]
+                (skip-probe ctx))]
     ;; Short-circuit: skip release when there is nothing to release.
     ;; This covers:
     ;; - implement returned :already-implemented (no new code)
     ;; - plan returned :already-satisfied (DAG had 0 tasks, no implement ran)
-    ;; In both cases, only skip if there are also no git changes from other phases.
+    ;; In both cases, only skip if there are also no git changes from other phases,
+    ;; neither in the worktree nor committed on the task branch beyond its base.
     ;; A failed scan returns an anomaly, which does not skip; build-workflow-state
     ;; reuses the probe rather than rescanning, so the anomaly is what it raises.
     (if (and (vector? probe) (empty? probe))
