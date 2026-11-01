@@ -18,11 +18,12 @@
 (ns ai.miniforge.gate.schema
   "Malli schemas for what the gate interface returns.
 
-   A gate's check returns one of two shapes, and `interface/passed?`
-   reads both: the gate convention `{:passed? bool :errors [...]}`, or a
-   `response/success` / `response/error` map. A result in neither shape
-   reads as failed, which is safe but silent: a gate that drifts out of
-   both shapes fails every phase that runs it. These schemas name the
+   A gate's check returns either the gate convention
+   `{:passed? bool :errors [...]}` or a response map (`response/success`,
+   `response/error` or `response/failure`), and `interface/passed?` reads
+   both. A result in neither shape reads as failed, which is safe but
+   silent: a gate that drifts out of both shapes fails every phase that
+   runs it. These schemas name the
    shapes so instrumented tests catch that drift at the gate.")
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -43,22 +44,34 @@
   [:map
    [:status [:enum :success :error :failed]]])
 
+(def ^{:stratum 0} ResponseFailure
+  "A `response/failure` map: `:success false` and no `:status`."
+  [:map
+   [:success [:= false]]])
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} CheckResult
   "What `check-gate` returns: the gate's own result in either accepted
-   shape, tagged with the gate that produced it."
+   shape, tagged with the gate that produced it. `passed?` reads
+   `:passed?` before any response key, so a present `:passed?` must be a
+   boolean whatever else the map carries."
   [:and
-   [:map [:gate :keyword]]
-   [:or GateVerdict ResponseStatus]])
+   [:map
+    [:gate :keyword]
+    [:passed? {:optional true} :boolean]]
+   [:or GateVerdict ResponseStatus ResponseFailure]])
 
 (def ^{:stratum 1} RepairResult
   "What `repair-gate` returns: the gate's repair result in either
    accepted shape, or the failure it builds when the gate has no repair
-   or the repair throws, tagged with the gate in every case."
+   or the repair throws, tagged with the gate in every case. A present
+   `:success?` must be a boolean, since it is read first."
   [:and
-   [:map [:gate :keyword]]
-   [:or RepairVerdict ResponseStatus]])
+   [:map
+    [:gate :keyword]
+    [:success? {:optional true} :boolean]]
+   [:or RepairVerdict ResponseStatus ResponseFailure]])
 
 ;------------------------------------------------------------------------------ Layer 2
 

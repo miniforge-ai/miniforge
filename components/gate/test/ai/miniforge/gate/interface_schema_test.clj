@@ -46,11 +46,34 @@
   [f]
   (:type (ex-data (is (thrown? clojure.lang.ExceptionInfo (f))))))
 
+(defmethod ^{:stratum 0} registry/get-gate ::string-verdict
+  [_]
+  {:name ::string-verdict
+   :check (fn [_artifact _ctx] {:passed? "false" :status :error})
+   :repair (fn [_artifact _errors _ctx] {:success? "false" :status :error})})
+
+(defmethod ^{:stratum 0} registry/get-gate ::failure-shaped
+  [_]
+  {:name ::failure-shaped
+   :check (fn [_artifact _ctx] (response/failure "not this time"))
+   :repair (fn [_artifact _errors _ctx] (response/failure "cannot repair"))})
+
 (deftest ^{:stratum 0} response-shaped-results-are-accepted-test
   (testing "response/success maps are an accepted result shape"
     (is (gate/passed? (gate/check-gate ::response-shaped {:content "x"} {})))
     (is (true? (:passed? (gate/check-gates [::response-shaped] {:content "x"} {}))))
     (is (response/success? (gate/repair-gate ::response-shaped {} [] {})))))
+
+(deftest ^{:stratum 0} response-failure-results-are-accepted-test
+  (testing "response/failure maps ({:success false}, no :status) are an accepted result shape"
+    (is (gate/failed? (gate/check-gate ::failure-shaped {} {})))
+    (is (false? (:success (gate/repair-gate ::failure-shaped {} [] {})))))
+  (testing "the behavioral gate's repair, which returns response/failure, passes the schema"
+    (let [result (gate/repair-gate :behavioral {:event-stream/events []}
+                                   [{:type :behavioral-violation :message "bad"}]
+                                   {:phase :observe})]
+      (is (false? (:success result)))
+      (is (= :behavioral (:gate result))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -59,6 +82,12 @@
     (is (= :malli.core/invalid-output (thrown-type #(gate/check-gate ::shapeless {} {})))))
   (testing "check-gates surfaces the same break instead of a failed verdict"
     (is (= :malli.core/invalid-output (thrown-type #(gate/check-gates [::shapeless] {} {}))))))
+
+(deftest ^{:stratum 1} non-boolean-verdict-is-rejected-test
+  (testing "a string :passed? beside a valid :status breaks check-gate's schema"
+    (is (= :malli.core/invalid-output (thrown-type #(gate/check-gate ::string-verdict {} {})))))
+  (testing "a string :success? beside a valid :status breaks repair-gate's schema"
+    (is (= :malli.core/invalid-output (thrown-type #(gate/repair-gate ::string-verdict {} [] {}))))))
 
 (deftest ^{:stratum 1} shapeless-repair-result-is-rejected-test
   (testing "a repair result with neither :success? nor :status breaks repair-gate's schema"

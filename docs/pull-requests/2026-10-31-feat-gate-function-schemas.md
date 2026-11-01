@@ -30,9 +30,13 @@ a component boundary, in tests, without changing runtime behaviour.
    interface): collects `:malli/schema` metadata in the given namespaces,
    instruments them while the wrapped tests run, and restores the original
    functions afterwards. `m/=>` declarations work too.
-2. `gate.schema`: `CheckResult` (the gate's result in either shape, tagged
-   with `:gate`), `RepairResult`, and `ChecksResult` (closed: `:passed?`,
-   `:results`, `:failed-gates`).
+2. `gate.schema`: `CheckResult` (the gate convention or a response map —
+   `response/success`, `response/error`, or `response/failure`'s
+   `{:success false}` — tagged with `:gate`), `RepairResult` (the same, with
+   `{:success? bool}` as the convention), and `ChecksResult` (closed:
+   `:passed?`, `:results`, `:failed-gates`). Because `passed?` and the repair
+   check read `:passed?` / `:success?` before any response key, a present
+   verdict key must be a boolean even when `:status` is valid.
 3. `gate.interface`: schema metadata on `check-gate`, `check-gates`,
    `repair-gate`, `passed?`, `failed?`. Inputs: gate keyword(s), any
    artifact, a map or nil context.
@@ -49,8 +53,12 @@ a component boundary, in tests, without changing runtime behaviour.
 2. `gate.interface-schema-test`: a test gate whose check returns `{:verdict :ok}`
    makes `check-gate` and `check-gates` throw `:malli.core/invalid-output`; its
    repair does the same for `repair-gate`; a string gate name throws
-   `:malli.core/invalid-input`; `response/success` results pass. These tests
-   fail without instrumentation, so they show the fixture is active.
+   `:malli.core/invalid-input`; `response/success` and `response/failure`
+   results pass, including the behavioral gate's real repair, which returns
+   `response/failure`. The rejection tests fail without instrumentation, so
+   they show the fixture is active; the failure-shape test fails against a
+   schema without `{:success false}`. A string `:passed?` or `:success?` beside
+   a valid `:status` is rejected.
 3. The existing gate tests (interface, format, policy-pack, opsv, no-secrets,
    tests-pass) pass with the fixture on.
 
