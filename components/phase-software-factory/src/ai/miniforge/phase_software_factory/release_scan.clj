@@ -32,13 +32,16 @@
    Only regular files are read. Release ships the committed work as the
    commits themselves; file content feeds the PR metadata and the
    releaser's prompt, so a symlink's target (possibly outside the
-   worktree) or a submodule directory must never be read into it. Those
-   entries, like deletions, carry their path and action with empty
-   content.
+   worktree) or a submodule directory must never be read into it. A
+   committed entry carries its git mode, and only modes 100644/100755 are
+   read. An entry from `git status` has no mode: the readers themselves
+   refuse a symlink (the host reader by canonical path, the capsule reader
+   by `test -L`) and read anything that is not a regular file as empty.
+   Deletions carry empty content.
 
-   Layer 0: failure shapes, output parsing, argument quoting
-   Layer 1: runners and readers (host, capsule), base-diff, read-entry
-   Layer 2: first-base-diff, read-entries"
+   Layer 0: failure shapes, output parsing, constants
+   Layer 1: argument quoting, host runner, readers, base-diff, read-entry
+   Layer 2: capsule runner, first-base-diff, read-entries"
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
@@ -56,7 +59,7 @@
   (when-not (= 0 exit)
     {:detail (or (not-empty (str/trim (str stderr)))
                  (:message executor-error)
-                 (str command " exited " exit))
+                 (messages/t :release/command-exited {:command command :exit exit}))
      :data   (cond-> {:command command :exit exit :stderr stderr}
                executor-error (assoc :executor/error executor-error))}))
 
@@ -77,30 +80,20 @@
                                :worktree-path root-path}
                               data)))
 
-(defn- ^{:stratum 0} exception-failure
+(defn ^{:stratum 0} exception-failure
   "Failure detail for exception `e`, with `data` describing what was run."
   [e data]
   {:detail (or (ex-message e) (.getName (class e)))
    :data   (assoc data :exception/class (.getName (class e)))})
 
-(def ^{:stratum 0} regular-file-modes
+(def ^{:stratum 0} ^:private regular-file-modes
   "Git modes of a regular file (plain and executable)."
   #{"100644" "100755"})
-
-(def ^{:stratum 0} ^:private missing-commit-exit
-  "`git rev-parse --verify --quiet` exit status for a ref that names no
-   object: it exits 1 and prints nothing."
-  1)
 
 (def ^{:stratum 0} ^:private shell-safe-arg
   "Arguments made only of these characters reach `sh -c` unchanged, so they
    are passed unquoted."
   #"[A-Za-z0-9_./:=@%+-]+")
-
-(defn- ^{:stratum 0} shell-arg
-  "`arg` for a `sh -c` command line, quoted unless it is shell-safe."
-  [arg]
-  (if (re-matches shell-safe-arg arg) arg (agent/shell-quote arg)))
 
 (defn- ^{:stratum 0} raw-z-entries
   "Parse `git diff --raw --no-renames -z` output into
@@ -127,12 +120,18 @@
 
 (defn- ^{:stratum 0} missing-commit?
   "True when a `rev-parse --verify --quiet` result says the ref names no
-   commit here: exit 1 with no output. An exit 1 that printed something
-   (a capsule whose container is gone also exits 1) is a failure."
+   commit here: it exits 1 and prints nothing. An exit 1 that printed
+   something (a capsule whose container is gone also exits 1) is a
+   failure."
   [{:keys [exit out err]}]
-  (and (= missing-commit-exit exit) (str/blank? out) (str/blank? err)))
+  (and (= 1 exit) (str/blank? out) (str/blank? err)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} shell-arg
+  "`arg` for a `sh -c` command line, quoted unless it is shell-safe."
+  [arg]
+  (if (re-matches shell-safe-arg arg) arg (agent/shell-quote arg)))
 
 (defn ^{:stratum 1} host-runner
   "Run git with `args` in `root-path` on the host: {:exit :out :err :failure}."
@@ -145,27 +144,10 @@
         (catch Exception e
           {:failure (exception-failure e {:command command})})))))
 
-(defn ^{:stratum 1} capsule-runner
-  "Run git with `args` in `workdir` inside a capsule through `execute-fn`
-   (dag-executor's execute! signature): {:exit :out :err :failure}. The
-   command runs under `sh -c`, so an argument that is not shell-safe is
-   quoted."
-  [execute-fn executor env-id workdir]
-  (fn [args]
-    (let [command (str/join " " (map shell-arg (cons "git" args)))]
-      (try
-        (let [result (execute-fn executor env-id command {:workdir workdir})
-              exit   (get-in result [:data :exit-code])
-              err    (get-in result [:data :stderr])
-              out    (get-in result [:data :stdout] "")]
-          {:exit exit :out out :err err
-           :failure (command-failure command exit err (:error result))})
-        (catch Exception e
-          {:failure (exception-failure e {:command command})})))))
-
 (defn ^{:stratum 1} host-reader
   "Read `path` under `root-path` on the host: {:content s} or {:failure f}.
-   Refuses a path whose canonical target leaves `root-path`."
+   Refuses a path whose canonical target leaves `root-path`, which covers a
+   symlink pointing out of the worktree."
   [root-path]
   (fn [path]
     (try
@@ -180,10 +162,12 @@
 
 (defn ^{:stratum 1} capsule-reader
   "Read `path` under `workdir` inside a capsule: {:content s} or
-   {:failure f}."
+   {:failure f}. A symlink, or anything that is not a regular file, reads
+   as empty: its target is never followed."
   [execute-fn executor env-id workdir]
   (fn [path]
-    (let [command (str "cat " (agent/shell-quote (str workdir "/" path)))]
+    (let [file    (agent/shell-quote (str workdir "/" path))
+          command (str "if [ -f " file " ] && [ ! -L " file " ]; then cat " file "; fi")]
       (try
         (let [result  (execute-fn executor env-id command {:workdir workdir})
               exit    (get-in result [:data :exit-code])
@@ -223,6 +207,24 @@
       {:path path :content (or content "") :action action})))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} capsule-runner
+  "Run git with `args` in `workdir` inside a capsule through `execute-fn`
+   (dag-executor's execute! signature): {:exit :out :err :failure}. The
+   command runs under `sh -c`, so an argument that is not shell-safe is
+   quoted."
+  [execute-fn executor env-id workdir]
+  (fn [args]
+    (let [command (str/join " " (map shell-arg (cons "git" args)))]
+      (try
+        (let [result (execute-fn executor env-id command {:workdir workdir})
+              exit   (get-in result [:data :exit-code])
+              err    (get-in result [:data :stderr])
+              out    (get-in result [:data :stdout] "")]
+          {:exit exit :out out :err err
+           :failure (command-failure command exit err (:error result))})
+        (catch Exception e
+          {:failure (exception-failure e {:command command})})))))
 
 (defn ^{:stratum 2} first-base-diff
   "The substantive entries the worktree differs by from the first of

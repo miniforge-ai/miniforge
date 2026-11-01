@@ -24,8 +24,12 @@ The reviews found:
   the checkout is `:execution/capsule-workdir` (#2240 moved implement, persist
   and the `:no-secrets` gate to it). The scan could not run there, so a
   governed `:already-implemented` release never found its committed work.
-- **Must-fix (dewey 050):** "resolves outside the worktree" was an inline
-  user-facing string.
+- **Must-fix (dewey 050):** "resolves outside the worktree" and
+  "<command> exited <n>" were inline user-facing strings.
+- **Should-fix (moved code, dewey 720 obligation 6):** the dirty scan, which
+  this PR moves onto `release-scan`'s readers, followed symlinks: the capsule
+  `cat` and the host `.isFile` + `slurp` read a symlink's target, possibly
+  outside the worktree, into the PR metadata.
 - **Low:** `skip-probe` threw a failed scan even when implement's recorded
   files would carry the release; the branch's commits ship either way, and the
   files feed only PR metadata. Throwing there also goes against dewey 005
@@ -47,32 +51,48 @@ The reviews found:
 1. `release.clj`:
    - `capsule-target`: the governed run's executor, environment and
      `:workdir` (`:execution/capsule-workdir`, else the worktree path), or nil.
-     `skip-probe`, `build-workflow-state` and `committed-since-base` use it.
+   - `scan-io`: the runner, reader and root a scan uses, host or capsule.
+   - `dirty-scan`: the one place that picks the host or capsule dirty scan;
+     `skip-probe` and `build-workflow-state` both use it.
    - `git-dirty-files-capsule` uses `release-scan`'s capsule runner and
      reader; `porcelain-scan-entry` maps a `git status` pair to a scan entry.
+   - `git-dirty-files` (host) skips symlinks and uses
+     `release-scan/exception-failure`.
    - `committed-since-base` composes `release-scan/first-base-diff` and
-     `read-entries`.
+     `read-entries` through `scan-io`.
    - `skip-probe` returns a failed scan as its anomaly again;
      `build-workflow-state` raises it unless implement's recorded files carry
      the release.
    - The `command-failure` / `git-status-failed` aliases are gone; call sites
      use `release-scan/...`.
    - `commit-sha-pattern` accepts 7 to 64 hex digits, with a docstring.
+   - Strata follow references to defs as well as calls (as `stratum-lint`
+     counts them): `release-base-shas` is stratum 1, `committed-since-base`
+     and `dirty-scan` 2, `skip-probe` 3.
 2. `release_scan.clj`:
    - `exception-failure`: one factory for a thrown exception's failure.
    - `capsule-runner` quotes only arguments that are not shell-safe, so plain
      git commands reach `sh -c` unchanged.
+   - `capsule-reader` reads only a regular file that is not a symlink
+     (`if [ -f p ] && [ ! -L p ]; then cat p; fi`); anything else reads as
+     empty. A real `cat` failure still raises.
    - `missing-commit?`: exit 1 with no output; an exit 1 that printed an
      error is a failure.
-   - `read-entry`: an entry with no mode (from `git status`) is read as a
-     file.
-   - Layers 0–2 only: `first-base-diff` and `read-entries` at Layer 2;
-     internals are private.
-3. `messages/en-US.edn`: `:release/path-outside-worktree`.
+   - `read-entry`: an entry with no mode (from `git status`) is passed to the
+     reader, which refuses symlinks.
+   - Layers 0–2 only, counting references to defs: `capsule-runner`,
+     `first-base-diff` and `read-entries` at Layer 2; internals are private.
+3. `messages/en-US.edn`: `:release/path-outside-worktree`,
+   `:release/command-exited`.
 4. `docs/pull-requests/2026-11-01-fix-release-skip-probe-committed.md`: the
    missing sections, and corrected statements.
 
 ## Testing Plan
+
+Not run locally: this cloud session cannot fetch the Clojars dependencies the
+suite needs, so CI is the run. Every edited file was checked with the Clojure
+reader, and the capsule reader's shell guard was run under a real `sh` against
+a regular file, a symlink and a directory.
 
 `release_committed_work_test.clj`:
 
@@ -84,10 +104,15 @@ The reviews found:
 3. When the committed scan fails but implement recorded files, release
    prepares with the recorded files (replaces the test that expected a raise).
 4. The host reader refuses `../outside.clj`.
+5. A governed release with implement `:success` lists its dirty files in the
+   capsule checkout (the `build-workflow-state` path).
+6. An untracked symlink to a secret outside the worktree never enters the
+   release, on the host and through the capsule reader under a real `sh -c`.
 
 The existing capsule tests in `release_file_scan_test.clj` cover the rewritten
 `git-dirty-files-capsule`: an executor error, a non-zero exit, a failed `cat`,
-a thrown executor, listed files, and paths a shell would mangle.
+a thrown executor, listed files, and paths a shell would mangle. Their stub key
+for the reader moves from `"cat"` to `"if ["`, the guarded command's prefix.
 
 ## Deployment Plan
 
@@ -109,6 +134,13 @@ No configuration or migration.
 - Moving the tests that create real git repositories to a project test
   directory (dewey 310): sibling release tests already do the same in the
   component.
+- Result factories for the runners' and readers' `{:failure ...}` /
+  `{:content ...}` maps, and reading executor results through dag-executor's
+  result helpers (dewey 003). The shapes came with #2305; changing them
+  touches every scan.
+- The pre-commit hooks are not installed in the cloud session that wrote
+  this, so `bb commit-budget` (200 lines per commit) did not run on its
+  commits; the PR stays within the 600-line `bb pr-budget` CI gate.
 
 ## Checklist
 
