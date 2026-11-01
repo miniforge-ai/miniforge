@@ -148,6 +148,34 @@ Lint and tests had not caught them.
 PR-budget requires oversized work to be split or explicitly flagged with a reviewable rationale.
 Adversarial review remains necessary because green CI alone cannot establish correctness.
 
+## PR Merge Gate
+
+This applies to every session and every PR in this repo.
+
+- Open PRs ready for review, never as drafts.
+  Automatic Copilot review skips drafts, and a draft adds a manual step for the operator.
+- A PR merges only when all four gates pass on its current head:
+  1. **Adversarial review**: every obligation in `standards/miniforge/workflows/code-review-rigor.mdc` (dewey 720).
+  2. **Rules review**: every rule in `standards/miniforge/` that applies to the diff, each read in full.
+     Start from `standards/miniforge/agents.md` and `index.mdc`.
+     A pattern grep is not a review.
+  3. **CI** green.
+  4. **Copilot review** of the current head: every finding fixed or answered on its thread, and the threads resolved.
+- Gates 1 and 2 run before the PR opens and again before every later push, on the commits being pushed.
+  This is the "adversarial self-review before every push" above, plus the rules review.
+- After a push, re-request Copilot's review so gate 4 covers the new head.
+  If Copilot posts no review (it declines very large diffs), stop and tell the operator; do not merge.
+- When all four gates pass, the session that owns the PR squash-merges it.
+  Do not wait for the operator to click merge.
+  The owning session is the one that opened the PR, or the one the operator handed it to.
+- If gate 1 or 2 cannot be completed (the diff is too large to trace, or context is missing), do not merge.
+  Stop and ask the operator, as dewey 720 requires.
+- The owning session runs gates 1 and 2 itself.
+  A subagent's review is an extra, independent pass; its "clean" verdict is not a review on its own (dewey 720).
+- Scope follows dewey 720: a typo-only or other trivial diff is exempt from gate 1.
+  For a documentation-only PR, gate 1 means checking every factual claim against the repo.
+- Green CI and a clean Copilot review are not enough on their own.
+
 ## Writing Spec Task Descriptions (`work/*.spec.edn`)
 
 Task descriptions in `work/` specs are agents' primary context.
