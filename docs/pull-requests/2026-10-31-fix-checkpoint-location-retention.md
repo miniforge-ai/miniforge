@@ -77,6 +77,11 @@ The normal hook also required a real namespace split after inferring a fourth
 stratum. File discovery and chronological grouping now form a separate I/O
 boundary; announcement interpretation remains separate, within three strata.
 
+After the split and current-main merge, all three workflow-consuming product
+suites passed again (2m49s). A fresh CLI build and isolated packaged acceptance
+passed 29 tests with 114 assertions, including the mixed-format ordering cases.
+Normal hooks and signing passed; the final reportable PR size is 528 lines.
+
 ## Deployment Plan
 
 No journal migration; retain both legacy forms. No change to filesystem trust,
