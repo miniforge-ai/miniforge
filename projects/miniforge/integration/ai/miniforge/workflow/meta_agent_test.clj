@@ -376,3 +376,5 @@
 ;; throwaway host repository and checkpoints into a throwaway root — never
 ;; the checkout the test JVM was launched in, never `~/.miniforge`.
 (clojure.test/use-fixtures :once isolation/with-isolated-host)
+
+(clojure.test/use-fixtures :each durable/with-event-dir-cleanup)

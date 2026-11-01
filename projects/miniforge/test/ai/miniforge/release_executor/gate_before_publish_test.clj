@@ -95,3 +95,5 @@
       (is (= 1 prepared))
       (is (= 1 published))
       (is (= :completed (:status phase))))))
+
+(clojure.test/use-fixtures :each durable/with-event-dir-cleanup)

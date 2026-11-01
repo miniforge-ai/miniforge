@@ -40,7 +40,8 @@
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]))
 
-(use-fixtures :each checkpoint-root-support/with-temp-checkpoint-root)
+(use-fixtures :each checkpoint-root-support/with-temp-checkpoint-root
+  durable/with-event-dir-cleanup)
 
 ;------------------------------------------------------------------------------ Layer 0
 

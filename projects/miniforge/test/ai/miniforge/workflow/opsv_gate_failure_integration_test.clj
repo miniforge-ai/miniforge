@@ -256,5 +256,7 @@
 
 (use-fixtures :once isolation/with-isolated-host)
 
+(use-fixtures :each durable/with-event-dir-cleanup)
+
 (comment
   (clojure.test/run-tests 'ai.miniforge.workflow.opsv-gate-failure-integration-test))

@@ -226,3 +226,5 @@
       (let [[result calls] (deploy manifest)]
         (is (= {:dry-run 1 :apply 1} calls))
         (is (= :completed (:status result)))))))
+
+(clojure.test/use-fixtures :each durable/with-event-dir-cleanup)
