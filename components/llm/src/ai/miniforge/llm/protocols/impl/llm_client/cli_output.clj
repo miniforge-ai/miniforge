@@ -71,16 +71,10 @@
             (update :output-tokens (fnil + 0) (:output-tokens usage)))
           (vary-meta assoc ::message-id message-id)))))
 
-(defn ^{:stratum 0} appended-text
-  "The text a swap appended to `old` to make `new`, or nil when `new` does
-   not extend `old`. Each Claude assistant frame appends one whole message,
-   so this is that message."
-  [old new]
-  (when (and (string? old)
-             (string? new)
-             (> (count new) (count old))
-             (str/starts-with? new old))
-    (subs new (count old))))
+(def ^{:stratum 0} ^:private cli-written-model
+  "The model the Claude CLI names on an assistant message it wrote itself
+   (its rate-limit notice, an API error), not the model's answer."
+  "<synthetic>")
 
 (defn ^{:stratum 0} rate-limited?
   "True when `content` is a CLI rate-limit notice rather than an answer.
@@ -328,6 +322,7 @@
                 ;; implement turns logged `:tokens 0`).
                 message-usage (parsed-usage (get-in data [:message :usage]))
                 message-id (get-in data [:message :id])
+                cli-written? (= cli-written-model (get-in data [:message :model]))
                 with-usage (fn [parsed]
                              (cond-> parsed
                                message-usage (assoc :message-usage message-usage)
@@ -348,7 +343,8 @@
 
               (not (str/blank? text))
               (cond-> (with-usage {:delta text :done? false})
-                stop-reason (assoc :stop-reason stop-reason))
+                stop-reason (assoc :stop-reason stop-reason)
+                cli-written? (assoc :cli-text text))
 
               ;; No text + no tool calls — still carry stop-reason if
               ;; present so "empty turn" shows a reason.
@@ -512,15 +508,17 @@
    - :tool-call-count      — total number of tool invocations during the run
    - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)
 
-   `last-message` is the run's last assistant message, checked for the CLI's
-   rate-limit notice on its own: a notice that follows earlier answer text
-   is too long, together with it, to read as a notice."
+   `cli-text` is the text of the last message the CLI wrote itself
+   (`:cli-text` from the stream parser), checked for the rate-limit notice
+   on its own: a notice that follows earlier answer text is too long,
+   together with it, to read as one. Only CLI-written text is checked, so
+   a model's own short answer or a streamed fragment never is."
   ([content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview stderr]
    (streaming-success-response content exit-code usage cost-usd stop-reason num-turns
                                tool-call-count final-message-preview stderr nil))
   ([content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview stderr
-    last-message]
-   (if-let [notice (first (filter rate-limited? [content last-message]))]
+    cli-text]
+   (if-let [notice (first (filter rate-limited? [content cli-text]))]
      (responses/llm-error :anomalies.agent/rate-limited "rate_limit"
                 (str "Claude CLI rate limited: " (str/trim notice))
                 {:exit-code exit-code :stdout content

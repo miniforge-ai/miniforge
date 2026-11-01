@@ -1578,35 +1578,28 @@
       (is (nil? (:usage resp)))
       (is (= 0.42 (:cost-usd resp))))))
 
-(deftest ^{:stratum 0} streaming-limit-notice-after-answer-text-test
-  (testing "a limit notice after earlier assistant text is still a rate limit"
-    (let [answer (json/generate-string {:claims (repeat 40 {:claim "Shipped the billing service."})})
-          notice "You've hit your limit · resets 7pm (America/Los_Angeles)"
-          assistant-line (fn [text]
-                           (json/generate-string {:type "assistant"
-                                                  :message {:content [{:type "text" :text text}]}}))
-          client (ai.miniforge.llm.protocols.records.llm-client/create-client
-                  {:backend :claude
-                   :stream-exec-fn (fn [_cmd on-line _opts]
-                                     (on-line (assistant-line answer))
-                                     (on-line (assistant-line notice))
-                                     {:out "" :err "" :exit 0})})
-          resp (llm/complete-stream client {:prompt "test"} (fn [_] nil))]
-      (is (< 300 (count answer)) "the answer alone is longer than any notice")
-      (is (not (:success resp)))
-      (is (= "rate_limit" (get-in resp [:error :type])))))
-  (testing "an answer that ends the run is not a limit, whatever came before"
-    (let [assistant-line (fn [text]
-                           (json/generate-string {:type "assistant"
-                                                  :message {:content [{:type "text" :text text}]}}))
-          client (ai.miniforge.llm.protocols.records.llm-client/create-client
-                  {:backend :claude
-                   :stream-exec-fn (fn [_cmd on-line _opts]
-                                     (on-line (assistant-line "Working on it."))
-                                     (on-line (assistant-line "(defn foo [] 42)"))
-                                     {:out "" :err "" :exit 0})})
-          resp (llm/complete-stream client {:prompt "test"} (fn [_] nil))]
-      (is (:success resp)))))
+(defn- ^{:stratum 0} assistant-frame
+  "A Claude stream-json assistant frame with `text`, written by `model`."
+  [model text]
+  (json/generate-string {:type "assistant"
+                         :message {:model model :content [{:type "text" :text text}]}}))
+
+(defn- ^{:stratum 0} fragment-frame
+  [text]
+  (json/generate-string {:type "stream_event" :event {:delta {:text text}}}))
+
+(defn- ^{:stratum 0} streamed-response
+  "The response of a streamed Claude run that emits `lines` and exits 0."
+  [lines]
+  (let [client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                {:backend :claude
+                 :stream-exec-fn (fn [_cmd on-line _opts]
+                                   (doseq [line lines] (on-line line))
+                                   {:out "" :err "" :exit 0})})]
+    (llm/complete-stream client {:prompt "test"} (fn [_] nil))))
+
+(def ^{:stratum 0} ^:private long-answer
+  (json/generate-string {:claims (repeat 40 {:claim "Shipped the billing service."})}))
 
 (deftest ^{:stratum 0} parse-claude-stream-line-carries-per-message-usage-test
   (testing "assistant events surface :message-usage + :message-id"
@@ -1678,6 +1671,22 @@
       (is (= {:input-tokens 2400 :output-tokens 100} @accumulated-usage)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} streaming-limit-notice-after-answer-text-test
+  (testing "the CLI's own limit notice after earlier answer text is a rate limit"
+    (let [resp (streamed-response [(assistant-frame "claude-opus-5" long-answer)
+                                   (assistant-frame "<synthetic>" "You've hit your limit · resets 7pm (America/Los_Angeles)")])]
+      (is (< 300 (count long-answer)) "the answer alone is longer than any notice")
+      (is (not (:success resp)))
+      (is (= "rate_limit" (get-in resp [:error :type])))))
+  (testing "a model's short final answer that mentions a limit is not a limit"
+    (let [resp (streamed-response [(assistant-frame "claude-opus-5" long-answer)
+                                   (assistant-frame "claude-opus-5" "{\"summary\":\"Added handling for too many requests.\"}")])]
+      (is (:success resp))))
+  (testing "a streamed fragment that mentions a limit is not a limit"
+    (let [resp (streamed-response [(fragment-frame long-answer)
+                                   (fragment-frame " and retries on rate limit exceeded.")])]
+      (is (:success resp)))))
 
 (deftest ^{:stratum 1} isolated-client-sends-isolation-flags-test
   (testing "an isolated claude client sends the isolation flags on complete and complete-stream"
