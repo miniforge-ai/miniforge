@@ -26,7 +26,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.agent.interface :as agent]
-   [ai.miniforge.event-stream.interface :as events]
+   [ai.miniforge.workflow.durable-stream-support :as durable]
    [ai.miniforge.llm.interface.protocols.llm-client :as llm-client]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -89,10 +89,11 @@
   (get-config [_this] config))
 
 (defn ^{:stratum 0} quiet-event-stream
-  "An event stream with no sinks. Gated phases advance only on an
-   acknowledged :gate/decision, which needs a stream to publish to."
+  "An event stream whose file sink writes to a temp directory. Gated phases
+   advance only on a persisted :gate/decision, so the stream needs a durable
+   sink."
   []
-  (events/create-event-stream {:sinks []}))
+  (durable/durable-event-stream))
 
 (defn ^{:stratum 0} count-health-checks
   "Count how many health checks were performed during execution."
