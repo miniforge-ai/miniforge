@@ -47,6 +47,7 @@
    [ai.miniforge.gate.syntax]
    [ai.miniforge.gate.lint]
    [ai.miniforge.gate.format]
+   [ai.miniforge.gate.messages :as messages]
    [ai.miniforge.gate.policy]
    [ai.miniforge.gate.registry :as registry]
    [ai.miniforge.policy-pack.interface :as policy-pack]
@@ -109,15 +110,16 @@
        :capability    capability
        :matches       errors
        :artifact-path (or (:artifact/path artifact) (:path artifact))
-       :message       (str (name capability) " capability failed: "
-                            (or (some-> errors first :message)
-                                "tool reported a violation"))})))
+       :message       (messages/t :capability/failed
+                                  {:capability (name capability)
+                                   :detail     (or (some-> errors first :message)
+                                                   (messages/t :capability/violation-fallback))})})))
 
 (defn- ^{:stratum 1} artifact-format-result
   [artifact]
   (when-let [formatted (expected-formatted-content artifact)]
     {:passed? (= formatted (artifact-content artifact))
-     :errors  [{:message "Artifact content is not formatted"}]}))
+     :errors  [{:message (messages/t :format/not-formatted)}]}))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -136,9 +138,9 @@
                           (check artifact context)
                           (catch Exception e
                             {:passed? false
-                             :errors  [{:message (str (name gate-kw)
-                                                      " gate check threw: "
-                                                      (ex-message e))}]}))]
+                             :errors  [{:message (messages/t :capability/gate-threw
+                                                             {:gate      (name gate-kw)
+                                                              :exception (ex-message e)})}]}))]
     (gate-result->violation capability result artifact)))
 
 (defn ^{:stratum 2} check-format
@@ -155,8 +157,7 @@
                    (artifact-format-result artifact))]
     (if result
       (gate-result->violation :format result artifact)
-      (format-drift-violation artifact
-                              "Format capability requires :format-check-fn or :artifact/formatted-content"))))
+      (format-drift-violation artifact (messages/t :capability/format-check-missing)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 
@@ -185,19 +186,19 @@
    `register-mechanical-capabilities!`."
   {:lint       {:meta  {:tool :clj-kondo
                         :class :deterministic
-                        :description "Lint Clojure code via the clj-kondo gate"}
+                        :description (messages/t :capability/lint-description)}
                 :check check-lint}
    :format     {:meta  {:tool :formatter
                         :class :deterministic
-                        :description "Detect formatting drift through a pure format check"}
+                        :description (messages/t :capability/format-description)}
                 :check check-format}
    :syntax     {:meta  {:tool :reader
                         :class :deterministic
-                        :description "Parse code via the reader/syntax gate"}
+                        :description (messages/t :capability/syntax-description)}
                 :check check-syntax}
    :no-secrets {:meta  {:tool :policy-gate
                         :class :deterministic
-                        :description "Detect hardcoded secrets via the policy gate"}
+                        :description (messages/t :capability/no-secrets-description)}
                 :check check-no-secrets}})
 
 ;------------------------------------------------------------------------------ Layer 5
