@@ -240,6 +240,13 @@
         (assoc-in [:phase :verdict] verdict)
         (assoc-in [:phase :result :output :phase/verdict] verdict))))
 
+(defn- ^{:stratum 0} release-file-paths
+  "The distinct paths of the files `workflow-state` releases."
+  [workflow-state]
+  (into []
+        (comp (mapcat (comp :code/files :artifact/content)) (keep :path) (distinct))
+        (:workflow/artifacts workflow-state)))
+
 (defn ^{:stratum 0} build-executor-context
   "Build context for the release executor from phase context: the
    publish context (release-publish/build-publish-context) plus what the
@@ -250,8 +257,9 @@
    `:task/behavior-addendum` so `release-executor/invoke-releaser` can
    forward it into the agent input. Mirrors the wiring review (#945)
    and plan use; closes the gap where the releaser ran without the
-   compiled standards pack."
-  [ctx config logger]
+   compiled standards pack. Rules are filtered by `changed-paths`, the
+   files being released, so glob-scoped rules apply."
+  [ctx config logger changed-paths]
   (let [on-chunk (phase/create-streaming-callback ctx :release)
         input (get-in ctx [:execution/input])
         ;; Codex consultation for the release situation, delivered through
@@ -261,7 +269,8 @@
         ;; provenance without consulting twice.
         codex-outcome (codex-pin/landings-outcome :release logger)
         pack-addendum (phase/load-and-filter-behaviors
-                        :release {:task {:task/intent (:intent input)}})
+                        :release {:task     {:task/intent (:intent input)}
+                                  :artifact {:artifact/paths changed-paths}})
         behavior-addendum (let [t (:text codex-outcome)]
                             (cond
                               (and pack-addendum t) (str pack-addendum "\n\n" t)
@@ -526,15 +535,15 @@
         env-id     (get ctx :execution/environment-id)
         dirty      (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
                      (git-dirty-files-capsule execute-fn executor env-id wt)
-                     (git-dirty-files wt))]
-    (let [probe (if (and (vector? dirty) (empty? dirty))
-                  (committed-since-base ctx wt)
-                  dirty)]
-      ;; Raised here, not carried: build-workflow-state reads the probe only
-      ;; when implement recorded no files, so a carried anomaly could be lost.
-      (if (anomaly/anomaly? probe)
-        (throw (ex-info (:anomaly/message probe) (:anomaly/data probe)))
-        probe))))
+                     (git-dirty-files wt))
+        probe      (if (and (vector? dirty) (empty? dirty))
+                     (committed-since-base ctx wt)
+                     dirty)]
+    ;; Raised here, not carried: build-workflow-state reads the probe only
+    ;; when implement recorded no files, so a carried anomaly could be lost.
+    (if (anomaly/anomaly? probe)
+      (throw (ex-info (:anomaly/message probe) (:anomaly/data probe)))
+      probe)))
 
 (defn- ^{:stratum 2} release-files!
   "Boundary wrapper around the anomaly-returning `release-files-result`;
@@ -671,7 +680,8 @@
                      {:data {:artifact-count (count (:workflow/artifacts workflow-state))
                              :file-count (count (get-in (first (:workflow/artifacts workflow-state))
                                                         [:artifact/content :code/files]))}})
-        exec-context (build-executor-context ctx config logger)
+        exec-context (build-executor-context ctx config logger
+                                             (release-file-paths workflow-state))
         releaser-agent (get config :releaser-agent)
         ;; Execute the release phase
         ;; Emit agent-started telemetry event for release executor
