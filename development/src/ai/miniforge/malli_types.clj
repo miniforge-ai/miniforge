@@ -16,18 +16,14 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.malli-types
-  "clj-kondo types from Malli function schemas.
-
-   clj-kondo loads `.clj-kondo/metosin/malli-types-clj/config.edn` on its
-   own and reports a call whose literal arguments, or whose use of the
-   return value, contradict a function's declared schema. `emit!` writes
-   that file from every brick source namespace that declares one
-   (`:malli/schema` var metadata or `m/=>`); `check!` exits 1 when the
-   committed file differs from what `emit!` would write, so CI fails on
-   a schema change whose types were not regenerated."
+  "clj-kondo types from Malli function schemas. `emit!` writes the
+   schemas declared in brick sources to `config-path`, which clj-kondo
+   loads on its own; `check!` exits 1 when the committed file differs from
+   what `emit!` would write."
   (:require
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [clojure.pprint :as pprint]
    [malli.clj-kondo :as mc]
    [malli.instrument :as mi]))
 
@@ -38,7 +34,9 @@
   ["components" "bases"])
 
 (def ^{:stratum 0} config-path
-  "Where `malli.clj-kondo/save!` writes the :clj types."
+  "Where the types are written; clj-kondo auto-loads
+   `.clj-kondo/<org>/<lib>/config.edn`. Fixed here, not left to
+   `malli.clj-kondo/save!`, whose path differs between Malli versions."
   ".clj-kondo/metosin/malli-types-clj/config.edn")
 
 (defn ^{:stratum 0} clojure-source?
@@ -53,11 +51,28 @@
       (second (read {:read-cond :allow} r)))))
 
 (defn ^{:stratum 0} kondo-config
-  "The clj-kondo config for the function schemas declared in `nss`."
+  "The clj-kondo config for the function schemas declared in `nss`; with
+   no namespaces, the config that declares no types."
   [nss]
-  (apply require nss)
-  (mi/collect! {:ns nss})
+  (when (seq nss)
+    (apply require nss)
+    (mi/collect! {:ns nss}))
   (mc/linter-config (mapcat mc/collect nss)))
+
+(defn ^{:stratum 0} write-config!
+  "Write `config` to `path` as EDN, creating parent directories."
+  [path config]
+  (io/make-parents path)
+  (spit path (with-out-str
+               (binding [pprint/*print-right-margin* 100]
+                 (pprint/pprint config)))))
+
+(defn ^{:stratum 0} current?
+  "True when the file at `path` exists and reads as `expected`."
+  [path expected]
+  (let [f (io/file path)]
+    (and (.exists f)
+         (= expected (edn/read-string (slurp f))))))
 
 (defn ^{:stratum 0} declares-function-schema?
   "True when source `text` declares a function schema: the
@@ -71,17 +86,19 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} schema-namespaces
-  "Every brick source namespace whose text declares a function schema."
-  []
-  (->> (for [root brick-roots
-             brick (.listFiles (io/file root))
-             f (file-seq (io/file brick "src"))
-             :when (clojure-source? f)]
-         f)
-       (filter #(declares-function-schema? (slurp %)))
-       (map ns-name-of)
-       sort
-       vec))
+  "Every namespace in a brick `src` tree under `base` (default the working
+   directory) whose text declares a function schema."
+  ([] (schema-namespaces "."))
+  ([base]
+   (->> (for [root brick-roots
+              brick (.listFiles (io/file base root))
+              f (file-seq (io/file brick "src"))
+              :when (clojure-source? f)]
+          f)
+        (filter #(declares-function-schema? (slurp %)))
+        (map ns-name-of)
+        sort
+        vec)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -89,16 +106,14 @@
   "Exec fn: write `config-path` from every namespace that declares a
    function schema."
   [_opts]
-  (mc/save! (kondo-config (schema-namespaces)) :clj)
+  (write-config! config-path (kondo-config (schema-namespaces)))
   (println "Wrote" config-path))
 
 (defn ^{:stratum 2} check!
   "Exec fn: exit 1 when `config-path` is missing or differs from what
    `emit!` would write."
   [_opts]
-  (let [f (io/file config-path)
-        committed (when (.exists f) (edn/read-string (slurp f)))]
-    (if (= committed (kondo-config (schema-namespaces)))
-      (println config-path "is current")
-      (do (println config-path "is stale; run `bb lint:malli-types` and commit it")
-          (System/exit 1)))))
+  (if (current? config-path (kondo-config (schema-namespaces)))
+    (println config-path "is current")
+    (do (println config-path "is stale; run `bb lint:malli-types` and commit it")
+        (System/exit 1))))

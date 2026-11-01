@@ -29,10 +29,13 @@ mistakes in calls no test reaches, at lint time: a gate named by string
 ## Changes in Detail
 
 1. `development/src/ai/miniforge/malli_types.clj`: `schema-namespaces` scans
-   `components/*/src` and `bases/*/src` for files that declare a function
-   schema; `kondo-config` loads them, collects the metadata and builds the
-   clj-kondo config with `malli.clj-kondo`; `emit!` writes it; `check!` exits
-   1 when the committed file is missing or different.
+   the `src` trees of `components/*` and `bases/*` for files that declare a
+   function schema; `kondo-config` loads them, collects the metadata and builds
+   the clj-kondo config with `malli.clj-kondo` (an empty config when nothing
+   declares one); `emit!` writes it to `config-path` itself rather than through
+   `malli.clj-kondo/save!`, whose path differs between Malli versions;
+   `check!` exits 1 when the committed file is missing or reads as different
+   data.
 2. `bb.edn`: `lint:malli-types` and `lint:malli-types:check` (JVM, `-X:dev`,
    about 26 s locally).
 3. `ci.yml`: the Test job runs the check after the development tests and
@@ -48,11 +51,14 @@ mistakes in calls no test reaches, at lint time: a gate named by string
 ## Testing Plan
 
 1. `malli-types-test`: a test function's `:malli/schema` becomes a
-   `:type-mismatch` entry with the declared args and return; the scan finds
-   `ai.miniforge.gate.interface` and does not scan test trees; the scan
-   recognizes `:malli/schema` metadata and `=>` under any alias
-   (`m/=>`, `malli.core/=>`), with spacing after the paren, or referred bare,
-   and ignores a schema value that only contains `:=>`.
+   `:type-mismatch` entry with the declared args and return; no namespaces give
+   a config with no types; the scan, over a temporary tree, returns the
+   declaring `src` namespaces of components and bases and skips test trees and
+   plain sources; the declaration match takes `:malli/schema` and `=>` under
+   any alias (`m/=>`, `malli.core/=>`), with spacing after the paren, or
+   referred bare, and ignores a schema value that only contains `:=>`;
+   `current?` is false for a missing or different file and true after
+   `write-config!`.
 2. `bb lint:malli-types:check` passes on the committed file and exits 1 after
    the file is replaced with an empty config.
 3. A probe calling `check-gate` with a string, `check-gates` with a keyword,
