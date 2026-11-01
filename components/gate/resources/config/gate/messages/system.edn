@@ -13,4 +13,5 @@
   :decide/grant-inactive-revoked "grant is not active (revoked: {reason})"
   :decide/grant-scope-mismatch "Effect is outside the grant scope"
   :decide/grant-exceeded-no-detail "grant exceeded; no breach detail supplied"
-  :decide/unrecognized-grant-outcome "unrecognized grant outcome: {outcome}"}}
+  :decide/unrecognized-grant-outcome "unrecognized grant outcome: {outcome}"
+  :lint/policy-check-threw "Policy-pack check threw; lint gate fails closed"}}

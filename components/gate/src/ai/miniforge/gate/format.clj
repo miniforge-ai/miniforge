@@ -12,6 +12,7 @@
    Layer 2: Gate check/repair + registration"
   (:require
    [ai.miniforge.gate.registry :as registry]
+   [ai.miniforge.gate.messages :as messages]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.tool-registry.interface :as tool-registry]
    [clojure.java.io :as io]
@@ -212,7 +213,7 @@
 (defmethod ^{:stratum 7} registry/get-gate :format
   [_]
   {:name        :format
-   :description "LSP structural formatting of written files"
+   :description (messages/t :format/description)
    :check       check-format
    :repair      repair-format})
 

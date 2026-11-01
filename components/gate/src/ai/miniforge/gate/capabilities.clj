@@ -47,6 +47,7 @@
    [ai.miniforge.gate.syntax]
    [ai.miniforge.gate.lint]
    [ai.miniforge.gate.format]
+   [ai.miniforge.gate.messages :as messages]
    [ai.miniforge.gate.policy]
    [ai.miniforge.gate.registry :as registry]
    [ai.miniforge.policy-pack.interface :as policy-pack]
@@ -117,7 +118,7 @@
   [artifact]
   (when-let [formatted (expected-formatted-content artifact)]
     {:passed? (= formatted (artifact-content artifact))
-     :errors  [{:message "Artifact content is not formatted"}]}))
+     :errors  [{:message (messages/t :format/not-formatted)}]}))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -185,19 +186,19 @@
    `register-mechanical-capabilities!`."
   {:lint       {:meta  {:tool :clj-kondo
                         :class :deterministic
-                        :description "Lint Clojure code via the clj-kondo gate"}
+                        :description (messages/t :capability/lint-description)}
                 :check check-lint}
    :format     {:meta  {:tool :formatter
                         :class :deterministic
-                        :description "Detect formatting drift through a pure format check"}
+                        :description (messages/t :capability/format-description)}
                 :check check-format}
    :syntax     {:meta  {:tool :reader
                         :class :deterministic
-                        :description "Parse code via the reader/syntax gate"}
+                        :description (messages/t :capability/syntax-description)}
                 :check check-syntax}
    :no-secrets {:meta  {:tool :policy-gate
                         :class :deterministic
-                        :description "Detect hardcoded secrets via the policy gate"}
+                        :description (messages/t :capability/no-secrets-description)}
                 :check check-no-secrets}})
 
 ;------------------------------------------------------------------------------ Layer 5

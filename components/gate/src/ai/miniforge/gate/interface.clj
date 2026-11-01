@@ -30,6 +30,7 @@
   (:require
    [ai.miniforge.gate.decide :as decide]
    [ai.miniforge.gate.grant :as grant]
+   [ai.miniforge.gate.messages :as messages]
    ;; Require implementations for side effects
    [ai.miniforge.gate.syntax]
    [ai.miniforge.gate.lint]
@@ -214,7 +215,7 @@
         (catch Exception ex
           (emit-gate-event! ctx gate-kw :failed [{:type :repair-error :message (ex-message ex)}])
           (schema/exception-failure :artifact ex {:gate gate-kw :artifact artifact})))
-      (schema/failure :artifact {:message "No repair function for gate"}
+      (schema/failure :artifact {:message (messages/t :gate/no-repair-fn)}
                       {:gate gate-kw :artifact artifact}))))
 
 ;; Response chain support
