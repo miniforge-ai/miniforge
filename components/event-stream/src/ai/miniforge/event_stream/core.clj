@@ -77,7 +77,7 @@
      (create-event-stream)
 
      ;; Custom sinks
-     (create-event-stream {:sinks [(file/file-sink) (console/stdout-sink)]})
+     (create-event-stream {:sinks [(file/file-sink) (factory/create-sink :stdout)]})
 
      ;; From config
      (create-event-stream {:config user-config})
