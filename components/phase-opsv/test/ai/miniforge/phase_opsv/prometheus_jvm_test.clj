@@ -7,7 +7,7 @@
             [ai.miniforge.phase-opsv.boundary.prometheus-http :as http]
             [ai.miniforge.phase-opsv.boundary.prometheus-io :as io]
             [ai.miniforge.phase-opsv.measurement-test-support :as measurement]
-            [ai.miniforge.phase-opsv.prometheus-test-support :as fixture]
+            [ai.miniforge.phase-opsv.prometheus-test-support :as fixture :refer [failed-future]]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]])
   (:import [java.io ByteArrayInputStream]
@@ -16,7 +16,7 @@
            [java.nio.charset StandardCharsets]
            [java.util Optional]
            [java.util.function BiPredicate]
-           [java.util.concurrent CompletableFuture CompletionException]))
+           [java.util.concurrent CompletionException]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -27,21 +27,18 @@
 (defn- ^{:stratum 0} headers []
   (HttpHeaders/of {} (reify BiPredicate (test [_ _ _] true))))
 
-(defn- ^{:stratum 0} failed-future [failure]
-  (doto (CompletableFuture.) (.completeExceptionally failure)))
-
 (defn- ^{:stratum 0} timeout [cause]
   (doto (HttpTimeoutException. "secret timeout") (.initCause cause)))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(deftest ^{:stratum 1} wrapped-http-timeouts-have-consistent-sanitized-diagnostics
+(deftest ^{:stratum 0} wrapped-http-timeouts-have-consistent-sanitized-diagnostics
   (doseq [failure [(HttpTimeoutException. "secret timeout")
                    (HttpConnectTimeoutException. "secret connect timeout")
                    (CompletionException. (HttpTimeoutException. "secret nested timeout"))]]
     (let [result (fixture/observe (fixture/settings) (failed-future failure) (atom []))]
       (is (= :timeout (:anomaly/type result)))
       (is (not (re-find #"secret" (pr-str result)))))))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} timeout-wrappers-never-mask-critical-causes
   (is (thrown? AssertionError

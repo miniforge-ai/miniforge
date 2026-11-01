@@ -7,16 +7,13 @@
             [ai.miniforge.phase-opsv.boundary.prometheus-http :as http]
             [ai.miniforge.phase-opsv.boundary.prometheus-io :as io]
             [ai.miniforge.phase-opsv.measurement-test-support :as measurement]
-            [ai.miniforge.phase-opsv.prometheus-test-support :as fixture :refer [observe]]
+            [ai.miniforge.phase-opsv.prometheus-test-support :as fixture :refer [failed-future observe]]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]])
   (:import [java.util.concurrent CompletableFuture TimeoutException]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defn- ^{:stratum 0} failed-future [thrown]
-  (doto (CompletableFuture.) (.completeExceptionally thrown)))
 
 (defn- ^{:stratum 0} read-timeout! [& _] (throw (TimeoutException.)))
 

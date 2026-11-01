@@ -23,6 +23,9 @@
 
 (defn ^{:stratum 0} completed [response] (CompletableFuture/completedFuture response))
 
+(defn ^{:stratum 0} failed-future [failure]
+  (doto (CompletableFuture.) (.completeExceptionally failure)))
+
 (defn ^{:stratum 0} record-request! [calls pending settings request]
   (swap! calls conj [settings request])
   pending)
