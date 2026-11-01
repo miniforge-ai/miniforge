@@ -34,7 +34,8 @@
      The pin is prompt-injected, so the agent saw it by construction; the
      missing fetch is informational, and becomes meaningful only if the
      pin ever moves to cache-only delivery."
-  (:require [ai.miniforge.gate.registry :as registry]))
+  (:require [ai.miniforge.gate.messages :as messages]
+            [ai.miniforge.gate.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -49,17 +50,13 @@
       (= :skipped (:status c))
       {:passed? false
        :errors [{:type :codex-consultation-skipped
-                 :message (str "Codex is configured but this phase's consultation "
-                               "failed — the agent acted without its pinned "
-                               "landings (Codex SPEC §7.4.3)")
+                 :message (messages/t :codex-consultation/skipped)
                  :anomaly (:anomaly c)}]}
 
       (and (:pinned? c) (false? (:pin-read? c)))
       {:passed? true
        :warnings [{:type :codex-pin-not-fetched
-                   :message (str "Pinned landings were prompt-injected but never "
-                                 "fetched via context_read; informational while "
-                                 "the pin is prompt-delivered")}]}
+                   :message (messages/t :codex-consultation/pin-not-fetched)}]}
 
       :else
       {:passed? true})))
@@ -69,7 +66,7 @@
 (defmethod ^{:stratum 1} registry/get-gate :codex-consultation
   [_]
   {:name :codex-consultation
-   :description "Validates the agent ran with its Thesium Codex consultation (SPEC §7.4.3)"
+   :description (messages/t :codex-consultation/description)
    :check check-codex-consultation
    :repair nil})
 
