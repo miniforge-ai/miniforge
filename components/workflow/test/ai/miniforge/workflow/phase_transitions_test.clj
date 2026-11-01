@@ -175,7 +175,11 @@
   (testing "gates configured + approved verdict → pass attaches ONLY the
             :allow decision envelope (Ariadne 1d); nothing else changes"
     (let [pr  {:result {:output {:review/decision :approved}}}
-          ctx {:execution/id (random-uuid) :event-stream (events/create-event-stream {:sinks []})}
+          ;; The pass is recorded only when a durable sink writes the decision;
+          ;; this one stands in for the file sink.
+          ctx {:execution/id (random-uuid)
+               :event-stream (events/create-event-stream
+                              {:sinks [(events/durable-sink (fn [_event] nil))]})}
           out (transition/apply-gate-validation {:config {:gates [:review-approved]}} pr ctx)]
       (is (= pr (dissoc out :phase/decision-envelope)) "unchanged on pass, envelope aside")
       (is (= :allow (get-in out [:phase/decision-envelope :envelope/decision])))

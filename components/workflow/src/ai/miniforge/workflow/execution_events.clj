@@ -62,9 +62,10 @@
 
 (defn- ^{:stratum 1} acknowledged-decision
   "Return the receipt only when it is this decision at an assigned stream position.
-   A current stream returns it after a durable journal commit. A legacy stream
-   returns the event it delivered; its sinks swallow write failures, so a legacy
-   receipt shows delivery to the stream, not persistence."
+   It comes from publish-persisted!: a current stream returns it after a durable
+   journal commit, and a legacy stream only after every durable sink (the file
+   sink) wrote it. A legacy stream with no durable sink, or a failed write, gives
+   an anomaly instead."
   [event receipt]
   (let [identity-fields [:event/id :event/type :event/version :workflow/id :scope/type
                          :gate/phase :envelope/id :gate/decision-envelope]]
@@ -131,8 +132,8 @@
   "Publish the :gate/decision event for a gated transition. Returns the
    acknowledged receipt, or an anomaly when there is no envelope or no event
    stream, when construction or publication returns an anomaly, when the
-   receipt is rejected or does not match the decision, or when publication
-   throws. Errors propagate; an interrupt is restored on the thread. Stream
+   decision was not persisted, when the receipt is rejected or does not match
+   the decision, or when publication throws. Errors propagate; an interrupt is restored on the thread. Stream
    and workflow id come from the same resolvers as phase telemetry."
   [ctx phase-result envelope]
   (let [stream (resolve-event-stream ctx)]
@@ -145,7 +146,7 @@
                                            (resolve-phase ctx phase-result) envelope)]
           (if (anomaly/any-anomaly? event)
             event
-            (acknowledged-decision event (events/publish! stream event))))
+            (acknowledged-decision event (events/publish-persisted! stream event))))
         (catch anomaly/any-anomaly? failure failure)
         #_{:clj-kondo/ignore [:unresolved-symbol]}
         (catch nonfatal? _
