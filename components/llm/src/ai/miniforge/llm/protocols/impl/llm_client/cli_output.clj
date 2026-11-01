@@ -71,6 +71,11 @@
             (update :output-tokens (fnil + 0) (:output-tokens usage)))
           (vary-meta assoc ::message-id message-id)))))
 
+(def ^{:stratum 0} ^:private cli-written-model
+  "The model the Claude CLI names on an assistant message it wrote itself
+   (its rate-limit notice, an API error), not the model's answer."
+  "<synthetic>")
+
 (defn ^{:stratum 0} rate-limited?
   "True when `content` is a CLI rate-limit notice rather than an answer.
    The Claude CLI exits 0 and prints the notice as its whole output
@@ -317,6 +322,7 @@
                 ;; implement turns logged `:tokens 0`).
                 message-usage (parsed-usage (get-in data [:message :usage]))
                 message-id (get-in data [:message :id])
+                cli-written? (= cli-written-model (get-in data [:message :model]))
                 with-usage (fn [parsed]
                              (cond-> parsed
                                message-usage (assoc :message-usage message-usage)
@@ -337,7 +343,8 @@
 
               (not (str/blank? text))
               (cond-> (with-usage {:delta text :done? false})
-                stop-reason (assoc :stop-reason stop-reason))
+                stop-reason (assoc :stop-reason stop-reason)
+                cli-written? (assoc :cli-text text))
 
               ;; No text + no tool calls — still carry stop-reason if
               ;; present so "empty turn" shows a reason.
@@ -499,20 +506,30 @@
    - :stop-reason          — why the model stopped (\"end_turn\", \"max_turns\", etc.)
    - :num-turns            — number of conversation turns consumed
    - :tool-call-count      — total number of tool invocations during the run
-   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)"
-  [content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview stderr]
-  (if (rate-limited? content)
-    (responses/llm-error :anomalies.agent/rate-limited "rate_limit"
-               (str "Claude CLI rate limited: " (str/trim content))
-               {:exit-code exit-code :stdout content
-                :stop-reason stop-reason :num-turns num-turns})
-    (cond-> (responses/llm-success content {:exit-code exit-code :usage usage})
-      cost-usd                    (assoc :cost-usd cost-usd)
-      stop-reason                 (assoc :stop-reason stop-reason)
-      num-turns                   (assoc :num-turns num-turns)
-      (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
-      (seq final-message-preview) (assoc :final-message-preview final-message-preview)
-      (seq stderr)                (assoc :stderr stderr))))
+   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)
+
+   `cli-text` is the text of the last message the CLI wrote itself
+   (`:cli-text` from the stream parser), checked for the rate-limit notice
+   on its own: a notice that follows earlier answer text is too long,
+   together with it, to read as one. Only CLI-written text is checked, so
+   a model's own short answer or a streamed fragment never is."
+  ([content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview stderr]
+   (streaming-success-response content exit-code usage cost-usd stop-reason num-turns
+                               tool-call-count final-message-preview stderr nil))
+  ([content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview stderr
+    cli-text]
+   (if-let [notice (first (filter rate-limited? [content cli-text]))]
+     (responses/llm-error :anomalies.agent/rate-limited "rate_limit"
+                (str "Claude CLI rate limited: " (str/trim notice))
+                {:exit-code exit-code :stdout content
+                 :stop-reason stop-reason :num-turns num-turns})
+     (cond-> (responses/llm-success content {:exit-code exit-code :usage usage})
+       cost-usd                    (assoc :cost-usd cost-usd)
+       stop-reason                 (assoc :stop-reason stop-reason)
+       num-turns                   (assoc :num-turns num-turns)
+       (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
+       (seq final-message-preview) (assoc :final-message-preview final-message-preview)
+       (seq stderr)                (assoc :stderr stderr)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
