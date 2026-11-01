@@ -30,9 +30,7 @@ parts.
 
 1. `release.clj`: `skip-probe` runs the existing dirty scan. When that comes
    back clean it adds `committed-since-base`: the files the worktree differs by
-   from the task's base commits, read through `agent/collect-worktree-files`
-   (or its capsule twin in governed mode) and filtered with
-   `agent/substantive-file?`. A failed dirty scan still returns its anomaly.
+   from the task's base commits. A failed dirty scan still returns its anomaly.
 2. The base commits are the commit shas among the task base refs implement
    recorded (`task-base/recorded-refs`, the resume-aware base the `:no-secrets`
    gate already uses), then `[:execution/environment-metadata :base-sha]`.
@@ -43,19 +41,38 @@ parts.
    with the ref itself, so a base branch name, a range, or the commit the CLI
    started on would count upstream changes as this run's work and turn a no-op
    into a release failure.
-4. Committed-only work then takes the release executor's existing
+4. New `release-scan` namespace does the committed scan, on the host or in the
+   capsule:
+   - `git diff --name-status --no-renames -z`, so a path with non-ASCII bytes
+     is read as the file it names (without -z git C-quotes it).
+   - Every failure (git exit, executor error, unreadable file) is a
+     `:release/git-status-failed` anomaly, which release raises and retries.
+     A failed scan never reads as "no changes", so it never skips.
+   - A base sha that names no commit in the repository (`rev-parse --verify`
+     exit 1: an older base a fresh clone never fetched) is passed over, not
+     an error.
+   - `command-failure` and `git-status-failed` move here from `release.clj`,
+     which keeps private aliases, so its call sites and layers are unchanged.
+     The new namespace keeps `release.clj` (already over its layer budget)
+     from gaining a layer.
+5. Committed-only work then takes the release executor's existing
    `:preexisting-commits` path, as the boundary-commit case already does.
-5. `agent` interface exposes `collect-worktree-files-via-executor`.
 
 ## Testing Plan
 
-`release_committed_work_test.clj`, on a real git repo:
+`release_committed_work_test.clj`:
 
 1. `:already-implemented`, clean worktree, one commit beyond the base: release
-   prepares, and the committed file is in the release artifact.
+   prepares, and the committed file is in the release artifact (real repo).
 2. Resumed run: environment base at HEAD, implement's recorded base refs name
-   the earlier commit: the committed file is released.
-3. Clean worktree at its base commit: release skips as before.
+   the earlier commit: the committed file is released (real repo).
+3. Clean worktree at its base commit: release skips as before (real repo).
+4. A committed `src/été b.clj`, which git quotes without -z, is released
+   (real repo).
+5. A base sha the repository does not have is passed over; release skips as
+   before (real repo).
+6. Capsule: a failing `git diff`, and an executor that cannot run the command,
+   each raise `:release/git-status-failed` instead of skipping.
 
 Existing skip tests carry no base commit and keep their behaviour.
 

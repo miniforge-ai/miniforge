@@ -40,6 +40,7 @@
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
             [ai.miniforge.phase-software-factory.release-publish :as release-publish]
+            [ai.miniforge.phase-software-factory.release-scan :as release-scan]
             [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
 
@@ -110,17 +111,13 @@
         (concat (task-base/recorded-refs ctx)
                 [(get-in ctx [:execution/environment-metadata :base-sha])])))
 
-(defn- ^{:stratum 0} command-failure
-  "Failure detail for one scan command, or nil when it exited 0. A capsule
-   executor that could not run the command returns `{:ok? false :error ...}`
-   with no exit code; a missing exit code counts as failure, as in verify."
-  [command exit stderr executor-error]
-  (when-not (= 0 exit)
-    {:detail (or (not-empty (str/trim (str stderr)))
-                 (:message executor-error)
-                 (str command " exited " exit))
-     :data   (cond-> {:command command :exit exit :stderr stderr}
-               executor-error (assoc :executor/error executor-error))}))
+(def ^{:stratum 0} ^:private command-failure
+  "See release-scan/command-failure."
+  release-scan/command-failure)
+
+(def ^{:stratum 0} ^:private git-status-failed
+  "See release-scan/git-status-failed."
+  release-scan/git-status-failed)
 
 (defn- ^{:stratum 0} porcelain-z-entries
   "Parse `git status --porcelain -z` output into [status path] pairs.
@@ -138,23 +135,6 @@
           (recur (if (some #{\R \C} status) (nnext records) (next records))
                  (conj entries [status (subs record 3)]))))
       entries)))
-
-(defn- ^{:stratum 0} git-status-failed
-  "Anomaly for a working-tree scan that could not run (git exited non-zero,
-   the capsule executor failed, or a listed file could not be read).
-   Distinct from the terminal `:release/zero-files`: a failed scan says
-   nothing about whether there is work to release. `error-release` retries
-   it in place like any non-terminal release error (what a held index.lock
-   needs). `failure` is `{:detail string :data map}`."
-  [root-path {:keys [detail data]}]
-  (anomaly/sub-anomaly :unavailable
-                       :anomalies.phase/enter-failed
-                       (messages/t :release/git-status-failed
-                                   {:worktree-path root-path :detail detail})
-                       (merge {:type          :release/git-status-failed
-                               :phase         :release
-                               :worktree-path root-path}
-                              data)))
 
 (defn- ^{:stratum 0} rehydrate-committed-files
   "Read content for the `:code/file-paths` recorded by the implement
@@ -396,19 +376,11 @@
 (defn- ^{:stratum 1} committed-since-base
   "Substantive `:code/files` the task branch holds beyond its base commits
    (committed and dirty alike), [] when there are none or no base commit is
-   known. A clean worktree is not \"nothing to release\" when an earlier
-   implement iteration's commits are still unreleased."
+   known, or a `:release/git-status-failed` anomaly when the scan fails. A
+   clean worktree is not \"nothing to release\" when an earlier implement
+   iteration's commits are still unreleased."
   [ctx worktree-path]
-  (let [base-shas  (not-empty (release-base-shas ctx))
-        execute-fn (get ctx :execution/execute-fn)
-        executor   (get ctx :execution/executor)
-        env-id     (get ctx :execution/environment-id)
-        artifact   (when base-shas
-                     (if (and (= :governed (get ctx :execution/mode)) execute-fn executor env-id)
-                       (agent/collect-worktree-files-via-executor
-                        execute-fn executor env-id worktree-path base-shas)
-                       (agent/collect-worktree-files worktree-path base-shas)))]
-    (filterv agent/substantive-file? (:code/files artifact))))
+  (release-scan/committed-since ctx worktree-path (release-base-shas ctx)))
 
 (defn- ^{:stratum 1} release-files-result
   "Return release file data, the failed scan's own anomaly when `dirty` is

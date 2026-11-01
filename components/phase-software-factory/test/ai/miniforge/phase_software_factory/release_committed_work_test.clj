@@ -71,7 +71,34 @@
        (map :path)
        set))
 
+(defn ^{:stratum 0} enter-error
+  "Run release's :enter on `ctx` and return the ExceptionInfo it throws,
+   or nil when it returns."
+  [ctx]
+  (try
+    ((:enter (phase/get-phase-interceptor {:phase :release})) ctx)
+    nil
+    (catch clojure.lang.ExceptionInfo e e)))
+
+(def ^{:stratum 0} some-sha
+  "0123456789abcdef0123456789abcdef01234567")
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} capsule-ctx
+  "A governed release context on a clean capsule worktree whose
+   environment base is `base-sha`; `execute-fn` answers every git
+   command but the clean `git status`."
+  [base-sha execute-fn]
+  (assoc (release-ctx "/workspace" :already-implemented {:base-sha base-sha})
+         :execution/mode           :governed
+         :execution/executor       :mock-executor
+         :execution/environment-id "env-1"
+         :execution/execute-fn
+         (fn [executor env-id command opts]
+           (if (str/starts-with? command "git status")
+             {:ok? true :data {:exit-code 0 :stdout ""}}
+             (execute-fn executor env-id command opts)))))
 
 (defn ^{:stratum 1} commit-file!
   "Write `path` under `dir` and commit it; return the new HEAD."
@@ -87,14 +114,14 @@
 
 (defn ^{:stratum 2} with-task-branch
   "Call `f` with a repo whose base commit holds README.md and whose task
-   commit adds src/feature.clj, and with the two commits' shas. The
-   worktree is clean."
-  [f]
+   commit adds `path`, and with the two commits' shas. The worktree is
+   clean."
+  [path f]
   (let [dir (str (fs/create-temp-dir {:prefix "release-committed-"}))]
     (try
       (git! dir "init" "-q")
       (let [base (commit-file! dir "README.md" "# base\n")
-            head (commit-file! dir "src/feature.clj" "(ns feature)\n")]
+            head (commit-file! dir path "(ns feature)\n")]
         (is (= "" (git! dir "status" "--porcelain")) "fixture: worktree is clean")
         (f dir base head))
       (finally
@@ -105,7 +132,7 @@
 (deftest ^{:stratum 3} committed-work-is-released-not-skipped-test
   (testing ":already-implemented on a clean worktree whose branch committed
             work beyond its base releases that work"
-    (with-task-branch
+    (with-task-branch "src/feature.clj"
       (fn [dir base _head]
         (let [{:keys [prepared]} (enter-release
                                   (release-ctx dir :already-implemented {:base-sha base}))]
@@ -115,7 +142,7 @@
 (deftest ^{:stratum 3} resumed-run-measures-from-the-recorded-task-base-test
   (testing "a resumed run whose environment base is already past the work
             measures from the base the first implement attempt recorded"
-    (with-task-branch
+    (with-task-branch "src/feature.clj"
       (fn [dir base head]
         (let [ctx (assoc-in (release-ctx dir nil {:base-sha head})
                             [:execution/phase-results :implement :artifact :code/base-refs]
@@ -126,9 +153,49 @@
 
 (deftest ^{:stratum 3} branch-with-nothing-beyond-base-still-skips-test
   (testing "a clean worktree at its base commit skips as before"
-    (with-task-branch
+    (with-task-branch "src/feature.clj"
       (fn [dir _base head]
         (let [{:keys [result prepared]} (enter-release
                                          (release-ctx dir :already-implemented {:base-sha head}))]
           (is (nil? prepared))
           (is (= :completed (get-in result [:phase :status]))))))))
+
+(deftest ^{:stratum 3} committed-path-git-would-quote-is-released-test
+  (testing "a committed file whose name git quotes without -z is read and released"
+    (with-task-branch "src/\u00e9t\u00e9 b.clj"
+      (fn [dir base _head]
+        (let [{:keys [prepared]} (enter-release
+                                  (release-ctx dir :already-implemented {:base-sha base}))]
+          (is (= #{"src/\u00e9t\u00e9 b.clj"} (released-paths prepared))))))))
+
+(deftest ^{:stratum 3} base-the-clone-never-fetched-is-passed-over-test
+  (testing "a base sha that names no commit here is not diffed, and a clean
+            worktree with no other base skips as before"
+    (with-task-branch "src/feature.clj"
+      (fn [dir _base _head]
+        (let [{:keys [result prepared]} (enter-release
+                                         (release-ctx dir :already-implemented {:base-sha some-sha}))]
+          (is (nil? prepared))
+          (is (= :completed (get-in result [:phase :status]))))))))
+
+(deftest ^{:stratum 3} failed-committed-diff-is-raised-not-skipped-test
+  (testing "a committed scan whose git diff fails raises the git error"
+    (let [ex (enter-error
+              (capsule-ctx some-sha
+                           (fn [_executor _env-id command _opts]
+                             (if (str/includes? command "'rev-parse'")
+                               {:ok? true :data {:exit-code 0 :stdout some-sha}}
+                               {:ok? true :data {:exit-code 128 :stdout ""
+                                                 :stderr "fatal: bad object"}}))))]
+      (is (= :release/git-status-failed (:type (ex-data ex))))
+      (is (str/includes? (str (ex-message ex)) "bad object")))))
+
+(deftest ^{:stratum 3} capsule-executor-error-is-raised-not-skipped-test
+  (testing "a committed scan the capsule executor cannot run raises its error"
+    (let [ex (enter-error
+              (capsule-ctx some-sha
+                           (fn [_executor _env-id _command _opts]
+                             {:ok? false :error {:code :exec-failed
+                                                 :message "container not running"}})))]
+      (is (= :release/git-status-failed (:type (ex-data ex))))
+      (is (str/includes? (str (ex-message ex)) "container not running")))))

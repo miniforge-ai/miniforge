@@ -767,11 +767,6 @@
   "Collect the promoted task artifact from the current worktree."
   file-artifacts/collect-worktree-files)
 
-(def ^{:stratum 0} collect-worktree-files-via-executor
-  "Like collect-worktree-files, reading git state and content in a capsule
-   through `exec!` (dag-executor's execute! signature)."
-  file-artifacts/collect-worktree-files-via-executor)
-
 (def ^{:stratum 0} rehydrate-files
   "Reconstitute :code/files from recorded paths by reading the worktree.
    Used by downstream phases when the implement phase persisted only
