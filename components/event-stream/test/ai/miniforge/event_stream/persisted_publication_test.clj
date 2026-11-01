@@ -38,8 +38,15 @@
 (defn- ^{:stratum 0} event-for [workflow-id]
   {:event/type :gate/decision :event/id (random-uuid) :workflow/id workflow-id})
 
-(defn- ^{:stratum 0} temp-path [create]
-  (str (create (make-array FileAttribute 0))))
+(defn- ^{:stratum 0} with-temp-path
+  "Call `f` with the path `create` makes, then delete it and everything under it."
+  [create f]
+  (let [root (.toFile ^java.nio.file.Path (create (make-array FileAttribute 0)))]
+    (try
+      (f (str root))
+      (finally
+        (doseq [file (reverse (file-seq root))]
+          (.delete ^java.io.File file))))))
 
 (defn- ^{:stratum 0} file-sink-stream
   "A legacy stream whose only sink is the configured file sink at `base-dir`."
@@ -88,35 +95,43 @@
 
 (deftest ^{:stratum 1} file-sink-write-is-the-acknowledgment
   (testing "the file sink wrote the event"
-    (let [dir (temp-path #(Files/createTempDirectory "persisted-" %))
-          event (event-for (random-uuid))
-          result (events/publish-persisted! (file-sink-stream dir) event)]
-      (is (= (:event/id event) (:event/id result)))
-      (is (= 1 (count (event-files dir))))))
+    (with-temp-path
+      #(Files/createTempDirectory "persisted-" %)
+      (fn [dir]
+        (let [event (event-for (random-uuid))
+              result (events/publish-persisted! (file-sink-stream dir) event)]
+          (is (= (:event/id event) (:event/id result)))
+          (is (= 1 (count (event-files dir))))))))
   (testing "the file sink could not write: its base directory is a regular file"
-    (let [not-a-dir (temp-path #(Files/createTempFile "persisted-" ".file" %))]
-      (is (not-persisted? (events/publish-persisted! (file-sink-stream not-a-dir)
-                                                     (event-for (random-uuid)))
-                          :sink-write-failed)))))
+    (with-temp-path
+      #(Files/createTempFile "persisted-" ".file" %)
+      (fn [not-a-dir]
+        (is (not-persisted? (events/publish-persisted! (file-sink-stream not-a-dir)
+                                                       (event-for (random-uuid)))
+                            :sink-write-failed))))))
 
 (deftest ^{:stratum 1} file-sink-forces-the-write-before-acknowledging
   (testing "the write goes through file-durability, which forces bytes and directory entries"
-    (let [dir (temp-path #(Files/createTempDirectory "persisted-" %))
-          forced (atom 0)
-          publish-bytes! disk/publish-bytes!
-          result (with-redefs [disk/publish-bytes! (fn [& args]
-                                                     (swap! forced inc)
-                                                     (apply publish-bytes! args))]
-                   (events/publish-persisted! (file-sink-stream dir) (event-for (random-uuid))))]
-      (is (not (anomaly/any-anomaly? result)))
-      (is (= 1 @forced))))
+    (with-temp-path
+      #(Files/createTempDirectory "persisted-" %)
+      (fn [dir]
+        (let [forced (atom 0)
+              publish-bytes! disk/publish-bytes!
+              result (with-redefs [disk/publish-bytes! (fn [& args]
+                                                         (swap! forced inc)
+                                                         (apply publish-bytes! args))]
+                       (events/publish-persisted! (file-sink-stream dir) (event-for (random-uuid))))]
+          (is (not (anomaly/any-anomaly? result)))
+          (is (= 1 @forced))))))
   (testing "a durability failure is a failed write, and leaves no temp file"
-    (let [dir (temp-path #(Files/createTempDirectory "persisted-" %))
-          result (with-redefs [disk/publish-bytes! (constantly
-                                                    (anomaly/anomaly :fault "force failed" {}))]
-                   (events/publish-persisted! (file-sink-stream dir) (event-for (random-uuid))))]
-      (is (not-persisted? result :sink-write-failed))
-      (is (empty? (event-files dir))))))
+    (with-temp-path
+      #(Files/createTempDirectory "persisted-" %)
+      (fn [dir]
+        (let [result (with-redefs [disk/publish-bytes! (constantly
+                                                        (anomaly/anomaly :fault "force failed" {}))]
+                       (events/publish-persisted! (file-sink-stream dir) (event-for (random-uuid))))]
+          (is (not-persisted? result :sink-write-failed))
+          (is (empty? (event-files dir))))))))
 
 (deftest ^{:stratum 1} plain-publish-still-returns-the-event-on-a-failed-write
   (let [stream (events/create-event-stream {:sinks [failing-sink]})
