@@ -42,6 +42,11 @@ and 186 assertions, including native task dependency sites and disabled reader e
 Both `deps.edn` and `bb.edn` manifests are scanned. Classifier artifacts remain rejected
 even when their declared version matches the approved artifact.
 
+A follow-up review identified unrelated task data being mistaken for declarations.
+Two failing regressions now pass after restricting inspection to manifest, alias
+and task dependency fields. Example task code and execution arguments remain data;
+they neither install dependencies nor trigger false policy failures.
+
 ## Deployment Plan
 
 This changes test policy only. It installs no production dependency and grants

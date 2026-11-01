@@ -36,6 +36,12 @@
        "{:deps {org.clojure/data.json {:mvn/version \"2.4.0\"}} :tasks {verify {:task #(identity %)}}}"))
   (is (thrown? RuntimeException (policy/compatible-json? "#=(identity {:deps {}})"))))
 
+(deftest ^{:stratum 0} task-code-and-exec-arguments-are-not-dependency-declarations
+  (is (policy/compatible-json?
+       "{:tasks {demo {:task (println '{org.clojure/data.json {:mvn/version \"2.5.2\"}})}}}"))
+  (is (policy/compatible-json?
+       "{:aliases {:demo {:exec-args {:example {org.clojure/data.json {:mvn/version \"2.5.2\"}}}}}}")))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} only-the-verified-json-coordinate-is-admitted

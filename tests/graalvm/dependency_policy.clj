@@ -10,24 +10,33 @@
 (def ^{:stratum 0} ^:private portable-dependency
   ['org.clojure/data.json {:mvn/version "2.4.0"}])
 
+(def ^{:stratum 0} ^:private dependency-fields
+  [:deps :extra-deps :replace-deps :override-deps])
+
 (defn- ^{:stratum 0} json-library? [library]
   (and (symbol? library) (= "org.clojure" (namespace library))
        (or (= "data.json" (name library)) (str/starts-with? (name library) "data.json$"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} json-dependencies [document]
-  (for [node (tree-seq coll? seq document)
-        :when (map? node)
-        [library coordinate] node
-        :when (json-library? library)]
-    [library coordinate]))
+(defn- ^{:stratum 1} dependency-maps [document]
+  (let [configs (concat [document] (vals (:aliases document)) (vals (:tasks document)))]
+    (for [config configs
+          :when (map? config)
+          field dependency-fields
+          :let [dependencies (get config field)]
+          :when (map? dependencies)]
+      dependencies)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} compatible-json? [deps-text]
   ;; bb.edn contains Clojure task forms. Read them as data, never reader evaluation.
   (let [document (binding [*read-eval* false] (read-string deps-text))]
-    (every? #{portable-dependency} (json-dependencies document))))
+    (every? #{portable-dependency}
+            (for [dependencies (dependency-maps document)
+                  [library coordinate] dependencies
+                  :when (json-library? library)]
+              [library coordinate]))))
 
 (comment (compatible-json? "{:deps {}}"))
