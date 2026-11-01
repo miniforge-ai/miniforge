@@ -191,7 +191,7 @@
    Returns a shell-result."
   [executor env-id branch]
   (or (commands/validate-safe-branch-name branch)
-      (commands/exec! executor env-id (str "git fetch origin " branch))))
+      (commands/exec! executor env-id (str "git fetch origin " branch) {:git-credentials? true})))
 
 (defn ^{:stratum 0} commits-ahead-of-base
   "Count commits HEAD has added since branching from `origin/<base>`.
@@ -360,7 +360,8 @@
   (let [default-branch (commands/detect-default-branch executor env-id)]
     (if-let [invalid (commands/validate-safe-branch-name default-branch)]
       invalid
-      (let [fetch-r (commands/exec! executor env-id ["git" "fetch" "origin" default-branch])]
+      (let [fetch-r (commands/exec! executor env-id ["git" "fetch" "origin" default-branch]
+                                    {:git-credentials? true})]
         (if-not (result/succeeded? fetch-r)
           (result/shell-failure (str "Failed to fetch: " (:error fetch-r)) {:branch nil})
           (try-checkout-branch executor env-id branch-name default-branch))))))
