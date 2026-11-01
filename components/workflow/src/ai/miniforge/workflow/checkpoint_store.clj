@@ -201,7 +201,8 @@
                    ;; datum, so a history consumer reads what a checkpoint
                    ;; consumer reads.
                    :phase/gate-errors (:phase/gate-errors phase-result)
-                   :phase/gate-failures (:phase/gate-failures phase-result)}]
+                   :phase/gate-failures (:phase/gate-failures phase-result)
+                   :phase/gate-warnings (:phase/gate-warnings phase-result)}]
         ;; Same instant normalization the checkpoint records get: gate
         ;; errors carry java.time.Instant values (policy-pack violations'
         ;; :timestamp), which pr-str would emit as #object[...] and make

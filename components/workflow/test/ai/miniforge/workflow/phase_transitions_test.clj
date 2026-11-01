@@ -192,6 +192,49 @@
     (let [pr {:result {}}]
       (is (= pr (transition/apply-gate-validation {:config {:gates []}} pr {}))))))
 
+(deftest ^{:stratum 0} gate-warnings-test
+  (testing "one {:gate :warnings} per gate that warned, in gate order"
+    (is (= [{:gate :codex-consultation
+             :warnings [{:type :codex-pin-not-fetched}]}
+            {:gate :lint :warnings [{:type :w1} {:type :w2}]}]
+           (transition/gate-warnings
+            {:results [{:gate :syntax :passed? true}
+                       {:gate :codex-consultation :passed? true
+                        :warnings [{:type :codex-pin-not-fetched}]}
+                       {:gate :lint :passed? false :errors [{:type :e}]
+                        :warnings (list {:type :w1} {:type :w2})}]}))))
+  (testing "nil when no gate warned, so the phase result gains no key"
+    (is (nil? (transition/gate-warnings {:results [{:gate :syntax :passed? true
+                                                    :warnings []}]})))
+    (is (nil? (transition/gate-warnings {:results []})))))
+
+(deftest ^{:stratum 0} apply-gate-validation-keeps-gate-warnings
+  (testing "a PASSING phase keeps its gates' warnings — the envelope has
+            no place for them, and they used to be dropped here"
+    (let [pr  {:result {:output {:codex/consultation {:status :consulted
+                                                      :pinned? true
+                                                      :pin-read? false}}}}
+          out (transition/apply-gate-validation {:config {:gates [:codex-consultation]}}
+                                                pr {})]
+      (is (= :allow (get-in out [:phase/decision-envelope :envelope/decision])))
+      (is (= [:codex-consultation] (mapv :gate (:phase/gate-warnings out))))
+      (is (= :codex-pin-not-fetched
+             (get-in out [:phase/gate-warnings 0 :warnings 0 :type])))))
+  (testing "a FAILING phase keeps the warnings beside its failures"
+    (let [pr  {:result {:output {:codex/consultation {:status :consulted
+                                                      :pinned? true
+                                                      :pin-read? false}}}}
+          out (transition/apply-gate-validation
+               {:config {:gates [:codex-consultation :review-approved]}} pr {})]
+      (is (= :failed (:phase/status out)))
+      (is (= [:review-approved] (mapv :gate (:phase/gate-failures out))))
+      (is (= [:codex-consultation] (mapv :gate (:phase/gate-warnings out))))))
+  (testing "no warnings → no key"
+    (let [out (transition/apply-gate-validation
+               {:config {:gates [:review-approved]}}
+               {:result {:output {:review/decision :approved}}} {})]
+      (is (not (contains? out :phase/gate-warnings))))))
+
 (defn- ^{:stratum 0} policy-rule
   []
   {:rule/id          :test/forbidden
