@@ -38,6 +38,7 @@
    [ai.miniforge.dag-executor.protocols.impl.host-guarded :as host-guarded]
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.image :as oci-img]
    [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes :as k8s]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]))
@@ -125,7 +126,7 @@
 (def ^{:stratum 0} task-runner-images
   "Pre-defined task runner images that can be built from bundled Dockerfiles.
    Keys: :minimal (Alpine), :clojure (full tooling)"
-  oci-cli/task-runner-images)
+  oci-img/task-runner-images)
 
 (def ^{:stratum 0} image-exists?
   "Check if a container image exists locally.
@@ -135,18 +136,18 @@
    protocols.impl.runtime.descriptor/make-descriptor. nil falls back to
    the default Docker executable name (preserving the pre-N11-delta call
    sites that pass nil)."
-  oci-cli/image-exists?)
+  oci-img/image-exists?)
 
 (def ^{:stratum 0} build-image!
   "Build a container image from a Dockerfile resource.
    (build-image! descriptor image-name dockerfile-resource-path) -> Result"
-  oci-cli/build-image!)
+  oci-img/build-image!)
 
 (def ^{:stratum 0} ensure-image!
   "Ensure a task runner image exists, building if necessary.
    (ensure-image! descriptor :minimal) -> Result
    (ensure-image! descriptor :clojure :force? true) -> Result"
-  oci-cli/ensure-image!)
+  oci-img/ensure-image!)
 
 (def ^{:stratum 0} ensure-all-images!
   "Ensure all task runner images are available.

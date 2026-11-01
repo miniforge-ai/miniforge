@@ -17,16 +17,27 @@
 ;; limitations under the License.
 (ns ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli-test
   "Tests for OCI-CLI executor: token sanitization, URL auth, image
-   management, descriptor wiring."
+   management, descriptor wiring.
+
+   Tests that need the stand-in runtime CLI are in `oci-cli-fake-runtime-test`;
+   helpers both use are in `oci-cli-test-support`."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
-   [clojure.java.shell :as shell]
-   [clojure.test :refer [deftest is testing]]
-   [clojure.string]
-   [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
-   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]))
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli-test-support
+    :refer [basic-auth env-file-path fake-token git-config-of private-fn recorded-remote-executor
+            supported-kinds-under-test token-in?]]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.acquisition :as oci-acq]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.container :as oci-ctr]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.git-credentials :as oci-git]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.image :as oci-img]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.process :as oci-run]
+   [ai.miniforge.dag-executor.result :as result]
+   [clojure.java.shell :as shell]
+   [clojure.string]
+   [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -38,10 +49,6 @@
   (clojure.string/includes?
    (if (string? cmd) cmd (clojure.string/join " " cmd))
    s))
-
-;; Private fn accessor helper
-(defn- ^{:stratum 0} private-fn [sym]
-  (var-get (ns-resolve 'ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli sym)))
 
 ;; Default descriptor used by tests that exercise CLI argument shaping
 ;; rather than runtime selection. `make-descriptor` defaults to :docker.
@@ -55,34 +62,9 @@
   []
   (descriptor/make-descriptor {:runtime-kind :podman}))
 
-;; Phase 2: argument-construction tests run against every supported kind so
-;; a Podman regression in flag shaping shows up at unit-test time.
-(def ^{:stratum 0} ^:private supported-kinds-under-test
-  [:docker :podman])
-
 (defn- ^{:stratum 0} descriptor-for-kind
   [kind]
   (descriptor/make-descriptor {:runtime-kind kind}))
-
-(def ^{:stratum 0} ^:private fake-token "tok-FAKE-0123456789")
-
-(defn- ^{:stratum 0} basic-auth [user token]
-  (.encodeToString (java.util.Base64/getEncoder)
-                   (.getBytes (str user ":" token) "UTF-8")))
-
-(defn- ^{:stratum 0} prefixed-entries [prefix call]
-  (into {} (keep #(when (.startsWith ^String % prefix)
-                    (clojure.string/split (subs % (count prefix)) #"=" 2)))
-        call))
-
-(defn- ^{:stratum 0} git-config-of
-  "{key value} that GIT_CONFIG_COUNT / KEY_n / VALUE_n in `env` set."
-  [env]
-  (into {} (for [i (range (parse-long (get env "GIT_CONFIG_COUNT" "0")))]
-             [(get env (str "GIT_CONFIG_KEY_" i)) (get env (str "GIT_CONFIG_VALUE_" i))])))
-
-(defn- ^{:stratum 0} env-file-path [argv]
-  (second (drop-while #(not= "--env-file" %) argv)))
 
 ;; ============================================================================
 ;; descriptor — basic construction
@@ -141,7 +123,7 @@
 (deftest ^{:stratum 0} persist-workspace-no-changes-test
   (testing "persist-workspace! returns {:persisted? false} when no dirty files"
     (let [executor (oci-cli/create-docker-executor {:image "test:latest"})]
-      (with-redefs [oci-cli/exec-in-container
+      (with-redefs [oci-ctr/exec-in-container
                     (fn [_descriptor _env-id cmd _opts]
                       (if (= cmd "git status --porcelain")
                         {:data {:exit-code 0 :stdout ""}}
@@ -164,8 +146,8 @@
         stub          (fn [_descriptor args & _]
                         (reset! captured-args (vec args))
                         {:exit 0 :out "container-id-123\n" :err ""})]
-    (with-redefs [oci-cli/run-runtime-process stub]
-      (apply oci-cli/create-container
+    (with-redefs [oci-run/run-runtime-process stub]
+      (apply oci-ctr/create-container
              descriptor "test-ctr" "alpine" "/workspace" nil nil nil
              (mapcat identity create-opts))
       @captured-args)))
@@ -182,11 +164,11 @@
   (testing "body that returns in time passes its result through unchanged"
     (let [ok-result {:ok? true :data {:environment-id "env-1"}}]
       (is (= ok-result
-             (oci-cli/with-acquisition-timeout 5000 (fn [] ok-result)))))))
+             (oci-acq/with-acquisition-timeout 5000 (fn [] ok-result)))))))
 
 (deftest ^{:stratum 0} with-acquisition-timeout-fires-on-deadline-test
   (testing "body that exceeds the deadline returns :timeout err"
-    (let [result (oci-cli/with-acquisition-timeout
+    (let [result (oci-acq/with-acquisition-timeout
                    50
                    (fn [] (Thread/sleep 5000) :should-not-see))]
       (is (= false (:ok? result)))
@@ -201,12 +183,12 @@
   (testing "nil / 0 / negative timeout bypasses the deadline check"
     (doseq [t [nil 0 -1]]
       (is (= :body-ran
-             (oci-cli/with-acquisition-timeout t (fn [] :body-ran)))
+             (oci-acq/with-acquisition-timeout t (fn [] :body-ran)))
           (str "timeout " (pr-str t) " must run the body without the guard")))))
 
 (deftest ^{:stratum 0} with-acquisition-timeout-disabled-body-exception-returns-error-result-test
   (testing "disabled deadline still returns body exceptions as failure data"
-    (let [result (oci-cli/with-acquisition-timeout
+    (let [result (oci-acq/with-acquisition-timeout
                    nil
                    (fn [] (throw (ex-info "boom" {:tag :disabled-timeout}))))]
       (is (result/err? result))
@@ -223,7 +205,7 @@
     ;; test passed even if cancellation regressed.
     (let [cancelled? (promise)
           deadline-ms 50
-          result (oci-cli/with-acquisition-timeout
+          result (oci-acq/with-acquisition-timeout
                    deadline-ms
                    (fn []
                      (try
@@ -238,7 +220,7 @@
 
 (deftest ^{:stratum 0} with-acquisition-timeout-body-exception-returns-error-result-test
   (testing "exceptions thrown by the body return failure data instead of throwing"
-    (let [result (oci-cli/with-acquisition-timeout
+    (let [result (oci-acq/with-acquisition-timeout
                    5000
                    (fn [] (throw (ex-info "boom" {:tag :original}))))]
       (is (false? (:ok? result)))
@@ -257,7 +239,7 @@
           worker (Thread.
                    (fn []
                      (deliver started? true)
-                     (oci-cli/run-runtime descriptor "5")))]
+                     (oci-run/run-runtime descriptor "5")))]
       (.start worker)
       (is (= true (deref started? 1000 false)))
       (.interrupt worker)
@@ -278,7 +260,7 @@
                    (fn []
                      (deliver started? true)
                      (deliver runtime-result
-                              (oci-cli/run-runtime descriptor "5"))))]
+                              (oci-run/run-runtime descriptor "5"))))]
       (.start worker)
       (is (= true (deref started? 1000 false)))
       (.interrupt worker)
@@ -286,14 +268,6 @@
         (is (not= :timeout result))
         (is (= 130 (:exit result)))
         (is (clojure.string/includes? (:err result) "interrupted"))))))
-
-(defn- ^{:stratum 0} recorded-remote-executor
-  "An executor that bootstrapped `c1` from https://github.com/o/r.git."
-  []
-  (doto (oci-cli/create-docker-executor {:image "test:latest"})
-    (-> :git-remotes (reset! {"c1" {:repo-url  "https://github.com/o/r.git"
-                                    :https-url "https://github.com/o/r.git"
-                                    :host-kind :github}}))))
 
 (defn- ^{:stratum 0} credentialed-calls
   "The [cmd opts] in `calls` that carried an env."
@@ -304,7 +278,7 @@
   (testing "an exec env name the launch gate refuses (DOCKER_CUSTOM_HEADERS
             or *) never reaches the runtime argv or the CLI's environment"
     (let [calls (atom [])]
-      (with-redefs [oci-cli/run-runtime-process-timed
+      (with-redefs [oci-run/run-runtime-process-timed
                     (fn [_ms _d args & {:as opts}]
                       (swap! calls conj [args (:env opts)])
                       {:exit 0 :out "" :err "" :out-bytes (byte-array 0) :err-bytes (byte-array 0)})]
@@ -315,37 +289,22 @@
           (is (not-any? #(or (= "*" %) (clojure.string/includes? % "Bearer x")) args))
           (is (not-any? #{"DOCKER_CUSTOM_HEADERS" "*"} (keys env))))))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} parse-fake-runtime-log [lines]
-  (->> lines
-       (partition-by #(= "END" %))
-       (remove #(= ["END"] %))
-       (mapv (fn [call]
-               {:argv     (vec (keep #(when (.startsWith ^String % "ARG ") (subs % 4)) call))
-                :env      (prefixed-entries "ENV " call)
-                :env-file (prefixed-entries "FILE " call)}))))
-
-(defn- ^{:stratum 1} token-in? [s]
-  (or (clojure.string/includes? s fake-token)
-      (clojure.string/includes? s (basic-auth "x-access-token" fake-token))))
-
 ;; ============================================================================
 ;; sanitize-token
 ;; ============================================================================
-(deftest ^{:stratum 1} sanitize-token-github-test
+(deftest ^{:stratum 0} sanitize-token-github-test
   (testing "sanitizes GitHub x-access-token"
     (let [sanitize (private-fn 'sanitize-token)]
       (is (= "https://x-access-token:***@github.com/o/r.git"
              (sanitize "https://x-access-token:ghp_abc123@github.com/o/r.git"))))))
 
-(deftest ^{:stratum 1} sanitize-token-gitlab-test
+(deftest ^{:stratum 0} sanitize-token-gitlab-test
   (testing "sanitizes GitLab oauth2 token"
     (let [sanitize (private-fn 'sanitize-token)]
       (is (= "https://oauth2:***@gitlab.com/g/p.git"
              (sanitize "https://oauth2:glpat-xyz@gitlab.com/g/p.git"))))))
 
-(deftest ^{:stratum 1} sanitize-token-no-token-test
+(deftest ^{:stratum 0} sanitize-token-no-token-test
   (testing "passes through strings without tokens"
     (let [sanitize (private-fn 'sanitize-token)]
       (is (= "git clone https://github.com/o/r.git"
@@ -354,7 +313,7 @@
 ;; ============================================================================
 ;; git-credential-env — per-command git auth (N11 §2.2)
 ;; ============================================================================
-(deftest ^{:stratum 1} git-credential-env-test
+(deftest ^{:stratum 0} git-credential-env-test
   (let [cred-env (private-fn 'git-credential-env)
         auth     {:user "x-access-token" :token "tok"}]
     (testing "an Authorization header scoped to the remote's host, with no
@@ -387,7 +346,7 @@
       (is (= {} (cred-env "https://github.com/o/r.git" nil)))
       (is (= {} (cred-env "git@github.com:o/r.git" auth))))))
 
-(deftest ^{:stratum 1} git-remote-test
+(deftest ^{:stratum 0} git-remote-test
   (let [git-remote (private-fn 'git-remote)]
     (testing "an explicit nil :host-kind is inferred, like an absent one"
       (is (= :github (:host-kind (git-remote {:repo-url "https://github.com/o/r.git"
@@ -403,30 +362,213 @@
              (:https-url (git-remote {:repo-url "https://bob@github.com/o/r.git"}))))
       (is (nil? (:url-auth (git-remote {:repo-url "https://bob@github.com/o/r.git"})))))))
 
-(deftest ^{:stratum 1} git-auth-test
+(deftest ^{:stratum 0} git-auth-test
   (let [git-auth (private-fn 'git-auth)]
-    (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] "tok")]
+    (with-redefs [oci-git/resolve-git-token (fn [_url _opts] "tok")]
       (testing "GitLab pairs a resolved token with oauth2, others with x-access-token"
         (is (= {:user "oauth2" :token "tok"} (git-auth {:host-kind :gitlab})))
         (is (= {:user "x-access-token" :token "tok"} (git-auth {:host-kind :github}))))
       (testing "a credential from the URL wins over the resolved token"
         (is (= {:user "bob" :token "pw"}
                (git-auth {:host-kind :github :url-auth {:user "bob" :token "pw"}})))))
-    (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] "tok")]
+    (with-redefs [oci-git/resolve-git-token (fn [_url _opts] "tok")]
       (testing "a resolved token is not sent over plain http"
         (is (nil? (git-auth {:host-kind :generic :https-url "http://git.example.com/r.git"})))))
-    (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)]
+    (with-redefs [oci-git/resolve-git-token (fn [_url _opts] nil)]
       (is (nil? (git-auth {:host-kind :github}))))))
+
+;; ============================================================================
+;; executor-type reflects descriptor kind
+;; ============================================================================
+(deftest ^{:stratum 0} executor-type-from-descriptor-test
+  (testing "OciCliExecutor reports its descriptor's runtime kind"
+    (doseq [kind supported-kinds-under-test]
+      (testing (str "kind " kind)
+        (let [exec (oci-cli/create-oci-cli-executor
+                    {:runtime-kind kind :image "test:latest"})]
+          (is (= kind (proto/executor-type exec))))))))
+
+;; ============================================================================
+;; run-runtime-timed / run-runtime-process-timed — per-subprocess deadline
+;; ============================================================================
+;;
+;; Covers the 2026-07-18 fix: `execute!`, `release-environment!`, `copy-to!`,
+;; and `copy-from!` now route through bounded waitFor rather than parking
+;; the JVM thread indefinitely if Docker stalls (2026-05-16 dogfood follow-up).
+(deftest ^{:stratum 0} run-runtime-timed-fires-on-deadline-test
+  (testing "returns exit 124 when the subprocess exceeds the per-op timeout"
+    (let [run-timed  (private-fn 'run-runtime-timed)
+          descriptor {:runtime/executable "/bin/sleep"}
+          result     (run-timed 100 descriptor "10")]
+      (is (= 124 (:exit result))
+          "exit 124 mirrors the GNU timeout(1) convention for a killed-by-timeout command")
+      (is (clojure.string/includes? (:err result) "100")
+          "error message includes the timeout-ms so operators can distinguish from a real failure"))))
+
+(deftest ^{:stratum 0} run-runtime-process-timed-fires-on-deadline-test
+  (testing "returns exit 124 with empty byte arrays when the subprocess exceeds the timeout"
+    (let [run-timed  (private-fn 'run-runtime-process-timed)
+          descriptor {:runtime/executable "/bin/sleep"}
+          result     (run-timed 100 descriptor ["10"])]
+      (is (= 124 (:exit result)))
+      (is (= "" (:out result)))
+      (is (clojure.string/includes? (:err result) "100"))
+      (is (zero? (alength ^bytes (:out-bytes result))))
+      (is (zero? (alength ^bytes (:err-bytes result)))))))
+
+(deftest ^{:stratum 0} run-runtime-timed-nil-timeout-is-unbounded-test
+  (testing "nil timeout-ms disables the deadline (backward-compatible with run-runtime)"
+    (let [run-timed  (private-fn 'run-runtime-timed)
+          descriptor {:runtime/executable "/bin/echo"}
+          result     (run-timed nil descriptor "hello")]
+      (is (= 0 (:exit result)))
+      (is (clojure.string/includes? (:out result) "hello")))))
+
+(deftest ^{:stratum 0} execute-git-credentials-test
+  (testing ":git-credentials? adds the recorded remote's credential to the
+            caller's env; without it the command gets only the caller's env"
+    (let [seen (atom [])]
+      (with-redefs [oci-git/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-ctr/container-git-count  (fn [_ _] 0)
+                    oci-ctr/exec-in-container (fn [_d _id _cmd opts] (swap! seen conj opts)
+                                                (result/ok {:exit-code 0}))]
+        (let [executor (recorded-remote-executor)]
+          (proto/execute! executor "c1" ["git" "push"] {:git-credentials? true
+                                                        :env {"GH_TOKEN" "t"}})
+          (proto/execute! executor "c1" ["git" "push"] {:env {"GH_TOKEN" "t"}}))
+        (let [[with-creds without] @seen]
+          (is (= "t" (get-in with-creds [:env "GH_TOKEN"])))
+          (is (contains? (git-config-of (:env with-creds)) "http.https://github.com/.extraheader"))
+          (is (= {"GH_TOKEN" "t"} (:env without))))))))
+
+(deftest ^{:stratum 0} execute-git-credentials-keeps-callers-git-config-test
+  (testing "a caller's own GIT_CONFIG_* block (release's push retry) is kept
+            alongside the recorded remote's, renumbered after it so the
+            caller's settings win, rather than overwritten"
+    (let [seen (atom nil)]
+      (with-redefs [oci-git/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-ctr/container-git-count  (fn [_ _] 0)
+                    oci-ctr/exec-in-container (fn [_d _id _cmd opts] (reset! seen opts)
+                                                (result/ok {:exit-code 0}))]
+        (proto/execute! (recorded-remote-executor) "c1" ["git" "push"]
+                        {:git-credentials? true
+                         :env {"GH_TOKEN"           "t"
+                               "GIT_CONFIG_COUNT"   "1"
+                               "GIT_CONFIG_KEY_0"   "url.https://github.com/.insteadOf"
+                               "GIT_CONFIG_VALUE_0" "git@github.com:"}})
+        (let [entries ((private-fn 'git-config-entries) (:env @seen))]
+          (is (= ["url.https://github.com/.insteadOf" "git@github.com:"] (last entries)))
+          (is (some #{["core.hooksPath" "/dev/null"]} entries))
+          (is (= "t" (get-in @seen [:env "GH_TOKEN"]))))))))
+
+(deftest ^{:stratum 0} execute-turns-git-tracing-off-for-a-callers-header-test
+  (testing "with no credential resolved, a caller's own Authorization header
+            (release's push retry) still runs with git tracing off, over a
+            GIT_TRACE_CURL and GIT_TRACE_REDACT=0 the container inherits"
+    (let [seen   (atom [])
+          header "Authorization: Basic eC1hY2Nlc3MtdG9rZW46dA=="
+          env    {"GH_TOKEN"           "t"
+                  "GIT_CONFIG_COUNT"   "1"
+                  "GIT_CONFIG_KEY_0"   "http.https://github.com/.extraHeader"
+                  "GIT_CONFIG_VALUE_0" header}]
+      (with-redefs [oci-git/resolve-git-token (fn [_url _opts] nil)
+                    oci-ctr/exec-in-container (fn [_d _id _cmd opts] (swap! seen conj opts)
+                                                (result/ok {:exit-code 0}))]
+        (let [executor (recorded-remote-executor)]
+          (proto/execute! executor "c1" ["git" "push"] {:git-credentials? true :env env})
+          (proto/execute! executor "c1" ["git" "push"] {:env env})))
+      (is (= 2 (count @seen)))
+      (doseq [{e :env} @seen]
+        (is (= header (get e "GIT_CONFIG_VALUE_0")))
+        (is (= "1" (get e "GIT_TRACE_REDACT")))
+        (is (= ["" ""] (map #(get e %) ["GIT_TRACE_CURL" "GIT_TRACE2_EVENT"])))))))
+
+(deftest ^{:stratum 0} credential-env-forces-git-trace-redaction-test
+  (testing "a credentialed git command runs with header redaction forced on
+            and git's trace targets off, so a GIT_TRACE_CURL file and
+            GIT_TRACE_REDACT=0 inherited from the container cannot record
+            the Authorization header"
+    (let [seen (atom nil)]
+      (with-redefs [oci-git/resolve-git-token    (fn [_url _opts] fake-token)
+                    oci-ctr/container-git-count  (fn [_ _] 0)
+                    oci-ctr/exec-in-container    (fn [_d _id _cmd opts] (reset! seen opts)
+                                                   (result/ok {:exit-code 0}))]
+        (proto/execute! (recorded-remote-executor) "c1" ["git" "push"] {:git-credentials? true})
+        (is (= "1" (get-in @seen [:env "GIT_TRACE_REDACT"])))
+        (is (= ["" "" ""] (map #(get-in @seen [:env %]) ["GIT_TRACE" "GIT_TRACE_CURL" "GIT_TRACE2_EVENT"])))
+        (is (not (contains? (:env @seen) "GIT_CURL_VERBOSE")))))))
+
+(deftest ^{:stratum 0} credential-env-follows-the-containers-git-config-test
+  (testing "the credential's GIT_CONFIG_* entries are numbered after the
+            tuple the container's own env sets (an image's http.proxy), so
+            the exec's GIT_CONFIG_COUNT keeps it rather than replacing it,
+            and that tuple is not sent again"
+    (let [seen (atom nil)]
+      (with-redefs [oci-git/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-run/run-runtime-timed (fn [_ms _d & args]
+                                                (when (= "inspect" (first args))
+                                                  {:exit 0
+                                                   :out  (clojure.string/join "\n" (map pr-str ["PATH=/bin" "GIT_CONFIG_COUNT=1"
+                                                                                      "GIT_CONFIG_KEY_0=http.proxy"
+                                                                                      "GIT_CONFIG_VALUE_0=http://proxy:3128"]))}))
+                    oci-ctr/exec-in-container (fn [_d _id _cmd opts] (reset! seen opts)
+                                                (result/ok {:exit-code 0}))]
+        (proto/execute! (recorded-remote-executor) "c1" ["git" "push"] {:git-credentials? true})
+        (let [env (:env @seen)
+              n   (parse-long (get env "GIT_CONFIG_COUNT"))]
+          (is (not (contains? env "GIT_CONFIG_KEY_0"))
+              "the container's own entry stays in its env, not sent again")
+          (is (= "core.hooksPath" (get env "GIT_CONFIG_KEY_1")))
+          (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
+                 (get env (str "GIT_CONFIG_VALUE_" (dec n)))))
+          (is (not (contains? env "PATH"))))))))
+
+(deftest ^{:stratum 0} persist-without-changes-resolves-no-token-test
+  (testing "a persist with nothing to push never resolves the credential,
+            so a slow token lookup (gh auth token) cannot hold it up"
+    (let [lookups (atom 0)]
+      (with-redefs [oci-git/resolve-git-token (fn [_url _opts] (swap! lookups inc) fake-token)
+                    oci-ctr/exec-in-container (fn [_d _id _cmd _opts]
+                                                {:data {:exit-code 0 :stdout ""}})]
+        (is (true? (get-in (proto/persist-workspace! (recorded-remote-executor) "c1"
+                                                     {:branch "task/x"})
+                           [:data :no-changes?])))
+        (is (zero? @lookups))))))
+
+(deftest ^{:stratum 0} git-credential-env-is-read-by-git-test
+  (testing "git takes the credential config from the env over the
+            workspace's own .git/config, and the config file never holds it"
+    (let [dir (.toFile (java.nio.file.Files/createTempDirectory
+                        "cred-env" (make-array java.nio.file.attribute.FileAttribute 0)))
+          env ((private-fn 'git-credential-env) "https://github.com/o/r.git"
+                                                {:user "x-access-token" :token fake-token})
+          git (fn [& args]
+                (apply shell/sh "git" "-C" (str dir)
+                       (concat args [:env (merge (into {} (System/getenv)) env)])))
+          get-config #(clojure.string/trim (:out (git "config" "--get" %)))]
+      (try
+        (git "init" "-q")
+        (git "config" "--local" "core.hooksPath" "/workspace/.evil-hooks")
+        (git "config" "--local" "credential.helper" "/workspace/evil-helper")
+        (is (= (get (git-config-of env) "http.https://github.com/.extraheader")
+               (get-config "http.https://github.com/.extraheader")))
+        (is (= "/dev/null" (get-config "core.hooksPath")))
+        (is (= "" (get-config "credential.helper")))
+        (is (not (token-in? (slurp (java.io.File. dir ".git/config")))))
+        (finally
+          (run! #(.delete ^java.io.File %) (reverse (file-seq dir))))))))
+
+;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================
 ;; image-exists? (public)
 ;; ============================================================================
 (deftest ^{:stratum 1} image-exists-nonexistent-test
   (testing "image-exists? returns false for nonexistent image"
-    (with-redefs [oci-cli/run-runtime
+    (with-redefs [oci-run/run-runtime
                   (fn [_d & _args]
                     {:exit 1 :out "" :err "No such image"})]
-      (is (false? (oci-cli/image-exists? (docker-descriptor)
+      (is (false? (oci-img/image-exists? (docker-descriptor)
                                          "nonexistent/image:never"))))))
 
 ;; ============================================================================
@@ -436,11 +578,11 @@
   (testing "an execution plan is authoritative even when it omits
             :network-profile"
     (let [captured (atom nil)]
-      (with-redefs [oci-cli/run-runtime-process
+      (with-redefs [oci-run/run-runtime-process
                     (fn [_d args & _]
                       (reset! captured (vec args))
                       {:exit 0 :out "cid\n" :err ""})]
-        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil "bridge"
+        (oci-ctr/create-container (docker-descriptor) "c" "img" "/w" {} nil "bridge"
                                   :execution-plan {:image-digest "sha256:x" :mounts []})
         (let [args @captured]
           (is (not (some #{"--network"} args)))
@@ -450,11 +592,11 @@
   (testing "an execution-plan WITH :network-profile drops the legacy network
             argument (profile drives networking via build-security-args)"
     (let [captured (atom nil)]
-      (with-redefs [oci-cli/run-runtime-process
+      (with-redefs [oci-run/run-runtime-process
                     (fn [_d args & _]
                       (reset! captured (vec args))
                       {:exit 0 :out "cid\n" :err ""})]
-        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil "bridge"
+        (oci-ctr/create-container (docker-descriptor) "c" "img" "/w" {} nil "bridge"
                                   :execution-plan {:image-digest "sha256:x" :mounts []
                                                    :network-profile :none})
         (let [args @captured]
@@ -464,11 +606,11 @@
 (deftest ^{:stratum 1} create-container-plan-memory-replaces-registry-default-test
   (testing "a plan memory limit emits one authoritative --memory argument"
     (let [captured (atom nil)]
-      (with-redefs [oci-cli/run-runtime-process
+      (with-redefs [oci-run/run-runtime-process
                     (fn [_d args & _]
                       (reset! captured (vec args))
                       {:exit 0 :out "cid\n" :err ""})]
-        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil nil
+        (oci-ctr/create-container (docker-descriptor) "c" "img" "/w" {} nil nil
                                   :execution-plan {:image-digest "sha256:x"
                                                    :mounts []
                                                    :memory-limit-mb 768})
@@ -479,11 +621,11 @@
   (testing "plan env is authoritative when present; partial plans retain legacy env"
     (let [captured (atom nil)
           run! (fn [plan]
-                 (with-redefs [oci-cli/run-runtime-process
+                 (with-redefs [oci-run/run-runtime-process
                                (fn [_d args & _]
                                  (reset! captured (slurp (env-file-path args)))
                                  {:exit 0 :out "cid\n" :err ""})]
-                   (oci-cli/create-container
+                   (oci-ctr/create-container
                     (docker-descriptor) "c" "img" "/w" {"SOURCE" "legacy"} nil nil
                     :execution-plan plan)
                    @captured))]
@@ -494,15 +636,15 @@
   (testing "the container command comes from the plan's :command, defaulting
             to the keep-alive when absent"
     (let [captured (atom nil)]
-      (with-redefs [oci-cli/run-runtime-process
+      (with-redefs [oci-run/run-runtime-process
                     (fn [_d args & _]
                       (reset! captured (vec args))
                       {:exit 0 :out "cid\n" :err ""})]
-        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil nil
+        (oci-ctr/create-container (docker-descriptor) "c" "img" "/w" {} nil nil
                                   :execution-plan {:image-digest "sha256:x" :mounts []
                                                    :command ["bb" "run" "task"]})
         (is (= ["bb" "run" "task"] (subvec @captured (- (count @captured) 3))))
-        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil nil)
+        (oci-ctr/create-container (docker-descriptor) "c" "img" "/w" {} nil nil)
         (is (= ["sleep" "infinity"] (subvec @captured (- (count @captured) 2))))))))
 
 ;; ============================================================================
@@ -510,78 +652,78 @@
 ;; ============================================================================
 (deftest ^{:stratum 1} container-image-digest-returns-sha-on-success-test
   (testing "returns trimmed digest string when inspect succeeds"
-    (with-redefs [oci-cli/run-runtime
+    (with-redefs [oci-run/run-runtime
                   (fn [_d & _args]
                     {:exit 0 :out "sha256:abc123def456\n" :err ""})]
       (is (= "sha256:abc123def456"
-             (oci-cli/container-image-digest (docker-descriptor) "my-container"))))))
+             (oci-img/container-image-digest (docker-descriptor) "my-container"))))))
 
 (deftest ^{:stratum 1} image-env-reads-the-image-env-test
   (testing "image-env inspects the given image's Config.Env, one JSON string
             per entry, so a value with a line break reads back whole; nil
             on failure"
     (let [seen (atom nil)]
-      (with-redefs [oci-cli/run-runtime
+      (with-redefs [oci-run/run-runtime
                     (fn [_d & args]
                       (reset! seen args)
                       {:exit 0 :err ""
                        :out  "\"PATH=/bin\"\n\"PEM=-----BEGIN\\nkey==\"\n\"GH_TOKEN=t\"\n"})]
         (is (= {"PATH" "/bin" "PEM" "-----BEGIN\nkey==" "GH_TOKEN" "t"}
-               (oci-cli/image-env (docker-descriptor) "sha256:abc")))
+               (oci-img/image-env (docker-descriptor) "sha256:abc")))
         (is (= ["image" "inspect" "sha256:abc"
                 "--format" "{{range .Config.Env}}{{json .}}{{println}}{{end}}"]
                @seen))))
-    (with-redefs [oci-cli/run-runtime (fn [& _] {:exit 1 :out "" :err "no such image"})]
-      (is (nil? (oci-cli/image-env (docker-descriptor) "sha256:abc"))))))
+    (with-redefs [oci-run/run-runtime (fn [& _] {:exit 1 :out "" :err "no such image"})]
+      (is (nil? (oci-img/image-env (docker-descriptor) "sha256:abc"))))))
 
 (deftest ^{:stratum 1} container-image-digest-normalizes-podman-bare-hex-test
   (testing "Podman prints the image ID as bare 64-hex; the digest is
             normalized to the sha256:-prefixed form the gate expects"
     (let [hex (apply str (repeat 64 \a))]
-      (with-redefs [oci-cli/run-runtime
+      (with-redefs [oci-run/run-runtime
                     (fn [_d & _args]
                       {:exit 0 :out (str hex "\n") :err ""})]
         (is (= (str "sha256:" hex)
-               (oci-cli/container-image-digest (podman-descriptor) "my-container")))))))
+               (oci-img/container-image-digest (podman-descriptor) "my-container")))))))
 
 (deftest ^{:stratum 1} image-config-digest-normalizes-podman-bare-hex-test
   (testing "image-config-digest applies the same normalization on image IDs"
     (let [hex (apply str (repeat 64 \a))]
-      (with-redefs [oci-cli/run-runtime
+      (with-redefs [oci-run/run-runtime
                     (fn [_d & _args]
                       {:exit 0 :out (str hex "\n") :err ""})]
         (is (= (str "sha256:" hex)
-               (oci-cli/image-config-digest (podman-descriptor) "img:tag")))))))
+               (oci-img/image-config-digest (podman-descriptor) "img:tag")))))))
 
 (deftest ^{:stratum 1} image-config-digest-passes-docker-prefixed-form-through-test
   (testing "Docker's already-prefixed sha256:<hex> ID is returned unchanged"
     (let [digest (str "sha256:" (apply str (repeat 64 \b)))]
-      (with-redefs [oci-cli/run-runtime
+      (with-redefs [oci-run/run-runtime
                     (fn [_d & _args]
                       {:exit 0 :out (str digest "\n") :err ""})]
         (is (= digest
-               (oci-cli/image-config-digest (docker-descriptor) "img:tag")))))))
+               (oci-img/image-config-digest (docker-descriptor) "img:tag")))))))
 
 (deftest ^{:stratum 1} container-image-digest-returns-nil-on-nonzero-exit-test
   (testing "returns nil when inspect exits non-zero"
-    (with-redefs [oci-cli/run-runtime
+    (with-redefs [oci-run/run-runtime
                   (fn [_d & _args]
                     {:exit 1 :out "" :err "No such container"})]
-      (is (nil? (oci-cli/container-image-digest (docker-descriptor) "missing"))))))
+      (is (nil? (oci-img/container-image-digest (docker-descriptor) "missing"))))))
 
 (deftest ^{:stratum 1} container-image-digest-returns-nil-on-empty-output-test
   (testing "returns nil when inspect output is blank"
-    (with-redefs [oci-cli/run-runtime
+    (with-redefs [oci-run/run-runtime
                   (fn [_d & _args]
                     {:exit 0 :out "  \n" :err ""})]
-      (is (nil? (oci-cli/container-image-digest (docker-descriptor) "empty-out"))))))
+      (is (nil? (oci-img/container-image-digest (docker-descriptor) "empty-out"))))))
 
 (deftest ^{:stratum 1} container-image-digest-returns-nil-on-exception-test
   (testing "returns nil when run-runtime throws"
-    (with-redefs [oci-cli/run-runtime
+    (with-redefs [oci-run/run-runtime
                   (fn [_d & _args]
                     (throw (ex-info "Runtime not found" {})))]
-      (is (nil? (oci-cli/container-image-digest (docker-descriptor) "any-container"))))))
+      (is (nil? (oci-img/container-image-digest (docker-descriptor) "any-container"))))))
 
 ;; ============================================================================
 ;; persist-workspace!
@@ -590,7 +732,7 @@
   (testing "persist-workspace! commits and pushes when there are dirty files"
     (let [commands (atom [])
           executor (oci-cli/create-docker-executor {:image "test:latest"})]
-      (with-redefs [oci-cli/exec-in-container
+      (with-redefs [oci-ctr/exec-in-container
                     (fn [_descriptor _env-id cmd _opts]
                       (swap! commands conj cmd)
                       (cond
@@ -620,7 +762,7 @@
   (testing "restore-workspace! fetches and checks out task branch"
     (let [commands (atom [])
           executor (oci-cli/create-docker-executor {:image "test:latest"})]
-      (with-redefs [oci-cli/exec-in-container
+      (with-redefs [oci-ctr/exec-in-container
                     (fn [_descriptor _env-id cmd _opts]
                       (swap! commands conj cmd)
                       (if (= cmd "git rev-parse HEAD")
@@ -654,59 +796,12 @@
                     :execution-plan {:time-limit-ms 2000})]
           (is (some #(= "5" %) args)))))))
 
-;; ============================================================================
-;; executor-type reflects descriptor kind
-;; ============================================================================
-(deftest ^{:stratum 1} executor-type-from-descriptor-test
-  (testing "OciCliExecutor reports its descriptor's runtime kind"
-    (doseq [kind supported-kinds-under-test]
-      (testing (str "kind " kind)
-        (let [exec (oci-cli/create-oci-cli-executor
-                    {:runtime-kind kind :image "test:latest"})]
-          (is (= kind (proto/executor-type exec))))))))
-
-;; ============================================================================
-;; run-runtime-timed / run-runtime-process-timed — per-subprocess deadline
-;; ============================================================================
-;;
-;; Covers the 2026-07-18 fix: `execute!`, `release-environment!`, `copy-to!`,
-;; and `copy-from!` now route through bounded waitFor rather than parking
-;; the JVM thread indefinitely if Docker stalls (2026-05-16 dogfood follow-up).
-(deftest ^{:stratum 1} run-runtime-timed-fires-on-deadline-test
-  (testing "returns exit 124 when the subprocess exceeds the per-op timeout"
-    (let [run-timed  (private-fn 'run-runtime-timed)
-          descriptor {:runtime/executable "/bin/sleep"}
-          result     (run-timed 100 descriptor "10")]
-      (is (= 124 (:exit result))
-          "exit 124 mirrors the GNU timeout(1) convention for a killed-by-timeout command")
-      (is (clojure.string/includes? (:err result) "100")
-          "error message includes the timeout-ms so operators can distinguish from a real failure"))))
-
-(deftest ^{:stratum 1} run-runtime-process-timed-fires-on-deadline-test
-  (testing "returns exit 124 with empty byte arrays when the subprocess exceeds the timeout"
-    (let [run-timed  (private-fn 'run-runtime-process-timed)
-          descriptor {:runtime/executable "/bin/sleep"}
-          result     (run-timed 100 descriptor ["10"])]
-      (is (= 124 (:exit result)))
-      (is (= "" (:out result)))
-      (is (clojure.string/includes? (:err result) "100"))
-      (is (zero? (alength ^bytes (:out-bytes result))))
-      (is (zero? (alength ^bytes (:err-bytes result)))))))
-
-(deftest ^{:stratum 1} run-runtime-timed-nil-timeout-is-unbounded-test
-  (testing "nil timeout-ms disables the deadline (backward-compatible with run-runtime)"
-    (let [run-timed  (private-fn 'run-runtime-timed)
-          descriptor {:runtime/executable "/bin/echo"}
-          result     (run-timed nil descriptor "hello")]
-      (is (= 0 (:exit result)))
-      (is (clojure.string/includes? (:out result) "hello")))))
-
 (deftest ^{:stratum 1} bootstrap-workspace-command-failure-returns-error-result-test
   (testing "bootstrap command failures are returned as result data"
     (let [bootstrap-workspace! (private-fn 'bootstrap-workspace!)
           exec-results (atom [{:data {:exit-code 1
                                       :stderr "fatal: could not read password\n"}}])]
-      (with-redefs [oci-cli/exec-in-container
+      (with-redefs [oci-ctr/exec-in-container
                     (fn [_descriptor _container-id _cmd _opts]
                       (let [r (first @exec-results)]
                         (swap! exec-results rest)
@@ -727,9 +822,9 @@
   (testing "an http URL's user:password@ is stripped from the clone URL and
             still authenticates the clone"
     (let [envs (atom [])]
-      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)
-                    oci-cli/container-git-count  (fn [_ _] 0)
-                    oci-cli/exec-in-container (fn [_d _c cmd opts]
+      (with-redefs [oci-git/resolve-git-token (fn [_url _opts] nil)
+                    oci-ctr/container-git-count  (fn [_ _] 0)
+                    oci-ctr/exec-in-container (fn [_d _c cmd opts]
                                                 (swap! envs conj [cmd (:env opts)])
                                                 (result/ok {:exit-code 0 :stdout ""}))]
         ((private-fn 'bootstrap-workspace!) (docker-descriptor) "c1" "/workspace"
@@ -742,8 +837,8 @@
   (testing "an image whose git ignores GIT_CONFIG_COUNT fails with a clear
             error before any clone"
     (let [cmds (atom [])]
-      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] "tok")
-                    oci-cli/exec-in-container (fn [_d _c cmd _opts]
+      (with-redefs [oci-git/resolve-git-token (fn [_url _opts] "tok")
+                    oci-ctr/exec-in-container (fn [_d _c cmd _opts]
                                                 (swap! cmds conj cmd)
                                                 (result/ok {:exit-code 0 :stdout "git version 2.30.2\n"}))]
         (let [r ((private-fn 'bootstrap-workspace!) (docker-descriptor) "c1" "/workspace"
@@ -758,11 +853,11 @@
             add/commit (which run workspace hooks) never see it"
     (let [executor (recorded-remote-executor)
           calls    (atom [])]
-      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
-                    oci-cli/container-git-count  (fn [_ _] 0)
-                    oci-cli/stop-container    (fn [& _] {:exit 0})
-                    oci-cli/remove-container  (fn [& _] (result/ok {:released? true}))
-                    oci-cli/exec-in-container
+      (with-redefs [oci-git/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-ctr/container-git-count  (fn [_ _] 0)
+                    oci-ctr/stop-container    (fn [& _] {:exit 0})
+                    oci-ctr/remove-container  (fn [& _] (result/ok {:released? true}))
+                    oci-ctr/exec-in-container
                     (fn [_d _id cmd opts]
                       (swap! calls conj [cmd opts])
                       {:data {:exit-code 0
@@ -781,9 +876,9 @@
   (testing "with a recorded remote, restore fetches the recorded URL into
             origin's tracking ref, with the credential on the fetch alone"
     (let [calls (atom [])]
-      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
-                    oci-cli/container-git-count  (fn [_ _] 0)
-                    oci-cli/exec-in-container
+      (with-redefs [oci-git/resolve-git-token (fn [_url _opts] fake-token)
+                    oci-ctr/container-git-count  (fn [_ _] 0)
+                    oci-ctr/exec-in-container
                     (fn [_d _id cmd opts]
                       (swap! calls conj [cmd opts])
                       {:data {:exit-code 0 :stdout "sha"}})]
@@ -794,70 +889,11 @@
                  "+refs/heads/task/x:refs/remotes/origin/task/x"]]
                (map first (credentialed-calls @calls))))))))
 
-(deftest ^{:stratum 1} execute-git-credentials-test
-  (testing ":git-credentials? adds the recorded remote's credential to the
-            caller's env; without it the command gets only the caller's env"
-    (let [seen (atom [])]
-      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
-                    oci-cli/container-git-count  (fn [_ _] 0)
-                    oci-cli/exec-in-container (fn [_d _id _cmd opts] (swap! seen conj opts)
-                                                (result/ok {:exit-code 0}))]
-        (let [executor (recorded-remote-executor)]
-          (proto/execute! executor "c1" ["git" "push"] {:git-credentials? true
-                                                        :env {"GH_TOKEN" "t"}})
-          (proto/execute! executor "c1" ["git" "push"] {:env {"GH_TOKEN" "t"}}))
-        (let [[with-creds without] @seen]
-          (is (= "t" (get-in with-creds [:env "GH_TOKEN"])))
-          (is (contains? (git-config-of (:env with-creds)) "http.https://github.com/.extraheader"))
-          (is (= {"GH_TOKEN" "t"} (:env without))))))))
-
-(deftest ^{:stratum 1} execute-git-credentials-keeps-callers-git-config-test
-  (testing "a caller's own GIT_CONFIG_* block (release's push retry) is kept
-            alongside the recorded remote's, renumbered after it so the
-            caller's settings win, rather than overwritten"
-    (let [seen (atom nil)]
-      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
-                    oci-cli/container-git-count  (fn [_ _] 0)
-                    oci-cli/exec-in-container (fn [_d _id _cmd opts] (reset! seen opts)
-                                                (result/ok {:exit-code 0}))]
-        (proto/execute! (recorded-remote-executor) "c1" ["git" "push"]
-                        {:git-credentials? true
-                         :env {"GH_TOKEN"           "t"
-                               "GIT_CONFIG_COUNT"   "1"
-                               "GIT_CONFIG_KEY_0"   "url.https://github.com/.insteadOf"
-                               "GIT_CONFIG_VALUE_0" "git@github.com:"}})
-        (let [entries ((private-fn 'git-config-entries) (:env @seen))]
-          (is (= ["url.https://github.com/.insteadOf" "git@github.com:"] (last entries)))
-          (is (some #{["core.hooksPath" "/dev/null"]} entries))
-          (is (= "t" (get-in @seen [:env "GH_TOKEN"]))))))))
-
-(deftest ^{:stratum 1} execute-turns-git-tracing-off-for-a-callers-header-test
-  (testing "with no credential resolved, a caller's own Authorization header
-            (release's push retry) still runs with git tracing off, over a
-            GIT_TRACE_CURL and GIT_TRACE_REDACT=0 the container inherits"
-    (let [seen   (atom [])
-          header "Authorization: Basic eC1hY2Nlc3MtdG9rZW46dA=="
-          env    {"GH_TOKEN"           "t"
-                  "GIT_CONFIG_COUNT"   "1"
-                  "GIT_CONFIG_KEY_0"   "http.https://github.com/.extraHeader"
-                  "GIT_CONFIG_VALUE_0" header}]
-      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)
-                    oci-cli/exec-in-container (fn [_d _id _cmd opts] (swap! seen conj opts)
-                                                (result/ok {:exit-code 0}))]
-        (let [executor (recorded-remote-executor)]
-          (proto/execute! executor "c1" ["git" "push"] {:git-credentials? true :env env})
-          (proto/execute! executor "c1" ["git" "push"] {:env env})))
-      (is (= 2 (count @seen)))
-      (doseq [{e :env} @seen]
-        (is (= header (get e "GIT_CONFIG_VALUE_0")))
-        (is (= "1" (get e "GIT_TRACE_REDACT")))
-        (is (= ["" ""] (map #(get e %) ["GIT_TRACE_CURL" "GIT_TRACE2_EVENT"])))))))
-
 (deftest ^{:stratum 1} container-git-count-reads-whole-entries-test
   (testing "the container's GIT_CONFIG_COUNT comes from whole env entries,
             so a later multi-line value holding a count line cannot change it"
     (let [args (atom nil)]
-      (with-redefs [oci-cli/run-runtime-timed
+      (with-redefs [oci-run/run-runtime-timed
                     (fn [_ms _d & a]
                       (reset! args a)
                       {:exit 0
@@ -867,280 +903,6 @@
                                                                     "BANNER=hi\nGIT_CONFIG_COUNT=7"]))})]
         (is (= 1 ((private-fn 'container-git-count) (docker-descriptor) "c1")))
         (is (= ["inspect" "--format" "{{range .Config.Env}}{{json .}}{{println}}{{end}}" "c1"] @args))))))
-
-(deftest ^{:stratum 1} credential-env-forces-git-trace-redaction-test
-  (testing "a credentialed git command runs with header redaction forced on
-            and git's trace targets off, so a GIT_TRACE_CURL file and
-            GIT_TRACE_REDACT=0 inherited from the container cannot record
-            the Authorization header"
-    (let [seen (atom nil)]
-      (with-redefs [oci-cli/resolve-git-token    (fn [_url _opts] fake-token)
-                    oci-cli/container-git-count  (fn [_ _] 0)
-                    oci-cli/exec-in-container    (fn [_d _id _cmd opts] (reset! seen opts)
-                                                   (result/ok {:exit-code 0}))]
-        (proto/execute! (recorded-remote-executor) "c1" ["git" "push"] {:git-credentials? true})
-        (is (= "1" (get-in @seen [:env "GIT_TRACE_REDACT"])))
-        (is (= ["" "" ""] (map #(get-in @seen [:env %]) ["GIT_TRACE" "GIT_TRACE_CURL" "GIT_TRACE2_EVENT"])))
-        (is (not (contains? (:env @seen) "GIT_CURL_VERBOSE")))))))
-
-(deftest ^{:stratum 1} credential-env-follows-the-containers-git-config-test
-  (testing "the credential's GIT_CONFIG_* entries are numbered after the
-            tuple the container's own env sets (an image's http.proxy), so
-            the exec's GIT_CONFIG_COUNT keeps it rather than replacing it,
-            and that tuple is not sent again"
-    (let [seen (atom nil)]
-      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
-                    oci-cli/run-runtime-timed (fn [_ms _d & args]
-                                                (when (= "inspect" (first args))
-                                                  {:exit 0
-                                                   :out  (clojure.string/join "\n" (map pr-str ["PATH=/bin" "GIT_CONFIG_COUNT=1"
-                                                                                      "GIT_CONFIG_KEY_0=http.proxy"
-                                                                                      "GIT_CONFIG_VALUE_0=http://proxy:3128"]))}))
-                    oci-cli/exec-in-container (fn [_d _id _cmd opts] (reset! seen opts)
-                                                (result/ok {:exit-code 0}))]
-        (proto/execute! (recorded-remote-executor) "c1" ["git" "push"] {:git-credentials? true})
-        (let [env (:env @seen)
-              n   (parse-long (get env "GIT_CONFIG_COUNT"))]
-          (is (not (contains? env "GIT_CONFIG_KEY_0"))
-              "the container's own entry stays in its env, not sent again")
-          (is (= "core.hooksPath" (get env "GIT_CONFIG_KEY_1")))
-          (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
-                 (get env (str "GIT_CONFIG_VALUE_" (dec n)))))
-          (is (not (contains? env "PATH"))))))))
-
-(deftest ^{:stratum 1} persist-without-changes-resolves-no-token-test
-  (testing "a persist with nothing to push never resolves the credential,
-            so a slow token lookup (gh auth token) cannot hold it up"
-    (let [lookups (atom 0)]
-      (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] (swap! lookups inc) fake-token)
-                    oci-cli/exec-in-container (fn [_d _id _cmd _opts]
-                                                {:data {:exit-code 0 :stdout ""}})]
-        (is (true? (get-in (proto/persist-workspace! (recorded-remote-executor) "c1"
-                                                     {:branch "task/x"})
-                           [:data :no-changes?])))
-        (is (zero? @lookups))))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} with-fake-runtime
-  "Run (f descriptor calls) against a stand-in runtime CLI for `kind`: a
-   script that logs each invocation's argv, the contents of any
-   `--env-file`, and the values of `env-names` in its own environment (line
-   breaks shown as |), then prints a fake id. `calls` returns the
-   invocations as [{:argv [...] :env {name value} :env-file {name value}}]:
-   what `ps`, the CLI's environment and the container would see."
-  [kind env-names f]
-  (let [dir    (.toFile (java.nio.file.Files/createTempDirectory
-                         "fake-runtime" (make-array java.nio.file.attribute.FileAttribute 0)))
-        log    (java.io.File. dir "calls.log")
-        script (java.io.File. dir "runtime")]
-    (try
-      (spit script
-            (str "#!/bin/sh\n"
-                 "log='" log "'\n"
-                 "prev=''\n"
-                 "for a in \"$@\"; do\n"
-                 "  printf 'ARG %s\\n' \"$a\" >> \"$log\"\n"
-                 "  [ \"$prev\" = --env-file ] && sed 's/^/FILE /' \"$a\" >> \"$log\"\n"
-                 "  prev=\"$a\"\n"
-                 "done\n"
-                 (apply str (for [n env-names]
-                              (str "[ -n \"${" n "+x}\" ] && printf 'ENV " n "=%s\\n' "
-                                   "\"$(printf '%s' \"$" n "\" | tr '\\n' '|')\" >> \"$log\"\n")))
-                 "echo END >> \"$log\"\n"
-                 "echo abc123\n"))
-      (.setExecutable script true)
-      (f (descriptor/make-descriptor {:runtime-kind kind :executable (str script)})
-         #(if (.exists log) (parse-fake-runtime-log (clojure.string/split-lines (slurp log))) []))
-      (finally
-        (run! #(.delete ^java.io.File %) (reverse (file-seq dir)))))))
-
-(deftest ^{:stratum 2} git-credential-env-is-read-by-git-test
-  (testing "git takes the credential config from the env over the
-            workspace's own .git/config, and the config file never holds it"
-    (let [dir (.toFile (java.nio.file.Files/createTempDirectory
-                        "cred-env" (make-array java.nio.file.attribute.FileAttribute 0)))
-          env ((private-fn 'git-credential-env) "https://github.com/o/r.git"
-                                                {:user "x-access-token" :token fake-token})
-          git (fn [& args]
-                (apply shell/sh "git" "-C" (str dir)
-                       (concat args [:env (merge (into {} (System/getenv)) env)])))
-          get-config #(clojure.string/trim (:out (git "config" "--get" %)))]
-      (try
-        (git "init" "-q")
-        (git "config" "--local" "core.hooksPath" "/workspace/.evil-hooks")
-        (git "config" "--local" "credential.helper" "/workspace/evil-helper")
-        (is (= (get (git-config-of env) "http.https://github.com/.extraheader")
-               (get-config "http.https://github.com/.extraheader")))
-        (is (= "/dev/null" (get-config "core.hooksPath")))
-        (is (= "" (get-config "credential.helper")))
-        (is (not (token-in? (slurp (java.io.File. dir ".git/config")))))
-        (finally
-          (run! #(.delete ^java.io.File %) (reverse (file-seq dir))))))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-;; ============================================================================
-;; Credentials stay off the runtime argv and out of capsule git config
-;; (N11 §2.2). These drive a stand-in runtime CLI, so they observe what the
-;; real `docker` / `podman` process would receive.
-;; ============================================================================
-(deftest ^{:stratum 3} create-container-passes-env-through-an-env-file-test
-  (doseq [kind supported-kinds-under-test]
-    (testing (str "runtime " kind ": container env reaches the runtime in an
-                   env file, not on argv or in the runtime CLI's environment,
-                   and the file is gone afterwards")
-      (with-fake-runtime kind ["GH_TOKEN"]
-        (fn [descriptor calls]
-          (oci-cli/create-container descriptor "c" "img" "/w" nil nil nil
-                                    :execution-plan {:env {"GH_TOKEN" fake-token}})
-          (let [{:keys [argv env env-file]} (first (calls))]
-            (is (not-any? token-in? argv))
-            (is (= {"GH_TOKEN" fake-token} env-file))
-            (is (not= fake-token (get env "GH_TOKEN")))
-            (is (some-> (env-file-path argv) java.io.File. .exists not))))))))
-
-(deftest ^{:stratum 3} exec-in-container-passes-env-through-an-env-file-test
-  (testing "per-command env (release's GH_TOKEN, a HOME for the container)
-            leaves the runtime CLI's own environment alone"
-    (with-fake-runtime :podman ["GH_TOKEN" "HOME"]
-      (fn [descriptor calls]
-        (oci-cli/exec-in-container descriptor "c" ["gh" "pr" "create"]
-                                   {:env {"GH_TOKEN" fake-token
-                                          "HOME"     "/capsule-home"}})
-        (let [{:keys [argv env env-file]} (first (calls))]
-          (is (not-any? token-in? argv))
-          (is (= {"GH_TOKEN" fake-token "HOME" "/capsule-home"} env-file))
-          (is (not= fake-token (get env "GH_TOKEN")))
-          (is (not= "/capsule-home" (get env "HOME"))))))))
-
-(deftest ^{:stratum 3} env-with-line-break-is-refused-test
-  (testing "a value with a line break, which an env file cannot hold, is
-            refused: the runtime CLI never runs, so the value reaches neither
-            its argv nor its environment (where LD_PRELOAD would load it)"
-    (with-fake-runtime :podman ["LD_PRELOAD"]
-      (fn [descriptor calls]
-        (let [r (oci-cli/exec-in-container descriptor "c" ["true"]
-                                           {:env {"LD_PRELOAD" "\n/tmp/evil.so"}})]
-          (is (= 1 (get-in r [:data :exit-code])))
-          (is (clojure.string/includes? (get-in r [:data :stderr]) "LD_PRELOAD"))
-          (is (empty? (calls))))
-        (is (result/err? (oci-cli/create-container descriptor "c" "img" "/w" nil nil nil
-                                                   :execution-plan {:env {"PEM" "a\nb"}})))
-        (is (empty? (calls)))))))
-
-(deftest ^{:stratum 3} env-name-that-is-not-an-identifier-is-refused-test
-  (testing "a name with a line break, which would write a second assignment
-            (here an unsanitized HTTPS_PROXY) or a bare line copying the
-            runtime CLI's own variable, is refused before the env file"
-    (with-fake-runtime :docker []
-      (fn [descriptor calls]
-        (is (result/err? (oci-cli/create-container
-                          descriptor "c" "img" "/w" nil nil nil
-                          :execution-plan {:env {"SAFE\nHTTPS_PROXY" "http://u:pw@proxy:3128"}})))
-        (let [r (oci-cli/exec-in-container descriptor "c" ["true"] {:env {"GH_TOKEN\n" ""}})]
-          (is (= 1 (get-in r [:data :exit-code])))
-          (is (clojure.string/includes? (get-in r [:data :stderr]) "GH_TOKEN\\n")))
-        (is (empty? (calls)))))))
-
-(deftest ^{:stratum 3} bootstrap-workspace-keeps-token-out-of-git-config-test
-  (testing "the clone gets the token through its env file: no runtime argv
-            carries it, origin is the plain URL, no push URL is set, and no
-            later command receives the credential"
-    (with-fake-runtime :docker []
-      (fn [descriptor calls]
-        (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)]
-          (let [result ((private-fn 'bootstrap-workspace!)
-                        descriptor "c1" "/workspace"
-                        {:repo-url "git@github.com:o/r.git" :branch "main"})
-                all    (calls)
-                [version inspect clone & later] all]
-            (is (result/ok? result))
-            (is (some #{"--version"} (:argv version)))
-            (is (some #{"inspect"} (:argv inspect)) "the container's own git config is read first")
-            (is (empty? (:env-file version)))
-            (is (some #{"clone"} (:argv clone)))
-            (is (not-any? #{"--single-branch"} (:argv clone))
-                "every branch is cloned, so release can compare against its base")
-            (is (not-any? token-in? (mapcat :argv all)))
-            (is (some #{"https://github.com/o/r.git"} (:argv clone)))
-            (is (not-any? #(some #{"set-url"} (:argv %)) all))
-            (is (= (str "Authorization: Basic " (basic-auth "x-access-token" fake-token))
-                   (get (git-config-of (:env-file clone)) "http.https://github.com/.extraheader")))
-            (is (= "1" (get (:env-file clone) "GIT_TRACE_REDACT"))
-                "the clone gets the same trace redaction as every credentialed command")
-            (is (seq later))
-            (is (not-any? (comp seq :env-file) later))))))))
-
-(deftest ^{:stratum 3} bootstrap-workspace-strips-url-credentials-test
-  (testing "a repo URL carrying user:password@ is cloned without it; the
-            password authenticates the clone through the env file"
-    (with-fake-runtime :docker []
-      (fn [descriptor calls]
-        (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] nil)]
-          ((private-fn 'bootstrap-workspace!)
-           descriptor "c1" "/workspace"
-           {:repo-url (str "https://bob:" fake-token "@github.com/o/r.git")})
-          (let [[_version _inspect clone :as all] (calls)]
-            (is (not-any? token-in? (mapcat :argv all)))
-            (is (some #{"https://github.com/o/r.git"} (:argv clone)))
-            (is (= (str "Authorization: Basic " (basic-auth "bob" fake-token))
-                   (get (git-config-of (:env-file clone))
-                        "http.https://github.com/.extraheader")))))))))
-
-(deftest ^{:stratum 3} container-env-leaves-runtime-cli-variables-alone-test
-  (testing "a container's DOCKER_DEFAULT_PLATFORM reaches the container but
-            not the docker CLI's own environment, where it would change the
-            platform `docker run` pulls and starts"
-    (with-fake-runtime :docker ["DOCKER_DEFAULT_PLATFORM"]
-      (fn [descriptor calls]
-        (oci-cli/create-container descriptor "c" "img" "/w" nil nil nil
-                                  :execution-plan {:env {"DOCKER_DEFAULT_PLATFORM" "linux/s390x"}})
-        (let [{:keys [argv env env-file]} (first (calls))]
-          (is (not= "linux/s390x" (get env "DOCKER_DEFAULT_PLATFORM")))
-          (is (or (some #{"DOCKER_DEFAULT_PLATFORM=linux/s390x"} argv)
-                  (= "linux/s390x" (get env-file "DOCKER_DEFAULT_PLATFORM")))))))))
-
-(deftest ^{:stratum 3} create-container-sets-untrusted-proxies-with-e-test
-  (testing "an :untrusted plan's proxy variables go on argv as -e, which
-            Docker's configured proxies do not replace, and not in the env
-            file; a :trusted plan's, which may carry a password, stay there"
-    (with-fake-runtime :docker []
-      (fn [descriptor calls]
-        (oci-cli/create-container descriptor "c" "img" "/w" nil nil nil
-                                  :execution-plan {:trust-level :untrusted
-                                                   :env {"HTTPS_PROXY" "http://proxy:3128"
-                                                         "http_proxy" "" "LANG" "C"}})
-        (oci-cli/create-container descriptor "c" "img" "/w" nil nil nil
-                                  :execution-plan {:trust-level :trusted
-                                                   :env {"HTTPS_PROXY" "http://u:pw@proxy:3128"}})
-        (let [[untrusted trusted] (calls)]
-          (is (= ["-e" "HTTPS_PROXY=http://proxy:3128" "-e" "http_proxy="]
-                 (take 4 (drop-while #(not= "-e" %) (:argv untrusted)))))
-          (is (= {"LANG" "C"} (:env-file untrusted)))
-          (is (= {"HTTPS_PROXY" "http://u:pw@proxy:3128"} (:env-file trusted)))
-          (is (not-any? #(clojure.string/includes? % "pw@") (:argv trusted))))))))
-
-(deftest ^{:stratum 3} credentialed-exec-keeps-a-multi-line-container-git-config-test
-  (testing "a trusted image's multi-line GIT_CONFIG_VALUE_0 stays in the
-            container env: the credentialed exec is not refused for its line
-            break, and the env file holds only the credential's entries,
-            numbered after the container's"
-    (with-fake-runtime :docker []
-      (fn [descriptor calls]
-        (with-redefs [oci-cli/resolve-git-token (fn [_url _opts] fake-token)
-                      oci-cli/run-runtime-timed
-                      (fn [_ms _d & _]
-                        {:exit 0
-                         :out  (clojure.string/join "\n" (map pr-str ["GIT_CONFIG_COUNT=1"
-                                                                      "GIT_CONFIG_KEY_0=http.sslCAInfo"
-                                                                      "GIT_CONFIG_VALUE_0=-----BEGIN CERT\nabc"]))})]
-          (let [r        (proto/execute! (assoc (recorded-remote-executor) :descriptor descriptor)
-                                         "c1" ["git" "push"] {:git-credentials? true})
-                env-file (:env-file (first (calls)))]
-            (is (zero? (get-in r [:data :exit-code])))
-            (is (not (contains? env-file "GIT_CONFIG_VALUE_0")))
-            (is (= "core.hooksPath" (get env-file "GIT_CONFIG_KEY_1")))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
