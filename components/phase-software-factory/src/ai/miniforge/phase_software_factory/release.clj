@@ -345,18 +345,15 @@
         (release-scan/git-status-failed root-path failure)
         (->> (porcelain-z-entries out)
              (keep (fn [[xy path]]
-                     (let [file (io/file root-path path)]
+                     (let [file   (io/file root-path path)
+                           action (if (str/starts-with? (str/trim xy) "?") :create :modify)]
                        (cond
                          (str/includes? xy "D") {:path path :content "" :action :delete}
-                         ;; Never follow a symlink: its target may lie
-                         ;; outside the worktree (see release-scan).
-                         (and (.isFile file)
-                              (not (java.nio.file.Files/isSymbolicLink (.toPath file))))
-                                                {:path path
-                                                 :content (slurp file)
-                                                 :action (if (str/starts-with? (str/trim xy) "?")
-                                                           :create
-                                                           :modify)}))))
+                         ;; Keep a symlink's path but never follow it: its
+                         ;; target may lie outside the worktree (see release-scan).
+                         (java.nio.file.Files/isSymbolicLink (.toPath file))
+                                                {:path path :content "" :action action}
+                         (.isFile file)         {:path path :content (slurp file) :action action}))))
              (filter agent/substantive-file?)
              vec)))
     (catch Exception e

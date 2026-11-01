@@ -335,8 +335,9 @@
       (is (= #{"a.clj"} (released-paths prepared))))))
 
 (deftest ^{:stratum 3} dirty-symlink-target-never-enters-the-release-test
-  (testing "an untracked symlink to a file outside the worktree is never
-            read, on the host or through the capsule reader under sh -c"
+  (testing "an untracked symlink to a file outside the worktree, the only
+            change, is released by path and never read, on the host or
+            through the capsule reader under sh -c"
     (let [outside (str (fs/create-temp-file {:prefix "release-secret-"}))
           sh-exec (fn [_executor _env-id command {:keys [workdir]}]
                     (let [{:keys [exit out err]} (shell/sh "sh" "-c" command :dir workdir)]
@@ -346,9 +347,6 @@
         (with-task-branch "src/feature.clj"
           (fn [dir _base _head]
             (fs/create-sym-link (fs/path dir "link") outside)
-            ;; A real dirty file, so the release goes ahead on the host,
-            ;; which drops the symlink entry altogether.
-            (spit (io/file dir "src" "new.clj") "(ns new)")
             (let [host    (enter-release (release-ctx dir :success {}))
                   capsule (enter-release
                            (assoc (release-ctx dir :success {})
@@ -358,7 +356,7 @@
                                   :execution/execute-fn      sh-exec
                                   :execution/capsule-workdir dir))]
               (doseq [{:keys [prepared]} [host capsule]]
-                (is (contains? (released-files prepared) "src/new.clj"))
+                (is (= "" (get-in (released-files prepared) ["link" :content])))
                 (is (not-any? #(str/includes? (str (:content %)) "SECRET")
                               (vals (released-files prepared))))))))
         (finally

@@ -56,8 +56,9 @@ The reviews found:
      `skip-probe` and `build-workflow-state` both use it.
    - `git-dirty-files-capsule` uses `release-scan`'s capsule runner and
      reader; `porcelain-scan-entry` maps a `git status` pair to a scan entry.
-   - `git-dirty-files` (host) skips symlinks and uses
-     `release-scan/exception-failure`.
+   - `git-dirty-files` (host) keeps a symlink's path and action with empty
+     content (never its target, and never dropping the path, which can be
+     the only change), and uses `release-scan/exception-failure`.
    - `committed-since-base` composes `release-scan/first-base-diff` and
      `read-entries` through `scan-io`.
    - `skip-probe` returns a failed scan as its anomaly again;
@@ -106,8 +107,9 @@ a regular file, a symlink and a directory.
 4. The host reader refuses `../outside.clj`.
 5. A governed release with implement `:success` lists its dirty files in the
    capsule checkout (the `build-workflow-state` path).
-6. An untracked symlink to a secret outside the worktree never enters the
-   release, on the host and through the capsule reader under a real `sh -c`.
+6. An untracked symlink to a secret outside the worktree, the only change,
+   is released by path with empty content, on the host and through the
+   capsule reader under a real `sh -c`; the secret never enters the release.
 
 The existing capsule tests in `release_file_scan_test.clj` cover the rewritten
 `git-dirty-files-capsule`: an executor error, a non-zero exit, a failed `cat`,
