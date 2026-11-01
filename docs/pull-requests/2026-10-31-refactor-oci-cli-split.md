@@ -59,8 +59,22 @@ Tests follow the moved definitions:
    false. With `defn-` read as `defn` and `#()` gensyms renamed, the source side holds the same
    95 forms and the test side the same 84.
 2. stratum-lint on every new file: no findings, and `--fix` leaves each file unchanged.
-3. clj-kondo on dag-executor's src and test: the same 6 warnings as on #2221's head, none new.
-4. Every dag-executor and release-executor test namespace, under the shared JVM lock: 752 tests pass.
+3. clj-kondo on dag-executor's src and test: no warnings beyond those already on the base.
+4. dag-executor, release-executor, redaction, task-executor and llm-interface tests, under the
+   shared JVM lock: 974 pass, on the split as regenerated from #2221's head after it merged main.
+
+When the base moves, the split is regenerated from the base's `oci_cli.clj` and test files with
+the same name-to-namespace assignment, the checks above are rerun, and this PR's own commits are
+re-applied on top.
+
+## Review Fixes
+
+Capsule stack review fixes that edit `oci_cli.clj` land here, one commit each:
+
+1. A failed env-file write deletes the temp file (#2143 thread).
+2. Persist and restore of a capsule cloned without an HTTP credential go to the URL it cloned
+   (#2166 thread; the clone URL is recorded at bootstrap, from a thread on this PR).
+3. A caller's keyword-keyed `GIT_CONFIG_*` entries survive `:git-credentials?` (#2166 thread).
 
 ## Deployment Plan
 
