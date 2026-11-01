@@ -24,6 +24,7 @@
    [ai.miniforge.phase-opsv.adapter-factory :as adapter-factory]
    [ai.miniforge.phase-opsv.model :as model]
    [ai.miniforge.phase-opsv.boundary.measurement :as measurement]
+   [ai.miniforge.phase-opsv.boundary.prometheus-client :as prometheus]
    [ai.miniforge.phase-opsv.run-control :as run-control]
    [ai.miniforge.phase-opsv.run-control-state :as control-state]
    [ai.miniforge.phase-opsv.protocol :as protocol]
@@ -38,6 +39,10 @@
 (def ^{:stratum 0} run-verification protocol/run-verification)
 
 (def ^{:stratum 0} verification-receipt verification-run/receipt)
+
+(def ^{:stratum 0} observe-prometheus-window!
+  "Read a bounded window from an explicit Prometheus endpoint without mutation authority."
+  prometheus/observe-window!)
 
 (def ^{:stratum 0} decode-measurement-window
   "Decode one complete Prometheus float series against a declared bounded grid.
