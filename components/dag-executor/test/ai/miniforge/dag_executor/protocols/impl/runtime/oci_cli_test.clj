@@ -513,6 +513,23 @@
         (is (= ["" "" ""] (map #(get-in @seen [:env %]) ["GIT_TRACE" "GIT_TRACE_CURL" "GIT_TRACE2_EVENT"])))
         (is (not (contains? (:env @seen) "GIT_CURL_VERBOSE")))))))
 
+(deftest ^{:stratum 0} credentialed-exec-overrides-keyword-keyed-trace-settings-test
+  (testing "a caller's trace settings named by keyword are read by string
+            name, so git-trace-off-env replaces them and the command gets one
+            spelling of each, not the caller's GIT_TRACE_CURL file and
+            GIT_TRACE_REDACT=0 beside the forced ones"
+    (let [seen (atom nil)]
+      (with-redefs [oci-git/resolve-git-token    (fn [_url _opts] fake-token)
+                    oci-ctr/container-git-count  (fn [_ _] 0)
+                    oci-ctr/exec-in-container    (fn [_d _id _cmd opts] (reset! seen opts)
+                                                   (result/ok {:exit-code 0}))]
+        (proto/execute! (recorded-remote-executor) "c1" ["git" "push"]
+                        {:git-credentials? true
+                         :env {:GIT_TRACE_CURL "/tmp/trace" :GIT_TRACE_REDACT "0"}})
+        (is (every? string? (keys (:env @seen))))
+        (is (= "" (get-in @seen [:env "GIT_TRACE_CURL"])))
+        (is (= "1" (get-in @seen [:env "GIT_TRACE_REDACT"])))))))
+
 (deftest ^{:stratum 0} credential-env-follows-the-containers-git-config-test
   (testing "the credential's GIT_CONFIG_* entries are numbered after the
             tuple the container's own env sets (an image's http.proxy), so
