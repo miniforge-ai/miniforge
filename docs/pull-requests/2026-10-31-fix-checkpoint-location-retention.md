@@ -9,8 +9,8 @@
 ## Overview
 
 Workflow integration for the product-owner-approved N3 paired-location amendment.
-Base: main. Depends on #2299, the checkpoint-announcement-identity foundation;
-it must merge before this integration is published or merged.
+Base: main. Contract foundation #2299 is merged and integrated, including its
+payload-version admission correction.
 
 ## Motivation
 
@@ -42,7 +42,7 @@ under the operator's live default root. The sandbox refused those writes. The
 helper now runs under the existing temporary-root fixture, passing its root
 explicitly, so real ownership enforcement remains active without live-state writes.
 
-All four workflow consumer suites then passed (3m32s). The final run, against
+All three workflow-consuming product suites then passed (3m32s). The final run, against
 the corrected #2299 schema and additional legacy-relative/misversioned locator
 coverage, also passed (4m03s). Lint has zero warnings/errors; actual strata remain
 within three. Aliased-layout filesystem cases require POSIX; pure decoder tests
@@ -51,6 +51,36 @@ use platform-native absolute paths.
 Fresh CLI build succeeded: 6,880,604-byte stripped jar. Isolated packaged
 Babashka acceptance passed 24 tests and 101 assertions from `/private/tmp`, using
 only that jar and workflow test fixtures (no production-source overlays).
+
+After merging actual main, including concurrent runtime/release changes, all
+three workflow-consuming product suites passed again (3m41s). A fresh CLI rebuild and
+the same isolated packaged acceptance also passed: 24 tests, 101 assertions.
+
+The adversarial pass traced captured aliases through producer, journal and
+retention boundaries. It also checked first-write snapshots, deployed root-only
+records, future minor profiles, unknown locators and newer unreadable events.
+The initial tracked-head standards scan had zero violations; its reportable
+integration size was 431 lines before review corrections.
+
+Copilot found mixed legacy/Snowflake filename ordering could select an older
+announcement. The regression reproduced ten failures across five tests. The
+reader now orders both grammars with the shared timestamp parser. Unknown or
+malformed times, unreadable newer records and conflicting same-time locators
+remain uncertain. Agreeing same-time locators remain usable.
+
+The first full ordering run exposed an old fixture whose successive IDs all
+encoded the same millisecond. Its factory now encodes the intended distinct
+timestamps. Focused ordering and retention acceptance then passed 20 tests and
+68 assertions. Data Foundry was explicitly selected but does not include the
+workflow brick; Polylith correctly excludes it from these component test runs.
+The normal hook also required a real namespace split after inferring a fourth
+stratum. File discovery and chronological grouping now form a separate I/O
+boundary; announcement interpretation remains separate, within three strata.
+
+After the split and current-main merge, all three workflow-consuming product
+suites passed again (2m49s). A fresh CLI build and isolated packaged acceptance
+passed 29 tests with 114 assertions, including the mixed-format ordering cases.
+Normal hooks and signing passed; the final reportable PR size is 528 lines.
 
 ## Deployment Plan
 
@@ -64,5 +94,5 @@ Follows #2094, #2280, #2287 and #2288. This integration is not an N7 completion 
 ## Checklist
 
 - [x] Implement and verify regression tests
-- [ ] Standards/adversarial review, normal hooks and size gates
+- [x] Standards/adversarial review, normal hooks and size gates
 - [ ] Fresh Copilot review and all CI gates
