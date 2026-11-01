@@ -1683,6 +1683,10 @@
     (let [resp (streamed-response [(assistant-frame "claude-opus-5" long-answer)
                                    (assistant-frame "claude-opus-5" "{\"summary\":\"Added handling for too many requests.\"}")])]
       (is (:success resp))))
+  (testing "a model answer after the CLI's notice ends the run as a success"
+    (let [resp (streamed-response [(assistant-frame "<synthetic>" "You've hit your limit · resets 7pm (America/Los_Angeles)")
+                                   (assistant-frame "claude-opus-5" long-answer)])]
+      (is (:success resp))))
   (testing "a streamed fragment that mentions a limit is not a limit"
     (let [resp (streamed-response [(fragment-frame long-answer)
                                    (fragment-frame " and retries on rate limit exceeded.")])]

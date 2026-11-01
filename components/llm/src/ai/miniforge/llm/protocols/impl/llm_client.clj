@@ -346,13 +346,15 @@
         accumulated-stop-reason (atom nil)
         accumulated-turns (atom nil)
         cli-text (atom nil)
-        ;; The text of a message the CLI wrote itself (its rate-limit
-        ;; notice), kept apart from the accumulated answer, so a notice
-        ;; after earlier answer text is still read as one.
+        ;; The text of the last text message when the CLI wrote it itself
+        ;; (its rate-limit notice), kept apart from the accumulated answer,
+        ;; so a notice after earlier answer text is still read as one. A
+        ;; later message from the model clears it: the notice was not the
+        ;; run's last word.
         observed-parser (fn [line]
                           (let [parsed (stream-parser line)]
-                            (when-let [text (:cli-text parsed)]
-                              (reset! cli-text text))
+                            (when-not (str/blank? (:delta parsed))
+                              (reset! cli-text (:cli-text parsed)))
                             parsed))]
     (when logger
       (log/info logger :system :agent/streaming-prompt-sent
