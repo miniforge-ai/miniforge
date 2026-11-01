@@ -8,13 +8,15 @@
             [ai.miniforge.phase-opsv.boundary.prometheus-io :as io]
             [ai.miniforge.phase-opsv.measurement-test-support :as measurement]
             [ai.miniforge.phase-opsv.prometheus-test-support :as fixture]
-            [clojure.test :refer [deftest is]])
+            [clojure.test :refer [deftest is]]
+            [slingshot.slingshot :refer [try+]])
   (:import [java.io ByteArrayInputStream]
            [java.net URI]
-           [java.net.http HttpHeaders HttpResponse HttpClient$Version]
+           [java.net.http HttpHeaders HttpResponse HttpClient$Version HttpTimeoutException HttpConnectTimeoutException]
            [java.nio.charset StandardCharsets]
            [java.util Optional]
-           [java.util.function BiPredicate]))
+           [java.util.function BiPredicate]
+           [java.util.concurrent CompletableFuture CompletionException]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -25,7 +27,32 @@
 (defn- ^{:stratum 0} headers []
   (HttpHeaders/of {} (reify BiPredicate (test [_ _ _] true))))
 
+(defn- ^{:stratum 0} failed-future [failure]
+  (doto (CompletableFuture.) (.completeExceptionally failure)))
+
+(defn- ^{:stratum 0} timeout [cause]
+  (doto (HttpTimeoutException. "secret timeout") (.initCause cause)))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} wrapped-http-timeouts-have-consistent-sanitized-diagnostics
+  (doseq [failure [(HttpTimeoutException. "secret timeout")
+                   (HttpConnectTimeoutException. "secret connect timeout")
+                   (CompletionException. (HttpTimeoutException. "secret nested timeout"))]]
+    (let [result (fixture/observe (fixture/settings) (failed-future failure) (atom []))]
+      (is (= :timeout (:anomaly/type result)))
+      (is (not (re-find #"secret" (pr-str result)))))))
+
+(deftest ^{:stratum 1} timeout-wrappers-never-mask-critical-causes
+  (is (thrown? AssertionError
+               (fixture/observe (fixture/settings)
+                                (failed-future (timeout (AssertionError. "fatal timeout cause"))) (atom []))))
+  (try+
+    (fixture/observe (fixture/settings) (failed-future (timeout (InterruptedException.))) (atom []))
+    (is false)
+    (catch InterruptedException _
+      (let [flagged? (.isInterrupted (Thread/currentThread))] (is flagged?)))
+    (finally (Thread/interrupted))))
 
 (defn- ^{:stratum 1} response [calls status text]
   (let [stream (body calls text)

@@ -5,19 +5,20 @@
   "Read-only observation ingress; it grants no experimental or mutation authority."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.boundary.measurement :as measurement]
+            [ai.miniforge.phase-opsv.boundary.prometheus-http :as http]
             [ai.miniforge.phase-opsv.boundary.prometheus-response :as response]
             [ai.miniforge.phase-opsv.boundary.prometheus-settings :as settings]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.resource-cleanup.interface :as cleanup]
-            [slingshot.slingshot :refer [try+]])
-  (:import [java.util.concurrent TimeoutException]))
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} failed! [thrown]
-  (if (cleanup/fatal-cause thrown)
-    (cleanup/after-failure! thrown (constantly nil))
-    (anomaly/anomaly :unavailable (msg/ts :prometheus/unavailable) {})))
+  (cond
+    (cleanup/fatal-cause thrown) (cleanup/after-failure! thrown (constantly nil))
+    (http/timeout-cause thrown) (response/timeout)
+    :else (anomaly/anomaly :unavailable (msg/ts :prometheus/unavailable) {})))
 
 (defn- ^{:stratum 0} admitted-observation! [overrides request]
   (let [options (settings/load-settings overrides)
@@ -37,7 +38,6 @@
   (try+
     (when (.isInterrupted (Thread/currentThread)) (throw (InterruptedException.)))
     (admitted-observation! overrides request)
-    (catch TimeoutException _ (response/timeout))
     (catch Throwable thrown (failed! thrown))))
 
 (comment ::read-only-metric-window)

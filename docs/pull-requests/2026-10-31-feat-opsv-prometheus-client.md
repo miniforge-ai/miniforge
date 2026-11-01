@@ -32,7 +32,7 @@ timeouts, size limits, HTTP errors, malformed JSON, redirects and resource
 cleanup without contacting a metric server. Run consuming-product, packaged,
 standards and normal signed-hook gates.
 
-Native-runtime source acceptance passes 29 tests and 154 assertions. These
+Native-runtime source acceptance passes 33 tests and 172 assertions. These
 tests use in-memory bodies and an explicit external-response projection, without
 network calls, JVM processes or test repositories. This is not packaged proof.
 The separate JVM fixture exercises actual JDK responses and stream closure.
@@ -46,13 +46,25 @@ Interrupt tests capture the flag before test reporting can consume it.
 An expired body deadline also prevents reader-thread creation.
 
 Reconciliation with merged main preserves the reviewed sample-limit regression.
-Both consuming product suites pass. A fresh 6,909,589-byte stripped CLI jar
-passes isolated acceptance: 30 tests and 156 assertions, without production-source
-overlays. The follow-up catalog regression covers every new transport message.
+Both consuming product suites pass. A fresh stripped CLI jar passes isolated
+acceptance: 33 tests and 172 assertions, without production-source overlays.
+The catalog regression covers every new transport message.
 
 Normal merge hooks also found inherited lint debt. Six overlong sentences in
 the merged sink-split document were shortened without changing its claims.
 An unused release-sandbox test binding was renamed without changing behavior.
+
+Copilot identified rounded wire timestamps and wrapped HTTP timeout classification.
+The producer-shaped JVM regressions first failed five assertions, without errors.
+Exact decimal decoding now follows duplicate-key and single-document validation.
+The portable JSON release avoids generated interfaces unavailable in Babashka.
+Cause selection reuses cycle-safe cleanup traversal, preserving fatal and interruption priority.
+Cleanup passes in all four products, and workflow passes in all three.
+The final pass also reproduced synchronous timeout masking of a fatal cause.
+Removing the special timeout catch routes every failure through shared cause priority.
+Focused JVM acceptance passes 13 tests and 44 assertions.
+Upstream warning-test fixtures now reuse the acknowledged gate context instead
+of claiming durable publication from a sinkless stream. Production remains fail-closed.
 
 ## Deployment Plan
 

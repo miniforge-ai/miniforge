@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.prometheus-test-support
   (:require [ai.miniforge.phase-opsv.boundary.prometheus-http :as http]
+            [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.measurement-test-support :as measurement]
             [cheshire.core :as json])
   (:import [java.io ByteArrayInputStream]
@@ -40,5 +41,11 @@
   (with-redefs [http/start! (partial record-request! calls pending)
                 http/response-fields identity]
     (operation)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} observe [settings pending calls]
+  (with-response pending calls
+                 (partial phase/observe-prometheus-window! settings (measurement/request))))
 
 (comment ::deterministic-prometheus-wire-fixtures)

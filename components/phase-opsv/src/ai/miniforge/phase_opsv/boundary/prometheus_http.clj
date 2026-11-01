@@ -3,12 +3,16 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.boundary.prometheus-http
   "Raw HTTP acquisition keeps cancellation attached to the original JDK future."
-  (:require [babashka.http-client :as http]
+  (:require [ai.miniforge.resource-cleanup.interface :as cleanup]
+            [babashka.http-client :as http]
             [clojure.string :as str])
   (:import [java.net.http HttpResponse]
            [java.util.concurrent CompletableFuture]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private timeout-classes
+  #{"java.net.http.HttpTimeoutException" "java.util.concurrent.TimeoutException"})
 
 (def ^{:stratum 0} ^:private client
   (delay (http/client {:follow-redirects :never})))
@@ -29,6 +33,14 @@
      :encodings encodings}))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} timeout? [failure]
+  ;; Some JDK timeout classes are not exposed by Babashka's class resolver.
+  (->> (class failure)
+       (iterate #(.getSuperclass ^Class %))
+       (take-while some?)
+       (map #(.getName ^Class %))
+       (some timeout-classes)))
 
 (defn ^{:stratum 1} request-options [settings request]
   (let [base (str/replace (:prometheus/base-url settings) #"/+$" "")
@@ -52,6 +64,8 @@
     (some-> (.getNow pending nil) response-fields :body .close)))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} timeout-cause [failure] (cleanup/find-cause timeout? failure))
 
 (defn ^{:stratum 2} start! [settings request]
   (http/request (assoc (request-options settings request) :client @client)))

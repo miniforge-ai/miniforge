@@ -7,7 +7,8 @@
             [ai.miniforge.phase-opsv.boundary.prometheus-io :as io]
             [ai.miniforge.phase-opsv.measurement-window :as window]
             [cheshire.core :as json]
-            [cheshire.factory :as factory])
+            [cheshire.factory :as factory]
+            [clojure.data.json :as exact-json])
   (:import [java.io BufferedReader StringReader]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -23,7 +24,9 @@
   (binding [factory/*json-factory* strict-json-factory]
     (with-open [reader (BufferedReader. (StringReader. text))]
       (let [documents (take 2 (json/parsed-seq reader false))]
-        (if (= 1 (count documents)) (first documents) (throw (IllegalArgumentException.)))))))
+        (when-not (= 1 (count documents)) (throw (IllegalArgumentException.)))
+        ;; Babashka hides Cheshire's decimal binding; validate there, decode losslessly here.
+        (exact-json/read-str text :bigdec true)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
