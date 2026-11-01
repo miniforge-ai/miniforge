@@ -20,12 +20,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} archive-event!
-  "Write `event` as archived event file number `n` of run `id`."
-  [events-dir id n event]
-  (let [file (io/file events-dir "archived" (str id) (format "%016x__%012d.transit.json" n n))]
-    (io/make-parents file)
-    (spit file (if (string? event) event (es/serialize-event event)))))
+(def ^{:stratum 0} ^:private snowflake-timestamp-shift
+  "The file sink reserves the low 22 ID bits for worker and per-ms sequence."
+  22)
 
 (defn- ^{:stratum 0} legacy-stream [] (es/create-event-stream {:sinks []}))
 
@@ -42,6 +39,15 @@
     (:execution/id ctx)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} archive-event!
+  "Write `event` as archived event file number `n` of run `id`."
+  [events-dir id n event]
+  (let [snowflake (bit-shift-left n snowflake-timestamp-shift)
+        filename (format "%016x__%012d.transit.json" snowflake n)
+        file (io/file events-dir "archived" (str id) filename)]
+    (io/make-parents file)
+    (spit file (if (string? event) event (es/serialize-event event)))))
 
 (deftest ^{:stratum 1} a-snapshot-only-iteration-is-announced
   (fs/with-temp-dir [dir {:prefix "hold-evidence-"}]
@@ -67,7 +73,9 @@
                  (:snapshot/path (first written)))))
         (finally (es/close-current-event-stream! stream))))))
 
-(deftest ^{:stratum 1} a-snapshot-only-checkpoint-under-another-root-holds
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} a-snapshot-only-checkpoint-under-another-root-holds
   (fs/with-temp-dir [alternate {:prefix "hold-alternate-"}]
     (fs/with-temp-dir [events-dir {:prefix "hold-events-"}]
       (let [id (snapshot-only-run! (str alternate))
@@ -76,7 +84,7 @@
                         (es/machine-snapshot-written (legacy-stream) id :running path 1 (str alternate)))
         (is (true? (es/retention-hold ::gc/checkpoint (str id) (fs/file events-dir))))))))
 
-(deftest ^{:stratum 1} the-scan-stops-at-the-newest-announced-write
+(deftest ^{:stratum 2} the-scan-stops-at-the-newest-announced-write
   (fs/with-temp-dir [alternate {:prefix "hold-alternate-"}]
     (fs/with-temp-dir [events-dir {:prefix "hold-events-"}]
       (let [id (random-uuid)

@@ -42,7 +42,7 @@ under the operator's live default root. The sandbox refused those writes. The
 helper now runs under the existing temporary-root fixture, passing its root
 explicitly, so real ownership enforcement remains active without live-state writes.
 
-All four workflow consumer suites then passed (3m32s). The final run, against
+All three workflow-consuming product suites then passed (3m32s). The final run, against
 the corrected #2299 schema and additional legacy-relative/misversioned locator
 coverage, also passed (4m03s). Lint has zero warnings/errors; actual strata remain
 within three. Aliased-layout filesystem cases require POSIX; pure decoder tests
@@ -53,14 +53,29 @@ Babashka acceptance passed 24 tests and 101 assertions from `/private/tmp`, usin
 only that jar and workflow test fixtures (no production-source overlays).
 
 After merging actual main, including concurrent runtime/release changes, all
-four workflow consumer suites passed again (3m41s). A fresh CLI rebuild and
+three workflow-consuming product suites passed again (3m41s). A fresh CLI rebuild and
 the same isolated packaged acceptance also passed: 24 tests, 101 assertions.
 
 The adversarial pass traced captured aliases through producer, journal and
 retention boundaries. It also checked first-write snapshots, deployed root-only
 records, future minor profiles, unknown locators and newer unreadable events.
-No code changes were needed after that pass. The tracked-head standards scan
-has zero violations; the complete integration has 431 reportable lines.
+The initial tracked-head standards scan had zero violations; its reportable
+integration size was 431 lines before review corrections.
+
+Copilot found mixed legacy/Snowflake filename ordering could select an older
+announcement. The regression reproduced ten failures across five tests. The
+reader now orders both grammars with the shared timestamp parser. Unknown or
+malformed times, unreadable newer records and conflicting same-time locators
+remain uncertain. Agreeing same-time locators remain usable.
+
+The first full ordering run exposed an old fixture whose successive IDs all
+encoded the same millisecond. Its factory now encodes the intended distinct
+timestamps. Focused ordering and retention acceptance then passed 20 tests and
+68 assertions. Data Foundry was explicitly selected but does not include the
+workflow brick; Polylith correctly excludes it from these component test runs.
+The normal hook also required a real namespace split after inferring a fourth
+stratum. File discovery and chronological grouping now form a separate I/O
+boundary; announcement interpretation remains separate, within three strata.
 
 ## Deployment Plan
 
