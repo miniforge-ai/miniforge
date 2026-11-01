@@ -27,7 +27,16 @@ Focused admission, duplicate/reopen, compatibility and sensitive-locator tests:
 5 tests, 81 assertions passed, including all four unchanged recovery profiles.
 Event-stream tests passed across all four consuming projects (1m18s). Changed
 Clojure files have zero lint warnings/errors and at most three actual strata.
-Compliance scan and normal hooks are required before push.
+Compliance scan found no violations. Normal hooks passed: workspace check,
+zero lint warnings/errors, layering, 373 smoke tests (1439 assertions), and
+9 Babashka compatibility tests (708 assertions).
+
+Copilot found direct publication could pair location metadata with payload
+1.0.0. Both write types reproduced the bug, including sequence consumption
+(three failed assertions). Admission now dispatches on payload version:
+1.0.0 forbids the location key; 1.1.0 permits the optional paired record.
+Regression checks include nil location keys and rejection before sequencing.
+All four event-stream consumer suites passed again after the correction (1m16s).
 
 ## Deployment Plan
 
@@ -43,5 +52,5 @@ implementation of those fixes is included.
 ## Checklist
 
 - [x] Product-owner approval recorded
-- [ ] Local verification and adversarial standards review
+- [x] Local verification and adversarial standards review
 - [ ] Fresh Copilot review and all CI gates

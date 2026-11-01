@@ -11,10 +11,22 @@
    [:checkpoint/root [:string {:min 1}]]
    [:checkpoint/run-directory [:string {:min 1}]]])
 
+(def ^{:stratum 0} Root
+  [:map [:checkpoint/root {:optional true} :string]])
+
 ;------------------------------------------------------------------------------ Layer 1
 
+(def ^{:stratum 1} Unlocated
+  [:and Root [:map [:checkpoint/location {:optional true} [:not :any]]]])
+
 (def ^{:stratum 1} Located
-  [:map [:checkpoint/location {:optional true} Location]
-   [:checkpoint/root {:optional true} :string]])
+  [:and Root [:map [:checkpoint/location {:optional true} Location]]])
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} Profile
+  [:multi {:dispatch :event/version}
+   ["1.0.0" Unlocated]
+   ["1.1.0" Located]])
 
 (comment Location)

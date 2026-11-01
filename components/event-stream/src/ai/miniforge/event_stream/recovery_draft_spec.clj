@@ -25,17 +25,16 @@
   [:map [:expected-hash :string] [:actual-hash :string]])
 
 (def ^{:stratum 0} WrittenIdentity
-  [:and workflow/ScopeIdentity
-   [:map [:event/version [:enum "1.0.0" "1.1.0"]]]])
+  [:and workflow/ScopeIdentity location/Profile])
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} CheckpointWritten
-  [:and WrittenIdentity location/Located Phase
+  [:and WrittenIdentity Phase
    [:map [:checkpoint/path :string] [:checkpoint/size-bytes Size]]])
 
 (def ^{:stratum 1} SnapshotWritten
-  [:and WrittenIdentity location/Located Machine
+  [:and WrittenIdentity Machine
    [:map [:snapshot/path :string] [:snapshot/size-bytes Size]]])
 
 (def ^{:stratum 1} CheckpointFailed [:and workflow/Identity Phase Failure])

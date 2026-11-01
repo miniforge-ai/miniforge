@@ -339,10 +339,12 @@
   "Construct an N3 governed OPSV effect disposition event."
   opsv/actuation-disposition)
 
-(def ^{:stratum 0} CheckpointLocation recovery-location/Location)
+(def ^{:stratum 0} CheckpointLocation
+  "Paired nonempty root/run-directory strings; producers supply validated canonical paths."
+  recovery-location/Location)
 
 (def ^{:stratum 0} checkpoint-location
-  "Construct paired canonical root and physical run-directory metadata."
+  "Construct paired canonical root and physical run-directory metadata from validated paths; no I/O."
   events/checkpoint-location)
 
 (def ^{:stratum 0} checkpoint-written

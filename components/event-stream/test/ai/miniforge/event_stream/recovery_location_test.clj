@@ -58,6 +58,10 @@
     (doseq [locator (invalid-locations (location))]
       (is (anomaly/any-anomaly? (events/publish! stream (assoc located :checkpoint/location locator)))))
     (is (anomaly/any-anomaly? (events/publish! stream (assoc located :event/version "2.0.0"))))
+    (doseq [kind [:workflow/checkpoint-written :workflow/machine-snapshot-written]
+            locator [(location) nil]]
+      (is (anomaly/any-anomaly?
+           (events/publish! stream (assoc (recovery/draft id kind) :checkpoint/location locator)))))
     (doseq [kind [:workflow/checkpoint-write-failed :workflow/machine-snapshot-write-failed
                   :workflow/resumed :workflow/spec-hash-mismatch]]
       (is (anomaly/any-anomaly?

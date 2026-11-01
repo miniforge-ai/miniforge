@@ -9,7 +9,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} ^:private located-write-version "1.1.0")
+(def ^{:stratum 0} ^:private located-write-version
+  "N3 minor payload version introducing paired storage identity without changing scope."
+  "1.1.0")
 
 (defn ^{:stratum 0} checkpoint-location [root run-directory]
   {:checkpoint/root root
