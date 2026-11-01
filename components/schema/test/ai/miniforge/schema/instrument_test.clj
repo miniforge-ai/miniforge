@@ -51,7 +51,9 @@
      (testing "a valid call returns the function's value"
        (is (= 4 (double-it 2))))
      (testing "an argument that breaks the input schema throws invalid-input"
-       (is (= ::m/invalid-input (thrown-type #(double-it "2")))))
+       ;; The wrong argument type is the point; clj-kondo reads the m/=> schema and flags it.
+       (is (= ::m/invalid-input
+              (thrown-type #_{:clj-kondo/ignore [:type-mismatch]} #(double-it "2")))))
      (testing "a return value that breaks the output schema throws invalid-output"
        (is (= ::m/invalid-output (thrown-type #(broken-double 1))))))))
 
