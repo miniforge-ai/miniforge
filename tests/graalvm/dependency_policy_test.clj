@@ -11,9 +11,10 @@
 (def ^{:stratum 0} ^:private verified-coordinate {:mvn/version "2.4.0"})
 
 (def ^{:stratum 0} ^:private dependency-sites
-  [[:deps] [:override-deps]
+  [[:deps] [:aliases :test :deps]
    [:aliases :test :extra-deps] [:aliases :test :override-deps]
-   [:aliases :test :replace-deps] [:tasks :verify :extra-deps]])
+   [:aliases :test :default-deps] [:aliases :test :replace-deps]
+   [:tasks :verify :extra-deps]])
 
 (defn- ^{:stratum 0} manifest-at [path coordinate]
   (pr-str (assoc-in {} path {'org.clojure/data.json coordinate})))
@@ -63,6 +64,13 @@
   (let [manifest {:deps {'org.clojure/data.json verified-coordinate}
                   :aliases {:dev {:override-deps {'org.clojure/data.json {:mvn/version "2.5.2"}}}}}]
     (is (false? (policy/compatible-json? (pr-str manifest))))))
+
+(deftest ^{:stratum 1} defaults-and-classpath-replacements-cannot-substitute-json
+  (is (false? (policy/compatible-json?
+               (manifest-at [:aliases :test :default-deps] {:mvn/version "2.5.2"}))))
+  (doseq [replacement ["src/unverified-json" nil verified-coordinate]]
+    (is (false? (policy/compatible-json?
+                 (manifest-at [:aliases :test :classpath-overrides] replacement))))))
 
 (deftest ^{:stratum 1} repository-manifests-preserve-native-json-admission
   (is (.isFile (io/file "deps.edn")) "Run this repository gate from its root")

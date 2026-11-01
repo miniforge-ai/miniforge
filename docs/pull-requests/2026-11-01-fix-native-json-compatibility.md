@@ -47,6 +47,13 @@ Two failing regressions now pass after restricting inspection to manifest, alias
 and task dependency fields. Example task code and execution arguments remain data;
 they neither install dependencies nor trigger false policy failures.
 
+The documented alias inventory also includes default dependencies and classpath
+overrides. Five failing assertions now pass after admitting verified defaults
+and rejecting every JSON classpath replacement, including nil and coordinate-shaped values.
+Scopes follow the [Clojure manifest reference](https://clojure.org/reference/deps_edn)
+and [Babashka task options](https://book.babashka.org/#_task_local_options).
+Root declarations use `:deps`; task-local declarations use `:extra-deps`.
+
 ## Deployment Plan
 
 This changes test policy only. It installs no production dependency and grants
