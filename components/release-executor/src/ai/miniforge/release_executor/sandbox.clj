@@ -92,7 +92,9 @@
 (defn ^{:stratum 0} remote-branch-sha!
   "The commit origin's `branch` points at, via `git ls-remote` in the
    sandbox: {:success? true :sha sha-or-nil} (nil: no such branch), or the
-   failed command's result."
+   failed command's result. The ls-remote asks the executor for git
+   credentials, since origin in the capsule holds none; the local
+   `remote get-url` checks do not."
   [executor env-id branch exec-opts]
   (or (commands/validate-safe-branch-name branch)
       (let [fetch  (commands/exec! executor env-id "git remote get-url origin" exec-opts)
@@ -104,7 +106,7 @@
                         (remove str/blank? (str/split-lines (:output pushes)))))
           (result/shell-failure (msg/t :push/probe-destination-differs))
           (let [r (commands/exec! executor env-id ["git" "ls-remote" "origin" (str "refs/heads/" branch)]
-                                  exec-opts)]
+                                  (assoc exec-opts :git-credentials? true))]
             (if (result/succeeded? r)
               (result/shell-success {:sha (-> (str/trim (:output r "")) (str/split #"\s+") first not-empty)})
               r))))))

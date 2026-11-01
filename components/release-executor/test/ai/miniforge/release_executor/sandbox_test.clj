@@ -322,6 +322,21 @@
       (is (:timed-out? r))
       (is (not-any? #(clojure.string/includes? % "set-url") @cmds)))))
 
+(deftest ^{:stratum 1} push-probe-ls-remote-asks-for-git-credentials-test
+  (testing "remote-branch-sha!'s ls-remote asks the executor for git
+            credentials; its local get-url checks do not"
+    (let [calls (atom [])
+          exec (reify
+                 dag/TaskExecutor
+                 (execute! [_ _env-id command opts]
+                   (swap! calls conj [(cmd-str command) (:git-credentials? opts)])
+                   (dag/ok {:exit-code 0 :stdout "https://github.com/o/r.git" :stderr ""})))]
+      (sandbox/remote-branch-sha! exec "env-1" "feat/x" {:workdir "/repo"})
+      (is (= [["git remote get-url origin" nil]
+              ["git remote get-url --push --all origin" nil]
+              ["git ls-remote origin refs/heads/feat/x" true]]
+             @calls)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 ;; ============================================================================
