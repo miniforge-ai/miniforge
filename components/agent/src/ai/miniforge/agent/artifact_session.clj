@@ -347,9 +347,9 @@
   "Alias of `readers/read-capsule-artifact`."
   readers/read-capsule-artifact)
 
-(def ^{:stratum 0} read-capsule-codex-answers
-  "Alias of `readers/read-capsule-codex-answers`."
-  readers/read-capsule-codex-answers)
+(def ^{:stratum 0} read-capsule-readonly-outputs
+  "Alias of `readers/read-capsule-readonly-outputs`."
+  readers/read-capsule-readonly-outputs)
 
 (def ^{:stratum 0} read-capsule-session-outputs
   "Alias of `readers/read-capsule-session-outputs`."
@@ -631,13 +631,15 @@
    read + the nothing-found WARN that `run-session` does, since a reviewer
    has no work product to promote.
 
-   A read-only session still produces one output: the §7.7.2 answer log
-   (answers.edn), written by the MCP server when the agent records
-   explicit peg answers. It is read BEFORE cleanup — previously the
-   session directory was deleted with the log unread, so a reviewer's
-   recorded answers never reached the durable consultation record.
+   A read-only session still produces two outputs, both written by the
+   MCP server: the §7.7.2 answer log (answers.edn) and the §7.4.2
+   context_read record (context-reads.edn). Both are read BEFORE cleanup
+   deletes the session directory. Unread, the answers never reached the
+   durable consultation record, and without the reads a reviewer's
+   :pin-read? could only ever be nil (unknown).
 
    Returns {:llm-result <body-fn result>
+            :context-reads <vector-or-nil>
             :codex-answers <vector-or-nil>
             :codex-answer-log :absent|:recorded|:unreadable}.
 
@@ -645,11 +647,12 @@
    exploration but does not write files. The hook's role comes from
    `context` as for `with-session`."
   [context body-fn]
-  (let [run (fn [session read-answers-fn cleanup-fn]
+  (let [run (fn [session read-outputs-fn cleanup-fn]
               (try
                 (let [result (body-fn session)
-                      {:keys [answers answer-log]} (read-answers-fn session)]
+                      {:keys [context-reads answers answer-log]} (read-outputs-fn session)]
                   {:llm-result       result
+                   :context-reads    context-reads
                    :codex-answers    answers
                    :codex-answer-log answer-log})
                 (finally (cleanup-fn session))))]
@@ -661,7 +664,7 @@
             session  (-> (create-capsule-session! executor env-id workdir exec!)
                          (assoc :role (:agent/role context))
                          write-capsule-mcp-config!)]
-        (run session read-capsule-codex-answers cleanup-capsule-session!))
+        (run session read-capsule-readonly-outputs cleanup-capsule-session!))
       (let [workdir (:execution/worktree-path context)
             session (-> (if workdir
                           (create-session! {:workdir workdir
@@ -669,7 +672,9 @@
                           (create-session! {:source-root (:source-root context)}))
                         (assoc :role (:agent/role context))
                         write-mcp-config!)]
-        (run session read-codex-answers cleanup-session!)))))
+        (run session
+             #(assoc (read-codex-answers %) :context-reads (read-context-reads %))
+             cleanup-session!)))))
 
 (defn ^{:stratum 2} with-session
   "Execute body-fn with the appropriate artifact session for the execution mode.

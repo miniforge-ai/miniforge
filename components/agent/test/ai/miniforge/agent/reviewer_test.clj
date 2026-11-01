@@ -183,7 +183,25 @@
                (:codex-answers normalized))
             "the readable session's answers survive")
         (is (= :unreadable (:codex-answer-log normalized))
-            "LOST observations in either split must not read as a clean record")))))
+            "LOST observations in either split must not read as a clean record")))
+    (testing "§7.4.2: context_reads concatenate across split sessions"
+      (let [read-a {:path ".miniforge/codex-pin.md" :source :cache :timestamp "t1"}
+            read-b {:path "src/x.clj" :source :filesystem :timestamp "t2"}
+            normalized (invoke-split!
+                        [{:context-reads [read-a] :codex-answer-log :absent}
+                         {:context-reads [read-b] :codex-answer-log :absent}])]
+        (is (= [read-a read-b] (:context-reads normalized))
+            "a pin read in any split session counts as read")))
+    (testing "one session with a reads log, one without: the log survives"
+      (let [read-a {:path ".miniforge/codex-pin.md" :source :cache :timestamp "t1"}
+            normalized (invoke-split!
+                        [{:context-reads nil :codex-answer-log :absent}
+                         {:context-reads [read-a] :codex-answer-log :absent}])]
+        (is (= [read-a] (:context-reads normalized)))))
+    (testing "no session surfaced a reads log: nil (unknown), not []"
+      (let [normalized (invoke-split!
+                        [{:codex-answer-log :absent} {:codex-answer-log :absent}])]
+        (is (nil? (:context-reads normalized)))))))
 
 (defn- ^{:stratum 0} adaptive-timeout-message
   [elapsed-ms]

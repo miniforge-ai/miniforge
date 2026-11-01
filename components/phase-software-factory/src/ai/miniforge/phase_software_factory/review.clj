@@ -478,8 +478,9 @@
         _ (phase/emit-agent-completed! agent-ctx :review :reviewer result)
 
         ;; SPEC §7.4.3 consultation provenance, prompt-section flavor. The
-        ;; reviewer session surfaces no reads log, so :pin-read? is nil
-        ;; (unknown). Attached before enter-context stores the result so
+        ;; reviewer result carries its read-only sessions' recorded
+        ;; context_reads (§7.4.2); :pin-read? is nil (unknown) only when
+        ;; no session surfaced a reads log. Attached before enter-context stores the result so
         ;; gates and the gap ledger can see it — on FAILURES too (:output
         ;; starts nil on response/failure): the consultation happened in
         ;; build-review-task whatever the reviewer did next, and §7.7.2.1
@@ -489,7 +490,8 @@
         ;; through.
         result (codex-pin/attach-consultation
                  result
-                 (codex-pin/consultation-summary codex-outcome nil
+                 (codex-pin/consultation-summary codex-outcome
+                                                 (:context-reads result)
                                                  (:codex-answers result)
                                                  (:codex-answer-log result)))]
 

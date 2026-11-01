@@ -200,31 +200,53 @@
      ;; torn log.
      :codex-answer-log (parsing/answer-log-state answers-present? codex-answers)}))
 
-(defn ^{:stratum 0} read-capsule-codex-answers
-  "Read only answers.edn from a capsule session — the §7.7.2 answer
-   channel for read-only agents (the reviewer), whose sessions skip the
-   full four-file output read because they promote no artifact. One
-   executor round-trip for the one file the session can still have
-   produced.
+(defn ^{:stratum 0} read-capsule-readonly-outputs
+  "Read context-reads.edn and answers.edn from a read-only capsule
+   session (the reviewer, via with-readonly-session) in ONE executor
+   round-trip. These are the two files such a session can still have
+   produced: it promotes no artifact, but the MCP server records every
+   context_read (§7.4.2) and every answer_peg (§7.7.2).
 
-   Returns {:answers <vector-or-nil> :answer-log :absent|:recorded|:unreadable}."
+   Without the reads, a reviewer's consultation summary could only ever
+   say :pin-read? nil (unknown), so 'did the reviewer read its pinned
+   landings' had no answer in the mode the gates run in.
+
+   The reads segment comes first and the answers segment last, split on
+   the same full-line `capsule-output-boundary` sentinel the four-file
+   reader uses; both files are server-written, so neither can carry an
+   agent-authored boundary line.
+
+   Returns {:context-reads <vector-or-nil>
+            :answers <vector-or-nil>
+            :answer-log :absent|:recorded|:unreadable}."
   [session]
-  (let [path    (str (:dir session) "/answers.edn")
-        ;; Presence marker before the cat — same reasoning as the
+  (let [dir          (:dir session)
+        reads-path   (str dir "/context-reads.edn")
+        answers-path (str dir "/answers.edn")
+        ;; Presence marker before the answers cat — same reasoning as the
         ;; batched reader: a present-but-empty file is a torn log
         ;; (:unreadable), not a missing one (:absent).
-        cmd     (str "test -f " (file-artifacts/shell-quote path)
-                     " && echo " parsing/capsule-answers-present-marker
-                     "; cat " (file-artifacts/shell-quote path) " 2>/dev/null")
-        result  ((:exec! session) (:executor session) (:environment-id session)
-                 cmd {:workdir (:workdir session)})
-        {:keys [present? content]}
-        (parsing/split-answers-segment (get-in result [:data :stdout] ""))
+        cmd          (str "cat " (file-artifacts/shell-quote reads-path) " 2>/dev/null"
+                          "; echo; echo " parsing/capsule-output-boundary "; "
+                          "test -f " (file-artifacts/shell-quote answers-path)
+                          " && echo " parsing/capsule-answers-present-marker
+                          "; cat " (file-artifacts/shell-quote answers-path) " 2>/dev/null")
+        result       ((:exec! session) (:executor session) (:environment-id session)
+                      cmd {:workdir (:workdir session)})
+        stdout       (get-in result [:data :stdout] "")
+        boundary-re  (re-pattern (str "(?m)^"
+                                      (java.util.regex.Pattern/quote parsing/capsule-output-boundary)
+                                      "$"))
+        [reads-part answers-part] (mapv str/trim (str/split stdout boundary-re 2))
+        {:keys [present? content]} (parsing/split-answers-segment (or answers-part ""))
         answers (when (seq content)
                   (parsing/parse-edn-content content edn/read-string
-                                     :warn/codex-answers-parse path))]
-    {:answers    answers
-     :answer-log (parsing/answer-log-state present? answers)}))
+                                             :warn/codex-answers-parse answers-path))]
+    {:context-reads (when (seq reads-part)
+                      (parsing/parse-edn-content reads-part edn/read-string
+                                                 :warn/context-reads-parse reads-path))
+     :answers       answers
+     :answer-log    (parsing/answer-log-state present? answers)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -296,7 +318,8 @@
    Reads the host-local session directory, same as `read-context-misses`.
    Capsule sessions surface the same file through
    `read-capsule-session-outputs`, which batches it into the artifact
-   read's single executor round-trip.
+   read's single executor round-trip, or, for read-only sessions,
+   `read-capsule-readonly-outputs`.
 
    Returns: vector of read records, or nil if no reads file."
   [session]
@@ -314,7 +337,7 @@
    — the marker keeps a torn log (observations LOST) distinct from a
    session that answered nothing. Capsule sessions surface the same
    channel through `read-capsule-session-outputs` /
-   `read-capsule-codex-answers`."
+   `read-capsule-readonly-outputs`."
   [session]
   (let [path (str (:dir session) "/answers.edn")
         f (io/file path)
