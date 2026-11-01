@@ -42,6 +42,12 @@ classification follows the original exception, not its generic anomaly wrapper.
 Refused or nonfatal failed publication preserves the original write anomaly;
 fatal publication errors propagate.
 
+With current main and the verified #2304 dependency integrated, all three
+workflow-consuming product suites passed (2m51s). A fresh CLI build produced a
+6,880,674-byte stripped jar. Isolated packaged acceptance passed 35 tests and
+146 assertions, including failure, location-retention and start/terminal paths.
+No production-source overlays were used.
+
 ## Deployment Plan
 
 No journal migration or new schema version. Failure events remain payload 1.0.0.
@@ -54,6 +60,6 @@ This change is not an N7 completion claim.
 
 ## Checklist
 
-- [ ] Regression and affected-project tests
+- [x] Regression and affected-project tests
 - [ ] Standards review, lint, layers, normal hooks and signing
 - [ ] Fresh Copilot review and all CI gates
