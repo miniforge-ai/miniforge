@@ -23,13 +23,14 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.workflow.boundary.checkpoint-directory :as directory]
+   [ai.miniforge.workflow.checkpoint-announcements :as announcements]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.messages :as messages]
    [babashka.fs :as fs]
    [clojure.edn :as edn]
-   [clojure.string :as str]
    [slingshot.slingshot :refer [try+]])
   (:import [java.nio.file.attribute BasicFileAttributes]))
 
@@ -47,41 +48,6 @@
    is not a run directory: the GC never touches what it did not write."
   [dir]
   (parse-uuid (str (fs/file-name dir))))
-
-(defn- ^{:stratum 0} announced-run-dir
-  "The checkpoint run directory a run's own events last announced writing
-   to, scanning its event files newest first and stopping at the first
-   announcement: the run's directory under the `:checkpoint/root` it
-   names. An announcement written before events carried the root names
-   only a file; the run directory is then the one above that phase file
-   or snapshot. `:unknown` when a file that does not read comes first (it
-   may be the announcement); nil when no event announces a write.
-
-   With `skip-unreadable?` an unreadable file is passed over: every
-   announcement of one run names the same root, so an older readable one
-   answers. `:unknown` then only when none reads and some file did not."
-  [events-dir workflow-id skip-unreadable?]
-  (let [dir (es/workflow-events-dir events-dir workflow-id)
-        files (when dir
-                (->> (fs/list-dir dir)
-                     (filter #(str/ends-with? (str (fs/file-name %)) ".json"))
-                     (sort-by #(str (fs/file-name %)))
-                     reverse))]
-    (reduce (fn [seen file]
-              (let [event (es/read-event-file (fs/file file))]
-                (cond
-                  (nil? event) (if skip-unreadable? :unknown (reduced :unknown))
-                  (and (#{:workflow/checkpoint-written :workflow/machine-snapshot-written}
-                        (:event/type event))
-                       (string? (:checkpoint/root event)))
-                  (reduced (fs/path (:checkpoint/root event) (str workflow-id)))
-                  (= :workflow/checkpoint-written (:event/type event))
-                  (reduced (some-> (:checkpoint/path event) fs/parent fs/parent))
-                  (= :workflow/machine-snapshot-written (:event/type event))
-                  (reduced (some-> (:snapshot/path event) fs/parent))
-                  :else seen)))
-            nil
-            files)))
 
 (defn- ^{:stratum 0} last-change-ms
   "When anything in `dir` last changed: the newest mtime in its own tree.
@@ -137,6 +103,43 @@
   [dir]
   (fs/exists? (fs/file dir checkpoint-paths/pin-marker-filename)))
 
+(defmethod ^{:stratum 0} es/retention-hold ::checkpoint
+  [_hold workflow-id events-dir]
+  (or (checkpoint-store/checkpoint-present? workflow-id)
+      (let [location (announcements/latest events-dir workflow-id)]
+        (cond
+          ;; An unreadable file newer than any announcement may be the
+          ;; one naming the root: the events are kept, not guessed about.
+          (= :unknown location) true
+          location (directory/populated? (:checkpoint/run-directory location))
+          :else false))))
+
+(defn ^{:stratum 0} run-checkpoint-root
+  "The checkpoint root run `workflow-id` was checkpointed under: the
+   default root when it holds the run, else the root the run's own events
+   (under `events-dir`) announce, else nil. An `:unavailable` anomaly when
+   the lookup fails, such as a run directory that cannot be listed, or
+   when a newer unreadable or invalid announcement makes storage identity
+   uncertain. An older announcement cannot prove that storage stayed put."
+  [workflow-id events-dir]
+  (try+
+    (if (checkpoint-store/checkpoint-present? workflow-id)
+      (checkpoint-paths/resolve-checkpoint-root {})
+      (let [location (announcements/latest events-dir workflow-id)]
+        (cond
+          (= :unknown location)
+          (anomaly/anomaly :unavailable
+                           (messages/t :checkpoint/root-unknown {:run-id (str workflow-id)})
+                           {:workflow/run-id workflow-id})
+          :else (:checkpoint/root location))))
+    (catch Exception e
+      (anomaly/exception-anomaly :unavailable
+                                 (messages/t :checkpoint/root-lookup-failed
+                                             {:run-id (str workflow-id)
+                                              :error (or (ex-message e) (.getName (class e)))})
+                                 {:workflow/run-id workflow-id}
+                                 e))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} delete-run!
@@ -159,19 +162,6 @@
        (catch Exception e
          (delete-failure dir id e))))))
 
-(defmethod ^{:stratum 1} es/retention-hold ::checkpoint
-  [_hold workflow-id events-dir]
-  (or (checkpoint-store/checkpoint-present? workflow-id)
-      (let [run-dir (announced-run-dir events-dir workflow-id false)]
-        (cond
-          ;; An unreadable file newer than any announcement may be the
-          ;; one naming the root: the events are kept, not guessed about.
-          (= :unknown run-dir) true
-          (and run-dir (= (str workflow-id) (str (fs/file-name run-dir))))
-          (checkpoint-store/checkpoint-present? workflow-id
-                                                {:checkpoint/root (str (fs/parent run-dir))})
-          :else false))))
-
 (defn- ^{:stratum 1} disposition
   "What the GC does with run directory `dir`: `:recent`, `:live`,
    `:pinned`, `:unreadable` (all kept) or `:expired` (deleted); nil when
@@ -182,33 +172,6 @@
       (>= (last-change-ms dir) cutoff-ms) :recent
       (fs/directory? (es/workflow-dir events-dir id)) :live
       :else (or (manifest-hold dir) :expired))))
-
-(defn ^{:stratum 1} run-checkpoint-root
-  "The checkpoint root run `workflow-id` was checkpointed under: the
-   default root when it holds the run, else the root the run's own events
-   (under `events-dir`) announce, else nil. An `:unavailable` anomaly when
-   the lookup fails, such as a run directory that cannot be listed, or
-   when the run's events cannot say: none that announces a write reads,
-   and one did not read (it may have named a custom root)."
-  [workflow-id events-dir]
-  (try+
-    (if (checkpoint-store/checkpoint-present? workflow-id)
-      (checkpoint-paths/resolve-checkpoint-root {})
-      (let [run-dir (announced-run-dir events-dir workflow-id true)]
-        (cond
-          (= :unknown run-dir)
-          (anomaly/anomaly :unavailable
-                           (messages/t :checkpoint/root-unknown {:run-id (str workflow-id)})
-                           {:workflow/run-id workflow-id})
-          (and run-dir (= (str workflow-id) (str (fs/file-name run-dir))))
-          (str (fs/parent run-dir)))))
-    (catch Exception e
-      (anomaly/exception-anomaly :unavailable
-                                 (messages/t :checkpoint/root-lookup-failed
-                                             {:run-id (str workflow-id)
-                                              :error (or (ex-message e) (.getName (class e)))})
-                                 {:workflow/run-id workflow-id}
-                                 e))))
 
 (defn ^{:stratum 1} checkpoint-usage
   "What the checkpoint root holds, read-only, cheap enough for `mf doctor`:
