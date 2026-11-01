@@ -49,7 +49,10 @@ mistakes in calls no test reaches, at lint time: a gate named by string
 
 1. `malli-types-test`: a test function's `:malli/schema` becomes a
    `:type-mismatch` entry with the declared args and return; the scan finds
-   `ai.miniforge.gate.interface` and does not scan test trees.
+   `ai.miniforge.gate.interface` and does not scan test trees; the scan
+   recognizes `:malli/schema` metadata and `=>` under any alias
+   (`m/=>`, `malli.core/=>`), with spacing after the paren, or referred bare,
+   and ignores a schema value that only contains `:=>`.
 2. `bb lint:malli-types:check` passes on the committed file and exits 1 after
    the file is replaced with an empty config.
 3. A probe calling `check-gate` with a string, `check-gates` with a keyword,

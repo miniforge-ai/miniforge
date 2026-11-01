@@ -30,6 +30,18 @@
   [k]
   (keyword? k))
 
+(deftest ^{:stratum 0} declares-function-schema-matches-every-declaration-form-test
+  (testing "metadata, and => under any alias, spacing, or referred bare"
+    (doseq [text ["(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)"
+                  "(m/=> f [:=> [:cat :int] :int])"
+                  "(malli.core/=> f [:=> [:cat :int] :int])"
+                  "(mc/=> f [:=> [:cat :int] :int])"
+                  "( m/=>\n  f [:=> [:cat :int] :int])"
+                  "(=> f [:=> [:cat :int] :int])"]]
+      (is (malli-types/declares-function-schema? text) text)))
+  (testing "a schema value that only uses :=> declares nothing"
+    (is (not (malli-types/declares-function-schema? "(def S [:=> [:cat :int] :int])")))))
+
 (deftest ^{:stratum 0} schema-namespaces-finds-declaring-sources-test
   (testing "brick sources that declare function schemas are found; test trees are not scanned"
     (let [nss (set (malli-types/schema-namespaces))]

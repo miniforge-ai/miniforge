@@ -41,10 +41,6 @@
   "Where `malli.clj-kondo/save!` writes the :clj types."
   ".clj-kondo/metosin/malli-types-clj/config.edn")
 
-(def ^{:stratum 0} declaration-re
-  "Text that marks a source file as declaring a function schema."
-  #":malli/schema|\(m/=>")
-
 (defn ^{:stratum 0} clojure-source?
   [^java.io.File f]
   (and (.isFile f) (boolean (re-find #"\.cljc?$" (.getName f)))))
@@ -63,6 +59,15 @@
   (mi/collect! {:ns nss})
   (mc/linter-config (mapcat mc/collect nss)))
 
+(defn ^{:stratum 0} declares-function-schema?
+  "True when source `text` declares a function schema: the
+   `:malli/schema` metadata key, or a call to `=>` under any alias
+   (`m/=>`, `malli.core/=>`), with any spacing after the paren, or
+   referred bare. A false match only costs a `require` of a namespace
+   that registers nothing."
+  [text]
+  (boolean (re-find #":malli/schema|\(\s*(?:[^\s()/]+/)?=>\s" text)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} schema-namespaces
@@ -73,7 +78,7 @@
              f (file-seq (io/file brick "src"))
              :when (clojure-source? f)]
          f)
-       (filter #(re-find declaration-re (slurp %)))
+       (filter #(declares-function-schema? (slurp %)))
        (map ns-name-of)
        sort
        vec))
