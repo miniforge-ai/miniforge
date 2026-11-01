@@ -151,6 +151,8 @@ Adversarial review remains necessary because green CI alone cannot establish cor
 ## PR Merge Gate
 
 This applies to every session and every PR in this repo.
+It is the shared rule `standards/miniforge/workflows/pr-merge-gate.mdc` (dewey 723), repeated here because sessions
+load this file even when the `standards` submodule is not checked out. Keep the two in step.
 
 - Open PRs ready for review, never as drafts.
   Automatic Copilot review skips drafts, and a draft adds a manual step for the operator.
@@ -165,6 +167,9 @@ This applies to every session and every PR in this repo.
   This is the "adversarial self-review before every push" above, plus the rules review.
 - After a push, re-request Copilot's review so gate 4 covers the new head.
   If Copilot posts no review (it declines oversized diffs), stop and tell the operator; do not merge.
+- If Copilot requests something a standards rule forbids, do not change the code.
+  For example, `no-dead-code` forbids restoring unused arities. Answer the thread with what you traced and which rule applies,
+  then resolve it yourself. A finding the trace confirms is fixed, whatever its severity label.
 - When all four gates pass, the session that owns the PR squash-merges it.
   Do not wait for the operator to click merge.
   The owning session is the one that opened the PR, or the one the operator handed it to.

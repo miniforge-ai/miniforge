@@ -579,12 +579,13 @@
    did not land, via the shared agent-agnostic runner. Returns
    {:llm-response ... :submitted-plan ... :parsed-plan ...} plus the
    retry session's §7.7.2 answer channel (:codex-answers
-   :codex-answer-log) — the retry runs its own session with its own
-   answers.edn, and answers recorded there are observations the caller
-   must merge with the primary session's."
+   :codex-answer-log) and §7.4.2 :context-reads — the retry runs its own
+   session with its own answers.edn and context-reads.edn, and what it
+   recorded there are observations the caller must merge with the
+   primary session's."
   [llm-client spec-text effective-system config context on-chunk prior-content]
   (let [{:keys [llm-result artifact worktree-artifacts
-                codex-answers codex-answer-log]}
+                context-reads codex-answers codex-answer-log]}
         (submission-recovery/run-recovery-session
          {:context          context
           :llm-client       llm-client
@@ -600,6 +601,7 @@
      :normalized       normalized
      :submitted-plan   submitted-plan
      :parsed-plan      parsed-plan
+     :context-reads    context-reads
      :codex-answers    codex-answers
      :codex-answer-log codex-answer-log}))
 
@@ -713,7 +715,7 @@
                    :context-window (:window budget)
                    :tokens 0}))
                 (let [{:keys [llm-result artifact worktree-artifacts context-misses
-                              codex-answers codex-answer-log]}
+                              context-reads codex-answers codex-answer-log]}
                   (artifact-session/with-session context
                     #(invoke-planner-session % llm-client user-prompt
                                              effective-system config context
@@ -821,6 +823,11 @@
                ;; (last-recording-wins includes an answer revised during
                ;; the retry) and a torn log in either session wins the
                ;; marker.
+               ;; §7.4.2: a pin read in either session counts; absent from both stays absent (unknown).
+               (or (some? context-reads)
+                   (some? (:context-reads retry-result)))
+               (assoc :context-reads
+                      (vec (concat context-reads (:context-reads retry-result))))
                (or (some? codex-answers)
                    (some? (:codex-answers retry-result)))
                (assoc :codex-answers
