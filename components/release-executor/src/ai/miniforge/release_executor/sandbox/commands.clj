@@ -64,15 +64,39 @@
                                (= :exec-interrupted (get-in r [:error :code]))
                                (assoc :interrupted? true)))))))
 
-(defn ^{:stratum 0} ssh->https-with-token
-  "Convert an SSH or HTTPS git remote URL to HTTPS with token auth.
-   Returns the authenticated URL, or nil if conversion fails."
+(defn ^{:stratum 0} token-auth-env
+  "Environment for one push that authenticates to GitHub with `token`, or
+   nil when `remote-url` is not a github.com SSH (git@github.com:path) or
+   HTTPS URL (any host case, default port allowed, as #2125's host-mode
+   retry reads it). Untrusted code can repoint the capsule's origin, and
+   GH_TOKEN is a GitHub credential, so no other host gets it.
+
+   The settings travel as GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n /
+   GIT_CONFIG_VALUE_n (git 2.31+), so the token is never written to the
+   capsule's .git/config:
+   url.https://github.com/.insteadOf sends an SSH origin over HTTPS for
+   this command only, and after an empty http.https://github.com/.extraHeader
+   drops headers from other config, the token goes as Basic
+   x-access-token:<token>."
   [remote-url token]
-  (when remote-url
-    (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" remote-url)]
-      (str "https://x-access-token:" token "@" host "/" path)
-      (when (str/starts-with? (str remote-url) "https://")
-        (str/replace remote-url #"https://" (str "https://x-access-token:" token "@"))))))
+  (let [url      (str remote-url)
+        ssh-host (second (re-matches #"git@([^:/]+):.+" url))
+        ;; Locale/ROOT: under tr-TR the default locale folds I to dotless ı.
+        host     (some-> (or ssh-host
+                             (second (re-matches #"(?i)https://(?:[^@/]*@)?([^:/]+)(?::443)?/.+" url)))
+                         (.toLowerCase java.util.Locale/ROOT))]
+    (when (= "github.com" host)
+      (let [base    (str "https://" host "/")
+            header  (str "Authorization: Basic "
+                         (.encodeToString (java.util.Base64/getEncoder)
+                                          (.getBytes (str "x-access-token:" token) "UTF-8")))
+            entries (cond-> [[(str "http." base ".extraHeader") ""]
+                             [(str "http." base ".extraHeader") header]]
+                      ssh-host (conj [(str "url." base ".insteadOf") (str "git@" ssh-host ":")]))]
+        (reduce-kv (fn [env i [k v]]
+                     (assoc env (str "GIT_CONFIG_KEY_" i) k (str "GIT_CONFIG_VALUE_" i) v))
+                   {"GIT_CONFIG_COUNT" (str (count entries))}
+                   entries)))))
 
 (defn ^{:stratum 0} parse-pr-ref
   "Parse a gh PR URL into {:pr-url :pr-number}, or nil when the output carries
@@ -218,47 +242,6 @@
           ;; rev-parse failure instead.
           (result/shell-failure (:error sha-r) {:commit-sha nil})))
       (result/shell-failure (:error commit-r) {:commit-sha nil}))))
-
-(defn ^{:stratum 1} push-with-https-fallback!
-  "Push using HTTPS + token auth after SSH fails. Temporarily sets the
-   remote URL to include the token, pushes, then restores the original URL
-   so the token never persists in git config.
-
-   The token-bearing URL is passed to `git remote set-url` as an argv
-   vector, never a shell string — `exec!` routes string commands through
-   `sh -c`, which would otherwise expose the embedded token to shell
-   interpolation. Mirrors `git/with-https-token-fallback!`: a failed
-   set-url aborts before pushing against a remote that was never actually
-   repointed; a failed restore fails loud with a scrub command rather than
-   silently leaving the token persisted in git config. All three exec!
-   calls share the caller's `opts` (e.g. `:workdir`) so the repoint, push,
-   and restore all target the same executor context — a `:workdir`
-   applied only to the push would otherwise leave set-url/restore running
-   against the wrong directory."
-  [executor env-id branch-name remote-url https-url push-error opts]
-  (let [set-r (exec! executor env-id ["git" "remote" "set-url" "origin" https-url] opts)]
-    (if-not (result/succeeded? set-r)
-      (result/shell-failure
-       (msg/t :push/https-fallback-setup-failed
-              {:push-error    push-error
-               :set-url-error (:error set-r)})
-       {:push-succeeded? false})
-      (let [retry     (exec! executor env-id (str "git push -u origin " branch-name) opts)
-            restore-r (exec! executor env-id ["git" "remote" "set-url" "origin" remote-url] opts)]
-        (if (result/succeeded? restore-r)
-          retry
-          (let [pushed? (result/succeeded? retry)]
-            (result/shell-failure
-             (if pushed?
-               (msg/t :push/https-fallback-restore-failed
-                      {:remote-url    remote-url
-                       :restore-error (:error restore-r)})
-               (msg/t :push/https-fallback-push-and-restore-failed
-                      {:remote-url    remote-url
-                       :push-error    (:error retry)
-                       :restore-error (:error restore-r)}))
-             (merge {:push-succeeded? pushed?}
-                    (select-keys retry [:timed-out? :interrupted?])))))))))
 
 (defn ^{:stratum 1} reuse-existing-pr!
   "Resolve the PR already open for the current branch via gh pr view, so a

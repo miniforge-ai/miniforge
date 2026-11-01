@@ -41,6 +41,23 @@
   (or (phase/already-done? phase-result)
       (phase/already-done? (:result phase-result))))
 
+(defn ^{:stratum 0} gate-warnings
+  "The STRUCTURED warnings of a check-gates result, one {:gate :warnings}
+   per gate that raised any, in gate order; nil when none did.
+
+   A warning never changes the decision, so the envelope has no place for
+   it, and before this a phase result dropped every one: a warning raised
+   on a re-entered phase was gone by the time anyone looked. Carried on
+   the phase result, it reaches the checkpoint and the append-only gate
+   history like :phase/gate-failures does."
+  [gate-result]
+  (not-empty
+   (into []
+         (keep (fn [{:keys [gate warnings]}]
+                 (when (seq warnings)
+                   {:gate gate :warnings (vec warnings)})))
+         (:results gate-result))))
+
 (defn- ^{:stratum 0} phase-transition-event-message
   [event]
   (messages/t :status/invalid-phase-transition-event {:event event}))
@@ -167,6 +184,7 @@
       (if (seq gate-keywords)
         (let [gate-result (gate/check-gates gate-keywords artifact ctx)
               minted (gate/gates->envelope gate-result (nil? artifact))
+              warnings (gate-warnings gate-result)
               ;; envelope minting can itself anomaly; fail closed on that too
               envelope (when (:envelope/id minted) minted)
               receipt (exec-events/emit-phase-decision! ctx phase-result envelope)]
@@ -192,6 +210,10 @@
                                                (remove gate/passed?)
                                                (mapv #(-> (select-keys % [:gate :errors])
                                                           (update :errors (fnil vec [])))))))
+            ;; Warnings never change the decision, so neither branch above
+            ;; carries them; kept here so they reach the checkpoint and the
+            ;; gate history on allow and deny alike.
+            warnings (assoc :phase/gate-warnings warnings)
             ;; Projected before :leave runs, the same way as a denial, so leave
             ;; handlers finalize a failed phase instead of publishing success.
             (anomaly/any-anomaly? receipt)
