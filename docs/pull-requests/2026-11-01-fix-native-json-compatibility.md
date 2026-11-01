@@ -30,6 +30,12 @@ Check accepted and rejected coordinates, nested dependency sites, and repository
 manifests. Run the native compatibility suite and normal signed hooks.
 The paired client PR retains actual lossless-decimal packaged execution coverage.
 
+The old substring policy failed 16 regression assertions without errors.
+Besides rejecting the portable release, it missed namespaced-map dependency forms.
+The structured policy passes 3 tests and 176 assertions. It checks brick,
+project and root manifests, including alias overrides, without loading dependencies.
+Java JDBC rejection and all existing native execution tests remain in place.
+
 ## Deployment Plan
 
 This changes test policy only. It installs no production dependency and grants
@@ -41,6 +47,6 @@ Prerequisite for #2314. The user explicitly approved the scoped policy correctio
 
 ## Checklist
 
-- [ ] Exact-coordinate policy and adversarial regressions
+- [x] Exact-coordinate policy and adversarial regressions
 - [ ] Native execution and normal signed-hook gates
 - [ ] Fresh Copilot review and all CI gates

@@ -39,7 +39,8 @@
    [clojure.string :as str]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [graalvm.discovery-files :as discovery]))
+   [graalvm.discovery-files :as discovery]
+   [graalvm.dependency-policy-test]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -80,8 +81,7 @@
 
 (deftest ^{:stratum 0} test-no-forbidden-dependencies
   (testing "Forbidden JVM-only dependencies should not be present"
-    (let [forbidden-deps {"org.clojure/data.json" "Use cheshire.core instead (bundled in Babashka)"
-                          "org.clojure/java.jdbc" "Use next.jdbc instead"}
+    (let [forbidden-deps {"org.clojure/java.jdbc" "Use next.jdbc instead"}
           all-dirs (concat (file-seq (io/file "components"))
                            (file-seq (io/file "bases")))
           deps-files (->> all-dirs
@@ -182,7 +182,7 @@
 (defn ^{:stratum 0} -main
   "Entry point for running tests from command line."
   []
-  (let [result (run-tests 'graalvm-compatibility-test)]
+  (let [result (run-tests 'graalvm-compatibility-test 'graalvm.dependency-policy-test)]
     (System/exit (if (zero? (+ (:fail result) (:error result))) 0 1))))
 
 (defn ^{:stratum 0} jvm-only-component?
