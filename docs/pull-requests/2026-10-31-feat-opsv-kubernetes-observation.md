@@ -57,6 +57,13 @@ the existing seven-phase value flow, passes 13 tests and 84 assertions.
 Only the built jar and test fixtures were on the classpath; production-source
 overlays were absent. Normal signed commits, lint and inferred strata pass.
 
+Copilot identified that sample validation preceded the configured size bound.
+The regression reproduced one failed assertion after correcting its validator
+spy to handle both Malli arities. Constant-time vector shape/count guards now
+reject oversized responses before sample validation. Both consuming products
+pass again, and fresh isolated packaged acceptance passes 14 tests with
+86 assertions. Actual namespace depth remains within three strata.
+
 ## Deployment Plan
 
 Staging and recommend-only remain the intended backend defaults. This pure

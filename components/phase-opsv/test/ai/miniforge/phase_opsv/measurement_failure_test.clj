@@ -5,9 +5,15 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.measurement-test-support :as fixture]
             [ai.miniforge.phase-opsv.interface :as observation]
+            [ai.miniforge.phase-opsv.measurement-schema :as schema]
+            [malli.core :as m]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} recording-validator [calls validate schema value & options]
+  (swap! calls conj schema)
+  (apply validate schema value options))
 
 (deftest ^{:stratum 0} malformed-or-unbounded-requests-are-anomalies-not-exceptions
   (doseq [request [nil {} (fixture/request {:prometheus/query " "})
@@ -50,5 +56,16 @@
                      (assoc-in (fixture/response) ["data" "result" 0 "histograms"] [[100 {}]])
                      (assoc-in (fixture/response) ["data" "result" 0 "values"] [])]]
     (is (anomaly/anomaly? (observation/decode-measurement-window (fixture/request) response)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} oversized-sample-vectors-are-rejected-before-element-validation
+  (let [calls (atom [])
+        validate m/validate
+        series (fixture/series [[100 "1"] [110 "2"] [120 "3"] [130 "4"]])
+        response (fixture/response [series])]
+    (with-redefs [m/validate (partial recording-validator calls validate)]
+      (is (anomaly/anomaly? (observation/decode-measurement-window (fixture/request) response))))
+    (is (not-any? #{schema/RangeResponse} @calls))))
 
 (comment ::bounded-observation-admission)
