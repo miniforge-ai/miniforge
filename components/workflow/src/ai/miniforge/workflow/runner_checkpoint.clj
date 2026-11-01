@@ -10,10 +10,8 @@
    it would leave a run that cannot be resumed and nobody told; failing
    the run for it would throw away a phase that succeeded. This takes the
    middle the checkpoint spec asks for: log a warning, emit
-   `:workflow/checkpoint-write-failed`, and carry on."
+   the registered phase or snapshot failure fact, and carry on."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.event-stream.interface :as es]
-            [ai.miniforge.failure-classifier.interface :as failure]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
             [ai.miniforge.workflow.messages :as messages]
@@ -23,17 +21,21 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} failure-fields
-  "The `:error/message` / `:failure/class` pair the failure event carries,
-   classified from the exception alone. The anomaly's own type is left
-   out: `:unavailable` would classify every local disk error as an
-   external-service failure."
-  [write-failure]
-  (let [data (:anomaly/data write-failure)
-        message (or (:anomaly/ex-message data) (:anomaly/message write-failure))]
-    {:error/message message
-     :failure/class (failure/classify {:exception/class (:anomaly/ex-class data)
-                                       :error/message message})}))
+(defn- ^{:stratum 0} thrown-message [throw-context]
+  (let [thrown (:throwable throw-context)]
+    (or (ex-message thrown) (some-> thrown class .getName))))
+
+(defn- ^{:stratum 0} warn-write-failure! [context write-failure phase fields]
+  (let [message (messages/t :warn/checkpoint-write-failed
+                            {:phase (some-> phase name) :error (:error/message fields)})]
+    (log/warn (:execution/logger context) :system :workflow/checkpoint-write-failed
+              {:message message
+               :data (:anomaly/data write-failure)})))
+
+(defn- ^{:stratum 0} warn-refused-failure! [context error]
+  (let [message (messages/t :warn/publish-event {:error error})]
+    (log/warn (:execution/logger context) :system :workflow/checkpoint-write-failed
+              {:message message})))
 
 (defn- ^{:stratum 0} warn-announcement! [context written error]
   (let [phase (some-> (:checkpoint/phase written) name)
@@ -63,34 +65,27 @@
                 warn!)
         #_{:clj-kondo/ignore [:unresolved-symbol]}
         (catch dispatch/nonfatal? _
-          (let [thrown (:throwable &throw-context)]
-            (warn! (or (ex-message thrown) (some-> thrown class .getName)))))))))
+          (warn! (thrown-message &throw-context)))))))
 
 (defn- ^{:stratum 1} report-write-failure!
-  "Warn on the run's logger and publish `:workflow/checkpoint-write-failed`.
-   The event names a phase, so a failure with none (a context checkpointed
-   before any phase ran) is logged only. So is one with no stateful event
-   stream: the constructor dereferences the stream, which throws on nil
-   and on a WebSocket transport map. A refused publication is logged too;
-   it never fails the run."
+  "Warn and publish the registered phase or snapshot failure fact. Without
+   a phase the authoritative machine state identifies the snapshot failure.
+   Missing/observer-only streams warn only; refused and nonfatal failed
+   publications warn and return. Fatal errors still propagate."
   [context write-failure]
-  (let [logger (:execution/logger context)
-        stream (get-in context [:execution/opts :event-stream])
+  (let [stream (get-in context [:execution/opts :event-stream])
         phase (get-in write-failure [:anomaly/data :phase/name])
-        fields (failure-fields write-failure)]
-    (log/warn logger :system :workflow/checkpoint-write-failed
-              {:message (messages/t :warn/checkpoint-write-failed
-                                    {:phase (some-> phase name)
-                                     :error (:error/message fields)})
-               :data (:anomaly/data write-failure)})
-    (when (and (keyword? phase) (dispatch/stateful-stream? stream))
-      (let [receipt (dispatch/publish-event!
-                     stream
-                     (es/checkpoint-write-failed stream (:execution/id context) phase fields))]
-        (when (anomaly/any-anomaly? receipt)
-          (log/warn logger :system :workflow/checkpoint-write-failed
-                    {:message (messages/t :warn/publish-event
-                                          {:error (:anomaly/message receipt)})}))))))
+        fields (events/failure-fields write-failure)
+        warn! (partial warn-refused-failure! context)]
+    (warn-write-failure! context write-failure phase fields)
+    (when (dispatch/stateful-stream? stream)
+      (try+
+        (some-> (dispatch/publish-event! stream (events/failed stream context phase fields))
+                refusal-message
+                warn!)
+        #_{:clj-kondo/ignore [:unresolved-symbol]}
+        (catch dispatch/nonfatal? _
+          (warn! (thrown-message &throw-context)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -1,0 +1,52 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
+# fix: report pre-phase snapshot write failures through the registered N3 event
+
+## Overview
+
+Close the existing N2/N3 failure-reporting obligation without amending contracts.
+Base: main, with a documented dependency on #2299 and the checkpoint-location-
+retention integration branch. Those dependencies must merge before this PR.
+
+## Motivation
+
+The runner logs checkpoint failures before any phase result exists but emits no
+event. N3 §3.21 already registers `workflow/machine-snapshot-write-failed` for
+this case. Observers otherwise miss that the run cannot be resumed.
+
+## Changes in Detail
+
+- Project phase and pre-phase failures into their respective registered events.
+- Preserve the warning, canonical failure classification and continued execution.
+- Keep event projection separate from reporting, within three actual strata.
+
+## Testing Plan
+
+Reproduce missing pre-phase failure publication; verify current-journal facts,
+legacy/no-stream compatibility, classification, returned anomaly and fatal errors.
+Then run affected workflow suites, normal hooks, standards and packaged acceptance.
+
+The real pre-phase regression failed six of ten assertions before the change,
+with no errors. After the change, all ten assertions pass. It initializes the
+compiled workflow's authoritative pending state and uses an unwritable temporary
+checkpoint root, rather than constructing an artificial failure event.
+
+## Deployment Plan
+
+No journal migration or new schema version. Failure events remain payload 1.0.0.
+No changes to storage, permission or recovery authorization policies.
+
+## Related Issues/PRs
+
+N3 §3.21 and the N2 checkpoint/resume delta; follows the checkpoint-location chain.
+This change is not an N7 completion claim.
+
+## Checklist
+
+- [ ] Regression and affected-project tests
+- [ ] Standards review, lint, layers, normal hooks and signing
+- [ ] Fresh Copilot review and all CI gates
