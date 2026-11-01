@@ -571,6 +571,38 @@
       (is (instance? java.io.File @written))
       (is (not (.exists ^java.io.File @written))))))
 
+(deftest ^{:stratum 0} combine-git-env-keeps-keyword-keyed-entries-test
+  (testing "a caller's GIT_CONFIG_* entries named by keyword, which plain exec
+            accepts, are kept and renumbered after the base's like string-named
+            ones, not dropped"
+    (is (= {"GIT_CONFIG_COUNT"   "2"
+            "GIT_CONFIG_KEY_0"   "core.hooksPath"
+            "GIT_CONFIG_VALUE_0" "/dev/null"
+            "GIT_CONFIG_KEY_1"   "http.proxy"
+            "GIT_CONFIG_VALUE_1" "http://proxy.example:3128"
+            "HOME"               "/capsule-home"}
+           ((private-fn 'combine-git-env)
+            {"GIT_CONFIG_COUNT" "1" "GIT_CONFIG_KEY_0" "core.hooksPath" "GIT_CONFIG_VALUE_0" "/dev/null"}
+            {:GIT_CONFIG_COUNT   "1"
+             :GIT_CONFIG_KEY_0   "http.proxy"
+             :GIT_CONFIG_VALUE_0 "http://proxy.example:3128"
+             :HOME               "/capsule-home"})))))
+
+(deftest ^{:stratum 0} execute-git-credentials-keeps-keyword-keyed-git-config-test
+  (testing "with :git-credentials? and no recorded credential, a caller's
+            keyword-keyed GIT_CONFIG_* entries still reach the command"
+    (let [seen (atom nil)]
+      (with-redefs [oci-git/resolve-git-token (fn [_url _opts] nil)
+                    oci-ctr/exec-in-container (fn [_d _id _cmd opts] (reset! seen opts)
+                                                (result/ok {:exit-code 0}))]
+        (proto/execute! (oci-cli/create-docker-executor {:image "test:latest"}) "c1" ["git" "push"]
+                        {:git-credentials? true
+                         :env {:GIT_CONFIG_COUNT   "1"
+                               :GIT_CONFIG_KEY_0   "url.https://github.com/.insteadOf"
+                               :GIT_CONFIG_VALUE_0 "git@github.com:"}})
+        (is (= [["url.https://github.com/.insteadOf" "git@github.com:"]]
+               ((private-fn 'git-config-entries) (:env @seen))))))))
+
 (deftest ^{:stratum 0} persist-and-restore-keep-an-ssh-clone-on-ssh-test
   (testing "a capsule cloned over SSH with no HTTP token persists and restores
             through the recorded SSH URL it cloned, not the unauthenticated

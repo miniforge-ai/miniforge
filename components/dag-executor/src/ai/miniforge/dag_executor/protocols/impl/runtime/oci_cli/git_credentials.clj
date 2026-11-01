@@ -118,12 +118,11 @@
        (= "git" (first cmd))
        (contains? #{"push" "fetch"} (second cmd))))
 
-(defn ^{:stratum 0} git-config-entries
-  "The [key value] pairs GIT_CONFIG_COUNT / KEY_n / VALUE_n in `env` set,
-   in order. An empty or non-numeric count, as git reads it, sets none."
+(defn- ^{:stratum 0} string-keys
+  "`env` with each key as its name: an exec env may name a variable by
+   keyword or string, and the GIT_CONFIG_* readers look names up as strings."
   [env]
-  (for [i (range (or (parse-long (get env "GIT_CONFIG_COUNT" "")) 0))]
-    [(get env (str "GIT_CONFIG_KEY_" i)) (get env (str "GIT_CONFIG_VALUE_" i))]))
+  (update-keys env name))
 
 (def ^{:stratum 0} git-trace-off-env
   "Env that keeps git's tracing from recording the Authorization header:
@@ -138,6 +137,15 @@
              (repeat ""))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} git-config-entries
+  "The [key value] pairs GIT_CONFIG_COUNT / KEY_n / VALUE_n in `env` set,
+   in order, whether `env` names them by keyword or string. An empty or
+   non-numeric count, as git reads it, sets none."
+  [env]
+  (let [env (string-keys env)]
+    (for [i (range (or (parse-long (get env "GIT_CONFIG_COUNT" "")) 0))]
+      [(get env (str "GIT_CONFIG_KEY_" i)) (get env (str "GIT_CONFIG_VALUE_" i))])))
 
 (defn- ^{:stratum 1} split-userinfo
   "[url auth] for an http(s) URL: the URL without any `user[:password]@`,
@@ -216,8 +224,11 @@
    base's GIT_CONFIG_COUNT, so they apply later and win, and base's entries
    stay as they are, including ones it counts but does not hold (the
    container's own, which its env keeps). Other variables merge, `extra`
-   winning."
+   winning. Both maps' keys are read as names first, so entries a caller
+   names by keyword are kept and renumbered like string-named ones."
   [base extra]
-  (let [entries (git-config-entries extra)]
+  (let [base    (string-keys base)
+        extra   (string-keys extra)
+        entries (git-config-entries extra)]
     (cond-> (merge base (without-git-config extra))
       (seq entries) (merge (git-config-env entries (git-config-count base))))))
