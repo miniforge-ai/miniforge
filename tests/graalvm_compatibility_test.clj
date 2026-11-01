@@ -38,43 +38,15 @@
    [clojure.test :refer [deftest is testing run-tests]]
    [clojure.string :as str]
    [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [clojure.java.io :as io]
+   [graalvm.discovery-files :as discovery]
+   [graalvm.dependency-policy-test]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; ============================================================================
 ;; Runtime classification (reads ns-meta without loading the namespace)
 ;; ============================================================================
-(def ^{:stratum 0} ^:private jvm-only-meta-re
-  "Distinctive enough that the only legitimate place it can appear is a
-   brick's ns-meta marker."
-  #":miniforge/runtime\s+:jvm-only")
-
-(defn- ^{:stratum 0} component-interface-file
-  [brick-name]
-  (io/file "components" brick-name "src" "ai" "miniforge"
-           (str/replace brick-name "-" "_") "interface.clj"))
-
-(defn- ^{:stratum 0} base-src-files
-  [base-name]
-  (let [src-dir (io/file "bases" base-name "src")]
-    (when (.exists src-dir)
-      (->> (file-seq src-dir)
-           (filter #(str/ends-with? (.getName %) ".clj"))))))
-
-(defn- ^{:stratum 0} path->namespace
-  "Convert a .clj file path (relative to src/) to a namespace symbol.
-   e.g. ai/miniforge/cli/main.clj -> ai.miniforge.cli.main"
-  [src-root clj-file]
-  (let [src-path (.getPath src-root)
-        file-path (.getPath clj-file)
-        relative (subs file-path (inc (count src-path)))]
-    (-> relative
-        (str/replace #"\.clj$" "")
-        (str/replace "/" ".")
-        (str/replace "_" "-")
-        symbol)))
-
 ;; ============================================================================
 ;; Helpers
 ;; ============================================================================
@@ -109,8 +81,7 @@
 
 (deftest ^{:stratum 0} test-no-forbidden-dependencies
   (testing "Forbidden JVM-only dependencies should not be present"
-    (let [forbidden-deps {"org.clojure/data.json" "Use cheshire.core instead (bundled in Babashka)"
-                          "org.clojure/java.jdbc" "Use next.jdbc instead"}
+    (let [forbidden-deps {"org.clojure/java.jdbc" "Use next.jdbc instead"}
           all-dirs (concat (file-seq (io/file "components"))
                            (file-seq (io/file "bases")))
           deps-files (->> all-dirs
@@ -211,15 +182,44 @@
 (defn ^{:stratum 0} -main
   "Entry point for running tests from command line."
   []
-  (let [result (run-tests 'graalvm-compatibility-test)]
+  (let [result (run-tests 'graalvm-compatibility-test 'graalvm.dependency-policy-test)]
     (System/exit (if (zero? (+ (:fail result) (:error result))) 0 1))))
 
-;------------------------------------------------------------------------------ Layer 1
+(defn ^{:stratum 0} jvm-only-component?
+  "True when `components/<brick-name>/…/interface.clj` self-declares
+   `{:miniforge/runtime :jvm-only}` in its ns metadata."
+  [brick-name]
+  (discovery/file-marked-jvm-only? (discovery/component-interface-file brick-name)))
 
-(defn- ^{:stratum 1} file-marked-jvm-only?
-  [^java.io.File f]
-  (and (.exists f)
-       (boolean (re-find jvm-only-meta-re (slurp f)))))
+(defn ^{:stratum 0} jvm-only-base?
+  "True when any .clj file under `bases/<base-name>/src` carries the
+   JVM-only marker — bases don't follow the single-interface convention
+   so we treat any marked file as opting the whole base out."
+  [base-name]
+  (boolean (some discovery/file-marked-jvm-only? (discovery/base-src-files base-name))))
+
+(defn ^{:stratum 0} discover-base-namespaces
+  "Return one entry per .clj file under `bases/<base>/src/`:
+     {:ns-sym …, :file …, :jvm-only? bool}
+
+   Per-file rather than per-base because some bases mix BB-safe and
+   JVM-only source files, and the loader tests require each file
+   independently."
+  []
+  (->> (-> (io/file "bases") .listFiles seq)
+       (filter #(.isDirectory %))
+       (mapcat (fn [dir]
+                 (let [src-dir (io/file dir "src")]
+                   (when (.exists src-dir)
+                     (->> (file-seq src-dir)
+                          (filter #(str/ends-with? (.getName %) ".clj"))
+                          (map (fn [f]
+                                 {:ns-sym    (discovery/path->namespace src-dir f)
+                                  :file      f
+                                  :jvm-only? (discovery/file-marked-jvm-only? f)})))))))
+       (sort-by (comp str :ns-sym))))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} test-workflow-execution-available
   (testing "Workflow execution should be available in Babashka build"
@@ -384,48 +384,10 @@
       {:dep-sym    dep-sym
        :local-root local-root})))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} jvm-only-component?
-  "True when `components/<brick-name>/…/interface.clj` self-declares
-   `{:miniforge/runtime :jvm-only}` in its ns metadata."
-  [brick-name]
-  (file-marked-jvm-only? (component-interface-file brick-name)))
-
-(defn ^{:stratum 2} jvm-only-base?
-  "True when any .clj file under `bases/<base-name>/src` carries the
-   JVM-only marker — bases don't follow the single-interface convention
-   so we treat any marked file as opting the whole base out."
-  [base-name]
-  (boolean (some file-marked-jvm-only? (base-src-files base-name))))
-
-(defn ^{:stratum 2} discover-base-namespaces
-  "Return one entry per .clj file under `bases/<base>/src/`:
-     {:ns-sym …, :file …, :jvm-only? bool}
-
-   Per-file rather than per-base because some bases mix BB-safe and
-   JVM-only source files, and the loader tests require each file
-   independently."
-  []
-  (->> (-> (io/file "bases") .listFiles seq)
-       (filter #(.isDirectory %))
-       (mapcat (fn [dir]
-                 (let [src-dir (io/file dir "src")]
-                   (when (.exists src-dir)
-                     (->> (file-seq src-dir)
-                          (filter #(str/ends-with? (.getName %) ".clj"))
-                          (map (fn [f]
-                                 {:ns-sym    (path->namespace src-dir f)
-                                  :file      f
-                                  :jvm-only? (file-marked-jvm-only? f)})))))))
-       (sort-by (comp str :ns-sym))))
-
-;------------------------------------------------------------------------------ Layer 3
-
 ;; ============================================================================
 ;; Discovery
 ;; ============================================================================
-(defn ^{:stratum 3} discover-interface-namespaces
+(defn ^{:stratum 1} discover-interface-namespaces
   "Return one entry per component with an `interface.clj`:
      {:brick-name …, :ns-sym …, :jvm-only? bool}"
   []
@@ -433,13 +395,13 @@
        (filter #(.isDirectory %))
        (keep (fn [dir]
                (let [brick-name (.getName dir)]
-                 (when (.exists (component-interface-file brick-name))
+                 (when (.exists (discovery/component-interface-file brick-name))
                    {:brick-name brick-name
                     :ns-sym     (symbol (str "ai.miniforge." brick-name ".interface"))
                     :jvm-only?  (jvm-only-component? brick-name)}))))
        (sort-by :brick-name)))
 
-(deftest ^{:stratum 3} test-all-bases-load-in-babashka
+(deftest ^{:stratum 1} test-all-bases-load-in-babashka
   (testing "Every BB-runtime base namespace loads; JVM-only files are skipped."
     (let [files (discover-base-namespaces)]
       (is (>= (count files) 3)
@@ -466,7 +428,7 @@
               :else
               (is false (str "Failed to load " ns-sym ":\n" error-msg)))))))))
 
-(defn- ^{:stratum 3} jvm-only-local-root?
+(defn- ^{:stratum 1} jvm-only-local-root?
   [local-root]
   (let [{:keys [kind name]} (classify-local-root local-root)]
     (case kind
@@ -474,12 +436,12 @@
       :base      (jvm-only-base? name)
       false)))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 2
 
 ;; ============================================================================
 ;; Tests
 ;; ============================================================================
-(deftest ^{:stratum 4} test-all-components-load-in-babashka
+(deftest ^{:stratum 2} test-all-components-load-in-babashka
   (testing "Every BB-runtime component interface loads; JVM-only bricks are skipped."
     (let [bricks (discover-interface-namespaces)]
       (is (>= (count bricks) 20)
@@ -508,7 +470,7 @@
               :else
               (is false (str "Failed to load " ns-sym ":\n" error-msg)))))))))
 
-(deftest ^{:stratum 4} test-no-jvm-only-brick-in-miniforge-project
+(deftest ^{:stratum 2} test-no-jvm-only-brick-in-miniforge-project
   (testing "projects/miniforge/deps.edn must not ship JVM-only bricks"
     (let [deps (project-local-root-deps "miniforge")]
       (is (seq deps)

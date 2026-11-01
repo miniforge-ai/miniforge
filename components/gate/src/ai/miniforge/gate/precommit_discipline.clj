@@ -26,7 +26,8 @@
    
    This gate helps maintain code quality by ensuring pre-commit hooks are not
    bypassed without proper justification and manual validation."
-  (:require [ai.miniforge.gate.registry :as registry]
+  (:require [ai.miniforge.gate.messages :as messages]
+            [ai.miniforge.gate.registry :as registry]
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
 
@@ -122,15 +123,7 @@
   {:success? false
    :artifact artifact
    :errors errors
-   :message "Pre-commit discipline violations cannot be automatically repaired.
-             
-             To fix:
-             1. Review the flagged commits and their documentation
-             2. If commit is recent and local, amend with proper documentation
-             3. If commit is pushed, add corrective commit with proper practices
-             4. Ensure future commits follow pre-commit discipline guidelines
-             
-             See .cursor/rules/workflows/pre-commit-discipline.mdc for details."})
+   :message (messages/t :precommit/repair-impossible)})
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -198,29 +191,29 @@
                      ;; Critical: No bypass documentation
                      (nil? bypass-reason)
                      (conj {:severity :error
-                            :message "Commit bypassed pre-commit hooks without [BYPASS-HOOKS: reason] documentation"
+                            :message (messages/t :precommit/bypass-undocumented)
                             :commit-hash (:hash commit)
                             :commit-subject (:subject commit)})
                      
                      ;; Critical: No manual validation documented
                      (and bypass-reason (not (:documented? manual-validation)))
                      (conj {:severity :error
-                            :message "Bypassed commit missing manual validation documentation"
+                            :message (messages/t :precommit/no-manual-validation)
                             :commit-hash (:hash commit)
                             :commit-subject (:subject commit)
-                            :help "Expected format: 'Manual validation:\n- Tests passed: ...\n- Linting passed: ...'"})
+                            :help (messages/t :precommit/manual-validation-help)})
                      
                      ;; Warning: Incomplete bypass justification
                      (and bypass-reason (not has-root-cause?))
                      (conj {:severity :warning
-                            :message "Bypassed commit should document 'Root cause:' of hook failure"
+                            :message (messages/t :precommit/no-root-cause)
                             :commit-hash (:hash commit)
                             :commit-subject (:subject commit)})
                      
                      ;; Warning: Missing explanation of why bypass was necessary
                      (and bypass-reason (not has-why-bypass?))
                      (conj {:severity :warning
-                            :message "Bypassed commit should document 'Why bypass:' was necessary"
+                            :message (messages/t :precommit/no-why-bypass)
                             :commit-hash (:hash commit)
                             :commit-subject (:subject commit)}))]
     
@@ -298,7 +291,7 @@
 (defmethod ^{:stratum 3} registry/get-gate :precommit-discipline
   [_]
   {:name :precommit-discipline
-   :description "Validates pre-commit hook discipline and bypass documentation"
+   :description (messages/t :precommit/description)
    :check check-precommit-discipline
    :repair repair-precommit-discipline})
 
