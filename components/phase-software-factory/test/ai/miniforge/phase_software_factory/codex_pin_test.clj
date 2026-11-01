@@ -78,6 +78,16 @@
     (testing "reads log with the pin path means true"
       (is (true? (:pin-read? (codex-pin/consultation-summary
                                pinned [{:path codex-pin/pin-path :source :cache}])))))
+    (testing "a pin lookup that resolved :absent is not a read"
+      (is (false? (:pin-read? (codex-pin/consultation-summary
+                                pinned [{:path codex-pin/pin-path :source :absent}])))
+          "the agent asked for the pin and got nothing — it never saw it"))
+    (testing "every content-bearing source counts as a read"
+      (doseq [source [:cache :filesystem :refresh]]
+        (is (true? (:pin-read? (codex-pin/consultation-summary
+                                 pinned [{:path codex-pin/pin-path :source :absent}
+                                         {:path codex-pin/pin-path :source source}])))
+            (str source " after an earlier :absent lookup is still a read"))))
     (testing "skipped consultation carries its anomaly"
       (is (= {:pinned? false :status :skipped :anomaly :codex-unreadable
               :situation nil :pegs nil :pin-read? nil :answer-log :absent}

@@ -189,7 +189,8 @@
    `context-reads` is the session's recorded context_read log (§7.4.2), or
    nil when the session did not surface one — then :pin-read? is nil
    (unknown), not false; absence of the record is not evidence of absence
-   of the read.
+   of the read. A recorded lookup of the pin that resolved :absent is not
+   a read: the agent asked and got nothing.
 
    :pegs is the §7.7 per-peg record: one row per peg the consultation
    presented — {:id peg-id
@@ -255,8 +256,14 @@
                                          :answer (get answer-of id)
                                          :landings branch-landings})
                                       pegs)))
+              ;; A read is a resolution that returned content. The MCP
+              ;; server also records failed lookups (:source :absent); one
+              ;; of those for the pin path means the agent asked and got
+              ;; nothing, so it must not count as having seen the pin.
               :pin-read? (when (some? context-reads)
-                           (boolean (some #(= pin-path (:path %)) context-reads)))}
+                           (boolean (some #(and (= pin-path (:path %))
+                                                (not= :absent (:source %)))
+                                          context-reads)))}
        unmatched (assoc :unmatched-answers (vec unmatched))))))
 
 ;------------------------------------------------------------------------------ Layer 2

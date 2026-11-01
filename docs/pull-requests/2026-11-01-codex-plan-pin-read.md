@@ -31,6 +31,13 @@ submission-retry session. The planner never destructured it.
 - `phase-software-factory/plan.clj`: passes `(:context-reads invoked)` to
   `consultation-summary` instead of `nil`, and updates the comment that
   said the planner "does not surface :context-reads yet".
+- `phase-software-factory/codex_pin.clj`: `consultation-summary` no longer
+  counts a pin lookup that resolved `:source :absent` as a read. The MCP
+  server records failed lookups too, and this function checked only the
+  path, so asking for the pin and getting nothing set `:pin-read? true`
+  and suppressed `:codex-pin-not-fetched`. This was pre-existing on the
+  implement path. It is fixed in the shared function, so implement and
+  plan both get it. Found by Copilot on this PR.
 - `phase-software-factory/review.clj`: comment only. Review keeps `nil`,
   but the old comment's reason ("the reviewer session surfaces no reads
   log") was wrong. The real reason is that the reviewer's landings are a
@@ -51,6 +58,12 @@ warning. That warning is informational and does not change the decision.
 
 - `planner_test.clj` gets two new cases. Retry reads append after the
   primary's. With no logs, the planner result has no `:context-reads` key.
+- `codex_pin_test.clj` gets two new cases: an `:absent` pin lookup gives
+  false, and each content-bearing source (`:cache`, `:filesystem`,
+  `:refresh`) after an `:absent` lookup still gives true. The real
+  `consultation-summary` form, evaluated on Clojure 1.12, passed all six
+  pin-read cases: nil, other path, cache, absent, absent then refresh,
+  and filesystem.
 - Every edited file reads cleanly with the Clojure 1.12 reader.
 - The planner test namespace needs malli from Clojars, which returns 403
   through this environment's proxy, so CI runs it.
