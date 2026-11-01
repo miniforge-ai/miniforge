@@ -68,13 +68,14 @@
                          (into (llm/backend-credential-env backend))
                          (into (map name) (:env-passthrough env-config)))
          env         (filter-env-by-trust (normalize-plan-env (get env-config :env {}))
-                                          trust-level keep-names)]
+                                          trust-level keep-names)
+         plan-env    (cond->> env
+                       (= :untrusted trust-level)
+                       (merge (untrusted-env-blanks image-env keep-names)))]
      (cond-> {:image-digest image-digest
               :command      ["sleep" "infinity"]
               :mounts       (get env-config :mounts [])
-              :env          (cond->> env
-                              (= :untrusted trust-level)
-                              (merge (untrusted-env-blanks image-env keep-names)))
+              :env          plan-env
               :trust-level  trust-level}
        (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
        (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))
@@ -106,32 +107,29 @@
    reads `*` or a trailing `*` in `-e NAME` as a pattern that copies every
    matching variable of its own environment into the container.
 
-   `image-env-fn` (injected; by default it reports an empty ENV) gives the
-   pinned image's ENV, whose secrets an :untrusted plan blanks
-   (`untrusted-env-blanks`). An :untrusted launch whose image ENV cannot be
-   read fails closed."
-  ([descriptor image env-config digest-fn]
-   (security-gate-check descriptor image env-config digest-fn (constantly {})))
-  ([descriptor image env-config digest-fn image-env-fn]
-   (let [digest          (digest-fn descriptor image)
-         image-env       (when digest (image-env-fn descriptor digest))
-         plan            (build-launch-plan digest env-config image-env)
-         security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
-                          :rootless-action     plan-security/default-rootless-action}
-         decision        (plan-security/check-plan-security plan descriptor security-config)
-         bad-names       (filter refused-env-name? (keys (:env plan)))]
-     (cond
-       (response/anomaly-map? decision)
-       (result/err :security-policy-violation
-                   (:anomaly/message decision)
-                   {:security/findings (:security/findings decision)})
+   `image-env-fn` (injected) gives the pinned image's ENV, whose secrets an
+   :untrusted plan blanks (`untrusted-env-blanks`). An :untrusted launch
+   whose image ENV cannot be read fails closed."
+  [descriptor image env-config digest-fn image-env-fn]
+  (let [digest          (digest-fn descriptor image)
+        image-env       (when digest (image-env-fn descriptor digest))
+        plan            (build-launch-plan digest env-config image-env)
+        security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
+                         :rootless-action     plan-security/default-rootless-action}
+        decision        (plan-security/check-plan-security plan descriptor security-config)
+        bad-names       (filter refused-env-name? (keys (:env plan)))]
+    (cond
+      (response/anomaly-map? decision)
+      (result/err :security-policy-violation
+                  (:anomaly/message decision)
+                  {:security/findings (:security/findings decision)})
 
-       (seq bad-names)
-       (result/err :security-policy-violation
-                   (messages/t :oci/env-name-refused {:names (str/join ", " (map pr-str bad-names))}))
+      (seq bad-names)
+      (result/err :security-policy-violation
+                  (messages/t :oci/env-name-refused {:names (str/join ", " (map pr-str bad-names))}))
 
-       (and (= :untrusted (:trust-level plan)) (nil? image-env))
-       (result/err :security-policy-violation (messages/t :oci/image-env-unreadable {:image image}))
+      (and (= :untrusted (:trust-level plan)) (nil? image-env))
+      (result/err :security-policy-violation (messages/t :oci/image-env-unreadable {:image image}))
 
-       :else
-       (result/ok (assoc (:output decision) :launch-plan plan))))))
+      :else
+      (result/ok (assoc (:output decision) :launch-plan plan)))))
