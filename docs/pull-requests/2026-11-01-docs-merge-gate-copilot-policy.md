@@ -8,11 +8,10 @@
 
 ## Overview
 
-`agents.md`'s PR Merge Gate now names its shared source, the standards rule
-`workflows/pr-merge-gate` (dewey 723, miniforge-ai/miniforge-standards#140),
-and adds the operator's policy for Copilot findings that conflict with a
-standards rule: answer the thread with the trace and the rule, resolve it,
-and do not change the code.
+`agents.md`'s PR Merge Gate names its shared source, `workflows/pr-merge-gate`
+(dewey 723, miniforge-ai/miniforge-standards#140). It also records the operator's
+policy for Copilot findings that conflict with a standards rule. Answer the
+thread with the trace and rule, resolve it, and do not change the code.
 
 ## Motivation
 
@@ -24,9 +23,9 @@ this repo's own copy of the gate needs it too.
 
 ## Changes in Detail
 
-1. `agents.md`, PR Merge Gate: one paragraph naming rule 723 as the shared
-   source, and why the text is repeated here (sessions load `agents.md` through
-   `.claude/CLAUDE.md` even when the `standards` submodule is not checked out).
+1. `agents.md`, PR Merge Gate: a paragraph names rule 723 as the shared source.
+   The text repeats here because sessions load `agents.md` through `.claude/CLAUDE.md`,
+   even without the `standards` submodule checked out.
 2. `agents.md`, PR Merge Gate: the Copilot-vs-rules bullet, matching rule 723.
 
 ## Testing Plan

@@ -13,15 +13,15 @@
 `apply-gate-validation-keeps-gate-warnings` fails on main, with 3
 assertions in `phase_transitions_test.clj`.
 
-#2311 changed what counts as an acknowledged gate decision: a decision
+PR #2311 changed what counts as an acknowledged gate decision: a decision
 now counts only once a durable sink has written it. #2311 updated the
 neighbouring approved-verdict test to give its stream a `durable-sink`.
-#2303 added two pass-path cases whose ctx streamed to `{:sinks []}`. The
+PR #2303 added two pass-path cases whose ctx streamed to `{:sinks []}`. The
 two PRs each passed CI separately. #2303 merged after #2311 without CI
 re-running against it. With no durable sink, the decision is
 unacknowledged, the phase is projected to `:failed`, and the assertions
 that a warning leaves the phase passing fail. That is the intended
-#2311 behavior; the test context was out of date.
+behavior introduced by #2311; the test context was out of date.
 
 ## Changes
 

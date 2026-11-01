@@ -25,9 +25,8 @@ under dewey 600:
 
 ## Changes in Detail
 
-- The `gate-warnings` docstring now states only the return contract: the
-  shape `[{:gate kw :warnings [..]}]`, one entry per gate that warned, in
-  gate order, and nil when no gate warned. Each of those claims was checked
+- The `gate-warnings` docstring states the return shape `[{:gate kw :warnings [..]}]`.
+  Entries follow gate order, one per warning gate; no warnings returns nil. Each claim was checked
   against the function body.
 - The clause comment is now one line and keeps the reason the clause
   exists: the envelope cannot carry warnings.
@@ -43,7 +42,7 @@ None. There is no runtime change.
 
 ## Related Issues/PRs
 
-- #2303: the change these docs belong to.
+These docs describe the change in #2303.
 
 ## Checklist
 

@@ -14,12 +14,12 @@ The gate component already has `config/gate/messages/en-US.edn` and
 `system.edn`. The stale-references, no-secrets, behavioral, opsv,
 policy-pack and tests-pass gates read their text from those catalogs. The
 rest did not. Their messages, registry descriptions and repair texts were
-English literals in the source: the Codex consultation gate (both
-verdicts and its description), syntax, lint, format, pre-verify lint,
-plan / review / quality / release / policy, coverage, pre-commit
-discipline, the mechanical capability descriptions, the registry's
-unknown-gate and noop entries, and the interface's missing-repair
-failure. 45 strings in all, counting the six added in review.
+English literals. These included the Codex consultation verdicts and description.
+They also covered syntax, lint, format, pre-verify lint, plan, review, quality,
+release, policy, coverage and pre-commit discipline. Mechanical capability
+descriptions also used literals. Registry unknown-gate and noop entries did too,
+as did the interface's missing-repair failure. There were 45 strings in all,
+counting the six added in review.
 
 ## Changes
 
@@ -61,6 +61,7 @@ machine strings (git argv, URIs, glob prefixes), and one programmer-error
 `ex-info` in `pre_verify_lint/execution.clj`. Dewey 050 exempts all three
 classes. Regex sweeps missed six prose literals, all of which Copilot
 caught and which are now catalogued:
+
 - the capability failure line and its fallback
 - the missing format-check-contract message
 - the formattable-file count
