@@ -148,6 +148,28 @@ Lint and tests had not caught them.
 PR-budget requires oversized work to be split or explicitly flagged with a reviewable rationale.
 Adversarial review remains necessary because green CI alone cannot establish correctness.
 
+## PR Merge Gate
+
+This applies to every session and every PR, set by the operator on 2026-11-01.
+
+- Open PRs ready for review, never as drafts. Copilot reviews only non-draft
+  PRs, and a draft adds a manual step for the operator.
+- A PR is ready to merge only when all four gates pass, in this order:
+  1. **Adversarial review** of the diff, following every obligation in
+     `standards/miniforge/workflows/code-review-rigor.mdc` (dewey 720).
+  2. **Rules review** against every rule in `standards/miniforge/` that applies
+     to the diff. Read each applicable rule in full; a pattern grep is not a
+     review.
+  3. **CI** green on the PR's current head.
+  4. **Copilot review**: every finding fixed or answered on its thread, and the
+     threads resolved.
+- When all four pass, the session that owns the PR merges it. Do not wait for
+  the operator to click merge.
+- Green CI and a clean Copilot review do not make a PR ready on their own.
+  Merging without gates 1 and 2 skips the process.
+- A finding from gate 1 or 2 is fixed on the PR branch before merge, and the
+  later gates run again on the new head.
+
 ## Writing Spec Task Descriptions (`work/*.spec.edn`)
 
 Task descriptions in `work/` specs are agents' primary context.
