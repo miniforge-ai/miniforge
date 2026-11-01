@@ -50,25 +50,27 @@
 (def ^{:stratum 0} infer-repo-url clone-target/infer-repo-url)
 
 ;; Sandbox preparation — expressed in the clone-target vocabulary.
+;; The repo goes to acquire-environment! so the executor's bootstrap clones
+;; it with a credential and records the remote that persist/restore and
+;; release authenticate against; a separate clone after acquisition left
+;; both without one. A branch the remote lacks now fails acquisition rather
+;; than silently leaving the default branch checked out.
 (defn ^{:stratum 0} prepare-sandbox [spec enriched-spec]
   (let [prep-result (dag/prepare-runtime-executor!
                      (runtime-env/selection-config {:image-type :clojure}))]
     (if-not (dag/ok? prep-result)
       prep-result
-      (let [executor (:executor (dag/unwrap prep-result))
-            gh-token (System/getenv "GH_TOKEN")
-            env-config (cond-> {} gh-token (assoc :env {:GH_TOKEN gh-token}))
+      (let [executor   (:executor (dag/unwrap prep-result))
+            repo-url   (clone-target/infer-repo-url spec enriched-spec)
+            env-config (cond-> {}
+                         repo-url (assoc :repo-url repo-url
+                                         :branch (clone-target/infer-branch spec enriched-spec)))
             env-result (dag/acquire-environment! executor (random-uuid) env-config)]
         (if-not (dag/ok? env-result)
           env-result
-          (let [env-id (:environment-id (dag/unwrap env-result))
-                repo-url (clone-target/infer-repo-url spec enriched-spec)
-                branch (clone-target/infer-branch spec enriched-spec)]
-            (when repo-url
-              (dag/clone-and-checkout! executor env-id repo-url branch {}))
-            (dag/ok {:executor executor
-                     :environment-id env-id
-                     :sandbox-workdir "/workspace"})))))))
+          (dag/ok {:executor executor
+                   :environment-id (:environment-id (dag/unwrap env-result))
+                   :sandbox-workdir "/workspace"}))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

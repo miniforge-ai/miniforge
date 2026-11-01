@@ -21,6 +21,8 @@
   :oci/command-failed        "Command failed"
   :oci/command-failed-detail "{prefix}: {command}{stderr}"
   :oci/bootstrap-failed      "Workspace bootstrap failed"
+  :oci/git-too-old           "The task image's git ({version}) is older than 2.31, which per-command git credentials need"
+  :oci/env-line-break        "Container env entries whose name is not a plain identifier or whose value has a line break cannot be passed safely: {names}"
   :oci/env-name-refused      "Container env names must be plain identifiers ([A-Za-z_][A-Za-z0-9_]*) and not DOCKER_CUSTOM_HEADERS; refused: {names}"
 
   ;; State management
