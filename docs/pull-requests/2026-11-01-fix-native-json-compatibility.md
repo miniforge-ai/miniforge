@@ -1,0 +1,46 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
+# fix: admit only the verified portable JSON coordinate
+
+## Overview
+
+Replace the blanket JSON dependency ban with an exact-coordinate compatibility
+policy. Only `org.clojure/data.json` version `2.4.0` is approved for native use.
+
+## Motivation
+
+The Prometheus boundary needs lossless decimal timestamps. Native Babashka does
+not expose Cheshire's decimal setting. The portable release passed real packaged
+execution; newer releases failed because they generate an unsupported interface.
+
+## Changes in Detail
+
+- Preserve unsupported dependency rejection and native execution gates.
+- Reject unverified JSON versions and coordinate variants, including alias overrides.
+- Separate filesystem discovery to keep the compatibility namespace within three strata.
+- Reuse the acknowledged gate fixture to repair main's warning-test regression.
+
+## Testing Plan
+
+Check accepted and rejected coordinates, nested dependency sites, and repository
+manifests. Run the native compatibility suite and normal signed hooks.
+The paired client PR retains actual lossless-decimal packaged execution coverage.
+
+## Deployment Plan
+
+This changes test policy only. It installs no production dependency and grants
+no runtime authority. No live server or cluster access is involved.
+
+## Related Issues/PRs
+
+Prerequisite for #2314. The user explicitly approved the scoped policy correction.
+
+## Checklist
+
+- [ ] Exact-coordinate policy and adversarial regressions
+- [ ] Native execution and normal signed-hook gates
+- [ ] Fresh Copilot review and all CI gates

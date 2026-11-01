@@ -29,7 +29,7 @@
    propagating bad state down the pipeline."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.event-stream.interface :as events]
+   [ai.miniforge.workflow.gate-decision-test-support :as gate-fixture]
    [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.workflow.execution-transition :as transition]
    [ai.miniforge.workflow.fsm :as workflow-fsm]
@@ -177,9 +177,7 @@
     (let [pr  {:result {:output {:review/decision :approved}}}
           ;; The pass is recorded only when a durable sink writes the decision;
           ;; this one stands in for the file sink.
-          ctx {:execution/id (random-uuid)
-               :event-stream (events/create-event-stream
-                              {:sinks [(events/durable-sink (fn [_event] nil))]})}
+          ctx (gate-fixture/context (gate-fixture/legacy-stream))
           out (transition/apply-gate-validation {:config {:gates [:review-approved]}} pr ctx)]
       (is (= pr (dissoc out :phase/decision-envelope)) "unchanged on pass, envelope aside")
       (is (= :allow (get-in out [:phase/decision-envelope :envelope/decision])))
@@ -218,7 +216,7 @@
     (let [pr  {:result {:output {:codex/consultation {:status :consulted
                                                       :pinned? true
                                                       :pin-read? false}}}}
-          ctx {:execution/id (random-uuid) :event-stream (events/create-event-stream {:sinks []})}
+          ctx (gate-fixture/context (gate-fixture/legacy-stream))
           out (transition/apply-gate-validation {:config {:gates [:codex-consultation]}}
                                                 pr ctx)]
       (is (= :allow (get-in out [:phase/decision-envelope :envelope/decision])))
@@ -241,7 +239,7 @@
     (let [out (transition/apply-gate-validation
                {:config {:gates [:review-approved]}}
                {:result {:output {:review/decision :approved}}}
-               {:execution/id (random-uuid) :event-stream (events/create-event-stream {:sinks []})})]
+               (gate-fixture/context (gate-fixture/legacy-stream)))]
       (is (not (contains? out :phase/status)))
       (is (not (contains? out :phase/gate-warnings))))))
 
