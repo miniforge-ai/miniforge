@@ -9,8 +9,8 @@
 ## Overview
 
 Concrete read-only HTTP transport for the approved Kubernetes + Prometheus
-backend. Depends on the bounded-measurement contract; publish after that
-foundation merges. No cluster changes or live experiments are authorized.
+backend. The bounded-measurement foundation, #2310, is merged and integrated.
+No cluster changes or live experiments are authorized.
 
 ## Motivation
 
@@ -45,6 +45,15 @@ anchors the whole value and rejects control characters before transport.
 Interrupt tests capture the flag before test reporting can consume it.
 An expired body deadline also prevents reader-thread creation.
 
+Reconciliation with merged main preserves the reviewed sample-limit regression.
+Both consuming product suites pass. A fresh 6,909,589-byte stripped CLI jar
+passes isolated acceptance: 30 tests and 156 assertions, without production-source
+overlays. The follow-up catalog regression covers every new transport message.
+
+Normal merge hooks also found inherited lint debt. Six overlong sentences in
+the merged sink-split document were shortened without changing its claims.
+An unused release-sandbox test binding was renamed without changing behavior.
+
 ## Deployment Plan
 
 Staging and recommend-only remain backend defaults. Reading measurements grants
@@ -58,7 +67,7 @@ Uses the public OPSV contract rather than rebuilding its schemas or factories.
 
 ## Checklist
 
-- [ ] Concrete transport and deterministic failure regressions
-- [ ] Consuming-product and packaged acceptance
-- [ ] Adversarial standards review and normal gates
+- [x] Concrete transport and deterministic failure regressions
+- [x] Consuming-product and packaged acceptance
+- [x] Adversarial standards review and normal gates
 - [ ] Fresh Copilot review and all CI gates
