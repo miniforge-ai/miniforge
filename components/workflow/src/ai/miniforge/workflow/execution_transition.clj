@@ -42,14 +42,8 @@
       (phase/already-done? (:result phase-result))))
 
 (defn ^{:stratum 0} gate-warnings
-  "The STRUCTURED warnings of a check-gates result, one {:gate :warnings}
-   per gate that raised any, in gate order; nil when none did.
-
-   A warning never changes the decision, so the envelope has no place for
-   it, and before this a phase result dropped every one: a warning raised
-   on a re-entered phase was gone by the time anyone looked. Carried on
-   the phase result, it reaches the checkpoint and the append-only gate
-   history like :phase/gate-failures does."
+  "A check-gates result's warnings as [{:gate kw :warnings [..]}], one entry
+   per gate that warned, in gate order; nil when no gate warned."
   [gate-result]
   (not-empty
    (into []
@@ -210,9 +204,7 @@
                                                (remove gate/passed?)
                                                (mapv #(-> (select-keys % [:gate :errors])
                                                           (update :errors (fnil vec [])))))))
-            ;; Warnings never change the decision, so neither branch above
-            ;; carries them; kept here so they reach the checkpoint and the
-            ;; gate history on allow and deny alike.
+            ;; Warnings never change the decision, so the envelope cannot carry them.
             warnings (assoc :phase/gate-warnings warnings)
             ;; Projected before :leave runs, the same way as a denial, so leave
             ;; handlers finalize a failed phase instead of publishing success.
