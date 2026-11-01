@@ -109,6 +109,17 @@
       (is (= :push-unresolved (-> again :errors first :type)))
       (is (empty? (:prs @state))))))
 
+(deftest ^{:stratum 1} crash-after-the-push-to-a-private-origin-test
+  (testing "origin answers ls-remote only with git credentials, as a private
+            HTTPS remote does: the resume's probe asks for them and confirms
+            the push, so the release ends with one PR"
+    (let [state  (atom (assoc (remote/initial-state) :ls-remote-needs-credentials? true))
+          origin (random-uuid)
+          r1     (release! state origin (fn [_ _]) (crash-on "git push"))
+          r2     (release! state origin (fn [_ _]) (fn [_ _]))]
+      (is (= ::crashed r1))
+      (is (one-pr-and-success? {:resumed r2 :state @state})))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} crash-before-the-push-reaches-the-remote-test

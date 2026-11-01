@@ -1,5 +1,7 @@
 {:phase-opsv/system
  {:adapter/missing "The OPSV workflow requires an adapter implementing OPSVAdapter."
+  :measurement/invalid-request "The declared Prometheus measurement window is invalid or exceeds its sample bound."
+  :measurement/invalid-response "Prometheus did not return one complete, finite measurement series for the declared window."
   :control/unconfirmed "OPSV run control refused the operation or could not confirm stop cleanup. Inspect the retained run and grant results before recovery."
   :adapter/invalid-callbacks "OPSV adapter callbacks must be functions."
   :verification/missing "The runtime requires a fresh candidate verification adapter."

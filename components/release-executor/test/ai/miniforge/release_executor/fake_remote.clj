@@ -48,6 +48,14 @@
 (defn- ^{:stratum 0} fail [stderr]
   {:exit-code 1 :stdout "" :stderr stderr})
 
+(defn- ^{:stratum 0} unauthenticated?
+  "True when `state` stands for an origin that answers ls-remote only with
+   git credentials and `line` is a git ls-remote that did not ask for them."
+  [state line opts]
+  (and (:ls-remote-needs-credentials? state)
+       (str/starts-with? line "git ls-remote")
+       (not (:git-credentials? opts))))
+
 (defn- ^{:stratum 0} last-word [line]
   (last (str/split line #"\s+")))
 
@@ -114,7 +122,9 @@
    `after`, fns of [state command-line] called before a command runs and
    after it took effect, can throw to stand for a crash at that point. A
    map `before` returns is the command's reply instead (a command that
-   fails without taking effect)."
+   fails without taking effect). With :ls-remote-needs-credentials? in the
+   state, a git ls-remote whose opts lack :git-credentials? fails, as
+   against a private HTTPS origin."
   ([state] (executor state (fn [_ _]) (fn [_ _])))
   ([state before] (executor state before (fn [_ _])))
   ([state before after]
@@ -123,11 +133,14 @@
      (executor-type [_] :fake-remote)
      (available? [_] (dag/ok {:available? true}))
      (acquire-environment! [_ _ _] (dag/ok {:environment-id "fake-env"}))
-     (execute! [_ _env-id command _opts]
+     (execute! [_ _env-id command opts]
        (let [line  (command-line command)
              reply (before state line)]
-         (if (map? reply)
-           (dag/ok reply)
+         (cond
+           (map? reply) (dag/ok reply)
+           (unauthenticated? @state line opts)
+           (dag/ok (fail "fatal: could not read Username for 'https://github.com'"))
+           :else
            (let [reply (answer! state command)]
              (after state line)
              (dag/ok reply)))))

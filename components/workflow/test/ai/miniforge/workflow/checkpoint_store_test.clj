@@ -186,7 +186,9 @@
                                                                  :timestamp (java.time.Instant/parse "2026-08-29T00:00:00Z")}]}]})
               allowed (assoc-in base [:execution/phase-results :implement]
                                 {:status :completed
-                                 :phase/decision-envelope {:envelope/decision :allow}})
+                                 :phase/decision-envelope {:envelope/decision :allow}
+                                 :phase/gate-warnings [{:gate :codex-consultation
+                                                        :warnings [{:type :codex-pin-not-fetched}]}]})
               _ (checkpoint-store/persist-execution-state! denied)
               _ (checkpoint-store/persist-execution-state! allowed)
               run-dir (str checkpoint-root "/" (:execution/id base))
@@ -202,6 +204,9 @@
           (is (= "2026-08-29T00:00:00Z"
                  (-> history first :phase/gate-failures first :errors first :timestamp))
               "Instants inside gate errors are normalized to strings so the history stays EDN-readable")
+          (is (= [nil :codex-consultation]
+                 (mapv #(-> % :phase/gate-warnings first :gate) history))
+              "a passing iteration's gate warnings reach the history too")
           (is (= :allow (get-in phase-file [:phase/result :phase/decision-envelope :envelope/decision]))
               "the phase checkpoint holds only the last iteration — the reason the history exists"))))))
 

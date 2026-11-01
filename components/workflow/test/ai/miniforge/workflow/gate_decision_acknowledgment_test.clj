@@ -79,7 +79,7 @@
 
 (deftest ^{:stratum 1} interrupted-publication-refuses-and-restores-the-interrupt
   (let [[step-result interrupted?]
-        (with-redefs [events/publish! (partial throwing (InterruptedException.))]
+        (with-redefs [events/publish-persisted! (partial throwing (InterruptedException.))]
           (let [step-result (gated-step [:review-approved] (support/context (support/legacy-stream)))]
             ;; Read and clear before any assertion: clojure.test can consume the flag.
             [step-result (Thread/interrupted)]))]
@@ -87,7 +87,7 @@
     (assert-refused step-result "interrupted publication")))
 
 (deftest ^{:stratum 1} fatal-publication-error-propagates
-  (with-redefs [events/publish! (partial throwing (AssertionError. "fatal"))]
+  (with-redefs [events/publish-persisted! (partial throwing (AssertionError. "fatal"))]
     (is (thrown? AssertionError
                  (gated-step [:review-approved] (support/context (support/legacy-stream)))))))
 
@@ -130,18 +130,22 @@
     (events/quiesce! stream {:workflow-id (:execution/id ctx)})
     (assert-refused (gated-step [:review-approved] ctx) "rejected receipt"))
   (journal/with-stream verify-closed-journal-refuses)
-  (with-redefs [events/publish! (partial throwing (ex-info "sink offline" {}))]
+  (with-redefs [events/publish-persisted! (partial throwing (ex-info "sink offline" {}))]
     (assert-refused (gated-step [:review-approved] (support/context (support/legacy-stream)))
                     "publication exception"))
-  (with-redefs [events/publish! (constantly (anomaly/anomaly :unavailable "refused" {}))]
+  (with-redefs [events/publish-persisted! (constantly (anomaly/anomaly :unavailable "refused" {}))]
     (assert-refused (gated-step [:review-approved] (support/context (support/legacy-stream)))
                     "anomaly receipt"))
-  (with-redefs [events/publish! other-envelope]
+  (with-redefs [events/publish-persisted! other-envelope]
     (assert-refused (gated-step [:review-approved] (support/context (support/legacy-stream)))
                     "mismatched receipt"))
   (with-redefs [gate/gates->envelope (constantly nil)]
     (assert-refused (gated-step [:review-approved] (support/context (support/legacy-stream)))
-                    "no envelope minted")))
+                    "no envelope minted"))
+  (assert-refused (gated-step [:review-approved] (support/context (support/sinkless-legacy-stream)))
+                  "legacy stream with no durable sink")
+  (assert-refused (gated-step [:review-approved] (support/context (support/failing-legacy-stream)))
+                  "durable sink failed to write the decision"))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.workflow.gate-decision-acknowledgment-test))

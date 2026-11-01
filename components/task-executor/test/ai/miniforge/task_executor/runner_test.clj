@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.task-executor.runner-test
   "Integration test for single-task execution lifecycle.
 
@@ -27,16 +26,17 @@
    [ai.miniforge.task-executor.runner :as runner]
    [clojure.test :refer [deftest testing is]]))
 
-;------------------------------------------------------------------------------ Mock Data
+;------------------------------------------------------------------------------ Layer 0
 
-(def mock-task
+;------------------------------------------------------------------------------ Mock Data
+(def ^{:stratum 0} mock-task
   {:task/id "test-task-1"
    :task/description "Implement feature X"
    :task/acceptance-criteria ["Feature works" "Tests pass"]
    :task/constraints ["No breaking changes"]
    :task/dependencies []})
 
-(def mock-code-artifact
+(def ^{:stratum 0} mock-code-artifact
   {:code/id (random-uuid)
    :code/files [{:path "src/feature.clj"
                  :content "(ns feature)\n(defn new-feature [] :ok)"
@@ -46,37 +46,23 @@
                  :action :create}]
    :code/language "clojure"})
 
-(def mock-pr-info
+(def ^{:stratum 0} mock-pr-info
   {:pr-number 123
    :pr-url "https://github.com/org/repo/pull/123"
    :branch "feature/test-feature"
    :commit-sha "abc123def456"})
 
-(def mock-worktree
+(def ^{:stratum 0} mock-worktree
   {:path "/tmp/worktree-test-task-1"
    :branch "task-test-task-1"
    :commit-sha "initial123"})
 
-(def mock-environment
+(def ^{:stratum 0} mock-environment
   {:env-id :env-123
    :session-id :sess-456
    :status :active})
 
-;------------------------------------------------------------------------------ Mock Implementations
-
-(defn mock-generate-fn
-  "Mock code generation function."
-  [should-succeed?]
-  (fn [task _context]
-    (if should-succeed?
-      {:status :success
-       :output (assoc mock-code-artifact :code/id (random-uuid))
-       :metrics {:tokens 1500 :duration-ms 5000}}
-      {:status :error
-       :error "Code generation failed"
-       :data {:task-id (:task/id task)}})))
-
-(defn mock-pr-lifecycle-fn
+(defn ^{:stratum 0} mock-pr-lifecycle-fn
   "Mock PR lifecycle runner."
   [ci-passes? review-approved?]
   (fn [_controller]
@@ -100,7 +86,183 @@
                  :ci-runs 1
                  :review-cycles 1}})))
 
-(defn mock-dag-executor
+;------------------------------------------------------------------------------ Test Helpers
+(defn ^{:stratum 0} acquire-worktree!
+  "Mock worktree acquisition."
+  [run-context task-id]
+  ((:acquire-worktree-fn (:dag-executor run-context)) run-context task-id))
+
+(defn ^{:stratum 0} release-worktree!
+  "Mock worktree release."
+  [run-context task-id]
+  ((:release-worktree-fn (:dag-executor run-context)) run-context task-id))
+
+(defn ^{:stratum 0} acquire-environment!
+  "Mock environment acquisition."
+  [run-context]
+  ((:acquire-environment-fn (:dag-executor run-context)) run-context))
+
+(defn ^{:stratum 0} release-environment!
+  "Mock environment release."
+  [run-context env-record]
+  ((:release-environment-fn (:dag-executor run-context)) run-context env-record))
+
+(defn ^{:stratum 0} transition-task!
+  "Mock task state transition."
+  [run-context task-id new-state]
+  ((:transition-task-fn (:dag-executor run-context)) run-context task-id new-state))
+
+(defn ^{:stratum 0} update-metrics!
+  "Mock metrics update."
+  [run-context task-id metrics]
+  ((:update-metrics-fn (:dag-executor run-context)) run-context task-id metrics))
+
+(defn ^{:stratum 0} mark-failed!
+  "Mock task failure marking."
+  [run-context task-id error]
+  ((:mark-failed-fn (:dag-executor run-context)) run-context task-id error))
+
+(deftest ^{:stratum 0} acquire-resources-worktree-failure-test
+  (testing "worktree acquisition failure returns DAG error data"
+    (with-redefs [dag/acquire-worktree! (fn [& _]
+                                          (dag/err :timeout
+                                                   "worktree timeout"
+                                                   {:holder-id "task-1"}))]
+      (let [result (runner/acquire-resources! "task-1" nil nil nil {})]
+        (is (dag/err? result))
+        (is (= :task-executor/worktree-acquire-failed
+               (get-in result [:error :code])))
+        (is (= :timeout
+               (get-in result [:error :data :error :code])))))))
+
+(deftest ^{:stratum 0} acquire-resources-environment-failure-test
+  (testing "environment acquisition failure releases the worktree and returns DAG error data"
+    (let [released? (atom false)]
+      (with-redefs [dag/acquire-worktree! (fn [& _]
+                                            (dag/ok {:holder-id "task-1"}))
+                    dag/acquire-environment! (fn [& _]
+                                               (dag/err :environment-unavailable
+                                                        "environment unavailable"
+                                                        {:executor :mock}))
+                    dag/release-worktree! (fn [& _]
+                                            (reset! released? true)
+                                            (dag/ok {:released true}))]
+        (let [result (runner/acquire-resources! "task-1" nil nil nil {})]
+          (is (dag/err? result))
+          (is (= :task-executor/environment-acquire-failed
+                 (get-in result [:error :code])))
+          (is (= :environment-unavailable
+                 (get-in result [:error :data :error :code])))
+          (is (true? @released?)))))))
+
+(deftest ^{:stratum 0} execute-task-resource-failure-returns-error-data-test
+  (testing "DAG error data is recorded in state and returned to the caller"
+    (let [run-atom (atom (dag/create-run-state
+                          (random-uuid)
+                          {"task-1" (assoc (dag/create-task-state "task-1" #{})
+                                           :task/status :running)}))]
+      (with-redefs [dag/acquire-worktree! (fn [& _]
+                                            (dag/err :timeout
+                                                     "worktree timeout"
+                                                     {:holder-id "task-1"}))]
+        (let [result (runner/execute-task "task-1" {:task/id "task-1"} {:run-atom run-atom})]
+          (is (false? (:ok? result)))
+          (is (= :task-executor/worktree-acquire-failed
+                 (get-in result [:error-classification :type])))
+          (is (= :task-executor/worktree-acquire-failed
+                 (get-in result [:error :code])))
+          (is (= :task-executor/worktree-acquire-failed
+                 (get-in @run-atom [:run/tasks "task-1" :task/error :code]))))))))
+
+(deftest ^{:stratum 0} update-task-metrics-updates-dag-run-metrics-test
+  (testing "task lifecycle metrics are passed to DAG run metrics as a map"
+    (let [run-atom (atom (dag/create-run-state
+                          (random-uuid)
+                          {"task-1" (dag/create-task-state "task-1" #{})}))
+          start-time (- (System/currentTimeMillis) 100)
+          lifecycle-result {:total-tokens 1000
+                            :fix-iterations 2
+                            :ci-runs 1
+                            :review-cycles 1
+                            :pr-url "https://github.com/org/repo/pull/123"
+                            :status :merged}]
+      (runner/update-task-metrics! run-atom "task-1" lifecycle-result start-time)
+      (is (= 1000 (get-in @run-atom [:run/metrics :tokens-used])))
+      (is (= :merged (get-in @run-atom [:run/metrics :status]))))))
+
+;------------------------------------------------------------------------------ validate-spec! Tests
+;; Regression coverage for the fail-fast spec validation gate added to execute-task
+(defn- ^{:stratum 0} write-temp-spec!
+  "Write content to a temp .md file and return its path string."
+  [content]
+  (let [f (java.io.File/createTempFile "test-spec" ".md")]
+    (.deleteOnExit f)
+    (spit f content)
+    (.getAbsolutePath f)))
+
+(deftest ^{:stratum 0} validate-spec-no-path-test
+  (testing "no-op when task has no spec path"
+    (is (dag/ok? (runner/validate-spec! "task-1" {} nil))
+        "Should return DAG ok when no spec-related key present"))
+  (testing "no-op when task has other keys but no spec path"
+    (is (dag/ok? (runner/validate-spec! "task-1" {:task/description "Do stuff"} nil))
+        "Should return DAG ok for task with no spec path")))
+
+(deftest ^{:stratum 0} validate-spec-missing-file-test
+  (testing "returns DAG error when spec path points to a nonexistent file"
+    (let [task {:spec/source-file "/nonexistent/path/spec.md"}
+          result (runner/validate-spec! "task-1" task nil)]
+      (is (dag/err? result))
+      (is (= :task-executor/spec-validation-failed
+             (get-in result [:error :code])))
+      (is (re-find #"Spec validation failed"
+                   (get-in result [:error :message]))))))
+
+;------------------------------------------------------------------------------ calculate-cost-usd Tests
+;; Pin reported costs to the current :token-pricing in defaults.edn (input 3.0 /
+;; output 15.0 per million, 0.7/0.3 split). A future EDN pricing edit that would
+;; silently change reported costs must fail these assertions.
+(deftest ^{:stratum 0} calculate-cost-usd-pinned-test
+  (testing "1,000,000 tokens at the configured pricing"
+    ;; 700k input * 3.0/M + 300k output * 15.0/M = 2.1 + 4.5 = 6.6
+    (is (= 6.6 (runner/calculate-cost-usd 1000000))))
+  (testing "mixed case: 500,000 tokens"
+    ;; 350k input * 3.0/M + 150k output * 15.0/M = 1.05 + 2.25 = 3.3
+    (is (= 3.3 (runner/calculate-cost-usd 500000))))
+  (testing "zero tokens costs nothing"
+    (is (= 0.0 (runner/calculate-cost-usd 0)))))
+
+;------------------------------------------------------------------------------ load-config Tests
+;; The defaults EDN is loaded fail-fast at namespace load; a missing classpath
+;; resource must throw a clear ex-info rather than a low-signal NPE.
+(deftest ^{:stratum 0} load-config-missing-resource-test
+  (testing "loading the runner namespace pinned defaults without NPE"
+    ;; If defaults failed to load, the ns would not have compiled and this test
+    ;; file would not run — so reaching here means the resource loaded.
+    (is (number? (runner/calculate-cost-usd 1000))
+        "defaults resource loaded; cost calc works"))
+  (testing "missing config resource throws a clear ex-info, not an NPE"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo #"Missing config resource on classpath"
+         (config/load-config-resource "config/task-executor/does-not-exist.edn"
+                                      [:worktree-acquire-timeout-ms])))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;------------------------------------------------------------------------------ Mock Implementations
+(defn ^{:stratum 1} mock-generate-fn
+  "Mock code generation function."
+  [should-succeed?]
+  (fn [task _context]
+    (if should-succeed?
+      {:status :success
+       :output (assoc mock-code-artifact :code/id (random-uuid))
+       :metrics {:tokens 1500 :duration-ms 5000}}
+      {:status :error
+       :error "Code generation failed"
+       :data {:task-id (:task/id task)}})))
+
+(defn ^{:stratum 1} mock-dag-executor
   "Mock DAG executor protocol implementation."
   []
   {:acquire-worktree-fn (fn [_run-context _task-id]
@@ -118,57 +280,7 @@
    :mark-failed-fn (fn [_run-context _task-id _error]
                      {:success? true :state :failed})})
 
-(defn create-mock-run-context
-  "Create mock run context for testing."
-  [dag-executor]
-  {:dag-id "test-dag"
-   :run-id "test-run-001"
-   :run-atom (atom {:status :running
-                    :tasks {"test-task-1" {:status :pending}}
-                    :metrics {:tokens 0}})
-   :dag-executor dag-executor
-   :generate-fn (mock-generate-fn true)
-   :pr-lifecycle-fn (mock-pr-lifecycle-fn true true)
-   :futures (atom {})})
-
-;------------------------------------------------------------------------------ Test Helpers
-
-(defn acquire-worktree!
-  "Mock worktree acquisition."
-  [run-context task-id]
-  ((:acquire-worktree-fn (:dag-executor run-context)) run-context task-id))
-
-(defn release-worktree!
-  "Mock worktree release."
-  [run-context task-id]
-  ((:release-worktree-fn (:dag-executor run-context)) run-context task-id))
-
-(defn acquire-environment!
-  "Mock environment acquisition."
-  [run-context]
-  ((:acquire-environment-fn (:dag-executor run-context)) run-context))
-
-(defn release-environment!
-  "Mock environment release."
-  [run-context env-record]
-  ((:release-environment-fn (:dag-executor run-context)) run-context env-record))
-
-(defn transition-task!
-  "Mock task state transition."
-  [run-context task-id new-state]
-  ((:transition-task-fn (:dag-executor run-context)) run-context task-id new-state))
-
-(defn update-metrics!
-  "Mock metrics update."
-  [run-context task-id metrics]
-  ((:update-metrics-fn (:dag-executor run-context)) run-context task-id metrics))
-
-(defn mark-failed!
-  "Mock task failure marking."
-  [run-context task-id error]
-  ((:mark-failed-fn (:dag-executor run-context)) run-context task-id error))
-
-(defn execute-task-lifecycle
+(defn ^{:stratum 1} execute-task-lifecycle
   "Simplified task execution for testing."
   [task run-context]
   (try
@@ -220,9 +332,61 @@
        :error (ex-message e)
        :data (ex-data e)})))
 
-;------------------------------------------------------------------------------ Tests
+(deftest ^{:stratum 1} validate-spec-valid-file-test
+  (testing "returns nil for a well-formed markdown spec"
+    (let [path (write-temp-spec!
+                (str "---\n"
+                     "title: Test Spec\n"
+                     "description: A valid test spec\n"
+                     "---\n\n"
+                     "## Design\n\nSome design content.\n"))
+          task {:spec/source-file path}]
+      (is (dag/ok? (runner/validate-spec! "task-1" task nil))
+          "Should return DAG ok for valid spec"))))
 
-(deftest task-execution-happy-path-test
+(deftest ^{:stratum 1} validate-spec-malformed-spec-test
+  (testing "plain markdown without frontmatter is now valid — decorated from H1"
+    (let [path (write-temp-spec! "# Compliance Scanner M2\n\nExecute phase design.")
+          task {:spec/source-file path}]
+      (is (dag/ok? (runner/validate-spec! "task-1" task nil)))))
+
+  (testing "spec-path key is also checked — returns DAG error for nonexistent file"
+    (let [task {:spec-path "/nonexistent/spec.md"}
+          result (runner/validate-spec! "task-1" task nil)]
+      (is (dag/err? result))
+      (is (= :task-executor/spec-validation-failed
+             (get-in result [:error :code]))))))
+
+(deftest ^{:stratum 1} validate-spec-provenance-key-test
+  (testing "reads spec path from :spec/provenance :source-file"
+    (let [path (write-temp-spec!
+                (str "---\n"
+                     "title: T\n"
+                     "description: D\n"
+                     "---\n"))
+          task {:spec/provenance {:source-file path}}]
+      (is (dag/ok? (runner/validate-spec! "task-1" task nil))
+          "Should accept path nested under :spec/provenance"))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} create-mock-run-context
+  "Create mock run context for testing."
+  [dag-executor]
+  {:dag-id "test-dag"
+   :run-id "test-run-001"
+   :run-atom (atom {:status :running
+                    :tasks {"test-task-1" {:status :pending}}
+                    :metrics {:tokens 0}})
+   :dag-executor dag-executor
+   :generate-fn (mock-generate-fn true)
+   :pr-lifecycle-fn (mock-pr-lifecycle-fn true true)
+   :futures (atom {})})
+
+;------------------------------------------------------------------------------ Layer 3
+
+;------------------------------------------------------------------------------ Tests
+(deftest ^{:stratum 3} task-execution-happy-path-test
   (testing "Task executes successfully through full lifecycle"
     (let [dag-executor (mock-dag-executor)
           run-context (create-mock-run-context dag-executor)
@@ -239,7 +403,7 @@
       (is (> (:tokens (:metrics result)) 0)
           "Should track tokens used"))))
 
-(deftest worktree-acquisition-test
+(deftest ^{:stratum 3} worktree-acquisition-test
   (testing "Worktree is acquired before task execution"
     (let [dag-executor (mock-dag-executor)
           run-context (create-mock-run-context dag-executor)
@@ -252,7 +416,7 @@
       (is (string? (:branch worktree))
           "Worktree should have branch name"))))
 
-(deftest environment-acquisition-test
+(deftest ^{:stratum 3} environment-acquisition-test
   (testing "Environment is acquired for task execution"
     (let [dag-executor (mock-dag-executor)
           run-context (create-mock-run-context dag-executor)
@@ -265,59 +429,7 @@
       (is (= :active (:status env))
           "Environment should be active"))))
 
-(deftest acquire-resources-worktree-failure-test
-  (testing "worktree acquisition failure returns DAG error data"
-    (with-redefs [dag/acquire-worktree! (fn [& _]
-                                          (dag/err :timeout
-                                                   "worktree timeout"
-                                                   {:holder-id "task-1"}))]
-      (let [result (runner/acquire-resources! "task-1" nil nil nil {})]
-        (is (dag/err? result))
-        (is (= :task-executor/worktree-acquire-failed
-               (get-in result [:error :code])))
-        (is (= :timeout
-               (get-in result [:error :data :error :code])))))))
-
-(deftest acquire-resources-environment-failure-test
-  (testing "environment acquisition failure releases the worktree and returns DAG error data"
-    (let [released? (atom false)]
-      (with-redefs [dag/acquire-worktree! (fn [& _]
-                                            (dag/ok {:holder-id "task-1"}))
-                    dag/acquire-environment! (fn [& _]
-                                               (dag/err :environment-unavailable
-                                                        "environment unavailable"
-                                                        {:executor :mock}))
-                    dag/release-worktree! (fn [& _]
-                                            (reset! released? true)
-                                            (dag/ok {:released true}))]
-        (let [result (runner/acquire-resources! "task-1" nil nil nil {})]
-          (is (dag/err? result))
-          (is (= :task-executor/environment-acquire-failed
-                 (get-in result [:error :code])))
-          (is (= :environment-unavailable
-                 (get-in result [:error :data :error :code])))
-          (is (true? @released?)))))))
-
-(deftest execute-task-resource-failure-returns-error-data-test
-  (testing "DAG error data is recorded in state and returned to the caller"
-    (let [run-atom (atom (dag/create-run-state
-                          (random-uuid)
-                          {"task-1" (assoc (dag/create-task-state "task-1" #{})
-                                           :task/status :running)}))]
-      (with-redefs [dag/acquire-worktree! (fn [& _]
-                                            (dag/err :timeout
-                                                     "worktree timeout"
-                                                     {:holder-id "task-1"}))]
-        (let [result (runner/execute-task "task-1" {:task/id "task-1"} {:run-atom run-atom})]
-          (is (false? (:ok? result)))
-          (is (= :task-executor/worktree-acquire-failed
-                 (get-in result [:error-classification :type])))
-          (is (= :task-executor/worktree-acquire-failed
-                 (get-in result [:error :code])))
-          (is (= :task-executor/worktree-acquire-failed
-                 (get-in @run-atom [:run/tasks "task-1" :task/error :code]))))))))
-
-(deftest code-generation-failure-test
+(deftest ^{:stratum 3} code-generation-failure-test
   (testing "Code generation failure marks task as failed"
     (let [dag-executor (mock-dag-executor)
           run-context (-> (create-mock-run-context dag-executor)
@@ -331,7 +443,7 @@
       (is (= "Generation failed" (:error result))
           "Should report generation failure"))))
 
-(deftest pr-lifecycle-ci-failure-test
+(deftest ^{:stratum 3} pr-lifecycle-ci-failure-test
   (testing "CI failure in PR lifecycle marks task for fixing"
     (let [dag-executor (mock-dag-executor)
           run-context (-> (create-mock-run-context dag-executor)
@@ -343,7 +455,7 @@
       (is (string? (:error result))
           "Should have error message"))))
 
-(deftest pr-lifecycle-review-failure-test
+(deftest ^{:stratum 3} pr-lifecycle-review-failure-test
   (testing "Review changes requested triggers fix loop"
     (let [dag-executor (mock-dag-executor)
           run-context (-> (create-mock-run-context dag-executor)
@@ -355,7 +467,7 @@
       (is (string? (:error result))
           "Should have error message"))))
 
-(deftest cleanup-on-success-test
+(deftest ^{:stratum 3} cleanup-on-success-test
   (testing "Resources are cleaned up after successful execution"
     (let [cleanup-tracker (atom {:worktree-released false
                                   :env-released false})
@@ -376,7 +488,7 @@
       (is (true? (:env-released @cleanup-tracker))
           "Environment should be released"))))
 
-(deftest cleanup-on-failure-test
+(deftest ^{:stratum 3} cleanup-on-failure-test
   (testing "Resources are cleaned up even after failure"
     (let [cleanup-tracker (atom {:worktree-released false
                                   :env-released false})
@@ -398,7 +510,7 @@
       (is (true? (:env-released @cleanup-tracker))
           "Environment should be released even on failure"))))
 
-(deftest state-transitions-test
+(deftest ^{:stratum 3} state-transitions-test
   (testing "Task transitions through expected states"
     (let [state-tracker (atom [])
           dag-executor (-> (mock-dag-executor)
@@ -414,7 +526,7 @@
       (is (= [:implementing :pr-opening :merged] @state-tracker)
           "Should transition: implementing → pr-opening → merged"))))
 
-(deftest metrics-accumulation-test
+(deftest ^{:stratum 3} metrics-accumulation-test
   (testing "Metrics accumulate from generation and PR lifecycle"
     (let [metrics-tracker (atom {})
           dag-executor (-> (mock-dag-executor)
@@ -432,23 +544,7 @@
       (is (> (:duration-ms @metrics-tracker 0) 10000)
           "Should accumulate duration from both phases"))))
 
-(deftest update-task-metrics-updates-dag-run-metrics-test
-  (testing "task lifecycle metrics are passed to DAG run metrics as a map"
-    (let [run-atom (atom (dag/create-run-state
-                          (random-uuid)
-                          {"task-1" (dag/create-task-state "task-1" #{})}))
-          start-time (- (System/currentTimeMillis) 100)
-          lifecycle-result {:total-tokens 1000
-                            :fix-iterations 2
-                            :ci-runs 1
-                            :review-cycles 1
-                            :pr-url "https://github.com/org/repo/pull/123"
-                            :status :merged}]
-      (runner/update-task-metrics! run-atom "task-1" lifecycle-result start-time)
-      (is (= 1000 (get-in @run-atom [:run/metrics :tokens-used])))
-      (is (= :merged (get-in @run-atom [:run/metrics :status]))))))
-
-(deftest task-execution-exception-handling-test
+(deftest ^{:stratum 3} task-execution-exception-handling-test
   (testing "Unexpected exceptions are caught and logged"
     (let [dag-executor (-> (mock-dag-executor)
                            (assoc :acquire-environment-fn
@@ -462,7 +558,7 @@
       (is (string? (:error result))
           "Should have error message"))))
 
-(deftest parallel-task-isolation-test
+(deftest ^{:stratum 3} parallel-task-isolation-test
   (testing "Multiple tasks can execute without interfering"
     (let [dag-executor (mock-dag-executor)
           run-context (create-mock-run-context dag-executor)
@@ -483,7 +579,7 @@
       (is (not= (:artifact result-1) (:artifact result-2))
           "Tasks should have independent artifacts"))))
 
-(deftest fix-loop-integration-test
+(deftest ^{:stratum 3} fix-loop-integration-test
   (testing "Fix loop is triggered on CI failure"
     (let [attempt-count (atom 0)
           dag-executor (mock-dag-executor)
@@ -505,99 +601,3 @@
       ;; First attempt would fail, triggering fix loop
       (is (= 1 @attempt-count)
           "Should attempt PR lifecycle once"))))
-
-;------------------------------------------------------------------------------ validate-spec! Tests
-;; Regression coverage for the fail-fast spec validation gate added to execute-task
-
-(defn- write-temp-spec!
-  "Write content to a temp .md file and return its path string."
-  [content]
-  (let [f (java.io.File/createTempFile "test-spec" ".md")]
-    (.deleteOnExit f)
-    (spit f content)
-    (.getAbsolutePath f)))
-
-(deftest validate-spec-no-path-test
-  (testing "no-op when task has no spec path"
-    (is (dag/ok? (runner/validate-spec! "task-1" {} nil))
-        "Should return DAG ok when no spec-related key present"))
-  (testing "no-op when task has other keys but no spec path"
-    (is (dag/ok? (runner/validate-spec! "task-1" {:task/description "Do stuff"} nil))
-        "Should return DAG ok for task with no spec path")))
-
-(deftest validate-spec-valid-file-test
-  (testing "returns nil for a well-formed markdown spec"
-    (let [path (write-temp-spec!
-                (str "---\n"
-                     "title: Test Spec\n"
-                     "description: A valid test spec\n"
-                     "---\n\n"
-                     "## Design\n\nSome design content.\n"))
-          task {:spec/source-file path}]
-      (is (dag/ok? (runner/validate-spec! "task-1" task nil))
-          "Should return DAG ok for valid spec"))))
-
-(deftest validate-spec-missing-file-test
-  (testing "returns DAG error when spec path points to a nonexistent file"
-    (let [task {:spec/source-file "/nonexistent/path/spec.md"}
-          result (runner/validate-spec! "task-1" task nil)]
-      (is (dag/err? result))
-      (is (= :task-executor/spec-validation-failed
-             (get-in result [:error :code])))
-      (is (re-find #"Spec validation failed"
-                   (get-in result [:error :message]))))))
-
-(deftest validate-spec-malformed-spec-test
-  (testing "plain markdown without frontmatter is now valid — decorated from H1"
-    (let [path (write-temp-spec! "# Compliance Scanner M2\n\nExecute phase design.")
-          task {:spec/source-file path}]
-      (is (dag/ok? (runner/validate-spec! "task-1" task nil)))))
-
-  (testing "spec-path key is also checked — returns DAG error for nonexistent file"
-    (let [task {:spec-path "/nonexistent/spec.md"}
-          result (runner/validate-spec! "task-1" task nil)]
-      (is (dag/err? result))
-      (is (= :task-executor/spec-validation-failed
-             (get-in result [:error :code]))))))
-
-(deftest validate-spec-provenance-key-test
-  (testing "reads spec path from :spec/provenance :source-file"
-    (let [path (write-temp-spec!
-                (str "---\n"
-                     "title: T\n"
-                     "description: D\n"
-                     "---\n"))
-          task {:spec/provenance {:source-file path}}]
-      (is (dag/ok? (runner/validate-spec! "task-1" task nil))
-          "Should accept path nested under :spec/provenance"))))
-
-;------------------------------------------------------------------------------ calculate-cost-usd Tests
-;; Pin reported costs to the current :token-pricing in defaults.edn (input 3.0 /
-;; output 15.0 per million, 0.7/0.3 split). A future EDN pricing edit that would
-;; silently change reported costs must fail these assertions.
-
-(deftest calculate-cost-usd-pinned-test
-  (testing "1,000,000 tokens at the configured pricing"
-    ;; 700k input * 3.0/M + 300k output * 15.0/M = 2.1 + 4.5 = 6.6
-    (is (= 6.6 (runner/calculate-cost-usd 1000000))))
-  (testing "mixed case: 500,000 tokens"
-    ;; 350k input * 3.0/M + 150k output * 15.0/M = 1.05 + 2.25 = 3.3
-    (is (= 3.3 (runner/calculate-cost-usd 500000))))
-  (testing "zero tokens costs nothing"
-    (is (= 0.0 (runner/calculate-cost-usd 0)))))
-
-;------------------------------------------------------------------------------ load-config Tests
-;; The defaults EDN is loaded fail-fast at namespace load; a missing classpath
-;; resource must throw a clear ex-info rather than a low-signal NPE.
-
-(deftest load-config-missing-resource-test
-  (testing "loading the runner namespace pinned defaults without NPE"
-    ;; If defaults failed to load, the ns would not have compiled and this test
-    ;; file would not run — so reaching here means the resource loaded.
-    (is (number? (runner/calculate-cost-usd 1000))
-        "defaults resource loaded; cost calc works"))
-  (testing "missing config resource throws a clear ex-info, not an NPE"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo #"Missing config resource on classpath"
-         (config/load-config-resource "config/task-executor/does-not-exist.edn"
-                                      [:worktree-acquire-timeout-ms])))))
