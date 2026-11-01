@@ -15,4 +15,30 @@
   "Config resource is not a map: {path}"
 
   :resource/missing-keys
-  "Config resource {path} missing keys: {keys}"}}
+  "Config resource {path} missing keys: {keys}"
+
+  ;; Raised by config.file when a writer meets ~/.miniforge/config.edn (or
+  ;; another user config file) in a state it must not overwrite. Shown to
+  ;; the user by the CLI, TUI and dashboard.
+  :config-file/unreadable
+  "Config file {path} is not a single EDN map ({error}). Fix it or move it aside; miniforge will not overwrite it."
+
+  :config-file/not-a-map
+  "top-level form is a {found}"
+
+  :config-file/extra-forms
+  "found {count} top-level forms"
+
+  :config-file/locked
+  "Config file {path} is being written by another miniforge process; try again."
+
+  :config-file/write-failed
+  "Could not write config file {path}: {error}"
+
+  :config-file/not-synced
+  "Config file {path} was replaced, but flushing it to disk failed ({error}); the change may not survive a crash."
+
+  ;; Printed to stderr by config.user when a config file it reads does not
+  ;; parse, instead of silently running on defaults.
+  :config-file/ignored
+  "Warning: ignoring config file {path}, it does not parse ({error}). Running with defaults."}}

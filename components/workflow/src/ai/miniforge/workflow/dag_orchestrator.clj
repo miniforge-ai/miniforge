@@ -22,6 +22,12 @@
    to skip tasks that completed in a prior run. Emits :dag/task-completed
    events to the event stream so completed work survives crashes.
 
+   Honors the run's control state (`mf workflow pause|resume|cancel`)
+   before launching each batch: a pause holds the next batch, a cancel
+   ends the run with the rest unreached. Each task's sub-workflow gets
+   the same control state, so in-flight tasks stop at their next phase
+   boundary. An agent turn already running is not interrupted.
+
    Plan analysis/conversion (`dag-plan`), sub-workflow construction
    (`dag-sub-workflow`) and execution (`dag-task-execution`), v2
    multi-parent git-merge orchestration (`dag-merge` and its own
@@ -52,6 +58,7 @@
    program reaches `workflow` and either accepts this floor or revisits
    the with-redefs contract."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.workflow.dag-finalize :as dag-finalize]
@@ -61,11 +68,13 @@
    [ai.miniforge.workflow.dag-resilience :as resilience]
    [ai.miniforge.workflow.dag-sub-workflow :as dag-sub-workflow]
    [ai.miniforge.workflow.dag-task-execution :as dag-task-execution]
+   [ai.miniforge.workflow.messages :as messages]
+   [ai.miniforge.workflow.runner-defaults :as runner-defaults]
    [clojure.set :as set]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;--- Layer 0: Compatibility Re-exports
+;; Compatibility Re-exports
 ;; Moved to dag-plan / dag-sub-workflow / dag-task-execution / dag-merge;
 ;; re-exported here so existing `:require [... :as dag-orch]` call sites
 ;; (production and test) keep resolving without modification.
@@ -99,7 +108,7 @@
 
 (def ^{:stratum 0} propagate-failures dag-finalize/propagate-failures)
 
-;--- Layer 0: Synchronous DAG Execution
+;; Synchronous DAG Execution
 (defn ^{:stratum 0} compute-ready-tasks [tasks-map completed-ids failed-ids]
   (->> tasks-map
        (filter (fn [[task-id task]]
@@ -198,7 +207,55 @@
                  {:branch    branch
                   :pr-branch (get-in result [:data :pr-info :branch])}))))))
 
-;--- Layer 0: Workflow Integration
+;; Operator Control (pause / resume / cancel)
+(defn- ^{:stratum 0} run-control-state
+  "The run's control-state atom: the one `mf workflow pause|resume|cancel`
+   flips. `mf run plan.edn` puts it on the context; the workflow runner
+   carries it in :execution/opts. nil when the caller supplied none."
+  [context]
+  (or (:control-state context)
+      (get-in context [:execution/opts :control-state])))
+
+(defn- ^{:stratum 0} await-launch-clearance!
+  "Block while the run is paused, then answer whether it is stopped.
+   :stopped is re-read on every poll, so a cancel issued during a pause
+   ends the wait instead of waiting for a resume that may never come.
+   nil when there is no control state."
+  [control-state logger]
+  (when control-state
+    (loop [logged? false]
+      (let [{:keys [paused stopped]} @control-state]
+        (cond
+          stopped true
+          paused  (do (when-not logged?
+                        (log/info logger :dag-orchestrator :dag/paused
+                                  {:message (messages/t :status/paused)}))
+                      (Thread/sleep (long (runner-defaults/pause-poll-interval-ms)))
+                      (recur true))
+          :else   false)))))
+
+(defn- ^{:stratum 0} cancelled-dag-result
+  "Terminal result for a run the operator stopped between batches. Built by
+   `finalize-dag`, so completed work, failures, spend and opened PRs are
+   reported as usual and every task not yet launched counts in
+   :tasks-unreached. :error is the same :anomalies.dashboard/stop anomaly
+   the runner raises when it sees :stopped at a phase boundary."
+  [tasks-map completed-ids all-failed all-results sub-workflow-ids iteration logger]
+  (let [result (dag-finalize/finalize-dag tasks-map completed-ids all-failed all-results
+                                          sub-workflow-ids iteration logger)]
+    (log/warn logger :dag-orchestrator :dag/cancelled
+              {:message (messages/t :status/stopped-dashboard)
+               :data {:reason :dashboard-stop
+                      :tasks-unreached (:tasks-unreached result)}})
+    (assoc result
+           :success? false
+           :cancelled? true
+           :error (anomaly/sub-anomaly :conflict
+                                       :anomalies.dashboard/stop
+                                       (messages/t :status/stopped-control)
+                                       {:reason :dashboard-stop}))))
+
+;; Workflow Integration
 (defn ^{:stratum 0} warn-potential-monolith
   "Log a warning when a plan may be under-decomposed — single task but
    multiple components or many files."
@@ -264,7 +321,12 @@
         ;; state. Empty for brand-new runs; pre-populated during resume
         ;; from the prior run's checkpoint events when that lands.
         registry-atom (atom (dag/create-branch-registry))
-        context (assoc context :dag/branch-registry registry-atom)]
+        ;; Installed on context under one key so every task's sub-workflow
+        ;; shares it (`task-sub-opts`) and honors pause/cancel at its own
+        ;; phase boundaries.
+        control-state (run-control-state context)
+        context (cond-> (assoc context :dag/branch-registry registry-atom)
+                  control-state (assoc :control-state control-state))]
 
     (when (seq pre-completed)
       (log/info logger :dag-orchestrator :dag/resuming
@@ -278,8 +340,22 @@
            current-backend (get context :current-backend)
            iteration 0]
       (let [all-failed (dag-finalize/propagate-failures tasks-map failed-ids)
-            ready-tasks (compute-ready-tasks tasks-map completed-ids all-failed)]
+            ready-tasks (compute-ready-tasks tasks-map completed-ids all-failed)
+            ;; Operator control. A pause holds the next batch, so it is
+            ;; waited out only when a batch is ready to launch. A cancel
+            ;; ends the run whenever it leaves tasks undone, including when
+            ;; an in-flight sub-workflow stopped on it and its failure took
+            ;; every remaining task down with it (nothing left ready).
+            stopped? (if (seq ready-tasks)
+                       (await-launch-clearance! control-state logger)
+                       (some-> control-state deref :stopped))
+            cut-short? (and stopped? (not-every? completed-ids (keys tasks-map)))]
         (cond
+          ;; Cancelled — launch nothing more; remaining tasks are unreached
+          cut-short?
+          (cancelled-dag-result tasks-map completed-ids all-failed all-results
+                                sub-workflow-ids iteration logger)
+
           ;; No more work — finalize
           (empty? ready-tasks)
           (dag-finalize/finalize-dag tasks-map completed-ids all-failed all-results
@@ -315,7 +391,21 @@
             ;; the run's actual state.
             (emit-failed-checkpoints! other-failed-ids results event-stream workflow-id)
 
-            (if (seq rate-limited-ids)
+            (cond
+              ;; Cancelled while this batch ran: rate-limit recovery would
+              ;; only delay the cancel (a cooldown sleep) or mask it (a
+              ;; :paused? checkpoint that invites auto-resume). Leave the
+              ;; rate-limited tasks undone, keep their spend, and let the
+              ;; next iteration return the cancelled result.
+              (and (seq rate-limited-ids) (some-> control-state deref :stopped))
+              (recur new-completed
+                     new-failed
+                     (merge all-results results)
+                     (into sub-workflow-ids batch-sub-ids)
+                     current-backend
+                     (inc iteration))
+
+              (seq rate-limited-ids)
               (let [decision (dag-rate-limit/handle-rate-limit-in-batch
                               context rate-limited-ids new-completed new-failed
                               all-results results event-stream workflow-id logger)]
@@ -327,6 +417,8 @@
                          (:new-backend decision)
                          (inc iteration))
                   (:result decision)))
+
+              :else
               (recur new-completed
                      (into failed-ids failed)
                      (merge all-results results)

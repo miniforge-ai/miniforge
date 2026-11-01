@@ -19,6 +19,7 @@
   "Persistent registry of known vendor bug workarounds.
    Storage: ~/.miniforge/known_workarounds.edn"
   (:require
+   [ai.miniforge.config.interface :as config]
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
@@ -28,11 +29,9 @@
 (defn ^{:stratum 0} workaround-registry-path
   "Get path to workaround registry file.
 
-   Returns: String path to ~/.miniforge/known_workarounds.edn"
+   Returns: String path to <miniforge-home>/known_workarounds.edn"
   []
-  (let [home (System/getProperty "user.home")
-        miniforge-dir (io/file home ".miniforge")]
-    (.getPath (io/file miniforge-dir "known_workarounds.edn"))))
+  (.getPath (io/file (config/miniforge-home) "known_workarounds.edn")))
 
 (defn ^{:stratum 0} ensure-directory-exists
   "Ensure parent directory exists for a file path.

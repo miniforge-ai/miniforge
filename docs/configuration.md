@@ -9,68 +9,123 @@
 > This document covers configuration for the **Miniforge** SDLC product (CLI/TUI). MiniForge Core exposes configuration
 seams that products customize via their own `app.edn`; the settings below are Miniforge-specific defaults and overrides.
 
-Miniforge uses [Aero](https://github.com/juxt/aero) for centralized configuration with environment variable overrides.
+## Where configuration comes from
 
-## Configuration File
+1. Built-in defaults shipped on the classpath.
+2. The user config file, `~/.miniforge/config.edn` (`$MINIFORGE_HOME/config.edn`
+   when `MINIFORGE_HOME` is set).
+3. A repository's `.miniforge/config.edn`, for `:policy-packs` overrides.
+4. The environment variables below, which override all of the above.
 
-The main configuration file is located at `bases/cli/resources/config.edn`.
+A spec's `:spec/llm-backend` overrides the backend for that run.
 
-## Configuration Structure
+Manage the user config file with `mf config`:
 
-```clojure
-{:llm
- {:backend #or [#env MINIFORGE_LLM_BACKEND :claude]
-  :timeout-ms #or [#env MINIFORGE_LLM_TIMEOUT 300000]
-  :line-timeout-ms #or [#env MINIFORGE_LLM_LINE_TIMEOUT 60000]
-  :max-tokens #or [#env MINIFORGE_LLM_MAX_TOKENS 4000]}
-
- :workflow
- {:max-iterations #or [#env MINIFORGE_MAX_ITERATIONS 50]
-  :max-tokens #or [#env MINIFORGE_MAX_TOKENS 150000]
-  :failure-strategy #or [#env MINIFORGE_FAILURE_STRATEGY :retry]}
-
- :artifacts
- {:dir #or [#env MINIFORGE_ARTIFACTS_DIR "~/.miniforge/artifacts"]}
-
- :meta-loop
- {:enabled #or [#env MINIFORGE_META_LOOP_ENABLED true]
-  :max-convergence-iterations #or [#env MINIFORGE_META_MAX_ITERATIONS 10]
-  :convergence-threshold #or [#env MINIFORGE_META_THRESHOLD 0.95]}}
+```bash
+mf config list              # current settings
+mf config get llm.backend
+mf config set <key> <value> # e.g. key llm.backend
+mf config backend claude    # sets llm.backend after checking the backend is installed
+mf config backends          # backends and whether each is available
+mf config init | edit | reset | validate
 ```
 
-## Environment Variable Overrides
+## Environment variables
 
-All configuration values can be overridden with environment variables using Aero's `#env` tag syntax:
+- `MINIFORGE_HOME` - Directory for the user config file and artifacts
+  (default: `~/.miniforge`). Checkpoints and worktrees go where
+  `:workflow :checkpoint-root` and `:workflow/worktree-root` in the config
+  say, which default to `~/.miniforge/checkpoints` and `~/.miniforge/worktrees`.
+- `MINIFORGE_LLM_BACKEND` - LLM backend for the run (default: `opencode`). Run
+  `mf config backends` for the list.
+- `MINIFORGE_LLM_MODEL` - Model for every role; sets `llm.model`. See [Models](#models).
+- `MINIFORGE_AGENT_THINKING_MODEL` - Model for the planner and architect roles.
+- `MINIFORGE_AGENT_EXECUTION_MODEL` - Model for every other role.
+- `MINIFORGE_GIT_TOKEN`, `GH_TOKEN` - Token the release phase uses to open the
+  PR, checked in that order before `gh auth token`.
+- `MINIFORGE_RUNTIME` - Container runtime; see [Container runtime](#container-runtime).
+- `MINIFORGE_NETWORK_MONITOR` - Set to `off` (or `false`, `0`, `no`) to turn
+  off the network-drop monitor. During a streaming CLI call (`:claude`,
+  `:codex`) it probes the provider every 10 s and stops the call after 3
+  failed probes in a row. The probe uses the CLI's configured endpoint.
+  It checks `ANTHROPIC_BASE_URL`, Bedrock and Vertex settings, or `OPENAI_BASE_URL`; otherwise it uses the provider's
+  API host.
+  It follows `HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY` as the agent CLI does.
 
-### LLM Configuration
+## Models
 
-- `MINIFORGE_LLM_BACKEND` - LLM backend to use (default: `:opencode`)
-  - Values: `:opencode`, `:claude`, `:codex`, `:cursor`, `:ollama`, etc.
-- `MINIFORGE_LLM_TIMEOUT` - Total timeout for LLM calls in milliseconds (default: `300000` = 5 minutes)
-- `MINIFORGE_LLM_LINE_TIMEOUT` - Per-line timeout for streaming in milliseconds (default: `60000` = 1 minute)
-- `MINIFORGE_LLM_MAX_TOKENS` - Maximum tokens per LLM request (default: `4000`)
+Every role runs on the run's backend: `llm.backend`, unless the run
+chooses another (the spec's `:spec/llm-backend`, for one). Choosing a
+model never moves a role to another backend.
 
-### Workflow Configuration
+The planner and architect use the thinking tier; every other role uses
+the execution tier. A role's model is the first of these that is set:
 
-- `MINIFORGE_MAX_ITERATIONS` - Maximum workflow iterations (default: `50`)
-- `MINIFORGE_MAX_TOKENS` - Maximum total tokens for workflow (default: `150000`)
-- `MINIFORGE_FAILURE_STRATEGY` - How to handle failures (default: `:retry`)
-  - Values: `:retry`, `:fail-fast`, `:continue`
+1. The tier's own setting: `[:agents :default-models :thinking]` or
+   `[:agents :default-models :execution]` (`MINIFORGE_AGENT_THINKING_MODEL`,
+   `MINIFORGE_AGENT_EXECUTION_MODEL`).
+2. `llm.model` (`MINIFORGE_LLM_MODEL`), for both tiers.
+3. Miniforge defaults to Claude Opus 4.6 for thinking and Claude Sonnet 4.6 for execution.
+   This applies to `opencode` (`anthropic/...` ids), `claude`, and `anthropic-api`.
+4. None: the backend's own default. The `codex` CLI uses its built-in
+   default model. Miniforge runs it with `--ignore-user-config`, ignoring the model in `~/.codex/config.toml`.
+   Set `llm.model` instead.
+   The `cursor` CLI uses its own default and `ollama` uses `codellama`. The
+   `openai-api`, `gemini-api`, `openrouter` and `openai-compat` backends
+   need a model, so set `llm.model` for them.
 
-### Artifact Configuration
+The shipped defaults set no model. An environment variable overrides the
+config file key it maps to. A blank setting counts as unset, and
+`mf config set llm.model nil` clears one. `claude` and `anthropic-api`
+take an `anthropic/...` id without the prefix.
 
-- `MINIFORGE_ARTIFACTS_DIR` - Directory for workflow artifacts (default: `~/.miniforge/artifacts`)
+A setting naming a catalog model the backend does not serve is skipped.
+One warning on stderr names the key, model, and backend; the next source applies. Examples are `gpt-5.4` on `claude`, or
+a
+Claude id on `codex` or `gemini-api`. `opencode`, `openrouter`,
+`openai-compat` and `cursor` route to many providers and take any model.
+A model the catalog does not know is used as given, since it may be newer
+than the catalog.
 
-### Meta-Loop Configuration
+A config file that an older `mf config init`, `set`, `backend` or `edit`
+created may carry `:llm {:model "anthropic/claude-sonnet-4-5"}`. On
+`opencode`, `claude` and `anthropic-api` it applies to every role; on
+`codex`, `openai-api`, `gemini-api` and `ollama` it is skipped as above.
+Remove it to get the defaults.
 
-- `MINIFORGE_META_LOOP_ENABLED` - Enable meta-loop self-improvement (default: `true`)
-- `MINIFORGE_META_MAX_ITERATIONS` - Maximum iterations for convergence (default: `10`)
-- `MINIFORGE_META_THRESHOLD` - Convergence threshold (default: `0.95`)
+`mf config set` stores `llm.model` and the two tier keys as strings, so a
+model id needs no quoting.
+
+```bash
+mf config backend codex                # roles use codex's built-in model
+mf config set llm.model gpt-5.4        # every role uses "gpt-5.4"
+MINIFORGE_AGENT_THINKING_MODEL=gpt-5.4-pro mf run spec.edn  # planner only
+```
+
+## Timeouts and budgets
+
+No environment variable or `config.edn` key sets LLM timeouts, token budgets or
+iteration limits for a run. Earlier versions of this page listed
+`MINIFORGE_LLM_TIMEOUT`, `MINIFORGE_LLM_LINE_TIMEOUT`, `MINIFORGE_LLM_MAX_TOKENS`,
+`MINIFORGE_MAX_ITERATIONS`, `MINIFORGE_MAX_TOKENS`, `MINIFORGE_FAILURE_STRATEGY`,
+`MINIFORGE_ARTIFACTS_DIR` and `MINIFORGE_META_*`; nothing read them, and
+miniforge no longer accepts them.
+
+The limits that do apply live in shipped resources:
+
+1. LLM call ceilings: `components/llm/resources/llm/client-defaults.edn`
+   (`:stream` and `:http`), overridden per role by the `:prompt/progress-monitor`
+   block in `components/agent/resources/prompts/*.edn`.
+2. Phase retries: `:budget {:iterations N}` on a phase in the workflow
+   definition.
 
 ## Container runtime
 
 Per [N11-delta](../specs/normative/N11-delta-runtime-adapter.md),
-miniforge runs each task inside an OCI container. Two layers configure
+miniforge runs each task inside an OCI container in governed mode
+(`--execution-mode governed`). The default, local mode, runs each task
+in a git worktree on the host, with the operator's privileges and no
+isolation. Two layers configure
 the runtime today; the third (file config) is a documented follow-up.
 
 ### Today: env var + descriptor config map
@@ -122,8 +177,7 @@ Per N11-delta §2.1 the canonical config block lives under
 
 The selector accepts the flat map today; the loader that strips the
 `:miniforge/runtime` namespace and threads it into the selector lands
-in a follow-up alongside the broader Aero file-config integration.
-Until then, use `MINIFORGE_RUNTIME=...`.
+in a follow-up. Until then, use `MINIFORGE_RUNTIME=...`.
 
 ### Inspecting the resolved runtime
 
@@ -132,121 +186,12 @@ mf runtime info       # descriptor as data (kind, exec, version, capabilities)
 mf doctor             # full system check, includes runtime block
 ```
 
-## Usage Examples
-
-### Using Default Configuration
+## Usage examples
 
 ```bash
-# Run workflow with default config
-mf run examples/workflows/implement-feature.edn
-```
-
-### Override LLM Backend
-
-```bash
-# Use Codex CLI instead of OpenCode
+# Use Codex CLI instead of OpenCode for one run
 MINIFORGE_LLM_BACKEND=codex mf run examples/workflows/implement-feature.edn
+
+# Keep config and artifacts for a sandbox run apart
+MINIFORGE_HOME=/tmp/mf-sandbox mf run examples/workflows/implement-feature.edn
 ```
-
-### Increase Timeout for Long Operations
-
-```bash
-# Set 10-minute timeout for complex workflows
-MINIFORGE_LLM_TIMEOUT=600000 mf run examples/workflows/complex-refactor.edn
-```
-
-### Meta-Loop Convergence Tuning
-
-```bash
-# Run meta-loop with more iterations and higher threshold
-MINIFORGE_META_MAX_ITERATIONS=20 \
-MINIFORGE_META_THRESHOLD=0.98 \
-mf run examples/workflows/meta-loop-self-improvement.edn
-```
-
-### Multiple Overrides
-
-```bash
-# Combine multiple environment overrides
-MINIFORGE_LLM_BACKEND=anthropic \
-MINIFORGE_MAX_ITERATIONS=100 \
-MINIFORGE_ARTIFACTS_DIR=/tmp/artifacts \
-mf run examples/workflows/implement-feature.edn
-```
-
-## Priority Order
-
-Configuration values are determined in this priority order:
-
-1. **Workflow override** - Specified in workflow spec (`:workflow/config` or `:spec/raw-data`)
-2. **Environment variable** - Set via shell environment
-3. **Config file** - Default value in `config.edn`
-4. **Hardcoded default** - Fallback in code (e.g., `:opencode` for backend)
-
-Example:
-
-```clojure
-;; In workflow spec file
-{:workflow/config {:llm-backend :codex}  ; Highest priority
- ...}
-```
-
-## Programmatic Access
-
-Configuration is loaded automatically by the workflow runner. To access config in custom code:
-
-```clojure
-(require '[ai.miniforge.cli.config :as config])
-
-;; Load configuration
-(def cfg (config/load-config))
-
-;; Get specific values with defaults
-(config/get-llm-backend cfg nil)        ; Get backend with no override
-(config/get-llm-timeout cfg)            ; Get timeout
-(config/get-llm-line-timeout cfg)       ; Get line timeout
-
-;; With workflow override
-(config/get-llm-backend cfg :codex)     ; Override with :codex
-```
-
-## Adding New Configuration
-
-To add new configuration values:
-
-1. Add to `bases/cli/resources/config.edn`:
-
-   ```clojure
-   {:my-section
-    {:my-value #or [#env MY_ENV_VAR "default"]}}
-   ```
-
-2. Add helper function in `bases/cli/src/ai/miniforge/cli/config.clj`:
-
-   ```clojure
-   (defn get-my-value
-     "Get my-value from config."
-     [config]
-     (get-in config [:my-section :my-value] "default"))
-   ```
-
-3. Use in code:
-
-   ```clojure
-   (def cfg (config/load-config))
-   (def my-val (config/get-my-value cfg))
-   ```
-
-## Benefits
-
-- **Centralized**: All configuration in one place
-- **Environment-aware**: Easy override for dev/test/prod
-- **Meta-loop compatible**: Agent can tune settings via env vars during convergence
-- **Type-safe**: Aero validates configuration structure
-- **Babashka compatible**: Works in both JVM and Babashka runtimes
-
-## See Also
-
-- [Aero Documentation](https://github.com/juxt/aero)
-- [Workflow Configuration](./workflows.md)
-- [Meta-Loop Architecture](./meta-loop.md)

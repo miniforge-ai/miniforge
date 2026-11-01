@@ -21,37 +21,10 @@
   (:require [ai.miniforge.response.interface :as response]
             [cheshire.core :as json]
             [clojure.java.io :as io]
-            [clojure.string]))
+            [clojure.string])
+  (:import [java.nio.file Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defmulti ^{:stratum 0} write-records
-  "Write records to the output directory in the given format.
-   Returns the filename of the written records file."
-  (fn [format _output-dir _run-id _records] format))
-
-(defmethod ^{:stratum 0} write-records :edn
-  [_ output-dir run-id records]
-  (let [filename "records.edn"
-        path (str output-dir "/" run-id "/" filename)]
-    (io/make-parents path)
-    (spit path (pr-str (vec records)))
-    filename))
-
-(defmethod ^{:stratum 0} write-records :json
-  [_ output-dir run-id records]
-  (let [filename "records.json"
-        path (str output-dir "/" run-id "/" filename)]
-    (io/make-parents path)
-    (with-open [wtr (io/writer path)]
-      (json/generate-stream records wtr))
-    filename))
-
-(defmethod ^{:stratum 0} write-records :default
-  [format _ _ _]
-  (response/throw-anomaly! :anomalies/unsupported
-                           (str "Unsupported output format: " format)
-                           {:format format}))
 
 (defn- ^{:stratum 0} sanitize-name
   "Sanitize a dataset name for use in filenames."
@@ -60,26 +33,98 @@
       (clojure.string/replace #"[^a-zA-Z0-9_-]" "_")
       (clojure.string/lower-case)))
 
-(defn ^{:stratum 0} write-manifest
+(defn- ^{:stratum 0} write-atomically!
+  "Create an empty sibling temp file, optionally narrow its permissions
+   to match the existing target's, call `(write-fn tmp)` to fill it,
+   then rename it over `path` atomically. The write therefore occurs
+   under the target's restricted mode rather than the process umask,
+   so the content is never transiently readable by other users. On
+   non-POSIX filesystems the permission step is skipped silently. On
+   failure the temp file is removed and the original exception rethrown."
+  [path write-fn]
+  (let [target (io/file path)
+        tmp    (io/file (.getParentFile target)
+                        (str "." (random-uuid) ".tmp"))]
+    (try
+      (.createNewFile tmp)
+      (try
+        (Files/setPosixFilePermissions
+         (.toPath tmp)
+         (Files/getPosixFilePermissions
+          (.toPath target) (make-array java.nio.file.LinkOption 0)))
+        (catch java.nio.file.NoSuchFileException _)
+        (catch UnsupportedOperationException _))
+      (write-fn tmp)
+      (Files/move (.toPath tmp) (.toPath target)
+                  (into-array StandardCopyOption
+                              [StandardCopyOption/ATOMIC_MOVE
+                               StandardCopyOption/REPLACE_EXISTING]))
+      (catch Throwable e
+        (try (Files/deleteIfExists (.toPath tmp))
+             (catch Throwable c (.addSuppressed e c)))
+        (throw e)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} write-edn-atomically!
+  "Write the string `content` to `path` atomically."
+  [path content]
+  (write-atomically! path #(spit % content :encoding "UTF-8")))
+
+(defn- ^{:stratum 1} write-json-atomically!
+  "Stream `data` as JSON to `path` atomically."
+  [path data]
+  (write-atomically! path
+                     (fn [tmp]
+                       (with-open [wtr (io/writer tmp :encoding "UTF-8")]
+                         (json/generate-stream data wtr)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defmulti ^{:stratum 2} write-records
+  "Write records to the output directory in the given format.
+   Returns the filename of the written records file."
+  (fn [format _output-dir _run-id _records] format))
+
+(defmethod ^{:stratum 2} write-records :edn
+  [_ output-dir run-id records]
+  (let [filename "records.edn"
+        path (str output-dir "/" run-id "/" filename)]
+    (io/make-parents path)
+    (write-edn-atomically! path (pr-str (vec records)))
+    filename))
+
+(defmethod ^{:stratum 2} write-records :json
+  [_ output-dir run-id records]
+  (let [filename "records.json"
+        path (str output-dir "/" run-id "/" filename)]
+    (io/make-parents path)
+    (write-json-atomically! path records)
+    filename))
+
+(defmethod ^{:stratum 2} write-records :default
+  [format _ _ _]
+  (response/throw-anomaly! :anomalies/unsupported
+                           (str "Unsupported output format: " format)
+                           {:format format}))
+
+(defn ^{:stratum 2} write-manifest
   "Write the manifest EDN file for a pipeline run."
   [output-dir run-id manifest]
   (let [path (str output-dir "/" run-id "/manifest.edn")]
     (io/make-parents path)
-    (spit path (pr-str manifest))
+    (write-edn-atomically! path (pr-str manifest))
     path))
 
-(defn ^{:stratum 0} write-json-schema
+(defn ^{:stratum 2} write-json-schema
   "Write the manifest JSON Schema for non-Clojure consumers."
   [output-dir run-id json-schema-map]
   (let [path (str output-dir "/" run-id "/manifest.schema.json")]
     (io/make-parents path)
-    (with-open [wtr (io/writer path)]
-      (json/generate-stream json-schema-map wtr))
+    (write-json-atomically! path json-schema-map)
     path))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} write-dataset-records
+(defn ^{:stratum 2} write-dataset-records
   "Write records grouped by dataset name into separate files.
    Returns a vector of {:dataset name :filename str :count int}."
   [format output-dir run-id datasets]
@@ -90,9 +135,8 @@
                 path      (str output-dir "/" run-id "/" filename)]
             (io/make-parents path)
             (case format
-              :edn  (spit path (pr-str (vec records)))
-              :json (with-open [wtr (io/writer path)]
-                      (json/generate-stream records wtr)))
+              :edn  (write-edn-atomically! path (pr-str (vec records)))
+              :json (write-json-atomically! path records))
             {:dataset  dataset-name
              :filename filename
              :count    (count records)}))

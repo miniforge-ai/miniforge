@@ -22,6 +22,8 @@
    [babashka.fs :as fs]
    [babashka.process :as process]
    [cheshire.core :as json]
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.config.interface.file :as config-file]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.messages :as messages]
@@ -38,12 +40,15 @@
       (merge-with merge default-config (edn/read-string (slurp config-path)))
       default-config)))
 
-(defn ^{:stratum 0} save-config
-  "Save configuration to file."
-  [config path default-config-path]
-  (let [config-path (or path default-config-path)]
-    (fs/create-dirs (fs/parent config-path))
-    (spit config-path (pr-str config))))
+(defn ^{:stratum 0} update-repos!
+  "Apply `f` to the fleet repo list under the shared config lock; prints the
+   anomaly and exits 1 when the config file cannot be updated."
+  [path f]
+  (let [result (config-file/update-config! path #(update-in % [:fleet :repos] (fnil f [])))]
+    (when (anomaly/anomaly? result)
+      (display/print-error (:anomaly/message result))
+      (shared/exit! 1))
+    result))
 
 ;; Fleet commands
 (defn ^{:stratum 0} fleet-start-cmd
@@ -133,26 +138,20 @@
       :fleet/failed           (get-in state [:workflows :failed] 0)})))
 
 (defn ^{:stratum 1} fleet-add-cmd
-  [opts default-config-path default-config]
+  [opts default-config-path _default-config]
   (let [{:keys [repo config]} opts]
     (if-not repo
       (display/print-error (messages/t :fleet/add-usage {:command (app-config/command-string "fleet add <repo>")}))
-      (let [cfg (load-config config default-config-path default-config)
-            repos (get-in cfg [:fleet :repos] [])
-            new-cfg (assoc-in cfg [:fleet :repos] (conj repos repo))]
-        (save-config new-cfg config default-config-path)
-        (display/print-success (messages/t :fleet/added {:repo repo}))))))
+      (do (update-repos! (or config default-config-path) #(conj % repo))
+          (display/print-success (messages/t :fleet/added {:repo repo}))))))
 
 (defn ^{:stratum 1} fleet-remove-cmd
-  [opts default-config-path default-config]
+  [opts default-config-path _default-config]
   (let [{:keys [repo config]} opts]
     (if-not repo
       (display/print-error (messages/t :fleet/remove-usage {:command (app-config/command-string "fleet remove <repo>")}))
-      (let [cfg (load-config config default-config-path default-config)
-            repos (get-in cfg [:fleet :repos] [])
-            new-cfg (assoc-in cfg [:fleet :repos] (vec (remove #{repo} repos)))]
-        (save-config new-cfg config default-config-path)
-        (display/print-success (messages/t :fleet/removed {:repo repo}))))))
+      (do (update-repos! (or config default-config-path) #(vec (remove #{repo} %)))
+          (display/print-success (messages/t :fleet/removed {:repo repo}))))))
 
 (defn- ^{:stratum 1} display-pr-row
   "Print a single PR row with risk annotation."

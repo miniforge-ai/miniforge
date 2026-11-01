@@ -35,11 +35,28 @@
   (:require
    [ai.miniforge.event-stream.sinks :as sinks]
    [cheshire.core :as json]
-   [clojure.java.io :as io]))
+   [clojure.java.io :as io]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Transit-JSON prefix stripping
+(defn ^{:stratum 0} event-order-key
+  "An event's place in creation order: its :event/timestamp in epoch ms,
+   then its :event/sequence-number. File names order events only to their
+   recorded time (a legacy name to the second), so a caller picking the
+   newest event sorts by this. Takes the timestamp as this reader returns
+   it (an RFC-3339 string) or as a live event carries it (a Date or an
+   Instant); an absent or unparseable one sorts first."
+  [event]
+  (let [ts (:event/timestamp event)]
+    [(cond
+       (inst? ts)   (inst-ms ts)
+       (string? ts) (try (.toEpochMilli (java.time.Instant/parse ts))
+                         (catch Exception _ 0))
+       :else        0)
+     (get event :event/sequence-number 0)]))
+
 (defn ^{:stratum 0} strip-transit-prefix
   "Turn the raw transit-JSON parse back into idiomatic Clojure data.
 
@@ -74,6 +91,13 @@
     (subs x 2)
 
     :else x))
+
+(defn- ^{:stratum 0} parse-json-file
+  "Parse file `f` as JSON with string keys, decoding it as UTF-8 — the
+   encoding the file sink writes. Throws when `f` cannot be read or
+   parsed."
+  [f]
+  (json/parse-string (slurp (io/file f) :encoding "UTF-8") false))
 
 (defn ^{:stratum 0} workflow-events-dir
   "Resolve the on-disk events directory for `workflow-id` under
@@ -110,38 +134,43 @@
    Returns the parsed map, or nil when the file cannot be read or
    parsed. Callers that must be LOUD about malformed files (the
    operator-event consumer's append-only contract) branch on the nil
-   themselves — unlike [[read-workflow-events]], nothing is dropped
-   silently without the caller seeing it."
+   themselves."
   [f]
-  (try
-    (strip-transit-prefix
-     (json/parse-string (slurp (io/file f) :encoding "UTF-8") false))
+  (try+
+    (strip-transit-prefix (parse-json-file f))
     (catch Exception _e nil)))
 
 ;; Directory reader
 (defn ^{:stratum 1} read-workflow-events
   "Read every `.json` event file under a workflow directory, sorted by
-   filename (which is timestamp-prefixed). Parse each as transit-JSON
-   and strip the transit prefixes.
+   filename (which is timestamp-prefixed). Parse each as UTF-8
+   transit-JSON and strip the transit prefixes.
 
    Arguments:
    - `dir` — java.io.File or String path to the workflow events dir
      (e.g. `~/.miniforge/events/<workflow-id>/`)
 
    Returns a vector of parsed event maps, or nil if the directory
-   does not exist. Files that fail to parse are silently dropped —
-   one corrupt event file shouldn't kill a whole replay."
+   does not exist. A file that cannot be read or parsed is skipped —
+   one corrupt event file shouldn't kill a whole replay — but not
+   silently: the vector's metadata carries
+   `:event-stream/unreadable-files`, the paths of the skipped files in
+   filename order (empty when none was skipped), so a caller can tell a
+   run with a lost `:workflow/completed` from one still in progress."
   [dir]
   (let [^java.io.File dir (io/file dir)]
     (when (.exists dir)
-      (->> (.listFiles dir)
-           (filter #(.endsWith (.getName ^java.io.File %) ".json"))
-           (sort-by #(.getName ^java.io.File %))
-           (keep (fn [^java.io.File f]
-                   (try
-                     (strip-transit-prefix (json/parse-string (slurp f) false))
-                     (catch Exception _e nil))))
-           vec))))
+      (let [files (->> (.listFiles dir)
+                       (filter #(.endsWith (.getName ^java.io.File %) ".json"))
+                       (sort-by #(.getName ^java.io.File %)))
+            parsed (mapv (fn [^java.io.File f]
+                           [(str f) (try+
+                                      (strip-transit-prefix (parse-json-file f))
+                                      (catch Exception _e nil))])
+                         files)]
+        (with-meta (into [] (keep second) parsed)
+          {:event-stream/unreadable-files
+           (into [] (comp (filter (comp nil? second)) (map first)) parsed)})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -155,7 +184,9 @@
    - `workflow-id` — UUID, keyword, or string
 
    Returns a vector of parsed event maps, or nil if the workflow
-   directory does not exist in any of the three layouts."
+   directory does not exist in any of the three layouts. Files that
+   could not be read are listed under `:event-stream/unreadable-files`
+   in the vector's metadata (see `read-workflow-events`)."
   [base-dir workflow-id]
   (when-let [dir (workflow-events-dir base-dir workflow-id)]
     (read-workflow-events dir)))

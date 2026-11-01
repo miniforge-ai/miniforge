@@ -2,7 +2,9 @@
  {;; Implementation phase defaults.
   :implement
   {:agent :implementer
-   :gates [:syntax :format :lint :codex-consultation :stale-references]
+   ;; :no-secrets blocks a credential the implementer writes into a
+   ;; file before it is committed and pushed.
+   :gates [:syntax :format :lint :no-secrets :codex-consultation :stale-references]
    :budget {:tokens 30000
             :iterations 8
             :time-seconds 600}

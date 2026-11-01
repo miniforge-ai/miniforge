@@ -26,7 +26,8 @@
    Lives in the `phase` core component so any workflow runtime that
    loads the phase registry gets `:done` for free, without depending on
    `phase-software-factory`."
-  (:require [ai.miniforge.phase.registry :as registry]))
+  (:require [ai.miniforge.phase.interface.gate :as gate]
+            [ai.miniforge.phase.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -40,6 +41,14 @@
 
 ;; Interceptor
 (defn- ^{:stratum 0} preserve-context [ctx _error] ctx)
+
+(defn- ^{:stratum 0} leave-done
+  "A terminal phase its gates failed does not complete the run."
+  [ctx]
+  (cond-> ctx
+    (gate/gate-failed? (:phase ctx))
+    (-> (assoc-in [:phase :status] :failed)
+        (assoc-in [:execution :status] :failed))))
 
 (defn- ^{:stratum 0} completed-phase [config start end]
   (let [duration (max 0 (- end start))
@@ -69,7 +78,7 @@
     {:name ::done
      :config merged
      :enter (partial enter-done merged)
-     :leave identity
+     :leave leave-done
      :error preserve-context}))
 
 ;; Register defaults on load

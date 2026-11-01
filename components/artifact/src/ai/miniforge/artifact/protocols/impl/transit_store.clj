@@ -19,18 +19,51 @@
   "Implementation functions for TransitArtifactStore protocol.
 
    These functions implement the ArtifactStore protocol for the Transit-based store.
-   They are used by the TransitArtifactStore record."
+   They are used by the TransitArtifactStore record.
+
+   The per-artifact files are the source of truth; the index is a
+   projection of them. save and link update the in-memory cache and index
+   at once and queue the change. The store's writer agent applies queued
+   changes in one critical section under the index lock (a per-directory
+   monitor in this JVM plus an OS file lock across processes): it
+   re-reads the artifact files, applies each change, writes the files,
+   sets the on-disk index entries of exactly those ids to their
+   projection, and writes the index; an unreadable on-disk index is
+   first quarantined and rebuilt from the files (quarantine-index!).
+   close-store waits for the writer
+   with a bounded timeout. Every file is written to a sibling temp file
+   and renamed over the target, so no reader sees a partial file.
+
+   Plain `try` throughout: the artifact component has no slingshot
+   dependency (rule 211, exemption 1)."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.artifact.messages :as messages]
    [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [cognitect.transit :as transit]
-   [ai.miniforge.artifact.core :as core]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log])
+  (:import
+   [java.io File]
+   [java.nio.channels FileChannel]
+   [java.nio.file CopyOption Files LinkOption OpenOption StandardCopyOption StandardOpenOption]
+   [java.nio.file.attribute FileAttribute PosixFilePermissions]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} default-close-timeout-ms
+  "Upper bound close-store waits for queued disk writes, so a stuck write
+   (e.g. another process holding the index lock) cannot hang CLI exit."
+  10000)
+
+(defonce ^{:stratum 0 :private true} index-monitors
+  ;; Canonical artifacts-dir path -> monitor object. The OS file lock
+  ;; serializes processes, but one JVM may hold only one lock per file:
+  ;; a second store on the same directory would get
+  ;; OverlappingFileLockException instead of waiting.
+  (atom {}))
 
 ;; Pure functions for path handling
 (defn ^{:stratum 0} artifacts-dir
@@ -52,19 +85,51 @@
   [artifacts-dir]
   (str artifacts-dir "/index.transit.json"))
 
+(defn ^{:stratum 0} lock-file-path
+  "Get the path to the file locked while the index is rewritten.
+   Separate from the index itself, which is replaced by rename."
+  [artifacts-dir]
+  (str artifacts-dir "/index.lock"))
+
 (defn ^{:stratum 0} ensure-artifacts-dir!
   "Ensure the artifacts directory exists."
   [dir]
   (.mkdirs (io/file dir))
   dir)
 
-;; Transit serialization
 (defn ^{:stratum 0} write-transit
-  "Write data to a file in Transit JSON format."
+  "Write data to a file in Transit JSON format.
+   Writes a sibling temp file, then renames it over the target, so the
+   file holds either its old content or the new content, never a
+   truncated mix. When the target exists on a POSIX file system, the
+   temp file is created owner-only (0600), written, and given the
+   target's permissions just before the rename: a private file is never
+   replaced by a more readable one, and a read-only target (e.g. 0400)
+   does not block the write. New files get the default mode."
   [file-path data]
-  (with-open [out (io/output-stream file-path)]
-    (let [writer (transit/writer out :json)]
-      (transit/write writer data))))
+  (let [target (io/file file-path)
+        tmp (io/file (.getParentFile target)
+                     (str (.getName target) "." (random-uuid) ".tmp"))
+        mode (when (and (.exists target)
+                        (contains? (.supportedFileAttributeViews (.getFileSystem (.toPath target))) "posix"))
+               (Files/getPosixFilePermissions (.toPath target) (make-array LinkOption 0)))]
+    (try
+      (Files/createFile (.toPath tmp)
+                        (if mode
+                          (into-array FileAttribute [(PosixFilePermissions/asFileAttribute
+                                                      (PosixFilePermissions/fromString "rw-------"))])
+                          (make-array FileAttribute 0)))
+      (with-open [out (io/output-stream tmp)]
+        (transit/write (transit/writer out :json) data))
+      (when mode
+        (Files/setPosixFilePermissions (.toPath tmp) mode))
+      (Files/move (.toPath tmp) (.toPath target)
+                  (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                          StandardCopyOption/REPLACE_EXISTING]))
+      (finally
+        ;; Gone after a successful move; on failure, don't leave a
+        ;; uniquely named orphan behind for every attempt.
+        (Files/deleteIfExists (.toPath tmp))))))
 
 (defn ^{:stratum 0} read-transit
   "Read data from a Transit JSON file.
@@ -86,12 +151,22 @@
                   :artifact/children (:artifact/children artifact)}]
     (assoc index id metadata)))
 
-(defn ^{:stratum 0} update-index-links
-  "Update parent-child links in the index."
-  [index parent-id child-id]
-  (-> index
-      (update-in [parent-id :artifact/children] (fnil conj []) child-id)
-      (update-in [child-id :artifact/parents] (fnil conj []) parent-id)))
+(defn- ^{:stratum 0} carry-links
+  "Return `entry` (an artifact or an index entry) with the parents and
+   children of `previous` kept in front of its own. Links are
+   append-only: link-artifacts or a save that lists them adds them, and
+   no later save removes them. Every other field comes from `entry`."
+  [previous entry]
+  (reduce (fn [acc k]
+            (let [links (distinct (concat (get previous k) (get acc k)))]
+              (if (seq links) (assoc acc k (vec links)) acc)))
+          entry
+          [:artifact/parents :artifact/children]))
+
+(defn- ^{:stratum 0} add-link
+  "Add `id` to the `k` links of `artifact` unless it is already there."
+  [artifact k id]
+  (update artifact k (fn [links] (if (some #{id} links) (vec links) (conj (vec links) id)))))
 
 ;; Protocol implementations
 (defn ^{:stratum 0} log-artifact-saved
@@ -119,14 +194,6 @@
   [record id]
   (p/load-artifact record id))
 
-(defn ^{:stratum 0} update-cache-links
-  "Update cached artifacts with new links."
-  [cache parent-id child-id]
-  (when-let [parent (get @cache parent-id)]
-    (swap! cache assoc parent-id (core/add-child parent child-id)))
-  (when-let [child (get @cache child-id)]
-    (swap! cache assoc child-id (core/add-parent child parent-id))))
-
 ;; Anomaly-returning helpers
 (defn- ^{:stratum 0} anomaly?
   [x]
@@ -143,38 +210,74 @@
   [result]
   (get-in result [:anomaly/data :artifact/role]))
 
-(defn ^{:stratum 0} close-store
-  "Close store implementation."
-  [{:keys [cache logger]}]
-  ;; Ensure all pending writes complete
-  (Thread/sleep 100) ; Give futures time to complete
-  (when logger
-    (log/info logger :system :artifact/store-closed
-              {:data {:artifact-count (count @cache)}})))
-
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Index management
-(defn ^{:stratum 1} load-index
-  "Load the artifact metadata index.
-   Returns empty map if index doesn't exist."
+(defn ^{:stratum 1} call-with-index-lock
+  "Call f while holding the index lock for artifacts-dir and return its
+   result. Closing the channel releases the OS lock (FileLock's own
+   methods are not callable under babashka)."
+  [artifacts-dir f]
+  (let [dir-key (.getCanonicalPath (io/file artifacts-dir))
+        monitor (-> (swap! index-monitors
+                           (fn [m] (if (contains? m dir-key) m (assoc m dir-key (Object.)))))
+                    (get dir-key))]
+    (locking monitor
+      (with-open [channel (FileChannel/open (.toPath (io/file (lock-file-path artifacts-dir)))
+                                            (into-array OpenOption [StandardOpenOption/CREATE
+                                                                    StandardOpenOption/WRITE]))]
+        (.lock channel)
+        (f)))))
+
+(defn ^{:stratum 1} read-index
+  "Read the index on disk. Returns {} when there is no index file, or a
+   :fault anomaly when the file exists but does not decode to a map
+   (content that decodes to nil included)."
   [artifacts-dir]
-  (or (read-transit (index-file-path artifacts-dir))
-      {}))
+  (let [path (index-file-path artifacts-dir)]
+    (try
+      (if-not (.exists (io/file path))
+        {}
+        (let [data (read-transit path)]
+          (if (map? data)
+            data
+            (anomaly/anomaly :fault (messages/t :index/unreadable)
+                             {:path path :value-type (str (type data))}))))
+      (catch Exception e
+        (anomaly/exception-anomaly :fault (messages/t :index/unreadable) {:path path} e)))))
 
-(defn ^{:stratum 1} save-index!
-  "Save the artifact metadata index."
-  [artifacts-dir index]
-  (write-transit (index-file-path artifacts-dir) index))
-
-;; Artifact persistence
-(defn ^{:stratum 1} persist-artifact!
-  "Persist an artifact to disk in Transit format."
-  [artifacts-dir artifact]
-  (let [id (:artifact/id artifact)
-        file-path (artifact-file-path artifacts-dir id)]
-    (write-transit file-path artifact)
-    id))
+(defn ^{:stratum 1} rebuild-index
+  "Rebuild the metadata index from the per-artifact files in
+   artifacts-dir. Returns {:index m :skipped [file-name ...]}, or an
+   :unavailable anomaly when the directory cannot be listed. A file that
+   cannot be read, or whose :artifact/id does not map back to that same
+   file (compared as canonical paths, so an id such as \"../a\" cannot
+   claim a.transit.json), is skipped; so is a file whose id cannot be
+   turned into a path at all (e.g. one containing NUL), without stopping
+   the rebuild of the others."
+  [artifacts-dir]
+  (let [index-name (.getName (io/file (index-file-path artifacts-dir)))
+        listing (.listFiles (io/file artifacts-dir))]
+    (if (nil? listing)
+      (anomaly/anomaly :unavailable (messages/t :index/unlistable) {:artifacts-dir artifacts-dir})
+      (reduce
+       (fn [acc ^File f]
+         (let [artifact (try (read-transit (.getPath f)) (catch Exception _ nil))
+               maps-back? (try
+                            (and (map? artifact)
+                                 (some? (:artifact/id artifact))
+                                 (= (.getCanonicalPath (io/file (artifact-file-path artifacts-dir
+                                                                                    (:artifact/id artifact))))
+                                    (.getCanonicalPath f)))
+                            (catch Exception _ false))]
+           (if maps-back?
+             (update acc :index add-to-index artifact)
+             (update acc :skipped conj (.getName f)))))
+       {:index {} :skipped []}
+       (filter (fn [^File f]
+                 (and (.isFile f)
+                      (str/ends-with? (.getName f) ".transit.json")
+                      (not= index-name (.getName f))))
+               listing)))))
 
 (defn ^{:stratum 1} load-artifact-from-disk
   "Load an artifact from disk.
@@ -194,28 +297,87 @@
                    {:artifact/id artifact-id
                     :artifact/role role}))
 
+(defn ^{:stratum 1} close-store
+  "Close store implementation. Waits up to the store's close timeout
+   for queued disk writes. Returns true when they all finished, nothing
+   is still queued, no file write failed without a later success, and
+   every written artifact is indexed; otherwise logs a warning and
+   returns false."
+  [{:keys [cache logger pending writer close-timeout-ms]}]
+  (let [timeout-ms (or close-timeout-ms default-close-timeout-ms)
+        flushed? (if writer (await-for timeout-ms writer) true)
+        {:keys [unindexed failed]} (when (and writer flushed?) @writer)
+        queued (if pending (count @pending) 0)
+        incomplete? (boolean (or (seq unindexed) (seq failed) (pos? queued)))]
+    (cond
+      (not flushed?) (log/warn logger :system :artifact/store-close-timeout
+                               {:message (messages/t :store/close-timeout)
+                                :data {:timeout-ms timeout-ms}})
+      incomplete? (log/warn logger :system :artifact/store-close-incomplete
+                            {:message (messages/t :store/close-incomplete)
+                             :data {:unindexed (vec unindexed) :failed (vec failed) :queued queued}})
+      :else (log/info logger :system :artifact/store-closed
+                      {:data {:artifact-count (count @cache)}}))
+    (and flushed? (not incomplete?))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} save-artifact
-  "Save artifact implementation."
-  [{:keys [artifacts-dir cache index logger]} artifact]
-  (let [id (:artifact/id artifact)]
-    ;; Store in memory cache
-    (swap! cache assoc id artifact)
+(defn- ^{:stratum 2} write-change!
+  "Apply one queued change to the artifact files on disk and write them.
+   A save keeps the on-disk links and takes every other field from the
+   save (carry-links); a link adds each side to the other's file. A
+   missing or unreadable file falls back to the queued copy. Returns
+   {:written [[queued written] ...] :failed [id ...]}; failures are logged."
+  [{:keys [artifacts-dir logger]} [op a b]]
+  (let [on-disk (fn [artifact]
+                  (or (try (load-artifact-from-disk artifacts-dir (:artifact/id artifact))
+                           (catch Exception _ nil))
+                      artifact))
+        pairs (case op
+                :save [[a (carry-links (on-disk a) a)]]
+                :link [[a (add-link (on-disk a) :artifact/children (:artifact/id b))]
+                       [b (add-link (on-disk b) :artifact/parents (:artifact/id a))]])]
+    (reduce (fn [result [_ artifact :as pair]]
+              (let [id (:artifact/id artifact)]
+                (try
+                  (write-transit (artifact-file-path artifacts-dir id) artifact)
+                  (log-artifact-saved logger id artifact)
+                  (update result :written conj pair)
+                  (catch Exception e
+                    (log-artifact-save-failed logger id e)
+                    (update result :failed conj id)))))
+            {:written [] :failed []}
+            pairs)))
 
-    ;; Update index
-    (let [new-index (add-to-index @index artifact)]
-      (reset! index new-index)
-      (future (save-index! artifacts-dir new-index)))
-
-    ;; Persist to disk asynchronously
-    (future
-      (try
-        (persist-artifact! artifacts-dir artifact)
-        (log-artifact-saved logger id artifact)
-        (catch Exception e
-          (log-artifact-save-failed logger id e))))
-    id))
+(defn ^{:stratum 2} quarantine-index!
+  "With the index lock held and the index unreadable: rebuild the index
+   from the per-artifact files, copy the unreadable index aside to
+   index.transit.json.corrupt-<millis>, write the rebuilt index over the
+   live path and log :artifact/index-rebuilt. Only that atomic write
+   replaces the live file, so no reader sees a missing index. Returns
+   the rebuilt index. When the directory cannot be listed, logs
+   :artifact/index-rebuild-failed, leaves the index file for a later
+   recovery, and returns the anomaly."
+  [artifacts-dir logger unreadable]
+  (let [rebuilt (rebuild-index artifacts-dir)]
+    (if (anomaly? rebuilt)
+      (do (log/error logger :system :artifact/index-rebuild-failed
+                     {:message (:anomaly/message rebuilt) :data (:anomaly/data rebuilt)})
+          rebuilt)
+      (let [path (index-file-path artifacts-dir)
+            copied-to (str path ".corrupt-" (System/currentTimeMillis))]
+        (Files/copy (.toPath (io/file path)) (.toPath (io/file copied-to))
+                    ^"[Ljava.nio.file.CopyOption;"
+                    (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING
+                                            StandardCopyOption/COPY_ATTRIBUTES]))
+        (write-transit path (:index rebuilt))
+        (log/warn logger :system :artifact/index-rebuilt
+                  {:message (messages/t :index/rebuilt)
+                   :data {:copied-to copied-to
+                          :cause (:anomaly/data unreadable)
+                          :artifact-count (count (:index rebuilt))
+                          :skipped (:skipped rebuilt)}})
+        (:index rebuilt)))))
 
 (defn ^{:stratum 2} load-artifact-impl
   "Load artifact implementation."
@@ -237,23 +399,72 @@
   (when (metadata-match? criteria metadata)
     id))
 
-(defn ^{:stratum 2} persist-linked-artifacts
-  "Persist both linked artifacts to disk."
-  [record artifacts-dir parent-id child-id logger]
-  (future
-    (try
-      (when-let [parent (p/load-artifact record parent-id)]
-        (persist-artifact! artifacts-dir parent))
-      (when-let [child (p/load-artifact record child-id)]
-        (persist-artifact! artifacts-dir child))
-      (catch Exception e
-        (when logger
-          (log/error logger :system :artifact/link-persist-failed
-                     {:message (.getMessage e)
-                      :data {:parent-id parent-id
-                             :child-id child-id}}))))))
-
 ;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} recover-index!
+  "Under the index lock, re-read the index and, if it is still
+   unreadable, quarantine and rebuild it (see quarantine-index!).
+   Returns the index."
+  [artifacts-dir logger]
+  (call-with-index-lock
+   artifacts-dir
+   (fn []
+     (let [index (read-index artifacts-dir)]
+       (if (anomaly? index)
+         (quarantine-index! artifacts-dir logger index)
+         index)))))
+
+(defn ^{:stratum 3} drain-action
+  "Writer action: one critical section under the index lock for every
+   change queued so far, including changes queued while it runs (so a
+   burst of saves costs one index write). Writes each change's artifact
+   files (write-change!); under the writer's monitor, puts each written
+   artifact in the cache and index unless a later save or link has
+   replaced the queued copy; then re-reads the on-disk index
+   (quarantined and rebuilt first if unreadable), sets the written ids'
+   entries to their projection from their files and writes it.
+   The writer's state is {:unindexed ids :failed ids}: ids whose files
+   were written but are not indexed yet (the next drain re-projects them
+   from their current files), and ids whose last file write failed
+   (cleared by a later successful write). close-store reports both."
+  [state {:keys [artifacts-dir cache index logger pending writer] :as store}]
+  (let [next-state (volatile! state)]
+    (try
+      (call-with-index-lock
+       artifacts-dir
+       (fn []
+         (loop [written [] failed (:failed state)]
+           (let [[batch] (swap-vals! pending empty)]
+             (if (seq batch)
+               (let [results (mapv (partial write-change! store) batch)]
+                 (recur (into written (mapcat :written) results)
+                        (reduce (fn [f r]
+                                  (into (apply disj f (map (comp :artifact/id second) (:written r)))
+                                        (:failed r)))
+                                failed results)))
+               (let [ids (into (:unindexed state) (map (comp :artifact/id second)) written)]
+                 (vreset! next-state {:unindexed ids :failed failed})
+                 (locking writer
+                   (doseq [[queued artifact] written
+                           :let [id (:artifact/id artifact)]
+                           :when (identical? queued (get @cache id))]
+                     (swap! cache assoc id artifact)
+                     (swap! index add-to-index artifact)))
+                 (when (seq ids)
+                   (let [on-disk (read-index artifacts-dir)
+                         disk-index (if (anomaly? on-disk) (quarantine-index! artifacts-dir logger on-disk) on-disk)]
+                     (when-not (anomaly? disk-index)
+                       (write-transit (index-file-path artifacts-dir)
+                                      (reduce add-to-index disk-index
+                                              (keep #(try (load-artifact-from-disk artifacts-dir %)
+                                                          (catch Exception _ nil))
+                                                    ids)))
+                       (vswap! next-state assoc :unindexed #{}))))))))))
+      (catch Exception e
+        (log/error logger :system :artifact/index-save-failed
+                   {:message (.getMessage e)
+                    :data {:artifacts-dir artifacts-dir}})))
+    @next-state))
 
 (defn ^{:stratum 3} filter-by-criteria
   "Filter artifacts by criteria."
@@ -269,6 +480,33 @@
 
 ;------------------------------------------------------------------------------ Layer 4
 
+(defn ^{:stratum 4} load-index
+  "Load the artifact metadata index; {} when there is none.
+   An unreadable index is copied aside and rebuilt from the per-artifact
+   files (see recover-index!) instead of failing store creation, which
+   would leave every later run without persistence. If the directory
+   cannot be listed, the store opens with an empty in-memory index and
+   the index file is left for the next open to recover."
+  [artifacts-dir logger]
+  (let [index (read-index artifacts-dir)
+        recovered (if (anomaly? index) (recover-index! artifacts-dir logger) index)]
+    (if (anomaly? recovered) {} recovered)))
+
+(defn ^{:stratum 4} save-artifact
+  "Save artifact implementation. Under the writer's monitor, carries the
+   cached and indexed links into the artifact (carry-links), puts it in
+   the cache and index, and queues it for drain-action. An index entry
+   whose file never landed loads as nil; query skips it."
+  [{:keys [cache index pending writer] :as store} saved]
+  (let [id (:artifact/id saved)]
+    (locking writer
+      (let [artifact (carry-links (get @index id) (carry-links (get @cache id) saved))]
+        (swap! cache assoc id artifact)
+        (swap! index add-to-index artifact)
+        (swap! pending conj [:save artifact])
+        (send-off writer drain-action store)))
+    id))
+
 (defn ^{:stratum 4} query-artifacts
   "Query artifacts implementation."
   [{:keys [index] :as record} criteria]
@@ -283,10 +521,15 @@
 
 (defn ^{:stratum 4} link-artifacts
   "Link artifacts, preserving the ArtifactStore boolean facade.
-   Missing link targets are represented as anomalies internally and logged."
-  [{:keys [artifacts-dir cache index logger] :as record} parent-id child-id]
+   Missing link targets and self-links are represented as anomalies
+   internally, logged, and return false."
+  [{:keys [cache index logger pending writer] :as record} parent-id child-id]
   (let [parent-result (find-link-target record parent-id :parent)
-        child-result  (find-link-target record child-id  :child)]
+        ;; No caller links an artifact to itself; refuse it.
+        child-result  (if (= parent-id child-id)
+                        (anomaly/anomaly :invalid-input (messages/t :link/self)
+                                         {:artifact/id child-id :artifact/role :child})
+                        (find-link-target record child-id :child))]
     (if (or (anomaly? parent-result) (anomaly? child-result))
       (do
         (doseq [result [parent-result child-result]
@@ -299,16 +542,14 @@
                                   :role      (link-target-role result)}})))
         false)
       (do
-        ;; Update index with links
-        (let [new-index (update-index-links @index parent-id child-id)]
-          (reset! index new-index)
-          (future (save-index! artifacts-dir new-index)))
-
-        ;; Update cached artifacts if present
-        (update-cache-links cache parent-id child-id)
-
-        ;; Re-persist both artifacts to disk
-        (persist-linked-artifacts record artifacts-dir parent-id child-id logger)
+        ;; Under the writer's monitor, as in save-artifact
+        (locking writer
+          (let [parent (add-link (get @cache parent-id parent-result) :artifact/children child-id)
+                child (add-link (get @cache child-id child-result) :artifact/parents parent-id)]
+            (swap! cache assoc parent-id parent child-id child)
+            (swap! index #(-> % (add-to-index parent) (add-to-index child)))
+            (swap! pending conj [:link parent child])
+            (send-off writer drain-action record)))
 
         (when logger
           (log/debug logger :system :artifact/linked

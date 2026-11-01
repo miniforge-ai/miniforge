@@ -41,6 +41,44 @@
    surfaces the misconfiguration loudly."
   "resources/precommit-smoke-tests.edn")
 
+(def ^{:stratum 0} ^:private project-test-roots
+  "Directories, relative to projects/<name>, whose *_test.clj files
+   `bb test:integration` runs. Discovered on disk rather than listed by
+   hand: a hand list silently left new integration tests unrun.
+   projects/miniforge/e2e is left out on purpose — it needs a real claude
+   CLI or Docker (see its README)."
+  {"miniforge"      ["test" "integration"]
+   "miniforge-core" ["test"]})
+
+(def ^{:stratum 0} ^:private development-test-root
+  "Task and tooling tests (tests for tasks/*.clj, build.clj, the dev
+   harness). `poly test :all` skips the development project, so
+   `development` is their only runner."
+  "development/test")
+
+(def ^{:stratum 0} ^:private external-tests-env
+  "Environment variable that, set to \"true\", makes `development` also
+   run the tests tagged ^:external. Those call a real external backend
+   (the claude CLI) and may send billable requests, so they are opt-in."
+  "MINIFORGE_TEST_EXTERNAL")
+
+(defn ^{:stratum 0} external-test-skip-form
+  "Clojure source for the test JVM, evaluated after `nses` load: removes
+   :test from every var tagged ^:external in them, so
+   clojure.test/run-tests skips it, and prints each one skipped."
+  [nses]
+  (str "(doseq [v (mapcat (comp vals ns-interns) ["
+       (apply str (map (fn [n] (str " '" n)) nses))
+       "]) :when (:external (meta v))] "
+       "(println \"Skipping external-backend test:\" (symbol v)) "
+       "(alter-meta! v dissoc :test))"))
+
+(defn- ^{:stratum 0} project-test-alias-flag
+  "The -M flag selecting whichever of the project's test aliases exist."
+  [deps-edn]
+  (let [aliases (:aliases deps-edn)]
+    (apply str "-M" (filter #(contains? aliases %) [:test :integration]))))
+
 (defn- ^{:stratum 0} valid-namespace-token?
   "Conservative check: namespace entries in the EDN must look like
    period-separated, dash-segmented symbol tokens. Rejects strings with
@@ -54,18 +92,40 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} discovered-project-tests
+  "Every *_test.clj namespace under `project`'s test roots, as sorted
+   strings."
+  [project]
+  (->> (get project-test-roots project)
+       (map #(str "projects/" project "/" %))
+       bb-test-runner/discover-test-namespaces
+       (map (comp str :ns))
+       sort
+       vec))
+
+(defn ^{:stratum 1} discovered-development-tests
+  "Every *_test.clj namespace under development/test, as sorted strings."
+  []
+  (->> (bb-test-runner/discover-test-namespaces [development-test-root])
+       (map (comp str :ns))
+       sort
+       vec))
+
 (defn- ^{:stratum 1} run-project-tests!
   [project test-nses]
   (let [deps (slurp (str "projects/" project "/deps.edn"))
-        test-mode (if (get-in (edn/read-string deps) [:aliases :test]) "-M:test" "-M")
+        test-mode (project-test-alias-flag (edn/read-string deps))
         clojure-cmd (proc/clojure-command)
         require-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
         run-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
         expr (str "(require 'clojure.test" require-expr ") "
                   "(let [r (clojure.test/run-tests" run-expr ")] "
                   "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")]
+    ;; :dir makes the project's deps.edn the CLI's project config. No
+    ;; -Sdeps: CLI 1.12.x reads an -Sdeps value that does not start with
+    ;; `{` as a file path, and this deps.edn opens with a comment.
     (run-stream! {:dir (str "projects/" project)}
-                 clojure-cmd "-Sdeps" deps test-mode "-e" expr)))
+                 clojure-cmd test-mode "-e" expr)))
 
 (defn ^{:stratum 1} conformance []
   (println "🧪 Running N1 conformance tests...")
@@ -117,62 +177,51 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} integration []
+(defn ^{:stratum 2} integration
+  "Run every discovered project integration test (see
+   `project-test-roots`)."
+  []
   (println "🧪 Running project integration tests...")
-  (let [miniforge-tests ["ai.miniforge.workflow.release-integration-test"
-                         "ai.miniforge.workflow.loader-integration-test"
-                         "ai.miniforge.workflow.configurable-integration-test"
-                         "ai.miniforge.workflow.runner-integration-test"
-                         "ai.miniforge.workflow.financial-etl-test"
-                         "ai.miniforge.workflow.dag-orchestrator-test"
-                         "ai.miniforge.workflow.artifact-persistence-test"
-                         "ai.miniforge.dag-executor.executor-test"
-                         "ai.miniforge.orchestrator.interface-test"
-                         "ai.miniforge.llm.progress-monitor-test"
-                         "ai.miniforge.llm.interface-integration-test"
-                         "ai.miniforge.phase.handoff-test"
-                         "ai.miniforge.tool-registry.integration-test"
-                         "ai.miniforge.self-healing.backend-health-test"
-                         "ai.miniforge.tui-views.subscription-integration-test"
-                         "ai.miniforge.tui-engine.core-test"
-                         "ai.miniforge.web-dashboard.interface-test"
-                         "ai.miniforge.tui-views.pr-views-test"
-                         "ai.miniforge.tui-views.view-test"
-                         "ai.miniforge.tui-views.persistence-test"
-                         "ai.miniforge.knowledge.interface-test"
-                         "ai.miniforge.gate.pipeline-test"
-                         "ai.miniforge.evidence-bundle.interface-test"
-                         "ai.miniforge.artifact.interface-integration-test"
-                         "ai.miniforge.loop.interface-integration-test"
-                         "ai.miniforge.observer.interface-integration-test"
-                         "ai.miniforge.observer.heartbeat-journal-integration-test"
-                         "ai.miniforge.task.interface-integration-test"
-                         "ai.miniforge.release-executor.artifact-validation-integration-test"
-                         "ai.miniforge.web-dashboard.fleet-onboarding-integration-test"
-                         "ai.miniforge.self-healing.integration-test"
-                         "ai.miniforge.workflow.opsv-lifecycle-integration-test"
-                         "ai.miniforge.workflow.opsv-finalization-integration-test"
-                         "ai.miniforge.phase-opsv.finalization-integration-test"
-                         "ai.miniforge.phase-opsv.current-finalization-integration-test"
-                         "ai.miniforge.phase-opsv.post-actuation-recovery-integration-test"
-                         "ai.miniforge.phase-opsv.terminal-evidence-integration-test"
-                         "ai.miniforge.phase-opsv.current-terminal-integration-test"
-                         "ai.miniforge.phase-opsv.terminal-boundary-integration-test"
-                         "ai.miniforge.workflow.opsv-terminal-integration-test"
-                         "ai.miniforge.workflow.opsv-checkpoint-integration-test"
-                         "ai.miniforge.event-stream.gate-contract-integration-test"
-                         "ai.miniforge.event-stream.heartbeat-runtime-integration-test"
-                         "ai.miniforge.event-stream.heartbeat-stop-integration-test"
-                         "ai.miniforge.governance.e2e-test"]
-        kernel-tests ["ai.miniforge.workflow.kernel-loader-integration-test"]
-        miniforge-exit (run-project-tests! "miniforge" miniforge-tests)]
-    (when-not (zero? miniforge-exit)
-      (println "❌ Integration tests failed in project: miniforge")
-      (System/exit miniforge-exit))
-    (let [kernel-exit (run-project-tests! "miniforge-core" kernel-tests)]
-      (when-not (zero? kernel-exit)
-        (println "❌ Integration tests failed in project: miniforge-core")
-        (System/exit kernel-exit)))))
+  (doseq [project (sort (keys project-test-roots))]
+    (let [test-nses (discovered-project-tests project)]
+      (when (empty? test-nses)
+        (println "❌ No integration tests discovered in project:" project)
+        (System/exit 1))
+      (println (format "Running %d integration test namespaces in project %s"
+                       (count test-nses) project))
+      (let [exit (run-project-tests! project test-nses)]
+        (when-not (zero? exit)
+          (println "❌ Integration tests failed in project:" project)
+          (System/exit exit))))))
+
+(defn ^{:stratum 2} development
+  "Run every development/test namespace from the repo root on the
+   :dev:test:build classpath (:build because build-test loads build.clj,
+   which needs tools.build). Tests tagged ^:external are skipped unless
+   `external-tests-env` is \"true\". Exits non-zero on any failure or
+   error, or when nothing is discovered."
+  []
+  (println "🧪 Running development tests...")
+  (let [nses (discovered-development-tests)
+        _ (when (empty? nses)
+            (println "❌ No development tests discovered under" development-test-root)
+            (System/exit 1))
+        include-external? (= "true" (System/getenv external-tests-env))
+        _ (when-not include-external?
+            (println (str "Tests tagged ^:external call a real backend and are skipped; "
+                          "set " external-tests-env "=true to run them.")))
+        ns-args (apply str (map (fn [n] (str " '" n)) nses))
+        expr (str "(require 'clojure.test" ns-args ") "
+                  (when-not include-external? (external-test-skip-form nses))
+                  "(let [r (clojure.test/run-tests" ns-args ")] "
+                  "  (shutdown-agents) "
+                  "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")
+        env  (bb-test-runner/sanitize-git-worktree-env (into {} (System/getenv)))
+        _ (println (format "Running %d development test namespaces" (count nses)))
+        exit (run-stream! {:env env} (proc/clojure-command) "-M:dev:test:build" "-e" expr)]
+    (when-not (zero? exit)
+      (println "❌ Development tests failed with exit code:" exit)
+      (System/exit exit))))
 
 (defn ^{:stratum 2} precommit-smoke
   "Run the hand-curated pre-commit smoke set.

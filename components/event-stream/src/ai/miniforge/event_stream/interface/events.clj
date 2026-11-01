@@ -33,6 +33,8 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Event constructors
+(def ^{:stratum 0} checkpoint-location recovery/checkpoint-location)
+
 (def ^{:stratum 0} checkpoint-written recovery/checkpoint-written)
 
 (def ^{:stratum 0} checkpoint-write-failed recovery/checkpoint-write-failed)

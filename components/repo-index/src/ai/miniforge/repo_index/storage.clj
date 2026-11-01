@@ -20,7 +20,8 @@
 
    Filesystem I/O only — no dependency on schema or factory."
   (:require [clojure.java.io :as io]
-            [clojure.edn :as edn]))
+            [clojure.edn :as edn])
+  (:import [java.nio.file Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -28,6 +29,13 @@
 (def ^{:stratum 0} ^:private index-dir-name
   "Directory name for storing indexes within the repo."
   ".miniforge/index")
+
+(defn- ^{:stratum 0} temp-file
+  "Return a sibling temp path for an atomic write; stays on the same
+   filesystem as target so the rename that follows is atomic."
+  ^java.io.File [^java.io.File target]
+  (io/file (.getParentFile target)
+           (str (.getName target) "." (random-uuid) ".tmp")))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -60,7 +68,17 @@
     (let [dir (index-dir repo-root)
           f (index-file repo-root (:tree-sha index))]
       (.mkdirs dir)
-      (spit f (pr-str index))
+      (let [tmp (temp-file f)]
+        (try
+          (spit tmp (pr-str index))
+          (Files/move (.toPath tmp) (.toPath f)
+                      (into-array java.nio.file.CopyOption
+                                  [StandardCopyOption/ATOMIC_MOVE
+                                   StandardCopyOption/REPLACE_EXISTING]))
+          (finally
+            ;; Gone after a successful move; on failure, don't leave a
+            ;; uniquely named orphan behind for every attempt.
+            (Files/deleteIfExists (.toPath tmp)))))
       (.getPath f))
     (catch Exception _
       nil)))

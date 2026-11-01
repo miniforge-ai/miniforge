@@ -4,6 +4,7 @@
 (ns ai.miniforge.workflow.environment-notifications-test
   (:require [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.workflow.messages :as messages]
             [ai.miniforge.workflow.runner-environment :as environment]
@@ -73,6 +74,9 @@
     (let [sink (atom []) reference "fixture.bundle"
           logger (capturing-logger sink)]
       (with-redefs [environment/env-logger logger
+                    ;; The fixture worktree is not a repo; this test is about
+                    ;; the persisted notice, so the secret scan reads clean.
+                    gate/outgoing-secrets (constantly {:passed? true})
                     dag/persist-workspace! (constantly (persisted reference))]
         (environment/persist-workspace-at-phase-boundary! (context mode) {:execution/current-phase :plan}))
       (let [entry (first @sink)

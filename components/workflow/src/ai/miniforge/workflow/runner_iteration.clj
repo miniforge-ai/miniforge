@@ -5,10 +5,10 @@
   "Apply dashboard control and supervision around one checkpointed phase step."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.logging.interface :as log]
-            [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.messages :as messages]
             [ai.miniforge.workflow.monitoring :as monitoring]
+            [ai.miniforge.workflow.runner-checkpoint :as runner-checkpoint]
             [ai.miniforge.workflow.runner-defaults :as defaults]
             [ai.miniforge.workflow.runner-outcome :as outcome]
             [ai.miniforge.workflow.runner-phase-step :as phase-step]))
@@ -40,12 +40,16 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} await-resume!
-  "Block while the control state is paused."
+  "Block while the control state is paused and not stopped. A cancel sets
+   :stopped without clearing :paused, so :stopped is re-read on every poll:
+   a run paused and then cancelled leaves the wait and takes the stop path
+   instead of waiting for a resume that may never come."
   [control-state]
   (when (:paused @control-state)
     (log/debug runner-logger :system :workflow/execution-paused
                {:message (messages/t :status/paused)})
-    (while (:paused @control-state)
+    (while (let [{:keys [paused stopped]} @control-state]
+             (and paused (not stopped)))
       (Thread/sleep (defaults/pause-poll-interval-ms)))))
 
 (defn- ^{:stratum 1} check-stopped
@@ -69,7 +73,9 @@
   (let [result (if-let [stop-anomaly (check-stopped control-state)]
                  (apply-dashboard-stop context stop-anomaly)
                  (execute-supervised pipeline context callbacks iteration))]
-    (checkpoint-store/persist-execution-state! result)
+    ;; A failed write is warned about and published, never thrown, so
+    ;; the run goes on without that checkpoint.
+    (runner-checkpoint/checkpoint! result)
     result))
 
 (comment ::supervised-iteration)

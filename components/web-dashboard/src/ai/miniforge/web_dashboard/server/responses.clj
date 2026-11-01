@@ -16,6 +16,7 @@
   (:require
    [clojure.java.io :as io]
    [cheshire.core :as json]
+   [ai.miniforge.coerce.interface :as coerce]
    [hiccup2.core :refer [html]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -44,11 +45,16 @@
            (str (html hiccup-data)))})
 
 (defn ^{:stratum 0} json-response
-  "Return JSON response."
+  "Return JSON response.
+
+   Instants are stringified first: cheshire has no encoder for
+   `java.time.Instant`, and every anomaly carries one under
+   `:anomaly/at`, so a failure result would otherwise throw during
+   encoding instead of reaching the client."
   [data]
   {:status 200
    :headers {"Content-Type" "application/json"}
-   :body (json/generate-string data)})
+   :body (json/generate-string (coerce/stringify-instants data))})
 
 (defn ^{:stratum 0} not-found-response
   "Return 404 response."

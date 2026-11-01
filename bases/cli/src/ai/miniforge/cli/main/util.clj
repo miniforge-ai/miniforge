@@ -21,7 +21,6 @@
    the optional-composition-var late-binding helper, and status-label
    formatting. Optional loading preserves fatal causes across exception wrappers."
   (:require
-   [babashka.fs :as fs]
    [ai.miniforge.cli.messages :as messages]
    [slingshot.slingshot :refer [try+]]))
 
@@ -61,11 +60,6 @@
   (if (contains? m :opts)
     (:opts m)
     m))
-
-(defn ^{:stratum 0} check-command
-  "Check if a command is available."
-  [cmd]
-  (boolean (fs/which cmd)))
 
 (defn ^{:stratum 0} timestamp->epoch-ms
   [timestamp]

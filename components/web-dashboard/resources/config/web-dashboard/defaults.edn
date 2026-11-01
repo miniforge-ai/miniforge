@@ -17,7 +17,11 @@
 ;; limitations under the License.
 
 ;; Web dashboard deployment and session defaults
+;; :host 127.0.0.1 keeps the dashboard on this machine. Binding any other
+;; address requires dashboard login (MINIFORGE_WEB_USERNAME/PASSWORD):
+;; event ingest and the event websocket stay unauthenticated by design.
 {:port 7878
+ :host "127.0.0.1"
  :session-cookie-name "miniforge-dashboard-session"
  :session-ttl-ms 43200000     ;; 12 * 60 * 60 * 1000
  :stale-threshold-ms 600000    ;; 10 * 60 * 1000

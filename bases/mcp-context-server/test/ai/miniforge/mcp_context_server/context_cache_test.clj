@@ -175,12 +175,6 @@
       (is (re-find #"core_test\.clj" (get-in result [:content 0 :text])))
       (is (not (re-find #"src/" (get-in result [:content 0 :text])))))))
 
-(deftest ^{:stratum 0} handle-context-grep-no-match-test
-  (testing "returns no matches message"
-    (swap! cache/cache-state assoc-in [:files "src/core.clj"] "(ns core)")
-    (let [result (cache/handle-context-grep {"pattern" "zzz_nonexistent_zzz"})]
-      (is (re-find #"[Nn]o matches" (get-in result [:content 0 :text]))))))
-
 (deftest ^{:stratum 0} handle-context-glob-cached-paths-test
   (testing "matches cached file paths"
     (swap! cache/cache-state assoc-in [:files "src/alpha.clj"] "a")
@@ -216,6 +210,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} handle-context-grep-no-match-test
+  (testing "returns no matches message"
+    (with-temp-dir
+      (fn [dir]
+        ;; An empty source root: the rg fallback searches it, so it must
+        ;; not be this checkout, where this very file holds the pattern.
+        (swap! cache/cache-state assoc :source-root dir)
+        (swap! cache/cache-state assoc-in [:files "src/core.clj"] "(ns core)")
+        (let [result (cache/handle-context-grep {"pattern" "zzz_nonexistent_zzz"})]
+          (is (re-find #"[Nn]o matches" (get-in result [:content 0 :text]))))))))
+
 (deftest ^{:stratum 1} flush-answers-writes-and-skips-empty-test
   (with-temp-dir
     (fn [dir]
@@ -236,6 +241,7 @@
       (fn [dir]
         (let [file-path (str dir "/uncached.txt")]
           (spit file-path "filesystem content")
+          (swap! cache/cache-state assoc :source-root dir)
           (let [result (cache/handle-context-read {"path" file-path})]
             (is (= "filesystem content" (get-in result [:content 0 :text])))
             ;; Verify it was cached

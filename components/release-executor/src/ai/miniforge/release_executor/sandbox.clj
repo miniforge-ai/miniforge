@@ -23,79 +23,56 @@
    container serves as an isolated workspace for file I/O, git ops, and PR creation.
 
    All commands are governed — they execute inside the task capsule via
-   dag/executor-execute!, never through host-side shell/sh."
+   dag/executor-execute!, never through host-side shell/sh.
+
+   The single commands these operations are built from (`exec!`, the path
+   and branch-name guards, output parsing, one-command git and gh calls)
+   live in `sandbox.commands`. Aliases keep the names callers use here.
+   This namespace calls `commands` directly, so redefining `sandbox/exec!`
+   steers only callers outside it; redefine `commands/exec!` to steer the
+   operations here too."
   (:require
-   [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.release-executor.messages :as msg]
+   [ai.miniforge.release-executor.pr-lookup :as pr-lookup]
    [ai.miniforge.release-executor.result :as result]
+   [ai.miniforge.release-executor.sandbox.commands :as commands]
+   [ai.miniforge.redaction.interface :as redaction]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Helpers
-(defn- ^{:stratum 0} unsafe-container-path-result
-  [message type path]
-  (result/shell-failure message {:type type :path path}))
+;; Aliases: the moved definitions keep their sandbox names for callers.
+(def ^{:stratum 0} exec!
+  "Alias of `commands/exec!`."
+  commands/exec!)
 
-(defn ^{:stratum 0} exec!
-  "Execute a command in the sandbox environment.
-   Returns {:success? bool :output string :error string}.
-   Optional opts map is merged with {:capture-output? true} and
-   forwarded to the executor (supports :env, :timeout-ms, :workdir)."
-  ([executor env-id command] (exec! executor env-id command {}))
-  ([executor env-id command opts]
-   (let [r (dag/executor-execute! executor env-id command
-                                  (merge {:capture-output? true} opts))]
-     (if (dag/ok? r)
-       (let [{:keys [exit-code stdout stderr]} (:data r)]
-         (if (zero? exit-code)
-           (result/shell-success {:output (str/trim (or stdout ""))})
-           (result/shell-failure (str/trim (or stderr ""))
-                                 {:output (str/trim (or stdout ""))})))
-       (result/shell-failure (str "Executor error: " (:error r)) {:output ""})))))
+(def ^{:stratum 0} validate-safe-branch-name
+  "Alias of `commands/validate-safe-branch-name`."
+  commands/validate-safe-branch-name)
 
-(defn- ^{:stratum 0} ssh->https-with-token
-  "Convert an SSH or HTTPS git remote URL to HTTPS with token auth.
-   Returns the authenticated URL, or nil if conversion fails."
-  [remote-url token]
-  (when remote-url
-    (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" remote-url)]
-      (str "https://x-access-token:" token "@" host "/" path)
-      (when (str/starts-with? (str remote-url) "https://")
-        (str/replace remote-url #"https://" (str "https://x-access-token:" token "@"))))))
+(def ^{:stratum 0} check-gh-auth!
+  "Alias of `commands/check-gh-auth!`."
+  commands/check-gh-auth!)
 
-(defn- ^{:stratum 0} parse-pr-ref
-  "Parse a gh PR URL into {:pr-url :pr-number}, or nil when the output carries
-   no /pull/<n> reference (so a phantom success can be told from a real PR)."
-  [output]
-  (let [url (str/trim (or output ""))]
-    (when-let [match (re-find #"/pull/(\d+)" url)]
-      {:pr-url url :pr-number (parse-long (second match))})))
+(def ^{:stratum 0} detect-default-branch
+  "Alias of `commands/detect-default-branch`."
+  commands/detect-default-branch)
 
-(defn- ^{:stratum 0} pr-already-exists?
-  "True when a gh error indicates a PR already exists for the current branch."
-  [error]
-  (boolean (some-> error str/lower-case (str/includes? "already exists"))))
+(def ^{:stratum 0} commit-changes!
+  "Alias of `commands/commit-changes!`."
+  commands/commit-changes!)
 
-;; Diff inspection (governed equivalents of git/diff-stats, git/count-test-defs)
-(defn- ^{:stratum 0} numstat-totals
-  "Parse `git diff <range> --numstat` output into {:additions :deletions :files}."
-  [output]
-  (let [lines (remove str/blank? (str/split-lines (str/trim (or output ""))))
-        parsed (keep (fn [line]
-                       (when-let [[_ adds dels] (re-matches #"(\d+)\t(\d+)\t.*" line)]
-                         {:additions (parse-long adds)
-                          :deletions (parse-long dels)}))
-                     lines)]
-    {:additions (reduce + 0 (map :additions parsed))
-     :deletions (reduce + 0 (map :deletions parsed))
-     :files (count parsed)}))
+(def ^{:stratum 0} edit-pr-body!
+  "Alias of `commands/edit-pr-body!`."
+  commands/edit-pr-body!)
 
-(defn- ^{:stratum 0} count-deftest
-  "Count `(deftest …` lines added vs removed in a unified diff body."
-  [diff-text]
-  {:added   (count (re-seq #"(?m)^\+.*\(deftest " (or diff-text "")))
-   :removed (count (re-seq #"(?m)^-.*\(deftest " (or diff-text "")))})
+(def ^{:stratum 0} diff-stats
+  "Alias of `commands/diff-stats`."
+  commands/diff-stats)
+
+(def ^{:stratum 0} count-test-defs
+  "Alias of `commands/count-test-defs`."
+  commands/count-test-defs)
 
 (defn ^{:stratum 0} track-operation
   "Update metrics for a completed file operation."
@@ -112,204 +89,40 @@
             :file path
             :action action})))
 
-;------------------------------------------------------------------------------ Layer 1
+(defn ^{:stratum 0} remote-branch-sha!
+  "The commit origin's `branch` points at, via `git ls-remote` in the
+   sandbox: {:success? true :sha sha-or-nil} (nil: no such branch), or the
+   failed command's result. The ls-remote asks the executor for git
+   credentials, since origin in the capsule holds none; the local
+   `remote get-url` checks do not."
+  [executor env-id branch exec-opts]
+  (or (commands/validate-safe-branch-name branch)
+      (let [fetch  (commands/exec! executor env-id "git remote get-url origin" exec-opts)
+            pushes (commands/exec! executor env-id "git remote get-url --push --all origin" exec-opts)]
+        ;; ls-remote asks origin's fetch URL; it speaks for the push only
+        ;; when the push goes there and nowhere else.
+        (if-not (and (result/succeeded? fetch) (result/succeeded? pushes)
+                     (= [(str/trim (:output fetch))]
+                        (remove str/blank? (str/split-lines (:output pushes)))))
+          (result/shell-failure (msg/t :push/probe-destination-differs))
+          (let [r (commands/exec! executor env-id ["git" "ls-remote" "origin" (str "refs/heads/" branch)]
+                                  (assoc exec-opts :git-credentials? true))]
+            (if (result/succeeded? r)
+              (result/shell-success {:sha (-> (str/trim (:output r "")) (str/split #"\s+") first not-empty)})
+              r))))))
 
-(defn ^{:stratum 1} validate-safe-container-path
-  "Return nil when `path` is safe to interpolate into a single-quoted shell argument
-   and cannot escape the container working directory.
+(defn ^{:stratum 0} find-pr!
+  "Look up the PR `branch` already has, in any state, via gh in the sandbox
+   (see pr-lookup). Optional exec-opts supports :env for GH_TOKEN. Returns
+   {:success? true :pr pr-or-nil}, or the failed command's result."
+  [executor env-id branch exec-opts]
+  (or (commands/validate-safe-branch-name branch)
+      (let [r (commands/exec! executor env-id (pr-lookup/lookup-argv branch) exec-opts)]
+        (if (result/succeeded? r)
+          (result/shell-success {:pr (pr-lookup/parse-lookup (:output r))})
+          r))))
 
-   Two classes of attack are blocked:
-
-   1. Path traversal -- any `..` segment (lexical check; host-side
-      normalization cannot be applied to a container path).
-
-   2. Shell injection -- any character that terminates a POSIX single-quoted
-      string or introduces a shell metacharacter that survives quoting:
-      single-quote, backslash, backtick, $, !, space, tab, newline, NUL,
-      and the glob/redirect set (; | & > < ( ) { } * ? [ ] # ~).
-
-   Returns a shell failure result with `:type :path-traversal` or
-   `:type :shell-injection` on violation."
-  [path]
-  (let [s (str path)]
-    (cond
-      (or (str/starts-with? s "/")
-          (re-find #"^[A-Za-z]:" s))
-      (unsafe-container-path-result
-       "Path traversal rejected: sandbox path must be relative"
-       :path-traversal
-       s)
-
-      (re-find #"(^|[/\\])\.\.([/\\]|$)" s)
-      (unsafe-container-path-result
-       "Path traversal rejected: sandbox path contains .. segment"
-       :path-traversal
-       s)
-
-      (re-find #"['\\`$! \t\n\r\x00;|&><(){}*?\[\]#~]" s)
-      (unsafe-container-path-result
-       "Shell injection rejected: sandbox path contains unsafe character"
-       :shell-injection
-       s))))
-
-(defn ^{:stratum 1} validate-safe-branch-name
-  "Return nil when `branch` is safe to interpolate unquoted into a shell
-   command (git checkout -b, git push, --base). Allows only
-   [a-zA-Z0-9._/-] — the character set git itself permits for branch names.
-   Additionally rejects blank names and names starting with '-', which
-   would be interpreted by git as option flags (option injection)."
-  [branch]
-  (let [s (str branch)]
-    (cond
-      (str/blank? s)
-      (unsafe-container-path-result
-       "Shell injection rejected: branch name must not be blank"
-       :shell-injection
-       s)
-
-      (str/starts-with? s "-")
-      (unsafe-container-path-result
-       "Shell injection rejected: branch name must not start with '-'"
-       :shell-injection
-       s)
-
-      (re-find #"[^a-zA-Z0-9._/\-]" s)
-      (unsafe-container-path-result
-       "Shell injection rejected: branch name contains unsafe character"
-       :shell-injection
-       s))))
-
-;; Git / GH operations (mirrors git.clj)
-(defn ^{:stratum 1} check-gh-auth!
-  "Check if gh CLI is available and authenticated inside the container.
-   Optional opts supports :env for injecting GH_TOKEN."
-  ([executor env-id] (check-gh-auth! executor env-id {}))
-  ([executor env-id opts]
-   (let [r (exec! executor env-id "gh auth status" opts)]
-     (if (result/succeeded? r)
-       {:available? true :authenticated? true :user "container-token"}
-       {:available? true :authenticated? false :error (:error r)}))))
-
-(defn ^{:stratum 1} detect-default-branch
-  "Detect the default branch from the remote. Falls back to
-   \"refs/remotes/origin/main\" when :output is blank, not merely absent —
-   exec!'s executor-error branch always includes :output (as \"\"), so
-   (:output r default) alone would never reach the default in that case,
-   quietly producing an empty branch name downstream instead of masking
-   nothing."
-  [executor env-id]
-  (let [r (exec! executor env-id
-                 "git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || echo refs/remotes/origin/main")
-        out (:output r)]
-    (-> (if (str/blank? out) "refs/remotes/origin/main" out)
-        str/trim
-        (str/replace #"refs/remotes/origin/" ""))))
-
-(defn ^{:stratum 1} commit-changes!
-  "Commit staged changes inside the sandbox container.
-
-   Returns {:success? bool :commit-sha string :error string}"
-  [executor env-id commit-message]
-  (let [escaped-msg (str/replace commit-message "'" "'\\''")
-        commit-r (exec! executor env-id (str "git commit -m '" escaped-msg "'"))]
-    (if (result/succeeded? commit-r)
-      (let [sha-r (exec! executor env-id "git rev-parse HEAD")]
-        (if (result/succeeded? sha-r)
-          (result/shell-success {:commit-sha (:output sha-r "")
-                                 :output (:output commit-r)})
-          ;; The commit itself succeeded, but resolving its sha didn't — do
-          ;; NOT report shell-success with an empty/missing :commit-sha, which
-          ;; would mislead callers that expect a real sha. Surface the
-          ;; rev-parse failure instead.
-          (result/shell-failure (:error sha-r) {:commit-sha nil})))
-      (result/shell-failure (:error commit-r) {:commit-sha nil}))))
-
-(defn- ^{:stratum 1} push-with-https-fallback!
-  "Push using HTTPS + token auth after SSH fails. Temporarily sets the
-   remote URL to include the token, pushes, then restores the original URL
-   so the token never persists in git config.
-
-   The token-bearing URL is passed to `git remote set-url` as an argv
-   vector, never a shell string — `exec!` routes string commands through
-   `sh -c`, which would otherwise expose the embedded token to shell
-   interpolation. Mirrors `git/with-https-token-fallback!`: a failed
-   set-url aborts before pushing against a remote that was never actually
-   repointed; a failed restore fails loud with a scrub command rather than
-   silently leaving the token persisted in git config. All three exec!
-   calls share the caller's `opts` (e.g. `:workdir`) so the repoint, push,
-   and restore all target the same executor context — a `:workdir`
-   applied only to the push would otherwise leave set-url/restore running
-   against the wrong directory."
-  [executor env-id branch-name remote-url https-url push-error opts]
-  (let [set-r (exec! executor env-id ["git" "remote" "set-url" "origin" https-url] opts)]
-    (if-not (result/succeeded? set-r)
-      (result/shell-failure
-       (msg/t :push/https-fallback-setup-failed
-              {:push-error    push-error
-               :set-url-error (:error set-r)})
-       {:push-succeeded? false})
-      (let [retry     (exec! executor env-id (str "git push -u origin " branch-name) opts)
-            restore-r (exec! executor env-id ["git" "remote" "set-url" "origin" remote-url] opts)]
-        (if (result/succeeded? restore-r)
-          retry
-          (let [pushed? (result/succeeded? retry)]
-            (result/shell-failure
-             (if pushed?
-               (msg/t :push/https-fallback-restore-failed
-                      {:remote-url    remote-url
-                       :restore-error (:error restore-r)})
-               (msg/t :push/https-fallback-push-and-restore-failed
-                      {:remote-url    remote-url
-                       :push-error    (:error retry)
-                       :restore-error (:error restore-r)}))
-             {:push-succeeded? pushed?})))))))
-
-(defn- ^{:stratum 1} reuse-existing-pr!
-  "Resolve the PR already open for the current branch via gh pr view, so a
-   release retry reuses it instead of opening a duplicate. Falls back to a
-   failure carrying the `gh pr view` resolution error (not the original
-   create error) when it can't be resolved — see the comment below."
-  [executor env-id exec-opts _create-error]
-  (let [r (exec! executor env-id "gh pr view --json url --jq '.url'" exec-opts)]
-    (if-let [pr (and (result/succeeded? r) (parse-pr-ref (:output r "")))]
-      (result/shell-success pr)
-      ;; Surface the actual gh pr view resolution failure (its stderr, or the
-      ;; unparseable stdout when it exited 0 without a URL) — not the original
-      ;; "already exists" create error — so retries are debuggable.
-      (result/shell-failure (msg/t :pr/reuse-unresolved
-                                   {:error (or (not-empty (:error r))
-                                               (not-empty (str/trim (:output r "")))
-                                               (msg/t :pr/reuse-no-url))})
-                            {:pr-url nil :pr-number nil}))))
-
-(defn ^{:stratum 1} edit-pr-body!
-  "Update the body of an existing PR using gh CLI.
-   Used to replace the initial stub body with the full PR doc content."
-  ([executor env-id pr-number body] (edit-pr-body! executor env-id pr-number body {}))
-  ([executor env-id pr-number body exec-opts]
-   (let [escaped-body (str/replace (or body "") "'" "'\\''")
-         cmd (str "gh pr edit " pr-number " --body '" escaped-body "'")]
-     (exec! executor env-id cmd exec-opts))))
-
-(defn ^{:stratum 1} diff-stats
-  "Get staged diff stats via executor. Mirrors git/diff-stats.
-   Returns {:additions N :deletions N :files N} or nil."
-  [executor env-id]
-  (let [r (exec! executor env-id "git diff --cached --numstat")]
-    (when (result/succeeded? r)
-      (numstat-totals (:output r "")))))
-
-(defn ^{:stratum 1} count-test-defs
-  "Count deftest forms in staged changes via executor. Mirrors git/count-test-defs.
-   Returns {:added N :removed N} or nil."
-  [executor env-id]
-  (let [r (exec! executor env-id "git diff --cached -U0")]
-    (when (result/succeeded? r)
-      (count-deftest (:output r "")))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} stage-files!
+(defn ^{:stratum 0} stage-files!
   "Stage files in the sandbox container. Returns a shell failure result if
    any path is unsafe (see validate-safe-container-path) — an unvalidated
    path containing a single quote or other shell metacharacter would
@@ -322,20 +135,23 @@
   [executor env-id file-paths]
   (cond
     (= file-paths :all)
-    (exec! executor env-id "git add .")
+    (commands/exec! executor env-id "git add .")
 
     (empty? file-paths)
     (result/shell-success {:output ""})
 
     :else
-    (if-let [invalid (some validate-safe-container-path file-paths)]
+    (if-let [invalid (some commands/validate-safe-container-path file-paths)]
       invalid
-      (exec! executor env-id
-             (str "git add " (str/join " " (map #(str "'" % "'") file-paths)))))))
+      (commands/exec! executor env-id
+                      (str "git add " (str/join " " (map #(str "'" % "'") file-paths)))))))
 
-(defn ^{:stratum 2} try-checkout-branch
-  "Try to checkout a new branch off the current HEAD, retrying with a
-   timestamp suffix if the desired name already exists.
+(defn ^{:stratum 0} try-checkout-branch
+  "Try to checkout a new branch off the current HEAD. When the name already
+   exists and the branch contains HEAD, check it out instead: a retried or
+   resumed release of the same run, whose branch name is fixed, carries on
+   with the branch it made rather than a renamed one (which would get a
+   second PR). Fails when the existing branch does not contain HEAD.
 
    Branches off HEAD (not `origin/<base-branch>`) so the new branch
    inherits whatever commits the task worktree already carries — e.g.
@@ -345,31 +161,41 @@
    `git add .` would find nothing to stage. `:base-branch` is still
    tracked for the PR-creation step, which uses it as the merge base."
   [executor env-id branch-name base-branch]
-  (if-let [guard (validate-safe-branch-name branch-name)]
+  (if-let [guard (commands/validate-safe-branch-name branch-name)]
     guard
-    (let [checkout-r (exec! executor env-id
-                            (str "git checkout -b " branch-name))]
+    (let [checkout-r (commands/exec! executor env-id
+                                     (str "git checkout -b " branch-name))]
     (if (result/succeeded? checkout-r)
       (result/shell-success {:branch branch-name :base-branch base-branch})
-      (let [ts-name (str branch-name "-" (System/currentTimeMillis))
-            retry-r (exec! executor env-id
-                           (str "git checkout -b " ts-name))]
-        (if (result/succeeded? retry-r)
-          (result/shell-success {:branch ts-name :base-branch base-branch})
-          (result/shell-failure (str "Failed to create branch: " (:error retry-r))
-                               {:branch nil})))))))
+      (let [exists?  (result/succeeded?
+                      (commands/exec! executor env-id ["git" "rev-parse" "--verify" "--quiet"
+                                                       (str "refs/heads/" branch-name)]))
+            holds?   (and exists?
+                          (result/succeeded?
+                           (commands/exec! executor env-id ["git" "merge-base" "--is-ancestor"
+                                                            "HEAD" branch-name])))
+            checkout (when holds? (commands/exec! executor env-id ["git" "checkout" branch-name]))]
+        (cond
+          (not exists?) (result/shell-failure (str "Failed to create branch: " (:error checkout-r))
+                                              {:branch nil})
+          (not holds?)  (result/shell-failure (msg/t :branch/diverged {:branch branch-name})
+                                              {:branch nil})
+          (result/succeeded? checkout)
+          (result/shell-success {:branch branch-name :base-branch base-branch :reused? true})
+          :else (result/shell-failure (str "Failed to check out branch: " (:error checkout))
+                                      {:branch nil})))))))
 
-(defn ^{:stratum 2} fetch-branch!
+(defn ^{:stratum 0} fetch-branch!
   "Fetch origin/<branch> into the sandbox. `create-branch!` fetches only the
    detected default; when a stacked-PR base is a parent task's branch, this
    pulls it so later `origin/<base>` range diffs / commits-ahead and the PR
    merge-base resolve instead of failing on a missing remote-tracking ref.
    Returns a shell-result."
   [executor env-id branch]
-  (or (validate-safe-branch-name branch)
-      (exec! executor env-id (str "git fetch origin " branch))))
+  (or (commands/validate-safe-branch-name branch)
+      (commands/exec! executor env-id (str "git fetch origin " branch) {:git-credentials? true})))
 
-(defn ^{:stratum 2} commits-ahead-of-base
+(defn ^{:stratum 0} commits-ahead-of-base
   "Count commits HEAD has added since branching from `origin/<base>`.
    Counts against the merge-base (`origin/<base>...HEAD`, three-dot
    form, right-only) so concurrent movement of `origin/<base>` while
@@ -381,56 +207,59 @@
    implement-phase boundary, the release branch inherits them and
    there is nothing left to stage."
   [executor env-id base-branch]
-  (when-not (validate-safe-branch-name base-branch)
-    (let [r (exec! executor env-id
-                   (str "git rev-list --count --right-only origin/" base-branch "...HEAD"))]
+  (when-not (commands/validate-safe-branch-name base-branch)
+    (let [r (commands/exec! executor env-id
+                            (str "git rev-list --count --right-only origin/" base-branch "...HEAD"))]
       (when (result/succeeded? r)
       (try
         (Long/parseLong (str/trim (:output r "0")))
         (catch NumberFormatException _ nil))))))
 
-(defn ^{:stratum 2} write-file!
+(defn ^{:stratum 0} write-file!
   "Write content to a file inside the sandbox container.
    Uses base64 encoding to safely transfer arbitrary content.
    Returns a shell failure result if `path` is unsafe."
   [executor env-id path content]
-  (if-let [invalid (validate-safe-container-path path)]
+  (if-let [invalid (commands/validate-safe-container-path path)]
     invalid
     (let [encoded (.encodeToString (java.util.Base64/getEncoder)
                                    (.getBytes content "UTF-8"))
           cmd (str "mkdir -p \"$(dirname '" path "')\" && "
                    "echo '" encoded "' | base64 -d > '" path "'")]
-      (exec! executor env-id cmd))))
+      (commands/exec! executor env-id cmd))))
 
-(defn ^{:stratum 2} delete-file!
+(defn ^{:stratum 0} delete-file!
   "Delete a file inside the sandbox container.
    Returns a shell failure result if `path` is unsafe."
   [executor env-id path]
-  (if-let [invalid (validate-safe-container-path path)]
+  (if-let [invalid (commands/validate-safe-container-path path)]
     invalid
-    (exec! executor env-id (str "rm -f '" path "'"))))
+    (commands/exec! executor env-id (str "rm -f '" path "'"))))
 
-(defn ^{:stratum 2} push-branch!
+(defn ^{:stratum 0} push-branch!
   "Push branch to origin inside the sandbox container.
    Optional opts supports :env for credential injection.
-   Retries with GH_TOKEN HTTPS auth if SSH push fails."
+   If the push fails and opts carry GH_TOKEN, retries once with the token in
+   that push's environment (`token-auth-env`), which also covers an SSH
+   origin; origin and .git/config are never modified."
   ([executor env-id branch-name] (push-branch! executor env-id branch-name {}))
   ([executor env-id branch-name opts]
-   (or (validate-safe-branch-name branch-name)
-       (let [result (exec! executor env-id (str "git push -u origin " branch-name) opts)]
-         (if (result/succeeded? result)
+   (or (commands/validate-safe-branch-name branch-name)
+       (let [result (commands/exec! executor env-id (str "git push -u origin " branch-name) opts)]
+         ;; A push stopped mid-way may have reached origin: retrying it over
+         ;; HTTPS would hide that unknown outcome behind the retry's.
+         (if (or (result/succeeded? result) (:timed-out? result) (:interrupted? result))
        result
        (if-let [token (get-in opts [:env "GH_TOKEN"])]
-         (let [url-r (exec! executor env-id "git remote get-url origin" opts)
-               remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
-               https-url (ssh->https-with-token remote-url token)]
-           (if https-url
-             (push-with-https-fallback! executor env-id branch-name remote-url https-url
-                                        (:error result) opts)
+         (let [url-r (commands/exec! executor env-id "git remote get-url origin" opts)
+               remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))]
+           (if-let [auth-env (commands/token-auth-env remote-url token)]
+             (commands/exec! executor env-id (str "git push -u origin " branch-name)
+                             (update opts :env merge auth-env))
              result))
          result))))))
 
-(defn ^{:stratum 2} create-pr!
+(defn ^{:stratum 0} create-pr!
   "Create a pull request using gh CLI inside the sandbox container.
    Optional exec-opts supports :env for GH_TOKEN injection.
    Returns {:success? bool :pr-number int :pr-url string :error string}.
@@ -440,33 +269,37 @@
      phantom success — release must never ship a PR doc claiming a PR it
      never opened.
    - A branch that already has an open PR (retry/resume) reuses that PR
-     rather than opening a duplicate."
+     rather than opening a duplicate.
+
+   Title and body are LLM-written and may quote a credential the agent saw;
+   secrets in them are replaced with the redaction marker before gh runs."
   ([executor env-id pr-opts] (create-pr! executor env-id pr-opts {}))
   ([executor env-id {:keys [title body base-branch]} exec-opts]
    (let [base (or base-branch "main")]
-     (or (validate-safe-branch-name base)
-         (let [escaped-title (str/replace title "'" "'\\''")
-               escaped-body (str/replace (or body "") "'" "'\\''")
+     (or (commands/validate-safe-branch-name base)
+         (let [escaped-title (str/replace (redaction/redact title) "'" "'\\''")
+               escaped-body (str/replace (or (redaction/redact body) "") "'" "'\\''")
                cmd (str "gh pr create"
                         " --title '" escaped-title "'"
                         " --body '" escaped-body "'"
                         " --base " base)
-               r (exec! executor env-id cmd exec-opts)]
+               r (commands/exec! executor env-id cmd exec-opts)]
            (cond
              (result/succeeded? r)
-             (if-let [pr (parse-pr-ref (:output r ""))]
+             (if-let [pr (commands/parse-pr-ref (:output r ""))]
                (result/shell-success pr)
                (result/shell-failure (msg/t :pr/create-unconfirmed
                                             {:output (str/trim (:output r ""))})
                                      {:pr-url nil :pr-number nil}))
 
-             (pr-already-exists? (:error r))
-             (reuse-existing-pr! executor env-id exec-opts (:error r))
+             (commands/pr-already-exists? (:error r))
+             (commands/reuse-existing-pr! executor env-id exec-opts (:error r))
 
              :else
-             (result/shell-failure (:error r) {:pr-url nil :pr-number nil})))))))
+             (result/shell-failure (:error r) (merge {:pr-url nil :pr-number nil}
+                                                     (select-keys r [:timed-out? :interrupted?])))))))))
 
-(defn ^{:stratum 2} diff-stats-range
+(defn ^{:stratum 0} diff-stats-range
   "Get diff stats for the changes this branch introduced since branching
    from `origin/<base>` — i.e. `git diff origin/<base>...HEAD` with the
    three-dot form, which compares HEAD to the merge-base rather than to
@@ -477,28 +310,28 @@
    reads the merge-base range rather than the staged index. Used in
    the boundary-commits release path."
   [executor env-id base-branch]
-  (when-not (validate-safe-branch-name base-branch)
-    (let [r (exec! executor env-id
-                   (str "git diff origin/" base-branch "...HEAD --numstat"))]
+  (when-not (commands/validate-safe-branch-name base-branch)
+    (let [r (commands/exec! executor env-id
+                            (str "git diff origin/" base-branch "...HEAD --numstat"))]
       (when (result/succeeded? r)
-        (numstat-totals (:output r ""))))))
+        (commands/numstat-totals (:output r ""))))))
 
-(defn ^{:stratum 2} count-test-defs-range
+(defn ^{:stratum 0} count-test-defs-range
   "Count deftest forms added/removed in `origin/<base>...HEAD` (three-dot,
    merge-base diff). Mirrors `count-test-defs` but reads the merge-base
    range so the destructive-diff gate keeps inspecting the commits this
    branch introduced — not deltas caused by `origin/<base>` moving
    forward concurrently."
   [executor env-id base-branch]
-  (when-not (validate-safe-branch-name base-branch)
-    (let [r (exec! executor env-id
-                   (str "git diff origin/" base-branch "...HEAD -U0"))]
+  (when-not (commands/validate-safe-branch-name base-branch)
+    (let [r (commands/exec! executor env-id
+                            (str "git diff origin/" base-branch "...HEAD -U0"))]
       (when (result/succeeded? r)
-        (count-deftest (:output r ""))))))
+        (commands/count-deftest (:output r ""))))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 3} metrics->result
+(defn ^{:stratum 1} metrics->result
   "Convert operation metrics to a final result, staging files if no errors."
   [executor env-id written-paths {:keys [created modified deleted errors]}]
   (let [file-metrics {:files-written created
@@ -514,7 +347,7 @@
            :errors [{:type :git-stage-failed :message (:error stage-r)}]
            :metrics file-metrics})))))
 
-(defn ^{:stratum 3} create-branch!
+(defn ^{:stratum 1} create-branch!
   "Create a new git branch inside the sandbox container, off the current
    HEAD (so phase-boundary commits already on the task branch carry
    forward). Fetches `origin/<default-branch>` first so the PR-creation
@@ -527,16 +360,17 @@
 
    Returns {:success? bool :branch string :base-branch string :error string}"
   [executor env-id branch-name]
-  (let [default-branch (detect-default-branch executor env-id)]
-    (if-let [invalid (validate-safe-branch-name default-branch)]
+  (let [default-branch (commands/detect-default-branch executor env-id)]
+    (if-let [invalid (commands/validate-safe-branch-name default-branch)]
       invalid
-      (let [fetch-r (exec! executor env-id ["git" "fetch" "origin" default-branch])]
+      (let [fetch-r (commands/exec! executor env-id ["git" "fetch" "origin" default-branch]
+                                    {:git-credentials? true})]
         (if-not (result/succeeded? fetch-r)
           (result/shell-failure (str "Failed to fetch: " (:error fetch-r)) {:branch nil})
           (try-checkout-branch executor env-id branch-name default-branch))))))
 
 ;; File batch operations (mirrors files.clj write-and-stage-files!)
-(defn ^{:stratum 3} apply-file-operation!
+(defn ^{:stratum 1} apply-file-operation!
   "Apply a single file operation (create, modify, delete) in the sandbox."
   [executor env-id {:keys [action path content]}]
   (case action
@@ -545,9 +379,9 @@
     :delete (delete-file! executor env-id path)
     (result/shell-failure (str "Unknown action: " action))))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 4} write-and-stage-files!
+(defn ^{:stratum 2} write-and-stage-files!
   "Write code artifact files into the sandbox and stage them.
    Returns result map matching files/write-and-stage-files! contract."
   [executor env-id code-artifacts]

@@ -33,6 +33,7 @@
             [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
             [ai.miniforge.workflow.execution-result-summary :as result-summary]
             [ai.miniforge.workflow.execution-transition :as transition]
+            [ai.miniforge.workflow.fsm :as workflow-fsm]
             [ai.miniforge.workflow.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -57,11 +58,39 @@
         (update-in [:execution/metrics :cost-usd]    (fnil + 0.0) (or cost-usd 0.0))
         (update-in [:execution/metrics :duration-ms] (fnil + 0)   (or duration-ms 0)))))
 
+(defn- ^{:stratum 0} dag-failure-error
+  "The :execution/errors entry for a failed DAG run. An operator cancel
+   is recorded as :dashboard-stop with the stop anomaly's message and
+   data, the same entry the runner writes when it sees :stopped at a
+   phase boundary, so a cancel reads the same wherever it lands."
+  [dag-result]
+  (if (:cancelled? dag-result)
+    (let [stop (:error dag-result)]
+      {:type    :dashboard-stop
+       :message (:anomaly/message stop)
+       :data    (:anomaly/data stop)})
+    {:type       :dag-execution-failed
+     :dag-result dag-result}))
+
+(defn- ^{:stratum 0} phase-after-active
+  "The phase the workflow enters when the active one (the plan phase, when
+   the DAG executor ran) succeeds, or nil when success completes the
+   workflow. Read from the compiled execution machine's :phase/succeed
+   target for the current state, the same edge the normal transition
+   takes: pipeline order, or the phase's :on-success when it has one."
+  [ctx]
+  (let [machine (:execution/fsm-machine ctx)
+        state-id (some-> (:execution/fsm-state ctx) workflow-fsm/current-state)
+        target (get-in machine [:workflow/source-states state-id :on :phase/succeed])]
+    (get-in machine [:workflow/state->entry target :phase])))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} dag-skip-reason
   "Return the reason DAG execution should be skipped, or nil if it should proceed.
-   Reasons are keywords — :not-plan-phase, :disabled, :no-plan-id, :no-tasks."
+   Reasons are keywords — :not-plan-phase, :disabled, :no-plan-id, :no-tasks,
+   :plan-failed. A failed plan phase (including one its gates denied) keeps its
+   plan output, but its tasks are never executed."
   [phase-name phase-result ctx]
   (cond
     (not= :plan phase-name) :not-plan-phase
@@ -70,6 +99,7 @@
             (cond
               (nil? plan) :no-plan-id
               (empty? (:plan/tasks plan)) :no-tasks
+              (phase/failed? phase-result) :plan-failed
               :else nil))))
 
 (defn ^{:stratum 1} apply-dag-failure
@@ -79,9 +109,7 @@
    (-> ctx
        (assoc :execution/dag-result dag-result)
        (roll-dag-metrics-into-execution dag-result)
-       (update :execution/errors conj
-               {:type :dag-execution-failed
-                :dag-result dag-result}))))
+       (update :execution/errors conj (dag-failure-error dag-result)))))
 
 (defn ^{:stratum 1} dag-skip-diagnostic
   "Produce a structured snapshot of phase-result for :no-plan-id / :no-tasks
@@ -122,8 +150,12 @@
 (defn ^{:stratum 1} apply-dag-success
   "Apply a successful DAG result to the execution context.
    Merges artifact provenance, copies sub-worktree file changes into the
-   parent worktree, synthesizes an :implement phase result, and advances
-   past implement to verify → review → release."
+   parent worktree, and advances out of the plan phase. The DAG ran the
+   plan's tasks, which is the implement phase's work: when :implement is
+   the pipeline's next phase, a synthesized :implement result is recorded
+   and that phase is skipped (plan → verify → review → release). Any other
+   next phase runs as usual, and no :implement result is recorded for a
+   pipeline that has no such phase there."
   [ctx dag-result pipeline transition-to-completed-fn transition-to-failed-fn]
   (let [artifacts    (:artifacts dag-result)
         task-count   (count artifacts)
@@ -150,7 +182,8 @@
                    {:type    :sync-sub-worktrees-failed
                     :message (:anomaly/message sync-result)
                     :anomaly sync-result})))
-      (let [;; Synthesize new-style implement phase result.
+      (let [implement-next? (= :implement (phase-after-active ctx))
+            ;; Synthesize new-style implement phase result.
             synthesized-implement-result
             {:name   :implement
              :status :completed
@@ -160,19 +193,20 @@
                                                   {:task-count task-count})
                       :metrics        (merge {:task-count task-count}
                                              (:metrics dag-result))}}
-            ctx-with-dag (-> ctx
-                             (update :execution/artifacts into artifacts)
-                             (assoc :execution/dag-result dag-result)
-                             (assoc-in [:execution/phase-results :implement]
-                                       synthesized-implement-result)
-                             (roll-dag-metrics-into-execution dag-result))
+            ctx-with-dag (cond-> (-> ctx
+                                     (update :execution/artifacts into artifacts)
+                                     (assoc :execution/dag-result dag-result)
+                                     (roll-dag-metrics-into-execution dag-result))
+                           implement-next?
+                           (assoc-in [:execution/phase-results :implement]
+                                     synthesized-implement-result))
             ctx-after-plan
             (transition/apply-phase-transition ctx-with-dag
                                                :phase/succeed
                                                pipeline
                                                transition-to-completed-fn
                                                transition-to-failed-fn)]
-        (if (phase/failed? ctx-after-plan)
+        (if (or (not implement-next?) (phase/failed? ctx-after-plan))
           ctx-after-plan
           (transition/apply-phase-transition (lifecycle/begin-phase-attempt :implement ctx-after-plan)
                                              :phase/succeed

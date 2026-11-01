@@ -11,9 +11,8 @@ Miniforge uses OpenCode as the default provider/auth wrapper for LLM
 access. Configure provider keys in OpenCode, then let miniforge invoke
 `opencode run`.
 
-Claude Code and Codex remain supported direct CLI backends for users who
-already have those tools configured, but miniforge no longer accepts
-provider API keys directly.
+Claude Code and Codex remain supported direct CLI backends for users who already have them configured.
+Miniforge no longer accepts provider API keys directly.
 
 ### Provider Key Setup
 
@@ -24,66 +23,61 @@ opencode models
 
 ### GitHub Token (for PR creation)
 
-```bash
-export GITHUB_TOKEN="ghp_..."
-```
-
-Without a GitHub token, the release phase will commit and push but skip
-PR creation.
+The release phase opens PRs with the `gh` CLI. It uses the first token it
+finds in `MINIFORGE_GIT_TOKEN`, `GH_TOKEN`, or `gh auth token`, so
+`gh auth login` is enough on a workstation.
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GITHUB_TOKEN` | — | GitHub token for PR creation |
-| `MINIFORGE_MAX_TOKENS` | `150000` | Max tokens per workflow |
-| `MINIFORGE_MAX_ITERATIONS` | `50` | Max phase retries |
-| `MINIFORGE_MAX_PARALLEL` | `4` | Max parallel DAG tasks |
-| `MINIFORGE_MAX_COST_USD` | `100.0` | Cost budget per workflow |
+| `MINIFORGE_HOME` | `~/.miniforge` | Directory for the user config file and artifacts |
+| `MINIFORGE_LLM_BACKEND` | `opencode` | LLM backend; `mf config backends` lists them |
+| `MINIFORGE_LLM_MODEL` | not set | Model for every role the next two leave unset |
+| `MINIFORGE_AGENT_THINKING_MODEL` | not set | Model for the planner and architect |
+| `MINIFORGE_AGENT_EXECUTION_MODEL` | not set | Model for every other role |
+| `MINIFORGE_GIT_TOKEN`, `GH_TOKEN` | — | Token for PR creation |
 
-## Workflow Tuning
+With no model set, each role uses miniforge's default for the backend, or
+the backend's own; [Models](../configuration.md#models) gives the order.
+[Configuration Management](../configuration.md) lists the rest.
 
-Override defaults in your spec:
+## Timeouts and Budgets
 
-```clojure
-{:spec/title "..."
- :spec/description "..."
+No environment variable or user-config key sets token budgets, cost
+budgets, iteration limits, parallelism or LLM timeouts.
+`MINIFORGE_MAX_TOKENS`, `MINIFORGE_MAX_ITERATIONS`, `MINIFORGE_MAX_PARALLEL`
+and `MINIFORGE_MAX_COST_USD` appeared here before, but nothing read them.
 
- ;; Override workflow config
- :workflow/config
- {:max-tokens 50000
-  :max-iterations 10
-  :failure-strategy :retry}}
-```
-
-## Per-Phase Budgets
-
-Individual phases can be tuned in the workflow definition:
+Phase retries are set per phase in the workflow definition. Only
+`:iterations` is enforced; the phase schema also accepts `:tokens` and
+`:time-seconds`, but no phase reads them.
 
 ```clojure
 {:phase :implement
  :gates [:syntax :lint :no-secrets]
- :budget {:tokens 50000
-          :iterations 5
-          :time-seconds 300}}
+ :budget {:iterations 5}}
 ```
 
 ## User Config File
 
-Persistent configuration lives in `~/.miniforge/config.edn`:
+Persistent configuration lives in `~/.miniforge/config.edn`. Create it
+with `mf config init`, view it with `mf config list`.
 
 ```clojure
-{:llm {:backend :opencode
-       :model "anthropic/claude-sonnet-4-5"}
- :max-parallel 2
- :default-workflow :canonical-sdlc}
+{:llm {:backend :opencode}
+ ;; Optional: models per role tier. Without them each role uses its
+ ;; default for the backend.
+ :agents {:default-models {:thinking  "anthropic/claude-opus-4-6"
+                           :execution "anthropic/claude-sonnet-4-6"}}}
 ```
 
 ## Priority Order
 
 Configuration is resolved in this order (highest priority first):
 
-1. Workflow spec overrides (`:workflow/config`)
+1. `:spec/llm-backend` in the spec (backend only)
 2. Environment variables (`MINIFORGE_*`)
-3. User config file (`~/.miniforge/config.edn`)
-4. Built-in defaults
+3. Repository config (`.miniforge/config.edn`, `:policy-packs` only)
+4. User config file (`~/.miniforge/config.edn`)
+5. Built-in defaults

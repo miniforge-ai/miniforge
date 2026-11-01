@@ -37,8 +37,8 @@ The old packaged runner reproduced eight failures / 35 assertions after the
 test fixture was corrected to reach the terminal boundary. Shared legacy phase
 completion publication is isolated in that test; terminal event construction,
 journal acceptance/refusal, checkpoint save/reopen, and cleanup remain real.
-All three consumers passed serially (1m31s), rebuilt CLI 39,199,111 bytes, and
-isolated packaged regressions passed 43 tests / 290 assertions with test fixtures
+All three consumers passed serially (1m31s). Rebuilt CLI: 39,199,111 bytes.
+Isolated packaged regressions passed 43 tests / 290 assertions with test fixtures
 only, no production source overlays. Nil/legacy and explicit skip behavior remain
 covered. Adversarial review traced receipt ownership, output projection,
 checkpoint ordering, retained phase facts and the fatal-error cleanup path.
@@ -49,7 +49,7 @@ diagnostic, never retried recursively; an already-failed outcome is not
 republished. Real-journal regressions cover the available failure path and the
 double-refusal case. The follow-up passed all three consumers (1m34s), rebuilt
 CLI 39,199,812 bytes, and isolated package 44 tests / 300 assertions.
-An additional serialized JVM run passed 37 tests / 681 assertions across N7 OPSV
+An additional serialized JVM run passed 37 tests / 681 assertions. Coverage includes N7 OPSV
 shared lifecycle, finalization, current terminal evidence, post-actuation
 recovery, typed checkpoints and native failure publication.
 Main alignment changed only the dependency documentation; the production and
@@ -61,8 +61,8 @@ publication. A class-only fatal-error boundary also marks cleanup failed when th
 initial publication throws, then rethrows the same Error. Real cleanup tests
 verify the failed observation signal in both paths and the failed checkpoint
 before fallback. The old package reproduced four failures / seven assertions.
-The fix passed all three consumers serially (1m31s), rebuilt CLI 39,199,999 bytes,
-isolated package 46 tests / 313 assertions, and the N7 JVM integration suite
+The fix passed all three consumers serially (1m31s). Rebuilt CLI: 39,199,999 bytes.
+Isolated package: 46 tests / 313 assertions. The N7 JVM integration suite passed
 37 tests / 681 assertions. Namespace responsibilities remain separated, shared
 test fixtures avoid duplicated setup, and all inferred namespaces stay within
 three strata. The standards scan then required the fatal catch/rethrow to live

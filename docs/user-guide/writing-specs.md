@@ -80,7 +80,7 @@ Everything else is optional but recommended.
 
 | Field | Description |
 |-------|-------------|
-| `:spec/intent` | `{:type :feature}` — helps select the right workflow |
+| `:spec/intent` | `{:type :feature :scope ["src/auth/"]}` — kind of change and where it lands |
 | `:spec/constraints` | Boundaries the implementer must respect |
 | `:spec/acceptance-criteria` | How to verify the work is correct |
 
@@ -88,6 +88,7 @@ Everything else is optional but recommended.
 
 | Field | Description |
 |-------|-------------|
+| `:spec/workflow-type` | `:quick-fix` — run a workflow other than the default `:canonical-sdlc` (Markdown frontmatter: `type: quick-fix`) |
 | `:spec/tags` | `[:auth :security]` — for organization |
 | `:spec/repo-url` | Target a different repo |
 | `:spec/branch` | Target a specific branch |

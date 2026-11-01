@@ -33,7 +33,7 @@ No provider operations, journal migration or terminal-publication policy changes
 ## Regression evidence
 
 The previous CLI fails 10 of 11 assertions across three tests. It drops phase
-identity and supplied options, leaves stale entry config in place, and turns the
+identity and supplied options, and leaves stale entry config in place. It turns the
 native failure/recovery workflow into a pipeline exception with no phase results.
 This is a runner integration regression, not only a synthetic map-shape mismatch.
 

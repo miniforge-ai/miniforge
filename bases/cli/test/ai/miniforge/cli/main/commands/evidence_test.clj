@@ -179,7 +179,7 @@
     (spit (str directory "/missing-id.edn") "{}")
     (with-redefs [shared/call-optional-provider (constantly nil)
                   app-config/home-dir (constantly *tmp-dir*)]
-      (let [output (with-out-str (sut/evidence-list-cmd {}))]
+      (let [output (with-out-str (binding [*err* *out*] (sut/evidence-list-cmd {})))]
         (is (.contains output "malformed.edn"))
         (is (.contains output "missing-id.edn"))
         (is (.contains output "refused"))))))
@@ -195,8 +195,8 @@
       (doseq [text ["{" "{} {}" "nil" "false"]]
         (spit source text)
         (spit destination "unchanged")
-        (is (.contains (with-out-str (sut/evidence-show-cmd {:id "malformed"})) "refused"))
-        (is (.contains (with-out-str (sut/evidence-export-cmd {:id "malformed"})) "refused"))
+        (is (.contains (with-out-str (binding [*err* *out*] (sut/evidence-show-cmd {:id "malformed"}))) "refused"))
+        (is (.contains (with-out-str (binding [*err* *out*] (sut/evidence-export-cmd {:id "malformed"}))) "refused"))
         (is (= "unchanged" (slurp destination)))))))
 
 (deftest ^{:stratum 1} falsey-legacy-fields-preserve-canonical-presentation
@@ -240,7 +240,7 @@
                   formats/encode (constantly nil)
                   shared/exit! identity]
       (doseq [path [destination absent]]
-        (is (.contains (with-out-str (sut/evidence-export-cmd (export-options "json" path)))
+        (is (.contains (with-out-str (binding [*err* *out*] (sut/evidence-export-cmd (export-options "json" path))))
                        (messages/t :evidence/export-failed {:path path}))))
       (is (= "unchanged" (slurp destination)))
       (is (not (fs/exists? (str *tmp-dir* "/not-created")))))))
@@ -255,7 +255,7 @@
       (with-redefs [shared/call-optional-provider (constantly nil)
                     app-config/home-dir (constantly *tmp-dir*)
                     shared/exit! identity]
-        (let [output (with-out-str (sut/evidence-show-cmd {:id "test-bundle"}))]
+        (let [output (with-out-str (binding [*err* *out*] (sut/evidence-show-cmd {:id "test-bundle"})))]
           (is (.contains output "unsealed"))
           (is (not (.contains output "wf-1"))))))))
 
@@ -290,12 +290,12 @@
                        (dissoc sealed :evidence/content-hash :evidence/sealed-at)]]
         (spit source (pr-str invalid))
         (spit destination "unchanged")
-        (is (.contains (with-out-str (sut/evidence-show-cmd {:id "checked"})) "refused"))
-        (is (.contains (with-out-str (sut/evidence-list-cmd {})) "refused"))
-        (is (.contains (with-out-str (sut/evidence-export-cmd {:id "checked"})) "refused"))
+        (is (.contains (with-out-str (binding [*err* *out*] (sut/evidence-show-cmd {:id "checked"}))) "refused"))
+        (is (.contains (with-out-str (binding [*err* *out*] (sut/evidence-list-cmd {}))) "refused"))
+        (is (.contains (with-out-str (binding [*err* *out*] (sut/evidence-export-cmd {:id "checked"}))) "refused"))
         (is (= "unchanged" (slurp destination))))
       (spit source (pr-str sealed))
-      (is (.contains (with-out-str (sut/evidence-export-cmd {:id "checked" :format "unknown"})) "Unsupported"))
+      (is (.contains (with-out-str (binding [*err* *out*] (sut/evidence-export-cmd {:id "checked" :format "unknown"}))) "Unsupported"))
       (is (not (fs/exists? (str directory "/checked-export.unknown")))))))
 
 (deftest ^{:stratum 2} provider-only-bundle-exports-the-validated-snapshot-test
@@ -309,7 +309,7 @@
                   app-config/home-dir (constantly *tmp-dir*)
                   shared/exit! identity]
       (spit destination "unchanged")
-      (is (.contains (with-out-str (sut/evidence-export-cmd {:id "provider"})) "refused"))
+      (is (.contains (with-out-str (binding [*err* *out*] (sut/evidence-export-cmd {:id "provider"}))) "refused"))
       (is (= "unchanged" (slurp destination))))))
 
 (use-fixtures :each tmp-dir-fixture)
