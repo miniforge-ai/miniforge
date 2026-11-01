@@ -4,6 +4,13 @@
   :streaming-error.system/no-output
   "Process failed with no output"
 
+  ;; System-locale diagnostics for a CLI run that exited 0.
+  :cli-output.system/empty-success-output
+  "CLI backend exited successfully but produced no output"
+
+  :cli-output.system/claude-rate-limited
+  "Claude CLI rate limited: {notice}"
+
   ;; System-locale test fixtures for rate-limit classifier regressions.
   :rate-limit-test.system/claude-limit-la
   "You've hit your limit - resets 7pm (America/Los_Angeles)"

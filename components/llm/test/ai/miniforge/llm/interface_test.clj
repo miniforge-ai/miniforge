@@ -406,7 +406,14 @@
     (let [resp (impl/parse-cli-output "" 0)]
       (is (not (:success resp)))
       (is (= "empty_success_output" (get-in resp [:error :type])))
-      (is (some? (:anomaly resp))))))
+      (is (= "CLI backend exited successfully but produced no output" (get-in resp [:error :message])))
+      (is (some? (:anomaly resp)))))
+
+  (testing "the CLI's limit notice as its whole output is a rate limit that quotes it"
+    (let [resp (impl/parse-cli-output "You've hit your limit · resets 7pm (America/Los_Angeles)" 0)]
+      (is (= "rate_limit" (get-in resp [:error :type])))
+      (is (= "Claude CLI rate limited: You've hit your limit · resets 7pm (America/Los_Angeles)"
+             (get-in resp [:error :message]))))))
 
 (deftest ^{:stratum 0} mock-client-response-includes-metrics-test
   (testing "mock client success response has :tokens and :usage"
@@ -1678,7 +1685,9 @@
                                    (assistant-frame "<synthetic>" "You've hit your limit · resets 7pm (America/Los_Angeles)")])]
       (is (< 300 (count long-answer)) "the answer alone is longer than any notice")
       (is (not (:success resp)))
-      (is (= "rate_limit" (get-in resp [:error :type])))))
+      (is (= "rate_limit" (get-in resp [:error :type])))
+      (is (= "Claude CLI rate limited: You've hit your limit · resets 7pm (America/Los_Angeles)"
+             (get-in resp [:error :message])))))
   (testing "a model's short final answer that mentions a limit is not a limit"
     (let [resp (streamed-response [(assistant-frame "claude-opus-5" long-answer)
                                    (assistant-frame "claude-opus-5" "{\"summary\":\"Added handling for too many requests.\"}")])]

@@ -487,12 +487,12 @@
     (cond
       (str/blank? trimmed)
       (responses/llm-error :anomalies.agent/llm-error "empty_success_output"
-                 "CLI backend exited successfully but produced no output"
+                 (msg/t :cli-output.system/empty-success-output)
                  {:exit-code exit-code :stderr stderr :stdout output})
 
       (rate-limited? trimmed)
       (responses/llm-error :anomalies.agent/rate-limited "rate_limit"
-                 (str "Claude CLI rate limited: " trimmed)
+                 (msg/t :cli-output.system/claude-rate-limited {:notice trimmed})
                  {:exit-code exit-code :stdout output})
 
       :else
@@ -520,7 +520,7 @@
     cli-text]
    (if-let [notice (first (filter rate-limited? [content cli-text]))]
      (responses/llm-error :anomalies.agent/rate-limited "rate_limit"
-                (str "Claude CLI rate limited: " (str/trim notice))
+                (msg/t :cli-output.system/claude-rate-limited {:notice (str/trim notice)})
                 {:exit-code exit-code :stdout content
                  :stop-reason stop-reason :num-turns num-turns})
      (cond-> (responses/llm-success content {:exit-code exit-code :usage usage})
