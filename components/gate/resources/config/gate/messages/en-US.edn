@@ -298,4 +298,20 @@
 
   ;; Coverage gate — registry description
   :coverage/description
-  "Validates test coverage meets threshold (default 80%)"}}
+  "Validates test coverage meets threshold (default 80%)"
+
+  ;; Mechanical capability — a wrapped gate failed; detail is its first error or the fallback
+  :capability/failed
+  "{capability} capability failed: {detail}"
+
+  ;; Mechanical capability — the wrapped tool failed without an error message
+  :capability/violation-fallback
+  "tool reported a violation"
+
+  ;; Format capability — neither check contract was supplied
+  :capability/format-check-missing
+  "Format capability requires :format-check-fn or :artifact/formatted-content"
+
+  ;; Format gate — how many changed files an LSP formatter can handle
+  :format/formattable-count
+  "{count} file(s) support LSP formatting"}}

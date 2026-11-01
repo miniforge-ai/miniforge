@@ -167,8 +167,8 @@
         formattable (filterv #(formattable-file? registry %)
                              (get artifact :code/files []))]
     (response/success {:formattable-files (mapv :path formattable)
-                       :message (str (count formattable)
-                                     " file(s) support LSP formatting")})))
+                       :message (messages/t :format/formattable-count
+                                            {:count (count formattable)})})))
 
 ;------------------------------------------------------------------------------ Layer 5
 

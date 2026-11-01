@@ -19,7 +19,7 @@ verdicts and its description), syntax, lint, format, pre-verify lint,
 plan / review / quality / release / policy, coverage, pre-commit
 discipline, the mechanical capability descriptions, the registry's
 unknown-gate and noop entries, and the interface's missing-repair
-failure. 39 strings in all.
+failure. 44 strings in all, counting the five added in review.
 
 ## Changes
 
@@ -56,7 +56,15 @@ failure. 39 strings in all.
 
   Minimum-count guards keep an empty scan from passing vacuously.
 
-The only literals left are inside rich-comment example blocks.
+Literals still left in gate sources: the rich-comment example blocks,
+machine strings (git argv, URIs, glob prefixes), and one programmer-error
+`ex-info` in `pre_verify_lint/execution.clj`. Dewey 050 exempts all three
+classes. The first sweep missed five prose literals: the capability
+failure line and its fallback, the missing format-check-contract message,
+the formattable-file count, and the response-chain "Gate validation
+failed" anomaly. Copilot caught them, and they are now catalogued. The
+anomaly text goes to `system.edn`, the default when the audience is
+unclear (050).
 
 ## Testing
 
@@ -64,7 +72,7 @@ Run here with Clojure 1.12 from Maven Central. Clojars is 403 through
 this environment's proxy, so only namespaces without Clojars
 dependencies could load:
 
-- `messages-test`: 1 test, 104 assertions, passing. It was also run against
+- `messages-test`: 1 test, 109 assertions, passing. It was also run against
   a copy of the catalog with `:tests-pass/failed-one` and
   `:opsv/abort-remediation` deleted. Both deletions were reported, so the
   test catches the indirect keys.

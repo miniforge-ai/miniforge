@@ -250,7 +250,7 @@
             (if (passed? result)
               result
               (response/throw-anomaly! :anomalies.gate/validation-failed
-                                      "Gate validation failed"
+                                      (messages/system-t :gate/validation-failed)
                                       {:errors (:errors result)})))))))
    (response/create :gates)
    gate-kws))

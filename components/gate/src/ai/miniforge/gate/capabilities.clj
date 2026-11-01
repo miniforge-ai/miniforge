@@ -110,9 +110,10 @@
        :capability    capability
        :matches       errors
        :artifact-path (or (:artifact/path artifact) (:path artifact))
-       :message       (str (name capability) " capability failed: "
-                            (or (some-> errors first :message)
-                                "tool reported a violation"))})))
+       :message       (messages/t :capability/failed
+                                  {:capability (name capability)
+                                   :detail     (or (some-> errors first :message)
+                                                   (messages/t :capability/violation-fallback))})})))
 
 (defn- ^{:stratum 1} artifact-format-result
   [artifact]
@@ -156,8 +157,7 @@
                    (artifact-format-result artifact))]
     (if result
       (gate-result->violation :format result artifact)
-      (format-drift-violation artifact
-                              "Format capability requires :format-check-fn or :artifact/formatted-content"))))
+      (format-drift-violation artifact (messages/t :capability/format-check-missing)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 
