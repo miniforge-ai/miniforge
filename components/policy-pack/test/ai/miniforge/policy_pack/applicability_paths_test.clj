@@ -31,6 +31,11 @@
 (def ^{:stratum 0} ^:private md-rule
   {:rule/id :test/md :rule/applies-to {:file-globs ["**/*.md"]}})
 
+(defn- ^{:stratum 0} paths-context
+  "A rule-filter context whose artifact spans `paths`."
+  [& paths]
+  {:artifact {:artifact/paths (vec paths)}})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} rule-applies-when-any-path-matches-test
@@ -51,14 +56,12 @@
     (is (= [:test/clj]
            (mapv :rule/id (policy-pack/filter-applicable-rules
                            [clj-rule md-rule]
-                           {:artifact {:artifact/paths ["src/core.clj" "deps.edn"]}}))))))
+                           (paths-context "src/core.clj" "deps.edn")))))))
 
 (deftest ^{:stratum 1} registry-rule-applies-honours-artifact-paths-test
   (testing "the registry's rule-applies? reads :artifact/paths as the
             applicability filter does"
-    (is (registry-support/rule-applies?
-         clj-rule {:artifact {:artifact/paths ["README.md" "src/core.clj"]}}))
-    (is (not (registry-support/rule-applies?
-              clj-rule {:artifact {:artifact/paths ["README.md"]}})))
+    (is (registry-support/rule-applies? clj-rule (paths-context "README.md" "src/core.clj")))
+    (is (not (registry-support/rule-applies? clj-rule (paths-context "README.md"))))
     (is (registry-support/rule-applies?
          clj-rule {:artifact {:artifact/path "src/core.clj"}}))))

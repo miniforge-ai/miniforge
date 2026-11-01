@@ -86,7 +86,7 @@
 (defn ^{:stratum 0} artifact-paths
   "The paths an artifact covers: its `:artifact/paths` when it spans several
    files, else its single `:artifact/path`, else `[\"\"]` (no path, which
-   matches no glob)."
+   matches no path-specific glob)."
   [artifact]
   (or (seq (:artifact/paths artifact))
       [(:artifact/path artifact "")]))

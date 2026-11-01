@@ -20,10 +20,10 @@ and rules reviews the PR process requires. Those reviews, run after merge,
 found:
 
 - **Medium:** release built its behavior addendum with no file paths, the bug
-  #2296 fixed for review. Five glob-scoped rules that target `:release`
-  (`:std/bb-over-shell`, `:std/datever`, `:std/rule-format`,
-  `:std/specification-standards`, `:std/work-spec-authoring`) never reached
-  the releaser.
+  #2296 fixed for review. Five glob-scoped rules that apply in `:release`
+  (`:std/bb-over-shell`, `:std/datever`, `:std/specification-standards`,
+  `:std/work-spec-authoring`, and `:std/rule-format`, which applies in every
+  phase) never reached the releaser.
 - `registry.support/rule-applies?` still read only `:artifact/path`, so the two
   applicability predicates disagreed on the artifact shape (dewey 002).
 - Review computed its paths inline in a map literal and listed every path twice
@@ -45,14 +45,16 @@ found:
 4. `phase-software-factory/review.clj`: `changed-file-paths`, the distinct
    paths of `:code/files` and `:code/file-paths`.
 5. `phase-software-factory/release.clj`: `build-executor-context` takes the
-   paths being released (a 3-arity keeps the old behaviour) and filters the
-   `:release` rules by them; `enter-release` passes `release-file-paths` of the
+   paths being released and filters the `:release` rules by them;
+   `enter-release`, its only caller, passes `release-file-paths` of the
    workflow state.
 
 ## Testing Plan
 
-1. `applicability_paths_test.clj`: `:artifact/paths` through the public
-   `filter-applicable-rules`, and through `registry.support/rule-applies?`.
+1. `applicability_paths_test.clj`: `:artifact/paths` through
+   `registry.support/rule-applies?` (a regression test), and through the
+   public `filter-applicable-rules` (contract coverage: it already passed
+   after #2296).
 2. `review_behavior_addendum_test.clj`: `changed-file-paths` on a rehydrated
    artifact (each path once), a paths-only artifact, and no artifact.
 3. `release_test.clj`: release hands `load-and-filter-behaviors` the paths of
