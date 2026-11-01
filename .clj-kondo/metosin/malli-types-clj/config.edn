@@ -1,0 +1,26 @@
+{:linters {:unresolved-symbol {:exclude [(malli.core/=>)]},
+           :type-mismatch {:namespaces {ai.miniforge.gate.interface {repair-gate {:arities {4 {:args [:keyword
+                                                                                                      :any
+                                                                                                      :any
+                                                                                                      {:op :keys,
+                                                                                                       :nilable true}],
+                                                                                               :ret :any}}},
+                                                                     failed? {:arities {1 {:args [{:op :keys,
+                                                                                                   :nilable true}],
+                                                                                           :ret :boolean}}},
+                                                                     check-gate {:arities {3 {:args [:keyword
+                                                                                                     :any
+                                                                                                     {:op :keys,
+                                                                                                      :nilable true}],
+                                                                                              :ret :any}}},
+                                                                     check-gates {:arities {3 {:args [:sequential
+                                                                                                      :any
+                                                                                                      {:op :keys,
+                                                                                                       :nilable true}],
+                                                                                               :ret {:op :keys,
+                                                                                                     :req {:passed? :boolean,
+                                                                                                           :results :vector,
+                                                                                                           :failed-gates :vector}}}}},
+                                                                     passed? {:arities {1 {:args [{:op :keys,
+                                                                                                   :nilable true}],
+                                                                                           :ret :boolean}}}}}}}}
