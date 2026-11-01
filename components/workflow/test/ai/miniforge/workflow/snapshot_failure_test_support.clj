@@ -16,7 +16,9 @@
   (let [workflow {:workflow/id :snapshot-failure
                   :workflow/version "1.0.0"
                   :workflow/pipeline [{:phase :plan}]}
-        options {:checkpoint/root root :event-stream stream :logger logger}
+        options {:checkpoint/root root
+                 :event-stream stream
+                 :logger logger}
         ctx (context/create-context workflow {} options)
         initial (fsm/initialize-execution (:execution/fsm-machine ctx))]
     (context/sync-machine-projections (assoc ctx :execution/fsm-state initial))))

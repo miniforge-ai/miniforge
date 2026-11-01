@@ -9,8 +9,7 @@
 ## Overview
 
 Close the existing N2/N3 failure-reporting obligation without amending contracts.
-Base: main, with a documented dependency on #2299 and the checkpoint-location-
-retention integration branch. Those dependencies must merge before this PR.
+Base: main. Dependencies #2299 and #2304 are merged and integrated.
 
 ## Motivation
 
@@ -48,6 +47,17 @@ workflow-consuming product suites passed (2m51s). A fresh CLI build produced a
 146 assertions, including failure, location-retention and start/terminal paths.
 No production-source overlays were used.
 
+Actual-main reconciliation preserved the tested snapshot producer and adopted
+the exact reviewed parent versions for retention files. The producer sources
+had no incoming changes beyond the already integrated parent. All three
+workflow-consuming product suites passed again (3m03s); a fresh build and
+isolated packaged acceptance passed 36 tests with 160 assertions.
+The adversarial pass also moved message-field computation above map assembly
+and kept fixture maps legible without changing failure semantics.
+Final focused acceptance passed 11 tests and 50 assertions. A fresh stripped
+CLI jar contains the final producer sources; isolated acceptance again passes
+36 tests and 160 assertions without production-source overlays.
+
 ## Deployment Plan
 
 No journal migration or new schema version. Failure events remain payload 1.0.0.
@@ -61,5 +71,5 @@ This change is not an N7 completion claim.
 ## Checklist
 
 - [x] Regression and affected-project tests
-- [ ] Standards review, lint, layers, normal hooks and signing
-- [ ] Fresh Copilot review and all CI gates
+- [x] Adversarial standards review, lint and inferred layers
+- [ ] Normal hooks, signing, fresh Copilot review and all CI gates

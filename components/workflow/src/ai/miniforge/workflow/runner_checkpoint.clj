@@ -26,8 +26,10 @@
     (or (ex-message thrown) (some-> thrown class .getName))))
 
 (defn- ^{:stratum 0} warn-write-failure! [context write-failure phase fields]
-  (let [message (messages/t :warn/checkpoint-write-failed
-                            {:phase (some-> phase name) :error (:error/message fields)})]
+  (let [phase-label (some-> phase name)
+        message (messages/t :warn/checkpoint-write-failed
+                            {:phase phase-label
+                             :error (:error/message fields)})]
     (log/warn (:execution/logger context) :system :workflow/checkpoint-write-failed
               {:message message
                :data (:anomaly/data write-failure)})))
@@ -39,7 +41,8 @@
 
 (defn- ^{:stratum 0} warn-announcement! [context written error]
   (let [phase (some-> (:checkpoint/phase written) name)
-        message (messages/t :warn/checkpoint-announce-failed {:phase phase :error error})]
+        message (messages/t :warn/checkpoint-announce-failed {:phase phase
+                                                           :error error})]
     (log/warn (:execution/logger context) :system :workflow/checkpoint-written {:message message})))
 
 (defn- ^{:stratum 0} refusal-message [receipt]

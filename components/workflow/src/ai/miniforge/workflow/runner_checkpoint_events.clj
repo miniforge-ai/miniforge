@@ -10,7 +10,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} failure-fields [write-failure]
+(defn ^{:stratum 0} failure-fields
+  "Classify the original cause, not the generic :unavailable wrapper."
+  [write-failure]
   (let [data (:anomaly/data write-failure)
         message (or (:anomaly/ex-message data) (:anomaly/message write-failure))
         class (failure/classify {:exception/class (:anomaly/ex-class data)
