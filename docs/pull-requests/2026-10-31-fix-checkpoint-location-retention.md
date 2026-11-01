@@ -48,6 +48,10 @@ coverage, also passed (4m03s). Lint has zero warnings/errors; actual strata rema
 within three. Aliased-layout filesystem cases require POSIX; pure decoder tests
 use platform-native absolute paths.
 
+Fresh CLI build succeeded: 6,880,604-byte stripped jar. Isolated packaged
+Babashka acceptance passed 24 tests and 101 assertions from `/private/tmp`, using
+only that jar and workflow test fixtures (no production-source overlays).
+
 ## Deployment Plan
 
 No journal migration; retain both legacy forms. No change to filesystem trust,
@@ -59,6 +63,6 @@ Follows #2094, #2280, #2287 and #2288. This integration is not an N7 completion 
 
 ## Checklist
 
-- [ ] Implement and verify regression tests
+- [x] Implement and verify regression tests
 - [ ] Standards/adversarial review, normal hooks and size gates
 - [ ] Fresh Copilot review and all CI gates
