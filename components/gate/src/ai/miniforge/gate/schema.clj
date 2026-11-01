@@ -54,8 +54,11 @@
 
 (def ^{:stratum 1} RepairResult
   "What `repair-gate` returns: the gate's repair result in either
-   accepted shape, tagged with the gate when the gate has a repair."
-  [:or RepairVerdict ResponseStatus])
+   accepted shape, or the failure it builds when the gate has no repair
+   or the repair throws, tagged with the gate in every case."
+  [:and
+   [:map [:gate :keyword]]
+   [:or RepairVerdict ResponseStatus]])
 
 ;------------------------------------------------------------------------------ Layer 2
 
