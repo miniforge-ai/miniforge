@@ -20,12 +20,15 @@
    finding by file and line, and never repeats the value."
   (:require [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.gate.no-secrets :as no-secrets]
+            [ai.miniforge.schema.interface :as schema]
             [babashka.fs :as fs]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]])
+            [clojure.test :refer [deftest is testing use-fixtures]])
   (:import (java.nio.file Files)
            (java.nio.file.attribute FileAttribute)))
+
+(use-fixtures :once (schema/instrument-fixture 'ai.miniforge.gate.interface))
 
 ;------------------------------------------------------------------------------ Layer 0
 
