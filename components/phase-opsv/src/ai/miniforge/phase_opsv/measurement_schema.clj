@@ -33,6 +33,8 @@
    ["infos" {:optional true} EmptyAnnotations]
    ["data" [:map
            ["resultType" [:= "matrix"]]
-           ["result" [:vector {:min 1 :max 1} RangeSeries]]]]])
+           ["result" [:vector {:min 1
+                               :max 1}
+                      RangeSeries]]]]])
 
 (comment ::prometheus-range-wire-contract)

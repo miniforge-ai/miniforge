@@ -73,5 +73,5 @@ Protocol reference: [Prometheus HTTP API](https://prometheus.io/docs/prometheus/
 
 - [x] Boundary implementation and failure regressions
 - [x] Affected-project and packaged tests
-- [ ] Adversarial standards review and normal gates
+- [x] Adversarial standards review and normal gates
 - [ ] Fresh Copilot review and all CI gates
