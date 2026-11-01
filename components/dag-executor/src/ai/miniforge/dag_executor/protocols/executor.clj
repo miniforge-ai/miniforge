@@ -15,18 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-executor.protocols.executor
   "TaskExecutor protocol definition.
 
    Defines the contract for pluggable task execution backends that provide
    isolated environments for code generation and PR lifecycle operations.")
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; TaskExecutor Protocol
 ;; ============================================================================
-
-(defprotocol TaskExecutor
+(defprotocol ^{:stratum 0} TaskExecutor
   "Protocol for task execution backends.
 
    Implementations provide isolated environments where tasks can:
@@ -75,7 +75,10 @@
        {:timeout-ms long        ; Command timeout
         :env map                ; Additional env vars
         :workdir string         ; Override working directory
-        :capture-output? bool}  ; Capture stdout/stderr
+        :capture-output? bool   ; Capture stdout/stderr
+        :git-credentials? bool} ; Container executors: authenticate this git
+                                ; command to the repo bootstrapped into the
+                                ; environment (origin holds no credential)
 
      Returns result with:
      {:exit-code int
@@ -130,8 +133,7 @@
 ;; ============================================================================
 ;; Environment Record
 ;; ============================================================================
-
-(defrecord ExecutionEnvironment
+(defrecord ^{:stratum 0} ExecutionEnvironment
   [environment-id
    executor-type
    task-id
@@ -142,7 +144,9 @@
    status
    metadata])
 
-(defn create-environment-record
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-environment-record
   "Create an environment record."
   [environment-id exec-type task-id workdir opts]
   (map->ExecutionEnvironment
