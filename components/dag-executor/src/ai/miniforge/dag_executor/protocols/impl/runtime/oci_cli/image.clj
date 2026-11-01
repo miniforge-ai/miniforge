@@ -60,7 +60,11 @@
 
 (defn ^{:stratum 0} find-dockerfile-path
   "Find the Dockerfile resource on the classpath or filesystem.
-   Returns absolute path to the Dockerfile."
+   Returns absolute path to the Dockerfile. `build-image!` sends the
+   Dockerfile's directory as the build context, so a Dockerfile inside a JAR
+   is extracted into a fresh directory of its own: the system temp directory
+   would send every file in it (other processes' files, env files) to the
+   runtime."
   [resource-path]
   (let [resource (clojure.java.io/resource resource-path)]
     (cond
@@ -68,9 +72,14 @@
       (and resource (= "file" (.getScheme (.toURI resource))))
       (.getAbsolutePath (clojure.java.io/file (.toURI resource)))
 
-      ;; Resource in JAR — extract to temp file
+      ;; Resource in JAR — extract into an otherwise empty temp directory
       resource
-      (let [temp-file (java.io.File/createTempFile "Dockerfile" ".tmp")]
+      (let [dir       (.toFile (java.nio.file.Files/createTempDirectory
+                                "miniforge-dockerfile-"
+                                (make-array java.nio.file.attribute.FileAttribute 0)))
+            temp-file (clojure.java.io/file dir "Dockerfile")]
+        ;; deleteOnExit runs in reverse order: the file, then its directory.
+        (.deleteOnExit dir)
         (.deleteOnExit temp-file)
         (with-open [in (clojure.java.io/input-stream resource)]
           (clojure.java.io/copy in temp-file))
