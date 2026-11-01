@@ -21,15 +21,36 @@
    `sinks.naming`), and starts one background retention pass
    (`sinks.cleanup`) when it is created."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.sink-durability :as durability]
    [ai.miniforge.event-stream.sinks :as sinks]
    [ai.miniforge.event-stream.sinks.cleanup :as cleanup]
    [ai.miniforge.event-stream.sinks.naming :as naming]
+   [ai.miniforge.file-durability.interface :as disk]
    [clojure.java.io :as io])
   (:import
    [java.nio.file Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} publish-durably!
+  "Write `bytes` to `tmp`, rename it to `target` atomically, and force the
+   bytes and the destination's directory entries to stable storage before
+   returning, so an acknowledged event survives a host crash. Throws when
+   any step fails; the caller removes `tmp`."
+  [^java.io.File tmp ^java.io.File target bytes]
+  (let [published (disk/publish-bytes!
+                   tmp bytes
+                   (fn []
+                     (Files/move (.toPath tmp) (.toPath target)
+                                 (into-array StandardCopyOption
+                                             [StandardCopyOption/ATOMIC_MOVE
+                                              StandardCopyOption/REPLACE_EXISTING]))
+                     target))]
+    (when (anomaly/any-anomaly? published)
+      (throw (ex-info (str "Event file not persisted: " (:anomaly/message published))
+                      {:anomaly published})))
+    published))
 
 (defn ^{:stratum 0} workflow-dir
   "Return the per-workflow directory for an in-flight workflow. As of
@@ -88,8 +109,9 @@
        :base-dir - Base directory (default: ~/.miniforge/events)
        :ttl-ms   - Retention for that cleanup pass in ms (default: 7 days)
 
-   Returns: a durable sink function (fn [event] -> nil). A failed write
-   prints a warning to stderr and rethrows, so the stream logs it and
+   Returns: a durable sink function (fn [event]). It returns after the
+   event's bytes and directory entries are forced to stable storage. A
+   failed write prints a warning to stderr and rethrows, so the stream logs it and
    records that the event was not persisted (`publish-persisted!` refuses
    it); the stream's other sinks and subscribers still run."
   [& [opts]]
@@ -116,11 +138,7 @@
              ;; Explicit UTF-8: payload strings can carry non-ASCII and these
              ;; files are a cross-language contract surface — platform default
              ;; encoding must never decide the on-disk bytes.
-             (spit tmp (sinks/event->transit-json event) :encoding "UTF-8")
-             (Files/move (.toPath tmp) (.toPath f)
-                         (into-array StandardCopyOption
-                                     [StandardCopyOption/ATOMIC_MOVE
-                                      StandardCopyOption/REPLACE_EXISTING]))
+             (publish-durably! tmp f (.getBytes ^String (sinks/event->transit-json event) "UTF-8"))
              (catch Throwable e
                (try (Files/deleteIfExists (.toPath tmp))
                     (catch Throwable cleanup-e (.addSuppressed e cleanup-e)))

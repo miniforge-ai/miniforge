@@ -29,6 +29,7 @@
    [ai.miniforge.event-stream.sinks.factory :as factory]
    [ai.miniforge.event-stream.sinks.file :as file]
    [ai.miniforge.event-stream.sinks.fleet :as fleet]
+   [ai.miniforge.file-durability.interface :as disk]
    [ai.miniforge.event-stream.test-helpers.http-mock :as http-mock]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -263,24 +264,28 @@
                 "every file is a finished event; none is a .transit.tmp"))))))
 
   (testing "no finished event file is visible while its content is being written"
-    ;; Look at the workflow directory once the bytes are written but
-    ;; before the sink returns. The old sink spat straight to the final
-    ;; .json path, so that file existed (and was readable part-written)
-    ;; at this point; now only the temp file does, until the rename.
+    ;; Look at the workflow directory once the bytes are written and
+    ;; forced, just before the rename publishes them. The old sink spat
+    ;; straight to the final .json path, so that file existed (and was
+    ;; readable part-written) during the write; now only the temp file
+    ;; does, until the rename.
     (with-temp-dir
       (fn [dir]
         (let [sink (file/file-sink {:base-dir dir})
               wf-id (random-uuid)
               wf-dir (io/file dir "live" (str wf-id))
               visible-mid-write (atom nil)
-              real-spit spit]
-          (with-redefs [spit (fn [f & args]
-                               (apply real-spit f args)
-                               (reset! visible-mid-write
-                                       (->> (list-files wf-dir)
-                                            (map #(.getName ^java.io.File %))
-                                            (filter #(str/ends-with? % ".json"))
-                                            vec)))]
+              publish-bytes! disk/publish-bytes!]
+          (with-redefs [disk/publish-bytes!
+                        (fn [tmp bytes publish!]
+                          (publish-bytes! tmp bytes
+                                          (fn []
+                                            (reset! visible-mid-write
+                                                    (->> (list-files wf-dir)
+                                                         (map #(.getName ^java.io.File %))
+                                                         (filter #(str/ends-with? % ".json"))
+                                                         vec))
+                                            (publish!))))]
             (sink (sample-event {:workflow/id wf-id})))
           (is (= [] @visible-mid-write))
           (is (= 1 (count (list-files wf-dir))) "the event lands once the write completes")))))

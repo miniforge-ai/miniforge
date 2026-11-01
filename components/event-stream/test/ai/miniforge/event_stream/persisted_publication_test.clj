@@ -21,6 +21,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as events]
+   [ai.miniforge.file-durability.interface :as disk]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]])
   (:import [java.nio.file Files]
@@ -97,6 +98,25 @@
       (is (not-persisted? (events/publish-persisted! (file-sink-stream not-a-dir)
                                                      (event-for (random-uuid)))
                           :sink-write-failed)))))
+
+(deftest ^{:stratum 1} file-sink-forces-the-write-before-acknowledging
+  (testing "the write goes through file-durability, which forces bytes and directory entries"
+    (let [dir (temp-path #(Files/createTempDirectory "persisted-" %))
+          forced (atom 0)
+          publish-bytes! disk/publish-bytes!
+          result (with-redefs [disk/publish-bytes! (fn [& args]
+                                                     (swap! forced inc)
+                                                     (apply publish-bytes! args))]
+                   (events/publish-persisted! (file-sink-stream dir) (event-for (random-uuid))))]
+      (is (not (anomaly/any-anomaly? result)))
+      (is (= 1 @forced))))
+  (testing "a durability failure is a failed write, and leaves no temp file"
+    (let [dir (temp-path #(Files/createTempDirectory "persisted-" %))
+          result (with-redefs [disk/publish-bytes! (constantly
+                                                    (anomaly/anomaly :fault "force failed" {}))]
+                   (events/publish-persisted! (file-sink-stream dir) (event-for (random-uuid))))]
+      (is (not-persisted? result :sink-write-failed))
+      (is (empty? (event-files dir))))))
 
 (deftest ^{:stratum 1} plain-publish-still-returns-the-event-on-a-failed-write
   (let [stream (events/create-event-stream {:sinks [failing-sink]})
