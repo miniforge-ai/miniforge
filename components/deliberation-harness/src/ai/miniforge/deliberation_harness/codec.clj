@@ -170,8 +170,7 @@
   (second (parse text)))
 
 (defn ^{:stratum 2} read-source
-  "Read `source` (a file or resource URL) as UTF-8 and parse it, or return
-   an anomaly naming the source when it cannot be read or parsed."
+  "Parse UTF-8 `source` (file or resource URL), or an anomaly naming it."
   [source]
   (second (parse-source source)))
 
