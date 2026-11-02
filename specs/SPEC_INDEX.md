@@ -454,6 +454,10 @@ Defines:
 - Ariadne v1.6.1 §§11 and 13 as the authority and information-flow contract; a decision never authorizes an
   external effect (§0.5, §10.1)
 
+**Experimental implementation:** the [shared-deliberation architecture atlas](../docs/architecture/deliberation/README.md)
+records the Ariadne-aligned design, five SVG panels and the standalone synthetic lab.
+The development runner does not establish N15 gate conformance; G0 is not evaluated.
+
 ### N15 — Collective-Cognition Evaluation Harness 🆕
 
 **File:** [normative/N15-collective-cognition-harness.md](normative/N15-collective-cognition-harness.md)

@@ -369,11 +369,16 @@ An MCI MUST:
 
 This annex is **informative**, recording implementation state as of 2026-11-02.
 
-### A.1 Specified, Not Implemented
+### A.1 Development Harness and Remaining Gate Requirements
 
-No harness component exists. The hypothesis registry (§2), budget protocol
-(§4), replication (§5), and scoring (§7) are unimplemented. G0 has not been
-evaluated.
+A synthetic development runner exists: `components/deliberation-harness` with
+`bases/deliberation-lab`, packaged by `projects/deliberation-lab`. It provides
+development comparisons, allowance tiers, replicates, pinned hashes, observed
+metering, recorded failures, deterministic scoring, paired descriptive deltas and
+replay. It is not a conforming gate harness: the hypothesis registry (§2), full
+controls, hard normalized-cost reservation (§4), overhead classification,
+calibrated long-horizon tasks and sealed executable artifact evaluation remain
+unimplemented. G0 has not been evaluated.
 
 `minibench` is the adjacent evaluation substrate in this workspace and is the
 natural host for §4's budget matching and §7's metrics.
