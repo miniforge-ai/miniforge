@@ -31,7 +31,7 @@ checks.
 - `admission` (new): `admit [workspace proposal context]`. Returns
   `{:workspace :transaction}` or a rejection anomaly, leaving the workspace
   untouched on rejection. Admission runs four steps in order:
-  1. Rejects an invalid or future context, a proposal field outside
+  1. Rejects a non-map, invalid or future context, a proposal field outside
      `#{:tx/operations :tx/role}`, a `:tx/role` that differs from the
      context, or an operation count outside 1 to 128.
   2. Runs the payload stages over the whole transaction.
@@ -45,8 +45,11 @@ checks.
   - closed operation, creation and attribute fields;
   - statement cap;
   - creation and target types;
+  - no created id inside the derived-conflict namespace (`conflict-`), so a
+    proposal cannot occupy the id of a conflict the engine must derive;
   - reference integrity;
-  - evidence source class and constraint kind;
+  - evidence source class, constraint kind, and claim kind (one of N14
+    §2.1's four, when given);
   - goal closure needs an adopted decision covering every closed goal;
   - one adopted decision per choice point (unadopted alternatives coexist),
     and a single `accept-decision` may not name the same choice point twice;
@@ -79,7 +82,8 @@ Deviations from the snapshot:
 
 New `admission_test` covers:
 
-- impersonation, forged provenance fields and invalid context;
+- impersonation, forged provenance fields, invalid and malformed context;
+- reserved derived-conflict ids and claim kinds;
 - closed fields and creation types;
 - a duplicate choice point within one adoption;
 - the statement cap on revisions;
@@ -95,8 +99,8 @@ New `admission_test` covers:
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 13 deliberation-workspace suites,
-159 tests, 524 assertions, 0 failures. `poly test`, clj-kondo and the
-Polylith check ran only in CI.
+164 tests, 534 assertions, 0 failures. clj-kondo 2026.10.26 (the CI version)
+on the component: 0 errors. `poly test` and the Polylith check ran only in CI.
 
 ## Deployment Plan
 
