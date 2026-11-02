@@ -311,7 +311,10 @@
            (subtype-of (submit ws :proposer {:op :propose-experiment :discriminates ["e"]
                                              :creates [{:id "x" :type :experiment :statement "x"}]}))))
     (is (= :anomalies.deliberation/unattested-provenance
-           (subtype-of (submit ws :skeptic {:op :challenge :targets ["c"] :evidence ["e"]}))))))
+           (subtype-of (submit ws :skeptic {:op :challenge :targets ["c"] :evidence ["e"]}))))
+    (is (= :anomalies.deliberation/unattested-provenance
+           (subtype-of (submit ws :proposer {:op :assert-claim :targets ["e"] :links {:contradicts ["c2"]}
+                                             :creates [{:id "c2" :type :claim :statement "c2"}]}))))))
 
 (deftest ^{:stratum 1} cited-evidence-must-be-attached
   (let [analysis (fn [id] {:id id :type :evidence :statement id

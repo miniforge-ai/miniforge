@@ -85,16 +85,18 @@
          (execution-class? (get-in evidence [:object/attrs :source-class]))
          (receipt-matches? receipt :execution (:object/statement evidence)))))
 
-;; True when `operation` creates `:execution` evidence or attaches any: along
-;; any edge type of its own `:links` or a created object's, through its
-;; `:discriminates` (persisted as links on what it creates), or as cited
-;; `:evidence` (a challenge attaches what it cites, N14 §3.5). Only its producers
-;; may make such evidence bear on a record (§5.3).
+;; True when `operation` creates `:execution` evidence or attaches any: at
+;; either end of an edge of its own `:links` (commit writes those onto its
+;; targets) or a created object's, through its `:discriminates` (persisted as
+;; links on what it creates), or as cited `:evidence` (a challenge attaches what
+;; it cites, N14 §3.5). Only its producers may make such evidence bear on a
+;; record (§5.3).
 (defn- ^{:stratum 1} attaches-execution?
   [workspace operation]
   (let [objects (validation/objects-of workspace)
         created (validation/created-specs operation)
         linked (concat (get operation :discriminates []) (get operation :evidence [])
+                       (when (seq (get operation :links)) (get operation :targets []))
                        (mapcat #(mapcat val (get % :links {})) (cons operation created)))]
     (or (some #(execution-class? (get-in % [:attrs :source-class])) created)
         (some #(execution-class? (get-in objects [% :object/attrs :source-class])) linked))))
