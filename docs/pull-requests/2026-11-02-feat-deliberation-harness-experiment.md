@@ -35,14 +35,24 @@ conformance; `turn/conditions` says so in its docstring.
     retries an adapter anomaly.
   - `commit-turn` admits the payload through
     `board/activate-participant`.
-  - `attach-observation` records receipt-backed execution evidence as a
-    trusted runtime capability.
+  - Each board is seeded with the goal and one experiment object per
+    fixture observation.
+  - `attach-observation` records the receipt, then admits the observation
+    through `board/admit` as the `:fixture-reader` participant, which holds
+    the verifier responsibility. The observation becomes execution evidence
+    that supports its experiment. It is deduplicated by attested receipt,
+    under the first id no object already uses, so a model can neither forge nor
+    pre-empt it (#2335's provenance stages reject model-made execution
+    evidence).
 - `experiment`
   - `run-cell` records each turn's start before calling the model, and
     records each activation and the cell result.
   - It stops on any journal anomaly.
   - Scoring: only a complete, in-budget closing turn can succeed. A failure
     is a scored cell, never retried.
+  - Evidence completeness counts only the observations the closing turn's
+    board showed it. An inspection requested on the closing turn, or one that
+    never reaches the closing participant, earns no credit.
 - `report`: the success table, normalized spend, unsettled-usage counts and
   paired shared-minus-blind deltas. The text comes from an en-US catalog and
   always says "G0: not evaluated".
@@ -57,6 +67,16 @@ Deviations from the snapshot:
 - The model view projects for the acting participant rather than a fixed
   `:synthesizer`. Under `:full` visibility of its own board, the result is
   the same.
+- The snapshot replayed observations without validation, onto the goal,
+  which is not a legal `:attach-evidence` target. It also credited every
+  requested inspection, whether or not any model saw the result.
+
+Open design question: in the `independent` condition, the closing selector
+starts from a fresh board and receives only solutions and rationales, so it
+never sees an observation and that condition earns no evidence credit.
+Before this change it earned credit it had not seen. Delivering observations
+to candidates would need a budgeted continuation turn, which changes the
+condition's allowance; that is left for the operator to decide.
 
 ## Testing Plan
 
@@ -66,6 +86,10 @@ Deviations from the snapshot:
   turn, but only the shared board relays a peer's contribution.
 - No request carries the sealed answer or runtime internals.
 - An adapter anomaly yields a failed, scored cell after exactly one call.
+- Observations requested only on the closing turn earn no credit.
+- A model object squatting on an observation's id does not block it, and
+  each observation supports its experiment.
+- Model-made execution evidence with a valid-looking receipt is rejected.
 - An over-budget closing call cannot succeed.
 - A journal failure stops the cell.
 - The report states G0 is not evaluated and shows the paired delta.
@@ -73,7 +97,9 @@ Deviations from the snapshot:
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox):
 
-- the 4 harness suites: 40 tests, 134 assertions, 0 failures;
+- the 4 harness suites: 43 tests, 143 assertions, 0 failures. The credit
+  and squatting tests fail on the previous code; the forgery test guards
+  #2335's provenance stages;
 - clj-kondo 2026.10.26 (the CI version) on `bases components development/src`:
   0 errors.
 

@@ -65,6 +65,15 @@
                    :rationale "SYNTHETIC test record"}
          :usage call-usage}))))
 
+(defn- ^{:stratum 0} answering
+  "A call answering the reference with `operations` and `inspect` computed
+   from each request."
+  [operations inspect]
+  (fn [request]
+    {:payload {:operations (operations request) :inspect (inspect request)
+               :solution (:reference (task)) :rationale "SYNTHETIC test record"}
+     :usage call-usage}))
+
 (defn- ^{:stratum 0} run [condition call & {:as tier-overrides}]
   (experiment/run-cell manifest (task) condition (merge tier tier-overrides) 0 call
                        (constantly "hash")))
@@ -121,3 +130,37 @@
         text (report/render manifest results)]
     (is (str/includes? text "G0: not evaluated"))
     (is (str/includes? text "- retry-contract/tiny/0: 0"))))
+
+(deftest ^{:stratum 1} observations-are-credited-only-when-the-closing-turn-saw-them
+  (let [late (run :workspace (answering (constantly [])
+                                        #(when (:closing? %) (:available-experiments %))))
+        early (run :workspace (answering (constantly []) :available-experiments))]
+    (is (false? (get-in late [:score :evidence-complete?])))
+    (is (zero? (get-in late [:score :success])))
+    (is (= 1 (get-in early [:score :success])))))
+
+(deftest ^{:stratum 1} a-model-object-cannot-squat-on-an-observation
+  (let [squat (fn [request]
+                (for [id (:available-experiments request)]
+                  {:op :assert-claim :creates [{:id (str "evidence-" id) :type :claim
+                                                :statement "squatting claim"}]}))
+        result (run :workspace (answering squat :available-experiments))
+        objects (vals (get-in result [:boards :shared :workspace/objects]))]
+    (is (= 1 (get-in result [:score :success])))
+    (testing "each observation supports its experiment through admission"
+      (doseq [id (keys (:experiments (task)))]
+        (is (seq (get-in result [:boards :shared :workspace/objects
+                                 (str "experiment-" id) :object/links :supports])))))
+    (is (some #(= :execution (get-in % [:object/attrs :source-class])) objects))))
+
+(deftest ^{:stratum 1} a-model-cannot-forge-execution-evidence
+  (let [id (first (keys (:experiments (task))))
+        forge (fn [_]
+                [{:op :attach-evidence :targets [(str "experiment-" id)]
+                  :creates [{:id "forged" :type :evidence
+                             :statement (get-in (task) [:experiments id])
+                             :attrs {:source-class :execution :receipt (str "receipt-" id)}}]
+                  :links {:supports ["forged"]}}])
+        result (run :workspace (answering forge (constantly [])))]
+    (is (nil? (get-in result [:boards :shared :workspace/objects "forged"])))
+    (is (zero? (get-in result [:score :success])))))
