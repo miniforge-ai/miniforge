@@ -44,7 +44,6 @@ checks.
   - creation and target types;
   - reference integrity;
   - evidence source class and constraint kind;
-  - only the synthesizer supersedes a decision;
   - goal closure needs an adopted decision covering every closed goal;
   - one adopted decision per choice point (unadopted alternatives coexist).
 - `provenance` (new): a `:hard` constraint needs the user or an interpreter
@@ -60,7 +59,7 @@ checks.
   role, because semantic admission restricts `:hard` constraints by source
   (N14 §2.4, §5.3).
 - `interface` (new): `new-object`, `admit`, `project`, `replay-transaction`.
-- Message catalog: 16 new `:anomaly/*` keys.
+- Message catalog: 15 new `:anomaly/*` keys.
 
 Deviations from the snapshot:
 
@@ -85,14 +84,14 @@ New `admission_test` covers:
   rejection;
 - uncovered closure;
 - the choice point and supersession, including that only the synthesizer
-  supersedes a decision;
+  supersedes a decision (enforced by the permission stage from #2330);
 - challenge and evidence on adopted records;
 - dangling references, distinct contributions versus retries, and basis
   staleness.
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 13 deliberation-workspace suites,
-152 tests, 510 assertions, 0 failures. `poly test`, clj-kondo and the
+157 tests, 525 assertions, 0 failures. `poly test`, clj-kondo and the
 Polylith check ran only in CI.
 
 ## Deployment Plan

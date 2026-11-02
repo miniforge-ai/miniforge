@@ -22,6 +22,7 @@
   (:require
    [ai.miniforge.deliberation-workspace.messages :as messages]
    [ai.miniforge.deliberation-workspace.object :as object]
+   [ai.miniforge.deliberation-workspace.transaction :as tx]
    [ai.miniforge.deliberation-workspace.validation :as validation]
    [clojure.set :as set]))
 
@@ -51,7 +52,7 @@
    :accept-decision #{:decision} :reject-decision #{:decision}
    :record-experiment-result #{:experiment} :invalidate-artifact #{:artifact-ref}
    :close-goal #{:goal} :split-hypothesis #{:hypothesis}
-   :merge-hypotheses #{:hypothesis} :supersede #{:claim :hypothesis :plan :decision}})
+   :merge-hypotheses #{:hypothesis} :supersede tx/supersedable-types})
 
 (def ^{:stratum 0} operation-keys
   "The closed set of fields an operation payload may carry. Anything else —
@@ -173,14 +174,6 @@
     (validation/reject-operation :anomalies.deliberation/invalid-attribute
                                  (messages/system-t :anomaly/invalid-attribute) operation)))
 
-(defn- ^{:stratum 1} check-supersede-responsibility [workspace operation {:keys [role]}]
-  (when (and (= :supersede (:op operation))
-             (not= :synthesizer role)
-             (some #(= :decision (:object/type (get (validation/objects-of workspace) %)))
-                   (get operation :targets [])))
-    (validation/reject-operation :anomalies.deliberation/supersede-responsibility
-                                 (messages/system-t :anomaly/supersede-responsibility) operation)))
-
 (defn- ^{:stratum 1} check-goal-closure [workspace operation _context]
   (when (and (= :close-goal (:op operation))
              (not (some #(covers-goals? (get (validation/objects-of workspace) %)
@@ -204,5 +197,4 @@
   "Ordered semantic stages. Field and type checks lead because the later
    stages read fields and object types those establish."
   [check-fields check-statement-cap check-creation-types check-target-types
-   check-references check-attributes check-supersede-responsibility
-   check-goal-closure check-choice-point])
+   check-references check-attributes check-goal-closure check-choice-point])
