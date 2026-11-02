@@ -16,6 +16,10 @@
  ;; See tools/poly-test-runner/src/ai/miniforge/poly_test_runner/core.clj.
  :test {:create-test-runner ai.miniforge.poly-test-runner.core/create}
  :projects {"development"    {:alias "dev"}
+            ;; No base yet: the lab base joins in a later PR. Until then the project
+            ;; exists so CI tests its components, which no base uses.
+            "deliberation-lab" {:alias "dlab"
+                                :necessary ["anomaly" "deliberation-workspace" "messages"]}
             "data-foundry"   {:alias "df"}
             "miniforge-core" {:alias "core"
                               ;; Runtime-loaded via phase/namespaces.edn resource discovery
