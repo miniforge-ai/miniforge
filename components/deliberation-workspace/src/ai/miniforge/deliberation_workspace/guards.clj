@@ -25,6 +25,7 @@
    and a challenge is a transaction record, not an object. It stays derived
    state, reconstructible from the log."
   (:require
+   [ai.miniforge.deliberation-workspace.messages :as messages]
    [ai.miniforge.deliberation-workspace.object :as object]
    [ai.miniforge.deliberation-workspace.transaction :as tx]
    [ai.miniforge.deliberation-workspace.validation :as validation]))
@@ -83,7 +84,7 @@
     (when-let [hard (seq (filter object/hard-constraint? touched))]
       (validation/reject
        :unauthorized :anomalies.deliberation/hard-constraint-immutable
-       "Hard constraints are immutable to agent transactions"
+       (messages/system-t :anomaly/hard-constraint-immutable)
        {:op (:op operation) :targets (mapv :object/id hard)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -93,7 +94,7 @@
   (when (committed-already? workspace operation role)
     (validation/reject
      :conflict :anomalies.deliberation/duplicate-operation
-     "Role already committed this operation against these targets"
+     (messages/system-t :anomaly/duplicate-operation)
      {:op (:op operation) :role role})))
 
 (defn- ^{:stratum 1} check-anti-livelock
@@ -106,13 +107,13 @@
         (not (backed? operation siblings))
         (validation/reject
          :invalid-input :anomalies.deliberation/bare-challenge
-         "A challenge must carry evidence or a discriminating experiment (N14 §3.5)"
+         (messages/system-t :anomaly/bare-challenge)
          {:targets (tx/touched-ids operation)})
 
         (seq saturated)
         (validation/reject
          :exhausted :anomalies.deliberation/challenge-limit
-         "Role already holds the permitted number of open challenges on this object"
+         (messages/system-t :anomaly/challenge-limit)
          {:role role :targets (set saturated) :limit limit})))))
 
 ;------------------------------------------------------------------------------ Layer 2
