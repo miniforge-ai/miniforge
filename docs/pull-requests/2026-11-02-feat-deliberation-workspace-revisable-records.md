@@ -88,8 +88,8 @@ adds the accepted case as positive coverage.
 
 Ran locally on plain Clojure 1.12 with a classpath of the component sources
 (Clojars is unreachable from the authoring sandbox, so a local stand-in
-replaced malli): all 12 deliberation-workspace suites, 147 tests,
-481 assertions, 0 failures. `poly test`, clj-kondo and the Polylith check ran
+replaced malli): all 11 deliberation-workspace suites, 148 tests,
+486 assertions, 0 failures. `poly test`, clj-kondo and the Polylith check ran
 only in CI.
 
 ## Deployment Plan

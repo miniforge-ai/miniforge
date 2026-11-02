@@ -65,6 +65,8 @@
    :execution/current-phase    — Derived projection of the active machine state
    :execution/phase-index      — Derived projection of the active machine state
    :execution/redirect-count   — Derived from machine context
+   :execution/unpersisted-phases — Phases whose boundary persist committed
+                                 nothing; the next boundary commit names them
 
    ### Phase Result Schema
    Entries in :execution/phase-results follow the shape:
