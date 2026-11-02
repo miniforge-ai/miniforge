@@ -23,7 +23,13 @@ separates what the synthetic lab implements from the Ariadne target.
 ## Changes in Detail
 
 - `diagrams/01`–`05`: the snapshot panels.
-- `index.html`: the panel viewer, with no external assets.
+- `index.html`: the panel viewer, with no external assets. Unlike the
+  snapshot, it:
+  - falls back to panel 1 for a fragment that names no panel, instead of
+    throwing;
+  - follows Back and Forward through a `hashchange` handler;
+  - lists the selected panel's text under "Text of this panel", because the
+    SVG's `role="img"` gives assistive technology only its title.
 - One correction in panel 2, applied in both the SVG and the viewer. The
   snapshot described a CLI process in an empty directory with a timeout.
   The lab now calls the model through the `llm` component's isolated
@@ -41,6 +47,9 @@ separates what the synthetic lab implements from the Ariadne target.
 - Headless Chromium loads `index.html` with no script errors and five panel
   buttons. The edited panel 2 card renders with the new text inside its
   box.
+- Fragments `#abc`, `#2.5` and `#9` select panel 1 and `#3` selects panel 3.
+  Back after a click restores the previous panel, and the transcript lists
+  the panel's text.
 - Each panel claim was checked against the merged code: runtime-stamped
   identity, role and impersonation rejection, closed vocabularies,
   choice-point adoption, receipt-backed fixture evidence, the 2 × 5 × 2 × 3
