@@ -1,11 +1,12 @@
-;; The deliberation lab (N15). For now it carries only the deliberation
-;; workspace and the components it needs, so `poly test` covers that
-;; component: Polylith tests a brick only through a project that contains it,
-;; and CI skips the development project. The lab base and the harness join
-;; this project in the PRs that add them.
+;; The deliberation lab (N15). For now it carries the deliberation workspace,
+;; the harness and the components they need, so `poly test` covers them:
+;; Polylith tests a brick only through a project that contains it, and CI
+;; skips the development project. The lab base joins in the PR that adds it.
 {:paths []
 
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}
+        ai.miniforge/deliberation-harness {:local/root "../../components/deliberation-harness"}
         ai.miniforge/deliberation-workspace {:local/root "../../components/deliberation-workspace"}
+        ai.miniforge/file-durability {:local/root "../../components/file-durability"}
         ai.miniforge/messages {:local/root "../../components/messages"}}}

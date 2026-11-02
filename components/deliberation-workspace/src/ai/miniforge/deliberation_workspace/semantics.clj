@@ -121,13 +121,6 @@
   "Operations whose own `:statement` is written onto their target."
   (conj tx/revisions :answer-question))
 
-(defn- ^{:stratum 0} covers-goal?
-  "True when `decision` is adopted and depends on `goal-id`."
-  [decision goal-id]
-  (and (= :decision (:object/type decision))
-       (= :accepted (:object/status decision))
-       (contains? (set (get-in decision [:object/links :depends-on])) goal-id)))
-
 (defn- ^{:stratum 0} statements
   "Every statement text `operation` would write: its created objects' and,
    for a revision or an answer, its own text. Payload validation guarantees
@@ -238,7 +231,7 @@
 (defn- ^{:stratum 1} uncovered-goal?
   "True when no decision among `resolves` is an adopted cover for `goal-id`."
   [workspace resolves goal-id]
-  (not-any? #(covers-goal? (get (validation/objects-of workspace) %) goal-id) resolves))
+  (not-any? #(object/covers-goal? (get (validation/objects-of workspace) %) goal-id) resolves))
 
 (defn- ^{:stratum 1} check-goal-closure
   "N14 §2.3: every closed goal has an adopted covering decision among the

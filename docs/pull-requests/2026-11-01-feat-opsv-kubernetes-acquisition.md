@@ -40,7 +40,7 @@ cluster snapshot and does not run an experiment, create grants or mutate resourc
 
 Captured decoder #2336, Prometheus transport #2314, bounded reader #2339 and shared
 HTTP ingress #2340 and settings foundation #2341 are merged.
-Pure dependency foundation #2343 must merge before this PR.
+Pure dependency foundation #2343 is also merged.
 
 ## Testing Plan
 

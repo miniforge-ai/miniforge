@@ -19,7 +19,8 @@
             ;; No base yet: the lab base joins in a later PR. Until then the project
             ;; exists so CI tests its components, which no base uses.
             "deliberation-lab" {:alias "dlab"
-                                :necessary ["anomaly" "deliberation-workspace" "messages"]}
+                                :necessary ["anomaly" "deliberation-harness" "deliberation-workspace"
+                                            "file-durability" "messages"]}
             "data-foundry"   {:alias "df"}
             "miniforge-core" {:alias "core"
                               ;; Runtime-loaded via phase/namespaces.edn resource discovery
