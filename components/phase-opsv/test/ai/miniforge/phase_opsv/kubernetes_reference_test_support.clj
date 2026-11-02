@@ -8,19 +8,16 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} settings
-  ([] (settings {}))
-  ([overrides]
-   (merge {:kubernetes/base-url "https://cluster.invalid"
-           :kubernetes/cluster-id "staging-cluster"
-           :kubernetes/namespace "staging"
-           :kubernetes/pod-selector "app=service"
-           :kubernetes/node-pool-label captured/pool-label}
-          overrides)))
+(def ^{:stratum 0} ^:private key-by-source
+  "Keys actually present in the captured ConfigMap and Secret fixtures."
+  {"configMapKeyRef" "workers"
+   "secretKeyRef" "token"})
 
 (defn ^{:stratum 0} referent [name optional?]
   {"name" name
    "optional" optional?})
+
+(defn ^{:stratum 0} local-reference [name] {"name" name})
 
 (defn ^{:stratum 0} container [name environment environment-from]
   (assoc (containers/container name) "env" environment "envFrom" environment-from))
@@ -39,8 +36,18 @@
   (hash-map field (referent name optional?)))
 
 (defn ^{:stratum 1} environment [field name optional?]
-  (let [value (referent name optional?)]
+  (let [value (assoc (referent name optional?) "key" (get key-by-source field))]
     {"name" "SETTING"
      "valueFrom" {field value}}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} api-pods [optional?]
+  (let [environment [(environment "configMapKeyRef" "settings" optional?)]
+        environment-from [(environment-from "secretRef" "credentials" false)]
+        container (container "service" environment environment-from)
+        observed (assoc-in (pod {"containers" [container]}) ["metadata" "labels"] {"app" "service"})
+        result (captured/resource-list "PodList" [observed])]
+    (assoc result "metadata" {"resourceVersion" "42"})))
 
 (comment ::pod-reference-fixtures)

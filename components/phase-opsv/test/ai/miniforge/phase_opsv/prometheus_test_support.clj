@@ -25,7 +25,8 @@
 (defn ^{:stratum 0} interrupted-result [operation]
   (try+ (operation) nil
     (catch Object _
-      [(:throwable &throw-context) (.isInterrupted (Thread/currentThread))])))
+      [(:throwable &throw-context) (.isInterrupted (Thread/currentThread))])
+    (finally (Thread/interrupted))))
 
 (defn ^{:stratum 0} with-default-locale [locale operation]
   (let [previous (Locale/getDefault)]

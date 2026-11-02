@@ -54,7 +54,7 @@
     (is (false? (:reference/optional? (first forward))))))
 
 (deftest ^{:stratum 0} test-image-pull-secrets-and-empty-captures-remain-explicit
-  (let [secret (fixture/referent "registry" false)
+  (let [secret (fixture/local-reference "registry")
         pod (fixture/pod {"imagePullSecrets" [secret]})
         result (references/configuration-references [pod])]
     (is (= ["registry"] (mapv :reference/name result)))

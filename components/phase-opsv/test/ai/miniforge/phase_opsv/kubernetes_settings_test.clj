@@ -5,7 +5,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.config.interface :as config]
             [ai.miniforge.phase-opsv.boundary.kubernetes-settings :as settings]
-            [ai.miniforge.phase-opsv.kubernetes-reference-test-support :as fixture]
+            [ai.miniforge.phase-opsv.kubernetes-settings-test-support :as fixture]
             [ai.miniforge.phase-opsv.prometheus-test-support :as failures]
             [clojure.test :refer [deftest is]]))
 
@@ -54,9 +54,11 @@
   (let [failure (failures/structured-failure (InterruptedException.))
         operation (partial settings/load-settings (fixture/settings))]
     (with-redefs [config/load-config-resource (partial failures/throw-failure! failure)]
-      (let [[thrown flagged?] (failures/interrupted-result operation)]
+      (let [[thrown flagged?] (failures/interrupted-result operation)
+            leaked? (Thread/interrupted)]
         (is (instance? InterruptedException thrown))
-        (is flagged?)))))
+        (is flagged?)
+        (is (false? leaked?))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

@@ -6,7 +6,7 @@
             [ai.miniforge.phase-opsv.boundary.http-transport :as transport]
             [ai.miniforge.phase-opsv.boundary.kubernetes-http :as http]
             [ai.miniforge.phase-opsv.boundary.kubernetes-settings :as settings]
-            [ai.miniforge.phase-opsv.kubernetes-reference-test-support :as target]
+            [ai.miniforge.phase-opsv.kubernetes-settings-test-support :as target]
             [ai.miniforge.phase-opsv.prometheus-test-support :as wire]))
 
 ;------------------------------------------------------------------------------ Layer 0

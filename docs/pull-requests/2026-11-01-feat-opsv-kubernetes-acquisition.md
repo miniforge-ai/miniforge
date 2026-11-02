@@ -28,8 +28,18 @@ node-pool label. Only HTTPS API origins are admitted; no credential discovery.
 Timeout, byte and resource bounds load from schema-checked EDN defaults.
 Prometheus and Kubernetes share the HTTP wire schemas rather than copying them.
 
-Acquisition and configuration-reference closure are not implemented yet.
-Captured decoder #2336, Prometheus transport #2314 and bounded reader #2339 are merged.
+The public read-only capture binds every returned object to its requested kind,
+namespace and name. It derives Node and ConfigMap/Secret reads only after admitting
+the complete target Pod list. Required absence, pagination, malformed dependency
+paths, foreign namespaces and resource-budget exhaustion fail closed.
+
+Unknown volume types and projected dependencies outside this capture model are
+rejected, including PVC-backed volumes. No incomplete fingerprint is returned.
+All reads share a capture deadline and owned HTTP cleanup. This is not an atomic
+cluster snapshot and does not run an experiment, create grants or mutate resources.
+
+Captured decoder #2336, Prometheus transport #2314, bounded reader #2339 and shared
+HTTP ingress #2340 are merged. Settings foundation #2341 must merge before this PR.
 
 ## Testing Plan
 
@@ -38,6 +48,8 @@ paths, duplicate use and optional-versus-required correlation. Later transport
 tests must substitute the effect boundary and never contact a cluster.
 Settings tests cover target requirements, endpoint and namespace rejection,
 sanitized configuration failures, and preservation of fatal/interrupted causes.
+Public capture tests use real API-shaped JSON, including ListMeta and container
+references. No cluster is contacted. JVM tests use actual JDK response/stream types.
 
 ## Deployment Plan
 

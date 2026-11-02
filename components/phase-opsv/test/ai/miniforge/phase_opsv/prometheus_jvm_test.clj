@@ -10,7 +10,7 @@
             [ai.miniforge.phase-opsv.boundary.kubernetes-http :as kubernetes]
             [ai.miniforge.phase-opsv.boundary.kubernetes-settings :as kubernetes-settings]
             [ai.miniforge.phase-opsv.kubernetes-http-test-support :as kubernetes-wire]
-            [ai.miniforge.phase-opsv.kubernetes-reference-test-support :as target]
+            [ai.miniforge.phase-opsv.kubernetes-settings-test-support :as target]
             [ai.miniforge.phase-opsv.measurement-test-support :as measurement]
             [ai.miniforge.phase-opsv.prometheus-test-support :as fixture :refer [failed-future]]
             [clojure.test :refer [deftest is]]
