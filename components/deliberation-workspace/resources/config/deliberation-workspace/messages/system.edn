@@ -34,6 +34,7 @@
   :anomaly/uncovered-closure         "Goal closure must resolve to an adopted decision covering every closed goal"
   :anomaly/choice-point              "Adoption needs a choice point no other adopted decision holds; supersede it first"
   :anomaly/reserved-id               "Object ids starting with conflict- are reserved for engine-derived conflicts"
+  :anomaly/invalid-closure-reserve   "The closure reserve must be a non-negative integer number of activations"
   :anomaly/invalid-context           "Runtime activation context is missing, invalid, or ahead of the workspace"
   :anomaly/actor-mismatch            "A proposal cannot supply identity, provenance, or a different responsibility"
   :anomaly/operation-count           "A proposal carries between one and the maximum number of operations"
