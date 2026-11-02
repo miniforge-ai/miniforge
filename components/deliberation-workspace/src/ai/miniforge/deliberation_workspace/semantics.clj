@@ -79,10 +79,9 @@
 ;; must be one of these.
 (def ^{:stratum 0} claim-kinds #{:fact :inference :assumption :prediction})
 
-(def ^{:stratum 0} default-statement-cap
-  "Characters one statement may hold (N14 §2.2). Manifest-configurable via
-   `:workspace/statement-cap`; sized for a paragraph, not a document."
-  4000)
+;; Characters one statement may hold (N14 §2.2). Manifest-configurable via
+;; `:workspace/statement-cap`; sized for a paragraph, not a document.
+(def ^{:stratum 0} default-statement-cap 4000)
 
 (defn- ^{:stratum 0} spec-fields-defect? [spec]
   (let [attrs (get spec :attrs {})]
@@ -109,9 +108,8 @@
     :claim (not (contains? claim-kinds (get-in spec [:attrs :kind] :fact)))
     false))
 
-(defn- ^{:stratum 0} reserved-id?
-  "True when `id` lies in the engine's derived-conflict namespace."
-  [id]
+;; True when `id` lies in the engine's derived-conflict namespace.
+(defn- ^{:stratum 0} reserved-id? [id]
   (and (string? id) (str/starts-with? id conflict/conflict-id-prefix)))
 
 (def ^{:stratum 0} text-operations
