@@ -36,7 +36,7 @@ success, and counts quiescence by object growth.
   - New `activate-participant`: one work turn. The request carries
     `:role :participant :activation :basis :projection :closing? :feedback`,
     and the proposal goes through `admission/admit`.
-  - `:feedback` reports the last transaction's status. A rejection's reason
+  - `:feedback` reports the last transaction's status; a pass clears it. A rejection's reason
     is delivered only when the participant sees every object (full visibility,
     no read scope) at the time of delivery. Otherwise the reason could reveal
     whether a hidden object exists, including after a read scope narrows.
@@ -44,7 +44,8 @@ success, and counts quiescence by object growth.
   - A pass or a rejection marks the participant quiet. Pass and
     frame-refusal markers belong to the workspace version they were recorded
     at, so any commit starts a new round, including one made directly
-    through `admit` or `replay-transaction`.
+    through `admit` or `replay-transaction`. `step` schedules from the current
+    round, so a stale refusal never skips a participant.
   - When the runtime sets a read scope for a participant (N14 §4.1), an
     admitted proposal that names an id outside that scope, other than one it
     creates, is refused exactly like an unknown target. Admission checks ids
@@ -118,7 +119,7 @@ before deadlock closure, and cost metering.
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 12 deliberation-workspace
-suites, 191 tests, 587 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
+suites, 192 tests, 589 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
 version) on the component: 0 errors. `poly test` and the Polylith check ran
 only in CI.
 
