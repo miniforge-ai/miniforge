@@ -10,10 +10,10 @@
 
 Release decides whether an `:already-implemented` task has work to ship by
 diffing the task branch against its base commits (#2305). Every phase's
-boundary commit is on that branch, including verify's and review's. A file
-either of them left in the worktree (a regenerated lockfile, a coverage
-report, a file a test run rewrote) is committed at their boundary and made
-release publish it as the task's work.
+boundary commit is on that branch, including verify's and review's.
+Files they left in the worktree are committed at their boundary.
+Examples include regenerated lockfiles, coverage reports and files rewritten by tests.
+Those commits made release publish the files as the task's work.
 
 Each boundary commit now names, in `Miniforge-Phase` trailers, every phase
 whose work it holds. Release counts a committed path only when a commit
@@ -33,21 +33,21 @@ release failure on it.
 2. `runner-environment/persist-workspace-at-phase-boundary!` labels the commit
    with the phase that ran, read from the pre-step context, and appends the
    trailer. It used to read the post-step context, whose current phase has
-   already advanced: implement's commit was labelled "verify phase
-   completed", and a review that redirects back to implement labelled its
+   already advanced. Implement's commit was labelled "verify phase
+   completed". A review that redirects back to implement labelled its
    commit "implement". The gate-denial check already read the pre-step
    context; the persist's log events and notices now name the same phase.
 3. A persist that was skipped, rejected or threw leaves its phase's work in
    the worktree. `runner-environment/track-unpersisted` keeps that phase in
    `:execution/unpersisted-phases` until a persist succeeds, and the next
-   boundary commit names it as well: implement's work committed at verify's
+   boundary commit names it as well. Implement's work committed at verify's
    boundary carries both trailers and still counts.
 4. `release-scan/base-diff` also runs
    `git log -z --format=%H%x00<trailers> <base>..HEAD`. A commit is a checking
    commit when every phase it names is verify or review. When there is one,
-   each other commit's paths are read with `git diff-tree -z <sha>^ <sha>`
-   (first parent, so a merge counts what it brought in), and only diff
-   entries on those paths are kept. Paths are only ever read from
+   each other commit's paths are read with `git diff-tree -z <sha>^ <sha>`.
+   This reads the first parent, so a merge counts what it brought in.
+   Only diff entries on those paths are kept. Paths are only ever read from
    NUL-separated output, so any file name is matched exactly. A commit with
    no trailer (the agent's own, or a boundary commit made before this
    change) counts, so no earlier run loses work. A failed `git log` or
@@ -58,8 +58,8 @@ release failure on it.
    excluded one is silently dropped work.
 
 The excluded commits are not removed from the branch. When release does
-publish (implement did real work), they ship with it as before; they only
-stop deciding whether there is anything to publish, and stay out of the
+publish (implement did real work), they ship with it as before.
+They only stop deciding whether there is anything to publish, and stay out of the
 files that feed the PR metadata.
 
 ## Testing Plan
@@ -81,7 +81,7 @@ files that feed the PR metadata.
    beside it is not.
 
 Workflow tests: the commit message carries the trailer of the phase that
-ran, while the post-step context names the next phase; a failed or skipped
+ran, while the post-step context names the next phase. A failed or skipped
 persist's phase is named by the next commit and cleared by a successful one.
 
 ## Deployment Plan
@@ -91,4 +91,4 @@ trailer-less boundary commits, which count as before.
 
 ## Related Issues/PRs
 
-- #2305, #2320: release counts committed work since the task base.
+PRs #2305 and #2320 make release count committed work since the task base.
