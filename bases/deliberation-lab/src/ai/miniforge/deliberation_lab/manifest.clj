@@ -62,8 +62,10 @@
        (distinct-seq? (map :id tiers))
        (every? valid-tier? tiers)))
 
-(defn- ^{:stratum 1} valid-prices? [{:keys [input-per-million output-per-million]}]
-  (and (non-negative-number? input-per-million) (non-negative-number? output-per-million)))
+(defn- ^{:stratum 1} valid-prices? [price-table]
+  (and (map? price-table)
+       (non-negative-number? (:input-per-million price-table))
+       (non-negative-number? (:output-per-million price-table))))
 
 (defn ^{:stratum 1} defects
   "The defect keys `manifest` fails, empty when it is valid."

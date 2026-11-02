@@ -138,12 +138,17 @@
           (cells pinned tasks)))
 
 (defn- ^{:stratum 1} replays?
-  "True when the board recorded for an activation rebuilds from its log."
+  "True when the board recorded for an activation rebuilds from its log. A
+   log that cannot be replayed at all, such as one naming an absent object,
+   does not rebuild. Plain `try`: this base has no slingshot dependency and
+   would add one only for its two leaf catches (dewey 211, exemption 1)."
   [tasks-by-id {:keys [task workspace]}]
-  (= (:workspace/objects workspace)
-     (:workspace/objects (reduce board/replay-transaction
-                                 (harness/initial-workspace (tasks-by-id task))
-                                 (:workspace/log workspace)))))
+  (try
+    (= (:workspace/objects workspace)
+       (:workspace/objects (reduce board/replay-transaction
+                                   (harness/initial-workspace (tasks-by-id task))
+                                   (:workspace/log workspace))))
+    (catch Exception _ false)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

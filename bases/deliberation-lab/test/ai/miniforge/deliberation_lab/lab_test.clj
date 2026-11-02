@@ -73,6 +73,10 @@
   (let [ok {:success true :content "not json"}]
     (is (anomaly/anomaly? (adapter/call-result (assoc ok :usage {:input-tokens 0 :output-tokens 0}))))
     (is (anomaly/anomaly? (adapter/call-result ok)))
+    (testing "cached input alone is still metered"
+      (is (= {:input 50 :output 3 :provider-usd 0}
+             (:usage (adapter/call-result (assoc ok :usage {:input-tokens 0 :output-tokens 3
+                                                            :cache-read-input-tokens 50}))))))
     (is (= {:input 12 :output 3 :provider-usd 0}
            (:usage (adapter/call-result (assoc ok :usage {:input-tokens 10 :output-tokens 3
                                                           :cache-read-input-tokens 2})))))))
@@ -93,3 +97,19 @@
   (is (nil? (main/dispatch ["smoke" "manifest.edn"])))
   (is (nil? (main/dispatch ["verify"])))
   (is (nil? (main/dispatch ["unknown" "x"]))))
+
+(deftest ^{:stratum 1 :integration true} an-unreplayable-log-fails-verification
+  (with-output
+    (fn [output]
+      (.mkdir (io/file output))
+      (let [journal (harness/open-journal! (str (io/file output "journal")))
+            task (first (harness/tasks))
+            broken {:workspace/log [{:tx/role :proposer :tx/participant :proposer
+                                     :tx/activation "a" :tx/basis 0
+                                     :tx/operations [{:op :refine-claim :targets ["absent"]
+                                                      :statement "x"}]}]}]
+        (doseq [record [{:kind :experiment-opened :tasks [task]}
+                        {:kind :activation :task (:id task) :workspace broken}
+                        {:kind :experiment-completed}]]
+          (harness/append! journal record))
+        (is (anomaly/anomaly? (lab/verify! output)))))))

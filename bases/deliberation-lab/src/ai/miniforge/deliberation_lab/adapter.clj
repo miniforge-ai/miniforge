@@ -61,26 +61,31 @@
        (string? (:rationale payload))))
 
 (defn- ^{:stratum 0} parse-json
-  "Plain `try`: this base has no slingshot dependency and this is its one
-   catch (dewey 211, exemption 1). Unparseable text yields nil."
+  "Plain `try`: this base has no slingshot dependency and would add one
+   only for its two leaf catches (dewey 211, exemption 1). Unparseable text
+   yields nil."
   [text]
   (try
     (json/parse-string text true)
     (catch Exception _ nil)))
 
 (defn- ^{:stratum 0} metered-usage
-  "Usage in the lab's terms: every input-side token counts as input."
-  [{:keys [input-tokens output-tokens cache-creation-input-tokens cache-read-input-tokens]
-    :or {input-tokens 0 output-tokens 0 cache-creation-input-tokens 0 cache-read-input-tokens 0}}]
-  (let [input (+ input-tokens cache-creation-input-tokens cache-read-input-tokens)]
-    {:input input :output output-tokens :provider-usd 0}))
+  "Usage in the lab's terms: every input-side token, cached or not, counts
+   as input."
+  [usage]
+  (let [count-of #(let [n (get usage %)] (if (nat-int? n) n 0))]
+    {:input (+ (count-of :input-tokens) (count-of :cache-creation-input-tokens)
+               (count-of :cache-read-input-tokens))
+     :output (count-of :output-tokens)
+     :provider-usd 0}))
 
 (defn- ^{:stratum 0} metered?
-  "True when `usage` is provider metering. Every real request sends input
-   tokens, so zero input marks the llm client's default for a response that
-   reported none."
+  "True when `usage` is provider metering. Every real request sends input,
+   cached or not, so zero total input marks the llm client's default for a
+   response that reported none."
   [usage]
-  (and (map? usage) (pos-int? (:input-tokens usage))))
+  (and (map? usage) (pos? (:input (metered-usage usage)))))
+
 
 (defn- ^{:stratum 0} failure [subtype message-key]
   (anomaly/sub-anomaly :unavailable subtype (messages/system-t message-key)

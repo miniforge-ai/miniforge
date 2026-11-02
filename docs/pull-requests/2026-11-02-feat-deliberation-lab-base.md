@@ -35,8 +35,9 @@ base requires no component internals (dewey 311).
     or MCP servers. The snapshot built its own `claude` process instead.
   - Token usage comes from the provider envelope. The adapter uses the
     streaming path, which parses it; the buffered path substitutes zero
-    usage when none is parsed. A response without positive input tokens is
-    therefore a missing-usage failure, never a free call.
+    usage when none is parsed. A response without positive input tokens,
+    cached or uncached, is therefore a missing-usage failure, never a free
+    call.
   - A model envelope with any field outside
     `#{:operations :inspect :solution :rationale}` is an invalid, charged
     payload.
@@ -59,7 +60,8 @@ base requires no component internals (dewey 311).
     `verify!` would refuse every run. The report is written through
     `file-durability`, so a write failure is an anomaly.
   - `verify!` checks the chain, that the journal opens and closes a run, and
-    that every recorded board replays from its own transaction log.
+    that every recorded board replays from its own transaction log. A log
+    that cannot be replayed at all fails verification instead of throwing.
   - `mock-call` for offline smoke runs.
 - `main`: `smoke`, `run`, `verify`. Results and anomalies print as data; an
   anomaly exits non-zero. A wrong argument count prints the usage instead of
@@ -87,6 +89,13 @@ checked between calls. A single call can cross the ceiling, and a cell that
 does cannot succeed. A hard pre-reserved budget remains a prerequisite for
 N15 budget conformance (N15 Annex A).
 
+Transport retry: when a Claude stream exits cleanly with no content and no
+usage, the `llm` client retries once through its buffered path. One
+activation can therefore make two provider calls. The lab records that
+activation as failed with unknown usage, never as free, but it cannot stop
+the second call: that needs a request opt-out in the `llm` component, a
+separate brick, which is left for a follow-up.
+
 `workspace.edn` excludes `llm`'s own tests from this project: they require
 `agent`, a test-only dependency the lab does not contain. The `miniforge`,
 `miniforge-core` and `miniforge-tui` projects contain both and test `llm`.
@@ -109,10 +118,11 @@ Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
 sandbox), with scratch stand-ins outside the repo for the `llm` namespace
 (no calls are made) and for cheshire's JSON parsing:
 
-- `manifest_test` and `lab_test`: 7 tests, 33 assertions, 0 failures. The
+- `manifest_test` and `lab_test`: 8 tests, 36 assertions, 0 failures. The
   smoke test failed before the `journal/` change, the usage test before the
   argument-count change, and the metering, refusal and shape tests before
-  the review fixes.
+  the review fixes. The cached-usage, unreplayable-log and price-table cases
+  fail on the code before the second review round.
 - clj-kondo 2026.10.26 (the CI version) on `bases components development/src`:
   0 errors.
 

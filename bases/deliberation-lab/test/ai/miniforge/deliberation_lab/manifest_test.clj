@@ -47,4 +47,6 @@
     (is (= [:tiers] (manifest/defects (assoc valid :tiers 42))))
     (is (= [:tiers] (manifest/defects (assoc valid :tiers [42]))))
     (is (= [:adapter] (manifest/defects (dissoc valid :adapter))))
+    (is (= [:price-table] (manifest/defects (assoc valid :price-table
+                                                   '(:input-per-million 3 :output-per-million)))))
     (is (some #{:manifest} (manifest/defects [])))))
