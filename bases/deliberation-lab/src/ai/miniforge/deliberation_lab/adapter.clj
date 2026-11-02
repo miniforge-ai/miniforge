@@ -147,6 +147,6 @@
     (fn [request]
       (call-result (complete! client
                               {:system prompt
-                               :budget-usd (:call-cap-usd adapter)
+                               :budget-usd (double (:call-cap-usd adapter))
                                :messages [{:role "user"
                                            :content (json/generate-string request)}]})))))
