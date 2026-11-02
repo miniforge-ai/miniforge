@@ -12,6 +12,11 @@
 (deftest ^{:stratum 0} test-native-reference-shapes-are-admitted
   (is (m/validate schema/PodList (fixture/api-pods false))))
 
+(deftest ^{:stratum 0} test-pod-namespaces-use-the-native-dns-label-domain
+  (doseq [namespace ["staging/other" "staging.other" "Staging" "-staging"]]
+    (let [pods (assoc-in (fixture/api-pods false) ["items" 0 "metadata" "namespace"] namespace)]
+      (is (not (m/validate schema/PodList pods))))))
+
 (deftest ^{:stratum 0} test-key-selectors-require-the-native-data-key
   (let [pods (fixture/api-pods false)
         malformed (update-in pods ["items" 0 "spec" "containers" 0 "env" 0 "valueFrom" "configMapKeyRef"] dissoc "key")]

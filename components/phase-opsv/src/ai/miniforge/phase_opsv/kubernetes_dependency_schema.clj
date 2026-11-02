@@ -5,6 +5,7 @@
   "Admit every supported dependency path before deriving additional API reads."
   (:require [ai.miniforge.phase-opsv.kubernetes-reference-schema-builder :as builder]
             [ai.miniforge.phase-opsv.kubernetes-reference-sources :as sources]
+            [ai.miniforge.phase-opsv.kubernetes-name-schema :as names]
             [ai.miniforge.phase-opsv.kubernetes-resource-schema :as resource]
             [ai.miniforge.phase-opsv.kubernetes-snapshot-schema :as snapshot]
             [ai.miniforge.schema.interface :as schema]))
@@ -35,7 +36,7 @@
 
 (def ^{:stratum 1} PodDependencies
   [:map
-   ["nodeName" builder/ResourceName]
+   ["nodeName" names/ResourceName]
    ["containers" [:vector {:min 1} Container]]
    ["initContainers" {:optional true} [:vector Container]]
    ["ephemeralContainers" {:optional true} [:vector Container]]
@@ -49,6 +50,8 @@
    [:map
     ["metadata" [:map ["resourceVersion" schema/NonBlankString]
                   ["continue" {:optional true} :string]]]
-    ["items" [:vector [:and resource/Pod [:map ["spec" PodDependencies]]]]]]])
+    ["items" [:vector [:and resource/Pod
+                      [:map ["metadata" [:map ["namespace" names/NamespaceName]]]
+                       ["spec" PodDependencies]]]]]]])
 
 (comment ::complete-known-reference-admission)
