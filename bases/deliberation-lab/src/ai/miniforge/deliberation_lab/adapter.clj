@@ -31,7 +31,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} system-prompt-resource "deliberation-lab/system-prompt.txt")
+(def ^{:stratum 0} system-prompt-resource
+  "Classpath path of the fixed system prompt; its hash is pinned per run."
+  "deliberation-lab/system-prompt.txt")
 
 (def ^{:stratum 0} envelope-keys
   "The only fields a model response may carry."

@@ -16,11 +16,11 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.deliberation-lab.lab
-  "Run, verify and hash development experiments. A run writes a new
-   hash-chained journal: an opened record pinning the manifest, prompt,
+  "Run, verify and hash development experiments. A run creates a new
+   directory holding `journal/`, a hash-chained journal of record files
+   only, and the derived `report.md`. The journal holds an opened record pinning the manifest, prompt,
    tasks and implementation hashes, every turn, every cell result and a
-   closing report record. `report.md` is a derived copy; G0 is never
-   evaluated."
+   closing report record; G0 is never evaluated."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-harness.interface :as harness]
@@ -32,9 +32,19 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} protocol-version "deliberation-lab/1")
+(def ^{:stratum 0} protocol-version
+  "Pinned into every opened record so a reader can tell which lab protocol
+   wrote the journal."
+  "deliberation-lab/1")
 
-(def ^{:stratum 0} report-file "report.md")
+(def ^{:stratum 0} report-file
+  "The derived Markdown report, beside the journal and never inside it."
+  "report.md")
+
+(def ^{:stratum 0} journal-directory
+  "The run subdirectory that holds only journal records, which the
+   journal reader requires."
+  "journal")
 
 (def ^{:stratum 0} mock-usage
   "Fixed metering for offline runs; mock spend has no evidential value."
@@ -74,6 +84,9 @@
 (defn- ^{:stratum 0} refuse [type message-key data]
   (anomaly/anomaly type (messages/system-t message-key) data))
 
+(defn- ^{:stratum 0} journal-path [run-directory]
+  (io/file run-directory journal-directory))
+
 (defn- ^{:stratum 0} cells
   "Every (task, condition, tier, replicate) in manifest order."
   [manifest tasks]
@@ -84,6 +97,14 @@
     [task condition tier replicate]))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} open-run!
+  "Create the new run directory `output` and start its journal, or return
+   the anomaly when `output` already exists or the journal cannot start."
+  [output]
+  (if (.mkdir (io/file output))
+    (harness/open-journal! (journal-path output))
+    (refuse :conflict :anomaly/output-exists {:directory (str output)})))
 
 (defn- ^{:stratum 1} pin
   "`manifest` with the hashes of everything the run depends on."
@@ -149,17 +170,17 @@
   [manifest output call]
   (let [tasks (harness/tasks)
         pinned (preflight manifest tasks)
-        journal (when-not (anomaly/anomaly? pinned) (harness/open-journal! output))]
+        journal (when-not (anomaly/anomaly? pinned) (open-run! output))]
     (cond
       (anomaly/anomaly? pinned) pinned
       (anomaly/anomaly? journal) journal
       :else (record-run! pinned tasks journal output call))))
 
 (defn ^{:stratum 2} verify!
-  "Verify the journal in `directory`: one unbroken chain that opens and
+  "Verify the journal of the run in `directory`: one unbroken chain that opens and
    closes a run, with every recorded board rebuilt from its own log."
   [directory]
-  (let [records (harness/read-journal directory)
+  (let [records (harness/read-journal (journal-path directory))
         payloads (when-not (anomaly/anomaly? records) (map :payload records))
         tasks-by-id (into {} (map (juxt :id identity)) (:tasks (first payloads)))
         activations (filter #(= :activation (:kind %)) payloads)]

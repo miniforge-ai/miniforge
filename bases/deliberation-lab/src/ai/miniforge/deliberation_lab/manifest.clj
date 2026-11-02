@@ -24,7 +24,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} schema-version 1)
+(def ^{:stratum 0} schema-version
+  "The manifest shape this lab reads; any other version is refused."
+  1)
 
 (def ^{:stratum 0} minimum-activations
   "A tier needs at least one working turn and the closing turn."

@@ -29,9 +29,14 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} failure-exit-code 1)
+(def ^{:stratum 0} failure-exit-code
+  "Exit status when a command returns an anomaly."
+  1)
 
-(def ^{:stratum 0} usage-exit-code 2)
+(def ^{:stratum 0} usage-exit-code
+  "Exit status for an unknown command, following the shell usage-error
+   convention."
+  2)
 
 (defn- ^{:stratum 0} read-manifest [path]
   (harness/read-edn-file path))
@@ -58,11 +63,12 @@
                     (call-for command manifest)))))
 
 (defn ^{:stratum 1} dispatch
-  "The result of one command, or nil for an unknown command."
+  "The result of one command, or nil for an unknown command or a wrong
+   argument count."
   [[command & args]]
-  (case command
-    ("smoke" "run") (apply experiment command args)
-    "verify" (lab/verify! (first args))
+  (case [command (count args)]
+    (["smoke" 2] ["run" 2]) (apply experiment command args)
+    ["verify" 1] (lab/verify! (first args))
     nil))
 
 ;------------------------------------------------------------------------------ Layer 2

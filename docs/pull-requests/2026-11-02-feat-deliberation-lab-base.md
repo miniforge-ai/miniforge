@@ -12,11 +12,11 @@ adds:
 
 - `bases/deliberation-lab`: the CLI, the model adapter, manifest validation,
   and run, verify and implementation hashing.
-- `projects/deliberation-lab`: the standalone project with its development
-  manifest.
+- the base, its runtime components and a development manifest, added to
+  `projects/deliberation-lab` (created in #2344 so CI tests the components).
 
 The reusable logic is in the `deliberation-harness` component from the
-previous two PRs.
+harness PRs (#2334, #2346).
 
 ## Motivation
 
@@ -45,16 +45,22 @@ a base stays a thin entry point over component interfaces.
   - `execute!` checks the manifest and fixtures before any call. It pins the
     prompt, task and implementation hashes, journals the opened record,
     every cell and the closing report record, and writes `report.md`.
+  - A run creates a new directory holding `journal/` and `report.md`. The
+    journal reader merged in #2334 accepts record files only, so the report
+    sits beside the journal, not inside it as in the snapshot, where
+    `verify!` would refuse every run.
   - `verify!` checks the chain, that the journal opens and closes a run, and
     that every recorded board replays from its own transaction log.
   - `mock-call` for offline smoke runs.
 - `main`: `smoke`, `run`, `verify`. Results and anomalies print as data; an
-  anomaly exits non-zero.
-- `projects/deliberation-lab` lists every brick the base needs, including
-  `llm`'s transitive components, and provides a `:run` alias.
-  `workspace.edn` gains the `dlab` alias. Root `deps.edn` gains the base
-  paths.
-- The harness interface exports `fixture-defects`.
+  anomaly exits non-zero. A wrong argument count prints the usage instead of
+  throwing an arity exception.
+- `projects/deliberation-lab` gains the base and the components `llm`
+  needs, a `resources` path and a `:run` alias. Its `:necessary` list in
+  `workspace.edn` stays. Root `deps.edn` gains the base paths.
+- The harness interface exports `fixture-defects` and `read-edn-file`, so a
+  manifest read failure is an anomaly.
+- Every named constant carries an intent docstring (dewey 006).
 
 Deviations from the snapshot:
 
@@ -76,22 +82,28 @@ pre-reserved budget remains a prerequisite for N15 budget conformance
 
 - `manifest_test`: each defect is named; the gate mode is refused.
 - `lab_test`, marked `:integration` because it writes a temporary journal:
-  - a smoke run journals, writes `report.md`, verifies and replays;
+  - a smoke run journals into `journal/`, writes `report.md` beside it,
+    verifies and replays;
   - a run refuses to reuse its directory;
   - an edited record fails verification;
   - an invalid manifest is refused with no call made;
   - forged metering in model output makes the payload invalid;
-  - enums decode.
+  - enums decode;
+  - a wrong argument count is a usage error.
 
 Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
-sandbox):
+sandbox), with scratch stand-ins outside the repo for the `llm` namespace
+(no calls are made) and for cheshire's JSON parsing:
 
-- `manifest_test` in full: 2 tests, 7 assertions, 0 failures.
-- `lab_test`'s smoke, verify, tamper and refusal cases, run with local
-  stand-ins for the `llm` and cheshire namespaces.
+- `manifest_test` and `lab_test`: 6 tests, 21 assertions, 0 failures. The
+  smoke test failed before the `journal/` change, and the usage test failed
+  before the argument-count change.
+- clj-kondo 2026.10.26 (the CI version) on `bases components development/src`:
+  0 errors.
 
-`adapter/decode` needs real cheshire, so its tests ran only in CI, as did
-`poly test`, clj-kondo and the Polylith check.
+`adapter/decode` against real cheshire, `poly test` and the Polylith check
+ran only in CI. The poly test runner does not filter on `:integration`, so
+the smoke run is part of CI.
 
 ## Deployment Plan
 
@@ -100,8 +112,8 @@ depends on it.
 
 ## Related Issues/PRs
 
-- Builds on the harness PRs (#2334 and the experiment PR) and on the
-  workspace stack (#2330–#2332, #2335).
+- Builds on the harness PRs (#2334, #2346), the lab project (#2344) and
+  the workspace stack (#2330, #2331, #2332, #2335).
 - Next: the architecture atlas docs and the N14/N15 Annex A updates.
 
 ## Checklist

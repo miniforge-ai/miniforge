@@ -23,6 +23,7 @@
    [ai.miniforge.deliberation-harness.interface :as harness]
    [ai.miniforge.deliberation-lab.adapter :as adapter]
    [ai.miniforge.deliberation-lab.lab :as lab]
+   [ai.miniforge.deliberation-lab.main :as main]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]])
   (:import
@@ -54,10 +55,11 @@
         (is (= :not-evaluated (:G0 summary)))
         (is (true? (:verified? (lab/verify! output))))
         (is (.exists (io/file output "report.md")))
+        (is (.exists (io/file output "journal" "000000.edn")))
         (testing "a run never reuses its directory"
           (is (anomaly/anomaly? (smoke! output))))
         (testing "an edited record breaks verification"
-          (spit (io/file output "000001.edn") (pr-str {:sequence 1 :payload {:turn 9000}}))
+          (spit (io/file output "journal" "000001.edn") (pr-str {:sequence 1 :payload {:turn 9000}}))
           (is (anomaly/anomaly? (lab/verify! output))))))))
 
 (deftest ^{:stratum 1} an-invalid-manifest-is-refused-before-any-call
@@ -78,3 +80,8 @@
                    [:operations 0 :op]))))
   (testing "unparseable text is an invalid payload"
     (is (:invalid? (adapter/decode "not json")))))
+
+(deftest ^{:stratum 1} a-wrong-argument-count-is-a-usage-error
+  (is (nil? (main/dispatch ["smoke" "manifest.edn"])))
+  (is (nil? (main/dispatch ["verify"])))
+  (is (nil? (main/dispatch ["unknown" "x"]))))

@@ -7,6 +7,7 @@
   :anomaly/missing-usage    "Provider returned no token usage"
   :anomaly/invalid-manifest "Development manifest is invalid"
   :anomaly/invalid-fixtures "Synthetic task package cannot discriminate references from distractors"
+  :anomaly/output-exists    "Run directory already exists; a run never reuses one"
   :anomaly/incomplete-run   "Experiment journal does not open and close a run"
   :anomaly/replay-mismatch  "A recorded board does not replay from its transaction history"
   :lab/invalid-response     "Invalid model JSON; the activation is charged"}}
