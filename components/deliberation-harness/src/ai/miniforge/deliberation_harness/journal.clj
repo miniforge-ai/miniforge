@@ -105,10 +105,12 @@
          sequence 0
          records []]
     (if-let [file (first files)]
-      (let [record (codec/read-source file)]
-        (if (links? record sequence previous)
+      (let [[status record] (codec/parse-source file)]
+        (cond
+          (= :failure status) record
+          (links? record sequence previous)
           (recur (next files) (:hash record) (inc sequence) (conj records record))
-          (or (failure record) (chain-anomaly file))))
+          :else (chain-anomaly file)))
       records)))
 
 (defn- ^{:stratum 1} write-next!

@@ -130,9 +130,10 @@
       [:failure (anomaly/anomaly :invalid-input (messages/system-t :anomaly/unknown-tag) {:tag tag})]
       result)))
 
-(defn- ^{:stratum 1} parse-source
-  "`parse` over the UTF-8 text of `source`, with the source named on any
-   failure, reading or parsing."
+(defn ^{:stratum 1} parse-source
+  "`[:ok value]` for the one plain EDN form in the UTF-8 text of `source`,
+   or `[:failure anomaly]` naming the source when reading or parsing fails.
+   Callers that must tell data from failure use this, not `read-source`."
   [source]
   (let [[status text :as read]
         (attempt #(vector :ok (slurp source :encoding "UTF-8")) :unavailable

@@ -109,3 +109,14 @@
       (journal/open! dir)
       (spit (io/file dir "000000.edn") "{:sequence")
       (is (some? (get-in (journal/read-journal dir) [:anomaly/data :source]))))))
+
+(deftest ^{:stratum 1 :integration true} anomaly-shaped-record-data-breaks-the-chain
+  (with-journal-dir
+    (fn [dir]
+      (journal/open! dir)
+      (spit (io/file dir "000000.edn")
+            (str "{:anomaly/type :fault :anomaly/message \"m\" :anomaly/data {}"
+                 " :anomaly/at #inst \"2026-01-01T00:00:00.000-00:00\"}"))
+      (let [result (journal/read-journal dir)]
+        (is (= :conflict (:anomaly/type result)))
+        (is (some? (get-in result [:anomaly/data :file])))))))
