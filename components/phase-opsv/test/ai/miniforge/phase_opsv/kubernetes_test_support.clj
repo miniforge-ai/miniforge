@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-test-support
-  "Captured-shape read fixtures; no Kubernetes calls.")
+  "Captured-shape read fixtures; no Kubernetes calls."
+  (:require [ai.miniforge.phase-opsv.kubernetes-container-test-support :as containers]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -45,8 +46,8 @@
 (defn ^{:stratum 1} pod []
   (let [meta (metadata "service-a" "staging" "pod-uid")
         spec {"nodeName" "worker-a"
-               "containers" [{"name" "service" "image" "registry.invalid/service:release"}]}
-        status {"containerStatuses" [{"name" "service" "imageID" image-id}]}]
+               "containers" [(containers/container "service")]}
+        status {"containerStatuses" [(containers/status "service" image-id)]}]
     (kube-resource "Pod" meta {"spec" spec "status" status})))
 
 ;------------------------------------------------------------------------------ Layer 2

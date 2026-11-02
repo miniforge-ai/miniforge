@@ -9,11 +9,11 @@
 
 (def ^{:stratum 0} ^:private configuration-metadata ["labels" "annotations"])
 
-(defn ^{:stratum 0} identity-key [resource]
-  [(get resource "apiVersion") (get resource "kind")
-   (get-in resource ["metadata" "namespace"])
-   (get-in resource ["metadata" "name"])
-   (get-in resource ["metadata" "uid"])])
+(defn ^{:stratum 0} uid [resource] (get-in resource ["metadata" "uid"]))
+
+(defn ^{:stratum 0} name-of [resource] (get-in resource ["metadata" "name"]))
+
+(defn ^{:stratum 0} namespace-of [resource] (get-in resource ["metadata" "namespace"]))
 
 (defn- ^{:stratum 0} secret? [resource]
   (and (= "v1" (get resource "apiVersion")) (= "Secret" (get resource "kind"))))
@@ -24,6 +24,10 @@
     {:secret/resource-version version}))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} identity-key [resource]
+  [(get resource "apiVersion") (get resource "kind")
+   (namespace-of resource) (name-of resource) (uid resource)])
 
 (defn- ^{:stratum 1} desired-configuration [resource]
   (let [metadata (select-keys (get resource "metadata") configuration-metadata)]

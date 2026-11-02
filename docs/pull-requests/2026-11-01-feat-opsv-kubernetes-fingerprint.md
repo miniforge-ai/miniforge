@@ -34,12 +34,16 @@ Use captured-shape fixtures only, with no cluster access. Verify drift sensitivi
 stable ordering, malformed observations and sanitized diagnostics. Run affected
 product tests, packaged acceptance, adversarial standards review and normal gates.
 
-Resource projections, captured-resource schemas and assembly pass 8 native source
-tests and 30 assertions. The snapshot contract requires explicit cluster and node-pool
-selection, physical resource UIDs and immutable image IDs. Shared factories retain
-native Kubernetes string keys across both test namespaces.
-The complete snapshot boundary and live acquisition remain
-unfinished. No environment-fingerprint conformance claim is made by this slice.
+The public decoder, projections, schemas and assembly pass 13 native source tests
+and 52 assertions. The contract requires explicit cluster and node-pool selection,
+physical resource UIDs and immutable image IDs. Shared factories retain native
+Kubernetes string keys. Regressions cover inconsistent identities, missing or
+mismatched container status, image tags and sanitized unsupported content.
+
+The decoder does not establish capture freshness, authenticity or completeness
+against a live cluster. Read-only acquisition must bind target selection and
+configuration-reference closure before experiments can use this evidence.
+This slice alone does not complete N7.EX.1.
 
 ## Deployment Plan
 

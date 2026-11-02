@@ -22,7 +22,7 @@
 (def ^{:stratum 0} ContainerStatus
   [:map
    ["name" schema/NonBlankString]
-   ["imageID" [:re #"\A(?:[^\s]*@|[a-z][a-z0-9+.-]*://)?sha256:[0-9a-f]{64}\z"]]])
+   ["imageID" [:re #"\A(?:[a-z][a-z0-9+.-]*://)?(?:[A-Za-z0-9._:/-]+@)?sha256:[0-9a-f]{64}\z"]]])
 
 (def ^{:stratum 0} NodeInfo
   [:map
@@ -54,6 +54,13 @@
 
 (def ^{:stratum 2} Namespace
   [:and Resource [:map ["apiVersion" [:= "v1"]] ["kind" [:= "Namespace"]]]])
+
+(def ^{:stratum 2} Secret
+  [:and Resource
+   [:map ["apiVersion" [:= "v1"]] ["kind" [:= "Secret"]]
+    ["metadata" [:map ["namespace" schema/NonBlankString]
+                  ["resourceVersion" schema/NonBlankString]]]
+    ["data" {:optional true} [:map-of :string :string]]]])
 
 (def ^{:stratum 2} Node
   [:and Resource [:map ["apiVersion" [:= "v1"]] ["kind" [:= "Node"]]

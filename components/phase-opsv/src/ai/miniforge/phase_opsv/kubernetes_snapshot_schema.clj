@@ -8,6 +8,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} ConfigurationResource
+  [:or resource/Secret
+   [:and resource/Resource [:map ["kind" [:not [:= "Secret"]]]]]])
+
 (def ^{:stratum 0} NodeList
   [:map ["apiVersion" [:= "v1"]] ["kind" [:= "NodeList"]]
    ["items" [:vector {:min 1} resource/Node]]])
@@ -26,6 +30,6 @@
    [:kubernetes/node-pool-label schema/NonBlankString]
    [:kubernetes/nodes NodeList]
    [:kubernetes/pods PodList]
-   [:kubernetes/configuration [:vector resource/Resource]]])
+   [:kubernetes/configuration [:vector ConfigurationResource]]])
 
 (comment ::explicit-kubernetes-target-snapshot)
