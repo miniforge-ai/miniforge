@@ -120,9 +120,9 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} encode
-  "The canonical EDN text of `value`. Values EDN cannot tell apart (a float
-   and a double that print alike) share a text; `plain?` refuses them in a
-   journal payload."
+  "The canonical EDN text of `value`. A float is written as the exact double
+   it widens to, so it shares a text only with the double it equals, and a
+   journal replays it as that double."
   [value]
   (stably #(emit value)))
 
