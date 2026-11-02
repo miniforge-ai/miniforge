@@ -15,6 +15,8 @@
 
 (defn- ^{:stratum 0} path-head [[_ path _]] (first path))
 
+(defn- ^{:stratum 0} child-head [[_ [_ field] _]] field)
+
 (defn ^{:stratum 0} closed-map-fields [fields]
   (into [:map {:closed true}]
         (for [field fields] [field {:optional true} :map])))
@@ -23,6 +25,9 @@
 
 (defn ^{:stratum 1} source-fields [descriptors]
   (set (map path-head descriptors)))
+
+(defn ^{:stratum 1} child-source-fields [descriptors]
+  (set (map child-head descriptors)))
 
 (defn- ^{:stratum 1} referent [[_ _ name-key policy]]
   (let [optional-type (if (:reference/optional? policy) :boolean :nil)

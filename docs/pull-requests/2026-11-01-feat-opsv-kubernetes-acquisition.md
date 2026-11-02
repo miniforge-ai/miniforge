@@ -39,7 +39,8 @@ All reads share a capture deadline and owned HTTP cleanup. This is not an atomic
 cluster snapshot and does not run an experiment, create grants or mutate resources.
 
 Captured decoder #2336, Prometheus transport #2314, bounded reader #2339 and shared
-HTTP ingress #2340 are merged. Settings foundation #2341 must merge before this PR.
+HTTP ingress #2340 and settings foundation #2341 are merged.
+Pure dependency foundation #2343 must merge before this PR.
 
 ## Testing Plan
 
@@ -63,8 +64,8 @@ API reference: <https://kubernetes.io/docs/reference/kubernetes-api/core/pod-v1/
 
 ## Checklist
 
-- [ ] Pure configuration-reference discovery
-- [ ] Bounded read-only acquisition and public boundary
+- [x] Pure configuration-reference discovery
+- [x] Bounded read-only acquisition and public boundary
 - [ ] Product and packaged acceptance
 - [ ] Adversarial standards review and normal signed hooks
 - [ ] Fresh full Copilot review and all CI gates

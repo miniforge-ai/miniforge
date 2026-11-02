@@ -12,9 +12,15 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} Container
-  [:map
-   ["env" {:optional true} [:vector (builder/source-schema sources/environment-sources)]]
-   ["envFrom" {:optional true} [:vector (builder/source-schema sources/environment-from-sources)]]])
+  (let [value-from-fields (conj (builder/child-source-fields sources/environment-sources) "fieldRef" "resourceFieldRef")
+        value-from-shell (builder/closed-map-fields value-from-fields)
+        source (builder/source-schema sources/environment-sources)
+        environment [:and source [:map ["valueFrom" {:optional true} value-from-shell]]]
+        from-fields (builder/source-fields sources/environment-from-sources)
+        from-shell (conj (builder/closed-map-fields from-fields) ["prefix" {:optional true} :string])]
+    [:map
+     ["env" {:optional true} [:vector environment]]
+     ["envFrom" {:optional true} [:vector [:and from-shell (builder/source-schema sources/environment-from-sources)]]]]))
 
 (def ^{:stratum 0} Volume
   (let [volume-fields (conj (builder/source-fields sources/volume-sources) "emptyDir" "projected" "downwardAPI")
