@@ -24,6 +24,7 @@ cancellation. Structured configuration exceptions need the same boundary policy.
 - Reuse shared, producer-shaped configuration fixtures.
 - Canonicalize case-insensitive URI schemes without changing escaped paths.
 - Reject reserved port zero and preserve omitted or valid explicit ports.
+- Enforce the RFC 6750 Bearer alphabet and trailing-only padding.
 
 ## Testing Plan
 
@@ -32,6 +33,7 @@ causes. Verify both consuming products, native packaging, standards and normal h
 
 Review regressions first reproduced five failing assertions without errors.
 Critical-cause coverage now includes ordinary and producer-shaped structured wrappers.
+Bearer grammar regressions first reproduced four failing assertions without errors.
 
 ## Deployment Plan
 

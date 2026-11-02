@@ -44,6 +44,14 @@
   (doseq [overrides [nil {}]]
     (is (anomaly/anomaly? (settings/load-settings overrides)))))
 
+(deftest ^{:stratum 0} test-bearer-credentials-follow-the-wire-grammar
+  (doseq [token ["abc,def" "abc:xyz" "abc=def" "=" "" "token\u00e9"]]
+    (is (anomaly/anomaly?
+          (settings/load-settings (fixture/settings {:prometheus/bearer-token token})))))
+  (doseq [token ["AZaz09-._~+/" "token=" "token=="]]
+    (is (= token (:prometheus/bearer-token
+                   (settings/load-settings (fixture/settings {:prometheus/bearer-token token})))))))
+
 (deftest ^{:stratum 0} test-case-insensitive-http-schemes-are-admitted-and-canonicalized
   (doseq [[overrides expected]
           [[{:prometheus/base-url "HTTP://metrics.invalid/"} "http://metrics.invalid/"]
