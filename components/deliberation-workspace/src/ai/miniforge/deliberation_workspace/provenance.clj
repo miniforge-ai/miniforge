@@ -86,13 +86,15 @@
          (receipt-matches? receipt :execution (:object/statement evidence)))))
 
 ;; True when `operation` creates `:execution` evidence or links any, along any
-;; edge type, through its own `:links` or a created object's: every edge to
-;; such evidence makes it bear on a record, which only its producers may do.
+;; edge type, through its own `:links`, a created object's, or its
+;; `:discriminates` (which commit persists as links on what it creates): every
+;; edge to such evidence makes it bear on a record, which only its producers may do.
 (defn- ^{:stratum 1} attaches-execution?
   [workspace operation]
   (let [objects (validation/objects-of workspace)
         created (validation/created-specs operation)
-        linked (mapcat #(mapcat val (get % :links {})) (cons operation created))]
+        linked (concat (get operation :discriminates [])
+                       (mapcat #(mapcat val (get % :links {})) (cons operation created)))]
     (or (some #(execution-class? (get-in % [:attrs :source-class])) created)
         (some #(execution-class? (get-in objects [% :object/attrs :source-class])) linked))))
 

@@ -306,7 +306,10 @@
           (str edge)))
     (is (= :anomalies.deliberation/unattested-provenance
            (subtype-of (submit ws :proposer {:op :refine-claim :targets ["c"] :statement "c"
-                                             :links {:depends-on ["e"]}}))))))
+                                             :links {:depends-on ["e"]}}))))
+    (is (= :anomalies.deliberation/unattested-provenance
+           (subtype-of (submit ws :proposer {:op :propose-experiment :discriminates ["e"]
+                                             :creates [{:id "x" :type :experiment :statement "x"}]}))))))
 
 (deftest ^{:stratum 1} cited-evidence-must-be-attached
   (let [analysis (fn [id] {:id id :type :evidence :statement id

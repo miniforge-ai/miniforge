@@ -29,7 +29,8 @@ label its own analysis `:execution` evidence and satisfy the acceptance rule.
     - `:execution` and `:user` evidence must match a `:workspace/receipts`
       entry in both class and statement;
     - only the verifier or the user may create `:execution` evidence or link
-      it along any edge type (not only `:supports`).
+      it along any edge type (not only `:supports`), including through an
+      operation's `:discriminates`, which commit persists as links.
   - `check-evidence-links`: an attachment names every evidence object it
     creates or references under `:supports`, and every `:supports`
     destination is evidence.
@@ -54,15 +55,15 @@ New admission tests cover:
 - hard-constraint sources (user, interpreter with and without a recorded
   source);
 - execution evidence with and without a receipt;
-- verifier-only execution evidence, linked along `:supports`, `:contradicts`
-  or `:depends-on`;
+- verifier-only execution evidence, linked along `:supports`, `:contradicts`,
+  `:depends-on` or an experiment's `:discriminates`;
 - unlinked evidence;
 - an experiment result backed only by non-execution evidence;
 - an experiment result whose evidence the experiment does not link.
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 12 deliberation-workspace
-suites, 178 tests, 600 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
+suites, 178 tests, 602 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
 version) on the component: 0 errors. `poly test` and the Polylith check ran
 only in CI.
 
