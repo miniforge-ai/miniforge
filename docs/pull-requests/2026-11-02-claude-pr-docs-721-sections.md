@@ -24,10 +24,10 @@ its change.
 ## Changes in Detail
 
 - `2026-11-01-fix-gate-warnings-survive-retries.md` (#2303) now has the
-  721 sections, describes the merged code as it is (the warnings clause
-  sits in `apply-gate-validation`'s outer `cond->`), and records under
-  Related that it merged without CI re-running against #2311, broke main,
-  and was fixed by #2319 and trimmed by #2316.
+  721 sections and describes the merged code as it is.
+  The warnings clause sits in `apply-gate-validation`'s outer `cond->`.
+  Related records that it merged without CI re-running against #2311 and broke main.
+  It was fixed by #2319 and trimmed by #2316.
 - `2026-11-01-gate-messages-to-catalog.md` (#2307) now has the 721
   sections. Its assertion count is updated from 109 to 110, measured on
   main. Related records the three Copilot rounds.
@@ -51,7 +51,7 @@ None.
 
 ## Related Issues/PRs
 
-- #2303, #2307, #2319: the PRs whose docs change.
+PRs #2303, #2307 and #2319 have documentation changes here.
 
 ## Checklist
 

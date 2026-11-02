@@ -125,7 +125,7 @@
                  (executor-type [_] :mock)
                  (available? [_] (dag/ok {:available? true}))
                  (acquire-environment! [_ _ _] (dag/ok {}))
-                 (execute! [_ _env-id command opts]
+                 (execute! [_ _env-id _command opts]
                    (swap! seen conj (:workdir opts))
                    (dag/ok {:exit-code 0 :stdout "git@github.com:org/repo.git" :stderr ""}))
                  (copy-to! [_ _ _ _] (dag/ok {}))

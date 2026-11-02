@@ -33,17 +33,17 @@ prerequisite gives them a catalog to add keys to.
 
 The coverage test reads the component's source files from the classpath to
 collect keys. The testing standards (dewey 400) discourage filesystem reads in
-tests; this follows `gate/messages_test`, which does the same, because no
-in-memory source lists the keys a call site passes.
+tests. This follows `gate/messages_test`, which does the same.
+No in-memory source lists the keys a call site passes.
 
 Not changed: the `IllegalArgumentException` texts in `object` and `commit`.
 They are programmer-error guards, which dewey 050 exempts.
 
 ## Testing Plan
 
-Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
-sandbox, so a local stand-in replaced malli): all 12 deliberation-workspace
-suites, 126 tests, 403 assertions, 0 failures. `poly test`, clj-kondo and
+Ran locally on plain Clojure 1.12. Clojars is unreachable from the authoring
+sandbox, so a local stand-in replaced malli. All 12 deliberation-workspace
+suites ran: 126 tests, 403 assertions, 0 failures. `poly test`, clj-kondo and
 the Polylith check ran only in CI.
 
 ## Deployment Plan
@@ -52,7 +52,7 @@ None. Experimental component with no production caller.
 
 ## Related Issues/PRs
 
-- Precedes the deliberation-workspace domain PR in the N14 0.3.0 stack.
+Precedes the deliberation-workspace domain PR in the N14 0.3.0 stack.
 
 ## Checklist
 

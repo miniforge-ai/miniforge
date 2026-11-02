@@ -26,9 +26,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Every derived conflict id starts with this prefix. The namespace is the
-;; engine's alone: admission refuses proposals that create objects inside it.
-(def ^{:stratum 0} conflict-id-prefix "conflict-")
+(def ^{:stratum 0} conflict-id-prefix
+  "Every derived conflict id starts with this prefix. The namespace is the
+   engine's alone: admission refuses proposals that create objects inside it."
+  "conflict-")
 
 (defn- ^{:stratum 0} conflict-id-of [[id target]]
   (str conflict-id-prefix id "-" target))

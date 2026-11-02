@@ -30,8 +30,8 @@ Where each definition now lives:
    `safe-path-segment`, `workflow-id-segment`, `now-sortable-str`, `snowflake-uuid?`,
    `event-filename`, `new-event-file-path`, `event-file-ms`. Three layers.
 3. `sinks.file` (new): the file sink. `workflow-dir`, `event-file-path`, `file-sink`. Two layers.
-4. `sinks.cleanup` (new): stored-event retention. `cleanup-stale-events!`, the `retention-hold`
-   multimethod and its `:default` method, and their private helpers and defaults
+4. `sinks.cleanup` (new): stored-event retention. It owns `cleanup-stale-events!`, the `retention-hold`
+   multimethod and its `:default` method. Their private helpers and defaults are
    (`default-event-ttl-ms`, `warned-runs`, `manifest-filename`, `walk-tree`, `delete-all!`,
    `child-dirs`, `archive-expired?`, `legacy-workflow-expired?`, `no-events?`,
    `idle-unmanaged-run?`, `run-verdict`, `archive-completed-run!`). Two layers.
@@ -40,9 +40,9 @@ Where each definition now lives:
 7. `sinks.factory` (new): `multi-sink`, `create-sink`, `create-sinks-from-config`, with the old
    `sinks` namespace docstring. Three layers.
 
-Why `sinks` keeps the on-disk layout instead of the factory: `archive.clj` and
-`operator_requests.clj` already span 4 layers on main, so editing either one fails SL003 in the
-pre-commit hook. Everything they call through `sinks/` therefore stays a real definition in
+Layout stays in `sinks` because `archive.clj` and `operator_requests.clj` already span four layers on main.
+Editing either file fails SL003 in the pre-commit hook. Everything they call through `sinks/` therefore stays a real
+definition in
 `sinks`, and neither file changes. The file sink calls those definitions and the factory calls
 the file sink, so the factory cannot stay in `sinks` without a require cycle. `reader.clj` and
 `archive_test.clj` also call only layout functions and are unchanged.
@@ -61,17 +61,17 @@ All 43 top-level forms move unchanged except for four kinds of edit:
 2. Public visibility for `workflow-id-segment` and `new-event-file-path`, which `sinks` and
    `sinks.file` now call.
 3. New stratum numbers: `operator-event-file-path` 3 to 1, `workflow-dir` 3 to 0,
-   `event-file-path` 3 to 0, `file-sink` 4 to 1, `create-sink` 5 to 1,
-   `create-sinks-from-config` 6 to 2. The rest keep their numbers.
+   `event-file-path` 3 to 0, `file-sink` 4 to 1.
+   `create-sink` changes from 5 to 1; `create-sinks-from-config` changes from 6 to 2.
+   The rest keep their numbers.
 4. The namespace forms and docstrings. The in-file section comments (`;; Cleanup`,
    `;; Fleet Sink` and so on) are gone; the namespace names carry the same grouping.
 
-Requirers changed only in their aliases: `core.clj`, `interface.clj`, `layout_reader.clj`,
-`sinks_test.clj`, `anomaly/sinks_anomaly_test.clj`, `live_retention_test.clj` and
-`retention_hold_test.clj`. That includes prose that named a moved var (`core.clj`'s
-`create-event-stream` example, the `layout_reader` and `sinks_anomaly_test` namespace
-docstrings) and two continuation lines in `sinks_test.clj` realigned after an alias changed
-length. `interface.clj` exports the same vars as before.
+Requirers changed only in their aliases. They are `core.clj`, `interface.clj`, `layout_reader.clj`,
+`sinks_test.clj`, `anomaly/sinks_anomaly_test.clj`, `live_retention_test.clj` and `retention_hold_test.clj`.
+This includes prose naming moved vars in the `core.clj` example and two namespace docstrings.
+Two continuation lines in `sinks_test.clj` were realigned after an alias changed length.
+`interface.clj` exports the same vars as before.
 
 `sinks.file` uses two layers, so the follow-up can add one helper below `file-sink` and stay
 within budget.
@@ -80,16 +80,16 @@ within budget.
 
 1. Form comparison against main. Every top-level form of main's `sinks.clj` and of the seven new
    files was read with `*read-eval*` false and printed with metadata. After normalizing `#()`
-   gensyms, the split namespaces' qualifiers and `:stratum` metadata, 41 of 43 forms are
-   identical; the other 2 differ only in `defn-` to `defn` (item 2 above). The new namespace
+   gensyms, the split namespaces' qualifiers and `:stratum` metadata, 41 of 43 forms are identical.
+   The other 2 differ only in `defn-` to `defn` (item 2 above). The new namespace
    forms require and import nothing main's did not, apart from each other. For each requirer,
    every form in order is identical to main's once the new aliases are mapped back to `sinks`.
    A one-token change to a new file or to a requirer makes the comparison fail.
 2. clj-kondo on every new and changed file: no errors or warnings.
 3. stratum-lint on the seven namespaces: no findings, and `--fix` changes nothing.
-4. Every event-stream test namespace, plus the tests outside the brick that use the moved
-   interface vars (`retention-hold`, `workflow-dir`, `cleanup-stale-events!`, `event-file-ms`),
-   run under the shared JVM lock with a temporary `MINIFORGE_HOME`.
+4. Every event-stream test namespace runs under the shared JVM lock with a temporary `MINIFORGE_HOME`.
+   External tests using moved interface vars run there too: `retention-hold`, `workflow-dir`,
+   `cleanup-stale-events!` and `event-file-ms`.
 
 ## Deployment Plan
 

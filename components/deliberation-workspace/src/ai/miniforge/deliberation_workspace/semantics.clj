@@ -29,9 +29,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Object types each creating operation may create. An operation absent
-;; from this table creates nothing.
 (def ^{:stratum 0} creation-types
+  "Object types each creating operation may create. An operation absent
+   from this table creates nothing."
   {:assert-claim #{:claim} :add-question #{:question}
    :propose-hypothesis #{:hypothesis} :split-hypothesis #{:hypothesis}
    :propose-experiment #{:experiment} :propose-plan #{:plan}
@@ -43,9 +43,9 @@
   "Creating operations that may instead reference what already exists."
   #{:attach-evidence})
 
-;; Object types each targeting operation may target. An operation absent
-;; from this table carries no type requirement on its targets.
 (def ^{:stratum 0} target-types
+  "Object types each targeting operation may target. An operation absent
+   from this table carries no type requirement on its targets."
   {:refine-claim #{:claim :hypothesis} :revise-plan #{:plan}
    :challenge #{:claim :hypothesis :plan :decision}
    :attach-evidence #{:claim :hypothesis :plan :decision :experiment}
@@ -55,9 +55,9 @@
    :close-goal #{:goal} :split-hypothesis #{:hypothesis}
    :merge-hypotheses #{:hypothesis} :supersede tx/supersedable-types})
 
-;; The closed set of fields an operation payload may carry. Anything else —
-;; an actor, a permission, a policy label — is model-supplied authority.
 (def ^{:stratum 0} operation-keys
+  "The closed set of fields an operation payload may carry. Anything else —
+   an actor, a permission, a policy label — is model-supplied authority."
   #{:op :targets :creates :links :evidence :discriminates :outcome
     :statement :reason :resolution :replacement})
 
@@ -73,15 +73,20 @@
    :plan #{:solution :assumptions} :decision #{:choice :solution :assumptions}
    :artifact-ref #{:capsule-id :digest :paths} :blocker #{}})
 
-(def ^{:stratum 0} constraint-kinds #{:hard :soft})
+(def ^{:stratum 0} constraint-kinds
+  "Constraint kinds (N14 §2.4): a `:hard` constraint is immutable to agents and
+   enters only from the specification or the user; agents may propose `:soft`."
+  #{:hard :soft})
 
-;; The claim kinds of N14 §2.1. A claim's `:kind` is optional; when given it
-;; must be one of these.
-(def ^{:stratum 0} claim-kinds #{:fact :inference :assumption :prediction})
+(def ^{:stratum 0} claim-kinds
+  "The claim kinds of N14 §2.1. A claim's `:kind` is optional; when given it
+   must be one of these."
+  #{:fact :inference :assumption :prediction})
 
-;; Characters one statement may hold (N14 §2.2). Manifest-configurable via
-;; `:workspace/statement-cap`; sized for a paragraph, not a document.
-(def ^{:stratum 0} default-statement-cap 4000)
+(def ^{:stratum 0} default-statement-cap
+  "Characters one statement may hold (N14 §2.2). Manifest-configurable via
+   `:workspace/statement-cap`; sized for a paragraph, not a document."
+  4000)
 
 (defn- ^{:stratum 0} spec-fields-defect? [spec]
   (let [attrs (get spec :attrs {})]
