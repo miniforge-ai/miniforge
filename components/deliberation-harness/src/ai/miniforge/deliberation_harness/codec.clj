@@ -45,39 +45,32 @@
             *print-dup* false *print-readably* true *print-namespace-maps* false]
     (f)))
 
-;; The plain Clojure view of a value that prints like a plain collection but
-;; is not one — a record, a host map or collection, an array — or nil. Such a
-;; value is encoded with its class tag, so it never shares a digest with the
-;; plain value it resembles.
-(defn- ^{:stratum 0} host-view [value]
-  (cond
-    (record? value) (into {} value)
-    (and (instance? java.util.Map value) (not (map? value))) (into {} value)
-    (and (instance? java.util.Collection value) (not (coll? value))) (vec value)
-    (some-> value class .isArray) (vec value)
-    :else nil))
+;; "#<class>" for a value that prints like a plain collection but is not one
+;; (a record, a host map, set or collection, an array), else "". The tag keeps
+;; it from sharing a digest with the plain value it resembles.
+(defn- ^{:stratum 0} host-tag [value]
+  (if (or (record? value)
+          (and (instance? java.util.Map value) (not (map? value)))
+          (and (instance? java.util.Collection value) (not (coll? value)))
+          (some-> value class .isArray))
+    (str "#" (.getName (class value)))
+    ""))
 
-(defn- ^{:stratum 0} emit
-  "The canonical text of `value`: maps, sets, vectors and lists written
-   element by element, map entries ordered by their key's then value's text
-   and set elements by their own text. A record, host collection or array is
-   tagged with its class (`host-view`), so it never shares a text with the
-   plain value it resembles; a float is written as the exact
-   double it widens to, so it never shares a text with a different double.
-   Anything else prints as itself. Call it inside `stably`."
-  [value]
-  (let [joined (fn [open texts close] (str open (str/join " " texts) close))]
+;; The canonical text of `value`, written from its own entries and never
+;; converted to another collection, so no two entries ever merge. Map entries
+;; are ordered by their key's then value's text, set elements by their own
+;; text; sequences keep their order. A float is written as the exact double
+;; it widens to. Anything else prints as itself. Call it inside `stably`.
+(defn- ^{:stratum 0} emit [value]
+  (let [joined (fn [open texts close] (str (host-tag value) open (str/join " " texts) close))]
     (cond
-      (host-view value) (str "#" (.getName (class value)) (emit (host-view value)))
       (instance? Float value) (pr-str (double value))
-      (map? value) (joined "{" (->> value
-                                    (map (fn [[k v]] [(emit k) (emit v)]))
-                                    sort
-                                    (map (fn [[k v]] (str k " " v))))
-                           "}")
-      (set? value) (joined "#{" (sort (map emit value)) "}")
-      (vector? value) (joined "[" (map emit value) "]")
+      (instance? java.util.Map value)
+      (joined "{" (->> value (map (fn [[k v]] [(emit k) (emit v)])) sort (map #(str/join " " %))) "}")
+      (instance? java.util.Set value) (joined "#{" (sort (map emit value)) "}")
       (seq? value) (joined "(" (map emit value) ")")
+      (or (instance? java.util.Collection value) (some-> value class .isArray))
+      (joined "[" (map emit value) "]")
       :else (pr-str value))))
 
 (defn- ^{:stratum 0} mark-tag

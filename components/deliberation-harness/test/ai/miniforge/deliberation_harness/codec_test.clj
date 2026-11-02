@@ -121,3 +121,11 @@
   (is (not= (codec/digest (java.util.HashMap. {:a 1})) (codec/digest {:a 1})))
   (is (not= (codec/digest (long-array [1 2])) (codec/digest [1 2])))
   (is (not (codec/plain? (java.util.ArrayList. [1 2])))))
+
+(deftest ^{:stratum 1} host-collections-encode-their-own-entries
+  (testing "a host map keeps keys Clojure would merge"
+    (let [linked (doto (java.util.LinkedHashMap.) (.put (int 1) :i) (.put (long 1) :l))]
+      (is (= 2 (count (re-seq #":[il]" (codec/encode linked)))))))
+  (testing "equal host sets digest alike whatever their insertion order"
+    (is (= (codec/digest (doto (java.util.LinkedHashSet.) (.add :a) (.add :b)))
+           (codec/digest (doto (java.util.LinkedHashSet.) (.add :b) (.add :a)))))))
