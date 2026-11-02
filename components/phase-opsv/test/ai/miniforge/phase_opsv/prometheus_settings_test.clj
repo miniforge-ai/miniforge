@@ -6,7 +6,8 @@
             [ai.miniforge.config.interface :as config]
             [ai.miniforge.phase-opsv.boundary.prometheus-settings :as settings]
             [ai.miniforge.phase-opsv.prometheus-test-support :as fixture]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -66,7 +67,7 @@
 (deftest ^{:stratum 1} test-settings-loading-preserves-wrapped-critical-causes
   (doseq [wrap [fixture/ordinary-failure fixture/structured-failure]]
     (is (thrown? AssertionError (load-failure (wrap (AssertionError.)))))
-    (try
+    (try+
       (let [[failure flagged?] (fixture/interrupted-result
                                 (partial load-failure (wrap (InterruptedException.))))]
         (is (instance? InterruptedException failure))

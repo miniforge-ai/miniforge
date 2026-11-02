@@ -98,7 +98,7 @@
   (with-redefs [http/start! (partial fixture/throw-failure! (fixture/structured-failure (AssertionError.)))]
     (is (thrown? AssertionError
                  (phase/observe-prometheus-window! (fixture/settings) (measurement/request)))))
-  (try
+  (try+
     (with-redefs [http/start! (partial fixture/throw-failure! (fixture/structured-failure (InterruptedException.)))]
       (let [[failure flagged?] (interrupted-result
                                 (partial phase/observe-prometheus-window! (fixture/settings) (measurement/request)))]
