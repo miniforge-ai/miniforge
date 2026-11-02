@@ -1,12 +1,18 @@
-;; The deliberation lab (N15). For now it carries the deliberation workspace,
-;; the harness and the components they need, so `poly test` covers them:
+;; The deliberation lab (N15): the development CLI and the bricks it runs.
 ;; Polylith tests a brick only through a project that contains it, and CI
-;; skips the development project. The lab base joins in the PR that adds it.
-{:paths []
+;; skips the development project, so this project is also how CI tests them.
+{:paths ["resources"]
 
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        ai.miniforge/deliberation-lab {:local/root "../../bases/deliberation-lab"}
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}
+        ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/deliberation-harness {:local/root "../../components/deliberation-harness"}
         ai.miniforge/deliberation-workspace {:local/root "../../components/deliberation-workspace"}
         ai.miniforge/file-durability {:local/root "../../components/file-durability"}
-        ai.miniforge/messages {:local/root "../../components/messages"}}}
+        ai.miniforge/llm {:local/root "../../components/llm"}
+        ai.miniforge/logging {:local/root "../../components/logging"}
+        ai.miniforge/messages {:local/root "../../components/messages"}
+        ai.miniforge/redaction {:local/root "../../components/redaction"}}
+
+ :aliases {:run {:main-opts ["-m" "ai.miniforge.deliberation-lab.main"]}}}
