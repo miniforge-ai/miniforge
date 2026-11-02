@@ -47,6 +47,13 @@
    not rely on it to skip symlinks.
    Deletions carry empty content.
 
+   A committed path counts only when a commit other than a checking
+   phase's boundary commit touched it. Verify and review only check the
+   work; a file their run left in the worktree (a regenerated lockfile, a
+   coverage report) is committed at their boundary but is not work to
+   release. A commit without the phase trailer (the agent's own, or one
+   made before the trailer existed) counts.
+
    Layer 0: failure shapes, output parsing, constants
    Layer 1: argument quoting, host runner, readers, base-diff, read-entry
    Layer 2: capsule runner, first-base-diff, read-entries"
@@ -55,6 +62,7 @@
             [clojure.string :as str]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.agent.interface :as agent]
+            [ai.miniforge.phase.interface.boundary-commit :as boundary-commit]
             [ai.miniforge.phase-software-factory.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -102,6 +110,44 @@
   "Arguments made only of these characters reach `sh -c` unchanged, so they
    are passed unquoted."
   #"[A-Za-z0-9_./:=@%+-]+")
+
+(def ^{:stratum 0} ^:private checking-phases
+  "Phases whose boundary commits hold no work to release: they check the
+   work, and anything they leave in the worktree is a by-product."
+  #{"verify" "review"})
+
+(def ^{:stratum 0} ^:private boundary-log-format
+  "`git log --format` for `boundary-log-records`: an ASCII record
+   separator (%x1e), then the commit's phase trailer value (empty without
+   one)."
+  (str "--format=%x1e%(trailers:key=" boundary-commit/phase-trailer-key
+       ",valueonly,separator=%x2C)"))
+
+(defn- ^{:stratum 0} boundary-log-records
+  "Parse `git log -z --name-only` output written with
+   `boundary-log-format` into {:phase :paths} per commit, `:phase` nil for
+   a commit without the trailer. Records start with the format's record
+   separator; with -z each is the trailer value, a NUL, a newline, then
+   NUL-terminated paths."
+  [out]
+  (->> (str/split (or out "") #"\u001e")
+       (remove empty?)
+       (mapv (fn [record]
+               (let [[phase & paths] (str/split record #"\u0000")]
+                 {:phase (not-empty (str/trim phase))
+                  :paths (->> (cons (some-> (first paths) (str/replace-first #"^\n" ""))
+                                    (rest paths))
+                              (remove empty?)
+                              vec)})))))
+
+(defn- ^{:stratum 0} work-paths
+  "Paths touched by `records` (from boundary-log-records) that are not
+   boundary commits of one of `excluded-phases`."
+  [records excluded-phases]
+  (into #{}
+        (comp (remove #(contains? excluded-phases (:phase %)))
+              (mapcat :paths))
+        records))
 
 (defn- ^{:stratum 0} raw-z-entries
   "Parse `git diff --raw --no-renames -z` output into
@@ -192,17 +238,24 @@
 
 (defn- ^{:stratum 1} base-diff
   "The substantive {:status :mode :path} entries the worktree differs by
-   from commit `sha`; nil when `sha` names no commit in this repository (an
-   older base a fresh clone never fetched); a `:release/git-status-failed`
-   anomaly when git fails."
+   from commit `sha`, limited to paths a commit since `sha` other than a
+   checking phase's boundary commit touched; nil when `sha` names no
+   commit in this repository (an older base a fresh clone never fetched);
+   a `:release/git-status-failed` anomaly when git fails."
   [run root-path sha]
   (let [verified (run ["rev-parse" "--verify" "--quiet" (str sha "^{commit}")])
-        diffed   (delay (run ["diff" "--raw" "--no-renames" "-z" sha "--"]))]
+        diffed   (delay (run ["diff" "--raw" "--no-renames" "-z" sha "--"]))
+        logged   (delay (run ["log" "-z" "--no-renames" "--name-only" boundary-log-format
+                              (str sha "..HEAD") "--"]))]
     (cond
       (missing-commit? verified) nil
       (:failure verified)        (git-status-failed root-path (:failure verified))
       (:failure @diffed)         (git-status-failed root-path (:failure @diffed))
-      :else                      (filterv agent/substantive-file? (raw-z-entries (:out @diffed))))))
+      (:failure @logged)         (git-status-failed root-path (:failure @logged))
+      :else
+      (let [work (work-paths (boundary-log-records (:out @logged)) checking-phases)]
+        (filterv #(and (agent/substantive-file? %) (contains? work (:path %)))
+                 (raw-z-entries (:out @diffed)))))))
 
 (defn- ^{:stratum 1} read-entry
   "The :code/files entry for one {:status :mode :path} entry, or a

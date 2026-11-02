@@ -523,8 +523,10 @@
 
 (defn- ^{:stratum 2} committed-since-base
   "Substantive `:code/files` the task branch holds beyond its base commits
-   (committed and dirty alike), [] when there are none or no base commit is
-   known, or a `:release/git-status-failed` anomaly when the scan fails. A
+   (committed and dirty alike), limited to paths a commit other than a
+   verify or review boundary commit touched (see release-scan); [] when
+   there are none or no base commit is known, or a
+   `:release/git-status-failed` anomaly when the scan fails. A
    clean worktree is not \"nothing to release\" when an earlier implement
    iteration's commits are still unreleased. Runs in the capsule for a
    governed run (`capsule`, from capsule-target), else on the host."
