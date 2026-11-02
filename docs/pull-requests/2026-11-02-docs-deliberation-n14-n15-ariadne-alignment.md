@@ -68,8 +68,15 @@ dogfood run, not edits:
   (for example `rn-03-reliability-events` in both `failed/` and `in-progress/`).
 - Eight of the copies are byte-identical to the active spec already at
   `work/<name>.spec.edn` on main.
-- `migrate-runner-println-to-structured-logging` differs from main's active
-  copy only by a run-time rewrite of its description.
+- `migrate-runner-println-to-structured-logging` is a full rewrite of
+  main's active copy, not a description edit. It retargets the task from
+  `runner.clj` to `runner_events.clj` and changes its title, scope,
+  constraints and acceptance criteria. The retarget matches main (no
+  `println` is left in `runner.clj`), but the rewrite's fact base is
+  already stale: it specifies 9 `println` sites, and main's
+  `runner_events.clj` has 3. Refreshing an unrelated work item belongs in
+  its own change through the `work/` queue process, checked against main,
+  not in a deliberation spec PR.
 - The other four (`phase-stream-idle-as-terminal-timeout`,
   `eliminate-requiring-resolve`, `monitor-loop-event-emission`,
   `observe-monitor-survives-cli-exit`) exist nowhere on main. `work/README.md`
