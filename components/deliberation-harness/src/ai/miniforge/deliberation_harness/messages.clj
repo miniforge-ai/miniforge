@@ -27,3 +27,8 @@
   "Look up developer-facing deliberation-harness prose by key."
   (messages/create-translator "config/deliberation-harness/messages/system.edn"
                               :deliberation-harness/system))
+
+(def ^{:stratum 0} t
+  "Look up user-facing deliberation-harness text by key."
+  (messages/create-translator "config/deliberation-harness/messages/en-US.edn"
+                              :deliberation-harness/messages))

@@ -13,4 +13,6 @@
   :anomaly/stray-journal-file "A journal directory holds record files only"
   :anomaly/unknown-tag    "EDN carries a reader tag; journals and manifests hold plain data only"
   :anomaly/journal-exists "Output directory must be new, with an existing parent"
-  :anomaly/broken-chain   "Experiment journal record breaks the hash chain"}}
+  :anomaly/broken-chain   "Experiment journal record breaks the hash chain"
+  :lab/context-overflow   "Context overflow: the request exceeded the manifest's input cap and was not sent"
+  :lab/adapter-failed     "Adapter failed; the call is not retried"}}
