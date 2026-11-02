@@ -42,14 +42,13 @@
        (remove object/terminal?)
        (sort-by :object/id)))
 
-;; Responsibilities activated only by deadlock or budget events, never by
-;; ordinary scheduling (N14 §5.2).
 (def ^{:stratum 0} event-only-responsibilities
+  "Responsibilities activated only by deadlock or budget events, never by
+   ordinary scheduling (N14 §5.2)."
   #{:meta-watchdog})
 
 (defn ^{:stratum 0} responsibility-of
-  "The responsibility the runtime assigned `participant`. A participant
-   without an assignment is its own responsibility."
+  "The responsibility assigned to `participant`, else the participant itself."
   [workspace participant]
   (get-in workspace [:workspace/participant-roles participant] participant))
 
@@ -72,10 +71,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} ordinary-participants
-  "The population in manifest order, without event-only responsibilities
-   and without participants refused since the last commit because their
-   read scope withholds the required frame. These are the participants a
-   quiescence round covers (N14 §7)."
+  "The quiescence population (N14 §7): manifest order, minus event-only and frame-refused."
   [workspace]
   (let [refused (get workspace :workspace/frame-refused #{})]
     (remove #(or (contains? event-only-responsibilities (responsibility-of workspace %))
@@ -116,9 +112,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} triggered-activation
-  "The highest §6.1 structural tier with waiting work and an eligible
-   participant, or nil. Within a tier, eligible participants rotate after
-   the last actor so one participant cannot monopolise it."
+  "The highest §6.1 structural tier with work and an eligible participant,
+   rotating after the last actor; nil when none."
   [workspace]
   (let [triggers [[:conflict (first (open-conflicts workspace))]
                   [:blocked-goal (first (blocked-goals workspace))]

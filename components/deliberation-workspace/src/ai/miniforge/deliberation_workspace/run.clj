@@ -30,13 +30,15 @@
    [ai.miniforge.deliberation-workspace.messages :as messages]
    [ai.miniforge.deliberation-workspace.projection :as projection]
    [ai.miniforge.deliberation-workspace.scheduler :as scheduler]
-   [ai.miniforge.deliberation-workspace.termination :as termination]))
+   [ai.miniforge.deliberation-workspace.termination :as termination]
+   [ai.miniforge.deliberation-workspace.transaction :as tx]
+   [ai.miniforge.deliberation-workspace.validation :as validation]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Harness backstop on loop iterations. Budgets and closing rules should end
-;; a run first; a run that reaches this bound is a defect worth surfacing.
 (def ^{:stratum 0} default-max-steps
+  "Harness backstop on loop iterations. Budgets and closing rules should end
+   a run first; a run that reaches this bound is a defect worth surfacing."
   1000)
 
 (defn- ^{:stratum 0} record-event [workspace event]
@@ -110,12 +112,29 @@
        (get-in after [:workspace/spent :activations])) :refused
     :else :executed))
 
+;; Whether an admitted `transaction` names an id the participant was neither
+;; shown in `projection` nor creates itself. Admission checks ids against the
+;; whole graph; acting on a hidden object would confirm it exists (N14 §4.4).
+(defn- ^{:stratum 0} unseen-reference? [transaction projection]
+  (let [ops (:tx/operations transaction)
+        specs (mapcat validation/created-specs ops)
+        seen (into (set (map :id specs)) (map :object/id) (:projection/objects projection))]
+    (some #(not (contains? seen %))
+          (concat (mapcat (fn [op] (mapcat #(get op % []) tx/id-fields)) ops)
+                  (mapcat #(mapcat val (get % :links {})) (concat ops specs))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Fold `proposed` into `spent` through admission, logging the outcome.
+;; Fold `proposed` into `spent` through admission, logging the outcome. A
+;; reference to an unseen id is refused exactly as an unknown target is.
 (defn- ^{:stratum 1} settle
-  [spent proposed participant context]
-  (let [result (admission/admit spent proposed context)]
+  [spent proposed participant context projection]
+  (let [admitted (admission/admit spent proposed context)
+        result (if (and (not (anomaly/anomaly? admitted))
+                        (unseen-reference? (:transaction admitted) projection))
+                 (validation/reject :not-found :anomalies.deliberation/unknown-target
+                                    (messages/system-t :anomaly/unknown-target) {})
+                 admitted)]
     (if (anomaly/anomaly? result)
       (-> spent
           (note-quiet participant)
@@ -147,7 +166,7 @@
       (-> spent
           (note-quiet participant)
           (record-event {:event :transaction/passed :role participant}))
-      (settle spent proposed participant context))))
+      (settle spent proposed participant context projection))))
 
 ;; Record a turn refused before any model call because the participant's
 ;; read scope withholds part of the required frame. Nothing ran, so nothing
@@ -182,8 +201,7 @@
       :else (run-turn ws activate activation projection))))
 
 (defn ^{:stratum 2} step
-  "Run the next scheduled activation, or record that none is eligible.
-   Nothing eligible charges nothing: the deadlock rule closes the run."
+  "Run the next scheduled activation, or record, uncharged, that none is eligible."
   [workspace activate]
   (if-let [{:activation/keys [participant reason target]} (scheduler/next-activation workspace)]
     (activate-participant workspace activate
@@ -191,10 +209,8 @@
     (record-event workspace {:event :activation/none-eligible})))
 
 (defn ^{:stratum 2} close
-  "Attach `closing` to `workspace`. A budget boundary runs one closure turn
-   for the synthesizer when the manifest reserved one (N14 §6.3, §7.2);
-   without a reserve, allowance or synthesizer it is recorded `:unfunded`,
-   and a closure turn refused for a withheld frame is recorded `:refused`."
+  "Attach `closing`. A budget boundary runs the reserved synthesizer closure turn
+   (N14 §6.3, §7.2), recorded `:executed`, `:refused` or `:unfunded`."
   [workspace activate closing]
   (let [participant (closer workspace)
         funded? (and (:termination/forced-synthesis closing)
@@ -220,13 +236,8 @@
         (recur (step ws activate) (inc steps))))))
 
 (defn ^{:stratum 2} run
-  "Drive the loop until a §7 closing rule fires, then return the closed
-   workspace with its termination record attached, or an `:invalid-input`
-   anomaly when the closure reserve is not a non-negative integer (a
-   negative reserve would enlarge ordinary work past the budget). A
-   workspace that already carries a termination record is returned
-   unchanged: a closed run is never driven, or closed, again.
-   `max-steps` is a harness backstop, not a spec rule."
+  "Drive the loop to a §7 closing rule; a closed workspace is returned unchanged,
+   and a closure reserve that is not a nat-int is an `:invalid-input` anomaly."
   [workspace activate {:keys [max-steps] :or {max-steps default-max-steps}}]
   (let [reserve (get workspace :workspace/closure-reserve 0)]
     (cond

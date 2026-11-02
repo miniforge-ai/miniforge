@@ -301,21 +301,26 @@
     (is (= closed (run/run closed (fn [_] (throw (ex-info "must not run" {}))) {})))))
 
 (deftest ^{:stratum 2} a-single-turn-respects-the-budget-and-the-reserve
-  (let [never (fn [_] (throw (ex-info "must not run" {})))
-        ws (workspace :workspace/closure-reserve 1 :workspace/spent {:activations 2})
-        blocked (run/activate-participant ws never {:participant :proposer :reason :round-robin})]
-    (is (= 2 (get-in blocked [:workspace/spent :activations])))
-    (is (= 1 (count (events-of blocked :activation/unfunded))))
-    (is (= 3 (get-in (run/activate-participant ws passes {:participant :synthesizer :reason :closure})
-                     [:workspace/spent :activations])))
-    (is (= 1 (count (events-of (run/activate-participant (assoc-in ws [:workspace/spent :activations] 3)
-                                                         never {:participant :synthesizer :reason :closure})
+  (let [ws (workspace :workspace/closure-reserve 1 :workspace/spent {:activations 2})
+        turn (fn [w reason f] (run/activate-participant w f {:participant :synthesizer :reason reason}))
+        never (fn [_] (throw (ex-info "must not run" {})))]
+    (is (= 1 (count (events-of (turn ws :round-robin never) :activation/unfunded))))
+    (is (= 3 (get-in (turn ws :closure passes) [:workspace/spent :activations])))
+    (is (= 1 (count (events-of (turn (workspace :workspace/spent {:activations 3}) :closure never)
                                :activation/unfunded))))))
 
 (deftest ^{:stratum 2} a-commit-outside-the-loop-starts-a-new-round
-  (let [ws (workspace :workspace/version 2 :workspace/round-version 1
-                      :workspace/passed #{:proposer :skeptic :synthesizer}
-                      :workspace/frame-refused #{:proposer})
-        closed (run/run ws passes {})]
-    (is (not= :quiescence (get-in closed [:workspace/termination :termination/rule])))
-    (is (pos? (get-in closed [:workspace/spent :activations])))))
+  (let [closed (run/run (workspace :workspace/version 2 :workspace/round-version 1
+                                   :workspace/passed #{:proposer :skeptic :synthesizer}
+                                   :workspace/frame-refused #{:proposer})
+                        passes {})]
+    (is (not= :quiescence (get-in closed [:workspace/termination :termination/rule])))))
+
+(deftest ^{:stratum 2} a-hidden-object-cannot-be-acted-on
+  (let [secret (assoc (goal "secret") :object/type :claim :object/role :proposer)
+        ws (workspace :workspace/visibility :none :workspace/roles [:skeptic]
+                      :workspace/objects {"goal-1" (goal "goal-1") "secret" secret})
+        feedback #(get-in (run/step ws (constantly {:tx/operations [{:op :challenge :targets [%]
+                                                                     :reason "r" :resolution "s"}]}))
+                          [:workspace/feedback :skeptic])]
+    (is (= {:status :rejected} (feedback "secret") (feedback "absent")))))

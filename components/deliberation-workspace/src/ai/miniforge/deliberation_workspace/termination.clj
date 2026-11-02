@@ -44,8 +44,7 @@
   (some #(= :rejected (:object/status %)) (goals workspace)))
 
 (defn ^{:stratum 1} exhausted-budget
-  "The budget dimension that ran out, or nil while ordinary work can still
-   spend. Ordinary work stops where the closure reserve begins."
+  "The exhausted budget dimension, or nil; ordinary work stops at the reserve."
   [workspace]
   (let [{:keys [activations cost]} (get workspace :workspace/budget {})
         spent (get workspace :workspace/spent {})]
