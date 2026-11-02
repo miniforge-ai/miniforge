@@ -5,20 +5,13 @@
   "Captured observations for one explicit target; no acquisition or authority."
   (:require [ai.miniforge.phase-opsv.kubernetes-configuration-schema :as configuration]
             [ai.miniforge.phase-opsv.kubernetes-resource-schema :as resource]
+            [ai.miniforge.phase-opsv.kubernetes-list-schema :as lists]
             [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ConfigurationResource
   [:or configuration/ConfigMap resource/Secret])
-
-(def ^{:stratum 0} NodeList
-  [:map ["apiVersion" [:= "v1"]] ["kind" [:= "NodeList"]]
-   ["items" [:vector {:min 1} resource/Node]]])
-
-(def ^{:stratum 0} PodList
-  [:map ["apiVersion" [:= "v1"]] ["kind" [:= "PodList"]]
-   ["items" [:vector {:min 1} resource/Pod]]])
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -28,8 +21,8 @@
    [:kubernetes/cluster resource/Namespace]
    [:kubernetes/namespace resource/Namespace]
    [:kubernetes/node-pool-label schema/NonBlankString]
-   [:kubernetes/nodes NodeList]
-   [:kubernetes/pods PodList]
+   [:kubernetes/nodes lists/NodeList]
+   [:kubernetes/pods lists/PodList]
    [:kubernetes/configuration [:vector ConfigurationResource]]])
 
 (comment ::explicit-kubernetes-target-snapshot)
