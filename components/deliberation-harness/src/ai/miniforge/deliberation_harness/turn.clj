@@ -156,6 +156,19 @@
    :usage empty-usage
    :failure failure})
 
+(defn ^{:stratum 0} well-formed?
+  "True when `response` has the shape a cell reads: a payload map with an
+   optional sequence of experiment ids, a solution map and a rationale
+   string, and usage whose every value is a number."
+  [{:keys [payload usage]}]
+  (and (map? payload)
+       (let [inspect (:inspect payload)]
+         (or (nil? inspect) (and (sequential? inspect) (every? string? inspect))))
+       (map? (:solution payload))
+       (string? (:rationale payload))
+       (map? usage)
+       (every? number? (vals usage))))
+
 (defn ^{:stratum 0} request-size [request]
   (alength (.getBytes ^String (codec/encode request) "UTF-8")))
 
@@ -192,15 +205,21 @@
 
 (defn ^{:stratum 1} respond
   "The model's response to `request`, or a failed response: an oversized
-   request is never sent, and an adapter anomaly is never retried."
+   request is never sent, an adapter anomaly is never retried, and a
+   malformed response is a failed activation with unknown usage."
   [manifest call request]
   (if (> (request-size request) (:max-input-bytes manifest))
     (failed-response :context-overflow :lab/context-overflow)
     (let [response (call request)]
-      (if (anomaly/anomaly? response)
+      (cond
+        (anomaly/anomaly? response)
         (assoc (failed-response (or (anomaly/subtype response) :adapter-failure) :lab/adapter-failed)
                :usage-unknown? true)
-        response))))
+
+        (not (well-formed? response))
+        (assoc (failed-response :malformed-response :lab/malformed-response) :usage-unknown? true)
+
+        :else response))))
 
 (defn ^{:stratum 1} commit-turn
   "Admit the payload's operations as `participant`'s turn on its board. No

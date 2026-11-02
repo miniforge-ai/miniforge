@@ -178,3 +178,15 @@
   (let [result (run :workspace (answering (constantly 1) :available-experiments))]
     (is (= 4 (:activations result)))
     (is (= :completed (:status result)))))
+
+(deftest ^{:stratum 1} a-malformed-response-is-a-failed-cell-not-an-exception
+  (doseq [response [{:payload {:operations [] :inspect 1 :solution {} :rationale "r"} :usage call-usage}
+                    {:payload {:operations [] :inspect [] :solution {} :rationale 7} :usage call-usage}
+                    {:payload {:operations [] :inspect [] :solution {} :rationale "r"} :usage {:input "x"}}
+                    nil]]
+    (let [records (atom [])
+          result (experiment/run-cell manifest (task) :workspace tier 0 (constantly response)
+                                      #(do (swap! records conj %) "hash"))]
+      (is (= :failed (:status result)))
+      (is (:usage-unknown? result))
+      (is (= :cell-completed (:kind (last @records)))))))
