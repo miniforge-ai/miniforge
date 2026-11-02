@@ -43,8 +43,8 @@
    never accepted from a proposal."
   #{:tx/operations :tx/role})
 
-;; Stages each operation runs against the candidate.
 (def ^{:stratum 0} operation-stages
+  "Stages each operation runs against the candidate."
   (-> validation/graph-stages
       (into semantics/semantic-stages)
       (into guards/guard-stages)))
