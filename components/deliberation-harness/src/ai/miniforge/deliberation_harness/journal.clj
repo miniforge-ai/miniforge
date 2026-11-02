@@ -49,10 +49,10 @@
   [^File file]
   (some-> (re-matches record-name-pattern (.getName file)) second bigint))
 
+;; The record files in `directory` in numeric sequence order, or an anomaly
+;; when the directory cannot be listed or holds anything but record files:
+;; a journal directory holds records only, so nothing in it is skipped.
 (defn- ^{:stratum 0} record-files
-  "The record files in `directory` in numeric sequence order, or an anomaly
-   when the directory cannot be listed or holds anything but record files:
-   a journal directory holds records only, so nothing in it is skipped."
   [directory]
   (let [files (.listFiles (io/file directory))
         stray (some #(when-not (record-number %) %) files)]
