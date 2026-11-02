@@ -62,6 +62,14 @@
             {:op :propose-decision :creates [(decision id choice)]}
             {:op :accept-decision :targets [id]}))
 
+(defn- ^{:stratum 0} receipted [workspace receipt statement]
+  (assoc-in workspace [:workspace/receipts receipt]
+            {:source-class :execution :statement statement}))
+
+(defn- ^{:stratum 0} execution-evidence [id receipt statement & {:as attrs}]
+  {:id id :type :evidence :statement statement
+   :attrs (merge {:source-class :execution :receipt receipt} attrs)})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} identity-comes-from-the-runtime
@@ -93,6 +101,33 @@
                       :actor :synthesizer}
                      {:op :assert-claim :creates []}]]
     (is (anomaly/anomaly? (submit (seed-workspace) :proposer operation)))))
+
+(deftest ^{:stratum 1} provenance-needs-a-runtime-attestation
+  (testing "the user adds hard constraints through OCI"
+    (is (some? (admitted (seed-workspace) :user
+                         {:op :add-constraint
+                          :creates [{:id "h" :type :constraint :statement "h"
+                                     :attrs {:kind :hard}}]}))))
+  (testing "hard constraints need an interpreter and a recorded spec source"
+    (is (= :anomalies.deliberation/unattested-provenance
+           (subtype-of (submit (seed-workspace) :interpreter
+                               {:op :add-constraint
+                                :creates [{:id "h" :type :constraint :statement "h"
+                                           :attrs {:kind :hard :source-ref "spec-1"}}]}))))
+    (is (some? (admitted (assoc (seed-workspace) :workspace/spec-sources #{"spec-1"})
+                         :interpreter
+                         {:op :add-constraint
+                          :creates [{:id "h" :type :constraint :statement "h"
+                                     :attrs {:kind :hard :source-ref "spec-1"}}]}))))
+  (testing "execution evidence needs a matching receipt"
+    (let [evidence {:op :attach-evidence :targets ["c"] :links {:supports ["e"]}
+                    :creates [{:id "e" :type :evidence :statement "observed"
+                               :attrs {:source-class :execution :receipt "r-1"}}]}]
+      (is (= :anomalies.deliberation/unattested-provenance
+             (subtype-of (submit (seed-workspace) :verifier (claim "c") evidence))))
+      (is (some? (admitted (assoc-in (seed-workspace) [:workspace/receipts "r-1"]
+                                     {:source-class :execution :statement "observed"})
+                           :verifier (claim "c") evidence))))))
 
 (deftest ^{:stratum 1} a-transaction-is-validated-in-order-and-published-once
   (let [operations [{:op :propose-decision :creates [(decision "d" "design" :depends-on [goal-id])]}
@@ -166,6 +201,34 @@
                            (assoc (context ws :proposer) :basis 0))]
     (is (= :anomalies.deliberation/stale-basis (subtype-of stale)))
     (is (= "c" (:object/statement (object-at ws "c"))))))
+
+(deftest ^{:stratum 1} only-the-verifier-attaches-execution-evidence
+  (let [ws (admitted (receipted (seed-workspace) "r-1" "observed") :proposer (claim "c"))
+        attach {:op :attach-evidence :targets ["c"] :links {:supports ["e"]}
+                :creates [(execution-evidence "e" "r-1" "observed")]}]
+    (is (= :anomalies.deliberation/unattested-provenance
+           (subtype-of (submit ws :proposer attach))))
+    (is (some? (admitted ws :verifier attach)))))
+
+(deftest ^{:stratum 1} created-evidence-must-be-linked
+  (let [ws (admitted (seed-workspace) :proposer (claim "c"))]
+    (is (= :anomalies.deliberation/evidence-link
+           (subtype-of (submit ws :proposer
+                               {:op :attach-evidence :targets ["c"]
+                                :creates [{:id "e" :type :evidence :statement "analysis"
+                                           :attrs {:source-class :agent-analysis}}]}))))))
+
+(deftest ^{:stratum 1} an-experiment-result-needs-execution-class-evidence
+  (let [ws (-> (receipted (seed-workspace) "r-1" "observed")
+               (admitted :proposer {:op :propose-experiment
+                                    :creates [{:id "x" :type :experiment :statement "probe"}]})
+               (admitted :proposer (claim "c")
+                         {:op :attach-evidence :targets ["c"] :links {:supports ["e"]}
+                          :creates [(execution-evidence "e" "r-1" "observed"
+                                                        :source-class :agent-analysis)]}))]
+    (is (= :anomalies.deliberation/unbacked-result
+           (subtype-of (submit ws :verifier {:op :record-experiment-result :targets ["x"]
+                                             :evidence ["e"]}))))))
 
 (deftest ^{:stratum 1} one-adoption-cannot-name-a-choice-point-twice
   (let [ws (admitted (seed-workspace) :synthesizer
