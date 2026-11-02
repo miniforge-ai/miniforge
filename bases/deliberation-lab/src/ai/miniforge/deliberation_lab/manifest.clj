@@ -51,10 +51,15 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} valid-conditions? [conditions]
-  (and (distinct-seq? conditions) (every? harness/conditions conditions)))
+  (and (sequential? conditions)
+       (distinct-seq? conditions)
+       (every? harness/conditions conditions)))
 
 (defn- ^{:stratum 1} valid-tiers? [tiers]
-  (and (distinct-seq? (map :id tiers)) (every? valid-tier? tiers)))
+  (and (sequential? tiers)
+       (every? map? tiers)
+       (distinct-seq? (map :id tiers))
+       (every? valid-tier? tiers)))
 
 (defn- ^{:stratum 1} valid-prices? [{:keys [input-per-million output-per-million]}]
   (and (non-negative-number? input-per-million) (non-negative-number? output-per-million)))
@@ -63,6 +68,7 @@
   "The defect keys `manifest` fails, empty when it is valid."
   [manifest]
   (cond-> []
+    (not (map? manifest)) (conj :manifest)
     (not= :development (:mode manifest)) (conj :mode)
     (not= schema-version (:schema-version manifest)) (conj :schema-version)
     (not (and (string? (:model manifest)) (seq (:model manifest)))) (conj :model)

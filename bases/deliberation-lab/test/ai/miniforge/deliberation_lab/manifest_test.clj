@@ -41,4 +41,9 @@
   (is (= [:conditions] (manifest/defects (assoc valid :conditions [:c99]))))
   (testing "a tier needs a working turn plus the closing turn"
     (is (= [:tiers] (manifest/defects (assoc-in valid [:tiers 0 :activations] 1)))))
-  (is (= [:price-table] (manifest/defects (assoc-in valid [:price-table :output-per-million] -1)))))
+  (is (= [:price-table] (manifest/defects (assoc-in valid [:price-table :output-per-million] -1))))
+  (testing "a wrongly shaped field is a named defect, not an exception"
+    (is (= [:conditions] (manifest/defects (assoc valid :conditions 42))))
+    (is (= [:tiers] (manifest/defects (assoc valid :tiers 42))))
+    (is (= [:tiers] (manifest/defects (assoc valid :tiers [42]))))
+    (is (some #{:manifest} (manifest/defects [])))))

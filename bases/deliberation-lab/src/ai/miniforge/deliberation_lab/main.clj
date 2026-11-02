@@ -41,26 +41,28 @@
 (defn- ^{:stratum 0} read-manifest [path]
   (harness/read-edn-file path))
 
-(defn- ^{:stratum 0} call-for
-  "The model call for `command`: the offline mock for smoke runs, the
-   isolated Claude client otherwise."
-  [command manifest]
+(defn- ^{:stratum 0} call-maker
+  "Builds the model call for `command` from a validated manifest: the
+   offline mock for smoke runs, the isolated Claude client otherwise."
+  [command]
   (if (= "smoke" command)
-    (lab/mock-call (harness/tasks))
-    (adapter/claude-call manifest)))
+    (fn [_] (lab/mock-call (harness/tasks)))
+    adapter/claude-call))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} experiment
   "Run `command` (`smoke` or `run`) for the manifest at `manifest-path`
-   into the new directory `output`."
+   into the new directory `output`. A manifest that is not a map is passed
+   through unchanged for preflight to refuse."
   [command manifest-path output]
   (let [manifest (read-manifest manifest-path)]
     (if (anomaly/anomaly? manifest)
       manifest
-      (lab/execute! (assoc manifest :adapter-kind (if (= "smoke" command) :mock :claude-cli))
+      (lab/execute! (cond-> manifest
+                      (map? manifest) (assoc :adapter-kind (if (= "smoke" command) :mock :claude-llm)))
                     output
-                    (call-for command manifest)))))
+                    (call-maker command)))))
 
 (defn ^{:stratum 1} dispatch
   "The result of one command, or nil for an unknown command or a wrong

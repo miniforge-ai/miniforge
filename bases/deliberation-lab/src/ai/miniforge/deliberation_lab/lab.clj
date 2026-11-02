@@ -28,6 +28,7 @@
    [ai.miniforge.deliberation-lab.manifest :as manifest]
    [ai.miniforge.deliberation-lab.messages :as messages]
    [ai.miniforge.deliberation-workspace.interface :as board]
+   [ai.miniforge.file-durability.interface :as durable]
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -161,20 +162,24 @@
     (cond
       (anomaly/anomaly? results) results
       (anomaly/anomaly? closed) closed
-      :else (do (spit (io/file output report-file) report)
-                {:cells (count results) :journal output :G0 :not-evaluated}))))
+      :else (let [written (durable/write-new-text! (io/file output report-file) report)]
+              (if (anomaly/anomaly? written)
+                written
+                {:cells (count results) :journal output :G0 :not-evaluated})))))
 
 (defn ^{:stratum 2} execute!
-  "Run `manifest` into the new directory `output` with `call`. Returns a run
-   summary, or the anomaly that refused or stopped the run."
-  [manifest output call]
+  "Run `manifest` into the new directory `output` with the call `make-call`
+   builds from the validated manifest, so nothing is constructed for a
+   refused one. Returns a run summary, or the anomaly that refused or
+   stopped the run."
+  [manifest output make-call]
   (let [tasks (harness/tasks)
         pinned (preflight manifest tasks)
         journal (when-not (anomaly/anomaly? pinned) (open-run! output))]
     (cond
       (anomaly/anomaly? pinned) pinned
       (anomaly/anomaly? journal) journal
-      :else (record-run! pinned tasks journal output call))))
+      :else (record-run! pinned tasks journal output (make-call pinned)))))
 
 (defn ^{:stratum 2} verify!
   "Verify the journal of the run in `directory`: one unbroken chain that opens and

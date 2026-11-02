@@ -44,7 +44,7 @@
          (finally (doseq [file (reverse (file-seq parent))] (io/delete-file file true))))))
 
 (defn- ^{:stratum 0} smoke! [output]
-  (lab/execute! manifest output (lab/mock-call (harness/tasks))))
+  (lab/execute! manifest output (fn [_] (lab/mock-call (harness/tasks)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -63,11 +63,19 @@
           (is (anomaly/anomaly? (lab/verify! output))))))))
 
 (deftest ^{:stratum 1} an-invalid-manifest-is-refused-before-any-call
-  (let [calls (atom 0)
-        result (lab/execute! (assoc manifest :mode :G0) "unused"
-                             (fn [_] (swap! calls inc) nil))]
-    (is (anomaly/anomaly? result))
-    (is (zero? @calls))))
+  (doseq [invalid [(assoc manifest :mode :G0) 42 []]]
+    (let [built (atom 0)
+          result (lab/execute! invalid "unused" (fn [_] (swap! built inc) nil))]
+      (is (anomaly/anomaly? result))
+      (is (zero? @built) "no call is built for a refused manifest"))))
+
+(deftest ^{:stratum 1} a-response-without-provider-usage-is-a-failure
+  (let [ok {:success true :content "not json"}]
+    (is (anomaly/anomaly? (adapter/call-result (assoc ok :usage {:input-tokens 0 :output-tokens 0}))))
+    (is (anomaly/anomaly? (adapter/call-result ok)))
+    (is (= {:input 12 :output 3 :provider-usd 0}
+           (:usage (adapter/call-result (assoc ok :usage {:input-tokens 10 :output-tokens 3
+                                                          :cache-read-input-tokens 2})))))))
 
 (deftest ^{:stratum 1} model-output-cannot-forge-metering
   (testing "an envelope carrying usage is invalid, not trusted"

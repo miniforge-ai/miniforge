@@ -75,6 +75,13 @@
   (let [input (+ input-tokens cache-creation-input-tokens cache-read-input-tokens)]
     {:input input :output output-tokens :provider-usd 0}))
 
+(defn- ^{:stratum 0} metered?
+  "True when `usage` is provider metering. Every real request sends input
+   tokens, so zero input marks the llm client's default for a response that
+   reported none."
+  [usage]
+  (and (map? usage) (pos-int? (:input-tokens usage))))
+
 (defn- ^{:stratum 0} failure [subtype message-key]
   (anomaly/sub-anomaly :unavailable subtype (messages/system-t message-key)
                        {:usage-unknown? true}))
@@ -92,24 +99,32 @@
       {:operations [] :inspect [] :solution {}
        :rationale (messages/system-t :lab/invalid-response) :invalid? true})))
 
-(defn ^{:stratum 1} claude-call
-  "A `call` for `run-cell`: one isolated completion per request. Returns
-   `{:payload :usage}`, or an anomaly when the call fails or reports no
-   usage; a failed call is never retried."
+(defn ^{:stratum 1} call-result
+  "The `call` result for one llm completion `result`: `{:payload :usage}`,
+   or an anomaly when the call failed or reported no provider usage."
+  [result]
+  (cond
+    (not (llm/success? result))
+    (failure :anomalies.deliberation-lab/adapter-failure :anomaly/adapter-failure)
+
+    (not (metered? (:usage result)))
+    (failure :anomalies.deliberation-lab/missing-usage :anomaly/missing-usage)
+
+    :else
+    {:payload (decode (llm/get-content result)) :usage (metered-usage (:usage result))}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} claude-call
+  "A `call` for `run-cell`: one isolated completion per request, through
+   the streaming path, which parses the provider's usage. A failed call is
+   never retried."
   [{:keys [model]}]
   (let [client (llm/create-client {:backend :claude :model model :isolated? true})
         prompt (system-prompt)]
     (fn [request]
-      (let [result (llm/complete client {:system prompt
+      (call-result (llm/complete-stream client
+                                        {:system prompt
                                          :messages [{:role "user"
-                                                     :content (json/generate-string request)}]})
-            usage (:usage result)]
-        (cond
-          (not (llm/success? result))
-          (failure :anomalies.deliberation-lab/adapter-failure :anomaly/adapter-failure)
-
-          (not (map? usage))
-          (failure :anomalies.deliberation-lab/missing-usage :anomaly/missing-usage)
-
-          :else
-          {:payload (decode (llm/get-content result)) :usage (metered-usage usage)})))))
+                                                     :content (json/generate-string request)}]}
+                                        (constantly nil))))))
