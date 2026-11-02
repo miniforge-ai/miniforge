@@ -37,7 +37,10 @@
   "The fixed peer schedule of the multi-participant conditions."
   [:proposer :skeptic :synthesizer])
 
-(def ^{:stratum 0} goal-id "goal")
+(def ^{:stratum 0} goal-id
+  "Object id of the seeded task goal every board starts with; observations
+   attach to it."
+  "goal")
 
 (def ^{:stratum 0} candidate-prefix
   "Participant-name prefix of the independent condition's private candidates."
@@ -49,11 +52,17 @@
   [:object/id :object/type :object/status :object/statement :object/links
    :object/attrs :object/contested?])
 
-(def ^{:stratum 0} empty-usage {:input 0 :output 0 :provider-usd 0})
+(def ^{:stratum 0} empty-usage
+  "Usage of a turn that spent nothing: the identity for summing usage."
+  {:input 0 :output 0 :provider-usd 0})
 
-(def ^{:stratum 0} nanos-per-second 1e9)
+(def ^{:stratum 0} nanos-per-second
+  "Converts `System/nanoTime` deltas to the seconds of wall ceilings."
+  1e9)
 
-(def ^{:stratum 0} tokens-per-million 1e6)
+(def ^{:stratum 0} tokens-per-million
+  "Divisor for the manifest's per-million-token price weights."
+  1e6)
 
 (defn ^{:stratum 0} normalized-cost
   "Spend under the manifest's pinned per-million-token weights: an

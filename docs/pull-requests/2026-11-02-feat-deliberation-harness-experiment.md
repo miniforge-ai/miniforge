@@ -19,6 +19,10 @@ that G0 is not evaluated. A cell compares the shared typed workspace against
 four development conditions. The ablated condition keeps the same schedule
 and budget but gives each participant a private board.
 
+The private-board ablation is a development control only. It is not the
+N14 §4.4 `:visibility :none` switch, and no condition here claims N15
+conformance; `turn/conditions` says so in its docstring.
+
 ## Changes in Detail
 
 - `turn`
@@ -67,9 +71,14 @@ Deviations from the snapshot:
 - The report states G0 is not evaluated and shows the paired delta.
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
-unreachable from the authoring sandbox): the 4 harness suites, 13 tests,
-69 assertions, 0 failures. `poly test`, clj-kondo and the Polylith check ran
-only in CI.
+unreachable from the authoring sandbox):
+
+- the 4 harness suites: 40 tests, 134 assertions, 0 failures;
+- clj-kondo 2026.10.26 (the CI version) on `bases components development/src`:
+  0 errors.
+
+`poly test` and the Polylith check ran only in CI. The harness suites run in
+CI through `projects/deliberation-lab` (#2344).
 
 ## Deployment Plan
 
@@ -84,3 +93,4 @@ None. Used by the `deliberation-lab` base in the next PR.
 
 - [x] No throws on data paths
 - [x] Report always disclaims G0
+- [x] Named constants carry intent docstrings (dewey 006)

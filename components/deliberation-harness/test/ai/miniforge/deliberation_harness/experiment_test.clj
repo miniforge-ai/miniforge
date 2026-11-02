@@ -27,17 +27,23 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ^:private tier
+  "A four-turn allowance: one full proposer/skeptic/synthesizer cycle plus
+   the closing turn."
   {:id :tiny :activations 4 :max-normalized-usd 1 :wall-seconds 30})
 
 (def ^{:stratum 0} ^:private manifest
+  "A minimal development manifest pairing the shared and ablated arms."
   {:schema-version 1 :mode :development :model "test-model"
    :conditions [:workspace :workspace-ablated] :replicates 1 :max-input-bytes 48000
    :price-table {:input-per-million 3 :output-per-million 15}
    :tiers [tier]})
 
-(def ^{:stratum 0} ^:private peer-marker "peer-exclusive-observation")
+(def ^{:stratum 0} ^:private peer-marker
+  "Text only the proposer writes, so its presence elsewhere shows relay."
+  "peer-exclusive-observation")
 
 (def ^{:stratum 0} ^:private call-usage
+  "Per-call usage: 0.0006 normalized USD under the manifest's price table."
   {:input 100 :output 20 :provider-usd 0.001})
 
 (defn- ^{:stratum 0} task [] (first (fixtures/tasks)))

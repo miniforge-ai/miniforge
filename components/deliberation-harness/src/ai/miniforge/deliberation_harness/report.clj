@@ -26,7 +26,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} usd-format "%.6f")
+(def ^{:stratum 0} usd-format
+  "Six decimals keep sub-cent normalized spend visible in the report."
+  "%.6f")
 
 (defn- ^{:stratum 0} printed-sort [groups]
   (sort-by (comp pr-str key) groups))
