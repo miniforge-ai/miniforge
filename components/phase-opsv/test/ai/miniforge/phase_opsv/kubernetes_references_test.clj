@@ -10,8 +10,8 @@
 
 (deftest ^{:stratum 0} test-all-container-groups-contribute-configuration-dependencies
   (let [variable (fixture/environment "configMapKeyRef" "settings" false)
-        secret (fixture/referent "credentials" true)
-        container (fixture/container "service" [variable] [{"secretRef" secret}])]
+        secret (fixture/environment-from "secretRef" "credentials" true)
+        container (fixture/container "service" [variable] [secret])]
     (doseq [field ["containers" "initContainers" "ephemeralContainers"]]
       (let [pod (fixture/pod {field [container]})
             result (references/configuration-references [pod])]
@@ -66,5 +66,13 @@
   (let [volume (fixture/volume ["projected" "sources" 0 "secret"] "name" "credentials")]
     (is (vector? (get-in volume ["projected" "sources"])))
     (is (= "credentials" (get-in volume ["projected" "sources" 0 "secret" "name"])))))
+
+(deftest ^{:stratum 0} test-whole-environment-imports-keep-both-resource-kinds
+  (let [config-map (fixture/environment-from "configMapRef" "all-settings" false)
+        secret (fixture/environment-from "secretRef" "all-credentials" false)
+        container (fixture/container "service" [] [config-map secret])
+        result (references/configuration-references [(fixture/pod {"containers" [container]})])]
+    (is (= ["ConfigMap" "Secret"] (mapv :reference/kind result)))
+    (is (= ["all-settings" "all-credentials"] (mapv :reference/name result)))))
 
 (comment ::configuration-reference-discovery)

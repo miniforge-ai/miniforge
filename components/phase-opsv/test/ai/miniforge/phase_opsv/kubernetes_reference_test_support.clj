@@ -30,6 +30,9 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} environment-from [field name optional?]
+  (hash-map field (referent name optional?)))
+
 (defn ^{:stratum 1} environment [field name optional?]
   (let [value (referent name optional?)]
     {"name" "SETTING"
