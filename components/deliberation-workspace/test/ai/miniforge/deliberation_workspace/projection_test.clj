@@ -141,3 +141,23 @@
   (let [p (projection/project (workspace goal) :skeptic {})]
     (is (= 12 (:projection/version p)))
     (is (= :full (:projection/visibility p)))))
+
+(deftest ^{:stratum 1} the-ablation-shows-a-participant-its-own-objects
+  (let [ws (workspace (assoc (obj "claim-1" :claim :proposer) :object/participant :proposer-1)
+                      (assoc (obj "claim-2" :claim :proposer) :object/participant :proposer-2))]
+    (is (= ["claim-1"] (ids (:projection/objects
+                             (projection/project ws :proposer-1 {:visibility :none})))))))
+
+(deftest ^{:stratum 1} edges-never-name-a-hidden-object
+  (let [ws (workspace (obj "goal-1" :goal :interpreter :links {:supports #{"claim-9"}})
+                      (obj "claim-9" :claim :skeptic))
+        view (projection/project ws :proposer {:visibility :none})]
+    (is (= ["goal-1"] (ids (:projection/objects view))))
+    (is (empty? (get-in view [:projection/goals 0 :object/links :supports])))))
+
+(deftest ^{:stratum 1} the-read-scope-bounds-every-visibility
+  (let [ws (workspace (obj "goal-1" :goal :interpreter)
+                      (obj "claim-1" :claim :proposer))]
+    (is (= ["goal-1"] (ids (:projection/objects
+                            (projection/project ws :proposer {:visibility :full
+                                                              :readable-ids #{"goal-1"}})))))))

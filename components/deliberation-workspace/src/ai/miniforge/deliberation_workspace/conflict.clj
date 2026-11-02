@@ -26,45 +26,77 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} derive-conflicts
-  "N14 §2.5: a conflict object is derived for every pair of live objects
-   linked `contradicts` — any non-terminal object that is not itself a
-   conflict, not only claims. Conflicts are engine-derived, never proposed,
-   and are closed by resolving a participant rather than by deletion.
+(defn- ^{:stratum 0} contradictable?
+  "True when `o` takes part in a contradiction: any object but a conflict
+   that is still live, counting an `:accepted` one, since adoption is not
+   proof (N14 §2.5)."
+  [o]
+  (and o
+       (not= :conflict (:object/type o))
+       (or (= :accepted (:object/status o))
+           (not (object/terminal? o)))))
 
-   Pairs are canonicalised into sorted id order and de-duplicated, so the
-   conflict a pair derives does not depend on which side happens to hold the
-   `contradicts` edge, and a symmetric pair that points both ways still
-   derives exactly one conflict.
+(defn- ^{:stratum 0} conflict-id [[id target]]
+  (str "conflict-" id "-" target))
 
-   A conflict is a relation between two objects, so an object contradicting
-   its own id derives nothing. Admitting it would mint a `conflict-x-x` that
-   no transaction can resolve — nothing supersedes a participant without
-   superseding the other — and the §6.1 conflict tier would keep selecting
-   it for as long as the run lasts."
+(defn- ^{:stratum 0} resolved-now?
+  "True when `o` is an open conflict whose pair is no longer live: a
+   transaction resolved or superseded a participant. Every status that ends
+   a participant's liveness is terminal, so a resolved conflict never
+   reopens."
+  [active-ids o]
+  (and (= :conflict (:object/type o))
+       (= :open (:object/status o))
+       (not (contains? active-ids (:object/id o)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} contradiction-pairs
+  "Every live pair linked `contradicts`, as sorted `[id target]`, distinct
+   and in sorted order. An object contradicting its own id derives nothing:
+   no transaction could resolve that conflict."
+  [objects]
+  (->> (for [[id o] objects
+             target (object/linked o :contradicts)
+             :when (and (not= id target)
+                        (contradictable? o)
+                        (contradictable? (get objects target)))]
+         (vec (sort [id target])))
+       distinct
+       sort))
+
+(defn- ^{:stratum 1} resolve-conflicts
+  "Resolve each open conflict whose pair is no longer live. Resolved
+   conflicts stay in the graph as history."
+  [workspace active-ids version]
+  (reduce-kv (fn [ws id o]
+               (if (resolved-now? active-ids o)
+                 (assoc-in ws [:workspace/objects id]
+                           (-> o (assoc :object/status :resolved) (object/touch version)))
+                 ws))
+             workspace
+             (get workspace :workspace/objects {})))
+
+(defn- ^{:stratum 1} add-conflict [workspace [id target :as pair] version]
+  (let [cid (conflict-id pair)]
+    (if (get-in workspace [:workspace/objects cid])
+      workspace
+      (assoc-in workspace [:workspace/objects cid]
+                (object/new-object
+                 {:id cid :type :conflict
+                  :statement (str "contradiction between " id " and " target)
+                  :role :engine :activation "derived" :version version
+                  :links {:contradicts #{id target}}})))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} derive-conflicts
+  "N14 §2.5: derive one conflict per live contradicting pair, canonicalised
+   so the side holding the edge does not matter. A conflict is never
+   deleted; it is resolved once a participant is resolved or superseded."
   [workspace version]
-  (let [objects (get workspace :workspace/objects {})
-        contradictable? (fn [id]
-                          (when-let [o (get objects id)]
-                            (and (not (object/terminal? o))
-                                 (not= :conflict (:object/type o)))))
-        pairs (->> (for [[id o] objects
-                         target (object/linked o :contradicts)
-                         :when (and (not= id target)
-                                    (contradictable? id)
-                                    (contradictable? target))]
-                     (vec (sort [id target])))
-                   distinct
-                   sort)]
-    (reduce (fn [ws [id target]]
-              (let [conflict-id (str "conflict-" id "-" target)]
-                (if (get-in ws [:workspace/objects conflict-id])
-                  ws
-                  (assoc-in ws [:workspace/objects conflict-id]
-                            (object/new-object
-                             {:id conflict-id :type :conflict
-                              :statement (str "contradiction between " id " and " target)
-                              :role :engine :activation "derived" :version version
-                              :links {:contradicts #{id target}}})))))
-            workspace
+  (let [pairs (contradiction-pairs (get workspace :workspace/objects {}))
+        active-ids (into #{} (map conflict-id) pairs)]
+    (reduce #(add-conflict %1 %2 version)
+            (resolve-conflicts workspace active-ids version)
             pairs)))
