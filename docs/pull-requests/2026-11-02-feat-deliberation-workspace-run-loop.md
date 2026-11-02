@@ -39,14 +39,19 @@ success, and counts quiescence by object growth.
   - A pass or a rejection marks the participant quiet; a commit clears the
     round.
   - New `close`: at a budget boundary, runs one closure turn for the first
-    synthesizer when `:workspace/closure-reserve` is positive. It records
-    `:termination/closure` as `:executed` or `:unfunded`.
+    synthesizer when `:workspace/closure-reserve` is positive and activation
+    allowance remains. It records `:termination/closure` as `:executed` or
+    `:unfunded`.
+  - A turn whose read scope withholds a goal or `:hard` constraint is
+    refused before the model runs (N14 §4). It is not charged, it counts as
+    quiet, and the rotation moves on.
   - `:workspace/stages` is gone; admission's stage chain is fixed.
 - `scheduler`
   - `:workspace/participant-roles` maps participants to responsibilities.
   - Eligibility is keyed by responsibility.
   - Round-robin and each tier rotate after the last actor.
-  - The meta-watchdog is excluded from ordinary rounds.
+  - The meta-watchdog is excluded from ordinary rounds and from the
+    structural tiers.
   - Exposes `triggered-activation`, `ordinary-participants` and
     `responsibility-of`.
 - `termination`
@@ -83,7 +88,7 @@ before deadlock closure, and cost metering.
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 13 deliberation-workspace
-suites, 159 tests, 523 assertions, 0 failures. `poly test`, clj-kondo and
+suites, 169 tests, 543 assertions, 0 failures. `poly test`, clj-kondo and
 the Polylith check ran only in CI.
 
 ## Deployment Plan

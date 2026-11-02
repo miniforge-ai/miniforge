@@ -78,12 +78,13 @@
           (get workspace :workspace/roles [])))
 
 (defn- ^{:stratum 1} eligible-participants
-  "Participants whose responsibility subscribes to `event`, in manifest
-   order so selection never depends on map iteration order."
+  "Ordinary participants whose responsibility subscribes to `event`, in
+   manifest order so selection never depends on map iteration order.
+   Event-only participants never take structural work (N14 §5.2)."
   [workspace event]
   (let [subscribed (set (get-in workspace [:workspace/eligibility event] #{}))]
     (filter #(contains? subscribed (responsibility-of workspace %))
-            (get workspace :workspace/roles []))))
+            (ordinary-participants workspace))))
 
 (defn ^{:stratum 1} open-conflicts
   "Unresolved conflicts, the scheduler's highest structural priority."

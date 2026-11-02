@@ -244,3 +244,19 @@
              (fn [{:keys [role participant]}] (swap! seen conj [participant role]) nil)
              {})
     (is (= [[:proposer-1 :proposer] [:proposer-2 :proposer]] @seen))))
+
+(deftest ^{:stratum 2} a-closure-needs-allowance-left
+  (let [ws (workspace :workspace/budget {:activations 3} :workspace/closure-reserve 1
+                      :workspace/spent {:activations 3})
+        closed (run/run ws (fn [_] (throw (ex-info "must not run" {}))) {})]
+    (is (= :unfunded (get-in closed [:workspace/termination :termination/closure])))
+    (is (= 3 (get-in closed [:workspace/spent :activations])))))
+
+(deftest ^{:stratum 2} a-turn-missing-its-frame-is-refused-before-the-model
+  (let [called (atom false)
+        after (run/step (workspace :workspace/readable {:proposer #{}})
+                        (fn [_] (reset! called true) nil))]
+    (is (false? @called))
+    (is (nil? (get-in after [:workspace/spent :activations])))
+    (is (= [{:event :activation/refused :role :proposer :withheld ["goal-1"]}]
+           (events-of after :activation/refused)))))

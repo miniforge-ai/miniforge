@@ -27,6 +27,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-workspace.admission :as admission]
+   [ai.miniforge.deliberation-workspace.object :as object]
    [ai.miniforge.deliberation-workspace.projection :as projection]
    [ai.miniforge.deliberation-workspace.scheduler :as scheduler]
    [ai.miniforge.deliberation-workspace.termination :as termination]))
@@ -67,6 +68,29 @@
   [workspace participant]
   (update workspace :workspace/passed (fnil conj #{}) participant))
 
+(defn- ^{:stratum 0} allowance-remains?
+  "True while the activation budget, when one is set, has a turn left."
+  [workspace]
+  (let [budget (get-in workspace [:workspace/budget :activations])]
+    (or (nil? budget)
+        (< (get-in workspace [:workspace/spent :activations] 0) budget))))
+
+(defn- ^{:stratum 0} frame-ids
+  "Ids of the task frame every participant must receive: goals and `:hard`
+   constraints (N14 §4.2)."
+  [workspace]
+  (->> (vals (get workspace :workspace/objects {}))
+       (filter #(or (= :goal (:object/type %)) (object/hard-constraint? %)))
+       (map :object/id)
+       set))
+
+(defn- ^{:stratum 0} withheld-frame
+  "Frame ids `projection` does not deliver. Non-empty when the runtime read
+   scope hides a required goal or constraint: the turn must be refused
+   rather than run on a partial frame (N14 §4)."
+  [workspace projection]
+  (remove (set (map :object/id (:projection/objects projection))) (frame-ids workspace)))
+
 (defn- ^{:stratum 0} closer
   "The first participant holding synthesizer responsibility, or nil."
   [workspace]
@@ -91,17 +115,16 @@
           (assoc-in [:workspace/feedback participant] {:status :committed})
           (record-event {:event :transaction/committed :role participant})))))
 
-(defn ^{:stratum 1} activate-participant
-  "Run one work turn for `participant`. Identity, activation and basis come
-   from the runtime; the model's output is only a proposal. `activation` is
-   `{:participant :reason :target}`; a closure turn uses the same path."
-  [workspace activate {:keys [participant reason target]}]
+(defn- ^{:stratum 1} run-turn
+  "Invoke the model for `participant` on `projection` and settle what it
+   proposes. The turn is charged whether it commits, passes or is rejected."
+  [workspace activate {:keys [participant reason target]} projection]
   (let [role (scheduler/responsibility-of workspace participant)
         context {:role role :participant participant
                  :activation (activation-id workspace)
                  :basis (get workspace :workspace/version 0)}
         proposed (activate (assoc context
-                                  :projection (render workspace participant)
+                                  :projection projection
                                   :closing? (= :closure reason)
                                   :feedback (get-in workspace [:workspace/feedback participant])))
         spent (-> (spend workspace participant)
@@ -113,7 +136,31 @@
           (record-event {:event :transaction/passed :role participant}))
       (settle spent proposed participant context))))
 
+(defn- ^{:stratum 1} refuse-turn
+  "Record a turn refused before any model call because the participant's
+   read scope withholds part of the required frame. Nothing ran, so nothing
+   is charged; the participant counts as quiet and the rotation moves on."
+  [workspace participant withheld]
+  (-> workspace
+      (assoc :workspace/last-actor participant)
+      (note-quiet participant)
+      (record-event {:event :activation/refused :role participant
+                     :withheld (vec (sort withheld))})))
+
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} activate-participant
+  "Run one work turn for `participant`. Identity, activation and basis come
+   from the runtime; the model's output is only a proposal. `activation` is
+   `{:participant :reason :target}`; a closure turn uses the same path. A
+   participant whose read scope withholds a goal or `:hard` constraint is
+   refused before the model runs (N14 §4)."
+  [workspace activate {:keys [participant] :as activation}]
+  (let [projection (render workspace participant)
+        withheld (seq (withheld-frame workspace projection))]
+    (if withheld
+      (refuse-turn workspace participant withheld)
+      (run-turn workspace activate activation projection))))
 
 (defn ^{:stratum 2} step
   "Run the next scheduled activation, or record that none is eligible.
@@ -132,6 +179,7 @@
   (let [participant (closer workspace)
         funded? (and (:termination/forced-synthesis closing)
                      (pos? (get workspace :workspace/closure-reserve 0))
+                     (allowance-remains? workspace)
                      (some? participant))
         closed (if funded?
                  (activate-participant workspace activate

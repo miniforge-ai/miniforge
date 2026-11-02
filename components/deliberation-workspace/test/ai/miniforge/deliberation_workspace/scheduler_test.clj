@@ -126,3 +126,9 @@
                      (assoc ws :workspace/last-actor (:activation/participant first-turn)))]
     (is (= [:skeptic-1 :skeptic] ((juxt :activation/participant :activation/role) first-turn)))
     (is (= :skeptic-2 (:activation/participant second-turn)))))
+
+(deftest ^{:stratum 2} event-only-participants-take-no-structural-work
+  (let [ws (workspace [(obj "question-1" :question :touched-at 1)]
+                      :workspace/roles [:proposer :meta-watchdog]
+                      :workspace/eligibility {:stale-question [:meta-watchdog]})]
+    (is (= :round-robin (:activation/reason (scheduler/next-activation ws))))))
