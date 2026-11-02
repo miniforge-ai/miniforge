@@ -29,9 +29,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+;; Object types each creating operation may create. An operation absent
+;; from this table creates nothing.
 (def ^{:stratum 0} creation-types
-  "Object types each creating operation may create. An operation absent
-   from this table creates nothing."
   {:assert-claim #{:claim} :add-question #{:question}
    :propose-hypothesis #{:hypothesis} :split-hypothesis #{:hypothesis}
    :propose-experiment #{:experiment} :propose-plan #{:plan}
@@ -43,9 +43,9 @@
   "Creating operations that may instead reference what already exists."
   #{:attach-evidence})
 
+;; Object types each targeting operation may target. An operation absent
+;; from this table carries no type requirement on its targets.
 (def ^{:stratum 0} target-types
-  "Object types each targeting operation may target. An operation absent
-   from this table carries no type requirement on its targets."
   {:refine-claim #{:claim :hypothesis} :revise-plan #{:plan}
    :challenge #{:claim :hypothesis :plan :decision}
    :attach-evidence #{:claim :hypothesis :plan :decision :experiment}
@@ -55,9 +55,9 @@
    :close-goal #{:goal} :split-hypothesis #{:hypothesis}
    :merge-hypotheses #{:hypothesis} :supersede tx/supersedable-types})
 
+;; The closed set of fields an operation payload may carry. Anything else —
+;; an actor, a permission, a policy label — is model-supplied authority.
 (def ^{:stratum 0} operation-keys
-  "The closed set of fields an operation payload may carry. Anything else —
-   an actor, a permission, a policy label — is model-supplied authority."
   #{:op :targets :creates :links :evidence :discriminates :outcome
     :statement :reason :resolution :replacement})
 
@@ -162,6 +162,7 @@
   (when (or (seq (remove operation-keys (keys operation)))
             (and (contains? operation :statement)
                  (not (contains? text-operations (:op operation))))
+            (and (seq (get operation :links)) (empty? (get operation :targets)))
             (some spec-fields-defect? (validation/created-specs operation)))
     (validation/reject-operation :anomalies.deliberation/unknown-field
                                  (messages/system-t :anomaly/unknown-field) operation)))
@@ -187,6 +188,7 @@
   (when-let [allowed (get target-types (:op operation))]
     (let [targets (map (validation/objects-of workspace) (get operation :targets []))]
       (when (or (empty? targets)
+                (and (= :challenge (:op operation)) (not= 1 (count targets)))
                 (some #(not (contains? allowed (:object/type %))) targets))
         (validation/reject-operation :anomalies.deliberation/target-type
                                      (messages/system-t :anomaly/target-type) operation)))))

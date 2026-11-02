@@ -47,7 +47,10 @@ checks.
 - `semantics` (new):
   - closed operation, creation and attribute fields;
   - statement cap;
-  - creation and target types;
+  - creation and target types; a challenge names exactly one target, so
+    its backing is about that record;
+  - operation-level `:links` need a target to hold them, so they are never
+    admitted and silently dropped;
   - no created id inside the derived-conflict namespace (`conflict-`), so a
     proposal cannot occupy the id of a conflict the engine must derive;
   - reference integrity;
@@ -103,7 +106,7 @@ New `admission_test` covers:
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 12 deliberation-workspace suites,
-167 tests, 544 assertions, 0 failures. clj-kondo 2026.10.26 (the CI version)
+168 tests, 548 assertions, 0 failures. clj-kondo 2026.10.26 (the CI version)
 on the component: 0 errors. `poly test` and the Polylith check ran only in CI.
 
 ## Deployment Plan
