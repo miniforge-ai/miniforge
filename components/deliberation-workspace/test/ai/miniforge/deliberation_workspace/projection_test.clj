@@ -154,3 +154,20 @@
         view (projection/project ws :proposer {:visibility :none})]
     (is (= ["goal-1"] (ids (:projection/objects view))))
     (is (empty? (get-in view [:projection/goals 0 :object/links :supports])))))
+
+(deftest ^{:stratum 2} a-hidden-replacement-is-never-named
+  (let [old (assoc (obj "decision-1" :decision :proposer :touched-at 5)
+                   :object/participant :proposer-1
+                   :object/superseded-by "decision-2")
+        replacement (assoc (obj "decision-2" :decision :synthesizer :touched-at 5)
+                           :object/participant :synthesizer-1)
+        hidden (projection/project (workspace old replacement) :proposer-1
+                                   {:visibility :none :since 4})
+        shown (projection/project (workspace old replacement) :proposer-1 {:since 4})]
+    (testing "the object list and the delta both drop the hidden replacement id"
+      (is (= ["decision-1"] (ids (:projection/objects hidden))))
+      (is (not (contains? (first (:projection/objects hidden)) :object/superseded-by)))
+      (is (not (contains? (first (:projection/delta hidden)) :object/superseded-by))))
+    (testing "a visible replacement stays named"
+      (is (= "decision-2" (:object/superseded-by (first (:projection/objects shown)))))
+      (is (= "decision-2" (:object/superseded-by (first (:projection/delta shown))))))))
