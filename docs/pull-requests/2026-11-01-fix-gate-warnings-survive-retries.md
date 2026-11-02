@@ -75,7 +75,9 @@ ignore the key are unaffected.
 ## Checklist
 
 - [x] Behavior and tests in the same PR (dewey 716)
-- [x] CI green on the merged head
+- [x] CI green on the pre-merge PR head (`2babfeb`)
+- [ ] CI green on the merged commit. The main push run on `d83c1b6` failed,
+      because the PR head had not been tested together with #2311.
 - [x] Copilot findings fixed and resolved
 - [ ] CI re-run against main before merge. It was not, which caused the
       breakage that #2319 fixed.
