@@ -34,7 +34,11 @@ projection named hidden ids.
     one target. They live here rather than in `commit`, which would otherwise
     need a fourth real layer (rule 210).
 - `validation`
-  - An `:accepted` target stays open to `challenge` and `attach-evidence`.
+  - No operation of any class may act on a terminal target. The one exception:
+    an `:accepted` target stays open to `challenge` and `attach-evidence`.
+  - Only the synthesizer or the user may supersede a decision.
+  - `supersede` may target only claims, hypotheses, plans and decisions. Its
+    replacement may be created earlier in the same transaction.
   - New `check-statement`: revisions and answers carry text.
   - New `check-replacement`: `supersede` names exactly one live replacement
     of the same type, and no other operation names one.
@@ -43,7 +47,7 @@ projection named hidden ids.
   - Created objects carry `:object/participant`.
   - Challenges record their participant, reason, resolution and evidence.
   - A challenge marks an adopted record `:object/contested?` and leaves it
-    `:accepted`.
+    `:accepted`. Adopting a contested record keeps the marker.
   - A revision replaces the statement and appends the prior one to
     `:object/history`.
   - An answer is recorded as `:object/answer`.
@@ -56,7 +60,7 @@ projection named hidden ids.
   - Idempotency compares the whole payload per participant.
   - The open-challenge cap counts per participant.
   - `:challenge/role` is renamed `:challenge/participant`.
-- `conflict`
+- `conflict` (a minimal change to main's `derive-conflicts`)
   - `:accepted` objects still take part in contradictions.
   - An open conflict whose pair stops being live is marked `:resolved`; it
     stays in the graph as history.
@@ -85,8 +89,8 @@ adds the accepted case as positive coverage.
 
 Ran locally on plain Clojure 1.12 with a classpath of the component sources
 (Clojars is unreachable from the authoring sandbox, so a local stand-in
-replaced malli): all 12 deliberation-workspace suites, 142 tests,
-464 assertions, 0 failures. `poly test`, clj-kondo and the Polylith check ran
+replaced malli): all 12 deliberation-workspace suites, 147 tests,
+478 assertions, 0 failures. `poly test`, clj-kondo and the Polylith check ran
 only in CI.
 
 ## Deployment Plan

@@ -164,7 +164,7 @@
                                      :discriminates :claim-1})))
         "an experiment whose :discriminates is unreadable never backed anything")))
 
-(deftest ^{:stratum 1} a-concern-with-a-resolution-criterion-backs-a-challenge
+(deftest ^{:stratum 2} a-concern-with-a-resolution-criterion-backs-a-challenge
   (let [ws (workspace [(claim-object "claim-1")])]
     (testing "a reason and a resolution together back the challenge"
       (is (nil? (validate ws :skeptic {:op :challenge :targets #{"claim-1"}
@@ -176,7 +176,7 @@
                                                  :reason "ordering assumed"
                                                  :resolution " "})))))))
 
-(deftest ^{:stratum 1} idempotency-compares-the-whole-payload-per-participant
+(deftest ^{:stratum 2} idempotency-compares-the-whole-payload-per-participant
   (let [committed {:op :refine-claim :targets #{"claim-1"} :statement "first"}
         ws (workspace [(claim-object "claim-1")]
                       :log [(tx/new-transaction {:role :proposer :activation "act-1"
@@ -187,7 +187,7 @@
       (is (= :anomalies.deliberation/duplicate-operation
              (subtype-of (validate ws :proposer committed)))))))
 
-(deftest ^{:stratum 1} the-challenge-cap-counts-per-participant
+(deftest ^{:stratum 2} the-challenge-cap-counts-per-participant
   (let [ws (workspace [(claim-object "claim-1")]
                       :challenges (merge (open-challenge "ch-1" :skeptic-1 "claim-1")
                                          (open-challenge "ch-2" :skeptic-1 "claim-1")))

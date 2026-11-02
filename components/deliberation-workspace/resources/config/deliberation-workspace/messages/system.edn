@@ -33,7 +33,6 @@
   :anomaly/unattested-provenance     "Hard constraints need a spec source; execution/user evidence needs a runtime receipt"
   :anomaly/evidence-link             "Attached evidence must be named under :supports and be evidence"
   :anomaly/unbacked-result           "Experiment result needs execution evidence backed by a runtime receipt"
-  :anomaly/supersede-responsibility  "Superseding a decision requires synthesizer responsibility"
   :anomaly/uncovered-closure         "Goal closure must resolve to an adopted decision covering every closed goal"
   :anomaly/choice-point              "Adoption needs a choice point no other adopted decision holds; supersede it first"
   :anomaly/unregistered-artifact     "Artifact reference must match a recorded capsule export"

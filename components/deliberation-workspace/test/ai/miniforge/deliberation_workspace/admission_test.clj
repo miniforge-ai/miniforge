@@ -157,7 +157,7 @@
         (is (= :superseded (:object/status (object-at replaced "d1"))))
         (is (= :accepted (:object/status (object-at replaced "d2"))))))
     (testing "only the synthesizer supersedes a decision"
-      (is (= :anomalies.deliberation/supersede-responsibility
+      (is (= :anomalies.deliberation/role-forbidden
              (subtype-of (submit ws :skeptic {:op :supersede :targets ["d1"]
                                               :replacement ["d2"]})))))))
 
