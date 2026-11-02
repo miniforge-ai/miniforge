@@ -59,8 +59,8 @@
 ;; The canonical text of `value`, written from its own entries and never
 ;; converted to another collection, so no two entries ever merge. Map entries
 ;; are ordered by their key's then value's text, set elements by their own
-;; text; sequences keep their order. A host map's keys and a host set's
-;; elements carry their class, since Java equality tells `(int 1)` from `1`. A float is written as the exact double
+;; text; sequences keep their order. Every member of a host collection carries
+;; its class, since Java equality tells `(int 1)` from `1`. A float is written as the exact double
 ;; it widens to. Anything else prints as itself. Call it inside `stably`.
 (defn- ^{:stratum 0} emit [value]
   (let [tag (host-tag value)
@@ -69,11 +69,11 @@
     (cond
       (instance? Float value) (pr-str (double value))
       (instance? java.util.Map value)
-      (joined "{" (->> value (map (fn [[k v]] [(member k) (emit v)])) sort (map #(str/join " " %))) "}")
+      (joined "{" (->> value (map (fn [[k v]] [(member k) (member v)])) sort (map #(str/join " " %))) "}")
       (instance? java.util.Set value) (joined "#{" (sort (map member value)) "}")
       (seq? value) (joined "(" (map emit value) ")")
       (or (instance? java.util.Collection value) (some-> value class .isArray))
-      (joined "[" (map emit value) "]")
+      (joined "[" (map member value) "]")
       :else (pr-str value))))
 
 ;; EDN reader for any custom tag. Journals and manifests carry plain data

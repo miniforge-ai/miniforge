@@ -126,9 +126,11 @@
   (testing "a host map keeps keys Clojure would merge"
     (let [linked (doto (java.util.LinkedHashMap.) (.put (int 1) :i) (.put (long 1) :l))]
       (is (= 2 (count (re-seq #":[il]" (codec/encode linked)))))))
-  (testing "unequal host maps whose keys print alike never share a digest"
+  (testing "unequal host collections whose members print alike never share a digest"
     (is (not= (codec/digest (doto (java.util.HashMap.) (.put (int 1) :a) (.put 1 :b)))
-              (codec/digest (doto (java.util.HashMap.) (.put (int 1) :b) (.put 1 :a))))))
+              (codec/digest (doto (java.util.HashMap.) (.put (int 1) :b) (.put 1 :a)))))
+    (is (not= (codec/digest (java.util.HashMap. {:a (int 1)})) (codec/digest (java.util.HashMap. {:a 1}))))
+    (is (not= (codec/digest (java.util.ArrayList. [(int 1)])) (codec/digest (java.util.ArrayList. [1]))))))
   (testing "equal host sets digest alike whatever their insertion order"
     (is (= (codec/digest (doto (java.util.LinkedHashSet.) (.add :a) (.add :b)))
            (codec/digest (doto (java.util.LinkedHashSet.) (.add :b) (.add :a)))))))
