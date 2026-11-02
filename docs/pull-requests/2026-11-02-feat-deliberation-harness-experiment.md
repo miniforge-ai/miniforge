@@ -32,7 +32,10 @@ conformance; `turn/conditions` says so in its docstring.
     without runtime internals, the participant's feedback and the
     condition's handoff.
   - `respond`: never sends a request over `:max-input-bytes`, and never
-    retries an adapter anomaly.
+    retries an adapter anomaly. A malformed response (no payload map,
+    solution map or rationale string, a non-sequence of experiment ids, or
+    non-numeric usage) is a failed activation with unknown usage, so a bad
+    `call` cannot abort a cell mid-journal.
   - `commit-turn` admits the payload through
     `board/activate-participant`. No operations is a pass; any other
     malformed shape goes to admission, which rejects it, so a bad payload
@@ -99,6 +102,8 @@ condition's allowance; that is left for the operator to decide.
 - Model-made execution evidence with a valid-looking receipt is rejected.
 - An unknown condition is refused before any call or record.
 - A malformed `:operations` value is rejected and the cell completes.
+- A malformed response fails the cell, with unknown usage and a completed
+  journal.
 - `turn_test`: the model view keeps an answer.
 - An over-budget closing call cannot succeed.
 - A journal failure stops the cell.
@@ -107,9 +112,9 @@ condition's allowance; that is left for the operator to decide.
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox):
 
-- the 5 harness suites: 46 tests, 149 assertions, 0 failures. The credit,
-  squatting, unknown-condition, malformed-operations and model-view tests
-  fail on the previous code; the forgery test guards
+- the 5 harness suites: 47 tests, 161 assertions, 0 failures. The credit,
+  squatting, unknown-condition, malformed-operations, malformed-response and
+  model-view tests fail on the previous code; the forgery test guards
   #2335's provenance stages;
 - clj-kondo 2026.10.26 (the CI version) on `bases components development/src`:
   0 errors.
