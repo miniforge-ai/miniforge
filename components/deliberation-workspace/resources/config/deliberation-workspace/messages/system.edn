@@ -1,0 +1,27 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
+{:deliberation-workspace/system
+ {:anomaly/hard-constraint-immutable "Hard constraints are immutable to agent transactions"
+  :anomaly/duplicate-operation       "Participant already committed this exact operation"
+  :anomaly/bare-challenge            "A challenge needs evidence, a discriminating experiment, or a reason and resolution (N14 §3.5)"
+  :anomaly/challenge-limit           "Participant already holds the permitted number of open challenges on this object"
+  :anomaly/unknown-operation         "Operation is outside the closed N14 §3.2 vocabulary"
+  :anomaly/invalid-object-ids        "Operation field must name object ids the engine can look up"
+  :anomaly/malformed-creates         "Operation :creates must be a sequence of object specifications"
+  :anomaly/invalid-creation          "Operation creates an object the engine cannot construct"
+  :anomaly/repeated-object-id        "Transaction creates more than one object at the same id"
+  :anomaly/taken-object-id           "Operation creates objects at ids the workspace already holds"
+  :anomaly/invalid-links             "Operation declares edges the engine cannot write"
+  :anomaly/unknown-outcome           "close-goal must carry an outcome legal for a goal (N14 §2.3)"
+  :anomaly/inapplicable-outcome      "Only close-goal carries an outcome"
+  :anomaly/unknown-target            "Operation targets objects that do not exist"
+  :anomaly/role-forbidden            "Role may not propose this operation (N14 §5.3)"
+  :anomaly/missing-basis             "Transaction must declare the workspace version its projection was rendered from"
+  :anomaly/terminal-target           "Operation targets an object already in a terminal status"
+  :anomaly/stale-basis               "Object changed since the projection this transaction was built from"
+  :anomaly/missing-statement         "Revisions and answers must carry a non-blank statement"
+  :anomaly/invalid-replacement       "supersede must name one live replacement of the target's type"
+  :anomaly/inapplicable-replacement  "Only supersede names a replacement"
+  :anomaly/invalid-transaction       "Transaction :tx/operations must be a sequence of operations"}}

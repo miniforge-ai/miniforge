@@ -25,6 +25,7 @@
    idempotency) compose onto this chain in a sibling namespace."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.deliberation-workspace.messages :as messages]
    [ai.miniforge.deliberation-workspace.object :as object]
    [ai.miniforge.deliberation-workspace.transaction :as tx]
    [clojure.string :as str]))
@@ -203,7 +204,7 @@
 (defn- ^{:stratum 1} check-schema [_workspace operation _context]
   (when-not (tx/known-operation? (:op operation))
     (reject :invalid-input :anomalies.deliberation/unknown-operation
-            "Operation is outside the closed N14 §3.2 vocabulary"
+            (messages/system-t :anomaly/unknown-operation)
             {:op (:op operation)})))
 
 (defn- ^{:stratum 1} check-id-fields
@@ -225,7 +226,7 @@
   (some (fn [[carrier field value]]
           (when-let [[reason data] (id-listing-defect value)]
             (reject :invalid-input :anomalies.deliberation/invalid-object-ids
-                    "Operation field must name object ids the engine can look up"
+                    (messages/system-t :anomaly/invalid-object-ids)
                     (merge {:op (:op carrier) :field field :reason reason} data))))
         (id-listings (get context :siblings [operation]))))
 
@@ -270,14 +271,14 @@
 
       (not (sequential? creates))
       (reject :invalid-input :anomalies.deliberation/invalid-creation
-              "Operation :creates must be a sequence of object specifications"
+              (messages/system-t :anomaly/malformed-creates)
               {:op (:op operation) :reason :malformed-creates :creates creates})
 
       :else
       (or (some (fn [spec]
                   (when-let [[reason data] (defect spec)]
                     (reject :invalid-input :anomalies.deliberation/invalid-creation
-                            "Operation creates an object the engine cannot construct"
+                            (messages/system-t :anomaly/invalid-creation)
                             (merge {:op (:op operation) :reason reason :id (:id spec)}
                                    data))))
                 creates)
@@ -288,11 +289,11 @@
                 counts (frequencies ids)]
             (when-let [repeated (seq (distinct (filter #(< 1 (get counts %)) ids)))]
               (reject :conflict :anomalies.deliberation/duplicate-object-id
-                      "Transaction creates more than one object at the same id"
+                      (messages/system-t :anomaly/repeated-object-id)
                       {:op (:op operation) :ids (vec repeated)})))
           (when-let [taken (seq (filter #(contains? known (:id %)) creates))]
             (reject :conflict :anomalies.deliberation/duplicate-object-id
-                    "Operation creates objects at ids the workspace already holds"
+                    (messages/system-t :anomaly/taken-object-id)
                     {:op (:op operation) :ids (mapv :id taken)}))))))
 
 (defn- ^{:stratum 1} check-links
@@ -310,7 +311,7 @@
   [_workspace operation _context]
   (when-let [[reason data] (link-defect (:links operation))]
     (reject :invalid-input :anomalies.deliberation/invalid-links
-            "Operation declares edges the engine cannot write"
+            (messages/system-t :anomaly/invalid-links)
             (merge {:op (:op operation) :reason reason} data))))
 
 (defn- ^{:stratum 1} check-outcome
@@ -344,11 +345,11 @@
     (if (= :close-goal (:op operation))
       (when-not (contains? tx/goal-outcomes outcome)
         (reject :invalid-input :anomalies.deliberation/invalid-outcome
-                "close-goal must carry an outcome legal for a goal (N14 §2.3)"
+                (messages/system-t :anomaly/unknown-outcome)
                 {:op (:op operation) :reason :unknown-outcome :outcome outcome}))
       (when (some? outcome)
         (reject :invalid-input :anomalies.deliberation/invalid-outcome
-                "Only close-goal carries an outcome"
+                (messages/system-t :anomaly/inapplicable-outcome)
                 {:op (:op operation) :reason :inapplicable-outcome
                  :outcome outcome})))))
 
@@ -361,7 +362,7 @@
     (when (and (or (contains? tx/revisions op) (= :answer-question op))
                (not (and (string? statement) (not (str/blank? statement)))))
       (reject :invalid-input :anomalies.deliberation/missing-statement
-              "Revisions and answers must carry a non-blank statement"
+              (messages/system-t :anomaly/missing-statement)
               {:op op :statement statement}))))
 
 (defn- ^{:stratum 1} check-targets [workspace operation _context]
@@ -369,7 +370,7 @@
         missing (remove #(contains? known %) (tx/touched-ids operation))]
     (when (seq missing)
       (reject :not-found :anomalies.deliberation/unknown-target
-              "Operation targets objects that do not exist"
+              (messages/system-t :anomaly/unknown-target)
               {:op (:op operation) :missing (set missing)}))))
 
 (defn- ^{:stratum 1} check-replacement
@@ -383,17 +384,17 @@
                                                    replacements
                                                    (known (first replacements)))]
         (reject :invalid-input :anomalies.deliberation/invalid-replacement
-                "supersede must name one live replacement of the target's type"
+                (messages/system-t :anomaly/invalid-replacement)
                 (merge {:op (:op operation) :reason reason} data)))
       (when (seq replacements)
         (reject :invalid-input :anomalies.deliberation/invalid-replacement
-                "Only supersede names a replacement"
+                (messages/system-t :anomaly/inapplicable-replacement)
                 {:op (:op operation) :reason :inapplicable-replacement})))))
 
 (defn- ^{:stratum 1} check-permission [_workspace operation {:keys [role]}]
   (when-not (tx/permitted? role (:op operation))
     (reject :unauthorized :anomalies.deliberation/role-forbidden
-            "Role may not propose this operation (N14 §5.3)"
+            (messages/system-t :anomaly/role-forbidden)
             {:op (:op operation) :role role})))
 
 (defn- ^{:stratum 1} check-basis
@@ -407,19 +408,19 @@
     (cond
       (not (number? basis))
       (reject :invalid-input :anomalies.deliberation/missing-basis
-              "Transaction must declare the workspace version its projection was rendered from"
+              (messages/system-t :anomaly/missing-basis)
               {:op (:op operation) :basis basis})
 
       (= :additive (tx/class-of (:op operation)))
       (when-let [terminal (seq (filter #(closed-to? (:op operation) %) targets))]
         (reject :conflict :anomalies.deliberation/terminal-target
-                "Operation targets an object already in a terminal status"
+                (messages/system-t :anomaly/terminal-target)
                 {:op (:op operation) :targets (mapv :object/id terminal)}))
 
       :else
       (when-let [moved (seq (filter #(> (:object/touched-at %) basis) targets))]
         (reject :conflict :anomalies.deliberation/stale-basis
-                "Object changed since the projection this transaction was built from"
+                (messages/system-t :anomaly/stale-basis)
                 {:op (:op operation) :basis basis
                  :targets (mapv :object/id moved)})))))
 
@@ -448,7 +449,7 @@
     (if (or (nil? operations) (sequential? operations))
       (some #(validate-operation workspace % context stages) operations)
       (reject :invalid-input :anomalies.deliberation/invalid-transaction
-              "Transaction :tx/operations must be a sequence of operations"
+              (messages/system-t :anomaly/invalid-transaction)
               {:operations operations}))))
 
 ;------------------------------------------------------------------------------ Layer 2
