@@ -82,6 +82,8 @@
         container (container "service" environment environment-from)
         observed (assoc-in (pod {"containers" [container]}) ["metadata" "labels"] {"app" "service"})
         result (captured/resource-list "PodList" [observed])]
-    (assoc result "metadata" {"resourceVersion" "42"})))
+    (-> result
+        (assoc "metadata" {"resourceVersion" "42"})
+        (update "items" (partial mapv #(dissoc % "apiVersion" "kind"))))))
 
 (comment ::pod-reference-fixtures)

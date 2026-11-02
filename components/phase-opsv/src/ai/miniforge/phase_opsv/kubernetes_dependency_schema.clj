@@ -6,8 +6,7 @@
   (:require [ai.miniforge.phase-opsv.kubernetes-reference-schema-builder :as builder]
             [ai.miniforge.phase-opsv.kubernetes-reference-sources :as sources]
             [ai.miniforge.phase-opsv.kubernetes-name-schema :as names]
-            [ai.miniforge.phase-opsv.kubernetes-resource-schema :as resource]
-            [ai.miniforge.phase-opsv.kubernetes-snapshot-schema :as snapshot]
+            [ai.miniforge.phase-opsv.kubernetes-list-schema :as lists]
             [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -46,12 +45,11 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (def ^{:stratum 2} PodList
-  [:and snapshot/PodList
+  [:and lists/PodList
    [:map
     ["metadata" [:map ["resourceVersion" schema/NonBlankString]
                   ["continue" {:optional true} :string]]]
-    ["items" [:vector [:and resource/Pod
-                      [:map ["metadata" [:map ["namespace" names/NamespaceName]]]
-                       ["spec" PodDependencies]]]]]]])
+    ["items" [:vector [:map ["metadata" [:map ["namespace" names/NamespaceName]]]
+                       ["spec" PodDependencies]]]]]])
 
 (comment ::complete-known-reference-admission)
