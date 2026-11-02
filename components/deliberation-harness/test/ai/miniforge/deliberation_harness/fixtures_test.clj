@@ -54,3 +54,6 @@
     (is (anomaly/anomaly? (fixtures/score {:id "t" :reference {:a 1} :experiments [1 2]} {:a 1} []))))
   (testing "inspected ids that are not a collection"
     (is (anomaly/anomaly? (fixtures/score (first (fixtures/tasks)) {} 5)))))
+
+(deftest ^{:stratum 1} an-omitted-choice-never-scores
+  (is (= {:a false} (:checks (fixtures/score {:id "t" :reference {:a nil}} {} [])))))

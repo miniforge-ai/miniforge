@@ -129,3 +129,7 @@
   (testing "equal host sets digest alike whatever their insertion order"
     (is (= (codec/digest (doto (java.util.LinkedHashSet.) (.add :a) (.add :b)))
            (codec/digest (doto (java.util.LinkedHashSet.) (.add :b) (.add :a)))))))
+
+(deftest ^{:stratum 1} strings-utf8-cannot-carry-never-collide-or-journal
+  (is (not= (codec/digest "\uD800") (codec/digest "\uDBFF")))
+  (is (not (codec/plain? {:s "\uD800"}))))

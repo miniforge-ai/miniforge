@@ -123,10 +123,13 @@
   [value]
   (stably #(emit value)))
 
-(defn ^{:stratum 1} digest
-  "Lowercase hex SHA-256 of `value`'s canonical encoding."
-  [value]
-  (let [bytes (.getBytes ^String (encode value) "UTF-8")
+;; Lowercase hex SHA-256 of `value`'s canonical encoding, hashed as UTF-16
+;; code units so that no two Java strings (even ones holding unpaired
+;; surrogates, which UTF-8 cannot carry) share a digest.
+(defn ^{:stratum 1} digest [value]
+  (let [text ^String (encode value)
+        bytes (.array (doto (java.nio.ByteBuffer/allocate (* 2 (count text)))
+                        (-> .asCharBuffer (.put text))))
         hashed (.digest (MessageDigest/getInstance digest-algorithm) bytes)]
     (format "%064x" (BigInteger. 1 hashed))))
 
@@ -166,15 +169,15 @@
   [source]
   (second (parse-source source)))
 
-(defn ^{:stratum 2} plain?
-  "True when `value` survives an encode and read unchanged, in value and in
-   encoding, so a record written from it replays to the same hash. False
-   for objects EDN cannot carry (an `Instant`, a function), for values that
-   print ambiguously, and for host collections such as a `LinkedHashMap`
-   whose key order canonicalization does not fix."
-  [value]
+;; True when `value` survives an encode, a UTF-8 file and a read unchanged,
+;; in value and in encoding, so a record written from it replays to the same
+;; hash. False for objects EDN cannot carry (an `Instant`, a function), for
+;; text UTF-8 cannot hold, and for host collections such as a
+;; `LinkedHashMap`, whose replay is a different value.
+(defn ^{:stratum 2} plain? [value]
   (let [encoded (encode value)
         [status read-back] (parse encoded)]
     (and (= :ok status)
+         (= encoded (String. (.getBytes ^String encoded "UTF-8") "UTF-8"))
          (= value read-back)
          (= encoded (encode read-back)))))

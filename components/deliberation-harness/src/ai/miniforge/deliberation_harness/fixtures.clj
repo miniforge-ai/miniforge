@@ -36,7 +36,9 @@
   (select-keys task public-keys))
 
 (defn- ^{:stratum 0} checks [task solution]
-  (into {} (map (fn [[k value]] [k (= value (get solution k))])) (:reference task)))
+  (into {} (map (fn [[k value]] [k (and (map? solution) (contains? solution k)
+                                        (= value (get solution k)))]))
+        (:reference task)))
 
 (defn- ^{:stratum 0} complete-inspection? [task inspected]
   (= (set (keys (:experiments task))) (set inspected)))
