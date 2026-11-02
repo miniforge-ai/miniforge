@@ -200,3 +200,22 @@
                                   guards/guard-stages))]
     (is (= :anomalies.deliberation/challenge-limit (subtype-of (as :skeptic-1))))
     (is (nil? (as :skeptic-2)))))
+
+(deftest ^{:stratum 2} idempotency-is-keyed-on-the-participant
+  (let [committed {:op :refine-claim :targets #{"claim-1"} :statement "first"}
+        logged (fn [participant role]
+                 (assoc (tx/new-transaction {:role role :activation "act-1" :basis 9
+                                             :operations [committed]})
+                        :tx/participant participant))
+        as (fn [ws participant role]
+             (validation/validate ws (assoc (tx/new-transaction
+                                             {:role role :activation "act-9" :basis 10
+                                              :operations [committed]})
+                                            :tx/participant participant)
+                                  guards/guard-stages))
+        ws (workspace [(claim-object "claim-1")] :log [(logged :proposer-1 :proposer)])]
+    (testing "another participant sharing the role may submit the same payload"
+      (is (nil? (as ws :proposer-2 :proposer))))
+    (testing "the same participant under another role is still a retry"
+      (is (= :anomalies.deliberation/duplicate-operation
+             (subtype-of (as ws :proposer-1 :skeptic)))))))

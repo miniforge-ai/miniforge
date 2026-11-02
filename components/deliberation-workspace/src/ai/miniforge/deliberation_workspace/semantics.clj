@@ -18,13 +18,12 @@
 (ns ai.miniforge.deliberation-workspace.semantics
   "Semantic admission stages (N14 §3.4): operation fields, creation and
    target types, reference integrity, and adoption rules. They check
-   structure, never the truth of prose. Attestation lives in `provenance`."
+   structure, never the truth of prose. Attestation is a separate stage set."
   (:require
    [ai.miniforge.deliberation-workspace.messages :as messages]
    [ai.miniforge.deliberation-workspace.object :as object]
    [ai.miniforge.deliberation-workspace.transaction :as tx]
-   [ai.miniforge.deliberation-workspace.validation :as validation]
-   [clojure.set :as set]))
+   [ai.miniforge.deliberation-workspace.validation :as validation]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -103,12 +102,24 @@
     :constraint (not (contains? constraint-kinds (get-in spec [:attrs :kind])))
     false))
 
-(defn- ^{:stratum 0} covers-goals?
-  "True when `decision` is adopted and depends on every goal in `goal-ids`."
-  [decision goal-ids]
+(def ^{:stratum 0} text-operations
+  "Operations whose own `:statement` is written onto their target."
+  (conj tx/revisions :answer-question))
+
+(defn- ^{:stratum 0} covers-goal?
+  "True when `decision` is adopted and depends on `goal-id`."
+  [decision goal-id]
   (and (= :decision (:object/type decision))
        (= :accepted (:object/status decision))
-       (set/subset? goal-ids (set (get-in decision [:object/links :depends-on])))))
+       (contains? (set (get-in decision [:object/links :depends-on])) goal-id)))
+
+(defn- ^{:stratum 0} statements
+  "Every statement text `operation` would write: its created objects' and,
+   for a revision or an answer, its own text. Payload validation guarantees
+   both are strings."
+  [operation]
+  (cond-> (map :statement (validation/created-specs operation))
+    (contains? text-operations (:op operation)) (conj (:statement operation))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -139,15 +150,11 @@
 
 (defn- ^{:stratum 1} check-fields [_workspace operation _context]
   (when (or (seq (remove operation-keys (keys operation)))
+            (and (contains? operation :statement)
+                 (not (contains? text-operations (:op operation))))
             (some spec-fields-defect? (validation/created-specs operation)))
     (validation/reject-operation :anomalies.deliberation/unknown-field
                                  (messages/system-t :anomaly/unknown-field) operation)))
-
-(defn- ^{:stratum 0} statements
-  "Every statement text `operation` would write: its created objects' and
-   its own revision or answer text."
-  [operation]
-  (cons (:statement operation) (map :statement (validation/created-specs operation))))
 
 (defn- ^{:stratum 1} check-statement-cap [workspace operation _context]
   (let [cap (get workspace :workspace/statement-cap default-statement-cap)]
@@ -174,6 +181,14 @@
         (validation/reject-operation :anomalies.deliberation/target-type
                                      (messages/system-t :anomaly/target-type) operation)))))
 
+(defn- ^{:stratum 1} non-evidence-reference?
+  "True when an id in the operation's `:evidence` names an object that is
+   not evidence, existing or created here."
+  [workspace operation]
+  (let [created (into {} (map (juxt :id :type)) (validation/created-specs operation))
+        type-of #(or (get-in (validation/objects-of workspace) [% :object/type]) (get created %))]
+    (some #(not= :evidence (type-of %)) (get operation :evidence []))))
+
 (defn- ^{:stratum 1} check-references [workspace operation _context]
   (let [existing (set (keys (validation/objects-of workspace)))
         known (into existing (map :id) (validation/created-specs operation))]
@@ -182,16 +197,32 @@
                                    (messages/system-t :anomaly/dangling-reference)
                                    operation))))
 
+(defn- ^{:stratum 1} check-evidence-references
+  "Every id an operation cites as `:evidence` names evidence; a challenge
+   cannot be backed by citing a goal or a claim."
+  [workspace operation _context]
+  (when (non-evidence-reference? workspace operation)
+    (validation/reject-operation :anomalies.deliberation/non-evidence-reference
+                                 (messages/system-t :anomaly/non-evidence-reference)
+                                 operation)))
+
 (defn- ^{:stratum 1} check-attributes [_workspace operation _context]
   (when (some attribute-defect? (validation/created-specs operation))
     (validation/reject-operation :anomalies.deliberation/invalid-attribute
                                  (messages/system-t :anomaly/invalid-attribute) operation)))
 
-(defn- ^{:stratum 1} check-goal-closure [workspace operation _context]
+(defn- ^{:stratum 1} uncovered-goal?
+  "True when no decision among `resolves` is an adopted cover for `goal-id`."
+  [workspace resolves goal-id]
+  (not-any? #(covers-goal? (get (validation/objects-of workspace) %) goal-id) resolves))
+
+(defn- ^{:stratum 1} check-goal-closure
+  "N14 §2.3: every closed goal has an adopted covering decision among the
+   decisions the closure names; different goals may name different ones."
+  [workspace operation _context]
   (when (and (= :close-goal (:op operation))
-             (not (some #(covers-goals? (get (validation/objects-of workspace) %)
-                                        (set (get operation :targets [])))
-                        (get-in operation [:links :resolves] []))))
+             (some #(uncovered-goal? workspace (get-in operation [:links :resolves] []) %)
+                   (get operation :targets [])))
     (validation/reject-operation :anomalies.deliberation/uncovered-closure
                                  (messages/system-t :anomaly/uncovered-closure) operation)))
 
@@ -212,4 +243,4 @@
   "Ordered semantic stages. Field and type checks lead because the later
    stages read fields and object types those establish."
   [check-fields check-statement-cap check-creation-types check-target-types
-   check-references check-attributes check-goal-closure check-choice-point])
+   check-references check-evidence-references check-attributes check-goal-closure check-choice-point])

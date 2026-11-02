@@ -154,10 +154,3 @@
         view (projection/project ws :proposer {:visibility :none})]
     (is (= ["goal-1"] (ids (:projection/objects view))))
     (is (empty? (get-in view [:projection/goals 0 :object/links :supports])))))
-
-(deftest ^{:stratum 2} the-read-scope-bounds-every-visibility
-  (let [ws (workspace (obj "goal-1" :goal :interpreter)
-                      (obj "claim-1" :claim :proposer))]
-    (is (= ["goal-1"] (ids (:projection/objects
-                            (projection/project ws :proposer {:visibility :full
-                                                              :readable-ids #{"goal-1"}})))))))

@@ -29,6 +29,7 @@
   :anomaly/creation-type             "Operation creates no object, or an object type it may not create"
   :anomaly/target-type               "Operation requires targets of the types it acts on"
   :anomaly/dangling-reference        "Reference names no existing object or object created by this operation"
+  :anomaly/non-evidence-reference    "An :evidence reference must name an evidence object"
   :anomaly/invalid-attribute         "Evidence needs a known source class; a constraint needs a hard or soft kind"
   :anomaly/uncovered-closure         "Goal closure must resolve to an adopted decision covering every closed goal"
   :anomaly/choice-point              "Adoption needs a choice point no other adopted decision holds; supersede it first"
