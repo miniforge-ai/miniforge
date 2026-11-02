@@ -25,24 +25,35 @@
    [ai.miniforge.deliberation-harness.codec :as codec]
    [ai.miniforge.deliberation-harness.messages :as messages]
    [ai.miniforge.file-durability.interface :as durable]
-   [clojure.java.io :as io]))
+   [clojure.java.io :as io])
+  (:import
+   (java.io File)
+   (java.util Locale)))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} record-name-pattern
-  "Record files are the zero-padded sequence number, so name order is
-   sequence order."
-  #"[0-9]{6}\.edn")
+  "Record files are the sequence number, zero-padded to at least six digits."
+  #"([0-9]{6,})\.edn")
 
 (def ^{:stratum 0} record-name-format "%06d.edn")
 
 (defn- ^{:stratum 0} record-file [directory sequence]
-  (io/file directory (format record-name-format sequence)))
+  (io/file directory (String/format Locale/ROOT record-name-format (to-array [sequence]))))
 
-(defn- ^{:stratum 0} record-files [directory]
-  (->> (.listFiles (io/file directory))
-       (filter #(re-matches record-name-pattern (.getName ^java.io.File %)))
-       (sort-by #(.getName ^java.io.File %))))
+(defn- ^{:stratum 0} record-number
+  "The sequence number a record file's name carries, or nil for another file."
+  [^File file]
+  (some-> (re-matches record-name-pattern (.getName file)) second bigint))
+
+(defn- ^{:stratum 0} record-files
+  "The record files in `directory` in numeric sequence order, or an anomaly
+   when the directory cannot be listed."
+  [directory]
+  (if-let [files (.listFiles (io/file directory))]
+    (sort-by record-number (filter record-number files))
+    (anomaly/anomaly :unavailable (messages/system-t :anomaly/unlistable-journal)
+                     {:directory (str directory)})))
 
 (defn- ^{:stratum 0} chain-anomaly [file]
   (anomaly/anomaly :conflict (messages/system-t :anomaly/broken-chain)
@@ -85,8 +96,20 @@
     (or (failure (durable/write-new-text! file (codec/encode record)))
         (failure (durable/confirm! file)))))
 
-(defn- ^{:stratum 1} read-record [file]
-  (codec/read-text (slurp file)))
+(defn- ^{:stratum 1} verified-records
+  "The records in `files`, verified as one unbroken chain from sequence zero,
+   or the anomaly for the first file that cannot be read or breaks it."
+  [files]
+  (loop [files files
+         previous nil
+         sequence 0
+         records []]
+    (if-let [file (first files)]
+      (let [record (codec/read-source file)]
+        (if (links? record sequence previous)
+          (recur (next files) (:hash record) (inc sequence) (conj records record))
+          (or (failure record) (chain-anomaly file))))
+      records)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -94,27 +117,22 @@
   "Durably append `payload` as the next record. Returns the record's hash, or
    the anomaly from writing it; a failed append leaves the position where it
    was, so nothing later can chain onto a record that was not forced."
-  [{:journal/keys [directory position]} payload]
-  (locking position
-    (let [{:keys [sequence previous]} @position
-          record (sealed {:sequence sequence :previous previous :payload payload})
-          failure (persist! directory record)]
-      (if failure
-        failure
-        (do (reset! position {:sequence (inc sequence) :previous (:hash record)})
-            (:hash record))))))
+  [journal payload]
+  (let [directory (:journal/directory journal)
+        position (:journal/position journal)]
+    (locking position
+      (let [{:keys [sequence previous]} @position
+            record (sealed {:sequence sequence :previous previous :payload payload})
+            failure (persist! directory record)]
+        (if failure
+          failure
+          (do (reset! position {:sequence (inc sequence) :previous (:hash record)})
+              (:hash record)))))))
 
 (defn ^{:stratum 2} read-journal
   "Every record in `directory`, verified as one unbroken chain from sequence
-   zero, or an anomaly naming the first record that breaks it."
+   zero, or an anomaly naming the directory or the first record that breaks
+   or cannot be read."
   [directory]
-  (loop [files (record-files directory)
-         previous nil
-         sequence 0
-         records []]
-    (if-let [file (first files)]
-      (let [record (read-record file)]
-        (if (links? record sequence previous)
-          (recur (next files) (:hash record) (inc sequence) (conj records record))
-          (chain-anomaly file)))
-      records)))
+  (let [files (record-files directory)]
+    (if (anomaly/anomaly? files) files (verified-records files))))

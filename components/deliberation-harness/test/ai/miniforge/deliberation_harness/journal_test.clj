@@ -69,3 +69,26 @@
         (spit (io/file dir "000001.edn") (pr-str {:sequence 1 :payload {:turn 9000}}))
         (testing "an edited record is detected"
           (is (anomaly/anomaly? (journal/read-journal dir))))))))
+
+(deftest ^{:stratum 1 :integration true} an-unlistable-directory-is-an-anomaly
+  (with-journal-dir
+    (fn [dir]
+      (is (anomaly/anomaly? (journal/read-journal dir))))))
+
+(deftest ^{:stratum 1 :integration true} an-unreadable-record-is-an-anomaly
+  (with-journal-dir
+    (fn [dir]
+      (journal/open! dir)
+      (.mkdir (io/file dir "000000.edn"))
+      (let [result (journal/read-journal dir)]
+        (is (anomaly/anomaly? result))
+        (is (= :unavailable (:anomaly/type result)))))))
+
+(deftest ^{:stratum 1 :integration true} record-files-sort-numerically-past-six-digits
+  (with-journal-dir
+    (fn [dir]
+      (journal/open! dir)
+      (doseq [name ["1000000.edn" "999999.edn" "notes.txt"]]
+        (spit (io/file dir name) "{}"))
+      (is (= ["999999.edn" "1000000.edn"]
+             (map #(.getName ^java.io.File %) (#'journal/record-files dir)))))))

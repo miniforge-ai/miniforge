@@ -24,6 +24,7 @@
    [clojure.edn :as edn]
    [clojure.walk :as walk])
   (:import
+   (java.io PushbackReader StringReader)
    (java.math BigInteger)
    (java.security MessageDigest)))
 
@@ -31,8 +32,22 @@
 
 (def ^{:stratum 0} digest-algorithm "SHA-256")
 
-(defn- ^{:stratum 0} printed-order [a b]
-  (compare (pr-str a) (pr-str b)))
+(deftype ^{:stratum 0} RejectedTag [tag])
+
+(defn- ^{:stratum 0} stably
+  "Call `f` with fixed, readable, untruncated printer settings, so a caller's
+   bindings cannot change an encoding or the order canonicalization picks."
+  [f]
+  (binding [*print-length* nil *print-level* nil *print-meta* false
+            *print-dup* false *print-readably* true *print-namespace-maps* false]
+    (f)))
+
+(defn- ^{:stratum 0} printed-order
+  "Compare by printed form. Stable printing is bound here, not around the
+   walk, because a sorted collection keeps calling its comparator after
+   `canonical` returns."
+  [a b]
+  (stably #(compare (pr-str a) (pr-str b))))
 
 (defn- ^{:stratum 0} ordered [value]
   (cond
@@ -43,21 +58,35 @@
 (defn- ^{:stratum 0} mark-tag
   "EDN reader for any custom tag. Journals and manifests carry plain data
    (EDN's built-in `#inst` and `#uuid` included), so a custom-tagged value
-   becomes a marker that `read-text` refuses."
+   becomes a marker plain EDN cannot construct, which `read-text` refuses."
   [tag _value]
-  {::rejected-tag tag})
+  (->RejectedTag tag))
 
 (defn- ^{:stratum 0} rejected-tag [value]
-  (some ::rejected-tag (filter map? (tree-seq coll? seq value))))
+  (some #(when (instance? RejectedTag %) (.-tag ^RejectedTag %))
+        (tree-seq coll? seq value)))
 
-(defn- ^{:stratum 0} parse
-  "Plain `try`: this component has no slingshot dependency and this is its
-   one catch (dewey 211, exemption 1)."
-  [text]
+(defn- ^{:stratum 0} attempt
+  "Call `f`, returning its value, or an anomaly of `type` carrying `message`,
+   `data` and the exception's provenance when it throws. Plain `try`: this
+   component has no slingshot dependency and this is its one catch (dewey 211,
+   exemption 1)."
+  [f type message data]
   (try
-    (edn/read-string {:readers {} :default mark-tag} text)
+    (f)
     (catch Exception e
-      (anomaly/exception-anomaly :invalid-input (messages/system-t :anomaly/unreadable-edn) e))))
+      (anomaly/exception-anomaly type message data e))))
+
+(defn- ^{:stratum 0} single-form
+  "The one EDN form in `text`, or an anomaly when there is none or more."
+  [^String text]
+  (let [reader (PushbackReader. (StringReader. text))
+        eof (Object.)
+        options {:readers {} :default mark-tag :eof eof}
+        value (edn/read options reader)]
+    (if (and (not (identical? eof value)) (identical? eof (edn/read options reader)))
+      value
+      (anomaly/anomaly :invalid-input (messages/system-t :anomaly/not-one-form) {}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -69,7 +98,7 @@
 (defn ^{:stratum 1} encode
   "The canonical EDN text of `value`."
   [value]
-  (pr-str (canonical value)))
+  (stably #(pr-str (canonical value))))
 
 (defn ^{:stratum 1} digest
   "Lowercase hex SHA-256 of `value`'s canonical encoding."
@@ -79,13 +108,23 @@
     (format "%064x" (BigInteger. 1 hashed))))
 
 (defn ^{:stratum 1} read-text
-  "Parse `text` as plain EDN, or return an `:invalid-input` anomaly for text
-   that does not parse or carries a custom reader tag."
+  "Parse `text` as exactly one plain EDN form, or return an `:invalid-input`
+   anomaly for text that does not parse, holds other than one form, or
+   carries a custom reader tag."
   [text]
-  (let [value (parse text)]
+  (let [value (attempt #(single-form text) :invalid-input
+                       (messages/system-t :anomaly/unreadable-edn) {})]
     (cond
       (anomaly/anomaly? value) value
       (rejected-tag value) (anomaly/anomaly :invalid-input
                                             (messages/system-t :anomaly/unknown-tag)
                                             {:tag (rejected-tag value)})
       :else value)))
+
+(defn ^{:stratum 1} read-source
+  "Read `source` (a file or resource URL) and parse it with `read-text`, or
+   return an anomaly naming the source when it cannot be read."
+  [source]
+  (let [text (attempt #(slurp source) :unavailable
+                      (messages/system-t :anomaly/unreadable-source) {:source (str source)})]
+    (if (anomaly/anomaly? text) text (read-text text))))

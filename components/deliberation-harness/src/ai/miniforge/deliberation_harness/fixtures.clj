@@ -19,7 +19,9 @@
   "Synthetic development tasks and their deterministic scoring. A task's
    sealed reference and distractors stay outside every model request."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-harness.codec :as codec]
+   [ai.miniforge.deliberation-harness.messages :as messages]
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -42,9 +44,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} tasks
-  "The synthetic task package, or an anomaly when the resource is unreadable."
+  "The synthetic task package, or an anomaly when the resource is missing or
+   unreadable."
   []
-  (codec/read-text (slurp (io/resource tasks-resource))))
+  (if-let [resource (io/resource tasks-resource)]
+    (codec/read-source resource)
+    (anomaly/anomaly :not-found (messages/system-t :anomaly/missing-resource)
+                     {:resource tasks-resource})))
 
 (defn ^{:stratum 1} score
   "Score `solution` for `task` given the experiment ids `inspected`. Success

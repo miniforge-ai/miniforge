@@ -42,3 +42,27 @@
     (is (anomaly/anomaly? (codec/read-text "{:a [#custom/tag 1]}"))))
   (testing "unreadable text is an anomaly, not an exception"
     (is (anomaly/anomaly? (codec/read-text "{:a")))))
+
+(deftest ^{:stratum 1} reading-takes-exactly-one-form
+  (testing "trailing forms and malformed suffixes are refused"
+    (is (anomaly/anomaly? (codec/read-text "{:a 1} #custom/tag 2")))
+    (is (anomaly/anomaly? (codec/read-text "{:a 1} {")))
+    (is (anomaly/anomaly? (codec/read-text "{:a 1} {:b 2}"))))
+  (testing "empty text holds no form"
+    (is (anomaly/anomaly? (codec/read-text "")))))
+
+(deftest ^{:stratum 1} plain-data-cannot-forge-the-tag-marker
+  (let [value {:ai.miniforge.deliberation-harness.codec/rejected-tag 'x}]
+    (is (= value (codec/read-text (codec/encode value))))))
+
+(deftest ^{:stratum 1} encoding-ignores-the-callers-printer-settings
+  (let [value {:a [1 2 3] :b {:c {:d 1}} :e/f 1 :e/g 2}
+        expected (codec/encode value)]
+    (binding [*print-length* 1 *print-level* 1 *print-namespace-maps* true]
+      (is (= expected (codec/encode value))))
+    (is (= value (codec/read-text expected)))))
+
+(deftest ^{:stratum 1} canonical-order-ignores-the-callers-printer-settings
+  (let [ordered (codec/canonical {[1 2 3] :long [1 2] :short})]
+    (binding [*print-length* 1]
+      (is (= 3 (count (assoc ordered [1 9] :new)))))))
