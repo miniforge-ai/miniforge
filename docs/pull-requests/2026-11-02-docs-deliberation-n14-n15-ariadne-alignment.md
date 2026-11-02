@@ -17,7 +17,8 @@ the code conforms to specs that are already on main.
 The snapshot amended N14 0.2.1 and N15 0.2.0 to:
 
 - make Ariadne v1.6.1 §§11 and 13 the authority and information-flow contract,
-  so a deliberation decision never authorizes an external effect;
+  cited at the `ariadne/v1.6.1` tag as Ariadne's VERSIONING.md requires, so a
+  deliberation decision never authorizes an external effect;
 - separate runtime-established participant identity from responsibility;
 - allow actionable challenges of adopted records, and add an explicit
   `supersede` operation;

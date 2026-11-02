@@ -75,9 +75,10 @@ Its lifecycle is bound to the N15 gates:
 
 ### 0.5 Ariadne alignment and experimental profile
 
-Ariadne v1.6.1 §§11 and 13
-([tenancy-ownership-access](../../docs/architecture/ariadne/tenancy-ownership-access.md))
-is the authority and information-flow contract for this specification.
+Ariadne v1.6.1 §§11 and 13, cited at its release tag `ariadne/v1.6.1`
+([tenancy-ownership-access][ariadne-v1.6.1]),
+is the authority and information-flow contract for this specification. Adopting a
+later Ariadne version is a spec change here, not an implicit drift.
 A deliberation decision records a chosen alternative; it MUST NOT confer an
 ExecutionGrant or substitute for a DecisionEnvelope or an effect receipt.
 Participant identity, responsibility, activation identity and basis MUST be
@@ -87,6 +88,8 @@ A synthetic development profile — runnable experimental infrastructure over
 synthetic tasks — is neither Stage 1 adoption nor N15 gate evidence. It MUST
 NOT accept arbitrary repository or customer data while the Ariadne object-label
 and provider-egress boundaries are absent.
+
+[ariadne-v1.6.1]: https://github.com/miniforge-ai/miniforge/blob/ariadne/v1.6.1/docs/architecture/ariadne/tenancy-ownership-access.md
 
 ## 1. Terminology
 
