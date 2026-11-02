@@ -91,7 +91,7 @@ Deviations from the snapshot:
   needs every observation; the public view hides the sealed answer.
 
 Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
-sandbox, so a local stand-in replaced malli): 32 tests, 78 assertions,
+sandbox, so a local stand-in replaced malli): 32 tests, 80 assertions,
 0 failures. clj-kondo 2026.10.26 (the CI version) over `bases components
 development/src`: 0 errors. `poly test` and the Polylith check ran only in CI.
 

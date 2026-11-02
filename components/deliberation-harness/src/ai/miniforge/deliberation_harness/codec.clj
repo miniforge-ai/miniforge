@@ -37,9 +37,9 @@
 
 (deftype ^{:stratum 0} RejectedTag [tag])
 
+;; Call `f` with fixed, readable, untruncated printer settings, so a caller's
+;; bindings cannot change an encoding.
 (defn- ^{:stratum 0} stably
-  "Call `f` with fixed, readable, untruncated printer settings, so a caller's
-   bindings cannot change an encoding."
   [f]
   (binding [*print-length* nil *print-level* nil *print-meta* false
             *print-dup* false *print-readably* true *print-namespace-maps* false]
@@ -100,9 +100,9 @@
     (catch Exception e
       [:failure (anomaly/exception-anomaly type message data e)])))
 
+;; `[:ok form]` for the one EDN form in `text`, or `[:failure anomaly]`
+;; when there is none or more.
 (defn- ^{:stratum 0} single-form
-  "`[:ok form]` for the one EDN form in `text`, or `[:failure anomaly]`
-   when there is none or more."
   [^String text]
   (let [reader (PushbackReader. (StringReader. text))
         eof (Object.)

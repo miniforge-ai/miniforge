@@ -130,7 +130,7 @@
     (is (not= (codec/digest (doto (java.util.HashMap.) (.put (int 1) :a) (.put 1 :b)))
               (codec/digest (doto (java.util.HashMap.) (.put (int 1) :b) (.put 1 :a)))))
     (is (not= (codec/digest (java.util.HashMap. {:a (int 1)})) (codec/digest (java.util.HashMap. {:a 1}))))
-    (is (not= (codec/digest (java.util.ArrayList. [(int 1)])) (codec/digest (java.util.ArrayList. [1]))))))
+    (is (not= (codec/digest (java.util.ArrayList. [(int 1)])) (codec/digest (java.util.ArrayList. [1])))))
   (testing "equal host sets digest alike whatever their insertion order"
     (is (= (codec/digest (doto (java.util.LinkedHashSet.) (.add :a) (.add :b)))
            (codec/digest (doto (java.util.LinkedHashSet.) (.add :b) (.add :a)))))))
