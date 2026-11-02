@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.phase-opsv.actuation :as actuation]
    [ai.miniforge.phase-opsv.boundary.kubernetes-snapshot :as kubernetes-snapshot]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-client :as kubernetes-client]
    [ai.miniforge.phase-opsv.evidence-recovery :as recovery]
    [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
    [ai.miniforge.phase-opsv.adapter-factory :as adapter-factory]
@@ -118,6 +119,11 @@
    Acquisition owns target selection and configuration-reference closure.
    This is neither a live capture nor a freshness, verification or authority proof."
   kubernetes-snapshot/decode)
+
+(def ^{:stratum 0} observe-kubernetes-fingerprint!
+  "Read one explicit target and its ConfigMap/Secret dependencies within declared bounds.
+   This is a bounded multi-read capture, not an atomic cluster snapshot or authority grant."
+  kubernetes-client/observe-fingerprint!)
 
 (comment
   (functional-adapter identity identity))
