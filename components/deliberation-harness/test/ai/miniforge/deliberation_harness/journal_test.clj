@@ -92,3 +92,20 @@
         (spit (io/file dir name) "{}"))
       (is (= ["999999.edn" "1000000.edn"]
              (map #(.getName ^java.io.File %) (#'journal/record-files dir)))))))
+
+(deftest ^{:stratum 1 :integration true} a-payload-that-cannot-replay-is-refused
+  (with-journal-dir
+    (fn [dir]
+      (let [log (journal/open! dir)]
+        (is (anomaly/anomaly? (journal/append! log {:at (java.time.Instant/now)})))
+        (testing "nothing was written and the position did not move"
+          (is (= [] (journal/read-journal dir)))
+          (journal/append! log {:turn 1})
+          (is (= [0] (mapv :sequence (journal/read-journal dir)))))))))
+
+(deftest ^{:stratum 1 :integration true} a-malformed-record-names-its-file
+  (with-journal-dir
+    (fn [dir]
+      (journal/open! dir)
+      (spit (io/file dir "000000.edn") "{:sequence")
+      (is (some? (get-in (journal/read-journal dir) [:anomaly/data :source]))))))

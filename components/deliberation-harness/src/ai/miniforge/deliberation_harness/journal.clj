@@ -111,12 +111,10 @@
           (or (failure record) (chain-anomaly file))))
       records)))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} append!
-  "Durably append `payload` as the next record. Returns the record's hash, or
-   the anomaly from writing it; a failed append leaves the position where it
-   was, so nothing later can chain onto a record that was not forced."
+(defn- ^{:stratum 1} write-next!
+  "Seal and force `payload` as the next record, returning its hash or the
+   write anomaly. A failed write leaves the position where it was, so
+   nothing later can chain onto a record that was not forced."
   [journal payload]
   (let [directory (:journal/directory journal)
         position (:journal/position journal)]
@@ -128,6 +126,17 @@
           failure
           (do (reset! position {:sequence (inc sequence) :previous (:hash record)})
               (:hash record)))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} append!
+  "Durably append `payload` as the next record. Returns the record's hash, an
+   `:invalid-input` anomaly for a payload that is not plain EDN (it could
+   not be replayed), or the anomaly from writing it."
+  [journal payload]
+  (if (codec/plain? payload)
+    (write-next! journal payload)
+    (anomaly/anomaly :invalid-input (messages/system-t :anomaly/unencodable-payload) {})))
 
 (defn ^{:stratum 2} read-journal
   "Every record in `directory`, verified as one unbroken chain from sequence

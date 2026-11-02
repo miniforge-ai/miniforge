@@ -66,3 +66,18 @@
   (let [ordered (codec/canonical {[1 2 3] :long [1 2] :short})]
     (binding [*print-length* 1]
       (is (= 3 (count (assoc ordered [1 9] :new)))))))
+
+(deftest ^{:stratum 1} values-that-print-alike-stay-distinct
+  (is (= 2 (count (codec/canonical (hash-set (float 1.2) (double 1.2))))))
+  (is (= 2 (count (codec/canonical (hash-map (float 1.2) :f (double 1.2) :d))))))
+
+(deftest ^{:stratum 1} plain-values-round-trip
+  (is (codec/plain? {:a [1 "x" #{:k}] :b nil}))
+  (is (not (codec/plain? {:at (java.time.Instant/now)})))
+  (is (not (codec/plain? {:x (float 1.2)}))))
+
+(deftest ^{:stratum 1} a-tag-inside-anomaly-shaped-text-is-refused
+  (is (= :invalid-input
+         (:anomaly/type (codec/read-text
+                         (str "{:anomaly/type :fault :anomaly/message \"m\""
+                              " :anomaly/data {:x #custom/tag 1} :anomaly/at #inst \"2026-01-01\"}"))))))

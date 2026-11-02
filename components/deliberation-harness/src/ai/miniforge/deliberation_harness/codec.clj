@@ -43,11 +43,15 @@
     (f)))
 
 (defn- ^{:stratum 0} printed-order
-  "Compare by printed form. Stable printing is bound here, not around the
-   walk, because a sorted collection keeps calling its comparator after
-   `canonical` returns."
+  "Compare by printed form, then by class, so distinct values that print
+   alike (a float and a double) stay distinct keys instead of merging.
+   Stable printing is bound here, not around the walk, because a sorted
+   collection keeps calling its comparator after `canonical` returns."
   [a b]
-  (stably #(compare (pr-str a) (pr-str b))))
+  (stably #(let [by-text (compare (pr-str a) (pr-str b))]
+             (if (zero? by-text)
+               (compare (.getName (class a)) (.getName (class b)))
+               by-text))))
 
 (defn- ^{:stratum 0} ordered [value]
   (cond
@@ -114,17 +118,27 @@
   [text]
   (let [value (attempt #(single-form text) :invalid-input
                        (messages/system-t :anomaly/unreadable-edn) {})]
-    (cond
-      (anomaly/anomaly? value) value
-      (rejected-tag value) (anomaly/anomaly :invalid-input
-                                            (messages/system-t :anomaly/unknown-tag)
-                                            {:tag (rejected-tag value)})
-      :else value)))
+    (if-let [tag (rejected-tag value)]
+      (anomaly/anomaly :invalid-input (messages/system-t :anomaly/unknown-tag) {:tag tag})
+      value)))
 
 (defn ^{:stratum 1} read-source
   "Read `source` (a file or resource URL) and parse it with `read-text`, or
    return an anomaly naming the source when it cannot be read."
   [source]
-  (let [text (attempt #(slurp source) :unavailable
-                      (messages/system-t :anomaly/unreadable-source) {:source (str source)})]
-    (if (anomaly/anomaly? text) text (read-text text))))
+  (let [text (attempt #(slurp source :encoding "UTF-8") :unavailable
+                      (messages/system-t :anomaly/unreadable-source) {:source (str source)})
+        value (if (anomaly/anomaly? text) text (read-text text))]
+    (if (anomaly/anomaly? value)
+      (assoc-in value [:anomaly/data :source] (str source))
+      value)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} plain?
+  "True when `value` survives an encode and read unchanged, so a record
+   written from it can be replayed. False for objects EDN cannot carry, such
+   as an `Instant` or a function, and for values that print ambiguously."
+  [value]
+  (let [read-back (read-text (encode value))]
+    (and (not (anomaly/anomaly? read-back)) (= value read-back))))
