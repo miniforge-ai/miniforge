@@ -440,7 +440,7 @@ Defines:
 - Closed object taxonomy (goal, constraint, question, claim, hypothesis, experiment, evidence, plan, decision,
   artifact-ref, conflict, blocker) with structural statuses, not numeric confidences (§2)
 - Transaction vocabulary with commutative/mergeable/exclusive classes, explicit `supersede`, semantic admission, and
-  the anti-livelock rule: a challenge must carry evidence, a discriminating experiment, or a concern plus resolution
+  the anti-livelock rule. A challenge must carry evidence, a discriminating experiment, or a concern plus resolution
   criterion (§3)
 - Deterministic projections as an activation's only input (N12-conformant), plus the `cross_visibility: none` ablation
   switch that makes shared-state value measurable (§4)
@@ -651,8 +651,8 @@ Normative specs are enforced by:
 
 - **0.28.0-draft** (2026-11-02) - N14 0.3.0 and N15 0.3.0: Ariadne alignment of the
   deliberation workspace (runtime-established participant identity, decisions that
-  never authorize effects), actionable challenges of adopted records, explicit
-  `supersede`, semantic admission, closure inside the total allowance, and
+  never authorize effects). Changes include actionable challenges of adopted records,
+  explicit `supersede`, semantic admission, closure inside the total allowance, and
   development comparisons distinguished from gate evidence.
 
 - **0.27.0-draft** (2026-10-31) - Approved paired checkpoint storage identity

@@ -16,9 +16,9 @@ the next PR.
 
 ## Motivation
 
-N14 0.3.0 makes adoption a working choice rather than proof (§2.3), keys
+N14 0.3.0 makes adoption a working choice rather than proof (§2.3). It keys
 challenge caps and idempotency on runtime-established participants (§3.4,
-§3.5), adds `supersede` (§3.2), and forbids projections from revealing
+§3.5) and adds `supersede` (§3.2). It forbids projections from revealing
 hidden objects (§4). On main, an `:accepted` object is terminal, so nothing
 can challenge it or add evidence to it. A refinement never changed the
 statement. Conflicts were never resolved. Edges in a `:none`-visibility
@@ -86,9 +86,9 @@ revision without a statement now supply one. One test that relied on
 `:accepted` being closed to `attach-evidence` now uses `:superseded`, and
 adds the accepted case as positive coverage.
 
-Ran locally on plain Clojure 1.12 with a classpath of the component sources
-(Clojars is unreachable from the authoring sandbox, so a local stand-in
-replaced malli): all 11 deliberation-workspace suites, 148 tests,
+Ran locally on plain Clojure 1.12 with a classpath of the component sources.
+Clojars is unreachable from the authoring sandbox, so a local stand-in
+replaced malli. All 11 deliberation-workspace suites ran: 148 tests,
 486 assertions, 0 failures. `poly test`, clj-kondo and the Polylith check ran
 only in CI.
 
