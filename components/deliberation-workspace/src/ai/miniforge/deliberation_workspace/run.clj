@@ -168,6 +168,7 @@
     (if (nil? proposed)
       (-> spent
           (note-quiet participant)
+          (update :workspace/feedback dissoc participant)
           (record-event {:event :transaction/passed :role participant}))
       (settle spent proposed participant context))))
 
@@ -205,7 +206,7 @@
 (defn ^{:stratum 2} step
   "Run the next scheduled activation, or record, uncharged, that none is eligible."
   [workspace activate]
-  (if-let [{:activation/keys [participant reason target]} (scheduler/next-activation workspace)]
+  (if-let [{:activation/keys [participant reason target]} (scheduler/next-activation (current-round workspace))]
     (activate-participant workspace activate
                           {:participant participant :reason reason :target target})
     (record-event workspace {:event :activation/none-eligible})))

@@ -226,8 +226,7 @@
 (deftest ^{:stratum 2} the-activation-never-receives-the-workspace
   (let [seen (atom nil)]
     (run/step (workspace) (fn [request] (reset! seen request) nil))
-    (is (= #{:role :participant :activation :basis :projection :closing? :feedback}
-           (set (keys @seen))))))
+    (is (= #{:role :participant :activation :basis :projection :closing? :feedback} (set (keys @seen))))))
 
 (deftest ^{:stratum 2} passes-and-rejections-advance-the-round
   (let [participants (atom [])
@@ -235,10 +234,9 @@
                                    :workspace/closure-reserve 1)
                         (fn [{:keys [participant]}] (swap! participants conj participant) nil)
                         {})]
-    (testing "every participant passes once, then the reserved closure turn runs"
-      (is (= [:proposer :skeptic :synthesizer :synthesizer] @participants))
-      (is (= :executed (get-in closed [:workspace/termination :termination/closure])))
-      (is (= 4 (get-in closed [:workspace/spent :activations]))))))
+    (is (= [:proposer :skeptic :synthesizer :synthesizer] @participants))
+    (is (= :executed (get-in closed [:workspace/termination :termination/closure])))
+    (is (= 4 (get-in closed [:workspace/spent :activations])))))
 
 (deftest ^{:stratum 2} a-boundary-without-a-reserve-records-an-unfunded-closure
   (let [closed (run/run (workspace) fresh-claim {})]
@@ -250,13 +248,11 @@
         ws (workspace :workspace/roles [:proposer-1 :proposer-2]
                       :workspace/participant-roles {:proposer-1 :proposer :proposer-2 :proposer})]
     (run/run (assoc ws :workspace/budget {:activations 2})
-             (fn [{:keys [role participant]}] (swap! seen conj [participant role]) nil)
-             {})
+             (fn [{:keys [role participant]}] (swap! seen conj [participant role]) nil) {})
     (is (= [[:proposer-1 :proposer] [:proposer-2 :proposer]] @seen))))
 
 (deftest ^{:stratum 2} a-closure-needs-allowance-left
-  (let [ws (workspace :workspace/budget {:activations 3} :workspace/closure-reserve 1
-                      :workspace/spent {:activations 3})
+  (let [ws (workspace :workspace/closure-reserve 1 :workspace/spent {:activations 3})
         closed (run/run ws (fn [_] (throw (ex-info "must not run" {}))) {})]
     (is (= :unfunded (get-in closed [:workspace/termination :termination/closure])))
     (is (= 3 (get-in closed [:workspace/spent :activations])))))
@@ -279,16 +275,14 @@
     (is (= [:skeptic :synthesizer] @seen))))
 
 (deftest ^{:stratum 2} a-refused-closure-is-recorded-as-refused
-  (let [ws (workspace :workspace/budget {:activations 3} :workspace/closure-reserve 1
-                      :workspace/spent {:activations 2}
+  (let [ws (workspace :workspace/closure-reserve 1 :workspace/spent {:activations 2}
                       :workspace/readable {:synthesizer #{}})
         closed (run/run ws (fn [_] (throw (ex-info "must not run" {}))) {})]
     (is (= :refused (get-in closed [:workspace/termination :termination/closure])))))
 
 (deftest ^{:stratum 2} a-negative-closure-reserve-is-refused
   (let [result (run/run (workspace :workspace/closure-reserve -1) fresh-claim {})]
-    (is (anomaly/anomaly? result))
-    (is (= :invalid-input (:anomaly/type result)))))
+    (is (and (anomaly/anomaly? result) (= :invalid-input (:anomaly/type result))))))
 
 (deftest ^{:stratum 2} a-spent-cost-ceiling-leaves-closure-unfunded
   (let [ws (workspace :workspace/budget {:activations 5 :cost 25} :workspace/closure-reserve 1
@@ -315,8 +309,7 @@
 (deftest ^{:stratum 2} a-commit-outside-the-loop-starts-a-new-round
   (let [closed (run/run (workspace :workspace/version 2 :workspace/round-version 1
                                    :workspace/passed #{:proposer :skeptic :synthesizer}
-                                   :workspace/frame-refused #{:proposer})
-                        passes {})]
+                                   :workspace/frame-refused #{:proposer}) passes {})]
     (is (not= :quiescence (get-in closed [:workspace/termination :termination/rule])))))
 
 (deftest ^{:stratum 2} the-read-scope-not-the-ablation-bounds-what-a-turn-touches
@@ -327,3 +320,10 @@
     (is (= :committed (status :workspace/visibility :none "secret")))
     (is (= :rejected (status :workspace/readable {:skeptic #{"goal-1"}} "secret")
            (status :workspace/readable {:skeptic #{"goal-1"}} "absent")))))
+
+(deftest ^{:stratum 2} a-step-schedules-from-the-current-round-and-a-pass-clears-feedback
+  (let [ws (workspace :workspace/roles [:proposer] :workspace/feedback {:proposer {:status :rejected}})
+        after (run/step (assoc ws :workspace/version 2 :workspace/round-version 1
+                               :workspace/frame-refused #{:proposer}) passes)]
+    (is (= 1 (get-in after [:workspace/spent :activations])))
+    (is (nil? (get-in after [:workspace/feedback :proposer])))))
