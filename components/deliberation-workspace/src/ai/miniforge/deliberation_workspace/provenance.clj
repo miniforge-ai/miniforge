@@ -32,7 +32,10 @@
    runtime receipt rather than a model assertion."
   #{:execution :user})
 
-(def ^{:stratum 0} artifact-ref-attributes [:capsule-id :digest :paths])
+(def ^{:stratum 0} artifact-ref-attributes
+  "The artifact-ref attributes that must equal the recorded capsule export,
+   so a reference names exactly what the runtime exported (N14 §8)."
+  [:capsule-id :digest :paths])
 
 (def ^{:stratum 0} execution-evidence-sources
   "Roles that may attach `:execution` evidence (N14 §5.3); `:user` acts
