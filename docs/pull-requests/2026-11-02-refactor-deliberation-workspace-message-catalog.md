@@ -31,6 +31,11 @@ prerequisite gives them a catalog to add keys to.
 - New `messages_test`: every key passed to `system-t` has catalog text, and
   the catalog holds no unreferenced entry.
 
+The coverage test reads the component's source files from the classpath to
+collect keys. The testing standards (dewey 400) discourage filesystem reads in
+tests; this follows `gate/messages_test`, which does the same, because no
+in-memory source lists the keys a call site passes.
+
 Not changed: the `IllegalArgumentException` texts in `object` and `commit`.
 They are programmer-error guards, which dewey 050 exempts.
 
