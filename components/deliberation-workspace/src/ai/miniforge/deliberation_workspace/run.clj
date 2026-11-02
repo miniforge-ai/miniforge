@@ -212,8 +212,7 @@
     (record-event workspace {:event :activation/none-eligible})))
 
 (defn ^{:stratum 2} close
-  "Attach `closing`. A budget boundary runs the reserved synthesizer closure turn
-   (N14 §6.3, §7.2), recorded `:executed`, `:refused` or `:unfunded`."
+  "Attach `closing`; at a budget boundary, run and record the reserved closure turn (§7.2)."
   [workspace activate closing]
   (let [participant (closer workspace)
         funded? (and (:termination/forced-synthesis closing)
