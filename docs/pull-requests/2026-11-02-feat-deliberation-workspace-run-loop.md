@@ -36,6 +36,10 @@ success, and counts quiescence by object growth.
   - New `activate-participant`: one work turn. The request carries
     `:role :participant :activation :basis :projection :closing? :feedback`,
     and the proposal goes through `admission/admit`.
+  - `:feedback` reports the last transaction's status. A rejection's reason
+    is included only when the participant sees every object (full visibility,
+    no read scope), because otherwise the reason could reveal whether a hidden
+    object exists. Trusted events always keep the reason.
   - A pass or a rejection marks the participant quiet; a commit clears the
     round.
   - New `close`: at a budget boundary, runs one closure turn for the first
@@ -97,7 +101,7 @@ before deadlock closure, and cost metering.
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 12 deliberation-workspace
-suites, 187 tests, 579 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
+suites, 188 tests, 582 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
 version) on the component: 0 errors. `poly test` and the Polylith check ran
 only in CI.
 

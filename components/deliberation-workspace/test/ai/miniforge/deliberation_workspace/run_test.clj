@@ -93,6 +93,13 @@
       (is (= :anomalies.deliberation/unknown-operation
              (:reason (first (events-of after :transaction/rejected))))))))
 
+(deftest ^{:stratum 2} a-restricted-participant-gets-no-rejection-reason
+  (let [reject (fn [_] {:tx/operations [{:op :not-an-operation}]})
+        feedback #(get-in (run/step % reject) [:workspace/feedback :proposer])]
+    (is (= :anomalies.deliberation/unknown-operation (:reason (feedback (workspace)))))
+    (is (= {:status :rejected} (feedback (workspace :workspace/visibility :none))))
+    (is (= {:status :rejected} (feedback (workspace :workspace/readable {:proposer #{"goal-1"}}))))))
+
 (deftest ^{:stratum 2} the-ablation-setting-reaches-the-projection
   (let [seen (atom nil)
         activate (fn [{:keys [projection]}] (reset! seen projection) nil)]

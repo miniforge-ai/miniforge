@@ -45,18 +45,18 @@
 (defn- ^{:stratum 0} activation-id [workspace]
   (str "activation-" (inc (get-in workspace [:workspace/spent :activations] 0))))
 
+;; The projection `participant` receives: the run's visibility, the
+;; runtime's read scope for it, and the delta since its last activation.
 (defn- ^{:stratum 0} render
-  "The projection `participant` receives: the run's visibility, the
-   runtime's read scope for it, and the delta since its last activation."
   [workspace participant]
   (projection/project workspace participant
                       {:visibility (get workspace :workspace/visibility :full)
                        :readable-ids (get-in workspace [:workspace/readable participant])
                        :since (get-in workspace [:workspace/last-seen participant] 0)}))
 
+;; Charge one activation to `participant`. A rejected or empty activation
+;; still ran, so it still costs budget.
 (defn- ^{:stratum 0} spend
-  "Charge one activation to `participant`. A rejected or empty activation
-   still ran, so it still costs budget."
   [workspace participant]
   (-> workspace
       (update-in [:workspace/spent :activations] (fnil inc 0))
@@ -68,9 +68,9 @@
   [workspace participant]
   (update workspace :workspace/passed (fnil conj #{}) participant))
 
+;; True while every configured run-level ceiling (activations, cost) has
+;; room left; a dimension with no ceiling never blocks.
 (defn- ^{:stratum 0} allowance-remains?
-  "True while every configured run-level ceiling (activations, cost) has
-   room left; a dimension with no ceiling never blocks."
   [workspace]
   (every? (fn [dimension]
             (let [ceiling (get-in workspace [:workspace/budget dimension])]
@@ -78,15 +78,22 @@
                   (< (get-in workspace [:workspace/spent dimension] 0) ceiling))))
           [:activations :cost]))
 
+;; True when `participant` sees every object: full visibility and no read
+;; scope. Only then is a rejection's reason fed back; otherwise it could reveal
+;; whether a hidden object exists, so the participant gets the status alone.
+(defn- ^{:stratum 0} open-view? [workspace participant]
+  (and (= :full (get workspace :workspace/visibility :full))
+       (nil? (get-in workspace [:workspace/readable participant]))))
+
 (defn- ^{:stratum 0} closer
   "The first participant holding synthesizer responsibility, or nil."
   [workspace]
   (first (filter #(= :synthesizer (scheduler/responsibility-of workspace %))
                  (get workspace :workspace/roles []))))
 
+;; How the closure turn ended: never attempted, refused before the model
+;; ran (nothing was charged), or executed.
 (defn- ^{:stratum 0} closure-status
-  "How the closure turn ended: never attempted, refused before the model
-   ran (nothing was charged), or executed."
   [before after funded?]
   (cond
     (not funded?) :unfunded
@@ -104,7 +111,8 @@
       (-> spent
           (note-quiet participant)
           (assoc-in [:workspace/feedback participant]
-                    {:status :rejected :reason (anomaly/subtype result)})
+                    (cond-> {:status :rejected}
+                      (open-view? spent participant) (assoc :reason (anomaly/subtype result))))
           (record-event {:event :transaction/rejected :role participant
                          :reason (anomaly/subtype result)}))
       (-> (:workspace result)
