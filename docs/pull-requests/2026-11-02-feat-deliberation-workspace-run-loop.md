@@ -111,8 +111,9 @@ None. Experimental component with no production caller.
 
 ## Related Issues/PRs
 
-- Base: #2337 (projection read scope and withheld frame, split out of this
-  PR for size), which builds on #2331, #2330 and #2329. Contract: #2328.
+- Base: main, after #2337 merged (projection read scope and withheld frame,
+  split out of this PR for size), which built on #2331, #2330 and #2329.
+  Contract: #2328.
 - Next: `bases/deliberation-lab` and `projects/deliberation-lab`.
 
 ## Checklist
