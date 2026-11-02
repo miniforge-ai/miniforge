@@ -23,14 +23,21 @@ follow the Kubernetes Pod API, including environment variables, projected volume
 image pull credentials and inline CSI credentials. Optional references remain
 explicit; any required use makes the combined resource reference required.
 
-Acquisition, bounded transport and target admission are not implemented yet.
-This work depends on the captured decoder in PR #2336 before backend integration.
+Explicit target settings require a named cluster, namespace, Pod selector and
+node-pool label. Only HTTPS API origins are admitted; no credential discovery.
+Timeout, byte and resource bounds load from schema-checked EDN defaults.
+Prometheus and Kubernetes share the HTTP wire schemas rather than copying them.
+
+Acquisition and configuration-reference closure are not implemented yet.
+Captured decoder #2336, Prometheus transport #2314 and bounded reader #2339 are merged.
 
 ## Testing Plan
 
 Use native API-shaped fixtures only. Exercise all container groups, reference
 paths, duplicate use and optional-versus-required correlation. Later transport
 tests must substitute the effect boundary and never contact a cluster.
+Settings tests cover target requirements, endpoint and namespace rejection,
+sanitized configuration failures, and preservation of fatal/interrupted causes.
 
 ## Deployment Plan
 

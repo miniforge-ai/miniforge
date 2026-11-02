@@ -14,6 +14,7 @@
   :verification/mismatched "The verification measurements do not match this candidate execution."
   :verification/environment-mismatch "The verification environment differs from the experiment environment."
   :kubernetes/invalid-snapshot "Kubernetes observations are incomplete or inconsistent for the declared target."
+  :kubernetes/invalid-settings "Kubernetes acquisition requires a valid explicit HTTPS endpoint and bounded target settings."
   :pr/policy-mismatch "Prepared PR target does not match the verified policy."
   :pr/invalid-correlation "OPSV PR preparation requires a workflow UUID and a valid owner/repository identity."
   :pr/unconfirmed "OPSV PR execution has no confirmed successful outcome."

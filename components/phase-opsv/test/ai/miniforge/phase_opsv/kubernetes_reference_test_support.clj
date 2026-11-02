@@ -8,6 +8,16 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} settings
+  ([] (settings {}))
+  ([overrides]
+   (merge {:kubernetes/base-url "https://cluster.invalid"
+           :kubernetes/cluster-id "staging-cluster"
+           :kubernetes/namespace "staging"
+           :kubernetes/pod-selector "app=service"
+           :kubernetes/node-pool-label captured/pool-label}
+          overrides)))
+
 (defn ^{:stratum 0} referent [name optional?]
   {"name" name
    "optional" optional?})
