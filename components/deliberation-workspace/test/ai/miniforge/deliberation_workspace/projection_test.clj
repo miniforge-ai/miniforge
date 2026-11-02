@@ -155,6 +155,19 @@
     (is (= ["goal-1"] (ids (:projection/objects view))))
     (is (empty? (get-in view [:projection/goals 0 :object/links :supports])))))
 
+(deftest ^{:stratum 2} the-read-scope-bounds-every-visibility
+  (let [ws (workspace (obj "goal-1" :goal :interpreter)
+                      (obj "claim-1" :claim :proposer))]
+    (is (= ["goal-1"] (ids (:projection/objects
+                            (projection/project ws :proposer {:visibility :full
+                                                              :readable-ids #{"goal-1"}})))))))
+
+(deftest ^{:stratum 2} a-read-scope-that-hides-the-frame-says-so
+  (let [ws (workspace (obj "goal-1" :goal :interpreter))]
+    (is (= ["goal-1"] (:projection/withheld-frame
+                       (projection/project ws :proposer {:readable-ids #{}}))))
+    (is (= [] (:projection/withheld-frame (projection/project ws :proposer {}))))))
+
 (deftest ^{:stratum 2} a-hidden-replacement-is-never-named
   (let [old (assoc (obj "decision-1" :decision :proposer :touched-at 5)
                    :object/participant :proposer-1

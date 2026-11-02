@@ -73,6 +73,28 @@
     (not (contains? visible-ids (:object/superseded-by object)))
     (dissoc :object/superseded-by)))
 
+(defn- ^{:stratum 0} frame?
+  "True for the task frame every participant must receive: goals and
+   `:hard` constraints (N14 §4.2)."
+  [object]
+  (or (= :goal (:object/type object)) (object/hard-constraint? object)))
+
+(defn ^{:stratum 0} withheld-frame
+  "Ids of frame objects outside `readable-ids` — the goals and `:hard`
+   constraints a read scope keeps from the viewer — sorted, or empty when
+   no scope is set. A non-empty result means the projection cannot carry
+   the required frame: the caller must refuse the turn or obtain an
+   authorized reformulation (N14 §4), never run it on a partial frame."
+  [workspace readable-ids]
+  (if (nil? readable-ids)
+    []
+    (->> (vals (get workspace :workspace/objects {}))
+         (filter frame?)
+         (map :object/id)
+         (remove readable-ids)
+         sort
+         vec)))
+
 (defn- ^{:stratum 0} of-type [objects object-type]
   (filter #(= object-type (:object/type %)) objects))
 
@@ -90,9 +112,11 @@
 
 (defn ^{:stratum 1} visible-objects
   "Every object `role` may see, ordered by id so the projection is a
-   deterministic function of its inputs (N14 §4.1)."
-  [workspace role visibility]
-  (by-id (filter #(visible? % role visibility)
+   deterministic function of its inputs (N14 §4.1). `readable-ids`, when
+   given, is the runtime's read scope; nothing outside it is visible."
+  [workspace role visibility readable-ids]
+  (by-id (filter #(and (visible? % role visibility)
+                       (or (nil? readable-ids) (contains? readable-ids (:object/id %))))
                  (vals (get workspace :workspace/objects {})))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -111,8 +135,8 @@
    the delta — is computed over the visible set, so the ablation cannot be
    defeated through derived objects, and edges to hidden objects are
    removed from what is rendered."
-  [workspace role {:keys [visibility since] :or {visibility :full since 0}}]
-  (let [candidates (visible-objects workspace role visibility)
+  [workspace role {:keys [visibility since readable-ids] :or {visibility :full since 0}}]
+  (let [candidates (visible-objects workspace role visibility readable-ids)
         candidate-ids (into #{} (map :object/id) candidates)
         ;; A conflict the role may otherwise see is withheld ENTIRELY when it
         ;; references something hidden — dropping it from :projection/conflicts
@@ -131,4 +155,5 @@
      :projection/hard-constraints (vec (filter object/hard-constraint? visible))
      :projection/conflicts (vec conflicts)
      :projection/delta (vec (filter #(> (:object/touched-at %) since) visible))
+     :projection/withheld-frame (withheld-frame workspace readable-ids)
      :projection/objects (vec visible)}))
