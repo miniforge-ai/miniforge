@@ -121,6 +121,14 @@
    must remain recordable against it (N14 §2.3)."
   #{:challenge :attach-evidence})
 
+(def ^{:stratum 0} supersedable-types
+  "Object types `supersede` may target (N14 §3.2)."
+  #{:claim :hypothesis :plan :decision})
+
+(def ^{:stratum 0} decision-superseders
+  "Roles that may supersede a decision (N14 §5.3); `:user` acts through OCI."
+  #{:synthesizer :user})
+
 (def ^{:stratum 0} goal-outcomes
   "Outcomes `close-goal` may impose (N14 §2.3)."
   #{:accepted :rejected})
@@ -164,12 +172,16 @@
 
 (defn ^{:stratum 0} with-status
   "`target` after `op` imposes `status`. A challenge leaves an adopted record
-   `:accepted` and marks it contested instead (N14 §2.3); a status illegal
-   for the target's type is skipped."
+   `:accepted` and marks it contested instead, and adopting a contested
+   record keeps that marker (N14 §2.3); a status illegal for the target's
+   type is skipped."
   [target op status]
   (cond
     (and (= :challenge op) (= :accepted (:object/status target)))
     (assoc target :object/contested? true)
+
+    (and (= :accepted status) (= :contested (:object/status target)))
+    (assoc target :object/status :accepted :object/contested? true)
 
     (and status (object/legal-status? (:object/type target) status))
     (assoc target :object/status status)

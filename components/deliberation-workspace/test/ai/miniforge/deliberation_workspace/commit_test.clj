@@ -257,3 +257,9 @@
     (is (= :superseded (:object/status (object-at ws "decision-1"))))
     (is (= "decision-2" (:object/superseded-by (object-at ws "decision-1"))))
     (is (= :open (:object/status (object-at ws "decision-2"))))))
+
+(deftest ^{:stratum 1} adopting-a-contested-record-keeps-the-marker
+  (let [ws (transact (workspace (obj "decision-1" :decision :status :contested)) :synthesizer
+                     {:op :accept-decision :targets #{"decision-1"}})]
+    (is (= :accepted (:object/status (object-at ws "decision-1"))))
+    (is (true? (:object/contested? (object-at ws "decision-1"))))))

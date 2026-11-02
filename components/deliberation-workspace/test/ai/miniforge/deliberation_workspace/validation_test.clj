@@ -611,3 +611,47 @@
     (is (= :inapplicable-replacement
            (reason-of {:op :refine-claim :targets #{"claim-1"} :statement "x"
                        :replacement #{"claim-2"}})))))
+
+(deftest ^{:stratum 1} a-replacement-created-earlier-in-the-transaction-resolves
+  (let [ws (workspace (object-at "claim-1" 1))]
+    (is (nil? (validate-tx ws (transaction :proposer 10
+                                           {:op :assert-claim
+                                            :creates [{:id "claim-2" :type :claim
+                                                       :statement "replacement"}]}
+                                           {:op :supersede :targets #{"claim-1"}
+                                            :replacement #{"claim-2"}}))))
+    (testing "but not one created after the supersession"
+      (is (= :anomalies.deliberation/invalid-replacement
+             (subtype-of (validate-tx ws (transaction :proposer 10
+                                                      {:op :supersede :targets #{"claim-1"}
+                                                       :replacement #{"claim-2"}}
+                                                      {:op :assert-claim
+                                                       :creates [{:id "claim-2" :type :claim
+                                                                  :statement "replacement"}]}))))))))
+
+(deftest ^{:stratum 1} only-deliberative-records-are-superseded
+  (let [ws (workspace (object-at "question-1" 1 :object/type :question)
+                      (object-at "question-2" 1 :object/type :question))]
+    (is (= :anomalies.deliberation/invalid-replacement
+           (subtype-of (validate-tx ws (transaction :proposer 10
+                                                    {:op :supersede :targets #{"question-1"}
+                                                     :replacement #{"question-2"}})))))))
+
+(deftest ^{:stratum 1} only-the-synthesizer-supersedes-a-decision
+  (let [ws (workspace (object-at "decision-1" 1 :object/type :decision)
+                      (object-at "decision-2" 1 :object/type :decision))
+        supersede {:op :supersede :targets #{"decision-1"} :replacement #{"decision-2"}}]
+    (is (= :anomalies.deliberation/role-forbidden
+           (subtype-of (validate-tx ws (transaction :skeptic 10 supersede)))))
+    (is (nil? (validate-tx ws (transaction :synthesizer 10 supersede))))))
+
+(deftest ^{:stratum 1} no-operation-revives-a-terminal-target
+  (doseq [[object op] [[(object-at "decision-1" 1 :object/type :decision
+                                   :object/status :superseded)
+                        {:op :accept-decision :targets #{"decision-1"}}]
+                       [(object-at "question-1" 1 :object/type :question
+                                   :object/status :answered)
+                        {:op :answer-question :targets #{"question-1"} :statement "again"}]]]
+    (is (= :anomalies.deliberation/terminal-target
+           (subtype-of (validate-tx (workspace object)
+                                    (transaction :synthesizer 10 op)))))))
