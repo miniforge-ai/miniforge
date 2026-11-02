@@ -263,3 +263,10 @@
                      {:op :accept-decision :targets #{"decision-1"}})]
     (is (= :accepted (:object/status (object-at ws "decision-1"))))
     (is (true? (:object/contested? (object-at ws "decision-1"))))))
+
+(deftest ^{:stratum 1} an-experiment-keeps-what-it-discriminates
+  (let [ws (transact (workspace (obj "claim-1" :claim)) :skeptic
+                     {:op :challenge :targets #{"claim-1"}}
+                     {:op :propose-experiment :discriminates ["claim-1"]
+                      :creates [{:id "exp-1" :type :experiment :statement "replay the log"}]})]
+    (is (= #{"claim-1"} (object/linked (object-at ws "exp-1") :discriminates)))))

@@ -232,3 +232,19 @@
     (is (= :anomalies.deliberation/invalid-attribute
            (subtype-of (submit (seed-workspace) :proposer (claim-of-kind :hard)))))
     (is (some? (admitted (seed-workspace) :proposer (claim-of-kind :prediction))))))
+
+(deftest ^{:stratum 1} permission-is-checked-before-staleness
+  (let [ws (-> (seed-workspace)
+               (admitted :synthesizer {:op :propose-decision :creates [(decision "d" "choice")]})
+               (admitted :skeptic {:op :challenge :targets ["d"] :reason "why" :resolution "show it"}))]
+    (is (= :anomalies.deliberation/role-forbidden
+           (subtype-of (board/admit ws {:tx/operations [{:op :accept-decision :targets ["d"]}]}
+                                    (assoc (context ws :proposer) :basis 1)))))))
+
+(deftest ^{:stratum 1} links-and-challenges-are-anchored
+  (let [ws (admitted (seed-workspace) :proposer (claim "a") (claim "b"))]
+    (is (= :anomalies.deliberation/unknown-field
+           (subtype-of (submit ws :proposer (assoc (claim "c") :links {:supports ["a"]})))))
+    (is (= :anomalies.deliberation/target-type
+           (subtype-of (submit ws :skeptic {:op :challenge :targets ["a" "b"]
+                                            :reason "why" :resolution "show it"}))))))
