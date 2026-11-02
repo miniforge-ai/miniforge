@@ -16,8 +16,11 @@
         ai.miniforge/phase {:local/root "../phase"}
         ai.miniforge/resource-cleanup {:local/root "../resource-cleanup"}
         ai.miniforge/schema {:local/root "../schema"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
         metosin/malli {:mvn/version "0.16.4"}
+        org.babashka/http-client {:mvn/version "0.4.22"}
+        ;; Later releases generate an interface unavailable in native Babashka.
+        org.clojure/data.json {:mvn/version "2.4.0"}
         slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases {:test {:extra-paths ["test" "test-resources"]
-                  :extra-deps {ai.miniforge/response {:local/root "../response"}
-                               cheshire/cheshire {:mvn/version "5.13.0"}}}}}
+                  :extra-deps {ai.miniforge/response {:local/root "../response"}}}}}

@@ -17,8 +17,8 @@ the code conforms to specs that are already on main.
 The snapshot amended N14 0.2.1 and N15 0.2.0 to:
 
 - make Ariadne v1.6.1 §§11 and 13 the authority and information-flow contract,
-  cited at the `ariadne/v1.6.1` tag as Ariadne's VERSIONING.md requires, so a
-  deliberation decision never authorizes an external effect;
+  cited at the `ariadne/v1.6.1` tag as Ariadne's VERSIONING.md requires.
+  A deliberation decision never authorizes an external effect;
 - separate runtime-established participant identity from responsibility;
 - allow actionable challenges of adopted records, and add an explicit
   `supersede` operation;
@@ -30,14 +30,15 @@ The snapshot amended N14 0.2.1 and N15 0.2.0 to:
 
 ## Changes in Detail
 
-- **N14 → 0.3.0-draft.** §0.5 (Ariadne alignment, synthetic development profile),
+- **N14 → 0.3.0-draft.** Changes cover §0.5 (Ariadne alignment, synthetic development profile),
   §2.1 participant identity, §2.3 revisable adoption, §2.4 receipt-derived
-  evidence classes, §2.5 contested claims in conflicts, §3.2 `supersede` with
-  an explicit `:replacement`, §3.3 class row, §3.4 payload idempotency and
-  semantic admission, §3.5 actionable challenges, §4 Ariadne projection
-  constraints, §5.2 responsibility population, §5.3 `supersede` and soft
-  constraints, §6.3 and §7 closure inside the allowance, success versus
-  rejected goals, round-based quiescence, §10.1 governed actions under Ariadne.
+  evidence classes, and §2.5 contested claims in conflicts.
+  They also cover §3.2 `supersede` with an explicit `:replacement`, §3.3's class row,
+  §3.4 payload idempotency and semantic admission, and §3.5 actionable challenges.
+  Further changes cover §4 Ariadne projection constraints, §5.2 responsibility
+  population, and §5.3 `supersede` and soft constraints.
+  Sections §6.3 and §7 cover closure inside the allowance, success versus
+  rejected goals, and round-based quiescence. Section §10.1 covers governed actions under Ariadne.
   New conformance IDs `N14.WS.7` and `N14.WS.8` and test obligation 4.
 - **N15 → 0.3.0-draft.** §0.5 development comparisons are not gate evidence,
   §8.1 paired binary comparisons, §8.4 version-scoped negative results.
@@ -73,7 +74,7 @@ dogfood run, not edits:
   `runner.clj` to `runner_events.clj` and changes its title, scope,
   constraints and acceptance criteria. The retarget matches main (no
   `println` is left in `runner.clj`), but the rewrite's fact base is
-  already stale: it specifies 9 `println` sites, and main's
+  already stale. It specifies 9 `println` sites, and main's
   `runner_events.clj` has 3. Refreshing an unrelated work item belongs in
   its own change through the `work/` queue process, checked against main,
   not in a deliberation spec PR.
