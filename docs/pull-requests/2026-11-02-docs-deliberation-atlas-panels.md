@@ -35,6 +35,9 @@ separates what the synthetic lab implements from the Ariadne target.
   The lab now calls the model through the `llm` component's isolated
   client (#2347). The text now reads "Isolated, tool-free llm client call"
   and "Observed usage, or unknown usage on failure, is recorded."
+- Panel 5 said timeouts are recorded. The adapter journals any failed call
+  as an adapter failure without distinguishing timeouts, so the card now
+  says "failed calls and failed cells".
 - The viewer's footer link to the README is left out until the README PR
   adds it, so this PR merges with no broken link.
 - `render_diagrams.py`, the snapshot's Python generator, is not carried

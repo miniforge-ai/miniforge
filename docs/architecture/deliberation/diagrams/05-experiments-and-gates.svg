@@ -37,7 +37,7 @@
 <rect x="680" y="338" width="552" height="166" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
 <text x="696" y="366" font-size="19" fill="#333" font-weight="bold">One total turn allowance</text>
 <text x="696" y="392" font-size="16" fill="#333" font-weight="normal">Final synthesis / selection is included. Observed provider</text>
-<text x="696" y="415" font-size="16" fill="#333" font-weight="normal">usage, normalized cost, timeouts and failed cells are</text>
+<text x="696" y="415" font-size="16" fill="#333" font-weight="normal">usage, normalized cost, failed calls and failed cells are</text>
 <text x="696" y="438" font-size="16" fill="#333" font-weight="normal">recorded.</text>
 <path d="M956,506 L956,532" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#arrow)"/>
 <rect x="680" y="536" width="552" height="166" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
