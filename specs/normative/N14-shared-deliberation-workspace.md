@@ -561,11 +561,14 @@ This annex is **informative**, recording implementation state as of 2026-11-02.
 
 ### A.1 Implemented experimental infrastructure
 
-`components/deliberation-workspace` holds the Stage 0 core.
-This includes the typed object graph, operation vocabulary, §3.4 concurrency validation, §3.5 guards, projections,
-the v0 scheduler, closing rules, and the run loop. The 0.3.0 amendments
-(participant identity, actionable challenges of adopted records, `supersede`,
-semantic admission, closure inside the total allowance) are not yet reflected in it.
+`components/deliberation-workspace` holds the Stage 0 core: the typed object graph,
+operation vocabulary, §3.4 concurrency validation, semantic admission, provenance
+attestation, §3.5 guards, projections, the v0 scheduler, closing rules and the run
+loop, including the 0.3.0 amendments. `components/deliberation-harness`,
+`bases/deliberation-lab` and `projects/deliberation-lab` add an isolated synthetic
+experiment runner, an immutable journal, replay verification and development
+comparisons. See [the architecture atlas](../../docs/architecture/deliberation/README.md)
+for run commands, diagrams and limitations.
 
 ### A.2 Not implemented
 
@@ -573,8 +576,9 @@ None of §9.1's event types is registered in N3 §6, so none is emitted. N6 expo
 full Ariadne ownership, labels and provider policy, governed capsule execution, cost
 reservation, wall-clock budgeting, and watchdog and OCI integration are absent.
 Conflicts are derived only from `contradicts` links. Section §2.5's `:hard`-constraint violation
-and shared-choice-point triggers are not implemented. Nothing here is an adopted
-workflow or a production authority boundary; §0.4 keeps this pre-gate.
+and shared-choice-point triggers are not implemented. The lab accepts synthetic
+fixtures only. Nothing here is an adopted workflow or a production authority
+boundary; §0.4 keeps this pre-gate.
 
 ---
 
