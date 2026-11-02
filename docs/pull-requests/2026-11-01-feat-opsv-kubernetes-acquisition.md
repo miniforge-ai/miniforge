@@ -45,12 +45,14 @@ Pure dependency foundation #2343 must merge before this PR.
 ## Testing Plan
 
 Use native API-shaped fixtures only. Exercise all container groups, reference
-paths, duplicate use and optional-versus-required correlation. Later transport
-tests must substitute the effect boundary and never contact a cluster.
+paths, duplicate use and optional-versus-required correlation. Transport tests
+substitute the effect boundary and never contact a cluster.
 Settings tests cover target requirements, endpoint and namespace rejection,
 sanitized configuration failures, and preservation of fatal/interrupted causes.
 Public capture tests use real API-shaped JSON, including ListMeta and container
-references. No cluster is contacted. JVM tests use actual JDK response/stream types.
+references. JVM tests use actual JDK response/stream types. Before the final
+dependency-floor integration, both products, 22 JVM tests (70 assertions) and
+91 isolated native-package tests (468 assertions) passed. Rerun on the final head.
 
 ## Deployment Plan
 
