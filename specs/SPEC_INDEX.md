@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.27.0-draft
-**Date:** 2026-10-31
+**Version:** 0.28.0-draft
+**Date:** 2026-11-02
 **Status:** Living specification during OSS development
 
 ---
@@ -439,16 +439,20 @@ Defines:
 
 - Closed object taxonomy (goal, constraint, question, claim, hypothesis, experiment, evidence, plan, decision,
   artifact-ref, conflict, blocker) with structural statuses, not numeric confidences (§2)
-- Transaction vocabulary with commutative/mergeable/exclusive classes, validation pipeline, and the anti-livelock rule:
-  a challenge must carry evidence or a discriminating experiment (§3)
+- Transaction vocabulary with commutative/mergeable/exclusive classes, explicit `supersede`, semantic admission, and
+  the anti-livelock rule: a challenge must carry evidence, a discriminating experiment, or a concern plus resolution
+  criterion (§3)
 - Deterministic projections as an activation's only input (N12-conformant), plus the `cross_visibility: none` ablation
   switch that makes shared-state value measurable (§4)
-- Stateless activations, seven-role v1 population, operation permission matrix (§5)
+- Stateless activations; runtime-established participant identity separate from responsibility; operation
+  permission matrix (§5)
 - Structural v0 scheduler (no model-estimated salience) behind a pluggable seam; budgets (§6)
 - Termination: success/budget/quiescence/deadlock closing rules, forced synthesis, dissent-at-close (§7)
 - Capsule-bound artifacts by reference; adoption decisions, never merges (§8, N11)
 - Workspace events on the N3 envelope; closure exports as N6 artifacts (§9)
 - Conformance Stages 0–2 with promotion gated on N15 experiments; demotion to Informative on gate failure (§0.4, §11)
+- Ariadne v1.6.1 §§11 and 13 as the authority and information-flow contract; a decision never authorizes an
+  external effect (§0.5, §10.1)
 
 ### N15 — Collective-Cognition Evaluation Harness 🆕
 
@@ -644,6 +648,12 @@ Normative specs are enforced by:
 ---
 
 ## Version History
+
+- **0.28.0-draft** (2026-11-02) - N14 0.3.0 and N15 0.3.0: Ariadne alignment of the
+  deliberation workspace (runtime-established participant identity, decisions that
+  never authorize effects), actionable challenges of adopted records, explicit
+  `supersede`, semantic admission, closure inside the total allowance, and
+  development comparisons distinguished from gate evidence.
 
 - **0.27.0-draft** (2026-10-31) - Approved paired checkpoint storage identity
   in N3 0.13.0, payload 1.1.0, with retained 1.0.0 compatibility and conservative
