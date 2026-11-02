@@ -55,6 +55,23 @@
       (is (= :timeout (:anomaly/type (observe (fixture/settings) pending (atom []))))))
     (is (.isCancelled pending))))
 
+(deftest ^{:stratum 0} test-expired-header-deadline-does-not-mask-completed-critical-failures
+  (with-redefs [io/remaining-ms (constantly 0)]
+    (is (thrown? AssertionError
+                 (observe (fixture/settings) (failed-future (AssertionError.)) (atom []))))
+    (try+
+      (let [pending (failed-future (InterruptedException.))
+            operation (partial observe (fixture/settings) pending (atom []))
+            [failure flagged?] (interrupted-result operation)]
+        (is (instance? InterruptedException failure))
+        (is flagged?))
+      (finally (Thread/interrupted)))))
+
+(deftest ^{:stratum 0} test-completed-success-after-expiry-still-cannot-become-an-observation
+  (let [pending (fixture/completed (fixture/response (fixture/successful-text)))]
+    (with-redefs [io/remaining-ms (constantly 0)]
+      (is (= :timeout (:anomaly/type (observe (fixture/settings) pending (atom []))))))))
+
 (deftest ^{:stratum 0} wire-timestamp-precision-is-not-rounded-onto-the-declared-grid
   (doseq [timestamp ["100.000000000000001" "1.00000000000000001e2"]]
     (let [text (str/replace (fixture/successful-text) "[100," (str "[" timestamp ","))

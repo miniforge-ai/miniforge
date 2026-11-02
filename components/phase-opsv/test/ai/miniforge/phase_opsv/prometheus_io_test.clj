@@ -3,6 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.prometheus-io-test
   (:require [ai.miniforge.phase-opsv.boundary.prometheus-io :as io]
+            [ai.miniforge.phase-opsv.prometheus-test-support :as fixture]
+            [ai.miniforge.resource-cleanup.interface :as cleanup]
             [clojure.test :refer [deftest is]])
   (:import [java.io ByteArrayInputStream]
            [java.nio.charset CharacterCodingException StandardCharsets]
@@ -25,6 +27,15 @@
 
 (defn- ^{:stratum 0} body [text]
   (ByteArrayInputStream. (.getBytes ^String text StandardCharsets/UTF_8)))
+
+(deftest ^{:stratum 0} test-expired-await-preserves-already-completed-critical-failures
+  (doseq [complete [fixture/failed-future fixture/failed-task]
+          failure [(AssertionError.) (InterruptedException.)]]
+    (let [pending (complete failure)
+          operation (partial io/await! pending 0)]
+      (with-redefs [io/remaining-ms (constantly 0)]
+        (let [[thrown _flagged?] (fixture/interrupted-result operation)]
+          (is (identical? failure (cleanup/fatal-cause thrown))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

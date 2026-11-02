@@ -32,7 +32,7 @@ timeouts, size limits, HTTP errors, malformed JSON, redirects and resource
 cleanup without contacting a metric server. Run consuming-product, packaged,
 standards and normal signed-hook gates.
 
-Native-runtime source acceptance passes 39 tests and 207 assertions. These
+Native-runtime source acceptance exercises bounded observations and failure priority. These
 tests use in-memory bodies and an explicit external-response projection, without
 network calls, JVM processes or test repositories. This is not packaged proof.
 The separate JVM fixture exercises actual JDK responses and stream closure.
@@ -77,6 +77,10 @@ of claiming durable publication from a sinkless stream. Production remains fail-
 The merged settings foundation, PR #2327, owns endpoint admission, URI scheme
 canonicalization, valid port bounds and RFC 6750 Bearer grammar. Shared fixtures
 preserve its structured-cause tests alongside transport and reader regressions.
+
+Expired waits use the future's zero-timeout read, preserving completed critical
+failures without blocking. Public acquisition still rejects late successful data.
+Regressions cover both actual completed reader tasks and HTTP futures.
 
 ## Deployment Plan
 

@@ -40,9 +40,7 @@
 
 (defn ^{:stratum 1} await! [^Future pending until]
   (let [timeout (remaining-ms until)]
-    (if (pos? timeout)
-      (.get pending timeout TimeUnit/MILLISECONDS)
-      (throw (TimeoutException.)))))
+    (.get pending timeout TimeUnit/MILLISECONDS)))
 
 (defn ^{:stratum 1} owned-result!
   "Adapt the shared throwing cleanup policy without losing the operation's value."

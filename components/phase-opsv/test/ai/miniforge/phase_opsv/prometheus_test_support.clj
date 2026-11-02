@@ -9,7 +9,7 @@
             [slingshot.slingshot :refer [try+]])
   (:import [java.io ByteArrayInputStream]
            [java.nio.charset StandardCharsets]
-           [java.util.concurrent CompletableFuture]))
+           [java.util.concurrent Callable CompletableFuture FutureTask]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -38,6 +38,9 @@
 
 (defn ^{:stratum 0} failed-future [failure]
   (doto (CompletableFuture.) (.completeExceptionally failure)))
+
+(defn ^{:stratum 0} failed-task [failure]
+  (doto (FutureTask. ^Callable (reify Callable (call [_] (throw failure)))) (.run)))
 
 (defn ^{:stratum 0} record-request! [calls pending settings request]
   (swap! calls conj [settings request])
