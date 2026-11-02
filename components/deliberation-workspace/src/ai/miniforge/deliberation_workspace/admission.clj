@@ -43,8 +43,8 @@
    never accepted from a proposal."
   #{:tx/operations :tx/role})
 
+;; Stages each operation runs against the candidate.
 (def ^{:stratum 0} operation-stages
-  "Stages each operation runs against the candidate."
   (-> validation/graph-stages
       (into semantics/semantic-stages)
       (into guards/guard-stages)))
@@ -53,9 +53,9 @@
   (or (keyword? participant)
       (and (string? participant) (not (str/blank? participant)))))
 
+;; True when the runtime-supplied context names a known responsibility, a
+;; participant, an activation, and a basis the workspace has reached.
 (defn- ^{:stratum 0} context-valid?
-  "True when the runtime-supplied context names a known responsibility, a
-   participant, an activation, and a basis the workspace has reached."
   [workspace context]
   (and (map? context)
        (let [{:keys [role participant activation basis]} context]
@@ -65,9 +65,9 @@
               (nat-int? basis)
               (<= basis (get workspace :workspace/version 0))))))
 
+;; True when `proposal` carries a field outside `proposal-keys` or names a
+;; responsibility other than the one the runtime assigned.
 (defn- ^{:stratum 0} impersonating?
-  "True when `proposal` carries a field outside `proposal-keys` or names a
-   responsibility other than the one the runtime assigned."
   [proposal role]
   (or (seq (remove proposal-keys (keys proposal)))
       (and (contains? proposal :tx/role) (not= role (:tx/role proposal)))))
@@ -76,9 +76,9 @@
   (and (sequential? operations)
        (<= 1 (count operations) max-operations)))
 
+;; The transaction the runtime records: the proposal's operations under the
+;; runtime's identity, activation and basis.
 (defn- ^{:stratum 0} transaction
-  "The transaction the runtime records: the proposal's operations under the
-   runtime's identity, activation and basis."
   [proposal {:keys [role participant activation basis]}]
   {:tx/role role
    :tx/participant participant
@@ -91,8 +91,8 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+;; The rejection for a context or proposal the boundary cannot accept, or nil.
 (defn- ^{:stratum 1} shape-rejection
-  "The rejection for a context or proposal the boundary cannot accept, or nil."
   [workspace proposal context]
   (cond
     (not (context-valid? workspace context))
@@ -111,11 +111,11 @@
     (refuse :invalid-input :anomalies.deliberation/operation-count
             (messages/system-t :anomaly/operation-count))))
 
+;; Validate `operation` against `candidate` and fold it in, or reduce to the
+;; rejection. Basis is the candidate's own version: the transaction's
+;; original basis was already checked, and its own earlier writes are not
+;; staleness.
 (defn- ^{:stratum 1} candidate-step
-  "Validate `operation` against `candidate` and fold it in, or reduce to the
-   rejection. Basis is the candidate's own version: the transaction's
-   original basis was already checked, and its own earlier writes are not
-   staleness."
   [transaction candidate operation]
   (let [basis (get candidate :workspace/version 0)
         context {:role (:tx/role transaction)
@@ -128,9 +128,9 @@
       (reduced rejection)
       (commit/stage candidate single))))
 
+;; The first rejection when the operations are applied one at a time to a
+;; private candidate, or nil.
 (defn- ^{:stratum 1} sequential-rejection
-  "The first rejection when the operations are applied one at a time to a
-   private candidate, or nil."
   [workspace transaction]
   (let [result (reduce #(candidate-step transaction %1 %2)
                        workspace

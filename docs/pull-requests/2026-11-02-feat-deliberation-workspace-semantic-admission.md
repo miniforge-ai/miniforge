@@ -68,7 +68,9 @@ checks.
   role, because semantic admission restricts `:hard` constraints by source
   (N14 §2.4, §5.3).
 - `interface` (new): `new-object`, `admit`, `project`, `replay-transaction`.
-- `commit`: new `stage`, which is `commit` without conflict derivation.
+- `commit`: new `stage`, which is `commit` without conflict derivation. An
+  operation's `:discriminates` ids become `:discriminates` links on the objects
+  it creates, so the experiment that backs a challenge keeps that record.
 - Message catalog: 11 new `:anomaly/*` keys.
 
 Deviations from the snapshot:
@@ -101,12 +103,13 @@ New `admission_test` covers:
 - the choice point and supersession, including that only the synthesizer
   supersedes a decision (enforced by the permission stage from #2330);
 - challenge and evidence on adopted records;
+- an experiment keeps what it discriminates;
 - dangling references, distinct contributions versus retries, and basis
   staleness.
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 12 deliberation-workspace suites,
-168 tests, 548 assertions, 0 failures. clj-kondo 2026.10.26 (the CI version)
+169 tests, 549 assertions, 0 failures. clj-kondo 2026.10.26 (the CI version)
 on the component: 0 errors. `poly test` and the Polylith check ran only in CI.
 
 ## Deployment Plan
