@@ -5,7 +5,7 @@
   "Read-only observation ingress; it grants no experimental or mutation authority."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.boundary.measurement :as measurement]
-            [ai.miniforge.phase-opsv.boundary.prometheus-http :as http]
+            [ai.miniforge.phase-opsv.boundary.http-transport :as http]
             [ai.miniforge.phase-opsv.boundary.prometheus-response :as response]
             [ai.miniforge.phase-opsv.boundary.prometheus-settings :as settings]
             [ai.miniforge.phase-opsv.messages :as msg]
