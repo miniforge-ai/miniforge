@@ -42,10 +42,11 @@
   (= (set (keys (:experiments task))) (set inspected)))
 
 (defn- ^{:stratum 0} scorable?
-  "True when `task` has a non-empty reference map and `inspected` is a
-   collection of experiment ids (or nil)."
+  "True when `task` has a non-empty reference map, its experiments (if any)
+   are a map, and `inspected` is a collection of experiment ids (or nil)."
   [task inspected]
   (and (map? (:reference task)) (seq (:reference task))
+       (or (nil? (:experiments task)) (map? (:experiments task)))
        (or (nil? inspected) (coll? inspected))))
 
 ;------------------------------------------------------------------------------ Layer 1

@@ -65,7 +65,8 @@
 (deftest ^{:stratum 1} plain-values-round-trip
   (is (codec/plain? {:a [1 "x" #{:k}] :b nil}))
   (is (not (codec/plain? {:at (java.time.Instant/now)})))
-  (is (not (codec/plain? {:x (float 1.2)}))))
+  (testing "a float replays as the exact double it widens to"
+    (is (codec/plain? {:x (float 1.2)}))))
 
 (deftest ^{:stratum 1} a-tag-inside-anomaly-shaped-text-is-refused
   (is (= :invalid-input
@@ -86,12 +87,12 @@
     (is (not (codec/plain? linked)))))
 
 (deftest ^{:stratum 1} encoding-never-drops-an-entry
-  (testing "unequal values that print alike are both written, so the payload is refused, not shrunk"
+  (testing "unequal float/double look-alikes are both written, with distinct texts"
     (doseq [value [(hash-set (float 1.2) (double 1.2))
                    (hash-set [(float 1.2)] [(double 1.2)])
                    (hash-map (float 1.2) :f (double 1.2) :d)]]
-      (is (= 2 (count (re-seq #"1\.2" (codec/encode value)))))
-      (is (not (codec/plain? value)))))
+      (is (re-find #"1\.2000000476837158" (codec/encode value)))
+      (is (re-find #"[ \[{#]1\.2[ \]}]" (codec/encode value)))))
   (testing "a look-alike tie still encodes deterministically"
     (is (= (codec/encode (hash-map [(float 1.2)] :a [(double 1.2)] :b))
            (codec/encode (hash-map [(double 1.2)] :b [(float 1.2)] :a))))))
@@ -104,3 +105,13 @@
   (is (codec/plain? {nil :value :a 1}))
   (is (codec/plain? #{nil :a}))
   (is (= "{[1 2 3] :long [1 2] :short}" (codec/encode {[1 2] :short [1 2 3] :long}))))
+
+(defrecord ^:private Probe [a])
+
+(deftest ^{:stratum 1} digests-never-collide-across-types
+  (testing "a record never digests like the plain map of its fields"
+    (is (not= (codec/digest (->Probe 1)) (codec/digest {:a 1})))
+    (is (not (codec/plain? (->Probe 1)))))
+  (testing "a float never digests like a different double"
+    (is (not= (codec/digest (float 1.2)) (codec/digest 1.2)))
+    (is (= (codec/digest (float 1.5)) (codec/digest 1.5)))))

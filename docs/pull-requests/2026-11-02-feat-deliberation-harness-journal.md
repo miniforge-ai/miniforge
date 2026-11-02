@@ -29,9 +29,9 @@ codec and fixtures belong in a component.
   - Canonical EDN written directly: map entries ordered by their key's
     then value's canonical text, set elements by their own text. No sorted
     collection is built, so ordering never has to agree with Clojure
-    equality and no entry is merged or dropped. Unequal values EDN cannot
-    tell apart (a float and a double printing alike) share a text, and
-    `plain?` refuses them as journal payloads. Printer settings are pinned,
+    equality and no entry is merged or dropped. A record is tagged with its
+    class and a float is written as the exact double it widens to, so
+    neither shares a digest with a different value. Printer settings are pinned,
     so a caller's `*print-length*` cannot truncate a record.
   - SHA-256 digest.
   - `read-text`: parses exactly one plain EDN form and returns an anomaly
@@ -58,8 +58,8 @@ codec and fixtures belong in a component.
     `resources/config/deliberation-harness/tasks.edn`.
   - `public-task` exposes only `:id :version :synthetic? :brief`.
   - `tasks` returns an anomaly when the resource is missing or unreadable.
-  - `score` returns an anomaly for a task with no reference or for
-    `inspected` that is not a collection.
+  - `score` returns an anomaly for a task with no reference, experiments
+    that are not a map, or `inspected` that is not a collection.
   - `score` and `fixture-defects`.
 - `messages`: system catalog for the component's anomaly text.
 - `interface`: `digest`, `read-edn`, `open-journal!`, `append!`,
@@ -90,7 +90,7 @@ Deviations from the snapshot:
   needs every observation; the public view hides the sealed answer.
 
 Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
-sandbox, so a local stand-in replaced malli): 25 tests, 59 assertions,
+sandbox, so a local stand-in replaced malli): 27 tests, 66 assertions,
 0 failures. clj-kondo 2026.10.26 (the CI version) over `bases components
 development/src`: 0 errors. `poly test` and the Polylith check ran only in CI.
 

@@ -50,5 +50,7 @@
   (testing "a task with no reference to score against"
     (is (anomaly/anomaly? (fixtures/score {:id "t" :reference {}} {} [])))
     (is (anomaly/anomaly? (fixtures/score {:id "t"} {} []))))
+  (testing "experiments that are not a map"
+    (is (anomaly/anomaly? (fixtures/score {:id "t" :reference {:a 1} :experiments [1 2]} {:a 1} []))))
   (testing "inspected ids that are not a collection"
     (is (anomaly/anomaly? (fixtures/score (first (fixtures/tasks)) {} 5)))))

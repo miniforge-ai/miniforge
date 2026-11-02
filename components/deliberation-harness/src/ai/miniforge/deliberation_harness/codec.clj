@@ -48,11 +48,15 @@
 (defn- ^{:stratum 0} emit
   "The canonical text of `value`: maps, sets, vectors and lists written
    element by element, map entries ordered by their key's then value's text
-   and set elements by their own text; anything else printed as itself.
-   Call it inside `stably`."
+   and set elements by their own text. A record is tagged with its class, so
+   it never shares a text with a plain map; a float is written as the exact
+   double it widens to, so it never shares a text with a different double.
+   Anything else prints as itself. Call it inside `stably`."
   [value]
   (let [joined (fn [open texts close] (str open (str/join " " texts) close))]
     (cond
+      (record? value) (str "#" (.getName (class value)) (emit (into {} value)))
+      (instance? Float value) (pr-str (double value))
       (map? value) (joined "{" (->> value
                                     (map (fn [[k v]] [(emit k) (emit v)]))
                                     sort
