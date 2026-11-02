@@ -26,6 +26,7 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.phase.interface.boundary-commit :as boundary-commit]
    [ai.miniforge.phase.interface.task-base :as task-base]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.boundary.environment :as boundary]
@@ -156,12 +157,16 @@
 (defn- ^{:stratum 0} persist-opts
   "Build the opts map passed to `dag/persist-workspace!`. Keeps map
    construction key-value with all derivations lifted into the let so
-   readers see the shape of the call without a cond-> obscuring it."
+   readers see the shape of the call without a cond-> obscuring it.
+   The commit message carries the phase as a trailer, which release reads
+   to tell implement's work from what a checking phase left behind."
   [context phase env-id]
   (let [metadata    (get context :execution/environment-metadata)
         branch      (get context :execution/task-branch)
         base-branch (:base-branch metadata)
-        message     (messages/t :env/persist-message {:phase (name phase)})]
+        message     (boundary-commit/with-phase-trailer
+                      (messages/t :env/persist-message {:phase (name phase)})
+                      phase)]
     (cond-> {:message     message
              :workdir     (get context :execution/worktree-path)
              :workflow-id (get context :execution/id)
@@ -258,9 +263,11 @@
         ;; turn an allowed implement into work that is never committed.
         workdir  (or (get context :execution/worktree-path)
                      (get phase-ctx :execution/worktree-path))
-        phase    (boundary-phase phase-ctx)
-        ;; The phase that just ran is the one the pre-step context was on.
-        denial   (gate-denial phase-ctx (boundary-phase context))
+        ;; The phase that just ran is the one the pre-step context was on:
+        ;; PHASE-CTX's current phase has already advanced to the next one
+        ;; (or back to implement on a redirect).
+        phase    (boundary-phase context)
+        denial   (gate-denial phase-ctx phase)
         ;; The :no-secrets check over what a commit or push would publish,
         ;; run only when the persist would otherwise go ahead.
         scan     (delay (gate/outgoing-secrets (assoc context

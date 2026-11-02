@@ -80,8 +80,8 @@
                   dag/persist-workspace! (fn [& _] (result/err :worktree-missing "gone"))]
       (env/persist-workspace-at-phase-boundary!
        {:execution/executor ::stub :execution/environment-id (random-uuid)
-        :execution/worktree-path "/tmp/wt"}
-       {:execution/current-phase :implement})
+        :execution/worktree-path "/tmp/wt" :execution/current-phase :implement}
+       {:execution/current-phase :verify})
       (is (= [:workflow/persist-rejected] (mapv :log/event @sink)))
       (is (= "Workspace persist rejected at implement: :worktree-missing"
              (:log/message (first @sink)))
