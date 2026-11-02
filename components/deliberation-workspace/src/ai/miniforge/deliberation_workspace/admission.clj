@@ -25,6 +25,7 @@
    [ai.miniforge.deliberation-workspace.commit :as commit]
    [ai.miniforge.deliberation-workspace.guards :as guards]
    [ai.miniforge.deliberation-workspace.messages :as messages]
+   [ai.miniforge.deliberation-workspace.provenance :as provenance]
    [ai.miniforge.deliberation-workspace.semantics :as semantics]
    [ai.miniforge.deliberation-workspace.transaction :as tx]
    [ai.miniforge.deliberation-workspace.validation :as validation]
@@ -47,6 +48,7 @@
   "Stages each operation runs against the candidate."
   (-> validation/graph-stages
       (into semantics/semantic-stages)
+      (into provenance/provenance-stages)
       (into guards/guard-stages)))
 
 (defn- ^{:stratum 0} participant? [participant]
