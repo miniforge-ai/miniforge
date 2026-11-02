@@ -19,6 +19,11 @@
 (deftest ^{:stratum 0} test-native-reference-shapes-are-admitted
   (is (m/validate schema/PodList (fixture/api-pods false))))
 
+(deftest ^{:stratum 0} test-native-list-items-need-no-item-level-type-metadata
+  (let [pods (update (fixture/api-pods false) "items"
+                     (partial mapv #(dissoc % "apiVersion" "kind")))]
+    (is (m/validate schema/PodList pods))))
+
 (deftest ^{:stratum 0} test-pod-namespaces-use-the-native-dns-label-domain
   (doseq [namespace ["staging/other" "staging.other" "Staging" "-staging"]]
     (let [pods (assoc-in (fixture/api-pods false) ["items" 0 "metadata" "namespace"] namespace)]
