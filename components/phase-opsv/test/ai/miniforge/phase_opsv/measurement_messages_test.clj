@@ -11,7 +11,9 @@
   (let [catalog (messages/load-catalog "config/phase-opsv/messages/system.edn"
                                         :phase-opsv/system)
         entries (messages/all catalog)]
-    (doseq [key [:measurement/invalid-request :measurement/invalid-response]]
+    (doseq [key [:measurement/invalid-request :measurement/invalid-response
+                :prometheus/invalid-settings :prometheus/unavailable
+                :prometheus/timeout :prometheus/http-status]]
       (is (string? (get entries key)))
       (is (not= (str key) (messages/t catalog key))))))
 
