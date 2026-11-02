@@ -42,6 +42,12 @@
    attach to it."
   "goal")
 
+(def ^{:stratum 0} fixture-reader
+  "The trusted runtime participant that records fixture observations. It
+   holds the verifier responsibility, which alone may attach execution
+   evidence (N14 §5.3); no model participant acts under it."
+  :fixture-reader)
+
 (def ^{:stratum 0} candidate-prefix
   "Participant-name prefix of the independent condition's private candidates."
   "candidate-")
@@ -70,14 +76,51 @@
   [{:keys [input output]} {:keys [input-per-million output-per-million]}]
   (/ (+ (* input input-per-million) (* output output-per-million)) tokens-per-million))
 
-(defn ^{:stratum 0} initial-workspace [task]
+(defn ^{:stratum 0} experiment-object-id [id] (str "experiment-" id))
+
+(defn ^{:stratum 0} receipt-id [id] (str "receipt-" id))
+
+(defn- ^{:stratum 0} seed [id type statement]
+  [id (board/new-object {:id id :type type :statement statement
+                         :role :interpreter :activation "seed" :version 0})])
+
+(defn ^{:stratum 0} initial-workspace
+  "A board seeded with the task goal and one experiment object per fixture
+   observation, which observations attach to."
+  [task]
   {:workspace/version 0
    :workspace/log []
    :workspace/roles participants
-   :workspace/objects {goal-id (board/new-object {:id goal-id :type :goal
-                                                  :statement (:brief task)
-                                                  :role :interpreter :activation "seed"
-                                                  :version 0})}})
+   :workspace/participant-roles {fixture-reader :verifier}
+   :workspace/objects (into {}
+                            (cons (seed goal-id :goal (:brief task))
+                                  (map #(seed (experiment-object-id %) :experiment %)
+                                       (keys (:experiments task)))))})
+
+(defn ^{:stratum 0} observed?
+  "True when `workspace` holds execution evidence whose receipt attests
+   fixture observation `id` with exactly its statement."
+  [workspace id]
+  (let [receipt (receipt-id id)
+        attested (get-in workspace [:workspace/receipts receipt])]
+    (boolean
+     (and attested
+          (some #(and (= :evidence (:object/type %))
+                      (= {:source-class :execution :receipt receipt}
+                         (select-keys (:object/attrs %) [:source-class :receipt]))
+                      (= (:statement attested) (:object/statement %)))
+                (vals (:workspace/objects workspace)))))))
+
+(defn ^{:stratum 0} observed-experiments
+  "The fixture observations a participant viewing `workspace` can see."
+  [task workspace]
+  (set (filter #(observed? workspace %) (keys (:experiments task)))))
+
+(defn- ^{:stratum 0} free-id
+  "`base`, or the first `base-n` no object on `workspace` already uses."
+  [workspace base]
+  (first (remove #(contains? (:workspace/objects workspace) %)
+                 (cons base (map #(str base "-" %) (iterate inc 1))))))
 
 (defn ^{:stratum 0} elapsed [started]
   (/ (- (System/nanoTime) started) nanos-per-second))
@@ -118,22 +161,29 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} attach-observation
-  "Record one fixture observation as receipt-backed execution evidence. The
-   fixture reader is a trusted runtime capability, so it commits directly;
-   a model cannot manufacture a receipt by naming an evidence class."
-  [workspace task participant id]
+  "Record fixture observation `id` as receipt-backed execution evidence
+   supporting its experiment object. The runtime records the receipt, and
+   the fixture reader's attachment passes full admission; a board that
+   already shows the observation is unchanged, and so is one admission
+   refuses."
+  [workspace task id]
   (let [statement (get-in task [:experiments id])
-        receipt (str "receipt-" id)
-        evidence-id (str "evidence-" id "-" (name participant))]
-    (if (or (nil? statement) (get-in workspace [:workspace/objects evidence-id]))
+        receipt (receipt-id id)]
+    (if (or (nil? statement) (observed? workspace id))
       workspace
-      (board/replay-transaction
-       (assoc-in workspace [:workspace/receipts receipt]
-                 {:source-class :execution :statement statement})
-       {:tx/role :verifier :tx/participant participant :tx/activation "fixture-reader"
-        :tx/operations [{:op :attach-evidence :targets [goal-id]
-                         :creates [{:id evidence-id :type :evidence :statement statement
-                                    :attrs {:source-class :execution :receipt receipt}}]}]}))))
+      (let [recorded (assoc-in workspace [:workspace/receipts receipt]
+                               {:source-class :execution :statement statement})
+            evidence-id (free-id recorded (str "evidence-" id))
+            admitted (board/admit
+                      recorded
+                      {:tx/operations [{:op :attach-evidence :targets [(experiment-object-id id)]
+                                        :creates [{:id evidence-id :type :evidence :statement statement
+                                                   :attrs {:source-class :execution :receipt receipt}}]
+                                        :links {:supports [evidence-id]}}]}
+                      {:role :verifier :participant fixture-reader
+                       :activation (str (name fixture-reader) "-" id)
+                       :basis (get recorded :workspace/version 0)})]
+        (if (anomaly/anomaly? admitted) workspace (:workspace admitted))))))
 
 (defn ^{:stratum 1} model-view [workspace participant]
   {:objects (mapv #(select-keys % model-object-keys)
@@ -164,7 +214,7 @@
   "`workspace` after the participant's proposal and its inspected
    observations."
   [workspace task participant final? payload]
-  (reduce #(attach-observation %1 task participant %2)
+  (reduce #(attach-observation %1 task %2)
           (commit-turn workspace participant final? payload)
           (:inspect payload)))
 

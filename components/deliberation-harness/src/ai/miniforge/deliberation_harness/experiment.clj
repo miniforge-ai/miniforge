@@ -42,15 +42,13 @@
 
 (defn- ^{:stratum 0} advance
   "The cell state after a recorded turn."
-  [state task manifest board-id next-board response participant]
+  [state manifest board-id next-board response participant]
   (let [payload (:payload response)
-        observed (filter (set (keys (:experiments task))) (:inspect payload))
         spend (turn/normalized-cost (:usage response) (:price-table manifest))]
     (-> state
         (update :turn inc)
         (assoc-in [:boards board-id] next-board)
         (update :history conj (select-keys payload [:solution :rationale]))
-        (update :inspected into observed)
         (update :usage #(merge-with + % (:usage response)))
         (update :cost + spend)
         (assoc :payload payload
@@ -83,8 +81,9 @@
 
 (defn- ^{:stratum 1} take-turn
   "Run one turn: record its start, call the model, apply its proposal and
-   observations, and record the activation. Returns the next state, or the
-   journal's anomaly when a record cannot be made durable."
+   observations, and record the activation. The closing turn is credited
+   with exactly the observations its board showed it. Returns the next
+   state, or the journal's anomaly when a record cannot be made durable."
   [{:keys [manifest task condition tier replicate call record!]} state]
   (let [final? (= (:turn state) (dec (:activations tier)))
         participant (turn/actor condition (:turn state) final?)
@@ -103,7 +102,8 @@
                                      :response response :workspace next-board))]
         (if (anomaly/anomaly? recorded)
           recorded
-          (advance state task manifest board-id next-board response participant))))))
+          (cond-> (advance state manifest board-id next-board response participant)
+            final? (assoc :inspected (turn/observed-experiments task workspace))))))))
 
 (defn- ^{:stratum 1} finished?
   "True when the allowance is spent, a ceiling is reached, or a turn failed.

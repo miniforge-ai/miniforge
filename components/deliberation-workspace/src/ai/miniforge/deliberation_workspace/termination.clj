@@ -40,6 +40,12 @@
   (let [all (goals workspace)]
     (and (seq all) (every? object/terminal? all))))
 
+;; N14 §7.1 success is every goal accepted with decision coverage, checked on
+;; the current graph: a covering decision superseded after closure no longer counts.
+(defn- ^{:stratum 1} goals-covered? [workspace]
+  (let [objects (vals (get workspace :workspace/objects {}))]
+    (every? (fn [goal] (some #(object/covers-goal? % (:object/id goal)) objects)) (goals workspace))))
+
 (defn- ^{:stratum 1} goal-rejected? [workspace]
   (some #(= :rejected (:object/status %)) (goals workspace)))
 
@@ -69,15 +75,15 @@
 
    Order matters: completion is checked before budget so a run that closes
    its goals on its last permitted activation completes rather than
-   exhausting. Success requires every goal accepted; terminal goals with a
-   rejection complete under a distinct rule (§7.1)."
+   exhausting. Success requires every goal accepted with current decision
+   coverage; terminal goals with a rejection complete under a distinct rule (§7.1)."
   [workspace]
   (let [exhausted (exhausted-budget workspace)]
     (cond
       (and (goals-terminal? workspace) (goal-rejected? workspace))
       {:termination/rule :completed-with-rejected-goals}
 
-      (goals-terminal? workspace)
+      (and (goals-terminal? workspace) (goals-covered? workspace))
       {:termination/rule :success}
 
       exhausted
