@@ -26,20 +26,32 @@ codec and fixtures belong in a component.
 ## Changes in Detail
 
 - `codec`
-  - Canonical EDN, with maps and sets in printed-key order.
+  - Canonical EDN, with maps and sets in printed-key order. Printer
+    settings are pinned for encoding and for the ordering comparator, so a
+    caller's `*print-length*` cannot truncate or reorder a record.
   - SHA-256 digest.
-  - `read-text`: parses plain EDN and returns an anomaly for unreadable
-    text or a custom reader tag. It neither throws nor evaluates a tag.
+  - `read-text`: parses exactly one plain EDN form and returns an anomaly
+    for unreadable text, trailing forms or a custom reader tag. A tag
+    becomes a `deftype` marker that plain EDN cannot construct. It neither
+    throws nor evaluates a tag.
+  - `read-source`: reads a file or resource; a read failure is an anomaly
+    naming the source.
 - `journal`
   - `open!` refuses a directory that already exists.
   - `append!` writes each record to a new file through `file-durability`
     and forces it. The position only advances after a successful write.
+  - Record names are the sequence zero-padded to at least six digits,
+    formatted with `Locale/ROOT` and ordered numerically, so sequence
+    1,000,000 and later still read.
   - `read-journal` verifies sequence, predecessor hash and content hash, and
-    returns an anomaly naming the first record that breaks the chain.
+    returns an anomaly naming the first record that breaks the chain or
+    cannot be read. An unlistable directory is an anomaly, not an empty
+    journal.
 - `fixtures`
   - The two synthetic tasks now live in
     `resources/config/deliberation-harness/tasks.edn`.
   - `public-task` exposes only `:id :version :synthetic? :brief`.
+  - `tasks` returns an anomaly when the resource is missing or unreadable.
   - `score` and `fixture-defects`.
 - `messages`: system catalog for the component's anomaly text.
 - `interface`: `digest`, `read-edn`, `open-journal!`, `append!`,
@@ -56,16 +68,19 @@ Deviations from the snapshot:
 ## Testing Plan
 
 - `codec_test`: order-independent encoding, digest stability, refused
-  custom tags, unreadable text.
+  custom tags, unreadable text, trailing forms, an unforgeable tag marker,
+  and encoding and ordering under hostile printer bindings.
 - `journal_test` (marked `:integration`; it writes a temporary directory,
   because durable files are the journal's contract): round trip, refusal
-  to reuse a directory, tamper detection.
+  to reuse a directory, tamper detection, an unlistable directory, an
+  unreadable record, numeric ordering past six digits.
 - `fixtures_test`: every reference passes and every distractor fails; success
   needs every observation; the public view hides the sealed answer.
 
 Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
-sandbox, so a local stand-in replaced malli): 8 tests, 19 assertions,
-0 failures. `poly test`, clj-kondo and the Polylith check ran only in CI.
+sandbox, so a local stand-in replaced malli): 15 tests, 31 assertions,
+0 failures. clj-kondo 2026.10.26 (the CI version) over `bases components
+development/src`: 0 errors. `poly test` and the Polylith check ran only in CI.
 
 ## Deployment Plan
 
