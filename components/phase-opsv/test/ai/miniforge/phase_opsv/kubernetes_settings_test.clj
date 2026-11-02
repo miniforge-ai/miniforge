@@ -54,9 +54,11 @@
   (let [failure (failures/structured-failure (InterruptedException.))
         operation (partial settings/load-settings (fixture/settings))]
     (with-redefs [config/load-config-resource (partial failures/throw-failure! failure)]
-      (let [[thrown flagged?] (failures/interrupted-result operation)]
+      (let [[thrown flagged?] (failures/interrupted-result operation)
+            leaked? (Thread/interrupted)]
         (is (instance? InterruptedException thrown))
-        (is flagged?)))))
+        (is flagged?)
+        (is (false? leaked?))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
