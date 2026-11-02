@@ -59,7 +59,7 @@
          (subtype-of (validate-tx
                       (workspace)
                       (transaction :proposer 10
-                                   {:op :refine-claim :targets #{"claim-404"}}))))))
+                                   {:op :refine-claim :targets #{"claim-404"} :statement "revised"}))))))
 
 (deftest ^{:stratum 1} role-permissions-are-enforced
   (testing "a skeptic cannot accept decisions"
@@ -92,7 +92,7 @@
          (subtype-of (validate-tx
                       (workspace (object-at "claim-1" 12))
                       (transaction :proposer 10
-                                   {:op :refine-claim :targets #{"claim-1"}}))))))
+                                   {:op :refine-claim :targets #{"claim-1"} :statement "revised"}))))))
 
 (deftest ^{:stratum 1} additive-operations-commute-over-a-stale-basis
   (testing "a stale basis does not block an additive operation"
@@ -103,9 +103,21 @@
   (testing "but a terminal target does"
     (is (= :anomalies.deliberation/terminal-target
            (subtype-of (validate-tx
+                        (workspace (object-at "claim-1" 12 :object/status :superseded))
+                        (transaction :proposer 10
+                                     {:op :attach-evidence :targets #{"claim-1"}}))))))
+  (testing "an adopted target stays open to evidence and challenges (N14 §2.3)"
+    (doseq [op [{:op :attach-evidence :targets #{"claim-1"}}
+                {:op :challenge :targets #{"claim-1"}}]]
+      (is (nil? (validate-tx
+                 (workspace (object-at "claim-1" 12 :object/status :accepted))
+                 (transaction :proposer 10 op))))))
+  (testing "but not to other additive operations"
+    (is (= :anomalies.deliberation/terminal-target
+           (subtype-of (validate-tx
                         (workspace (object-at "claim-1" 12 :object/status :accepted))
                         (transaction :proposer 10
-                                     {:op :attach-evidence :targets #{"claim-1"}})))))))
+                                     {:op :declare-blocked :targets #{"claim-1"}})))))))
 
 (deftest ^{:stratum 1} a-missing-basis-is-rejected-not-thrown
   (testing "nothing in the pipeline throws, including on a malformed basis"
@@ -114,7 +126,8 @@
              (subtype-of (validate-tx (workspace (object-at "claim-1" 4))
                                       (transaction :proposer basis
                                                    {:op :refine-claim
-                                                    :targets #{"claim-1"}}))))))))
+                                                    :targets #{"claim-1"}
+                                                    :statement "revised"}))))))))
 
 (deftest ^{:stratum 1} the-first-failing-stage-wins
   (testing "schema conformance is checked before target existence"
@@ -130,7 +143,7 @@
                 (workspace (object-at "claim-1" 4))
                 (transaction :proposer 10
                              {:op :attach-evidence :targets #{"claim-1"}}
-                             {:op :refine-claim :targets #{"claim-404"}}))))))
+                             {:op :refine-claim :targets #{"claim-404"} :statement "revised"}))))))
 
 (deftest ^{:stratum 1} creations-the-engine-cannot-construct-are-refused
   (testing "every payload that object/new-object throws on is rejected as data first"
@@ -453,7 +466,7 @@
            (subtype-of (validate-tx
                         (workspace)
                         (transaction :proposer 10
-                                     {:op :refine-claim :targets #{"claim-404" 7}}))))
+                                     {:op :refine-claim :targets #{"claim-404" 7} :statement "revised"}))))
         "check-targets would otherwise report 7 as a missing object")))
 
 (deftest ^{:stratum 1} an-operation-that-is-not-a-map-is-left-to-schema-conformance
@@ -570,3 +583,31 @@
                         (transaction :synthesizer 10
                                      {:op :close-every-goal :outcome :accepted}))))
         "an operation outside the vocabulary has no outcome contract to violate")))
+
+(deftest ^{:stratum 1} revisions-and-answers-carry-text
+  (doseq [op [{:op :refine-claim :targets #{"claim-1"}}
+              {:op :answer-question :targets #{"claim-1"} :statement "  "}]]
+    (is (= :anomalies.deliberation/missing-statement
+           (subtype-of (validate-tx (workspace (object-at "claim-1" 1))
+                                    (transaction :proposer 10 op)))))))
+
+(deftest ^{:stratum 1} supersede-names-one-live-same-type-replacement
+  (let [ws (workspace (object-at "claim-1" 1) (object-at "claim-2" 1)
+                      (object-at "claim-3" 1 :object/status :rejected)
+                      (object-at "plan-1" 1 :object/type :plan))
+        reason-of (fn [op]
+                    (let [result (validate-tx ws (transaction :proposer 10 op))]
+                      (is (= :anomalies.deliberation/invalid-replacement (subtype-of result)))
+                      (:reason (:anomaly/data result))))
+        supersede (fn [replacement]
+                    {:op :supersede :targets #{"claim-1"} :replacement replacement})]
+    (is (nil? (validate-tx ws (transaction :proposer 10 (supersede #{"claim-2"})))))
+    (is (= :replacement-count (reason-of (supersede #{}))))
+    (is (= :replacement-count (reason-of (supersede #{"claim-2" "plan-1"}))))
+    (is (= :unknown-replacement (reason-of (supersede #{"claim-404"}))))
+    (is (= :terminal-replacement (reason-of (supersede #{"claim-3"}))))
+    (is (= :mismatched-replacement (reason-of (supersede #{"plan-1"}))))
+    (is (= :mismatched-replacement (reason-of (supersede #{"claim-1"}))))
+    (is (= :inapplicable-replacement
+           (reason-of {:op :refine-claim :targets #{"claim-1"} :statement "x"
+                       :replacement #{"claim-2"}})))))

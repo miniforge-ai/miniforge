@@ -163,6 +163,34 @@
         :when (contains? operation field)]
     [operation field (get operation field)]))
 
+(defn- ^{:stratum 0} closed-to?
+  "True when `target` admits no further `op`. An `:accepted` object stays
+   open to the reopening operations (N14 §2.3)."
+  [op target]
+  (and (object/terminal? target)
+       (not (and (= :accepted (:object/status target))
+                 (contains? tx/reopening-operations op)))))
+
+(defn- ^{:stratum 0} replacement-defect
+  "The first defect in a `supersede` replacement, as `[reason data]`, or nil.
+   `replacements` are the ids the operation names, `replacement` the object
+   the single id resolves to."
+  [targets replacements replacement]
+  (cond
+    (not= 1 (count replacements))
+    [:replacement-count {:replacement (vec replacements)}]
+
+    (nil? replacement)
+    [:unknown-replacement {:replacement (first replacements)}]
+
+    (object/terminal? replacement)
+    [:terminal-replacement {:replacement (:object/id replacement)}]
+
+    (some #(or (= (:object/id %) (:object/id replacement))
+               (not= (:object/type %) (:object/type replacement)))
+          targets)
+    [:mismatched-replacement {:replacement (:object/id replacement)}]))
+
 (defn ^{:stratum 0} validate-operation
   "Run `stages` against one operation in order, returning the first anomaly
    or nil. `context` carries :role, :basis and :siblings from the enclosing
@@ -324,6 +352,18 @@
                 {:op (:op operation) :reason :inapplicable-outcome
                  :outcome outcome})))))
 
+(defn- ^{:stratum 1} check-statement
+  "A revision or an answer carries the text that replaces or answers its
+   target; without it `commit` would write nil (N14 §2.3)."
+  [_workspace operation _context]
+  (let [op (:op operation)
+        statement (:statement operation)]
+    (when (and (or (contains? tx/revisions op) (= :answer-question op))
+               (not (and (string? statement) (not (str/blank? statement)))))
+      (reject :invalid-input :anomalies.deliberation/missing-statement
+              "Revisions and answers must carry a non-blank statement"
+              {:op op :statement statement}))))
+
 (defn- ^{:stratum 1} check-targets [workspace operation _context]
   (let [known (objects-of workspace)
         missing (remove #(contains? known %) (tx/touched-ids operation))]
@@ -331,6 +371,24 @@
       (reject :not-found :anomalies.deliberation/unknown-target
               "Operation targets objects that do not exist"
               {:op (:op operation) :missing (set missing)}))))
+
+(defn- ^{:stratum 1} check-replacement
+  "N14 §3.2: `supersede` names exactly one distinct, live, same-type
+   replacement, and no other operation names one."
+  [workspace operation _context]
+  (let [known (objects-of workspace)
+        replacements (set (get operation :replacement #{}))]
+    (if (= :supersede (:op operation))
+      (when-let [[reason data] (replacement-defect (keep known (tx/touched-ids operation))
+                                                   replacements
+                                                   (known (first replacements)))]
+        (reject :invalid-input :anomalies.deliberation/invalid-replacement
+                "supersede must name one live replacement of the target's type"
+                (merge {:op (:op operation) :reason reason} data)))
+      (when (seq replacements)
+        (reject :invalid-input :anomalies.deliberation/invalid-replacement
+                "Only supersede names a replacement"
+                {:op (:op operation) :reason :inapplicable-replacement})))))
 
 (defn- ^{:stratum 1} check-permission [_workspace operation {:keys [role]}]
   (when-not (tx/permitted? role (:op operation))
@@ -353,7 +411,7 @@
               {:op (:op operation) :basis basis})
 
       (= :additive (tx/class-of (:op operation)))
-      (when-let [terminal (seq (filter object/terminal? targets))]
+      (when-let [terminal (seq (filter #(closed-to? (:op operation) %) targets))]
         (reject :conflict :anomalies.deliberation/terminal-target
                 "Operation targets an object already in a terminal status"
                 {:op (:op operation) :targets (mapv :object/id terminal)}))
@@ -384,6 +442,7 @@
   [workspace transaction stages]
   (let [operations (:tx/operations transaction)
         context {:role (:tx/role transaction)
+                 :participant (:tx/participant transaction)
                  :basis (:tx/basis transaction)
                  :siblings operations}]
     (if (or (nil? operations) (sequential? operations))
@@ -417,4 +476,4 @@
    and the payload is the more basic fault: the ids a graph stage would
    report come out of the same payload whose shape is not yet established."
   [check-schema check-id-fields check-creates check-links check-outcome
-   check-targets check-permission check-basis])
+   check-statement check-targets check-replacement check-permission check-basis])
