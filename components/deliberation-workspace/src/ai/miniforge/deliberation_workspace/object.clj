@@ -38,6 +38,8 @@
   #{:execution :retrieval :user :agent-analysis})
 
 (def ^{:stratum 0} ^:private deliberative-statuses
+  "Statuses shared by the deliberated record types (claim, hypothesis, plan,
+   decision) in N14 §2.3."
   #{:open :contested :accepted :rejected :superseded})
 
 (def ^{:stratum 0} terminal-statuses

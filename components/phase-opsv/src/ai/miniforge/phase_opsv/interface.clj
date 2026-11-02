@@ -19,11 +19,13 @@
   "Public OPSV application transformations and adapter port."
   (:require
    [ai.miniforge.phase-opsv.actuation :as actuation]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-snapshot :as kubernetes-snapshot]
    [ai.miniforge.phase-opsv.evidence-recovery :as recovery]
    [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
    [ai.miniforge.phase-opsv.adapter-factory :as adapter-factory]
    [ai.miniforge.phase-opsv.model :as model]
    [ai.miniforge.phase-opsv.boundary.measurement :as measurement]
+   [ai.miniforge.phase-opsv.boundary.prometheus-client :as prometheus]
    [ai.miniforge.phase-opsv.run-control :as run-control]
    [ai.miniforge.phase-opsv.run-control-state :as control-state]
    [ai.miniforge.phase-opsv.protocol :as protocol]
@@ -38,6 +40,10 @@
 (def ^{:stratum 0} run-verification protocol/run-verification)
 
 (def ^{:stratum 0} verification-receipt verification-run/receipt)
+
+(def ^{:stratum 0} observe-prometheus-window!
+  "Read a bounded window from an explicit Prometheus endpoint without mutation authority."
+  prometheus/observe-window!)
 
 (def ^{:stratum 0} decode-measurement-window
   "Decode one complete Prometheus float series against a declared bounded grid.
@@ -106,6 +112,12 @@
    (adapter-factory/create discover-fn guarded-ramp-fn))
   ([discover-fn guarded-ramp-fn verify-fn]
    (adapter-factory/create discover-fn guarded-ramp-fn verify-fn)))
+
+(def ^{:stratum 0} decode-kubernetes-fingerprint
+  "Decode one explicitly captured target into drift-sensitive evidence.
+   Acquisition owns target selection and configuration-reference closure.
+   This is neither a live capture nor a freshness, verification or authority proof."
+  kubernetes-snapshot/decode)
 
 (comment
   (functional-adapter identity identity))

@@ -43,6 +43,21 @@
   [workspace]
   (get workspace :workspace/objects {}))
 
+(defn ^{:stratum 0} created-specs
+  "The object specifications `operation` asks to create."
+  [operation]
+  (get operation :creates []))
+
+(defn ^{:stratum 0} text?
+  "True when `value` is a non-blank string."
+  [value]
+  (and (string? value) (not (str/blank? value))))
+
+(defn ^{:stratum 0} reject-operation
+  "An `:invalid-input` rejection of `operation` with `subtype`."
+  [subtype message operation]
+  (anomaly/sub-anomaly :invalid-input subtype message {:op (:op operation)}))
+
 (defn- ^{:stratum 0} link-defect
   "The first structural defect in a `:links` map, as `[reason data]`, or nil
    when the engine can write every edge the map declares: a map, keyed by
@@ -163,6 +178,46 @@
         field tx/id-fields
         :when (contains? operation field)]
     [operation field (get operation field)]))
+
+(defn- ^{:stratum 0} closed-to?
+  "True when `target` admits no further `op`. An `:accepted` object stays
+   open to the reopening operations (N14 §2.3)."
+  [op target]
+  (and (object/terminal? target)
+       (not (and (= :accepted (:object/status target))
+                 (contains? tx/reopening-operations op)))))
+
+(defn- ^{:stratum 0} created-earlier
+  "The object `id` would be once the operations before `operation` in
+   `siblings` commit, as a fresh object of its specified type, or nil."
+  [siblings operation id]
+  (some (fn [spec]
+          (when (= id (:id spec))
+            {:object/id id :object/type (:type spec) :object/status :open}))
+        (mapcat #(get % :creates []) (take-while #(not (identical? % operation)) siblings))))
+
+(defn- ^{:stratum 0} replacement-defect
+  "The first defect in a `supersede` replacement, as `[reason data]`, or nil.
+   `replacements` are the ids the operation names, `replacement` the object
+   the single id resolves to."
+  [targets replacements replacement]
+  (cond
+    (some #(not (contains? tx/supersedable-types (:object/type %))) targets)
+    [:unsupersedable-target {:targets (mapv :object/id targets)}]
+
+    (not= 1 (count replacements))
+    [:replacement-count {:replacement (vec replacements)}]
+
+    (nil? replacement)
+    [:unknown-replacement {:replacement (first replacements)}]
+
+    (object/terminal? replacement)
+    [:terminal-replacement {:replacement (:object/id replacement)}]
+
+    (some #(or (= (:object/id %) (:object/id replacement))
+               (not= (:object/type %) (:object/type replacement)))
+          targets)
+    [:mismatched-replacement {:replacement (:object/id replacement)}]))
 
 (defn ^{:stratum 0} validate-operation
   "Run `stages` against one operation in order, returning the first anomaly
@@ -325,6 +380,18 @@
                 {:op (:op operation) :reason :inapplicable-outcome
                  :outcome outcome})))))
 
+(defn- ^{:stratum 1} check-statement
+  "A revision or an answer carries the text that replaces or answers its
+   target; without it `commit` would write nil (N14 §2.3)."
+  [_workspace operation _context]
+  (let [op (:op operation)
+        statement (:statement operation)]
+    (when (and (or (contains? tx/revisions op) (= :answer-question op))
+               (not (and (string? statement) (not (str/blank? statement)))))
+      (reject :invalid-input :anomalies.deliberation/missing-statement
+              (messages/system-t :anomaly/missing-statement)
+              {:op op :statement statement}))))
+
 (defn- ^{:stratum 1} check-targets [workspace operation _context]
   (let [known (objects-of workspace)
         missing (remove #(contains? known %) (tx/touched-ids operation))]
@@ -333,38 +400,69 @@
               (messages/system-t :anomaly/unknown-target)
               {:op (:op operation) :missing (set missing)}))))
 
-(defn- ^{:stratum 1} check-permission [_workspace operation {:keys [role]}]
-  (when-not (tx/permitted? role (:op operation))
+(defn- ^{:stratum 1} check-replacement
+  "N14 §3.2: `supersede` names exactly one distinct, live, same-type
+   replacement, and no other operation names one."
+  [workspace operation {:keys [siblings]}]
+  (let [known (objects-of workspace)
+        replacements (set (get operation :replacement #{}))
+        id (first replacements)
+        replacement (or (known id) (created-earlier siblings operation id))]
+    (if (= :supersede (:op operation))
+      (when-let [[reason data] (replacement-defect (keep known (tx/touched-ids operation))
+                                                   replacements
+                                                   replacement)]
+        (reject :invalid-input :anomalies.deliberation/invalid-replacement
+                (messages/system-t :anomaly/invalid-replacement)
+                (merge {:op (:op operation) :reason reason} data)))
+      (when (seq replacements)
+        (reject :invalid-input :anomalies.deliberation/invalid-replacement
+                (messages/system-t :anomaly/inapplicable-replacement)
+                {:op (:op operation) :reason :inapplicable-replacement})))))
+
+(defn- ^{:stratum 1} supersedes-decision-without-standing?
+  "True when `operation` supersedes a decision on behalf of a role §5.3
+   does not let supersede one."
+  [workspace operation role]
+  (and (= :supersede (:op operation))
+       (not (contains? tx/decision-superseders role))
+       (some #(= :decision (:object/type (get (objects-of workspace) %)))
+             (tx/touched-ids operation))))
+
+(defn- ^{:stratum 1} check-permission [workspace operation {:keys [role]}]
+  (when (or (not (tx/permitted? role (:op operation)))
+            (supersedes-decision-without-standing? workspace operation role))
     (reject :unauthorized :anomalies.deliberation/role-forbidden
             (messages/system-t :anomaly/role-forbidden)
             {:op (:op operation) :role role})))
 
 (defn- ^{:stratum 1} check-basis
-  "Basis staleness per concurrency class (N14 §3.3). Additive operations
-   commute, so they commit on a stale basis provided their targets are still
-   live; mergeable and exclusive operations require targets untouched since
-   the basis version the projection was rendered from."
+  "Target liveness and basis staleness (N14 §3.3). No operation may act on a
+   terminal target, except the reopening operations on an `:accepted` one.
+   Additive operations commute, so they commit on a stale basis; mergeable
+   and exclusive operations require targets untouched since the basis
+   version the projection was rendered from."
   [workspace operation {:keys [basis]}]
-  (let [known (objects-of workspace)
-        targets (keep known (tx/touched-ids operation))]
+  (let [op (:op operation)
+        targets (keep (objects-of workspace) (tx/touched-ids operation))
+        terminal (seq (filter #(closed-to? op %) targets))
+        moved (when (and (number? basis) (not= :additive (tx/class-of op)))
+                (seq (filter #(> (:object/touched-at %) basis) targets)))]
     (cond
       (not (number? basis))
       (reject :invalid-input :anomalies.deliberation/missing-basis
               (messages/system-t :anomaly/missing-basis)
-              {:op (:op operation) :basis basis})
+              {:op op :basis basis})
 
-      (= :additive (tx/class-of (:op operation)))
-      (when-let [terminal (seq (filter object/terminal? targets))]
-        (reject :conflict :anomalies.deliberation/terminal-target
-                (messages/system-t :anomaly/terminal-target)
-                {:op (:op operation) :targets (mapv :object/id terminal)}))
+      terminal
+      (reject :conflict :anomalies.deliberation/terminal-target
+              (messages/system-t :anomaly/terminal-target)
+              {:op op :targets (mapv :object/id terminal)})
 
-      :else
-      (when-let [moved (seq (filter #(> (:object/touched-at %) basis) targets))]
-        (reject :conflict :anomalies.deliberation/stale-basis
-                (messages/system-t :anomaly/stale-basis)
-                {:op (:op operation) :basis basis
-                 :targets (mapv :object/id moved)})))))
+      moved
+      (reject :conflict :anomalies.deliberation/stale-basis
+              (messages/system-t :anomaly/stale-basis)
+              {:op op :basis basis :targets (mapv :object/id moved)}))))
 
 (defn ^{:stratum 1} validate
   "Validate a whole transaction against `stages`. Returns nil when every
@@ -385,6 +483,7 @@
   [workspace transaction stages]
   (let [operations (:tx/operations transaction)
         context {:role (:tx/role transaction)
+                 :participant (:tx/participant transaction)
                  :basis (:tx/basis transaction)
                  :siblings operations}]
     (if (or (nil? operations) (sequential? operations))
@@ -394,6 +493,26 @@
               {:operations operations}))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} payload-stages
+  "The §3.4 stages that read only the transaction's own payload, never the
+   object graph."
+  [check-schema check-id-fields check-creates check-links check-outcome check-statement])
+
+(def ^{:stratum 2} permission-stages
+  "The §5.3 role-permission stage alone. §3.4 orders permission before basis
+   staleness, so admission runs this over the whole transaction before it
+   checks the declared basis."
+  [check-permission])
+
+(def ^{:stratum 2} basis-stages
+  "The §3.3 basis-staleness stage alone, for checking a transaction's
+   declared basis separately from its other graph checks."
+  [check-basis])
+
+(def ^{:stratum 2} graph-stages
+  "The §3.4 stages that read the object graph."
+  (into [check-targets check-replacement check-permission] basis-stages))
 
 (def ^{:stratum 2} concurrency-stages
   "Ordered §3.4 stages. Schema conformance runs first because every later
@@ -417,5 +536,4 @@
    transaction can carry a malformed payload and a missing target at once,
    and the payload is the more basic fault: the ids a graph stage would
    report come out of the same payload whose shape is not yet established."
-  [check-schema check-id-fields check-creates check-links check-outcome
-   check-targets check-permission check-basis])
+  (into payload-stages graph-stages))

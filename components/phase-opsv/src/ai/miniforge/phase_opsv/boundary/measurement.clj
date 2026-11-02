@@ -18,9 +18,20 @@
     (and (vector? series) (= 1 (count series))
          (vector? values) (<= (count values) (:measurement/max-samples request)))))
 
+(defn ^{:stratum 0} invalid-request []
+  (anomaly/anomaly :invalid-input (msg/ts :measurement/invalid-request) {}))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} decode-response [request response]
+(defn ^{:stratum 1} request-failure
+  "Admit the declared window once, before external acquisition or decoding."
+  [request]
+  (when-not (and (m/validate schema/WindowRequest request) (window/bounded? request))
+    (invalid-request)))
+
+(defn ^{:stratum 1} decode-response
+  "Admit external response data for an already admitted request."
+  [request response]
   (cond
     (not (within-size? request response)) (window/invalid-response)
     (not (m/validate schema/RangeResponse response)) (window/invalid-response)
@@ -35,8 +46,8 @@
    complete float series without API warnings; return observations, never
    a verification verdict or execution authority."
   [request response]
-  (if (and (m/validate schema/WindowRequest request) (window/bounded? request))
-    (decode-response request response)
-    (anomaly/anomaly :invalid-input (msg/ts :measurement/invalid-request) {})))
+  (if-let [failure (request-failure request)]
+    failure
+    (decode-response request response)))
 
 (comment ::external-range-response)

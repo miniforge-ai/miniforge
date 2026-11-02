@@ -15,8 +15,8 @@ later re-entered stays on record.
 ## Motivation
 
 `apply-gate-validation` in `workflow/execution_transition.clj` ran the
-phase's gates through `gate/check-gates` and kept only two things: the
-decision envelope, and on a deny the failed gates' `[:gate :errors]` as
+phase's gates through `gate/check-gates` and kept only two things.
+It retained the decision envelope, and on a deny the failed gates' `[:gate :errors]` as
 `:phase/gate-failures`. Every gate's `:warnings` were discarded.
 
 A warning never changes the decision, so the envelope has nowhere to put
@@ -47,8 +47,8 @@ history as the only record, and the history had no warnings.
   - `gate-warnings-test`: ordering, list-to-vector coercion, and nil when
     no gate warned.
   - `apply-gate-validation-keeps-gate-warnings`: a passing
-    `:codex-consultation` phase with an unread pin keeps the warning; a
-    failing phase keeps it beside `:phase/gate-failures`; a phase with no
+    `:codex-consultation` phase with an unread pin keeps the warning.
+    A failing phase keeps it beside `:phase/gate-failures`; a phase with no
     warnings gets no key.
 - `checkpoint_store_test.clj`: the re-entry history test also checks that
   the allowed iteration's warning is in the history.
