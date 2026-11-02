@@ -319,9 +319,8 @@
 (deftest ^{:stratum 2} the-read-scope-not-the-ablation-bounds-what-a-turn-touches
   (let [ws (workspace :workspace/roles [:skeptic] :workspace/objects
                       {"goal-1" (goal "goal-1") "secret" (assoc (goal "secret") :object/type :claim :object/role :proposer)})
-        status #(get-in (run/step % (constantly {:tx/operations [{:op :challenge :targets [%2]
-                                                                   :reason "r" :resolution "s"}]}))
-                        [:workspace/feedback :skeptic :status])
-        scoped (assoc ws :workspace/readable {:skeptic #{"goal-1"}})]
-    (is (= :committed (status (assoc ws :workspace/visibility :none) "secret")))
-    (is (= :rejected (status scoped "secret") (status scoped "absent")))))
+        challenge (fn [id] (constantly {:tx/operations [{:op :challenge :targets [id] :reason "r" :resolution "s"}]}))
+        status #(get-in (run/step (assoc ws %1 %2) (challenge %3)) [:workspace/feedback :skeptic :status])]
+    (is (= :committed (status :workspace/visibility :none "secret")))
+    (is (= :rejected (status :workspace/readable {:skeptic #{"goal-1"}} "secret")
+           (status :workspace/readable {:skeptic #{"goal-1"}} "absent")))))
