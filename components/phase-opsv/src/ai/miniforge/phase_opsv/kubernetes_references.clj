@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-references
   "Collect ConfigMap and Secret dependencies; never resolve or read their values."
-  (:require [ai.miniforge.phase-opsv.kubernetes-reference-sources :as sources]))
+  (:require [ai.miniforge.phase-opsv.kubernetes-images :as images]
+            [ai.miniforge.phase-opsv.kubernetes-reference-sources :as sources]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -27,7 +28,7 @@
 (defn- ^{:stratum 1} pod-references [pod]
   (let [namespace (get-in pod ["metadata" "namespace"])
         spec (get pod "spec")
-        containers (mapcat #(get spec %) ["containers" "initContainers" "ephemeralContainers"])
+        containers (mapcat #(get spec (first %)) images/container-groups)
         pull-secrets (get spec "imagePullSecrets")]
     (concat (mapcat (partial container-references namespace) containers)
             (mapcat (partial volume-references namespace) (get spec "volumes"))
