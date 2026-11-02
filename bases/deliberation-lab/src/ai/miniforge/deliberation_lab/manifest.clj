@@ -17,7 +17,8 @@
 ;; limitations under the License.
 (ns ai.miniforge.deliberation-lab.manifest
   "Development manifest validation. A manifest pins the conditions, tiers,
-   replicates, model and normalized price weights before any provider call;
+   replicates, model, normalized price weights and the per-call provider
+   dollar cap before any provider call;
    an invalid one is refused before the first call."
   (:require
    [ai.miniforge.deliberation-harness.interface :as harness]))
@@ -76,4 +77,5 @@
     (not (pos-int? (:max-input-bytes manifest))) (conj :max-input-bytes)
     (not (valid-conditions? (:conditions manifest))) (conj :conditions)
     (not (valid-tiers? (:tiers manifest))) (conj :tiers)
-    (not (valid-prices? (:price-table manifest))) (conj :price-table)))
+    (not (valid-prices? (:price-table manifest))) (conj :price-table)
+    (not (positive-number? (get-in manifest [:adapter :call-cap-usd]))) (conj :adapter)))

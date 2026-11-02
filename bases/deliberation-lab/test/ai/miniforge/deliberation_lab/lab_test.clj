@@ -34,7 +34,7 @@
 
 (def ^{:stratum 0} ^:private manifest
   {:schema-version 1 :mode :development :model "test-model"
-   :conditions [:workspace :workspace-ablated] :replicates 1 :max-input-bytes 48000
+   :conditions [:workspace :workspace-ablated] :replicates 1 :max-input-bytes 48000 :adapter {:call-cap-usd 0.2}
    :price-table {:input-per-million 3 :output-per-million 15}
    :tiers [{:id :tiny :activations 4 :max-normalized-usd 1 :wall-seconds 30}]})
 

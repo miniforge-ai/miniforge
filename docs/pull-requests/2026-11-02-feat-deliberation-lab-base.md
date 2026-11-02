@@ -47,7 +47,7 @@ base requires no component internals (dewey 311).
 - `manifest`: `defects` names every invalid field, including a wrongly
   shaped one or a manifest that is not a map, without throwing: mode, schema version,
   model, replicates, input cap, conditions, tiers (at least one working turn
-  plus the closing turn) and price weights.
+  plus the closing turn), price weights and the per-call dollar cap.
 - `lab`
   - `execute!` checks the manifest and fixtures before any call, and builds
     the model call only from a manifest that passed. It pins the
@@ -79,13 +79,17 @@ Deviations from the snapshot:
 - No progress `println`; the journal is the record.
 - The snapshot's own test runner is dropped: `poly test` covers the base.
 
-Known limitation: the snapshot passed `--max-budget-usd` to the CLI as a
-per-call dollar guard, and the `llm` client exposes no equivalent. Spend is
-still bounded per cell by the turn allowance and the normalized-cost
-ceiling, which is checked between calls. As in the snapshot, a single call
-can cross the ceiling, and a cell that does cannot succeed. A hard
-pre-reserved budget remains a prerequisite for N15 budget conformance
-(N15 Annex A).
+Per-call guard: as in the snapshot, the manifest's `:adapter {:call-cap-usd}`
+is passed to the provider as `--max-budget-usd`, here through the `llm`
+client's `:budget-usd`. It is a provider backstop, not a strict bound. Spend
+is bounded per cell by the turn allowance and the normalized-cost ceiling,
+checked between calls. A single call can cross the ceiling, and a cell that
+does cannot succeed. A hard pre-reserved budget remains a prerequisite for
+N15 budget conformance (N15 Annex A).
+
+`workspace.edn` excludes `llm`'s own tests from this project: they require
+`agent`, a test-only dependency the lab does not contain. The `miniforge`,
+`miniforge-core` and `miniforge-tui` projects contain both and test `llm`.
 
 ## Testing Plan
 
@@ -105,7 +109,7 @@ Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
 sandbox), with scratch stand-ins outside the repo for the `llm` namespace
 (no calls are made) and for cheshire's JSON parsing:
 
-- `manifest_test` and `lab_test`: 7 tests, 32 assertions, 0 failures. The
+- `manifest_test` and `lab_test`: 7 tests, 33 assertions, 0 failures. The
   smoke test failed before the `journal/` change, the usage test before the
   argument-count change, and the metering, refusal and shape tests before
   the review fixes.

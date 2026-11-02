@@ -117,14 +117,16 @@
 
 (defn ^{:stratum 2} claude-call
   "A `call` for `run-cell`: one isolated completion per request, through
-   the streaming path, which parses the provider's usage. A failed call is
-   never retried."
-  [{:keys [model]}]
+   the streaming path, which parses the provider's usage, with the
+   manifest's per-call dollar cap as the provider budget guard. A failed
+   call is never retried."
+  [{:keys [model adapter]}]
   (let [client (llm/create-client {:backend :claude :model model :isolated? true})
         prompt (system-prompt)]
     (fn [request]
       (call-result (llm/complete-stream client
                                         {:system prompt
+                                         :budget-usd (:call-cap-usd adapter)
                                          :messages [{:role "user"
                                                      :content (json/generate-string request)}]}
                                         (constantly nil))))))
