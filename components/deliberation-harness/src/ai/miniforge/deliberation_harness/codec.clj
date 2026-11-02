@@ -16,13 +16,16 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.deliberation-harness.codec
-  "Canonical EDN for manifests, digests and journal records: maps and sets
-   print in a fixed order, so equal values encode, and hash, identically."
+  "Canonical EDN for manifests, digests and journal records. Map entries and
+   set elements are written in the order of their own canonical text, so a
+   value encodes, and hashes, the same however it was built. No sorted
+   collection is ever built: ordering never has to agree with Clojure
+   equality, and no entry can be merged or dropped."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-harness.messages :as messages]
    [clojure.edn :as edn]
-   [clojure.walk :as walk])
+   [clojure.string :as str])
   (:import
    (java.io PushbackReader StringReader)
    (java.math BigInteger)
@@ -36,30 +39,29 @@
 
 (defn- ^{:stratum 0} stably
   "Call `f` with fixed, readable, untruncated printer settings, so a caller's
-   bindings cannot change an encoding or the order canonicalization picks."
+   bindings cannot change an encoding."
   [f]
   (binding [*print-length* nil *print-level* nil *print-meta* false
             *print-dup* false *print-readably* true *print-namespace-maps* false]
     (f)))
 
-(defn- ^{:stratum 0} printed-order
-  "Compare by printed form. Values that print alike but are not `=` (a
-   float and a double of 1.2) are ordered by class, so they stay distinct
-   keys; values that are `=` compare equal, so lookups keep Clojure's key
-   equality.
-   Stable printing is bound here, not around the walk, because a sorted
-   collection keeps calling its comparator after `canonical` returns."
-  [a b]
-  (stably #(let [by-text (compare (pr-str a) (pr-str b))]
-             (if (and (zero? by-text) (not= a b))
-               (compare (str (class a)) (str (class b)))
-               by-text))))
-
-(defn- ^{:stratum 0} ordered [value]
-  (cond
-    (map? value) (into (sorted-map-by printed-order) value)
-    (set? value) (into (sorted-set-by printed-order) value)
-    :else value))
+(defn- ^{:stratum 0} emit
+  "The canonical text of `value`: maps, sets, vectors and lists written
+   element by element, map entries ordered by their key's then value's text
+   and set elements by their own text; anything else printed as itself.
+   Call it inside `stably`."
+  [value]
+  (let [joined (fn [open texts close] (str open (str/join " " texts) close))]
+    (cond
+      (map? value) (joined "{" (->> value
+                                    (map (fn [[k v]] [(emit k) (emit v)]))
+                                    sort
+                                    (map (fn [[k v]] (str k " " v))))
+                           "}")
+      (set? value) (joined "#{" (sort (map emit value)) "}")
+      (vector? value) (joined "[" (map emit value) "]")
+      (seq? value) (joined "(" (map emit value) ")")
+      :else (pr-str value))))
 
 (defn- ^{:stratum 0} mark-tag
   "EDN reader for any custom tag. Journals and manifests carry plain data
@@ -104,15 +106,12 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} canonical
-  "`value` with every nested map and set in printed-key order."
-  [value]
-  (walk/postwalk ordered value))
-
 (defn ^{:stratum 1} encode
-  "The canonical EDN text of `value`."
+  "The canonical EDN text of `value`. Values EDN cannot tell apart (a float
+   and a double that print alike) share a text; `plain?` refuses them in a
+   journal payload."
   [value]
-  (stably #(pr-str (canonical value))))
+  (stably #(emit value)))
 
 (defn ^{:stratum 1} digest
   "Lowercase hex SHA-256 of `value`'s canonical encoding."

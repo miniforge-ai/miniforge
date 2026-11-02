@@ -26,11 +26,13 @@ codec and fixtures belong in a component.
 ## Changes in Detail
 
 - `codec`
-  - Canonical EDN, with maps and sets in printed-key order; values that
-    print alike but are not `=` are ordered by class, so no entry merges,
-    while `=` values still compare equal for lookups. Printer
-    settings are pinned for encoding and for the ordering comparator, so a
-    caller's `*print-length*` cannot truncate or reorder a record.
+  - Canonical EDN written directly: map entries ordered by their key's
+    then value's canonical text, set elements by their own text. No sorted
+    collection is built, so ordering never has to agree with Clojure
+    equality and no entry is merged or dropped. Unequal values EDN cannot
+    tell apart (a float and a double printing alike) share a text, and
+    `plain?` refuses them as journal payloads. Printer settings are pinned,
+    so a caller's `*print-length*` cannot truncate a record.
   - SHA-256 digest.
   - `read-text`: parses exactly one plain EDN form and returns an anomaly
     for unreadable text, trailing forms or a custom reader tag. A tag
@@ -75,8 +77,9 @@ Deviations from the snapshot:
 
 - `codec_test`: order-independent encoding, digest stability, refused
   custom tags, unreadable text, trailing forms, an unforgeable tag marker,
-  and encoding and ordering under hostile printer bindings; look-alike keys
-  staying distinct; `plain?`; a tag inside anomaly-shaped text.
+  encoding under hostile printer bindings, no entry ever dropped, equal
+  keys counted once, nil keys, `plain?`, and a tag inside anomaly-shaped
+  text.
 - `journal_test` (marked `:integration`; it writes a temporary directory,
   because durable files are the journal's contract): round trip, refusal
   to reuse a directory, tamper detection, an unlistable directory, an
@@ -87,7 +90,7 @@ Deviations from the snapshot:
   needs every observation; the public view hides the sealed answer.
 
 Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
-sandbox, so a local stand-in replaced malli): 20 tests, 41 assertions,
+sandbox, so a local stand-in replaced malli): 25 tests, 59 assertions,
 0 failures. clj-kondo 2026.10.26 (the CI version) over `bases components
 development/src`: 0 errors. `poly test` and the Polylith check ran only in CI.
 

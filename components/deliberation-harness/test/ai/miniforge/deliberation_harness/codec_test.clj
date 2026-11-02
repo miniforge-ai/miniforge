@@ -62,15 +62,6 @@
       (is (= expected (codec/encode value))))
     (is (= value (codec/read-text expected)))))
 
-(deftest ^{:stratum 1} canonical-order-ignores-the-callers-printer-settings
-  (let [ordered (codec/canonical {[1 2 3] :long [1 2] :short})]
-    (binding [*print-length* 1]
-      (is (= 3 (count (assoc ordered [1 9] :new)))))))
-
-(deftest ^{:stratum 1} values-that-print-alike-stay-distinct
-  (is (= 2 (count (codec/canonical (hash-set (float 1.2) (double 1.2))))))
-  (is (= 2 (count (codec/canonical (hash-map (float 1.2) :f (double 1.2) :d))))))
-
 (deftest ^{:stratum 1} plain-values-round-trip
   (is (codec/plain? {:a [1 "x" #{:k}] :b nil}))
   (is (not (codec/plain? {:at (java.time.Instant/now)})))
@@ -81,10 +72,6 @@
          (:anomaly/type (codec/read-text
                          (str "{:anomaly/type :fault :anomaly/message \"m\""
                               " :anomaly/data {:x #custom/tag 1} :anomaly/at #inst \"2026-01-01\"}"))))))
-
-(deftest ^{:stratum 1} nil-keys-stay-usable-after-canonicalizing
-  (is (= :value (get (codec/canonical {nil :value :a 1}) nil)))
-  (is (contains? (codec/canonical #{nil :a}) nil)))
 
 (deftest ^{:stratum 1} anomaly-shaped-data-is-data
   (let [text (str "{:anomaly/type :fault :anomaly/message \"m\""
@@ -98,6 +85,22 @@
   (let [linked (doto (java.util.LinkedHashMap.) (.put :b 1) (.put :a 2))]
     (is (not (codec/plain? linked)))))
 
-(deftest ^{:stratum 1} canonical-lookups-keep-clojure-key-equality
-  (is (= :f (get (codec/canonical {(float 1.5) :f}) (double 1.5))))
-  (is (contains? (codec/canonical #{(float 1.5)}) (double 1.5))))
+(deftest ^{:stratum 1} encoding-never-drops-an-entry
+  (testing "unequal values that print alike are both written, so the payload is refused, not shrunk"
+    (doseq [value [(hash-set (float 1.2) (double 1.2))
+                   (hash-set [(float 1.2)] [(double 1.2)])
+                   (hash-map (float 1.2) :f (double 1.2) :d)]]
+      (is (= 2 (count (re-seq #"1\.2" (codec/encode value)))))
+      (is (not (codec/plain? value)))))
+  (testing "a look-alike tie still encodes deterministically"
+    (is (= (codec/encode (hash-map [(float 1.2)] :a [(double 1.2)] :b))
+           (codec/encode (hash-map [(double 1.2)] :b [(float 1.2)] :a))))))
+
+(deftest ^{:stratum 1} equal-keys-are-one-entry
+  (is (= (codec/encode {1 :v}) (codec/encode (assoc {1 :v} 1 :v))))
+  (is (= (codec/encode {1.5 :f}) (codec/encode {(float 1.5) :f}))))
+
+(deftest ^{:stratum 1} nil-and-ordering-are-plain
+  (is (codec/plain? {nil :value :a 1}))
+  (is (codec/plain? #{nil :a}))
+  (is (= "{[1 2 3] :long [1 2] :short}" (codec/encode {[1 2] :short [1 2 3] :long}))))
