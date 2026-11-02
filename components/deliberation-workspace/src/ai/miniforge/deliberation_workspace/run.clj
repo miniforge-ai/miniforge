@@ -69,11 +69,14 @@
   (update workspace :workspace/passed (fnil conj #{}) participant))
 
 (defn- ^{:stratum 0} allowance-remains?
-  "True while the activation budget, when one is set, has a turn left."
+  "True while every configured run-level ceiling (activations, cost) has
+   room left; a dimension with no ceiling never blocks."
   [workspace]
-  (let [budget (get-in workspace [:workspace/budget :activations])]
-    (or (nil? budget)
-        (< (get-in workspace [:workspace/spent :activations] 0) budget))))
+  (every? (fn [dimension]
+            (let [ceiling (get-in workspace [:workspace/budget dimension])]
+              (or (nil? ceiling)
+                  (< (get-in workspace [:workspace/spent dimension] 0) ceiling))))
+          [:activations :cost]))
 
 (defn- ^{:stratum 0} closer
   "The first participant holding synthesizer responsibility, or nil."
@@ -200,11 +203,15 @@
   "Drive the loop until a §7 closing rule fires, then return the closed
    workspace with its termination record attached, or an `:invalid-input`
    anomaly when the closure reserve is not a non-negative integer (a
-   negative reserve would enlarge ordinary work past the budget).
+   negative reserve would enlarge ordinary work past the budget). A
+   workspace that already carries a termination record is returned
+   unchanged: a closed run is never driven, or closed, again.
    `max-steps` is a harness backstop, not a spec rule."
   [workspace activate {:keys [max-steps] :or {max-steps default-max-steps}}]
   (let [reserve (get workspace :workspace/closure-reserve 0)]
-    (if (nat-int? reserve)
-      (drive workspace activate max-steps)
-      (anomaly/anomaly :invalid-input (messages/system-t :anomaly/invalid-closure-reserve)
-                       {:closure-reserve reserve}))))
+    (cond
+      (contains? workspace :workspace/termination) workspace
+      (nat-int? reserve) (drive workspace activate max-steps)
+      :else (anomaly/anomaly :invalid-input
+                             (messages/system-t :anomaly/invalid-closure-reserve)
+                             {:closure-reserve reserve}))))

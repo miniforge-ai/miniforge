@@ -281,3 +281,14 @@
   (let [result (run/run (workspace :workspace/closure-reserve -1) fresh-claim {})]
     (is (anomaly/anomaly? result))
     (is (= :invalid-input (:anomaly/type result)))))
+
+(deftest ^{:stratum 2} a-spent-cost-ceiling-leaves-closure-unfunded
+  (let [ws (workspace :workspace/budget {:activations 5 :cost 25} :workspace/closure-reserve 1
+                      :workspace/spent {:activations 1 :cost 25})
+        closed (run/run ws (fn [_] (throw (ex-info "must not run" {}))) {})]
+    (is (= :unfunded (get-in closed [:workspace/termination :termination/closure])))))
+
+(deftest ^{:stratum 2} a-closed-run-is-never-driven-again
+  (let [ws (workspace :workspace/budget {:activations 5} :workspace/closure-reserve 2)
+        closed (run/run ws passes {})]
+    (is (= closed (run/run closed (fn [_] (throw (ex-info "must not run" {}))) {})))))
