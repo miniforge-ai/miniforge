@@ -21,20 +21,7 @@
         (is (= ["staging" "staging"] (mapv :reference/namespace result)))))))
 
 (deftest ^{:stratum 0} test-volume-and-projected-reference-field-names-follow-the-api
-  (doseq [[path name-key kind]
-          [[["configMap"] "name" "ConfigMap"]
-           [["secret"] "secretName" "Secret"]
-           [["csi" "nodePublishSecretRef"] "name" "Secret"]
-           [["azureFile"] "secretName" "Secret"]
-           [["cephfs" "secretRef"] "name" "Secret"]
-           [["cinder" "secretRef"] "name" "Secret"]
-           [["flexVolume" "secretRef"] "name" "Secret"]
-           [["iscsi" "secretRef"] "name" "Secret"]
-           [["rbd" "secretRef"] "name" "Secret"]
-           [["scaleIO" "secretRef"] "name" "Secret"]
-           [["storageos" "secretRef"] "name" "Secret"]
-           [["projected" "sources" 0 "secret"] "name" "Secret"]
-           [["projected" "sources" 0 "configMap"] "name" "ConfigMap"]]]
+  (doseq [[path name-key kind] fixture/volume-cases]
     (let [volume (fixture/volume path name-key "referenced-object")
           pod (fixture/pod {"volumes" [volume]})
           result (references/configuration-references [pod])]

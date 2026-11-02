@@ -51,8 +51,9 @@ Settings tests cover target requirements, endpoint and namespace rejection,
 sanitized configuration failures, and preservation of fatal/interrupted causes.
 Public capture tests use real API-shaped JSON, including ListMeta and container
 references. JVM tests use actual JDK response/stream types. After integrating the
-dependency floor, both products, 22 JVM tests (70 assertions) and 92 isolated
-native-package tests (472 assertions) passed, with normal signed hooks.
+dependency floor, both products and 22 JVM tests (70 assertions) passed. The
+expanded isolated native-package suite passed 95 tests (512 assertions).
+Normal signed hooks remain required for every commit.
 
 ## Deployment Plan
 

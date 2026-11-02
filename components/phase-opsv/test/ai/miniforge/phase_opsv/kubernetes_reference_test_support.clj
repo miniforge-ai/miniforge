@@ -8,6 +8,38 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} volume-cases
+  "Independent native-path expectations shared by collection and admission tests."
+  [[["configMap"] "name" "ConfigMap" true]
+   [["secret"] "secretName" "Secret" true]
+   [["csi" "nodePublishSecretRef"] "name" "Secret" false]
+   [["azureFile"] "secretName" "Secret" false]
+   [["cephfs" "secretRef"] "name" "Secret" false]
+   [["cinder" "secretRef"] "name" "Secret" false]
+   [["flexVolume" "secretRef"] "name" "Secret" false]
+   [["iscsi" "secretRef"] "name" "Secret" false]
+   [["rbd" "secretRef"] "name" "Secret" false]
+   [["scaleIO" "secretRef"] "name" "Secret" false]
+   [["storageos" "secretRef"] "name" "Secret" false]
+   [["projected" "sources" 0 "secret"] "name" "Secret" true]
+   [["projected" "sources" 0 "configMap"] "name" "ConfigMap" true]])
+
+(def ^{:stratum 0} ^:private volume-fields
+  "Required surrounding fields from the native core/v1 volume sources."
+  {"csi" {"driver" "storage.example.invalid"}
+   "azureFile" {"shareName" "configuration"}
+   "cephfs" {"monitors" ["storage.example.invalid:6789"]}
+   "cinder" {"volumeID" "volume-1"}
+   "flexVolume" {"driver" "example.invalid/storage"}
+   "iscsi" {"targetPortal" "192.0.2.1:3260"
+            "iqn" "iqn.2026-01.invalid.example:storage"
+            "lun" 0}
+   "rbd" {"monitors" ["storage.example.invalid:6789"]
+          "image" "configuration"}
+   "scaleIO" {"gateway" "https://storage.example.invalid"
+              "system" "staging"}
+   "projected" {"sources" [{}]}})
+
 (def ^{:stratum 0} ^:private key-by-source
   "Keys actually present in the captured ConfigMap and Secret fixtures."
   {"configMapKeyRef" "workers"
@@ -25,12 +57,14 @@
 (defn ^{:stratum 0} pod [spec]
   (update (captured/pod) "spec" merge spec))
 
-(defn ^{:stratum 0} volume [path name-key name]
-  (let [base (cond-> {"name" "configuration"}
-               (= "projected" (first path)) (assoc-in ["projected" "sources"] [{}]))]
-    (assoc-in base (conj path name-key) name)))
-
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} volume [path name-key name]
+  (let [root (first path)
+        fields (get volume-fields root {})
+        base {"name" "configuration"
+              root fields}]
+    (assoc-in base (conj path name-key) name)))
 
 (defn ^{:stratum 1} environment-from [field name optional?]
   (hash-map field (referent name optional?)))
