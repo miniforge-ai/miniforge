@@ -121,9 +121,10 @@
   (let [ops (:tx/operations transaction)
         specs (mapcat validation/created-specs ops)
         allowed (into (set (map :id specs)) readable)]
-    (some #(not (contains? allowed %))
-          (concat (mapcat (fn [op] (mapcat #(get op % []) tx/id-fields)) ops)
-                  (mapcat #(mapcat val (get % :links {})) (concat ops specs))))))
+    (and readable
+         (some #(not (contains? allowed %))
+               (concat (mapcat (fn [op] (mapcat #(get op % []) tx/id-fields)) ops)
+                       (mapcat #(mapcat val (get % :links {})) (concat ops specs)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -132,9 +133,8 @@
 (defn- ^{:stratum 1} settle
   [spent proposed participant context]
   (let [admitted (admission/admit spent proposed context)
-        readable (get-in spent [:workspace/readable participant])
-        result (if (and readable (not (anomaly/anomaly? admitted))
-                        (out-of-scope? (:transaction admitted) readable))
+        result (if (and (not (anomaly/anomaly? admitted))
+                        (out-of-scope? (:transaction admitted) (get-in spent [:workspace/readable participant])))
                  (validation/reject :not-found :anomalies.deliberation/unknown-target
                                     (messages/system-t :anomaly/unknown-target) {})
                  admitted)]
