@@ -185,10 +185,14 @@
 ;; in value and in encoding, so a record written from it replays to the same
 ;; hash. False for objects EDN cannot carry (an `Instant`, a function), for
 ;; text UTF-8 cannot hold, and for host collections such as a
-;; `LinkedHashMap`, whose replay is a different value. Host collections are
-;; refused before encoding, so a self-referential one cannot recurse forever.
+;; `LinkedHashMap`, whose replay is a different value. Anything but EDN's own
+;; scalars and Clojure collections is refused before encoding, so neither a
+;; self-referential host collection nor an object whose printing throws is ever
+;; encoded.
 (defn ^{:stratum 2} plain? [value]
-  (and (not-any? #(seq (host-tag %)) (tree-seq coll? seq value))
+  (and (every? #(or ((some-fn nil? boolean? string? char? number? keyword? symbol? inst? uuid?) %)
+                    (and (coll? %) (not (record? %))))
+               (tree-seq coll? seq value))
        (let [encoded (encode value)
              [status read-back] (parse encoded)]
          (and (= :ok status)

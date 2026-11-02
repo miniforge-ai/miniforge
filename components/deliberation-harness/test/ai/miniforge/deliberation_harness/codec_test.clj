@@ -44,12 +44,8 @@
     (is (anomaly/anomaly? (codec/read-text "{:a")))))
 
 (deftest ^{:stratum 1} reading-takes-exactly-one-form
-  (testing "trailing forms and malformed suffixes are refused"
-    (is (anomaly/anomaly? (codec/read-text "{:a 1} #custom/tag 2")))
-    (is (anomaly/anomaly? (codec/read-text "{:a 1} {")))
-    (is (anomaly/anomaly? (codec/read-text "{:a 1} {:b 2}"))))
-  (testing "empty text holds no form"
-    (is (anomaly/anomaly? (codec/read-text "")))))
+  (doseq [text ["{:a 1} #custom/tag 2" "{:a 1} {" "{:a 1} {:b 2}" ""]]
+    (is (anomaly/anomaly? (codec/read-text text)) (str "refused: " (pr-str text)))))
 
 (deftest ^{:stratum 1} plain-data-cannot-forge-the-tag-marker
   (let [value {:ai.miniforge.deliberation-harness.codec/rejected-tag 'x}]
@@ -122,8 +118,9 @@
   (is (not= (codec/digest (long-array [1 2])) (codec/digest [1 2])))
   (is (not (codec/plain? (java.util.ArrayList. [1 2])))))
 
-(deftest ^{:stratum 1} a-self-referential-host-collection-is-refused-not-recursed
-  (is (not (codec/plain? {:x (doto (java.util.ArrayList.) (#(.add % %)))}))))
+(deftest ^{:stratum 1} non-edn-values-are-refused-before-encoding
+  (is (not (codec/plain? {:x (doto (java.util.ArrayList.) (#(.add % %)))})))
+  (is (not (codec/plain? [(reify Object (toString [_] (throw (ex-info "no" {}))))]))))
 
 (deftest ^{:stratum 1} host-collections-encode-their-own-entries
   (testing "a host map keeps keys Clojure would merge"

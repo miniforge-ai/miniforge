@@ -41,9 +41,10 @@ codec and fixtures belong in a component.
   - `read-source`: reads a file or resource as strict UTF-8, so malformed
     bytes are an anomaly rather than U+FFFD; a read or parse failure is an
     anomaly naming the source.
-  - `plain?`: true when a value reads back unchanged after encoding. Any
-    host collection is refused before encoding, so a self-referential one
-    cannot recurse forever.
+  - `plain?`: true when a value reads back unchanged after encoding. Anything
+    but EDN's own scalars and Clojure collections is refused before encoding.
+    So a self-referential host collection cannot recurse forever, and an
+    object whose printing throws cannot make `append!` throw.
 - `journal`
   - `open!` refuses a directory that already exists.
   - `append!` refuses a payload that is not `plain?` (it could not be
@@ -82,8 +83,8 @@ Deviations from the snapshot:
 - `codec_test`: order-independent encoding, digest stability, refused
   custom tags, unreadable text, trailing forms, an unforgeable tag marker,
   encoding under hostile printer bindings, no entry ever dropped, equal
-  keys counted once, nil keys, `plain?`, a self-referential host collection,
-  and a tag inside anomaly-shaped text.
+  keys counted once, nil keys, `plain?`, a self-referential host collection
+  and an object whose printing throws, and a tag inside anomaly-shaped text.
 - `journal_test` (marked `:integration`; it writes a temporary directory,
   because durable files are the journal's contract): round trip, refusal
   to reuse a directory, tamper detection, an unlistable directory, an
@@ -95,7 +96,7 @@ Deviations from the snapshot:
   needs every observation; the public view hides the sealed answer.
 
 Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
-sandbox, so a local stand-in replaced malli): 35 tests, 85 assertions,
+sandbox, so a local stand-in replaced malli): 35 tests, 86 assertions,
 0 failures. clj-kondo 2026.10.26 (the CI version) over `bases components
 development/src`: 0 errors. `poly test` and the Polylith check ran only in CI.
 
