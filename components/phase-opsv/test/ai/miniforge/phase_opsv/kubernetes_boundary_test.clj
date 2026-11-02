@@ -106,4 +106,18 @@
     (is (= (phase/decode-kubernetes-fingerprint captured)
            (phase/decode-kubernetes-fingerprint changed)))))
 
+(deftest ^{:stratum 0} test-secret-native-fields-are-typed-without-hashing-their-values
+  (let [captured (fixture/snapshot)]
+    (doseq [[field values] [["type" [nil 42 [] {} true]]
+                            ["immutable" [nil 42 "" {} []]]]
+            value values]
+      (is (anomaly/anomaly?
+            (phase/decode-kubernetes-fingerprint
+              (assoc-in captured [:kubernetes/configuration 1 field] value)))))
+    (doseq [immutable? [true false]]
+      (let [value (-> captured
+                      (assoc-in [:kubernetes/configuration 1 "type"] "")
+                      (assoc-in [:kubernetes/configuration 1 "immutable"] immutable?))]
+        (is (not (anomaly/anomaly? (phase/decode-kubernetes-fingerprint value))))))))
+
 (comment ::public-captured-target-admission)

@@ -67,7 +67,9 @@
    [:map ["apiVersion" [:= "v1"]] ["kind" [:= "Secret"]]
     ["metadata" [:map ["namespace" schema/NonBlankString]
                   ["resourceVersion" schema/NonBlankString]]]
-    ["data" {:optional true} [:map-of :string :string]]]])
+    ["data" {:optional true} [:map-of :string :string]]
+    ["type" {:optional true} :string]
+    ["immutable" {:optional true} :boolean]]])
 
 (def ^{:stratum 2} Node
   [:and Resource [:map ["apiVersion" [:= "v1"]] ["kind" [:= "Node"]]
