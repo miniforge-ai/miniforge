@@ -5,12 +5,23 @@
   (:require [ai.miniforge.phase-opsv.boundary.prometheus-http :as http]
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.measurement-test-support :as measurement]
-            [cheshire.core :as json])
+            [cheshire.core :as json]
+            [slingshot.slingshot :refer [try+]])
   (:import [java.io ByteArrayInputStream]
            [java.nio.charset StandardCharsets]
            [java.util.concurrent CompletableFuture]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} throw-failure! [failure & _args] (throw failure))
+
+(defn ^{:stratum 0} structured-failure [cause]
+  (ex-info "secret configuration failure" {:config/resource "secret-path"} cause))
+
+(defn ^{:stratum 0} interrupted-result [operation]
+  (try+ (operation) nil
+    (catch Object _
+      [(:throwable &throw-context) (.isInterrupted (Thread/currentThread))])))
 
 (defn ^{:stratum 0} settings
   ([] (settings {}))

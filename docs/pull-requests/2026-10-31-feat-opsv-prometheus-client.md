@@ -32,7 +32,7 @@ timeouts, size limits, HTTP errors, malformed JSON, redirects and resource
 cleanup without contacting a metric server. Run consuming-product, packaged,
 standards and normal signed-hook gates.
 
-Native-runtime source acceptance passes 33 tests and 172 assertions. These
+Native-runtime source acceptance passes 37 tests and 189 assertions. These
 tests use in-memory bodies and an explicit external-response projection, without
 network calls, JVM processes or test repositories. This is not packaged proof.
 The separate JVM fixture exercises actual JDK responses and stream closure.
@@ -47,7 +47,7 @@ An expired body deadline also prevents reader-thread creation.
 
 Reconciliation with merged main preserves the reviewed sample-limit regression.
 Both consuming product suites pass. A fresh stripped CLI jar passes isolated
-acceptance: 33 tests and 172 assertions, without production-source overlays.
+acceptance: 37 tests and 189 assertions, without production-source overlays.
 The catalog regression covers every new transport message.
 
 Normal merge hooks also found inherited lint debt. Six overlong sentences in
@@ -67,6 +67,10 @@ A real blocked pipe now tests deadline expiry after reader entry, original-task
 cancellation and owned stream closure. Promise waits are bounded; no sleeps are used.
 Disabling cancellation or release independently makes its corresponding assertion fail.
 Endpoint admission also rejects URI ports above the protocol range before transport.
+Settings preserve wrapped critical causes and sanitize structured configuration
+failures. The observation boundary also handles structured transport wrappers
+without losing timeout, fatal or interruption priority. The new cases first
+reproduced three failing assertions and two escaping errors.
 Upstream warning-test fixtures now reuse the acknowledged gate context instead
 of claiming durable publication from a sinkless stream. Production remains fail-closed.
 

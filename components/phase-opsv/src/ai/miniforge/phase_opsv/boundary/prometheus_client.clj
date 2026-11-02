@@ -38,6 +38,6 @@
   (try+
     (when (.isInterrupted (Thread/currentThread)) (throw (InterruptedException.)))
     (admitted-observation! overrides request)
-    (catch Throwable thrown (failed! thrown))))
+    (catch Object _ (failed! (:throwable &throw-context)))))
 
 (comment ::read-only-metric-window)

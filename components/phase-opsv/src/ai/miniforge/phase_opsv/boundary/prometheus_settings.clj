@@ -7,6 +7,7 @@
             [ai.miniforge.config.interface :as config]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.prometheus-schema :as schema]
+            [ai.miniforge.resource-cleanup.interface :as cleanup]
             [malli.core :as m]
             [slingshot.slingshot :refer [try+]])
   (:import [java.net URI]))
@@ -19,6 +20,11 @@
   (anomaly/anomaly :invalid-input (msg/ts :prometheus/invalid-settings) {}))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} failed-settings! [failure]
+  (if (cleanup/fatal-cause failure)
+    (cleanup/after-failure! failure (constantly nil))
+    (invalid)))
 
 (defn- ^{:stratum 1} endpoint? [settings]
   (let [uri (URI. (:prometheus/base-url settings))
@@ -39,7 +45,6 @@
       (if (and (map? overrides) (m/validate schema/Settings settings) (endpoint? settings))
         settings
         (invalid)))
-    (catch InterruptedException thrown (throw thrown))
-    (catch Exception _ (invalid))))
+    (catch Object _ (failed-settings! (:throwable &throw-context)))))
 
 (comment ::explicit-prometheus-endpoint)

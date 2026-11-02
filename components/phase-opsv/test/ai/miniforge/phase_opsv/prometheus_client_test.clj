@@ -7,7 +7,7 @@
             [ai.miniforge.phase-opsv.boundary.prometheus-http :as http]
             [ai.miniforge.phase-opsv.boundary.prometheus-io :as io]
             [ai.miniforge.phase-opsv.measurement-test-support :as measurement]
-            [ai.miniforge.phase-opsv.prometheus-test-support :as fixture :refer [failed-future observe]]
+            [ai.miniforge.phase-opsv.prometheus-test-support :as fixture :refer [failed-future interrupted-result observe]]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]])
@@ -18,11 +18,6 @@
 (defn- ^{:stratum 0} read-timeout! [& _] (throw (TimeoutException.)))
 
 (defn- ^{:stratum 0} fatal-read! [& _] (throw (AssertionError. "read failed")))
-
-(defn- ^{:stratum 0} interrupted-result [operation]
-  (try+ (operation) nil
-    (catch Object _
-      [(:throwable &throw-context) (.isInterrupted (Thread/currentThread))])))
 
 (deftest ^{:stratum 0} observations-retain-the-declared-query-grid-and-zero-samples
   (let [calls (atom [])
@@ -75,6 +70,36 @@
       (is (thrown? AssertionError
                    (phase/observe-prometheus-window! (fixture/settings) (measurement/request)))))))
 
+(deftest ^{:stratum 0} test-structured-failures-use-the-same-sanitized-observation-policy
+  (doseq [[cause expected] [[nil :unavailable] [(TimeoutException.) :timeout]]]
+    (with-redefs [http/start! (partial fixture/throw-failure! (fixture/structured-failure cause))]
+      (let [result (phase/observe-prometheus-window! (fixture/settings) (measurement/request))]
+        (is (= expected (:anomaly/type result)))
+        (is (not (re-find #"secret" (pr-str result))))))))
+
+(deftest ^{:stratum 0} test-structured-startup-wrappers-preserve-critical-causes
+  (with-redefs [http/start! (partial fixture/throw-failure! (fixture/structured-failure (AssertionError.)))]
+    (is (thrown? AssertionError
+                 (phase/observe-prometheus-window! (fixture/settings) (measurement/request)))))
+  (try
+    (with-redefs [http/start! (partial fixture/throw-failure! (fixture/structured-failure (InterruptedException.)))]
+      (let [[failure flagged?] (interrupted-result
+                                (partial phase/observe-prometheus-window! (fixture/settings) (measurement/request)))]
+        (is (instance? InterruptedException failure))
+        (is flagged?)))
+    (finally (Thread/interrupted))))
+
+(deftest ^{:stratum 0} pre-existing-interruption-prevents-network-start
+  (let [calls (atom [])]
+    (try+
+      (.interrupt (Thread/currentThread))
+      (let [[failure flagged?] (interrupted-result
+                                (partial observe (fixture/settings) (CompletableFuture.) calls))]
+        (is (instance? InterruptedException failure))
+        (is flagged?)
+        (is (empty? @calls)))
+      (finally (Thread/interrupted)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} body-deadline-and-network-errors-are-sanitized
@@ -102,17 +127,6 @@
       (let [[failure flagged?] (interrupted-result (partial observe (fixture/settings) pending (atom [])))]
         (is (instance? InterruptedException failure))
         (is flagged?))
-      (finally (Thread/interrupted)))))
-
-(deftest ^{:stratum 1} pre-existing-interruption-prevents-network-start
-  (let [calls (atom [])]
-    (try+
-      (.interrupt (Thread/currentThread))
-      (let [[failure flagged?] (interrupted-result
-                                (partial observe (fixture/settings) (CompletableFuture.) calls))]
-        (is (instance? InterruptedException failure))
-        (is flagged?)
-        (is (empty? @calls)))
       (finally (Thread/interrupted)))))
 
 (comment ::read-only-client-boundary-acceptance)
