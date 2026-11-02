@@ -643,7 +643,11 @@
         supersede {:op :supersede :targets #{"decision-1"} :replacement #{"decision-2"}}]
     (is (= :anomalies.deliberation/role-forbidden
            (subtype-of (validate-tx ws (transaction :skeptic 10 supersede)))))
-    (is (nil? (validate-tx ws (transaction :synthesizer 10 supersede))))))
+    (is (nil? (validate-tx ws (transaction :synthesizer 10 supersede))))
+    (testing "an adopted decision can be superseded"
+      (is (nil? (validate-tx (update-in ws [:workspace/objects "decision-1"]
+                                        assoc :object/status :accepted)
+                             (transaction :synthesizer 10 supersede)))))))
 
 (deftest ^{:stratum 1} no-operation-revives-a-terminal-target
   (doseq [[object op] [[(object-at "decision-1" 1 :object/type :decision
