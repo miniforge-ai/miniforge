@@ -254,7 +254,8 @@ coexist at one choice point. Choice-point uniqueness binds adoption: admitting
 
 ### 4.1 Determinism and the only-input rule
 
-A projection MUST be a deterministic function of (workspace version, role configuration,
+A projection MUST be a deterministic function of (workspace version, runtime-established
+participant identity, role configuration, the participant's authorized read scope,
 projection parameters). Given identical inputs, byte-identical output MUST result.
 
 A projection MUST first satisfy Ariadne read, purpose and destination constraints.
@@ -374,8 +375,10 @@ A deliberation run MUST close on the first of:
    with explicit dissent and open items. This activation is funded by the reserved closure
    allowance (§6.3), reserved before ordinary work and never added to the matched
    allowance, so the §6.3 prohibition and this requirement never conflict.
-3. **Quiescence** — every participant in the population passes in a full bounded round
-   without a committed contribution, and no eligible work remains. Answering a question,
+3. **Quiescence** — every participant scheduled for ordinary work passes in a full
+   bounded round without a committed contribution, and no eligible work remains.
+   Participants eligible only on deadlock or budget events (the meta-watchdog) are not
+   part of that round; the deadlock rule still activates them before closure. Answering a question,
    revising a statement or resolving a conflict counts as progress even if the object
    count does not grow.
 4. **Deadlock** — no eligible activations exist for any open goal. The meta-watchdog MUST be
