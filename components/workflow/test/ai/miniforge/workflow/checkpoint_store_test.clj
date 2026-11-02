@@ -225,6 +225,20 @@
                                          (:execution/id ctx) {:checkpoint/root checkpoint-root}))]
         (is (= refs (:execution/task-base-refs snapshot)))))))
 
+(deftest ^{:stratum 0} unpersisted-phases-survive-a-checkpoint-test
+  ;; Work a failed boundary persist left in a retained worktree is named by
+  ;; the next boundary commit; dropped at checkpoint, a resumed run would
+  ;; commit implement's work under a verify trailer alone.
+  (checkpoint-test-support/call-with-temp-checkpoint-root
+    (fn [checkpoint-root]
+      (let [workflow {:workflow/id :test :workflow/version "1.0.0" :workflow/pipeline [{:phase :done}]}
+            ctx      (assoc (ctx/create-context workflow {:task "Test"} {:checkpoint/root checkpoint-root})
+                            :execution/unpersisted-phases #{:implement})
+            _        (checkpoint-store/persist-execution-state! ctx)
+            snapshot (:machine-snapshot (checkpoint-store/load-checkpoint-data
+                                         (:execution/id ctx) {:checkpoint/root checkpoint-root}))]
+        (is (= #{:implement} (:execution/unpersisted-phases snapshot)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} persist-and-load-checkpoint-data-test
