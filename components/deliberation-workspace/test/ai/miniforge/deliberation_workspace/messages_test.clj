@@ -26,6 +26,12 @@
 (def ^{:stratum 0} catalog-resource
   "config/deliberation-workspace/messages/system.edn")
 
+(def ^{:stratum 0} ^:private minimum-referenced-keys
+  "Floor on keys the source scan must find. Main references 19; a scan that
+   finds fewer than this has stopped matching call sites, and an empty scan
+   would pass the coverage checks vacuously."
+  10)
+
 (defn- ^{:stratum 0} source-dir []
   (-> (io/resource "ai/miniforge/deliberation_workspace/validation.clj")
       io/file
@@ -49,7 +55,7 @@
 (deftest ^{:stratum 1} the-catalog-covers-exactly-the-referenced-keys
   (let [referenced (referenced-keys)]
     (testing "the scan found the component's anomaly messages"
-      (is (< 10 (count referenced))))
+      (is (<= minimum-referenced-keys (count referenced))))
     (testing "every referenced key has catalog text"
       (is (empty? (remove (catalog-keys) referenced))))
     (testing "the catalog holds no unreferenced entry"
