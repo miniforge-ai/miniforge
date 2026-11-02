@@ -157,8 +157,11 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} commit
-  "Apply a validated transaction and advance the workspace version.
+(defn ^{:stratum 2} stage
+  "Apply a validated transaction, advance the version and log it, without
+   deriving conflicts. Admission folds operations through this, so the
+   candidate derives conflicts at the same transaction boundary that
+   publication does.
 
    The version increments once per committed transaction — it is the clock
    every basis check and staleness measure reads, so it must move exactly
@@ -177,6 +180,12 @@
     (-> (reduce #(apply-operation %1 %2 context)
                 workspace
                 (:tx/operations transaction))
-        (conflict/derive-conflicts version)
         (assoc :workspace/version version)
         (update :workspace/log (fnil conj []) transaction))))
+
+(defn ^{:stratum 2} commit
+  "Apply a validated transaction (see `stage`) and derive the conflicts the
+   resulting graph implies (N14 §2.5)."
+  [workspace transaction]
+  (let [staged (stage workspace transaction)]
+    (conflict/derive-conflicts staged (:workspace/version staged))))

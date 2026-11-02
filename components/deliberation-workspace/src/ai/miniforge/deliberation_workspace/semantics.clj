@@ -130,15 +130,28 @@
     (or (not (validation/text? (get-in target [:object/attrs :choice])))
         (choice-taken? workspace target))))
 
+(defn- ^{:stratum 1} shared-choice?
+  "True when two of the decisions at `ids` name the same choice point."
+  [workspace ids]
+  (let [choices (map #(get-in (validation/objects-of workspace) [% :object/attrs :choice])
+                     (distinct ids))]
+    (not= (count choices) (count (distinct choices)))))
+
 (defn- ^{:stratum 1} check-fields [_workspace operation _context]
   (when (or (seq (remove operation-keys (keys operation)))
             (some spec-fields-defect? (validation/created-specs operation)))
     (validation/reject-operation :anomalies.deliberation/unknown-field
                                  (messages/system-t :anomaly/unknown-field) operation)))
 
+(defn- ^{:stratum 0} statements
+  "Every statement text `operation` would write: its created objects' and
+   its own revision or answer text."
+  [operation]
+  (cons (:statement operation) (map :statement (validation/created-specs operation))))
+
 (defn- ^{:stratum 1} check-statement-cap [workspace operation _context]
   (let [cap (get workspace :workspace/statement-cap default-statement-cap)]
-    (when (some #(< cap (count (:statement %))) (validation/created-specs operation))
+    (when (some #(< cap (count %)) (statements operation))
       (validation/reject-operation :anomalies.deliberation/statement-too-long
                                    (messages/system-t :anomaly/statement-too-long)
                                    operation))))
@@ -184,10 +197,12 @@
 
 (defn- ^{:stratum 1} check-choice-point
   "N14 §3.4: adoption names a choice point that no other adopted decision
-   holds. Unadopted alternatives may coexist."
+   holds, and one adoption never names the same choice point twice.
+   Unadopted alternatives may coexist."
   [workspace operation _context]
   (when (and (= :accept-decision (:op operation))
-             (some #(unadoptable? workspace %) (get operation :targets [])))
+             (or (some #(unadoptable? workspace %) (get operation :targets []))
+                 (shared-choice? workspace (get operation :targets []))))
     (validation/reject-operation :anomalies.deliberation/choice-point
                                  (messages/system-t :anomaly/choice-point) operation)))
 

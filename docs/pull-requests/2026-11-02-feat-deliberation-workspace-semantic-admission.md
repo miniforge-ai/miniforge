@@ -36,8 +36,11 @@ checks.
      context, or an operation count outside 1 to 128.
   2. Runs the payload stages over the whole transaction.
   3. Checks the declared basis against the real workspace.
-  4. Validates each operation against the candidate (graph, semantic,
-     provenance and guard stages), then commits the whole transaction once.
+  4. Validates each operation against the candidate (graph, semantic and
+     guard stages), then commits the whole transaction once. The candidate is
+     folded through the new `commit/stage`, which does not derive conflicts,
+     so conflicts are derived once at the same transaction boundary that
+     publication uses.
 - `semantics` (new):
   - closed operation, creation and attribute fields;
   - statement cap;
@@ -45,12 +48,9 @@ checks.
   - reference integrity;
   - evidence source class and constraint kind;
   - goal closure needs an adopted decision covering every closed goal;
-  - one adopted decision per choice point (unadopted alternatives coexist).
-- `provenance` (new): a `:hard` constraint needs the user or an interpreter
-  citing a recorded spec source. Execution and user evidence must match a
-  runtime receipt. Attached evidence is named under `:supports`. An experiment
-  result needs receipt-backed execution evidence. An artifact reference must
-  match a recorded capsule export.
+  - one adopted decision per choice point (unadopted alternatives coexist),
+    and a single `accept-decision` may not name the same choice point twice;
+  - the statement cap also covers revision and answer text.
 - `validation`:
   - `concurrency-stages` is now `payload-stages` followed by `graph-stages`,
     with `basis-stages` exposed separately;
@@ -59,15 +59,17 @@ checks.
   role, because semantic admission restricts `:hard` constraints by source
   (N14 §2.4, §5.3).
 - `interface` (new): `new-object`, `admit`, `project`, `replay-transaction`.
-- Message catalog: 15 new `:anomaly/*` keys.
+- `commit`: new `stage`, which is `commit` without conflict derivation.
+- Message catalog: 11 new `:anomaly/*` keys.
 
 Deviations from the snapshot:
 
 - Its single `semantics/check` was one `cond` with multi-form arms. Here the
   checks are named stages, each with its own anomaly subtype, so the
   scheduler can route on the reason.
-- Attestation is split into `provenance` so that no single namespace or
-  commit exceeds the size limits.
+- Attestation (hard-constraint sources, evidence receipts, experiment
+  results, artifact exports) moves to a follow-up PR stacked on this one, so
+  that each PR stays under the 600-line budget.
 - `admit` returns an anomaly rather than `{:rejection ...}`.
 - A proposal may no longer carry `:tx/activation` or `:tx/basis`; the
   snapshot accepted them and silently overwrote them.
@@ -79,7 +81,9 @@ New `admission_test` covers:
 
 - impersonation, forged provenance fields and invalid context;
 - closed fields and creation types;
-- hard-constraint and receipt attestation;
+- a duplicate choice point within one adoption;
+- the statement cap on revisions;
+- conflicts derived once at the transaction boundary;
 - ordered validation with single-version publication and whole-transaction
   rejection;
 - uncovered closure;
@@ -91,7 +95,7 @@ New `admission_test` covers:
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 13 deliberation-workspace suites,
-157 tests, 525 assertions, 0 failures. `poly test`, clj-kondo and the
+159 tests, 524 assertions, 0 failures. `poly test`, clj-kondo and the
 Polylith check ran only in CI.
 
 ## Deployment Plan

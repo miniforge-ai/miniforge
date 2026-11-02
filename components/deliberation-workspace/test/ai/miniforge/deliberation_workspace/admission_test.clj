@@ -94,33 +94,6 @@
                      {:op :assert-claim :creates []}]]
     (is (anomaly/anomaly? (submit (seed-workspace) :proposer operation)))))
 
-(deftest ^{:stratum 1} provenance-needs-a-runtime-attestation
-  (testing "the user adds hard constraints through OCI"
-    (is (some? (admitted (seed-workspace) :user
-                         {:op :add-constraint
-                          :creates [{:id "h" :type :constraint :statement "h"
-                                     :attrs {:kind :hard}}]}))))
-  (testing "hard constraints need an interpreter and a recorded spec source"
-    (is (= :anomalies.deliberation/unattested-provenance
-           (subtype-of (submit (seed-workspace) :interpreter
-                               {:op :add-constraint
-                                :creates [{:id "h" :type :constraint :statement "h"
-                                           :attrs {:kind :hard :source-ref "spec-1"}}]}))))
-    (is (some? (admitted (assoc (seed-workspace) :workspace/spec-sources #{"spec-1"})
-                         :interpreter
-                         {:op :add-constraint
-                          :creates [{:id "h" :type :constraint :statement "h"
-                                     :attrs {:kind :hard :source-ref "spec-1"}}]}))))
-  (testing "execution evidence needs a matching receipt"
-    (let [evidence {:op :attach-evidence :targets ["c"]
-                    :creates [{:id "e" :type :evidence :statement "observed"
-                               :attrs {:source-class :execution :receipt "r-1"}}]}]
-      (is (= :anomalies.deliberation/unattested-provenance
-             (subtype-of (submit (seed-workspace) :verifier (claim "c") evidence))))
-      (is (some? (admitted (assoc-in (seed-workspace) [:workspace/receipts "r-1"]
-                                     {:source-class :execution :statement "observed"})
-                           :verifier (claim "c") evidence))))))
-
 (deftest ^{:stratum 1} a-transaction-is-validated-in-order-and-published-once
   (let [operations [{:op :propose-decision :creates [(decision "d" "design" :depends-on [goal-id])]}
                     {:op :accept-decision :targets ["d"]}
@@ -193,3 +166,27 @@
                            (assoc (context ws :proposer) :basis 0))]
     (is (= :anomalies.deliberation/stale-basis (subtype-of stale)))
     (is (= "c" (:object/statement (object-at ws "c"))))))
+
+(deftest ^{:stratum 1} one-adoption-cannot-name-a-choice-point-twice
+  (let [ws (admitted (seed-workspace) :synthesizer
+                     {:op :propose-decision :creates [(decision "d1" "same") (decision "d2" "same")]})]
+    (is (= :anomalies.deliberation/choice-point
+           (subtype-of (submit ws :synthesizer {:op :accept-decision :targets ["d1" "d2"]}))))))
+
+(deftest ^{:stratum 1} the-statement-cap-bounds-revisions
+  (let [ws (assoc (admitted (seed-workspace) :proposer (claim "c")) :workspace/statement-cap 5)]
+    (is (= :anomalies.deliberation/statement-too-long
+           (subtype-of (submit ws :proposer {:op :refine-claim :targets ["c"]
+                                             :statement "far too long"}))))))
+
+(deftest ^{:stratum 1} conflicts-are-derived-once-at-the-transaction-boundary
+  (testing "a conflict created and resolved inside one transaction is never referenced"
+    (let [ws (admitted (seed-workspace) :proposer (claim "b"))]
+      (is (= :anomalies.deliberation/dangling-reference
+             (subtype-of (submit ws :proposer
+                                 {:op :assert-claim
+                                  :creates [{:id "a" :type :claim :statement "a"
+                                             :links {:contradicts ["b"]}}]}
+                                 {:op :assert-claim
+                                  :creates [{:id "c2" :type :claim :statement "cites"
+                                             :links {:depends-on ["conflict-a-b"]}}]})))))))
