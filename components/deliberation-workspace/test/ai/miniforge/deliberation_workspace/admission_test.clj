@@ -228,7 +228,7 @@
                                                         :source-class :agent-analysis)]}))]
     (is (= :anomalies.deliberation/unbacked-result
            (subtype-of (submit ws :verifier {:op :record-experiment-result :targets ["x"]
-                                             :evidence ["e"]}))))))
+                                             :evidence ["e"] :links {:supports ["e"]}}))))))
 
 (deftest ^{:stratum 1} an-experiment-result-keeps-its-evidence-link
   (let [ws (-> (receipted (seed-workspace) "r-1" "observed")
