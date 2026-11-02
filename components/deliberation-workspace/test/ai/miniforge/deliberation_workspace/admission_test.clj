@@ -297,11 +297,16 @@
   (let [ws (admitted (receipted (seed-workspace) "r-1" "observed") :verifier (claim "c")
                      {:op :attach-evidence :targets ["c"] :links {:supports ["e"]}
                       :creates [(execution-evidence "e" "r-1" "observed")]})]
+    (doseq [edge [:supports :contradicts :depends-on]]
+      (is (= :anomalies.deliberation/unattested-provenance
+             (subtype-of (submit ws :proposer
+                                 {:op :assert-claim
+                                  :creates [{:id "c2" :type :claim :statement "borrowed"
+                                             :links {edge ["e"]}}]})))
+          (str edge)))
     (is (= :anomalies.deliberation/unattested-provenance
-           (subtype-of (submit ws :proposer
-                               {:op :assert-claim
-                                :creates [{:id "c2" :type :claim :statement "borrowed"
-                                           :links {:supports ["e"]}}]}))))))
+           (subtype-of (submit ws :proposer {:op :refine-claim :targets ["c"] :statement "c"
+                                             :links {:depends-on ["e"]}}))))))
 
 (deftest ^{:stratum 1} cited-evidence-must-be-attached
   (let [analysis (fn [id] {:id id :type :evidence :statement id
