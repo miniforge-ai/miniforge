@@ -28,18 +28,18 @@ label its own analysis `:execution` evidence and satisfy the acceptance rule.
       `:workspace/spec-sources` entry;
     - `:execution` and `:user` evidence must match a `:workspace/receipts`
       entry in both class and statement;
-    - only the verifier or the user may create `:execution` evidence or link
-      it along any edge type (not only `:supports`), at either end of the
-      edge: commit writes an operation's `:links` onto its targets. This includes an
+    - only the verifier or the user may create `:execution` evidence.
+      This restriction also covers linking it along any edge type, at either end.
+      Commit writes an operation's `:links` onto its targets. This includes an
       operation's `:discriminates`, which commit persists as links, and
       evidence a challenge cites: N14 §3.5 calls that attaching evidence.
   - `check-evidence-links`: an attachment names every evidence object it
     creates or references under `:supports`, and every `:supports`
     destination is evidence.
-  - `check-experiment-result`: `record-experiment-result` needs evidence that
-    is `:execution` class and receipt-backed, and that every target
-    experiment links under `:supports` (already, or through the result's own
-    `:links`), so a completed experiment keeps its observation.
+  - `check-experiment-result`: `record-experiment-result` needs receipt-backed
+    `:execution` evidence. Every target experiment must link it under `:supports`
+    (already, or through the result's own `:links`). A completed experiment thus
+    keeps its observation.
   - `check-artifact-export`: an `artifact-ref` must match a recorded capsule
     export.
 - Message catalog: four keys.
@@ -64,8 +64,8 @@ New admission tests cover:
 - an experiment result backed only by non-execution evidence;
 - an experiment result whose evidence the experiment does not link.
 
-Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
-unreachable from the authoring sandbox): all 12 deliberation-workspace
+Ran locally on plain Clojure 1.12 with a local malli stand-in.
+Clojars is unreachable from the authoring sandbox. Results: all 12 deliberation-workspace
 suites, 201 tests, 646 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
 version) on the component: 0 errors. `poly test` and the Polylith check ran
 only in CI.
@@ -76,7 +76,7 @@ None.
 
 ## Related Issues/PRs
 
-- Base: main, after #2331 merged. Contract: #2328.
+Base: main, after #2331 merged. Contract: #2328.
 
 ## Checklist
 

@@ -43,9 +43,9 @@ scope and cannot report a withheld frame.
 - a scope that hides a goal reports it in `:projection/withheld-frame`, and
   no scope reports nothing.
 
-Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
-unreachable from the authoring sandbox): all 12 deliberation-workspace
-suites, 171 tests, 552 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
+Ran locally on plain Clojure 1.12 with a local malli stand-in.
+Clojars is unreachable from the authoring sandbox. All 12 deliberation-workspace
+suites ran: 171 tests, 552 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
 version) on the component: 0 errors. `poly test` and the Polylith check ran
 only in CI.
 

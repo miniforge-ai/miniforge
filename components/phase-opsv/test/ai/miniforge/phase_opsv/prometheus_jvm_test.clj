@@ -6,12 +6,17 @@
   (:require [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.boundary.prometheus-http :as http]
             [ai.miniforge.phase-opsv.boundary.bounded-io :as io]
+            [ai.miniforge.phase-opsv.boundary.http-transport :as transport]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-http :as kubernetes]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-settings :as kubernetes-settings]
+            [ai.miniforge.phase-opsv.kubernetes-http-test-support :as kubernetes-wire]
+            [ai.miniforge.phase-opsv.kubernetes-settings-test-support :as target]
             [ai.miniforge.phase-opsv.measurement-test-support :as measurement]
             [ai.miniforge.phase-opsv.prometheus-test-support :as fixture :refer [failed-future]]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]])
   (:import [java.io ByteArrayInputStream PipedInputStream PipedOutputStream]
-           [java.net URI]
+           [java.net HttpURLConnection URI]
            [java.net.http HttpHeaders HttpResponse HttpClient$Version HttpTimeoutException HttpConnectTimeoutException]
            [java.nio.charset StandardCharsets]
            [java.util Optional]
@@ -20,7 +25,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} ^:private reader-wait-ms 10000)
+(def ^{:stratum 0} ^:private reader-wait-ms
+  "Allow a busy host ten seconds to observe deterministic reader cancellation and closure."
+  10000)
 
 (defn- ^{:stratum 0} stalled-body [started closed writer]
   (proxy [PipedInputStream] [writer]
@@ -92,7 +99,9 @@
         (is (true? (deref closed reader-wait-ms false)))))))
 
 (deftest ^{:stratum 2} real-jdk-bodies-are-closed-on-success-rejection-and-parse-failure
-  (doseq [[status text] [[200 (fixture/successful-text)] [302 ""] [200 "not-json"]]]
+  (doseq [[status text] [[transport/success-status (fixture/successful-text)]
+                       [HttpURLConnection/HTTP_MOVED_TEMP ""]
+                       [transport/success-status "not-json"]]]
     (let [closed (atom 0)
           pending (fixture/completed (response closed status text))
           calls (atom [])]
@@ -102,12 +111,32 @@
 
 (deftest ^{:stratum 2} completed-response-is-closed-when-the-header-deadline-wins
   (let [closed (atom 0)
-        pending (fixture/completed (response closed 200 ""))
+        pending (fixture/completed (response closed transport/success-status ""))
         calls (atom [])]
     (with-redefs [http/start! (partial fixture/record-request! calls pending)
                   io/remaining-ms (constantly 0)]
       (is (= :timeout (:anomaly/type
                        (phase/observe-prometheus-window! (fixture/settings) (measurement/request))))))
+    (is (= 1 @closed))))
+
+(deftest ^{:stratum 2} test-kubernetes-real-jdk-bodies-close-on-success-absence-and-rejection
+  (let [settings (kubernetes-settings/load-settings (target/settings))]
+    (doseq [[status text] [[transport/success-status "{}"]
+                         [transport/not-found-status ""]
+                         [HttpURLConnection/HTTP_MOVED_TEMP ""]]]
+      (let [closed (atom 0)
+            pending (fixture/completed (response closed status text))]
+        (with-redefs [transport/start! (constantly pending)]
+          (kubernetes/read-resource! settings (kubernetes-wire/deadline) kubernetes-wire/resource-path {}))
+        (is (= 1 @closed))))))
+
+(deftest ^{:stratum 2} test-kubernetes-real-jdk-body-closes-after-malformed-json
+  (let [settings (kubernetes-settings/load-settings (target/settings))
+        closed (atom 0)
+        pending (fixture/completed (response closed transport/success-status "not-json"))]
+    (with-redefs [transport/start! (constantly pending)]
+      (is (thrown? Exception
+                   (kubernetes/read-resource! settings (kubernetes-wire/deadline) kubernetes-wire/resource-path {}))))
     (is (= 1 @closed))))
 
 (comment ::real-jdk-response-acceptance)

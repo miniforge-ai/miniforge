@@ -23,8 +23,8 @@ sequence closed as `:success`:
 
 At that point no adopted decision covers the goal.
 
-Copilot found this while reviewing #2332. The fix needed about 40 lines,
-which that PR (at 599 of 600) could not hold, so it was deferred to this PR,
+Copilot found this while reviewing #2332. The fix needed about 40 lines.
+That PR was at 599 of 600 and could not hold it. It was deferred to this PR,
 as recorded on that PR's review thread and in a PR comment.
 
 ## Changes in Detail
@@ -47,9 +47,9 @@ as recorded on that PR's review thread and in a PR comment.
 - `run_test/a-run-closes-as-success-when-every-goal-is-terminal` now includes
   a covering decision.
 
-Ran locally on plain Clojure 1.12 with a malli stand-in (Clojars is
-unreachable from the authoring sandbox): all 12 deliberation-workspace suites,
-192 tests, 590 assertions, 0 failures. clj-kondo 2026.10.26 (the CI version) on
+Ran locally on plain Clojure 1.12 with a malli stand-in.
+Clojars is unreachable from the authoring sandbox. Results: all 12 deliberation-workspace
+suites, 192 tests, 590 assertions, 0 failures. clj-kondo 2026.10.26 (the CI version) on
 `bases components development/src`: 0 errors. CI runs these suites through
 `projects/deliberation-lab` (#2344).
 

@@ -6,11 +6,20 @@
   (:require [ai.miniforge.resource-cleanup.interface :as cleanup]
             [babashka.http-client :as http]
             [clojure.string :as str])
-  (:import [java.net.http HttpResponse]
+  (:import [java.net HttpURLConnection]
+           [java.net.http HttpResponse]
            [java.util Locale]
            [java.util.concurrent CompletableFuture]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} success-status
+  "HTTP OK supplies the complete representation required by observation admission."
+  HttpURLConnection/HTTP_OK)
+
+(def ^{:stratum 0} not-found-status
+  "HTTP absence is distinct from JSON null; only declared optional resources may be absent."
+  HttpURLConnection/HTTP_NOT_FOUND)
 
 (def ^{:stratum 0} ^:private timeout-classes
   #{"java.net.http.HttpTimeoutException" "java.util.concurrent.TimeoutException"})
@@ -31,6 +40,17 @@
      :encodings encodings}))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} json-get-options [uri token timeout-ms params]
+  {:uri uri
+   :method :get
+   :headers {"Accept" "application/json"
+             "Accept-Encoding" identity-coding}
+   :oauth-token token
+   :query-params params
+   :timeout timeout-ms
+   :async true
+   :raw true})
 
 (defn- ^{:stratum 1} identity-coding? [coding]
   (= identity-coding (.toLowerCase ^String (str/trim coding) Locale/ROOT)))

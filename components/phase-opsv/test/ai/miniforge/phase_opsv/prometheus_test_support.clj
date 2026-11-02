@@ -58,7 +58,7 @@
 
 (defn ^{:stratum 1} response
   ([text] (response text {}))
-  ([text overrides] (merge {:status 200
+  ([text overrides] (merge {:status transport/success-status
                            :body (body text)
                            :encodings []} overrides)))
 

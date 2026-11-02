@@ -26,8 +26,8 @@ N14 0.3.0 requires:
   a separate rule. Quiescence is a full round in which every ordinary
   participant passes with no structural work waiting.
 
-On main, the loop hands the raw workspace to the activation, trusts the
-transaction it returns, schedules by role, treats any terminal goal set as
+On main, the loop hands the raw workspace to the activation. It trusts the
+returned transaction, schedules by role, treats any terminal goal set as
 success, and counts quiescence by object growth.
 
 ## Changes in Detail
@@ -42,21 +42,21 @@ success, and counts quiescence by object growth.
     whether a hidden object exists, including after a read scope narrows.
     Trusted events always keep the reason.
   - A pass or a rejection marks the participant quiet. Pass and
-    frame-refusal markers belong to the workspace version they were recorded
-    at, so any commit starts a new round, including one made directly
+    frame-refusal markers belong to the workspace version at which they were recorded.
+    Any commit therefore starts a new round, including one made directly
     through `admit` or `replay-transaction`. `step` schedules from the current
     round, so a stale refusal never skips a participant.
-  - When the runtime sets a read scope for a participant (N14 §4.1), an
-    admitted proposal that names an id outside that scope, other than one it
-    creates, is refused exactly like an unknown target. Admission checks ids
+  - The runtime may set a participant's read scope (N14 §4.1).
+    An admitted proposal naming an id outside that scope is refused exactly like an unknown target.
+    Ids it creates are exempt. Admission checks ids
     against the whole graph, so without this a scoped participant could act on
     an object outside its scope by guessing the id. The ablation switch
     (`:visibility :none`) is deliberately not consulted: §4.4 says it must not
     alter validation, so it changes only what the projection shows.
   - `activate-participant` enforces the budget itself, so the public one-turn
     entry point cannot bypass `run`'s checks. An ordinary turn past the
-    closure reserve, or a closure turn with no allowance left, is recorded as
-    `:activation/unfunded` without calling the model or charging anything.
+    closure reserve is recorded as `:activation/unfunded`. The same applies to a
+    closure turn with no allowance left. Neither calls the model or charges anything.
     A closure reserve that is not a non-negative integer counts as zero in
     that arithmetic, so a direct call can never spend past the budget. `run`
     still refuses such a reserve outright.
@@ -117,8 +117,8 @@ before deadlock closure, and cost metering.
   last actor does not reset the rotation.
 - `run_test` also covers refusing a negative closure reserve.
 
-Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
-unreachable from the authoring sandbox): all 12 deliberation-workspace
+Ran locally on plain Clojure 1.12 with a local malli stand-in.
+Clojars is unreachable from the authoring sandbox. Results: all 12 deliberation-workspace
 suites, 192 tests, 589 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
 version) on the component: 0 errors. `poly test` and the Polylith check ran
 only in CI.
