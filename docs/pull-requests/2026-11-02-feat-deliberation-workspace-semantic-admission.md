@@ -30,13 +30,16 @@ checks.
 
 - `admission` (new): `admit [workspace proposal context]`. Returns
   `{:workspace :transaction}` or a rejection anomaly, leaving the workspace
-  untouched on rejection. Admission runs four steps in order:
+  untouched on rejection. Admission runs five steps in order:
   1. Rejects a non-map, invalid or future context, a proposal field outside
      `#{:tx/operations :tx/role}`, a `:tx/role` that differs from the
      context, or an operation count outside 1 to 128.
   2. Runs the payload stages over the whole transaction.
-  3. Checks the declared basis against the real workspace.
-  4. Validates each operation against the candidate (graph, semantic and
+  3. Checks role permission against the real workspace, before staleness
+     as §3.4 orders it, so an unauthorized operation is never reported as
+     stale.
+  4. Checks the declared basis against the real workspace.
+  5. Validates each operation against the candidate (graph, semantic and
      guard stages), then commits the whole transaction once. The candidate is
      folded through the new `commit/stage`, which does not derive conflicts,
      so conflicts are derived once at the same transaction boundary that
@@ -83,6 +86,7 @@ Deviations from the snapshot:
 New `admission_test` covers:
 
 - impersonation, forged provenance fields, invalid and malformed context;
+- permission checked before staleness;
 - reserved derived-conflict ids and claim kinds;
 - closed fields and creation types;
 - a duplicate choice point within one adoption;
@@ -99,7 +103,7 @@ New `admission_test` covers:
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 12 deliberation-workspace suites,
-166 tests, 542 assertions, 0 failures. clj-kondo 2026.10.26 (the CI version)
+167 tests, 544 assertions, 0 failures. clj-kondo 2026.10.26 (the CI version)
 on the component: 0 errors. `poly test` and the Polylith check ran only in CI.
 
 ## Deployment Plan

@@ -148,6 +148,7 @@
   (or (shape-rejection workspace proposal context)
       (let [tx (transaction proposal context)]
         (or (validation/validate workspace tx validation/payload-stages)
+            (validation/validate workspace tx validation/permission-stages)
             (validation/validate workspace tx validation/basis-stages)
             (sequential-rejection workspace tx)
             {:workspace (commit/commit workspace tx)
