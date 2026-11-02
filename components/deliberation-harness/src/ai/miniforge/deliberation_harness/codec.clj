@@ -76,10 +76,10 @@
       (joined "[" (map emit value) "]")
       :else (pr-str value))))
 
+;; EDN reader for any custom tag. Journals and manifests carry plain data
+;; (EDN's built-in `#inst` and `#uuid` included), so a custom-tagged value
+;; becomes a marker plain EDN cannot construct, which `read-text` refuses.
 (defn- ^{:stratum 0} mark-tag
-  "EDN reader for any custom tag. Journals and manifests carry plain data
-   (EDN's built-in `#inst` and `#uuid` included), so a custom-tagged value
-   becomes a marker plain EDN cannot construct, which `read-text` refuses."
   [tag _value]
   (->RejectedTag tag))
 
