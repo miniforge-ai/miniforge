@@ -44,12 +44,13 @@ success, and counts quiescence by object growth.
     frame-refusal markers belong to the workspace version they were recorded
     at, so any commit starts a new round, including one made directly
     through `admit` or `replay-transaction`.
-  - An admitted proposal that names an id the participant was not shown, and
-    does not create itself, is refused exactly like an unknown target.
-    Admission checks ids against the whole graph. Without this guard, under
-    `:visibility :none` or a read scope, a participant could act on a hidden
-    object by guessing its id, and the commit would confirm the object exists
-    (N14 §4.4).
+  - When the runtime sets a read scope for a participant (N14 §4.1), an
+    admitted proposal that names an id outside that scope, other than one it
+    creates, is refused exactly like an unknown target. Admission checks ids
+    against the whole graph, so without this a scoped participant could act on
+    an object outside its scope by guessing the id. The ablation switch
+    (`:visibility :none`) is deliberately not consulted: §4.4 says it must not
+    alter validation, so it changes only what the projection shows.
   - `activate-participant` enforces the budget itself, so the public one-turn
     entry point cannot bypass `run`'s checks. An ordinary turn past the
     closure reserve, or a closure turn with no allowance left, is recorded as

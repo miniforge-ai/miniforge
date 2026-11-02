@@ -316,11 +316,12 @@
                         passes {})]
     (is (not= :quiescence (get-in closed [:workspace/termination :termination/rule])))))
 
-(deftest ^{:stratum 2} a-hidden-object-cannot-be-acted-on
-  (let [secret (assoc (goal "secret") :object/type :claim :object/role :proposer)
-        ws (workspace :workspace/visibility :none :workspace/roles [:skeptic]
-                      :workspace/objects {"goal-1" (goal "goal-1") "secret" secret})
-        feedback #(get-in (run/step ws (constantly {:tx/operations [{:op :challenge :targets [%]
-                                                                     :reason "r" :resolution "s"}]}))
-                          [:workspace/feedback :skeptic])]
-    (is (= {:status :rejected} (feedback "secret") (feedback "absent")))))
+(deftest ^{:stratum 2} the-read-scope-not-the-ablation-bounds-what-a-turn-touches
+  (let [ws (workspace :workspace/roles [:skeptic] :workspace/objects
+                      {"goal-1" (goal "goal-1") "secret" (assoc (goal "secret") :object/type :claim :object/role :proposer)})
+        status #(get-in (run/step % (constantly {:tx/operations [{:op :challenge :targets [%2]
+                                                                   :reason "r" :resolution "s"}]}))
+                        [:workspace/feedback :skeptic :status])
+        scoped (assoc ws :workspace/readable {:skeptic #{"goal-1"}})]
+    (is (= :committed (status (assoc ws :workspace/visibility :none) "secret")))
+    (is (= :rejected (status scoped "secret") (status scoped "absent")))))

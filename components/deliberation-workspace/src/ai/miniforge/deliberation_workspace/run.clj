@@ -112,26 +112,29 @@
        (get-in after [:workspace/spent :activations])) :refused
     :else :executed))
 
-;; Whether an admitted `transaction` names an id the participant was neither
-;; shown in `projection` nor creates itself. Admission checks ids against the
-;; whole graph; acting on a hidden object would confirm it exists (N14 §4.4).
-(defn- ^{:stratum 0} unseen-reference? [transaction projection]
+;; Whether an admitted `transaction` names an id outside the participant's
+;; authorized read scope (N14 §4.1) that it does not create. Admission checks
+;; ids against the whole graph, so this is where the scope is enforced. The
+;; ablation switch is deliberately not consulted: §4.4 forbids it to alter
+;; validation.
+(defn- ^{:stratum 0} out-of-scope? [transaction readable]
   (let [ops (:tx/operations transaction)
         specs (mapcat validation/created-specs ops)
-        seen (into (set (map :id specs)) (map :object/id) (:projection/objects projection))]
-    (some #(not (contains? seen %))
+        allowed (into (set (map :id specs)) readable)]
+    (some #(not (contains? allowed %))
           (concat (mapcat (fn [op] (mapcat #(get op % []) tx/id-fields)) ops)
                   (mapcat #(mapcat val (get % :links {})) (concat ops specs))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Fold `proposed` into `spent` through admission, logging the outcome. A
-;; reference to an unseen id is refused exactly as an unknown target is.
+;; reference outside the read scope is refused exactly as an unknown target is.
 (defn- ^{:stratum 1} settle
-  [spent proposed participant context projection]
+  [spent proposed participant context]
   (let [admitted (admission/admit spent proposed context)
-        result (if (and (not (anomaly/anomaly? admitted))
-                        (unseen-reference? (:transaction admitted) projection))
+        readable (get-in spent [:workspace/readable participant])
+        result (if (and readable (not (anomaly/anomaly? admitted))
+                        (out-of-scope? (:transaction admitted) readable))
                  (validation/reject :not-found :anomalies.deliberation/unknown-target
                                     (messages/system-t :anomaly/unknown-target) {})
                  admitted)]
@@ -166,7 +169,7 @@
       (-> spent
           (note-quiet participant)
           (record-event {:event :transaction/passed :role participant}))
-      (settle spent proposed participant context projection))))
+      (settle spent proposed participant context))))
 
 ;; Record a turn refused before any model call because the participant's
 ;; read scope withholds part of the required frame. Nothing ran, so nothing
