@@ -23,7 +23,8 @@
    [ai.miniforge.deliberation-workspace.admission :as admission]
    [ai.miniforge.deliberation-workspace.commit :as commit]
    [ai.miniforge.deliberation-workspace.object :as object]
-   [ai.miniforge.deliberation-workspace.projection :as projection]))
+   [ai.miniforge.deliberation-workspace.projection :as projection]
+   [ai.miniforge.deliberation-workspace.run :as run]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -47,3 +48,13 @@
   "Re-apply a logged transaction, reconstructing the graph (N14 §9.1)."
   [workspace transaction]
   (commit/commit workspace transaction))
+
+(defn activate-participant
+  "Run one work turn for a participant; see `run/activate-participant`."
+  [workspace activate activation]
+  (run/activate-participant workspace activate activation))
+
+(defn run
+  "Drive a deliberation run to a §7 closing rule; see `run/run`."
+  [workspace activate options]
+  (run/run workspace activate options))
