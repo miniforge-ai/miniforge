@@ -3,64 +3,79 @@
   Author: Christopher Lester (christopher@miniforge.ai)
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
-# fix(workflow): gate warnings survive on the phase result and in gate history
+# fix: Gate warnings survive on the phase result and in gate history
 
-**Tier:** observability / Codex §7.4.3 follow-up
-**Theme:** gates, checkpoints, Thesium Codex consultation
+## Overview
 
-## Problem
+Gate warnings used to be thrown away. They are now recorded on the phase
+result as `:phase/gate-warnings`, on both allow and deny, and written to
+the append-only `gate-history.edn`. A warning raised on a phase that is
+later re-entered stays on record.
 
-`apply-gate-validation` in `workflow/execution_transition.clj` runs the
-phase's gates through `gate/check-gates` and then keeps only two things from
-the result: the decision envelope, and on a deny the failed gates'
-`[:gate :errors]` as `:phase/gate-failures`. Every gate's `:warnings` were
-thrown away.
+## Motivation
 
-A warning never changes the decision, so the envelope has nowhere to put it.
-Nothing else picked it up either, so a warning never reached
-`:execution/phase-results`, the phase checkpoint, or the append-only
-`gate-history.edn`. The case that matters here is `:codex-pin-not-fetched`
-from the `:codex-consultation` gate (Codex SPEC §7.4.3 verdict 3). That
-gate passes with the warning when the agent was given its pinned landings
-but never fetched them with `context_read`. The warning was raised and
-dropped on every iteration. When a phase is re-entered (a redirect, a
-repair) its checkpoint is overwritten, so the history is the only record
-left, and it had no warnings in it.
+`apply-gate-validation` in `workflow/execution_transition.clj` ran the
+phase's gates through `gate/check-gates` and kept only two things: the
+decision envelope, and on a deny the failed gates' `[:gate :errors]` as
+`:phase/gate-failures`. Every gate's `:warnings` were discarded.
 
-## Changes
+A warning never changes the decision, so the envelope has nowhere to put
+it, and nothing else picked it up. Warnings therefore never reached
+`:execution/phase-results`, the phase checkpoint, or the gate history.
+The case that matters is `:codex-pin-not-fetched` from the
+`:codex-consultation` gate (Codex SPEC §7.4.3, verdict 3). That gate
+passes with this warning when the agent was given its pinned landings but
+never fetched them with `context_read`. When a phase is re-entered, by a
+redirect or a repair, its checkpoint is overwritten. That leaves the
+history as the only record, and the history had no warnings.
 
-### `components/workflow/src/ai/miniforge/workflow/execution_transition.clj`
+## Changes in Detail
 
-- New Layer 0 `gate-warnings`: from a `check-gates` result it returns one
-  `{:gate kw :warnings [...]}` for each gate that raised a warning, in gate
-  order, or nil when no gate did. This is the same shape as
-  `:phase/gate-failures`.
-- `apply-gate-validation` puts that value on the phase result as
-  `:phase/gate-warnings`, on both the allow and the deny branch. The key is
-  added only when some gate warned, so the phase result for a phase with no
-  warnings is unchanged.
+- `workflow/execution_transition.clj`: a new Layer 0 `gate-warnings`
+  returns one `{:gate kw :warnings [...]}` per gate that warned, in gate
+  order, or nil when none did. It uses the same shape as
+  `:phase/gate-failures`. `apply-gate-validation` sets
+  `:phase/gate-warnings` from it on both branches, through one clause in
+  its outer `cond->`. The key is set only when some gate warned.
+- `workflow/checkpoint_store.clj`: `append-gate-history!` writes
+  `:phase/gate-warnings` next to `:phase/gate-errors` and
+  `:phase/gate-failures`, using the phase result's own key name.
 
-### `components/workflow/src/ai/miniforge/workflow/checkpoint_store.clj`
-
-- `append-gate-history!` writes `:phase/gate-warnings` next to
-  `:phase/gate-errors` and `:phase/gate-failures`. It uses the phase
-  result's own key name, so the history and the checkpoint name the datum
-  the same way.
-
-## Testing
+## Testing Plan
 
 - `phase_transitions_test.clj`:
-  - `gate-warnings-test`: covers ordering, a list of warnings coerced to a
-    vector, and nil when there are no warnings.
+  - `gate-warnings-test`: ordering, list-to-vector coercion, and nil when
+    no gate warned.
   - `apply-gate-validation-keeps-gate-warnings`: a passing
-    `:codex-consultation` phase with an unread pin keeps the warning. A
-    failing phase (`:review-approved` denies) keeps the warning alongside
-    `:phase/gate-failures`. A phase with no warnings gets no key.
-- `checkpoint_store_test.clj`: `gate-history-survives-phase-re-entry-test`
-  now also checks that the allowed iteration's warning is in the history.
-- **`bb test` was NOT run.** The authoring environment has no Clojure CLI or
-  Babashka, and `repo.clojars.org` returns 403 through its proxy. What was
-  checked: all four edited files read cleanly with the Clojure 1.12 reader,
-  and `gate-warnings` was evaluated on its own against the test inputs and
-  returned the expected values. The full suite still has to run in CI or on
-  review.
+    `:codex-consultation` phase with an unread pin keeps the warning; a
+    failing phase keeps it beside `:phase/gate-failures`; a phase with no
+    warnings gets no key.
+- `checkpoint_store_test.clj`: the re-entry history test also checks that
+  the allowed iteration's warning is in the history.
+- Locally, only the Clojure 1.12 reader and a standalone evaluation of
+  `gate-warnings` ran, because Clojars is unreachable from the authoring
+  environment. CI ran the full suite.
+
+## Deployment Plan
+
+No configuration or data migration. Phase results and gate-history
+entries gain `:phase/gate-warnings` when a gate warns. Readers that
+ignore the key are unaffected.
+
+## Related Issues/PRs
+
+- #2311: makes a gate decision count only once a durable sink has written
+  it. It merged before this PR. This PR merged as `d83c1b6` without CI
+  re-running against #2311. Its pass-path test cases streamed to
+  `{:sinks []}`, so they failed on main.
+- #2319: fixed that red main by giving those cases a durable-sink ctx.
+- #2316: trimmed this PR's `gate-warnings` docstring and clause comment
+  to the dewey 600 limits.
+
+## Checklist
+
+- [x] Behavior and tests in the same PR (dewey 716)
+- [x] CI green on the merged head
+- [x] Copilot findings fixed and resolved
+- [ ] CI re-run against main before merge. It was not, which caused the
+      breakage that #2319 fixed.
