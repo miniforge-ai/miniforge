@@ -181,7 +181,9 @@ Status transitions MUST be governed by structural rules, not numeric confidence:
 
 The workspace engine MUST derive `conflict` objects automatically when: two `:open`,
 `:contested` or `:accepted` claims are linked `contradicts`; an artifact-ref or plan violates a `:hard`
-constraint; or two decisions target the same choice point. Conflicts MUST NOT be closed by
+constraint; or two `:open`, `:contested` or `:accepted` decisions target the same
+choice point. Rejected and superseded decisions are retained history and derive no new
+conflict. Conflicts MUST NOT be closed by
 deletion — only by a transaction that resolves or supersedes a participant.
 
 ## 3. Transactions
