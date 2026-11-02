@@ -16,9 +16,11 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.deliberation-workspace.transaction
-  "The closed transaction operation vocabulary of N14 §3.2 and the
-   concurrency classes of §3.3. Pure data — validation and application
-   live in sibling namespaces.")
+  "The closed transaction operation vocabulary of N14 §3.2, the concurrency
+   classes of §3.3, and the pure effect each operation has on one target
+   object. Validation and commit live in sibling namespaces."
+  (:require
+   [ai.miniforge.deliberation-workspace.object :as object]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -32,7 +34,7 @@
     :propose-plan :revise-plan
     :propose-decision :accept-decision :reject-decision
     :register-artifact :invalidate-artifact
-    :add-goal :add-constraint :declare-blocked :close-goal})
+    :add-goal :add-constraint :declare-blocked :close-goal :supersede})
 
 (def ^{:stratum 0} operation-class
   "Concurrency class per operation (N14 §3.3).
@@ -68,7 +70,8 @@
    :close-goal :exclusive
    :add-goal :exclusive
    :add-constraint :exclusive
-   :retire-question :exclusive})
+   :retire-question :exclusive
+   :supersede :exclusive})
 
 (def ^{:stratum 0} role-permissions
   "Operations each role may propose (N14 §5.3). Roles absent from a given
@@ -97,7 +100,27 @@
    :retire-question :retired
    :record-experiment-result :completed
    :invalidate-artifact :superseded
-   :challenge :contested})
+   :challenge :contested
+   :supersede :superseded})
+
+(def ^{:stratum 0} revisions
+  "Operations that replace their target's statement, keeping the prior one
+   in the target's history (N14 §2.3)."
+  #{:refine-claim :revise-plan})
+
+(def ^{:stratum 0} reopening-operations
+  "Operations that may still target an `:accepted` object: adoption is a
+   working choice, so contrary evidence and actionable challenges remain
+   recordable against it, and a replacement can supersede it (N14 §2.3)."
+  #{:challenge :attach-evidence :supersede})
+
+(def ^{:stratum 0} supersedable-types
+  "Object types `supersede` may target (N14 §3.2)."
+  #{:claim :hypothesis :plan :decision})
+
+(def ^{:stratum 0} decision-superseders
+  "Roles that may supersede a decision (N14 §5.3); `:user` acts through OCI."
+  #{:synthesizer :user})
 
 (def ^{:stratum 0} goal-outcomes
   "Outcomes `close-goal` may impose (N14 §2.3)."
@@ -111,9 +134,10 @@
   "Operation fields that name object ids (N14 §3.2).
 
    `:targets` is read by [[touched-ids]]; `:evidence` and `:discriminates`
-   by the §3.5 backing check. Each is optional, and each reader hands the
-   field to `set` or `seq`, so validation holds all three to one shape."
-  [:targets :evidence :discriminates])
+   by the §3.5 backing check; `:replacement` by `supersede`. Each is
+   optional, and each reader hands the field to `set` or `seq`, so
+   validation holds all four to one shape."
+  [:targets :evidence :discriminates :replacement])
 
 (defn ^{:stratum 0} touched-ids
   "The object ids `operation` reads or writes. Every operation must declare
@@ -131,6 +155,32 @@
    :tx/basis basis
    :tx/operations (vec operations)})
 
+(defn- ^{:stratum 0} revise
+  "`target` with `statement` replacing its own, the prior kept in history."
+  [target statement]
+  (-> target
+      (update :object/history (fnil conj [])
+              (select-keys target [:object/statement :object/touched-at]))
+      (assoc :object/statement statement)))
+
+(defn ^{:stratum 0} with-status
+  "`target` after `op` imposes `status`. A challenge leaves an adopted record
+   `:accepted` and marks it contested instead, and adopting a contested
+   record keeps that marker (N14 §2.3); a status illegal for the target's
+   type is skipped."
+  [target op status]
+  (cond
+    (and (= :challenge op) (= :accepted (:object/status target)))
+    (assoc target :object/contested? true)
+
+    (and (= :accepted status) (= :contested (:object/status target)))
+    (assoc target :object/status :accepted :object/contested? true)
+
+    (and status (object/legal-status? (:object/type target) status))
+    (assoc target :object/status status)
+
+    :else target))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} known-operation?
@@ -142,6 +192,24 @@
   "Concurrency class of `op`, or nil when `op` is not in the vocabulary."
   [op]
   (get operation-class op))
+
+(defn ^{:stratum 1} with-content
+  "`target` after the content an operation carries: a revision replaces the
+   statement and keeps the prior one in `:object/history`, an answer is
+   recorded beside its question, and a supersession names its replacement."
+  [target operation]
+  (let [op (:op operation)]
+    (cond
+      (contains? revisions op)
+      (revise target (:statement operation))
+
+      (= :answer-question op)
+      (assoc target :object/answer (:statement operation))
+
+      (= :supersede op)
+      (assoc target :object/superseded-by (first (:replacement operation)))
+
+      :else target)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

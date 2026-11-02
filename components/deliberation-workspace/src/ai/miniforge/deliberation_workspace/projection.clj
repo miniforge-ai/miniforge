@@ -51,7 +51,7 @@
     :full true
     :none (or (= :goal (:object/type object))
               (object/hard-constraint? object)
-              (= role (:object/role object))
+              (= role (or (:object/participant object) (:object/role object)))
               (contains? #{:interpreter :user} (:object/role object)))))
 
 (defn- ^{:stratum 0} by-id [objects]
@@ -61,6 +61,17 @@
   "Object ids `object` points at across all its typed edges."
   [object]
   (reduce into #{} (vals (get object :object/links {}))))
+
+(defn- ^{:stratum 0} visible-edges [links visible-ids]
+  (update-vals links #(into #{} (filter visible-ids) %)))
+
+(defn- ^{:stratum 0} scrub-references
+  "`object` with every reference to an id outside `visible-ids` removed, so
+   an edge cannot reveal that a hidden object exists (N14 §4.4)."
+  [object visible-ids]
+  (cond-> (update object :object/links visible-edges visible-ids)
+    (not (contains? visible-ids (:object/superseded-by object)))
+    (dissoc :object/superseded-by)))
 
 (defn- ^{:stratum 0} of-type [objects object-type]
   (filter #(= object-type (:object/type %)) objects))
@@ -88,15 +99,18 @@
 
 (defn ^{:stratum 2} project
   "Render the projection `role` sees at the workspace's current version.
+   `role` is the viewing participant, which is its role when the runtime
+   assigned no separate participant identity.
 
-   Deterministic: identical (workspace, role, visibility, since) inputs
+   Deterministic: identical (workspace, role, options) inputs
    produce an identical value. `since` is the workspace version at the
    role's previous activation; the delta carries everything touched after
    it, which is how a role learns what moved without re-reading the graph.
 
    Required content per §4.2 — goals, hard constraints, open conflicts, and
    the delta — is computed over the visible set, so the ablation cannot be
-   defeated through derived objects."
+   defeated through derived objects, and edges to hidden objects are
+   removed from what is rendered."
   [workspace role {:keys [visibility since] :or {visibility :full since 0}}]
   (let [candidates (visible-objects workspace role visibility)
         candidate-ids (into #{} (map :object/id) candidates)
@@ -104,9 +118,11 @@
         ;; references something hidden — dropping it from :projection/conflicts
         ;; alone would still leak its existence through the object list and the
         ;; delta. One pass suffices: conflicts never reference other conflicts.
-        visible (remove #(and (= :conflict (:object/type %))
-                              (not (renderable-conflict? % candidate-ids)))
-                        candidates)
+        retained (remove #(and (= :conflict (:object/type %))
+                               (not (renderable-conflict? % candidate-ids)))
+                         candidates)
+        visible-ids (into #{} (map :object/id) retained)
+        visible (map #(scrub-references % visible-ids) retained)
         conflicts (filter open? (of-type visible :conflict))]
     {:projection/version (get workspace :workspace/version 0)
      :projection/role role

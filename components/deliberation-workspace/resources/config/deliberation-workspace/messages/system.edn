@@ -4,9 +4,9 @@
 
 {:deliberation-workspace/system
  {:anomaly/hard-constraint-immutable "Hard constraints are immutable to agent transactions"
-  :anomaly/duplicate-operation       "Role already committed this operation against these targets"
-  :anomaly/bare-challenge            "A challenge must carry evidence or a discriminating experiment (N14 §3.5)"
-  :anomaly/challenge-limit           "Role already holds the permitted number of open challenges on this object"
+  :anomaly/duplicate-operation       "Participant already committed this exact operation"
+  :anomaly/bare-challenge            "A challenge needs evidence, a discriminating experiment, or a reason and resolution (N14 §3.5)"
+  :anomaly/challenge-limit           "Participant already holds the permitted number of open challenges on this object"
   :anomaly/unknown-operation         "Operation is outside the closed N14 §3.2 vocabulary"
   :anomaly/invalid-object-ids        "Operation field must name object ids the engine can look up"
   :anomaly/malformed-creates         "Operation :creates must be a sequence of object specifications"
@@ -21,4 +21,7 @@
   :anomaly/missing-basis             "Transaction must declare the workspace version its projection was rendered from"
   :anomaly/terminal-target           "Operation targets an object already in a terminal status"
   :anomaly/stale-basis               "Object changed since the projection this transaction was built from"
+  :anomaly/missing-statement         "Revisions and answers must carry a non-blank statement"
+  :anomaly/invalid-replacement       "supersede must name one live replacement of the target's type"
+  :anomaly/inapplicable-replacement  "Only supersede names a replacement"
   :anomaly/invalid-transaction       "Transaction :tx/operations must be a sequence of operations"}}
