@@ -123,6 +123,14 @@
     [:failure (assoc-in value [:anomaly/data :source] (str source))]
     result))
 
+;; The text of `source` decoded as strict UTF-8: malformed bytes throw rather
+;; than becoming U+FFFD, so two different files never read as the same text.
+(defn- ^{:stratum 0} strict-utf8 [source]
+  (let [decoder (doto (.newDecoder StandardCharsets/UTF_8)
+                  (.onMalformedInput CodingErrorAction/REPORT)
+                  (.onUnmappableCharacter CodingErrorAction/REPORT))]
+    (str (.decode decoder (ByteBuffer/wrap (with-open [in (io/input-stream source)] (.readAllBytes in)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} encode
@@ -140,14 +148,6 @@
                         (-> .asCharBuffer (.put text))))
         hashed (.digest (MessageDigest/getInstance digest-algorithm) bytes)]
     (format "%064x" (BigInteger. 1 hashed))))
-
-;; The text of `source` decoded as strict UTF-8: malformed bytes throw rather
-;; than becoming U+FFFD, so two different files never read as the same text.
-(defn- ^{:stratum 0} strict-utf8 [source]
-  (let [decoder (doto (.newDecoder StandardCharsets/UTF_8)
-                  (.onMalformedInput CodingErrorAction/REPORT)
-                  (.onUnmappableCharacter CodingErrorAction/REPORT))]
-    (str (.decode decoder (ByteBuffer/wrap (with-open [in (io/input-stream source)] (.readAllBytes in)))))))
 
 ;; `[:ok value]` for `text` holding exactly one plain EDN form, otherwise
 ;; `[:failure anomaly]`: unparseable, not one form, or a custom reader tag.
