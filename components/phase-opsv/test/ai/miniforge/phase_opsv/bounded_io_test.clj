@@ -1,8 +1,8 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.prometheus-io-test
-  (:require [ai.miniforge.phase-opsv.boundary.prometheus-io :as io]
+(ns ai.miniforge.phase-opsv.bounded-io-test
+  (:require [ai.miniforge.phase-opsv.boundary.bounded-io :as io]
             [ai.miniforge.phase-opsv.prometheus-test-support :as fixture]
             [ai.miniforge.resource-cleanup.interface :as cleanup]
             [clojure.test :refer [deftest is]])

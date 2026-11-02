@@ -5,7 +5,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.boundary.prometheus-http :as http]
-            [ai.miniforge.phase-opsv.boundary.prometheus-io :as io]
+            [ai.miniforge.phase-opsv.boundary.bounded-io :as io]
             [ai.miniforge.phase-opsv.measurement-test-support :as measurement]
             [ai.miniforge.phase-opsv.prometheus-test-support :as fixture :refer [failed-future interrupted-result observe]]
             [clojure.string :as str]
