@@ -63,6 +63,11 @@
   []
   (fixtures/tasks))
 
+(defn fixture-defects
+  "Tasks whose scoring cannot discriminate; see `fixtures/fixture-defects`."
+  [task-package]
+  (fixtures/fixture-defects task-package))
+
 (defn score
   "Score a solution against a task's sealed reference; see `fixtures/score`."
   [task solution inspected]
