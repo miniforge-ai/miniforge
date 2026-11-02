@@ -26,8 +26,9 @@ codec and fixtures belong in a component.
 ## Changes in Detail
 
 - `codec`
-  - Canonical EDN, with maps and sets in printed-key order; ties between
-    values that print alike are broken by class, so no entry merges. Printer
+  - Canonical EDN, with maps and sets in printed-key order; values that
+    print alike but are not `=` are ordered by class, so no entry merges,
+    while `=` values still compare equal for lookups. Printer
     settings are pinned for encoding and for the ordering comparator, so a
     caller's `*print-length*` cannot truncate or reorder a record.
   - SHA-256 digest.
@@ -55,6 +56,8 @@ codec and fixtures belong in a component.
     `resources/config/deliberation-harness/tasks.edn`.
   - `public-task` exposes only `:id :version :synthetic? :brief`.
   - `tasks` returns an anomaly when the resource is missing or unreadable.
+  - `score` returns an anomaly for a task with no reference or for
+    `inspected` that is not a collection.
   - `score` and `fixture-defects`.
 - `messages`: system catalog for the component's anomaly text.
 - `interface`: `digest`, `read-edn`, `open-journal!`, `append!`,

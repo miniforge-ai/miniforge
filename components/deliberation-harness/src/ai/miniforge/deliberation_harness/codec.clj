@@ -43,13 +43,15 @@
     (f)))
 
 (defn- ^{:stratum 0} printed-order
-  "Compare by printed form, then by class, so distinct values that print
-   alike (a float and a double) stay distinct keys instead of merging.
+  "Compare by printed form. Values that print alike but are not `=` (a
+   float and a double of 1.2) are ordered by class, so they stay distinct
+   keys; values that are `=` compare equal, so lookups keep Clojure's key
+   equality.
    Stable printing is bound here, not around the walk, because a sorted
    collection keeps calling its comparator after `canonical` returns."
   [a b]
   (stably #(let [by-text (compare (pr-str a) (pr-str b))]
-             (if (zero? by-text)
+             (if (and (zero? by-text) (not= a b))
                (compare (str (class a)) (str (class b)))
                by-text))))
 

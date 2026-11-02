@@ -41,6 +41,13 @@
 (defn- ^{:stratum 0} complete-inspection? [task inspected]
   (= (set (keys (:experiments task))) (set inspected)))
 
+(defn- ^{:stratum 0} scorable?
+  "True when `task` has a non-empty reference map and `inspected` is a
+   collection of experiment ids (or nil)."
+  [task inspected]
+  (and (map? (:reference task)) (seq (:reference task))
+       (or (nil? inspected) (coll? inspected))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} tasks
@@ -54,15 +61,20 @@
 
 (defn ^{:stratum 1} score
   "Score `solution` for `task` given the experiment ids `inspected`. Success
-   needs every reference choice and every available observation inspected."
+   needs every reference choice and every available observation inspected.
+   An `:invalid-input` anomaly when the task has no reference to score
+   against or `inspected` is not a collection."
   [task solution inspected]
-  (let [results (checks task solution)
-        inspected? (complete-inspection? task inspected)
-        correct (count (filter true? (vals results)))]
-    {:success (if (and inspected? (every? true? (vals results))) 1 0)
-     :checks results
-     :evidence-complete? inspected?
-     :partial (/ correct (count results))}))
+  (if-not (scorable? task inspected)
+    (anomaly/anomaly :invalid-input (messages/system-t :anomaly/unscorable-task)
+                     {:task (:id task)})
+    (let [results (checks task solution)
+          inspected? (complete-inspection? task inspected)
+          correct (count (filter true? (vals results)))]
+      {:success (if (and inspected? (every? true? (vals results))) 1 0)
+       :checks results
+       :evidence-complete? inspected?
+       :partial (/ correct (count results))})))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -17,6 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.deliberation-harness.fixtures-test
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-harness.fixtures :as fixtures]
    [clojure.test :refer [deftest is testing]]))
 
@@ -44,3 +45,10 @@
     (is (not (contains? view :reference)))
     (is (not (contains? view :distractors)))
     (is (not (contains? view :experiments)))))
+
+(deftest ^{:stratum 1} unscorable-input-is-an-anomaly
+  (testing "a task with no reference to score against"
+    (is (anomaly/anomaly? (fixtures/score {:id "t" :reference {}} {} [])))
+    (is (anomaly/anomaly? (fixtures/score {:id "t"} {} []))))
+  (testing "inspected ids that are not a collection"
+    (is (anomaly/anomaly? (fixtures/score (first (fixtures/tasks)) {} 5)))))

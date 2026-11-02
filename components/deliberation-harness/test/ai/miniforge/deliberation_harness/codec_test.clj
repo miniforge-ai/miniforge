@@ -97,3 +97,7 @@
 (deftest ^{:stratum 1} host-maps-whose-order-canonicalizing-skips-are-not-plain
   (let [linked (doto (java.util.LinkedHashMap.) (.put :b 1) (.put :a 2))]
     (is (not (codec/plain? linked)))))
+
+(deftest ^{:stratum 1} canonical-lookups-keep-clojure-key-equality
+  (is (= :f (get (codec/canonical {(float 1.5) :f}) (double 1.5))))
+  (is (contains? (codec/canonical #{(float 1.5)}) (double 1.5))))

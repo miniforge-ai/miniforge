@@ -9,6 +9,7 @@
   :anomaly/missing-resource "Resource is not on the classpath"
   :anomaly/unlistable-journal "Journal directory cannot be listed"
   :anomaly/unencodable-payload "Journal payloads must be plain EDN that reads back unchanged"
+  :anomaly/unscorable-task "A task needs a non-empty reference map, and inspected ids must be a collection"
   :anomaly/unknown-tag    "EDN carries a reader tag; journals and manifests hold plain data only"
   :anomaly/journal-exists "Output directory must be new, with an existing parent"
   :anomaly/broken-chain   "Experiment journal record breaks the hash chain"}}
