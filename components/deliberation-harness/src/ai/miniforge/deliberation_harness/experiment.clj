@@ -25,6 +25,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-harness.codec :as codec]
    [ai.miniforge.deliberation-harness.fixtures :as fixtures]
+   [ai.miniforge.deliberation-harness.messages :as messages]
    [ai.miniforge.deliberation-harness.turn :as turn]
    [clojure.string :as str]))
 
@@ -118,18 +119,22 @@
   "Run one cell. `call` receives only the public request and returns
    `{:payload :usage}` or an anomaly; `record!` persists a journal record
    before the next call and returns its hash or an anomaly. Returns the
-   cell result after recording it, or the journal anomaly that stopped it."
+   cell result after recording it, the journal anomaly that stopped it, or
+   an `:invalid-input` anomaly for an unknown condition, before any call or
+   record."
   [manifest task condition tier replicate call record!]
   (let [started (System/nanoTime)
         cell {:manifest manifest :task task :condition condition :tier tier
               :replicate replicate :call call :record! record!}]
-    (loop [state {:turn 0 :boards {} :history [] :inspected #{} :usage turn/empty-usage
-                  :cost 0.0 :payload nil :audit []}]
-      (cond
-        (anomaly/anomaly? state) state
-        (finished? state tier started)
-        (let [result (cell-result manifest task condition tier replicate state started)
-              recorded (record! {:kind :cell-completed :result (dissoc result :boards)})]
-          (if (anomaly/anomaly? recorded) recorded result))
-        :else (recur (take-turn cell state))))))
-
+    (if-not (contains? turn/conditions condition)
+      (anomaly/anomaly :invalid-input (messages/system-t :anomaly/unknown-condition)
+                       {:condition condition})
+      (loop [state {:turn 0 :boards {} :history [] :inspected #{} :usage turn/empty-usage
+                    :cost 0.0 :payload nil :audit []}]
+        (cond
+          (anomaly/anomaly? state) state
+          (finished? state tier started)
+          (let [result (cell-result manifest task condition tier replicate state started)
+                recorded (record! {:kind :cell-completed :result (dissoc result :boards)})]
+            (if (anomaly/anomaly? recorded) recorded result))
+          :else (recur (take-turn cell state)))))))

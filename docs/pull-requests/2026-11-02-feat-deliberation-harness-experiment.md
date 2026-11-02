@@ -48,6 +48,9 @@ conformance; `turn/conditions` says so in its docstring.
   - `run-cell` records each turn's start before calling the model, and
     records each activation and the cell result.
   - It stops on any journal anomaly.
+  - It refuses a condition outside `conditions` with an `:invalid-input`
+    anomaly before any call or record, so a typo cannot fall through to a
+    private-board run.
   - Scoring: only a complete, in-budget closing turn can succeed. A failure
     is a scored cell, never retried.
   - Evidence completeness counts only the observations the closing turn's
@@ -90,6 +93,7 @@ condition's allowance; that is left for the operator to decide.
 - A model object squatting on an observation's id does not block it, and
   each observation supports its experiment.
 - Model-made execution evidence with a valid-looking receipt is rejected.
+- An unknown condition is refused before any call or record.
 - An over-budget closing call cannot succeed.
 - A journal failure stops the cell.
 - The report states G0 is not evaluated and shows the paired delta.
@@ -97,8 +101,8 @@ condition's allowance; that is left for the operator to decide.
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox):
 
-- the 4 harness suites: 43 tests, 143 assertions, 0 failures. The credit
-  and squatting tests fail on the previous code; the forgery test guards
+- the 4 harness suites: 44 tests, 146 assertions, 0 failures. The credit,
+  squatting and unknown-condition tests fail on the previous code; the forgery test guards
   #2335's provenance stages;
 - clj-kondo 2026.10.26 (the CI version) on `bases components development/src`:
   0 errors.
