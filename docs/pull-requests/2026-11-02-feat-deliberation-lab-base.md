@@ -62,7 +62,8 @@ base requires no component internals (dewey 311).
     `verify!` would refuse every run. The report is written through
     `file-durability`, so a write failure is an anomaly.
   - `verify!` checks the chain, that the journal opens and closes a run, and
-    that every recorded board replays from its own transaction log. A log
+    that every recorded board's objects, version and challenge table replay
+    from its own transaction log. A log
     that cannot be replayed at all, or an opened record whose task package
     is not a sequence of maps, fails verification instead of throwing.
   - `mock-call` for offline smoke runs.
@@ -99,6 +100,11 @@ activation as failed with unknown usage, never as free, but it cannot stop
 the second call: that needs a request opt-out in the `llm` component, a
 separate brick, which is left for a follow-up.
 
+Input cap: `:max-input-bytes` is checked by the harness against the
+canonical EDN request the journal records. The adapter sends that request as
+JSON, which can differ in size by a few percent; the provider still enforces
+its own context limit.
+
 `workspace.edn` excludes `llm`'s own tests from this project: they require
 `agent`, a test-only dependency the lab does not contain. The `miniforge`,
 `miniforge-core` and `miniforge-tui` projects contain both and test `llm`.
@@ -121,12 +127,13 @@ Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
 sandbox), with scratch stand-ins outside the repo for the `llm` namespace
 (no calls are made) and for cheshire's JSON parsing:
 
-- `manifest_test` and `lab_test`: 10 tests, 39 assertions, 0 failures. The
+- `manifest_test` and `lab_test`: 11 tests, 40 assertions, 0 failures. The
   smoke test failed before the `journal/` change, the usage test before the
   argument-count change, and the metering, refusal and shape tests before
   the review fixes. The cached-usage, unreplayable-log and price-table cases
   fail on the code before the second review round, and the output-count,
-  transport and task-package cases on the code before the third.
+  transport and task-package cases on the code before the third, and the
+  forged-challenge-table case on the code before the fourth.
 - clj-kondo 2026.10.26 (the CI version) on `bases components development/src`:
   0 errors.
 

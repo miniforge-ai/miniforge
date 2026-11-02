@@ -130,3 +130,18 @@
   (with-redefs [llm/complete-stream (fn [& _] (throw (java.io.IOException. "no claude")))]
     (let [call (adapter/claude-call manifest)]
       (is (anomaly/anomaly? (call {:task {:id "t"}}))))))
+
+(deftest ^{:stratum 1 :integration true} a-recorded-board-its-log-does-not-produce-fails-verification
+  (with-output
+    (fn [output]
+      (smoke! output)
+      (let [payloads (map :payload (harness/read-journal (str (io/file output "journal"))))
+            activation (first (filter #(= :activation (:kind %)) payloads))
+            forged (str output "-forged")]
+        (.mkdir (io/file forged))
+        (let [journal (harness/open-journal! (str (io/file forged "journal")))]
+          (doseq [record [(first payloads)
+                          (update-in activation [:workspace :workspace/challenges] assoc "forged" {})
+                          (last payloads)]]
+            (harness/append! journal record)))
+        (is (anomaly/anomaly? (lab/verify! forged)))))))

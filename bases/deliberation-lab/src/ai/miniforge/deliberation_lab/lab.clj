@@ -85,6 +85,12 @@
 (defn- ^{:stratum 0} refuse [type message-key data]
   (anomaly/anomaly type (messages/system-t message-key) data))
 
+(def ^{:stratum 0} replayed-keys
+  "The board state a log determines: objects, version and the challenge
+   table guards read. Feedback, receipts and roles are runtime inputs the
+   log does not carry."
+  [:workspace/objects :workspace/version :workspace/challenges])
+
 (defn- ^{:stratum 0} journal-path [run-directory]
   (io/file run-directory journal-directory))
 
@@ -144,10 +150,11 @@
    would add one only for its leaf catches (dewey 211, exemption 1)."
   [tasks-by-id {:keys [task workspace]}]
   (try
-    (= (:workspace/objects workspace)
-       (:workspace/objects (reduce board/replay-transaction
-                                   (harness/initial-workspace (tasks-by-id task))
-                                   (:workspace/log workspace))))
+    (= (select-keys workspace replayed-keys)
+       (select-keys (reduce board/replay-transaction
+                            (harness/initial-workspace (tasks-by-id task))
+                            (:workspace/log workspace))
+                    replayed-keys))
     (catch Exception _ false)))
 
 ;------------------------------------------------------------------------------ Layer 2
