@@ -23,7 +23,8 @@ The snapshot amended N14 0.2.1 and N15 0.2.0 to:
   `supersede` operation;
 - add semantic admission requirements (types, references, attested provenance,
   atomic candidate validation);
-- put the closure allowance inside the total matched allowance;
+- put the closure allowance inside the total matched allowance, reserved on every
+  budget dimension (activations, cost and wall-clock);
 - distinguish development comparisons from N15 gate evidence.
 
 ## Changes in Detail

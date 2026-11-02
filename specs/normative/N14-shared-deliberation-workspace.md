@@ -361,9 +361,13 @@ a benchmark axis under N15, not a rewrite.
 
 A run manifest MUST declare budgets: per-run and per-goal activation counts, cost ceiling,
 and wall-clock ceiling. The manifest MUST additionally reserve a **closure allowance**,
-inside the total condition allowance, sized for one synthesizer activation. The scheduler
-MUST NOT start an ordinary activation that a budget forbids; the forced-synthesis closure
-activation (§7) draws only from the reserved closure allowance.
+inside the total condition allowance, sized for one synthesizer activation on every
+declared dimension: activations, cost and wall-clock. Ordinary work on each dimension is
+bounded by its ceiling minus that dimension's reserve, so no ceiling is exhausted before
+closure. The scheduler MUST NOT start an ordinary activation that a budget forbids; the
+forced-synthesis closure activation (§7) draws only from the reserved closure allowance
+and MUST be bounded by what remains of every ceiling. A closure that the remaining
+allowance cannot fund is recorded as unfunded rather than run past a ceiling.
 Every scheduling decision (start, skip, budget-block) MUST be logged as an event with reason.
 
 ## 7. Termination
@@ -372,11 +376,13 @@ A deliberation run MUST close on the first of:
 
 1. **Success** — all goals accepted with decision coverage. All goals terminal with at least
    one rejected goal is a distinct completed-with-rejected-goals outcome, not task success.
-2. **Budget boundary** — any run-level budget exhausted. The engine MUST then run one final
+2. **Budget boundary** — any run-level budget's ordinary allowance (its ceiling minus the
+   closure reserve, §6.3) exhausted. The engine MUST then run one final
    synthesizer activation ("forced synthesis") producing the best-available decision record
    with explicit dissent and open items. This activation is funded by the reserved closure
    allowance (§6.3), reserved before ordinary work and never added to the matched
-   allowance, so the §6.3 prohibition and this requirement never conflict.
+   allowance, so the §6.3 prohibition and this requirement never conflict. Only a reserve
+   too small to fund it leaves the closure recorded as unfunded (§6.3).
 3. **Quiescence** — every participant scheduled for ordinary work passes in a full
    bounded round without a committed contribution, and no eligible work remains.
    Participants eligible only on deadlock or budget events (the meta-watchdog) are not
@@ -557,8 +563,8 @@ semantic admission, closure inside the total allowance) are not yet reflected in
 
 None of §9.1's event types is registered in N3 §6, so none is emitted. N6 exports,
 full Ariadne ownership, labels and provider policy, governed capsule execution, cost
-reservation, and watchdog and OCI integration are absent. Nothing here is an adopted
-workflow or a production authority boundary; §0.4 keeps this pre-gate.
+reservation, wall-clock budgeting, and watchdog and OCI integration are absent. Nothing
+here is an adopted workflow or a production authority boundary; §0.4 keeps this pre-gate.
 
 ---
 
