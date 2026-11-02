@@ -81,3 +81,19 @@
          (:anomaly/type (codec/read-text
                          (str "{:anomaly/type :fault :anomaly/message \"m\""
                               " :anomaly/data {:x #custom/tag 1} :anomaly/at #inst \"2026-01-01\"}"))))))
+
+(deftest ^{:stratum 1} nil-keys-stay-usable-after-canonicalizing
+  (is (= :value (get (codec/canonical {nil :value :a 1}) nil)))
+  (is (contains? (codec/canonical #{nil :a}) nil)))
+
+(deftest ^{:stratum 1} anomaly-shaped-data-is-data
+  (let [text (str "{:anomaly/type :fault :anomaly/message \"m\""
+                  " :anomaly/data {} :anomaly/at #inst \"2026-01-01T00:00:00.000-00:00\"}")
+        value (codec/read-text text)]
+    (is (= :fault (:anomaly/type value)))
+    (is (not (contains? (:anomaly/data value) :source)))
+    (is (codec/plain? value))))
+
+(deftest ^{:stratum 1} host-maps-whose-order-canonicalizing-skips-are-not-plain
+  (let [linked (doto (java.util.LinkedHashMap.) (.put :b 1) (.put :a 2))]
+    (is (not (codec/plain? linked)))))

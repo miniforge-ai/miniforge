@@ -50,7 +50,7 @@
   [a b]
   (stably #(let [by-text (compare (pr-str a) (pr-str b))]
              (if (zero? by-text)
-               (compare (.getName (class a)) (.getName (class b)))
+               (compare (str (class a)) (str (class b)))
                by-text))))
 
 (defn- ^{:stratum 0} ordered [value]
@@ -71,26 +71,34 @@
         (tree-seq coll? seq value)))
 
 (defn- ^{:stratum 0} attempt
-  "Call `f`, returning its value, or an anomaly of `type` carrying `message`,
-   `data` and the exception's provenance when it throws. Plain `try`: this
-   component has no slingshot dependency and this is its one catch (dewey 211,
-   exemption 1)."
+  "Call `f`, which returns `[:ok value]` or `[:failure anomaly]`. A throw
+   becomes `[:failure anomaly]` of `type` carrying `message`, `data` and the
+   exception's provenance. Success is tracked by the tag, never by the
+   value's shape, so parsed data that looks like an anomaly stays data.
+   Plain `try`: this component has no slingshot dependency and this is its
+   one catch (dewey 211, exemption 1)."
   [f type message data]
   (try
     (f)
     (catch Exception e
-      (anomaly/exception-anomaly type message data e))))
+      [:failure (anomaly/exception-anomaly type message data e)])))
 
 (defn- ^{:stratum 0} single-form
-  "The one EDN form in `text`, or an anomaly when there is none or more."
+  "`[:ok form]` for the one EDN form in `text`, or `[:failure anomaly]`
+   when there is none or more."
   [^String text]
   (let [reader (PushbackReader. (StringReader. text))
         eof (Object.)
         options {:readers {} :default mark-tag :eof eof}
         value (edn/read options reader)]
     (if (and (not (identical? eof value)) (identical? eof (edn/read options reader)))
-      value
-      (anomaly/anomaly :invalid-input (messages/system-t :anomaly/not-one-form) {}))))
+      [:ok value]
+      [:failure (anomaly/anomaly :invalid-input (messages/system-t :anomaly/not-one-form) {})])))
+
+(defn- ^{:stratum 0} with-source [[status value :as result] source]
+  (if (= :failure status)
+    [:failure (assoc-in value [:anomaly/data :source] (str source))]
+    result))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -111,34 +119,50 @@
         hashed (.digest (MessageDigest/getInstance digest-algorithm) bytes)]
     (format "%064x" (BigInteger. 1 hashed))))
 
-(defn ^{:stratum 1} read-text
+(defn- ^{:stratum 1} parse
+  "`[:ok value]` for `text` holding exactly one plain EDN form, otherwise
+   `[:failure anomaly]`: unparseable, not one form, or a custom reader tag."
+  [text]
+  (let [[status value :as result]
+        (attempt #(single-form text) :invalid-input (messages/system-t :anomaly/unreadable-edn) {})
+        tag (when (= :ok status) (rejected-tag value))]
+    (if tag
+      [:failure (anomaly/anomaly :invalid-input (messages/system-t :anomaly/unknown-tag) {:tag tag})]
+      result)))
+
+(defn- ^{:stratum 1} parse-source
+  "`parse` over the UTF-8 text of `source`, with the source named on any
+   failure, reading or parsing."
+  [source]
+  (let [[status text :as read]
+        (attempt #(vector :ok (slurp source :encoding "UTF-8")) :unavailable
+                 (messages/system-t :anomaly/unreadable-source) {})]
+    (with-source (if (= :ok status) (parse text) read) source)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} read-text
   "Parse `text` as exactly one plain EDN form, or return an `:invalid-input`
    anomaly for text that does not parse, holds other than one form, or
    carries a custom reader tag."
   [text]
-  (let [value (attempt #(single-form text) :invalid-input
-                       (messages/system-t :anomaly/unreadable-edn) {})]
-    (if-let [tag (rejected-tag value)]
-      (anomaly/anomaly :invalid-input (messages/system-t :anomaly/unknown-tag) {:tag tag})
-      value)))
+  (second (parse text)))
 
-(defn ^{:stratum 1} read-source
-  "Read `source` (a file or resource URL) and parse it with `read-text`, or
-   return an anomaly naming the source when it cannot be read."
+(defn ^{:stratum 2} read-source
+  "Read `source` (a file or resource URL) as UTF-8 and parse it, or return
+   an anomaly naming the source when it cannot be read or parsed."
   [source]
-  (let [text (attempt #(slurp source :encoding "UTF-8") :unavailable
-                      (messages/system-t :anomaly/unreadable-source) {:source (str source)})
-        value (if (anomaly/anomaly? text) text (read-text text))]
-    (if (anomaly/anomaly? value)
-      (assoc-in value [:anomaly/data :source] (str source))
-      value)))
-
-;------------------------------------------------------------------------------ Layer 2
+  (second (parse-source source)))
 
 (defn ^{:stratum 2} plain?
-  "True when `value` survives an encode and read unchanged, so a record
-   written from it can be replayed. False for objects EDN cannot carry, such
-   as an `Instant` or a function, and for values that print ambiguously."
+  "True when `value` survives an encode and read unchanged, in value and in
+   encoding, so a record written from it replays to the same hash. False
+   for objects EDN cannot carry (an `Instant`, a function), for values that
+   print ambiguously, and for host collections such as a `LinkedHashMap`
+   whose key order canonicalization does not fix."
   [value]
-  (let [read-back (read-text (encode value))]
-    (and (not (anomaly/anomaly? read-back)) (= value read-back))))
+  (let [encoded (encode value)
+        [status read-back] (parse encoded)]
+    (and (= :ok status)
+         (= value read-back)
+         (= encoded (encode read-back)))))
