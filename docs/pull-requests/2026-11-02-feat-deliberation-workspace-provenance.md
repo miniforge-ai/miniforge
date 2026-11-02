@@ -9,8 +9,8 @@
 
 Adds the attestation stages that admission composes after the semantic
 stages (N14 0.3.0 §2.4, §3.4, §5.3, §8). Provenance a proposal claims must
-match what the runtime recorded, never what the model asserts. Split from
-#2331 to keep that PR under the 600-line budget.
+match what the runtime recorded, never what the model asserts. It was split
+from PR #2331 to keep that PR under the 600-line budget.
 
 ## Motivation
 
@@ -56,8 +56,9 @@ New admission tests cover:
 - an experiment result backed only by non-execution evidence.
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
-unreachable from the authoring sandbox): 13 suites, 163 tests,
-538 assertions, 0 failures. `poly test`, clj-kondo and the Polylith check ran
+unreachable from the authoring sandbox): all 12 deliberation-workspace
+suites, 173 tests, 576 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
+version) on the component: 0 errors. `poly test` and the Polylith check ran
 only in CI.
 
 ## Deployment Plan
