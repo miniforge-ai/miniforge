@@ -50,9 +50,9 @@ substitute the effect boundary and never contact a cluster.
 Settings tests cover target requirements, endpoint and namespace rejection,
 sanitized configuration failures, and preservation of fatal/interrupted causes.
 Public capture tests use real API-shaped JSON, including ListMeta and container
-references. JVM tests use actual JDK response/stream types. Before the final
-dependency-floor integration, both products, 22 JVM tests (70 assertions) and
-91 isolated native-package tests (468 assertions) passed. Rerun on the final head.
+references. JVM tests use actual JDK response/stream types. After integrating the
+dependency floor, both products, 22 JVM tests (70 assertions) and 92 isolated
+native-package tests (472 assertions) passed, with normal signed hooks.
 
 ## Deployment Plan
 
@@ -68,6 +68,6 @@ API reference: <https://kubernetes.io/docs/reference/kubernetes-api/core/pod-v1/
 
 - [x] Pure configuration-reference discovery
 - [x] Bounded read-only acquisition and public boundary
-- [ ] Product and packaged acceptance
-- [ ] Adversarial standards review and normal signed hooks
+- [x] Product and packaged acceptance
+- [x] Adversarial standards review and normal signed hooks
 - [ ] Fresh full Copilot review and all CI gates
