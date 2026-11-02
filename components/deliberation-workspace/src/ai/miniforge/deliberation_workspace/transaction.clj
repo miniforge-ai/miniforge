@@ -73,9 +73,17 @@
    :retire-question :exclusive
    :supersede :exclusive})
 
+(def ^{:stratum 0} responsibilities
+  "The responsibilities a runtime may assign an activation (N14 §5.2), plus
+   `:user`, the OCI principal."
+  #{:interpreter :proposer :implementer :skeptic :verifier :synthesizer
+    :meta-watchdog :user})
+
 (def ^{:stratum 0} role-permissions
   "Operations each role may propose (N14 §5.3). Roles absent from a given
    operation's permitted set are rejected at the permission stage.
+   `add-constraint` is open to every role: only a `:hard` constraint is
+   restricted, which semantic admission checks by its source.
 
    The user acts through OCI, not through a role, and is exempt (§10.2)."
   {:record-experiment-result #{:verifier}
@@ -84,7 +92,6 @@
    :reject-decision #{:synthesizer}
    :close-goal #{:synthesizer}
    :add-goal #{:interpreter}
-   :add-constraint #{:interpreter}
    :retire-question #{:meta-watchdog}})
 
 (def ^{:stratum 0} status-effect

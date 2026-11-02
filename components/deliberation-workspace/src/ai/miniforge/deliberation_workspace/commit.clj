@@ -111,13 +111,17 @@
               (map-indexed vector (sort (tx/touched-ids operation)))))
     workspace))
 
+;; Insert the objects `operation` creates, stamping provenance from the
+;; transaction rather than trusting the activation's own report of it. What an
+;; operation `:discriminates` becomes a `:discriminates` link on each object it
+;; creates, so the experiment backing a challenge keeps that record.
 (defn- ^{:stratum 0} insert-created
-  "Insert the objects `operation` creates, stamping provenance from the
-   transaction rather than trusting the activation's own report of it."
   [workspace operation {:keys [role participant activation version]}]
   (reduce (fn [ws spec]
-            (let [created (-> (object/new-object
-                               (assoc spec :role role :activation activation
+            (let [linked (cond-> spec (seq (:discriminates operation))
+                           (update-in [:links :discriminates] (fnil into #{}) (:discriminates operation)))
+                  created (-> (object/new-object
+                               (assoc linked :role role :activation activation
                                       :version version))
                               (assoc :object/participant participant))]
               (assoc-in ws [:workspace/objects (:object/id created)] created)))
@@ -157,8 +161,11 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} commit
-  "Apply a validated transaction and advance the workspace version.
+(defn ^{:stratum 2} stage
+  "Apply a validated transaction, advance the version and log it, without
+   deriving conflicts. Admission folds operations through this, so the
+   candidate derives conflicts at the same transaction boundary that
+   publication does.
 
    The version increments once per committed transaction — it is the clock
    every basis check and staleness measure reads, so it must move exactly
@@ -177,6 +184,12 @@
     (-> (reduce #(apply-operation %1 %2 context)
                 workspace
                 (:tx/operations transaction))
-        (conflict/derive-conflicts version)
         (assoc :workspace/version version)
         (update :workspace/log (fnil conj []) transaction))))
+
+(defn ^{:stratum 2} commit
+  "Apply a validated transaction (see `stage`) and derive the conflicts the
+   resulting graph implies (N14 §2.5)."
+  [workspace transaction]
+  (let [staged (stage workspace transaction)]
+    (conflict/derive-conflicts staged (:workspace/version staged))))
