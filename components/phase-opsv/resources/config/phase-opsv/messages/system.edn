@@ -1,5 +1,7 @@
 {:phase-opsv/system
  {:adapter/missing "The OPSV workflow requires an adapter implementing OPSVAdapter."
+  :discovery/invalid-settings "Signal discovery requires explicit target settings, queries and distinct metric-label bindings."
+  :discovery/unbound-signal "The acquired metric labels do not match the declared Kubernetes service target."
   :prometheus/invalid-settings "Prometheus requires a valid explicit endpoint and bounded transport settings; bearer credentials require HTTPS."
   :prometheus/unavailable "Prometheus measurement acquisition failed; no complete observation is available."
   :prometheus/timeout "Prometheus measurement acquisition exceeded its deadline."
