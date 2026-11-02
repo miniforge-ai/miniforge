@@ -59,15 +59,18 @@
 ;; The canonical text of `value`, written from its own entries and never
 ;; converted to another collection, so no two entries ever merge. Map entries
 ;; are ordered by their key's then value's text, set elements by their own
-;; text; sequences keep their order. A float is written as the exact double
+;; text; sequences keep their order. A host map's keys and a host set's
+;; elements carry their class, since Java equality tells `(int 1)` from `1`. A float is written as the exact double
 ;; it widens to. Anything else prints as itself. Call it inside `stably`.
 (defn- ^{:stratum 0} emit [value]
-  (let [joined (fn [open texts close] (str (host-tag value) open (str/join " " texts) close))]
+  (let [tag (host-tag value)
+        joined (fn [open texts close] (str tag open (str/join " " texts) close))
+        member (fn [k] (str (when (seq tag) (str (some-> k class .getName) " ")) (emit k)))]
     (cond
       (instance? Float value) (pr-str (double value))
       (instance? java.util.Map value)
-      (joined "{" (->> value (map (fn [[k v]] [(emit k) (emit v)])) sort (map #(str/join " " %))) "}")
-      (instance? java.util.Set value) (joined "#{" (sort (map emit value)) "}")
+      (joined "{" (->> value (map (fn [[k v]] [(member k) (emit v)])) sort (map #(str/join " " %))) "}")
+      (instance? java.util.Set value) (joined "#{" (sort (map member value)) "}")
       (seq? value) (joined "(" (map emit value) ")")
       (or (instance? java.util.Collection value) (some-> value class .isArray))
       (joined "[" (map emit value) "]")
