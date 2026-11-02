@@ -20,7 +20,7 @@
   (let [response (http/response-fields (io/await! pending until))
         {:keys [status encodings body]} response]
     (cond
-      (not= 200 status) (anomaly/anomaly :unavailable (msg/ts :prometheus/http-status) {:http/status status})
+      (not= http/success-status status) (anomaly/anomaly :unavailable (msg/ts :prometheus/http-status) {:http/status status})
       (not (http/unencoded? encodings)) (window/invalid-response)
       :else (body/decode! settings request until body))))
 

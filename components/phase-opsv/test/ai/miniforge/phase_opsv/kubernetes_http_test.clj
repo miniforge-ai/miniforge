@@ -3,12 +3,14 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-http-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.phase-opsv.boundary.http-transport :as transport]
             [ai.miniforge.phase-opsv.boundary.kubernetes-response :as response]
             [ai.miniforge.phase-opsv.kubernetes-http-test-support :as fixture]
             [ai.miniforge.phase-opsv.prometheus-test-support :as wire]
             [ai.miniforge.resource-cleanup.interface :as cleanup]
             [clojure.test :refer [deftest is]])
-  (:import [java.util.concurrent TimeoutException]))
+  (:import [java.net HttpURLConnection]
+           [java.util.concurrent TimeoutException]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -18,18 +20,21 @@
     (is (= {"kind" "Namespace"} result))
     (is (= :get (:method options)))
     (is (= "https://cluster.invalid/api/v1/namespaces/staging" (:uri options)))
-    (is (= "identity" (get-in options [:headers "Accept-Encoding"])))
+    (is (= transport/identity-coding (get-in options [:headers "Accept-Encoding"])))
     (is (true? (:raw options)))
     (is (true? (:async options)))))
 
 (deftest ^{:stratum 0} test-absent-resource-is-not-json-null-or-a-successful-document
-  (let [[missing] (fixture/read-response! {} (wire/response "" {:status 404}))
+  (let [[missing] (fixture/read-response! {} (wire/response "" {:status transport/not-found-status}))
         [json-null] (fixture/read-response! {} (wire/response "null"))]
     (is (= response/not-found missing))
     (is (not= missing json-null))))
 
 (deftest ^{:stratum 0} test-status-and-content-coding-refusals-are-sanitized
-  (doseq [status [301 401 403 500]]
+  (doseq [status [HttpURLConnection/HTTP_MOVED_PERM
+                  HttpURLConnection/HTTP_UNAUTHORIZED
+                  HttpURLConnection/HTTP_FORBIDDEN
+                  HttpURLConnection/HTTP_INTERNAL_ERROR]]
     (let [[result] (fixture/read-response! {} (wire/response "secret-sentinel" {:status status}))]
       (is (= :unavailable (:anomaly/type result)))
       (is (= status (get-in result [:anomaly/data :http/status])))))

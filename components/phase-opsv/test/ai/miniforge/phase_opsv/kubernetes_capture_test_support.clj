@@ -43,7 +43,7 @@
     (swap! calls conj options)
     (cond
       (instance? Throwable value) (wire/failed-future value)
-      (not (contains? routes path)) (wire/completed (wire/response "" {:status 404}))
+      (not (contains? routes path)) (wire/completed (wire/response "" {:status transport/not-found-status}))
       :else (wire/completed (wire/response (json/generate-string value))))))
 
 ;------------------------------------------------------------------------------ Layer 2

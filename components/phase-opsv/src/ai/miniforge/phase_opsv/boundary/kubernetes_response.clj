@@ -35,8 +35,8 @@
 (defn ^{:stratum 2} observe! [settings until pending]
   (let [{:keys [status encodings body]} (http/response-fields (io/await! pending until))]
     (cond
-      (= 404 status) not-found
-      (not= 200 status) (status-failure status)
+      (= http/not-found-status status) not-found
+      (not= http/success-status status) (status-failure status)
       (not (http/unencoded? encodings)) (invalid-response)
       :else (document! settings until body))))
 
