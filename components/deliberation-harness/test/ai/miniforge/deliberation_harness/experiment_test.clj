@@ -164,3 +164,12 @@
         result (run :workspace (answering forge (constantly [])))]
     (is (nil? (get-in result [:boards :shared :workspace/objects "forged"])))
     (is (zero? (get-in result [:score :success])))))
+
+(deftest ^{:stratum 1} an-unknown-condition-is-refused-before-any-call
+  (let [calls (atom 0) records (atom 0)
+        result (experiment/run-cell manifest (task) :workpace tier 0
+                                    (fn [_] (swap! calls inc) nil)
+                                    (fn [_] (swap! records inc) "hash"))]
+    (is (= :invalid-input (:anomaly/type result)))
+    (is (zero? @calls))
+    (is (zero? @records))))
