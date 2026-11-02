@@ -109,10 +109,10 @@
   #{:refine-claim :revise-plan})
 
 (def ^{:stratum 0} reopening-operations
-  "Additive operations that may still target an `:accepted` object: adoption
-   is a working choice, and contrary evidence or an actionable challenge
-   must remain recordable against it (N14 §2.3)."
-  #{:challenge :attach-evidence})
+  "Operations that may still target an `:accepted` object: adoption is a
+   working choice, so contrary evidence and actionable challenges remain
+   recordable against it, and a replacement can supersede it (N14 §2.3)."
+  #{:challenge :attach-evidence :supersede})
 
 (def ^{:stratum 0} supersedable-types
   "Object types `supersede` may target (N14 §3.2)."
