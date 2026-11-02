@@ -172,12 +172,24 @@
        (not (and (= :accepted (:object/status target))
                  (contains? tx/reopening-operations op)))))
 
+(defn- ^{:stratum 0} created-earlier
+  "The object `id` would be once the operations before `operation` in
+   `siblings` commit, as a fresh object of its specified type, or nil."
+  [siblings operation id]
+  (some (fn [spec]
+          (when (= id (:id spec))
+            {:object/id id :object/type (:type spec) :object/status :open}))
+        (mapcat #(get % :creates []) (take-while #(not (identical? % operation)) siblings))))
+
 (defn- ^{:stratum 0} replacement-defect
   "The first defect in a `supersede` replacement, as `[reason data]`, or nil.
    `replacements` are the ids the operation names, `replacement` the object
    the single id resolves to."
   [targets replacements replacement]
   (cond
+    (some #(not (contains? tx/supersedable-types (:object/type %))) targets)
+    [:unsupersedable-target {:targets (mapv :object/id targets)}]
+
     (not= 1 (count replacements))
     [:replacement-count {:replacement (vec replacements)}]
 
@@ -376,13 +388,15 @@
 (defn- ^{:stratum 1} check-replacement
   "N14 §3.2: `supersede` names exactly one distinct, live, same-type
    replacement, and no other operation names one."
-  [workspace operation _context]
+  [workspace operation {:keys [siblings]}]
   (let [known (objects-of workspace)
-        replacements (set (get operation :replacement #{}))]
+        replacements (set (get operation :replacement #{}))
+        id (first replacements)
+        replacement (or (known id) (created-earlier siblings operation id))]
     (if (= :supersede (:op operation))
       (when-let [[reason data] (replacement-defect (keep known (tx/touched-ids operation))
                                                    replacements
-                                                   (known (first replacements)))]
+                                                   replacement)]
         (reject :invalid-input :anomalies.deliberation/invalid-replacement
                 (messages/system-t :anomaly/invalid-replacement)
                 (merge {:op (:op operation) :reason reason} data)))
@@ -391,38 +405,49 @@
                 (messages/system-t :anomaly/inapplicable-replacement)
                 {:op (:op operation) :reason :inapplicable-replacement})))))
 
-(defn- ^{:stratum 1} check-permission [_workspace operation {:keys [role]}]
-  (when-not (tx/permitted? role (:op operation))
+(defn- ^{:stratum 1} supersedes-decision-without-standing?
+  "True when `operation` supersedes a decision on behalf of a role §5.3
+   does not let supersede one."
+  [workspace operation role]
+  (and (= :supersede (:op operation))
+       (not (contains? tx/decision-superseders role))
+       (some #(= :decision (:object/type (get (objects-of workspace) %)))
+             (tx/touched-ids operation))))
+
+(defn- ^{:stratum 1} check-permission [workspace operation {:keys [role]}]
+  (when (or (not (tx/permitted? role (:op operation)))
+            (supersedes-decision-without-standing? workspace operation role))
     (reject :unauthorized :anomalies.deliberation/role-forbidden
             (messages/system-t :anomaly/role-forbidden)
             {:op (:op operation) :role role})))
 
 (defn- ^{:stratum 1} check-basis
-  "Basis staleness per concurrency class (N14 §3.3). Additive operations
-   commute, so they commit on a stale basis provided their targets are still
-   live; mergeable and exclusive operations require targets untouched since
-   the basis version the projection was rendered from."
+  "Target liveness and basis staleness (N14 §3.3). No operation may act on a
+   terminal target, except the reopening operations on an `:accepted` one.
+   Additive operations commute, so they commit on a stale basis; mergeable
+   and exclusive operations require targets untouched since the basis
+   version the projection was rendered from."
   [workspace operation {:keys [basis]}]
-  (let [known (objects-of workspace)
-        targets (keep known (tx/touched-ids operation))]
+  (let [op (:op operation)
+        targets (keep (objects-of workspace) (tx/touched-ids operation))
+        terminal (seq (filter #(closed-to? op %) targets))
+        moved (when (and (number? basis) (not= :additive (tx/class-of op)))
+                (seq (filter #(> (:object/touched-at %) basis) targets)))]
     (cond
       (not (number? basis))
       (reject :invalid-input :anomalies.deliberation/missing-basis
               (messages/system-t :anomaly/missing-basis)
-              {:op (:op operation) :basis basis})
+              {:op op :basis basis})
 
-      (= :additive (tx/class-of (:op operation)))
-      (when-let [terminal (seq (filter #(closed-to? (:op operation) %) targets))]
-        (reject :conflict :anomalies.deliberation/terminal-target
-                (messages/system-t :anomaly/terminal-target)
-                {:op (:op operation) :targets (mapv :object/id terminal)}))
+      terminal
+      (reject :conflict :anomalies.deliberation/terminal-target
+              (messages/system-t :anomaly/terminal-target)
+              {:op op :targets (mapv :object/id terminal)})
 
-      :else
-      (when-let [moved (seq (filter #(> (:object/touched-at %) basis) targets))]
-        (reject :conflict :anomalies.deliberation/stale-basis
-                (messages/system-t :anomaly/stale-basis)
-                {:op (:op operation) :basis basis
-                 :targets (mapv :object/id moved)})))))
+      moved
+      (reject :conflict :anomalies.deliberation/stale-basis
+              (messages/system-t :anomaly/stale-basis)
+              {:op op :basis basis :targets (mapv :object/id moved)}))))
 
 (defn ^{:stratum 1} validate
   "Validate a whole transaction against `stages`. Returns nil when every
