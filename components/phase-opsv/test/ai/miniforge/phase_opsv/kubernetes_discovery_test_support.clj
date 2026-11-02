@@ -47,10 +47,13 @@
     (record! calls kind (get scenario kind))))
 
 (defn ^{:stratum 1} scenario []
-  (let [queries (:discovery/queries (configuration))]
-    {:kubernetes (phase/decode-kubernetes-fingerprint (captured/snapshot))
-     :cpu (observation (:cpu queries) labels)
-     :backlog (observation (:backlog queries) labels)}))
+  (let [queries (:discovery/queries (configuration))
+        fingerprint (phase/decode-kubernetes-fingerprint (captured/snapshot))
+        cpu (observation (:cpu queries) labels)
+        backlog (observation (:backlog queries) labels)]
+    {:kubernetes fingerprint
+     :cpu cpu
+     :backlog backlog}))
 
 ;------------------------------------------------------------------------------ Layer 2
 
