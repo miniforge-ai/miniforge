@@ -4,9 +4,9 @@
 (ns ai.miniforge.phase-opsv.boundary.prometheus-response
   "Read bounded bytes and admit the native Prometheus response at ingress."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.phase-opsv.boundary.prometheus-body :as body]
-            [ai.miniforge.phase-opsv.boundary.prometheus-io :as io]
+            [ai.miniforge.phase-opsv.boundary.bounded-io :as io]
             [ai.miniforge.phase-opsv.boundary.http-transport :as http]
+            [ai.miniforge.phase-opsv.boundary.prometheus-body :as body]
             [ai.miniforge.phase-opsv.boundary.prometheus-http :as prometheus]
             [ai.miniforge.phase-opsv.measurement-window :as window]
             [ai.miniforge.phase-opsv.messages :as msg]))
