@@ -101,11 +101,14 @@ package and implementation resources. Weights are an accounting convention, not
 a claim about current vendor prices. Results include exact cell identity, observed
 usage, normalized cost, wall time, failures, final solutions and rationales.
 
-**Budget limitation:** turn counts are enforced, and the `llm` client exposes no
-per-call dollar guard. Normalized spend is checked between calls; a single call
-can cross that ceiling, is recorded as such and prevents a successful result. A
-hard, pre-reserved provider budget and verified token limits are prerequisites
-for N15 budget conformance. A failed call can leave provider spend unsettled.
+**Budget limitation:** turn counts are enforced, and the manifest's
+`:adapter {:call-cap-usd}` reaches the provider as a per-call dollar guard
+(`--max-budget-usd`, through the `llm` client's `:budget-usd`). That guard is
+a backstop, not proof of a strict single-call cost bound. Normalized spend is
+checked between calls; a single call can cross that ceiling, is recorded as such
+and prevents a successful result. A hard, pre-reserved provider budget and
+verified token limits are prerequisites for N15 budget conformance. A failed call
+can leave provider spend unsettled.
 
 ## What is being compared
 

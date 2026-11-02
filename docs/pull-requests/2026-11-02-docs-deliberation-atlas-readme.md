@@ -27,7 +27,8 @@ atlas's run guide and limitations statement.
     snapshot's `clojure -M:test` alias does not exist in the project.
   - A run directory holds `journal/` and `report.md` (#2347).
   - The live adapter is the `llm` component's isolated Claude client, not a
-    CLI process, and it has no per-call dollar guard.
+    CLI process; the manifest's per-call dollar cap reaches it as
+    `:budget-usd` (#2347).
   - Observations go through admission as the verifier's receipt-backed
     evidence. They count only when the closing turn's board showed them, and
     the README states that the `independent` condition therefore earns no
