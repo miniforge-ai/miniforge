@@ -53,6 +53,9 @@
                      (= :open (:challenge/status %))))
        count))
 
+(defn- ^{:stratum 0} text? [value]
+  (and (string? value) (not (str/blank? value))))
+
 (defn- ^{:stratum 0} backed?
   "N14 §3.5: a challenge must carry evidence, ride in the same transaction
    as an experiment that discriminates what it challenges, or name a concern
@@ -71,9 +74,7 @@
                               (some (set (get sibling :discriminates #{})) targets)))]
     (boolean (or (seq (get operation :evidence #{}))
                  (some discriminates? siblings)
-                 (every? #(let [text (get operation %)]
-                            (and (string? text) (not (str/blank? text))))
-                         [:reason :resolution])))))
+                 (every? #(text? (get operation %)) [:reason :resolution])))))
 
 (defn- ^{:stratum 0} committed-already?
   "True when `participant` already committed this exact operation payload

@@ -147,6 +147,14 @@
    :tx/basis basis
    :tx/operations (vec operations)})
 
+(defn- ^{:stratum 0} revise
+  "`target` with `statement` replacing its own, the prior kept in history."
+  [target statement]
+  (-> target
+      (update :object/history (fnil conj [])
+              (select-keys target [:object/statement :object/touched-at]))
+      (assoc :object/statement statement)))
+
 (defn ^{:stratum 0} with-status
   "`target` after `op` imposes `status`. A challenge leaves an adopted record
    `:accepted` and marks it contested instead (N14 §2.3); a status illegal
@@ -181,10 +189,7 @@
   (let [op (:op operation)]
     (cond
       (contains? revisions op)
-      (-> target
-          (update :object/history (fnil conj [])
-                  (select-keys target [:object/statement :object/touched-at]))
-          (assoc :object/statement (:statement operation)))
+      (revise target (:statement operation))
 
       (= :answer-question op)
       (assoc target :object/answer (:statement operation))

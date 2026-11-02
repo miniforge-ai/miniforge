@@ -93,7 +93,8 @@
    from it."
   [workspace operation context version]
   (if (= :challenge (:op operation))
-    (let [start (count (get workspace :workspace/challenges {}))]
+    (let [start (count (get workspace :workspace/challenges {}))
+          evidence (set (get operation :evidence #{}))]
       (reduce (fn [ws [ordinal id]]
                 (let [challenge-id (str "challenge-" version "-"
                                         (+ start ordinal) "-" id)]
@@ -105,7 +106,7 @@
                              :challenge/version version
                              :challenge/reason (:reason operation)
                              :challenge/resolution (:resolution operation)
-                             :challenge/evidence (set (get operation :evidence #{}))})))
+                             :challenge/evidence evidence})))
               workspace
               (map-indexed vector (sort (tx/touched-ids operation)))))
     workspace))
@@ -168,8 +169,9 @@
    than being quietly absorbed."
   [workspace transaction]
   (let [version (inc (get workspace :workspace/version 0))
+        participant (or (:tx/participant transaction) (:tx/role transaction))
         context {:role (:tx/role transaction)
-                 :participant (or (:tx/participant transaction) (:tx/role transaction))
+                 :participant participant
                  :activation (:tx/activation transaction)
                  :version version}]
     (-> (reduce #(apply-operation %1 %2 context)

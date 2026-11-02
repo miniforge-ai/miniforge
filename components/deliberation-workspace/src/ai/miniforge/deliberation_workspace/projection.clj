@@ -62,12 +62,14 @@
   [object]
   (reduce into #{} (vals (get object :object/links {}))))
 
+(defn- ^{:stratum 0} visible-edges [links visible-ids]
+  (update-vals links #(into #{} (filter visible-ids) %)))
+
 (defn- ^{:stratum 0} scrub-references
   "`object` with every reference to an id outside `visible-ids` removed, so
    an edge cannot reveal that a hidden object exists (N14 §4.4)."
   [object visible-ids]
-  (cond-> (update object :object/links
-                  #(into {} (map (fn [[edge ids]] [edge (into #{} (filter visible-ids) ids)])) %))
+  (cond-> (update object :object/links visible-edges visible-ids)
     (not (contains? visible-ids (:object/superseded-by object)))
     (dissoc :object/superseded-by)))
 
