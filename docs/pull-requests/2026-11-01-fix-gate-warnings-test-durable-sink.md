@@ -3,35 +3,53 @@
   Author: Christopher Lester (christopher@miniforge.ai)
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
-# test(workflow): gate-warning pass cases use an acknowledging stream
+# test: Gate-warning pass cases use an acknowledging stream
 
-**Tier:** main is red
-**Theme:** semantic merge conflict between #2303 and #2311
+## Overview
 
-## Problem
+This fixes a red main. Two pass-path cases in
+`apply-gate-validation-keeps-gate-warnings` (`phase_transitions_test.clj`)
+now get a stream with a durable sink, the same ctx the sibling
+approved-verdict test uses. The assertions are unchanged.
 
-`apply-gate-validation-keeps-gate-warnings` fails on main, with 3
-assertions in `phase_transitions_test.clj`.
+## Motivation
 
-PR #2311 changed what counts as an acknowledged gate decision: a decision
-now counts only once a durable sink has written it. #2311 updated the
-neighbouring approved-verdict test to give its stream a `durable-sink`.
-PR #2303 added two pass-path cases whose ctx streamed to `{:sinks []}`. The
-two PRs each passed CI separately. #2303 merged after #2311 without CI
-re-running against it. With no durable sink, the decision is
-unacknowledged, the phase is projected to `:failed`, and the assertions
-that a warning leaves the phase passing fail. That is the intended
-behavior introduced by #2311; the test context was out of date.
+Main failed three assertions in that test. The cause was a semantic
+conflict between #2303 and #2311. #2311 made a gate decision count as
+acknowledged only once a durable sink writes it, and it updated the
+sibling test. #2303 added two pass-path cases that streamed to
+`{:sinks []}`. Each PR passed CI on its own, but #2303 merged after #2311
+without CI re-running against it.
 
-## Changes
+With no durable sink, the decision went unacknowledged and the phase was
+projected to `:failed`, so the "a warning leaves the phase passing"
+assertions failed. That is correct behavior under #2311; the test ctx was
+stale.
 
-- A test helper, `acknowledging-ctx`, builds the same ctx #2311 gave the
-  sibling test: a stream with one `events/durable-sink`.
-- Both pass-path cases use it. The assertions are unchanged.
+## Changes in Detail
 
-## Testing
+- A new test helper, `acknowledging-ctx`, builds a stream with one
+  `events/durable-sink`.
+- Both pass-path cases use it.
 
-The test file reads cleanly. The workflow tests need Clojars
-dependencies, which are unreachable from the authoring environment, so
-CI is the run. The fix copies the sibling test's ctx exactly, and that
-test is green on main.
+## Testing Plan
+
+CI ran the workflow tests. They need Clojars dependencies that are
+unreachable from the authoring environment. The ctx copies the sibling
+test's, which is green on main.
+
+## Deployment Plan
+
+Test-only. Nothing to deploy.
+
+## Related Issues/PRs
+
+- #2303: added the cases.
+- #2311: changed what an acknowledged decision is.
+- Merged as `cc2c646`.
+
+## Checklist
+
+- [x] Assertions unchanged; only the test ctx changed
+- [x] CI green on a head containing current main
+- [x] Copilot review clean
