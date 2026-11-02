@@ -37,7 +37,9 @@ base requires no component internals (dewey 311).
     streaming path, which parses it; the buffered path substitutes zero
     usage when none is parsed. A response without positive input tokens,
     cached or uncached, or without an output count, is therefore a
-    missing-usage failure, never a free or under-counted call. A transport
+    missing-usage failure, never a free or under-counted call. The usage
+    keeps the client's `:cost-usd` as `:provider-usd`: the provider's
+    reported charge, or the client's estimate when none was reported. A transport
     that throws, such as a missing `claude` executable, is an adapter
     failure.
   - A model envelope with any field outside
@@ -127,7 +129,9 @@ Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
 sandbox), with scratch stand-ins outside the repo for the `llm` namespace
 (no calls are made) and for cheshire's JSON parsing:
 
-- `manifest_test` and `lab_test`: 11 tests, 40 assertions, 0 failures. The
+- `manifest_test` and `lab_test`: 11 tests, 41 assertions, 0 failures.
+- The stratum heading check (SL006) over the base, the harness and the
+  workspace: 0 mismatches. The
   smoke test failed before the `journal/` change, the usage test before the
   argument-count change, and the metering, refusal and shape tests before
   the review fixes. The cached-usage, unreplayable-log and price-table cases

@@ -109,7 +109,9 @@
 
 (defn ^{:stratum 1} call-result
   "The `call` result for one llm completion `result`: `{:payload :usage}`,
-   or an anomaly when the call failed or reported no provider usage."
+   or an anomaly when the call failed or reported no provider usage. The
+   usage carries the client's `:cost-usd` as `:provider-usd`: the provider's
+   reported charge, or the client's estimate when none was reported."
   [result]
   (cond
     (not (llm/success? result))
@@ -119,9 +121,9 @@
     (failure :anomalies.deliberation-lab/missing-usage :anomaly/missing-usage)
 
     :else
-    {:payload (decode (llm/get-content result)) :usage (metered-usage (:usage result))}))
-
-;------------------------------------------------------------------------------ Layer 2
+    {:payload (decode (llm/get-content result))
+     :usage (assoc (metered-usage (:usage result)) :provider-usd
+                   (let [cost (:cost-usd result)] (if (number? cost) cost 0)))}))
 
 (defn- ^{:stratum 1} complete!
   "One streaming completion, or nil when the transport itself throws, as
@@ -131,6 +133,8 @@
   (try
     (llm/complete-stream client request (constantly nil))
     (catch Exception _ nil)))
+
+;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} claude-call
   "A `call` for `run-cell`: one isolated completion per request, through

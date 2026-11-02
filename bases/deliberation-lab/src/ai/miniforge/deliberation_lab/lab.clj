@@ -157,6 +157,11 @@
                     replayed-keys))
     (catch Exception _ false)))
 
+(defn- ^{:stratum 1} task-package?
+  "True when `tasks` is a sequence of task maps, as an opened record holds."
+  [tasks]
+  (and (sequential? tasks) (every? map? tasks)))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn- ^{:stratum 2} record-run!
@@ -192,11 +197,6 @@
       (anomaly/anomaly? pinned) pinned
       (anomaly/anomaly? journal) journal
       :else (record-run! pinned tasks journal output (make-call pinned)))))
-
-(defn- ^{:stratum 1} task-package?
-  "True when `tasks` is a sequence of task maps, as an opened record holds."
-  [tasks]
-  (and (sequential? tasks) (every? map? tasks)))
 
 (defn ^{:stratum 2} verify!
   "Verify the journal of the run in `directory`: one unbroken chain that opens and

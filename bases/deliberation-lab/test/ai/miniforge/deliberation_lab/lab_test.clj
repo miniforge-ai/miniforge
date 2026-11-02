@@ -80,6 +80,10 @@
       (is (= {:input 50 :output 3 :provider-usd 0}
              (:usage (adapter/call-result (assoc ok :usage {:input-tokens 0 :output-tokens 3
                                                             :cache-read-input-tokens 50}))))))
+    (testing "the client's reported cost is kept"
+      (is (= 0.25 (get-in (adapter/call-result (assoc ok :cost-usd 0.25
+                                                      :usage {:input-tokens 4 :output-tokens 1}))
+                          [:usage :provider-usd]))))
     (is (= {:input 12 :output 3 :provider-usd 0}
            (:usage (adapter/call-result (assoc ok :usage {:input-tokens 10 :output-tokens 3
                                                           :cache-read-input-tokens 2})))))))
