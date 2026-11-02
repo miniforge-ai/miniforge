@@ -27,29 +27,38 @@
   (:require
    [ai.miniforge.deliberation-workspace.object :as object]
    [ai.miniforge.deliberation-workspace.transaction :as tx]
-   [ai.miniforge.deliberation-workspace.validation :as validation]))
+   [ai.miniforge.deliberation-workspace.validation :as validation]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} default-challenge-limit
-  "Open challenges one role may hold against one object before further
-   challenges are refused (N14 §3.5). Manifest-configurable."
+  "Open challenges one participant may hold against one object before
+   further challenges are refused (N14 §3.5). Manifest-configurable."
   2)
 
+(defn ^{:stratum 0} actor
+  "The participant a transaction context acts for. A context without a
+   runtime-assigned participant acts as its role."
+  [{:keys [role participant]}]
+  (or participant role))
+
 (defn ^{:stratum 0} open-challenges-by
-  "Count of unresolved challenges `role` holds against `target-id`."
-  [workspace role target-id]
+  "Count of unresolved challenges `participant` holds against `target-id`."
+  [workspace participant target-id]
   (->> (get workspace :workspace/challenges {})
        vals
-       (filter #(and (= role (:challenge/role %))
+       (filter #(and (= participant (:challenge/participant %))
                      (= target-id (:challenge/target %))
                      (= :open (:challenge/status %))))
        count))
 
 (defn- ^{:stratum 0} backed?
-  "N14 §3.5: a challenge must carry evidence, or ride in the same transaction
-   as an experiment that discriminates what it challenges. Bare objections are
-   refused — that rule is what stops a skeptic looping forever.
+  "N14 §3.5: a challenge must carry evidence, ride in the same transaction
+   as an experiment that discriminates what it challenges, or name a concern
+   (`:reason`) and a resolution criterion (`:resolution`). Bare objections
+   are refused — with the open-challenge cap, that is what stops a skeptic
+   looping forever.
 
    `:evidence` and a sibling's `:discriminates` are read unscreened.
    `validation/concurrency-stages` establishes that both name object ids
@@ -61,17 +70,20 @@
                          (and (= :propose-experiment (:op sibling))
                               (some (set (get sibling :discriminates #{})) targets)))]
     (boolean (or (seq (get operation :evidence #{}))
-                 (some discriminates? siblings)))))
+                 (some discriminates? siblings)
+                 (every? #(let [text (get operation %)]
+                            (and (string? text) (not (str/blank? text))))
+                         [:reason :resolution])))))
 
 (defn- ^{:stratum 0} committed-already?
-  "True when `role` already committed an identical operation against the same
-   targets (N14 §3.4 idempotency)."
-  [workspace operation role]
+  "True when `participant` already committed this exact operation payload
+   (N14 §3.4 idempotency). A new payload against the same targets is a
+   distinct contribution."
+  [workspace operation participant]
   (->> (get workspace :workspace/log [])
-       (filter #(= role (:tx/role %)))
+       (filter #(= participant (or (:tx/participant %) (:tx/role %))))
        (mapcat :tx/operations)
-       (some #(and (= (:op %) (:op operation))
-                   (= (tx/touched-ids %) (tx/touched-ids operation))))
+       (some #(= % operation))
        boolean))
 
 (defn- ^{:stratum 0} check-hard-constraints
@@ -89,31 +101,32 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} check-idempotency
-  [workspace operation {:keys [role]}]
-  (when (committed-already? workspace operation role)
+  [workspace operation context]
+  (when (committed-already? workspace operation (actor context))
     (validation/reject
      :conflict :anomalies.deliberation/duplicate-operation
-     "Role already committed this operation against these targets"
-     {:op (:op operation) :role role})))
+     "Participant already committed this exact operation"
+     {:op (:op operation) :participant (actor context)})))
 
 (defn- ^{:stratum 1} check-anti-livelock
-  [workspace operation {:keys [role siblings]}]
+  [workspace operation {:keys [siblings] :as context}]
   (when (= :challenge (:op operation))
-    (let [limit (get workspace :workspace/challenge-limit default-challenge-limit)
-          saturated (filter #(>= (open-challenges-by workspace role %) limit)
+    (let [participant (actor context)
+          limit (get workspace :workspace/challenge-limit default-challenge-limit)
+          saturated (filter #(>= (open-challenges-by workspace participant %) limit)
                             (tx/touched-ids operation))]
       (cond
         (not (backed? operation siblings))
         (validation/reject
          :invalid-input :anomalies.deliberation/bare-challenge
-         "A challenge must carry evidence or a discriminating experiment (N14 §3.5)"
+         "A challenge needs evidence, a discriminating experiment, or a reason and resolution (N14 §3.5)"
          {:targets (tx/touched-ids operation)})
 
         (seq saturated)
         (validation/reject
          :exhausted :anomalies.deliberation/challenge-limit
-         "Role already holds the permitted number of open challenges on this object"
-         {:role role :targets (set saturated) :limit limit})))))
+         "Participant already holds the permitted number of open challenges on this object"
+         {:participant participant :targets (set saturated) :limit limit})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

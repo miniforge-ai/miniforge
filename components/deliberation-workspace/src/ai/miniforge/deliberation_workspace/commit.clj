@@ -99,10 +99,13 @@
                                         (+ start ordinal) "-" id)]
                   (assoc-in ws [:workspace/challenges challenge-id]
                             {:challenge/id challenge-id
-                             :challenge/role (:role context)
+                             :challenge/participant (:participant context)
                              :challenge/target id
                              :challenge/status :open
-                             :challenge/version version})))
+                             :challenge/version version
+                             :challenge/reason (:reason operation)
+                             :challenge/resolution (:resolution operation)
+                             :challenge/evidence (set (get operation :evidence #{}))})))
               workspace
               (map-indexed vector (sort (tx/touched-ids operation)))))
     workspace))
@@ -110,19 +113,20 @@
 (defn- ^{:stratum 0} insert-created
   "Insert the objects `operation` creates, stamping provenance from the
    transaction rather than trusting the activation's own report of it."
-  [workspace operation {:keys [role activation version]}]
+  [workspace operation {:keys [role participant activation version]}]
   (reduce (fn [ws spec]
-            (let [created (object/new-object
-                           (assoc spec :role role :activation activation
-                                  :version version))]
+            (let [created (-> (object/new-object
+                               (assoc spec :role role :activation activation
+                                      :version version))
+                              (assoc :object/participant participant))]
               (assoc-in ws [:workspace/objects (:object/id created)] created)))
           workspace
           (get operation :creates [])))
 
 (defn- ^{:stratum 0} apply-status
-  "Impose the operation's status on its targets and advance their staleness
-   clock. A status illegal for the target's type is skipped; the object is
-   still touched, so the clock stays honest.
+  "Impose the operation's status and content on its targets and advance
+   their staleness clock. The object is touched whatever the status effect,
+   so the clock stays honest.
 
    Every target is known to exist by the time this runs — see
    `assert-known-targets` — so `update-in` always lands on a real object
@@ -132,12 +136,10 @@
                  (tx/goal-outcomes (:outcome operation))
                  (get tx/status-effect (:op operation)))]
     (reduce (fn [ws id]
-              (let [current (get-in ws [:workspace/objects id])]
-                (if (and status (object/legal-status? (:object/type current) status))
-                  (update-in ws [:workspace/objects id]
-                             #(-> % (assoc :object/status status)
-                                  (object/touch version)))
-                  (update-in ws [:workspace/objects id] object/touch version))))
+              (update-in ws [:workspace/objects id]
+                         #(-> % (tx/with-status (:op operation) status)
+                              (tx/with-content operation)
+                              (object/touch version))))
             workspace
             (tx/touched-ids operation))))
 
@@ -167,6 +169,7 @@
   [workspace transaction]
   (let [version (inc (get workspace :workspace/version 0))
         context {:role (:tx/role transaction)
+                 :participant (or (:tx/participant transaction) (:tx/role transaction))
                  :activation (:tx/activation transaction)
                  :version version}]
     (-> (reduce #(apply-operation %1 %2 context)

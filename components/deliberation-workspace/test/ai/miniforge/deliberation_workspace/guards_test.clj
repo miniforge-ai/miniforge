@@ -50,7 +50,7 @@
   (anomaly/subtype result))
 
 (defn- ^{:stratum 0} open-challenge [id role target]
-  {id {:challenge/id id :challenge/role role :challenge/target target
+  {id {:challenge/id id :challenge/participant role :challenge/target target
        :challenge/status :open}})
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -72,11 +72,11 @@
     (is (= :anomalies.deliberation/hard-constraint-immutable
            (subtype-of (validate (workspace [(hard-constraint "constraint-1")])
                                  :proposer
-                                 {:op :refine-claim :targets #{"constraint-1"}})))))
+                                 {:op :refine-claim :targets #{"constraint-1"} :statement "revised"})))))
   (testing "a soft constraint is fair game"
     (let [soft (assoc-in (hard-constraint "constraint-2") [:object/attrs :kind] :soft)]
       (is (nil? (validate (workspace [soft]) :proposer
-                          {:op :refine-claim :targets #{"constraint-2"}}))))))
+                          {:op :refine-claim :targets #{"constraint-2"} :statement "revised"}))))))
 
 (deftest ^{:stratum 2} bare-challenges-are-refused
   (testing "a challenge with neither evidence nor an experiment is refused"
@@ -163,3 +163,40 @@
                                     {:op :propose-experiment
                                      :discriminates :claim-1})))
         "an experiment whose :discriminates is unreadable never backed anything")))
+
+(deftest ^{:stratum 1} a-concern-with-a-resolution-criterion-backs-a-challenge
+  (let [ws (workspace [(claim-object "claim-1")])]
+    (testing "a reason and a resolution together back the challenge"
+      (is (nil? (validate ws :skeptic {:op :challenge :targets #{"claim-1"}
+                                        :reason "ordering assumed"
+                                        :resolution "check the transport contract"}))))
+    (testing "a reason alone is still a bare objection"
+      (is (= :anomalies.deliberation/bare-challenge
+             (subtype-of (validate ws :skeptic {:op :challenge :targets #{"claim-1"}
+                                                 :reason "ordering assumed"
+                                                 :resolution " "})))))))
+
+(deftest ^{:stratum 1} idempotency-compares-the-whole-payload-per-participant
+  (let [committed {:op :refine-claim :targets #{"claim-1"} :statement "first"}
+        ws (workspace [(claim-object "claim-1")]
+                      :log [(tx/new-transaction {:role :proposer :activation "act-1"
+                                                 :basis 9 :operations [committed]})])]
+    (testing "a new payload against the same target is a distinct contribution"
+      (is (nil? (validate ws :proposer (assoc committed :statement "second")))))
+    (testing "the identical payload is a retry"
+      (is (= :anomalies.deliberation/duplicate-operation
+             (subtype-of (validate ws :proposer committed)))))))
+
+(deftest ^{:stratum 1} the-challenge-cap-counts-per-participant
+  (let [ws (workspace [(claim-object "claim-1")]
+                      :challenges (merge (open-challenge "ch-1" :skeptic-1 "claim-1")
+                                         (open-challenge "ch-2" :skeptic-1 "claim-1")))
+        challenge {:op :challenge :targets #{"claim-1"} :evidence #{"evidence-4"}}
+        as (fn [participant]
+             (validation/validate ws (assoc (tx/new-transaction
+                                             {:role :skeptic :activation "act-9" :basis 10
+                                              :operations [challenge]})
+                                            :tx/participant participant)
+                                  guards/guard-stages))]
+    (is (= :anomalies.deliberation/challenge-limit (subtype-of (as :skeptic-1))))
+    (is (nil? (as :skeptic-2)))))
