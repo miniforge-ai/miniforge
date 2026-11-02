@@ -65,6 +65,13 @@
   [object link-type]
   (get-in object [:object/links link-type] #{}))
 
+(defn ^{:stratum 0} covers-goal?
+  "True when `decision` is adopted and depends on `goal-id` (N14 §2.3, §7.1)."
+  [decision goal-id]
+  (and (= :decision (:object/type decision))
+       (= :accepted (:object/status decision))
+       (contains? (set (get-in decision [:object/links :depends-on])) goal-id)))
+
 (defn ^{:stratum 0} hard-constraint?
   "True when `object` is a constraint the workspace must never let an agent
    modify or retire (N14 §2.4)."
