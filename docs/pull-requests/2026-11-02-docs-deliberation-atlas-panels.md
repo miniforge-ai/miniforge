@@ -28,8 +28,13 @@ separates what the synthetic lab implements from the Ariadne target.
   - falls back to panel 1 for a fragment that names no panel, instead of
     throwing;
   - follows Back and Forward through a `hashchange` handler;
-  - lists the selected panel's text under "Text of this panel", because the
-    SVG's `role="img"` gives assistive technology only its title.
+  - lists the selected panel's title, description and text under "Text of
+    this panel", because the SVG's `role="img"` gives assistive technology
+    only its title; the panel container is a labelled group;
+  - uses explicit `<head>` and `<body>` elements.
+- The SVGs stay inlined in the viewer so it works opened from disk, where a
+  page cannot fetch sibling files and the transcript needs the SVG text. An
+  edit to a panel is made in both places.
 - One correction in panel 2, applied in both the SVG and the viewer. The
   snapshot described a CLI process in an empty directory with a timeout.
   The lab now calls the model through the `llm` component's isolated
