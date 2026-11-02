@@ -90,11 +90,9 @@
 
 (defn ^{:stratum 1} visible-objects
   "Every object `role` may see, ordered by id so the projection is a
-   deterministic function of its inputs (N14 §4.1). `readable-ids`, when
-   given, is the runtime's read scope; nothing outside it is visible."
-  [workspace role visibility readable-ids]
-  (by-id (filter #(and (visible? % role visibility)
-                       (or (nil? readable-ids) (contains? readable-ids (:object/id %))))
+   deterministic function of its inputs (N14 §4.1)."
+  [workspace role visibility]
+  (by-id (filter #(visible? % role visibility)
                  (vals (get workspace :workspace/objects {})))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -113,8 +111,8 @@
    the delta — is computed over the visible set, so the ablation cannot be
    defeated through derived objects, and edges to hidden objects are
    removed from what is rendered."
-  [workspace role {:keys [visibility since readable-ids] :or {visibility :full since 0}}]
-  (let [candidates (visible-objects workspace role visibility readable-ids)
+  [workspace role {:keys [visibility since] :or {visibility :full since 0}}]
+  (let [candidates (visible-objects workspace role visibility)
         candidate-ids (into #{} (map :object/id) candidates)
         ;; A conflict the role may otherwise see is withheld ENTIRELY when it
         ;; references something hidden — dropping it from :projection/conflicts
