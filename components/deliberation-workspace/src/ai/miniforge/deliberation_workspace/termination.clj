@@ -23,42 +23,61 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} default-quiescence-rounds
-  "Consecutive committed transactions producing no new open objects before
-   the run is quiescent (N14 §7)."
-  3)
+(defn- ^{:stratum 0} goals [workspace]
+  (->> (get workspace :workspace/objects {})
+       vals
+       (filter #(= :goal (:object/type %)))))
 
-(defn- ^{:stratum 0} goals-terminal? [workspace]
-  (let [goals (->> (get workspace :workspace/objects {})
-                   vals
-                   (filter #(= :goal (:object/type %))))]
-    (and (seq goals) (every? object/terminal? goals))))
+(defn- ^{:stratum 0} closure-reserve
+  "Activations held back from ordinary work for the forced-synthesis
+   closure. The reserve sits inside the activation budget (N14 §6.3)."
+  [workspace]
+  (get workspace :workspace/closure-reserve 0))
 
-(defn- ^{:stratum 0} exhausted-budget
-  "The budget dimension that ran out, or nil while the run can still spend."
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} goals-terminal? [workspace]
+  (let [all (goals workspace)]
+    (and (seq all) (every? object/terminal? all))))
+
+(defn- ^{:stratum 1} goal-rejected? [workspace]
+  (some #(= :rejected (:object/status %)) (goals workspace)))
+
+(defn- ^{:stratum 1} exhausted-budget
+  "The budget dimension that ran out, or nil while ordinary work can still
+   spend. Ordinary work stops where the closure reserve begins."
   [workspace]
   (let [{:keys [activations cost]} (get workspace :workspace/budget {})
         spent (get workspace :workspace/spent {})]
     (cond
-      (and activations (>= (get spent :activations 0) activations)) :activations
+      (and activations (>= (get spent :activations 0)
+                           (- activations (closure-reserve workspace)))) :activations
       (and cost (>= (get spent :cost 0) cost)) :cost)))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} quiescent? [workspace]
-  (>= (get workspace :workspace/quiet-rounds 0)
-      (get workspace :workspace/quiescence-rounds default-quiescence-rounds)))
+(defn- ^{:stratum 1} quiescent?
+  "N14 §7: every participant scheduled for ordinary work passed since the
+   last committed contribution, and no structural tier has work waiting."
+  [workspace]
+  (let [population (scheduler/ordinary-participants workspace)]
+    (and (seq population)
+         (every? (get workspace :workspace/passed #{}) population)
+         (nil? (scheduler/triggered-activation workspace)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} closing-rule
   "The §7 rule that fires, or nil while the run continues.
 
-   Order matters: success is checked before budget so a run that completes
-   on its last permitted activation closes as a success, not an exhaustion."
+   Order matters: completion is checked before budget so a run that closes
+   its goals on its last permitted activation completes rather than
+   exhausting. Success requires every goal accepted; terminal goals with a
+   rejection complete under a distinct rule (§7.1)."
   [workspace]
   (let [exhausted (exhausted-budget workspace)]
     (cond
+      (and (goals-terminal? workspace) (goal-rejected? workspace))
+      {:termination/rule :completed-with-rejected-goals}
+
       (goals-terminal? workspace)
       {:termination/rule :success}
 

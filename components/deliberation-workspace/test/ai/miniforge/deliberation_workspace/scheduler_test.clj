@@ -111,3 +111,18 @@
     (let [ws (workspace [(obj "conflict-1" :conflict)]
                         :workspace/eligibility {})]
       (is (= :round-robin (:activation/reason (scheduler/next-activation ws)))))))
+
+(deftest ^{:stratum 2} round-robin-skips-event-only-participants
+  (let [ws (workspace [] :workspace/roles [:proposer :meta-watchdog :skeptic]
+                      :workspace/last-actor :proposer)]
+    (is (= :skeptic (:activation/participant (scheduler/next-activation ws))))))
+
+(deftest ^{:stratum 2} a-tier-rotates-among-participants-sharing-a-responsibility
+  (let [ws (workspace [(obj "conflict-1" :conflict)]
+                      :workspace/roles [:skeptic-1 :skeptic-2]
+                      :workspace/participant-roles {:skeptic-1 :skeptic :skeptic-2 :skeptic})
+        first-turn (scheduler/next-activation ws)
+        second-turn (scheduler/next-activation
+                     (assoc ws :workspace/last-actor (:activation/participant first-turn)))]
+    (is (= [:skeptic-1 :skeptic] ((juxt :activation/participant :activation/role) first-turn)))
+    (is (= :skeptic-2 (:activation/participant second-turn)))))
