@@ -253,3 +253,25 @@
                                  {:op :assert-claim
                                   :creates [{:id "c2" :type :claim :statement "cites"
                                              :links {:depends-on ["conflict-a-b"]}}]})))))))
+
+(deftest ^{:stratum 1} evidence-citations-must-name-evidence
+  (let [ws (admitted (seed-workspace) :proposer (claim "c"))]
+    (is (= :anomalies.deliberation/non-evidence-reference
+           (subtype-of (submit ws :skeptic {:op :challenge :targets ["c"] :evidence [goal-id]}))))))
+
+(deftest ^{:stratum 1} extra-statement-text-on-a-creation-is-not-capped-or-thrown
+  (is (anomaly/anomaly? (submit (seed-workspace) :proposer
+                                (assoc (claim "c") :statement 42)))))
+
+(deftest ^{:stratum 1} each-closed-goal-may-name-its-own-covering-decision
+  (let [ws (-> (seed-workspace)
+               (assoc-in [:workspace/objects "goal-2"]
+                         (board/new-object {:id "goal-2" :type :goal :statement "also"
+                                            :role :interpreter :activation "seed" :version 0}))
+               (admitted :synthesizer
+                         {:op :propose-decision
+                          :creates [(decision "d1" "first" :depends-on [goal-id])
+                                    (decision "d2" "second" :depends-on ["goal-2"])]}
+                         {:op :accept-decision :targets ["d1" "d2"]}))]
+    (is (some? (admitted ws :synthesizer {:op :close-goal :targets [goal-id "goal-2"]
+                                          :outcome :accepted :links {:resolves ["d1" "d2"]}})))))

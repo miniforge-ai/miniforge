@@ -66,7 +66,6 @@ projection named hidden ids.
     stays in the graph as history.
 - `projection`
   - `:none` visibility matches the viewer against the object's participant.
-  - An optional `:readable-ids` read scope.
   - Edges and `:object/superseded-by` pointing at hidden objects are removed.
 
 Deviations from the snapshot:
@@ -90,7 +89,7 @@ adds the accepted case as positive coverage.
 Ran locally on plain Clojure 1.12 with a classpath of the component sources
 (Clojars is unreachable from the authoring sandbox, so a local stand-in
 replaced malli): all 12 deliberation-workspace suites, 147 tests,
-478 assertions, 0 failures. `poly test`, clj-kondo and the Polylith check ran
+481 assertions, 0 failures. `poly test`, clj-kondo and the Polylith check ran
 only in CI.
 
 ## Deployment Plan
