@@ -19,7 +19,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-harness.fixtures :as fixtures]
-   [clojure.test :refer [deftest is testing]]))
+   [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -32,8 +32,7 @@
 (deftest ^{:stratum 1} the-package-discriminates
   (let [package (fixtures/tasks)]
     (is (<= minimum-tasks (count package)))
-    (testing "every reference passes and every distractor fails"
-      (is (empty? (fixtures/fixture-defects package))))))
+    (is (empty? (fixtures/fixture-defects package)) "every reference passes and every distractor fails")))
 
 (deftest ^{:stratum 1} success-needs-every-observation
   (let [task (first (fixtures/tasks))]
@@ -42,18 +41,14 @@
 
 (deftest ^{:stratum 1} the-public-view-hides-the-sealed-answer
   (let [view (fixtures/public-task (first (fixtures/tasks)))]
-    (is (not (contains? view :reference)))
-    (is (not (contains? view :distractors)))
-    (is (not (contains? view :experiments)))))
+    (is (empty? (select-keys view [:reference :distractors :experiments])))))
 
 (deftest ^{:stratum 1} unscorable-input-is-an-anomaly
-  (testing "a task with no reference to score against"
-    (is (anomaly/anomaly? (fixtures/score {:id "t" :reference {}} {} [])))
-    (is (anomaly/anomaly? (fixtures/score {:id "t"} {} []))))
-  (testing "experiments that are not a map"
-    (is (anomaly/anomaly? (fixtures/score {:id "t" :reference {:a 1} :experiments [1 2]} {:a 1} []))))
-  (testing "inspected ids that are not a collection"
-    (is (anomaly/anomaly? (fixtures/score (first (fixtures/tasks)) {} 5)))))
+  ;; No reference (empty or absent), experiments not a map, inspected ids not a collection.
+  (doseq [[task solution inspected] [[{:id "t" :reference {}} {} []] [{:id "t"} {} []]
+                                     [{:id "t" :reference {:a 1} :experiments [1 2]} {:a 1} []]
+                                     [(first (fixtures/tasks)) {} 5]]]
+    (is (anomaly/anomaly? (fixtures/score task solution inspected)) (pr-str task))))
 
 (deftest ^{:stratum 1} an-omitted-choice-never-scores
   (is (= {:a false} (:checks (fixtures/score {:id "t" :reference {:a nil}} {} [])))))
