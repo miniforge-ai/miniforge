@@ -25,6 +25,8 @@
             [ai.miniforge.dag-executor.result :as result]
             [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.phase.interface.boundary-commit :as boundary-commit]
+   [ai.miniforge.workflow.messages :as messages]
             [ai.miniforge.workflow.runner-environment :as env]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -130,3 +132,29 @@
           :execution/capsule-workdir "/workspace"}
          {:execution/current-phase :implement})
         (is (= "/workspace" (:workdir @opts-seen)))))))
+
+(deftest ^{:stratum 1} a-phase-whose-persist-failed-is-named-by-the-next-commit
+  (testing "work a failed persist left in the worktree keeps its phase on the
+            next boundary commit, and a successful persist clears it"
+    (let [failed    (env/track-unpersisted {:execution/current-phase :implement}
+                                           {:execution/current-phase :verify}
+                                           (result/err :persist-push-failed "rejected"))
+          skipped   (env/track-unpersisted {:execution/current-phase :implement}
+                                           {:execution/current-phase :verify}
+                                           nil)
+          opts-seen (atom nil)]
+      (is (= #{:implement} (:execution/unpersisted-phases failed)))
+      (is (= #{:implement} (:execution/unpersisted-phases skipped)))
+      (with-redefs [env/env-logger (capturing-logger (atom []))
+                    gate/outgoing-secrets (constantly {:passed? true})
+                    dag/persist-workspace! (fn [_ _ opts] (reset! opts-seen opts)
+                                             (result/ok {:persisted? true :pushed? true}))]
+        (env/persist-workspace-at-phase-boundary!
+         (assoc failed :execution/executor ::stub :execution/environment-id (random-uuid)
+                :execution/worktree-path "/tmp/wt")
+         {:execution/current-phase :review}))
+      (is (= (boundary-commit/with-phase-trailers
+               (messages/t :env/persist-message {:phase "verify"}) [:implement :verify])
+             (:message @opts-seen)))
+      (is (not (contains? (env/track-unpersisted failed failed (result/ok {:persisted? true}))
+                          :execution/unpersisted-phases))))))

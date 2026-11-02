@@ -158,15 +158,18 @@
   "Build the opts map passed to `dag/persist-workspace!`. Keeps map
    construction key-value with all derivations lifted into the let so
    readers see the shape of the call without a cond-> obscuring it.
-   The commit message carries the phase as a trailer, which release reads
-   to tell implement's work from what a checking phase left behind."
+   The commit message names in trailers every phase whose work the commit
+   holds: PHASE, and any earlier phase whose own persist committed nothing
+   (`track-unpersisted`), so release can tell implement's work from what a
+   checking phase left behind."
   [context phase env-id]
   (let [metadata    (get context :execution/environment-metadata)
         branch      (get context :execution/task-branch)
         base-branch (:base-branch metadata)
-        message     (boundary-commit/with-phase-trailer
+        phases      (sort-by name (conj (set (get context :execution/unpersisted-phases)) phase))
+        message     (boundary-commit/with-phase-trailers
                       (messages/t :env/persist-message {:phase (name phase)})
-                      phase)]
+                      phases)]
     (cond-> {:message     message
              :workdir     (get context :execution/worktree-path)
              :workflow-id (get context :execution/id)
@@ -347,6 +350,17 @@
                                           {:error (ex-message e)})
                      :data {:phase phase :error (ex-message e)}})
           nil)))))
+
+(defn ^{:stratum 1} track-unpersisted
+  "PHASE-CTX noting whether the boundary persist that returned RESULT
+   committed the work of the phase CONTEXT ran. A persist that was skipped,
+   rejected or threw leaves that work in the worktree for the next
+   boundary commit, which must name this phase too: otherwise implement's
+   work committed at verify's boundary reads as a verify by-product."
+  [context phase-ctx result]
+  (if (and (some? result) (dag/ok? result))
+    (dissoc phase-ctx :execution/unpersisted-phases)
+    (update phase-ctx :execution/unpersisted-phases (fnil conj #{}) (boundary-phase context))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

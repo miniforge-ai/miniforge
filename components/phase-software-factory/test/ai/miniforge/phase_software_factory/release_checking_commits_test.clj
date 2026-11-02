@@ -32,15 +32,16 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} boundary-commit!
-  "Write `path` under `dir` and commit it as `phase`'s boundary commit."
-  [dir phase path content]
+  "Write `path` under `dir` and commit it as a boundary commit holding the
+   work of `phases`."
+  [dir phases path content]
   (let [file (io/file dir path)]
     (io/make-parents file)
     (spit file content)
     (committed/git! dir "add" "--" path)
     (committed/git! dir "commit" "-q" "-m"
-                    (boundary-commit/with-phase-trailer
-                      (str (name phase) " phase completed") phase))))
+                    (boundary-commit/with-phase-trailers
+                      (str (name (last phases)) " phase completed") phases))))
 
 (defn ^{:stratum 0} shell-execute
   "Capsule executor stub that runs each command under `sh -c` in its workdir."
@@ -80,8 +81,8 @@
             an already-implemented task skips"
     (with-base-repo
       (fn [dir base]
-        (boundary-commit! dir :verify "coverage/report.json" "{}")
-        (boundary-commit! dir :review "deps.lock" "lock")
+        (boundary-commit! dir [:verify] "coverage/report.json" "{}")
+        (boundary-commit! dir [:review] "deps.lock" "lock")
         (let [{:keys [result prepared]} (release-from dir base)]
           (is (nil? prepared) "release must skip, not publish by-products")
           (is (= :completed (get-in result [:phase :status]))))))))
@@ -91,8 +92,8 @@
             by-product is left out of the release's files"
     (with-base-repo
       (fn [dir base]
-        (boundary-commit! dir :implement "src/été b.clj" "(ns feature)\n")
-        (boundary-commit! dir :verify "coverage/report.json" "{}")
+        (boundary-commit! dir [:implement] "src/été b.clj" "(ns feature)\n")
+        (boundary-commit! dir [:verify] "coverage/report.json" "{}")
         (let [{:keys [prepared]} (release-from dir base)]
           (is (some? prepared))
           (is (= #{"src/été b.clj"} (committed/released-paths prepared))))))))
@@ -102,8 +103,8 @@
             the content on the branch"
     (with-base-repo
       (fn [dir base]
-        (boundary-commit! dir :implement "src/feature.clj" "(ns feature)\n")
-        (boundary-commit! dir :verify "src/feature.clj" "(ns feature) ; formatted\n")
+        (boundary-commit! dir [:implement] "src/feature.clj" "(ns feature)\n")
+        (boundary-commit! dir [:verify] "src/feature.clj" "(ns feature) ; formatted\n")
         (let [{:keys [prepared]} (release-from dir base)]
           (is (= "(ns feature) ; formatted\n"
                  (:content (get (committed/released-files prepared) "src/feature.clj")))))))))
@@ -122,8 +123,8 @@
             phase's by-product and releases implement's work"
     (with-base-repo
       (fn [dir base]
-        (boundary-commit! dir :implement "src/feature.clj" "(ns feature)\n")
-        (boundary-commit! dir :review "deps.lock" "lock")
+        (boundary-commit! dir [:implement] "src/feature.clj" "(ns feature)\n")
+        (boundary-commit! dir [:review] "deps.lock" "lock")
         (let [{:keys [prepared]} (committed/enter-release
                                   (committed/capsule-ctx dir base shell-execute))]
           (is (= #{"src/feature.clj"} (committed/released-paths prepared))))))))
@@ -133,3 +134,35 @@
     (let [ex (committed/enter-error (committed/capsule-ctx "/workspace" committed/some-sha failing-log))]
       (is (= :release/git-status-failed (:type (ex-data ex))))
       (is (str/includes? (str (ex-message ex)) "log failed")))))
+
+(deftest ^{:stratum 2} work-a-checking-boundary-swept-up-is-released-test
+  (testing "implement's work committed at verify's boundary, after
+            implement's own persist failed, names both phases and is released"
+    (with-base-repo
+      (fn [dir base]
+        (boundary-commit! dir [:implement :verify] "src/feature.clj" "(ns feature)\n")
+        (boundary-commit! dir [:review] "deps.lock" "lock")
+        (let [{:keys [prepared]} (release-from dir base)]
+          (is (= #{"src/feature.clj"} (committed/released-paths prepared))))))))
+
+(deftest ^{:stratum 2} path-with-control-characters-is-released-test
+  (testing "a path holding an ASCII record separator is matched exactly"
+    (with-base-repo
+      (fn [dir base]
+        (boundary-commit! dir [:implement] "src/a\u001eb.clj" "(ns a)\n")
+        (boundary-commit! dir [:verify] "coverage/report.json" "{}")
+        (let [{:keys [prepared]} (release-from dir base)]
+          (is (= #{"src/a\u001eb.clj"} (committed/released-paths prepared))))))))
+
+(deftest ^{:stratum 2} file-a-merge-brought-in-is-released-test
+  (testing "a file only a merge commit brought into the branch counts, and a
+            checking phase's by-product on the branch stays out"
+    (with-base-repo
+      (fn [dir base]
+        (committed/git! dir "checkout" "-q" "-b" "side")
+        (committed/commit-file! dir "src/merged.clj" "(ns merged)\n")
+        (committed/git! dir "checkout" "-q" "-")
+        (boundary-commit! dir [:verify] "coverage/report.json" "{}")
+        (committed/git! dir "merge" "-q" "--no-ff" "side" "-m" "merge side")
+        (let [{:keys [prepared]} (release-from dir base)]
+          (is (= #{"src/merged.clj"} (committed/released-paths prepared))))))))

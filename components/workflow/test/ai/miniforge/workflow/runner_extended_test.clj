@@ -440,8 +440,8 @@
         (is (= "env-42" (:env-id @call-args)))
         (is (= "task/abc" (get-in @call-args [:opts :branch])))
         (is (= "/workspace" (get-in @call-args [:opts :workdir])))
-        (is (= (boundary-commit/with-phase-trailer
-                 (messages/t :env/persist-message {:phase "implement"}) :implement)
+        (is (= (boundary-commit/with-phase-trailers
+                 (messages/t :env/persist-message {:phase "implement"}) [:implement])
                (get-in @call-args [:opts :message]))
             "the commit names the phase that ran, not the one the machine moved to")))))
 
@@ -457,8 +457,8 @@
                     (fn [_exec _env-id opts]
                       (reset! call-args opts))]
         (persist-fn context phase-ctx)
-        (is (= (boundary-commit/with-phase-trailer
-                 (messages/t :env/persist-message {:phase "unknown"}) :unknown)
+        (is (= (boundary-commit/with-phase-trailers
+                 (messages/t :env/persist-message {:phase "unknown"}) [:unknown])
                (:message @call-args)))))))
 
 (deftest ^{:stratum 1} persist-workspace-catches-exceptions-test

@@ -51,8 +51,11 @@
    phase's boundary commit touched it. Verify and review only check the
    work; a file their run left in the worktree (a regenerated lockfile, a
    coverage report) is committed at their boundary but is not work to
-   release. A commit without the phase trailer (the agent's own, or one
-   made before the trailer existed) counts.
+   release. A boundary commit names every phase whose work it holds (an
+   earlier phase whose own persist failed included), and is a checking
+   commit only when all of them are checking phases. A commit without the
+   phase trailer (the agent's own, or one made before the trailer
+   existed) counts.
 
    Layer 0: failure shapes, output parsing, constants
    Layer 1: argument quoting, host runner, readers, base-diff, read-entry
@@ -117,37 +120,45 @@
   #{"verify" "review"})
 
 (def ^{:stratum 0} ^:private boundary-log-format
-  "`git log --format` for `boundary-log-records`: an ASCII record
-   separator (%x1e), then the commit's phase trailer value (empty without
+  "`git log -z --format` for `boundary-commits`: each commit's sha, a NUL,
+   then the values of its phase trailers joined by commas (empty without
    one)."
-  (str "--format=%x1e%(trailers:key=" boundary-commit/phase-trailer-key
+  (str "--format=%H%x00%(trailers:key=" boundary-commit/phase-trailer-key
        ",valueonly,separator=%x2C)"))
 
-(defn- ^{:stratum 0} boundary-log-records
-  "Parse `git log -z --name-only` output written with
-   `boundary-log-format` into {:phase :paths} per commit, `:phase` nil for
-   a commit without the trailer. Records start with the format's record
-   separator; with -z each is the trailer value, a NUL, a newline, then
-   NUL-terminated paths."
+(defn- ^{:stratum 0} boundary-commits
+  "Parse `git log -z` output written with `boundary-log-format` into
+   {:sha :phases} per commit, `:phases` the set of phase names its
+   trailers carry. With -z the fields and the commits are NUL-separated,
+   and neither field can hold a NUL."
   [out]
-  (->> (str/split (or out "") #"\u001e")
-       (remove empty?)
-       (mapv (fn [record]
-               (let [[phase & paths] (str/split record #"\u0000")]
-                 {:phase (not-empty (str/trim phase))
-                  :paths (->> (cons (some-> (first paths) (str/replace-first #"^\n" ""))
-                                    (rest paths))
-                              (remove empty?)
-                              vec)})))))
+  (->> (str/split (or out "") #"\u0000" -1)
+       (partition 2)
+       (mapv (fn [[sha trailers]]
+               {:sha    (str/trim sha)
+                :phases (into #{} (comp (map str/trim) (remove str/blank?))
+                              (str/split trailers #","))}))))
 
-(defn- ^{:stratum 0} work-paths
-  "Paths touched by `records` (from boundary-log-records) that are not
-   boundary commits of one of `excluded-phases`."
-  [records excluded-phases]
-  (into #{}
-        (comp (remove #(contains? excluded-phases (:phase %)))
-              (mapcat :paths))
-        records))
+(defn- ^{:stratum 0} checking-commit?
+  "True when `commit` is a boundary commit holding only the work of
+   `checking` phases."
+  [{:keys [phases]} checking]
+  (and (seq phases) (every? checking phases)))
+
+(defn- ^{:stratum 0} commit-paths
+  "The set of paths the commits `shas` touched, read with `run`, or the
+   `{:failure f}` of the first git command that failed. Each commit is
+   diffed against its first parent, so a merge contributes what it brought
+   into the branch, not the branch's own commits seen from the other side."
+  [run shas]
+  (reduce (fn [paths sha]
+            (let [{:keys [failure out] :as result}
+                  (run ["diff-tree" "-r" "-z" "--no-renames" "--name-only" (str sha "^") sha])]
+              (if failure
+                (reduced result)
+                (into paths (remove empty?) (str/split (or out "") #"\u0000")))))
+          #{}
+          shas))
 
 (defn- ^{:stratum 0} raw-z-entries
   "Parse `git diff --raw --no-renames -z` output into
@@ -238,24 +249,30 @@
 
 (defn- ^{:stratum 1} base-diff
   "The substantive {:status :mode :path} entries the worktree differs by
-   from commit `sha`, limited to paths a commit since `sha` other than a
-   checking phase's boundary commit touched; nil when `sha` names no
-   commit in this repository (an older base a fresh clone never fetched);
-   a `:release/git-status-failed` anomaly when git fails."
+   from commit `sha`; nil when `sha` names no commit in this repository (an
+   older base a fresh clone never fetched); a `:release/git-status-failed`
+   anomaly when git fails. When a checking phase's boundary commit is
+   among the commits since `sha`, only paths another of those commits
+   touched are kept."
   [run root-path sha]
   (let [verified (run ["rev-parse" "--verify" "--quiet" (str sha "^{commit}")])
         diffed   (delay (run ["diff" "--raw" "--no-renames" "-z" sha "--"]))
-        logged   (delay (run ["log" "-z" "--no-renames" "--name-only" boundary-log-format
-                              (str sha "..HEAD") "--"]))]
+        logged   (delay (run ["log" "-z" boundary-log-format (str sha "..HEAD") "--"]))
+        commits  (delay (boundary-commits (:out @logged)))
+        ;; nil when no commit is excluded: every changed path counts.
+        work     (delay (when (some #(checking-commit? % checking-phases) @commits)
+                          (commit-paths run (->> @commits
+                                                 (remove #(checking-commit? % checking-phases))
+                                                 (map :sha)))))]
     (cond
       (missing-commit? verified) nil
       (:failure verified)        (git-status-failed root-path (:failure verified))
       (:failure @diffed)         (git-status-failed root-path (:failure @diffed))
       (:failure @logged)         (git-status-failed root-path (:failure @logged))
-      :else
-      (let [work (work-paths (boundary-log-records (:out @logged)) checking-phases)]
-        (filterv #(and (agent/substantive-file? %) (contains? work (:path %)))
-                 (raw-z-entries (:out @diffed)))))))
+      (:failure @work)           (git-status-failed root-path (:failure @work))
+      :else                      (filterv #(and (agent/substantive-file? %)
+                                                (or (nil? @work) (contains? @work (:path %))))
+                                          (raw-z-entries (:out @diffed))))))
 
 (defn- ^{:stratum 1} read-entry
   "The :code/files entry for one {:status :mode :path} entry, or a
