@@ -111,13 +111,17 @@
               (map-indexed vector (sort (tx/touched-ids operation)))))
     workspace))
 
+;; Insert the objects `operation` creates, stamping provenance from the
+;; transaction rather than trusting the activation's own report of it. What an
+;; operation `:discriminates` becomes a `:discriminates` link on each object it
+;; creates, so the experiment backing a challenge keeps that record.
 (defn- ^{:stratum 0} insert-created
-  "Insert the objects `operation` creates, stamping provenance from the
-   transaction rather than trusting the activation's own report of it."
   [workspace operation {:keys [role participant activation version]}]
   (reduce (fn [ws spec]
-            (let [created (-> (object/new-object
-                               (assoc spec :role role :activation activation
+            (let [linked (cond-> spec (seq (:discriminates operation))
+                           (update-in [:links :discriminates] (fnil into #{}) (:discriminates operation)))
+                  created (-> (object/new-object
+                               (assoc linked :role role :activation activation
                                       :version version))
                               (assoc :object/participant participant))]
               (assoc-in ws [:workspace/objects (:object/id created)] created)))
