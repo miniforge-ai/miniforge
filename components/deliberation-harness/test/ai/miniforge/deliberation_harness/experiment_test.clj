@@ -173,3 +173,8 @@
     (is (= :invalid-input (:anomaly/type result)))
     (is (zero? @calls))
     (is (zero? @records))))
+
+(deftest ^{:stratum 1} malformed-operations-are-rejected-not-thrown
+  (let [result (run :workspace (answering (constantly 1) :available-experiments))]
+    (is (= 4 (:activations result)))
+    (is (= :completed (:status result)))))

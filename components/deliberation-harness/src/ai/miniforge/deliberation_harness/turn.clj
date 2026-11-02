@@ -53,10 +53,11 @@
   "candidate-")
 
 (def ^{:stratum 0} model-object-keys
-  "Object fields a model sees. Sequence numbers and activation identities
-   are audit metadata, never model input."
+  "Object fields a model sees, including a question's answer and a
+   superseded record's replacement. Sequence numbers and activation
+   identities are audit metadata, never model input."
   [:object/id :object/type :object/status :object/statement :object/links
-   :object/attrs :object/contested?])
+   :object/attrs :object/contested? :object/answer :object/superseded-by])
 
 (def ^{:stratum 0} empty-usage
   "Usage of a turn that spent nothing: the identity for summing usage."
@@ -202,9 +203,13 @@
         response))))
 
 (defn ^{:stratum 1} commit-turn
-  "Admit the payload's operations as `participant`'s turn on its board."
+  "Admit the payload's operations as `participant`'s turn on its board. No
+   operations is a pass; any other shape goes to admission, which rejects
+   what it cannot accept."
   [workspace participant final? payload]
-  (let [proposal (when (seq (:operations payload)) {:tx/operations (:operations payload)})]
+  (let [operations (:operations payload)
+        pass? (or (nil? operations) (and (sequential? operations) (empty? operations)))
+        proposal (when-not pass? {:tx/operations operations})]
     (board/activate-participant
      (assoc-in workspace [:workspace/participant-roles participant] (role-of participant))
      (constantly proposal)
