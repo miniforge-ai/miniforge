@@ -132,3 +132,10 @@
                       :workspace/roles [:proposer :meta-watchdog]
                       :workspace/eligibility {:stale-question [:meta-watchdog]})]
     (is (= :round-robin (:activation/reason (scheduler/next-activation ws))))))
+
+(deftest ^{:stratum 2} a-skipped-participant-does-not-reset-the-rotation
+  (testing "after a frame-refused skeptic's turn, the synthesizer is next, not the proposer"
+    (let [ws (workspace [] :workspace/log [{:tx/role :proposer}]
+                        :workspace/last-actor :skeptic
+                        :workspace/frame-refused #{:skeptic})]
+      (is (= :synthesizer (:activation/role (scheduler/next-activation ws)))))))

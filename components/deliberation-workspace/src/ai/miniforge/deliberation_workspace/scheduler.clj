@@ -61,12 +61,13 @@
          (or (:tx/participant logged) (:tx/role logged)))))
 
 (defn- ^{:stratum 0} next-after
-  "The member of `candidates` following `previous` in their order, wrapping;
-   the first when `previous` is absent from them."
-  [candidates previous]
-  (let [candidates (vec candidates)]
-    (when (seq candidates)
-      (nth candidates (mod (inc (.indexOf candidates previous)) (count candidates))))))
+  "The first of `candidates` following `previous` in `roster` order, wrapping.
+   Rotation runs over the full roster, so a participant skipped this time
+   never moves the rotation back to the start."
+  [roster candidates previous]
+  (let [roster (vec roster)
+        [before after] (split-at (inc (.indexOf roster previous)) roster)]
+    (first (filter (set candidates) (concat after before)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -127,7 +128,8 @@
         ;; subscription must not silently suppress the tiers beneath it.
         fired (fn [[event target]]
                 (when-let [participant (and target
-                                            (next-after (eligible-participants workspace event)
+                                            (next-after (get workspace :workspace/roles [])
+                                                        (eligible-participants workspace event)
                                                         (last-actor workspace)))]
                   {:activation/participant participant
                    :activation/role (responsibility-of workspace participant)
@@ -144,7 +146,8 @@
    §6.3 requires every scheduling decision to carry a reason."
   [workspace]
   (or (triggered-activation workspace)
-      (when-let [participant (next-after (ordinary-participants workspace)
+      (when-let [participant (next-after (get workspace :workspace/roles [])
+                                         (ordinary-participants workspace)
                                          (last-actor workspace))]
         {:activation/participant participant
          :activation/role (responsibility-of workspace participant)

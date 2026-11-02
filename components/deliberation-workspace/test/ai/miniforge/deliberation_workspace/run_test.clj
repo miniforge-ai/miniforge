@@ -17,6 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.deliberation-workspace.run-test
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-workspace.object :as object]
    [ai.miniforge.deliberation-workspace.run :as run]
    [clojure.test :refer [deftest is testing]]))
@@ -275,3 +276,8 @@
                       :workspace/readable {:synthesizer #{}})
         closed (run/run ws (fn [_] (throw (ex-info "must not run" {}))) {})]
     (is (= :refused (get-in closed [:workspace/termination :termination/closure])))))
+
+(deftest ^{:stratum 2} a-negative-closure-reserve-is-refused
+  (let [result (run/run (workspace :workspace/closure-reserve -1) fresh-claim {})]
+    (is (anomaly/anomaly? result))
+    (is (= :invalid-input (:anomaly/type result)))))

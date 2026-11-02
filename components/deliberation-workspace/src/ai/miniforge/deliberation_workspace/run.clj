@@ -27,6 +27,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-workspace.admission :as admission]
+   [ai.miniforge.deliberation-workspace.messages :as messages]
    [ai.miniforge.deliberation-workspace.projection :as projection]
    [ai.miniforge.deliberation-workspace.scheduler :as scheduler]
    [ai.miniforge.deliberation-workspace.termination :as termination]))
@@ -186,11 +187,7 @@
              (:termination/forced-synthesis closing)
              (assoc :termination/closure (closure-status workspace closed funded?))))))
 
-(defn ^{:stratum 2} run
-  "Drive the loop until a §7 closing rule fires, then return the closed
-   workspace with its termination record attached. `max-steps` is a harness
-   backstop, not a spec rule."
-  [workspace activate {:keys [max-steps] :or {max-steps default-max-steps}}]
+(defn- ^{:stratum 2} drive [workspace activate max-steps]
   (loop [ws workspace
          steps 0]
     (if-let [closing (termination/closing-rule ws)]
@@ -198,3 +195,16 @@
       (if (>= steps max-steps)
         (assoc ws :workspace/termination {:termination/rule :step-bound-exceeded})
         (recur (step ws activate) (inc steps))))))
+
+(defn ^{:stratum 2} run
+  "Drive the loop until a §7 closing rule fires, then return the closed
+   workspace with its termination record attached, or an `:invalid-input`
+   anomaly when the closure reserve is not a non-negative integer (a
+   negative reserve would enlarge ordinary work past the budget).
+   `max-steps` is a harness backstop, not a spec rule."
+  [workspace activate {:keys [max-steps] :or {max-steps default-max-steps}}]
+  (let [reserve (get workspace :workspace/closure-reserve 0)]
+    (if (nat-int? reserve)
+      (drive workspace activate max-steps)
+      (anomaly/anomaly :invalid-input (messages/system-t :anomaly/invalid-closure-reserve)
+                       {:closure-reserve reserve}))))
