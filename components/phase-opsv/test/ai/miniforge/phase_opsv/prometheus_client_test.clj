@@ -11,7 +11,8 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]])
-  (:import [java.util.concurrent CompletableFuture TimeoutException]))
+  (:import [java.util Locale]
+           [java.util.concurrent CompletableFuture TimeoutException]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -62,6 +63,12 @@
   (doseq [encodings [["identity, GZIP"] ["br" "identity"]]]
     (let [response (fixture/response (fixture/successful-text) {:encodings encodings})]
       (is (anomaly/anomaly? (observe (fixture/settings) (fixture/completed response) (atom [])))))))
+
+(deftest ^{:stratum 0} test-content-coding-admission-does-not-depend-on-the-default-locale
+  (let [response (fixture/response (fixture/successful-text) {:encodings ["IDENTITY"]})
+        operation (partial observe (fixture/settings) (fixture/completed response) (atom []))
+        result (fixture/with-default-locale (Locale/forLanguageTag "tr-TR") operation)]
+    (is (not (anomaly/anomaly? result)))))
 
 (deftest ^{:stratum 0} test-expired-header-deadline-does-not-mask-completed-critical-failures
   (with-redefs [io/remaining-ms (constantly 0)]

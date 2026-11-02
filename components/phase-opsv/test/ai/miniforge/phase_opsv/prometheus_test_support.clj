@@ -9,6 +9,7 @@
             [slingshot.slingshot :refer [try+]])
   (:import [java.io ByteArrayInputStream]
            [java.nio.charset StandardCharsets]
+           [java.util Locale]
            [java.util.concurrent Callable CompletableFuture FutureTask]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -24,6 +25,11 @@
   (try+ (operation) nil
     (catch Object _
       [(:throwable &throw-context) (.isInterrupted (Thread/currentThread))])))
+
+(defn ^{:stratum 0} with-default-locale [locale operation]
+  (let [previous (Locale/getDefault)]
+    (try+ (Locale/setDefault locale) (operation)
+      (finally (Locale/setDefault previous)))))
 
 (defn ^{:stratum 0} settings
   ([] (settings {}))

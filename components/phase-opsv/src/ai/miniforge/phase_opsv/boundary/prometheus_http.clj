@@ -7,6 +7,7 @@
             [babashka.http-client :as http]
             [clojure.string :as str])
   (:import [java.net.http HttpResponse]
+           [java.util Locale]
            [java.util.concurrent CompletableFuture]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -41,7 +42,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} identity-coding? [coding]
-  (= identity-coding (str/lower-case (str/trim coding))))
+  (= identity-coding (.toLowerCase ^String (str/trim coding) Locale/ROOT)))
 
 (defn- ^{:stratum 1} timeout? [failure]
   ;; Some JDK timeout classes are not exposed by Babashka's class resolver.
