@@ -3,8 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.boundary.prometheus-body
   "Admit exactly one unambiguous JSON document from bounded UTF-8 bytes."
-  (:require [ai.miniforge.phase-opsv.boundary.measurement :as measurement]
-            [ai.miniforge.phase-opsv.boundary.prometheus-io :as io]
+  (:require [ai.miniforge.phase-opsv.boundary.bounded-io :as io]
+            [ai.miniforge.phase-opsv.boundary.measurement :as measurement]
             [ai.miniforge.phase-opsv.measurement-window :as window]
             [cheshire.core :as json]
             [cheshire.factory :as factory]

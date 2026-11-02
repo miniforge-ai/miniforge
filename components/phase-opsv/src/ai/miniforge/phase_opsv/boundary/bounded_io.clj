@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.boundary.prometheus-io
+(ns ai.miniforge.phase-opsv.boundary.bounded-io
   "Owned, bounded response reads; these throwing effect ports are converted at ingress."
   (:require [ai.miniforge.resource-cleanup.interface :as cleanup]
             [slingshot.slingshot :refer [try+]])
@@ -62,4 +62,4 @@
       (await! pending until)
       (finally (cancel! pending)))))
 
-(comment ::bounded-prometheus-response-io)
+(comment ::bounded-response-io)
