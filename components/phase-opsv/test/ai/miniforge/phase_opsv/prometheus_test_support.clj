@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.prometheus-test-support
   (:require [ai.miniforge.phase-opsv.boundary.prometheus-http :as http]
+            [ai.miniforge.phase-opsv.boundary.http-transport :as transport]
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.measurement-test-support :as measurement]
             [cheshire.core :as json]
@@ -64,7 +65,7 @@
   ;; BB cannot reify java.net.http.HttpResponse. Only its external projection
   ;; is substituted here; the separate JVM fixture exercises the real type.
   (with-redefs [http/start! (partial record-request! calls pending)
-                http/response-fields identity]
+                transport/response-fields identity]
     (operation)))
 
 ;------------------------------------------------------------------------------ Layer 2
