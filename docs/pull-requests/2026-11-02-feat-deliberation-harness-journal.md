@@ -85,13 +85,13 @@ Deviations from the snapshot:
   because durable files are the journal's contract): round trip, refusal
   to reuse a directory, tamper detection, an unlistable directory, an
   unreadable record, numeric ordering past six digits, an unreplayable
-  payload refused without moving the position, a malformed record naming
-  its file.
+  payload refused without moving the position, a failed write that leaves
+  the position where it was, a malformed record naming its file.
 - `fixtures_test`: every reference passes and every distractor fails; success
   needs every observation; the public view hides the sealed answer.
 
 Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
-sandbox, so a local stand-in replaced malli): 32 tests, 80 assertions,
+sandbox, so a local stand-in replaced malli): 33 tests, 83 assertions,
 0 failures. clj-kondo 2026.10.26 (the CI version) over `bases components
 development/src`: 0 errors. `poly test` and the Polylith check ran only in CI.
 

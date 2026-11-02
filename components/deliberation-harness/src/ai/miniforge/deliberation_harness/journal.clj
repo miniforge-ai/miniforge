@@ -75,9 +75,9 @@
   [record]
   (assoc record :hash (codec/digest record)))
 
+;; True when `record` is the record expected at `sequence` after `previous`
+;; and its hash matches its content.
 (defn- ^{:stratum 0} links?
-  "True when `record` is the record expected at `sequence` after `previous`
-   and its hash matches its content."
   [record sequence previous]
   (and (map? record)
        (= sequence (:sequence record))
@@ -104,11 +104,11 @@
     (or (failure (durable/write-new-text! file (codec/encode record)))
         (failure (durable/confirm! file)))))
 
+;; The records in `files`, verified as one unbroken chain from sequence zero,
+;; or the anomaly for the first file that cannot be read or breaks it. A
+;; file breaks the chain when its name is not exactly the name `append!`
+;; gives its sequence, so a misnumbered file can never be replayed.
 (defn- ^{:stratum 1} verified-records
-  "The records in `files`, verified as one unbroken chain from sequence zero,
-   or the anomaly for the first file that cannot be read or breaks it. A
-   file breaks the chain when its name is not exactly the name `append!`
-   gives its sequence, so a misnumbered file can never be replayed."
   [files]
   (loop [files files
          previous nil

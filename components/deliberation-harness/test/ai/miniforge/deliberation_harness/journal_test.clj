@@ -103,6 +103,18 @@
           (journal/append! log {:turn 1})
           (is (= [0] (mapv :sequence (journal/read-journal dir)))))))))
 
+(deftest ^{:stratum 1 :integration true} a-failed-write-leaves-the-position
+  (with-journal-dir
+    (fn [dir]
+      (let [log (journal/open! dir)
+            blocker (io/file dir "000000.edn")]
+        (spit blocker "occupied")
+        (is (anomaly/anomaly? (journal/append! log {:turn 1})))
+        (is (= {:sequence 0 :previous nil} @(:journal/position log)))
+        (io/delete-file blocker)
+        (journal/append! log {:turn 1})
+        (is (= [0] (mapv :sequence (journal/read-journal dir))))))))
+
 (deftest ^{:stratum 1 :integration true} a-malformed-record-names-its-file
   (with-journal-dir
     (fn [dir]
