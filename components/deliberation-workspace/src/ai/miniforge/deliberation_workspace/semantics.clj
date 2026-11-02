@@ -20,10 +20,12 @@
    target types, reference integrity, and adoption rules. They check
    structure, never the truth of prose. Attestation is a separate stage set."
   (:require
+   [ai.miniforge.deliberation-workspace.conflict :as conflict]
    [ai.miniforge.deliberation-workspace.messages :as messages]
    [ai.miniforge.deliberation-workspace.object :as object]
    [ai.miniforge.deliberation-workspace.transaction :as tx]
-   [ai.miniforge.deliberation-workspace.validation :as validation]))
+   [ai.miniforge.deliberation-workspace.validation :as validation]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -73,6 +75,10 @@
 
 (def ^{:stratum 0} constraint-kinds #{:hard :soft})
 
+;; The claim kinds of N14 §2.1. A claim's `:kind` is optional; when given it
+;; must be one of these.
+(def ^{:stratum 0} claim-kinds #{:fact :inference :assumption :prediction})
+
 (def ^{:stratum 0} default-statement-cap
   "Characters one statement may hold (N14 §2.2). Manifest-configurable via
    `:workspace/statement-cap`; sized for a paragraph, not a document."
@@ -93,14 +99,20 @@
           (get operation :discriminates [])))
 
 (defn- ^{:stratum 0} attribute-defect?
-  "True when `spec` is evidence without a known source class or a
-   constraint without a known kind."
+  "True when `spec` is evidence without a known source class, a constraint
+   without a known kind, or a claim with an unknown kind."
   [spec]
   (case (:type spec)
     :evidence (not (contains? object/evidence-source-classes
                               (get-in spec [:attrs :source-class])))
     :constraint (not (contains? constraint-kinds (get-in spec [:attrs :kind])))
+    :claim (not (contains? claim-kinds (get-in spec [:attrs :kind] :fact)))
     false))
+
+(defn- ^{:stratum 0} reserved-id?
+  "True when `id` lies in the engine's derived-conflict namespace."
+  [id]
+  (and (string? id) (str/starts-with? id conflict/conflict-id-prefix)))
 
 (def ^{:stratum 0} text-operations
   "Operations whose own `:statement` is written onto their target."
@@ -206,6 +218,13 @@
                                  (messages/system-t :anomaly/non-evidence-reference)
                                  operation)))
 
+;; No proposal creates an object whose id a derived conflict could need; an
+;; occupied id would otherwise suppress the conflict (N14 §2.5).
+(defn- ^{:stratum 1} check-reserved-ids [_workspace operation _context]
+  (when (some (comp reserved-id? :id) (validation/created-specs operation))
+    (validation/reject-operation :anomalies.deliberation/reserved-id
+                                 (messages/system-t :anomaly/reserved-id) operation)))
+
 (defn- ^{:stratum 1} check-attributes [_workspace operation _context]
   (when (some attribute-defect? (validation/created-specs operation))
     (validation/reject-operation :anomalies.deliberation/invalid-attribute
@@ -242,5 +261,5 @@
 (def ^{:stratum 2} semantic-stages
   "Ordered semantic stages. Field and type checks lead because the later
    stages read fields and object types those establish."
-  [check-fields check-statement-cap check-creation-types check-target-types
+  [check-fields check-statement-cap check-creation-types check-reserved-ids check-target-types
    check-references check-evidence-references check-attributes check-goal-closure check-choice-point])

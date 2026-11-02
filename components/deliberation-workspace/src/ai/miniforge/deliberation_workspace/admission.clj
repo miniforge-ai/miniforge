@@ -58,12 +58,14 @@
 (defn- ^{:stratum 0} context-valid?
   "True when the runtime-supplied context names a known responsibility, a
    participant, an activation, and a basis the workspace has reached."
-  [workspace {:keys [role participant activation basis]}]
-  (and (contains? tx/responsibilities role)
-       (participant? participant)
-       (string? activation) (not (str/blank? activation))
-       (nat-int? basis)
-       (<= basis (get workspace :workspace/version 0))))
+  [workspace context]
+  (and (map? context)
+       (let [{:keys [role participant activation basis]} context]
+         (and (contains? tx/responsibilities role)
+              (participant? participant)
+              (string? activation) (not (str/blank? activation))
+              (nat-int? basis)
+              (<= basis (get workspace :workspace/version 0))))))
 
 (defn- ^{:stratum 0} impersonating?
   "True when `proposal` carries a field outside `proposal-keys` or names a
