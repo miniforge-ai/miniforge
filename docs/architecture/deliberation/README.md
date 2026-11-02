@@ -45,7 +45,7 @@ available to deterministic scheduling and inspection.
 | Original assumption | Revised contract | Current implementation |
 |---|---|---|
 | Role name identifies an actor | Participant identity and responsibility are separate; runtime establishes identity | Admission stamps participant/activation/basis; lab uses synthetic participants |
-| Every run needs seven agents | Manifest chooses population; responsibilities and required independence are explicit | Lab uses three peers, or one participant for its single control |
+| Every run needs seven agents | Manifest chooses population; responsibilities and required independence are explicit | `relay` and both workspace conditions use three peers; `independent` uses one fresh candidate per non-closing turn plus a selector; `single` uses one participant |
 | Accepted conclusions are terminal | Challenge adoption without erasing it; supersede explicitly | Accepted decision retains its status plus a contested marker and challenge record |
 | Challenge requires existing evidence | Also allow a concern plus a resolution criterion | `reason` + `resolution` is admitted, subject to a participant/object cap |
 | Same operation and targets means duplicate | Compare the full operation payload per participant | Distinct claims and new evidence no longer collide as retries |
@@ -64,7 +64,8 @@ the derived conflict while retaining the conflict record.
 
 The standalone project avoids changing the canonical software-factory workflow.
 The workspace, harness and lab tests run with `poly test` through this project,
-for example `clojure -M:poly test project:dlab` from the repository root. From
+for example `clojure -M:poly test project:dlab :all` from the repository root
+(without `:all`, `poly test` runs only bricks changed since the stable tag). From
 `projects/deliberation-lab`:
 
 ```sh
