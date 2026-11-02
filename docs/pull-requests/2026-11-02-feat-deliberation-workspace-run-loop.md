@@ -43,17 +43,20 @@ success, and counts quiescence by object growth.
     allowance remains. It records `:termination/closure` as `:executed` or
     `:unfunded`.
   - A turn whose read scope withholds a goal or `:hard` constraint (the
-    projection's new `:projection/withheld-frame`) is refused before the
+    `:projection/withheld-frame` from #2337) is refused before the
     model runs (N14 §4). It is not charged, it counts as quiet, and the
     scheduler passes the participant over until the next commit. A refused
     closure turn is recorded as `:refused`.
-- `projection`: optional `:readable-ids` read scope (moved here from #2330)
-  and `:projection/withheld-frame`.
   - `:workspace/stages` is gone; admission's stage chain is fixed.
+  - `run` returns an `:invalid-input` anomaly unless
+    `:workspace/closure-reserve` is a non-negative integer, because a
+    negative reserve would enlarge ordinary work past the budget.
 - `scheduler`
   - `:workspace/participant-roles` maps participants to responsibilities.
   - Eligibility is keyed by responsibility.
-  - Round-robin and each tier rotate after the last actor.
+  - Round-robin and each tier rotate over the full roster from the last
+    actor, taking the first eligible participant. A skipped (frame-refused)
+    last actor therefore never sends the rotation back to the start.
   - The meta-watchdog is excluded from ordinary rounds and from the
     structural tiers.
   - Exposes `triggered-activation`, `ordinary-participants` and
@@ -88,12 +91,15 @@ before deadlock closure, and cost metering.
 - `termination_test`: round-based quiescence (including the meta-watchdog and
   waiting structural work), rejected goals, and the closure reserve.
 - `scheduler_test`: round-robin skips the event-only participant; a tier
-  rotates among participants that share a responsibility.
+  rotates among participants that share a responsibility; a frame-refused
+  last actor does not reset the rotation.
+- `run_test` also covers refusing a negative closure reserve.
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
-unreachable from the authoring sandbox): all 13 deliberation-workspace
-suites, 176 tests, 555 assertions, 0 failures. `poly test`, clj-kondo and
-the Polylith check ran only in CI.
+unreachable from the authoring sandbox): all 12 deliberation-workspace
+suites, 181 tests, 565 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
+version) on the component: 0 errors. `poly test` and the Polylith check ran
+only in CI.
 
 ## Deployment Plan
 
@@ -101,7 +107,8 @@ None. Experimental component with no production caller.
 
 ## Related Issues/PRs
 
-- Base: #2331, which builds on #2330 and #2329. Contract: #2328.
+- Base: #2337 (projection read scope and withheld frame, split out of this
+  PR for size), which builds on #2331, #2330 and #2329. Contract: #2328.
 - Next: `bases/deliberation-lab` and `projects/deliberation-lab`.
 
 ## Checklist
