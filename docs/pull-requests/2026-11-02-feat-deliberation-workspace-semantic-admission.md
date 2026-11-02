@@ -98,8 +98,8 @@ New `admission_test` covers:
   staleness.
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
-unreachable from the authoring sandbox): all 13 deliberation-workspace suites,
-164 tests, 534 assertions, 0 failures. clj-kondo 2026.10.26 (the CI version)
+unreachable from the authoring sandbox): all 12 deliberation-workspace suites,
+165 tests, 537 assertions, 0 failures. clj-kondo 2026.10.26 (the CI version)
 on the component: 0 errors. `poly test` and the Polylith check ran only in CI.
 
 ## Deployment Plan
