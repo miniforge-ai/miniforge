@@ -115,3 +115,9 @@
   (testing "a float never digests like a different double"
     (is (not= (codec/digest (float 1.2)) (codec/digest 1.2)))
     (is (= (codec/digest (float 1.5)) (codec/digest 1.5)))))
+
+(deftest ^{:stratum 1} host-collections-never-digest-like-plain-ones
+  (is (not= (codec/digest (java.util.ArrayList. [1 2])) (codec/digest [1 2])))
+  (is (not= (codec/digest (java.util.HashMap. {:a 1})) (codec/digest {:a 1})))
+  (is (not= (codec/digest (long-array [1 2])) (codec/digest [1 2])))
+  (is (not (codec/plain? (java.util.ArrayList. [1 2])))))

@@ -88,7 +88,7 @@
   (with-journal-dir
     (fn [dir]
       (journal/open! dir)
-      (doseq [name ["1000000.edn" "999999.edn" "notes.txt"]]
+      (doseq [name ["1000000.edn" "999999.edn"]]
         (spit (io/file dir name) "{}"))
       (is (= ["999999.edn" "1000000.edn"]
              (map #(.getName ^java.io.File %) (#'journal/record-files dir)))))))
@@ -130,3 +130,13 @@
         (let [result (journal/read-journal dir)]
           (is (= :conflict (:anomaly/type result)))
           (is (some? (get-in result [:anomaly/data :file]))))))))
+
+(deftest ^{:stratum 1 :integration true} a-stray-file-is-never-skipped
+  (with-journal-dir
+    (fn [dir]
+      (let [log (journal/open! dir)]
+        (journal/append! log {:turn 1})
+        (doseq [stray ["00001.edn" "notes.txt"]]
+          (spit (io/file dir stray) "{}")
+          (is (= :conflict (:anomaly/type (journal/read-journal dir))))
+          (io/delete-file (io/file dir stray)))))))

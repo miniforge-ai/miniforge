@@ -45,17 +45,30 @@
             *print-dup* false *print-readably* true *print-namespace-maps* false]
     (f)))
 
+;; The plain Clojure view of a value that prints like a plain collection but
+;; is not one — a record, a host map or collection, an array — or nil. Such a
+;; value is encoded with its class tag, so it never shares a digest with the
+;; plain value it resembles.
+(defn- ^{:stratum 0} host-view [value]
+  (cond
+    (record? value) (into {} value)
+    (and (instance? java.util.Map value) (not (map? value))) (into {} value)
+    (and (instance? java.util.Collection value) (not (coll? value))) (vec value)
+    (some-> value class .isArray) (vec value)
+    :else nil))
+
 (defn- ^{:stratum 0} emit
   "The canonical text of `value`: maps, sets, vectors and lists written
    element by element, map entries ordered by their key's then value's text
-   and set elements by their own text. A record is tagged with its class, so
-   it never shares a text with a plain map; a float is written as the exact
+   and set elements by their own text. A record, host collection or array is
+   tagged with its class (`host-view`), so it never shares a text with the
+   plain value it resembles; a float is written as the exact
    double it widens to, so it never shares a text with a different double.
    Anything else prints as itself. Call it inside `stably`."
   [value]
   (let [joined (fn [open texts close] (str open (str/join " " texts) close))]
     (cond
-      (record? value) (str "#" (.getName (class value)) (emit (into {} value)))
+      (host-view value) (str "#" (.getName (class value)) (emit (host-view value)))
       (instance? Float value) (pr-str (double value))
       (map? value) (joined "{" (->> value
                                     (map (fn [[k v]] [(emit k) (emit v)]))

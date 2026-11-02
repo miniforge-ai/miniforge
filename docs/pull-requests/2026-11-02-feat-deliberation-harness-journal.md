@@ -29,8 +29,8 @@ codec and fixtures belong in a component.
   - Canonical EDN written directly: map entries ordered by their key's
     then value's canonical text, set elements by their own text. No sorted
     collection is built, so ordering never has to agree with Clojure
-    equality and no entry is merged or dropped. A record is tagged with its
-    class and a float is written as the exact double it widens to, so
+    equality and no entry is merged or dropped. A record, host collection or
+    array is tagged with its class and a float is written as the exact double it widens to, so
     neither shares a digest with a different value. Printer settings are pinned,
     so a caller's `*print-length*` cannot truncate a record.
   - SHA-256 digest.
@@ -52,7 +52,8 @@ codec and fixtures belong in a component.
   - `read-journal` verifies sequence, predecessor hash and content hash, and
     returns an anomaly naming the first record that breaks the chain or
     cannot be read. An unlistable directory is an anomaly, not an empty
-    journal.
+    journal. A file in the journal directory that is not a canonically named
+    record is an anomaly, never silently skipped.
 - `fixtures`
   - The two synthetic tasks now live in
     `resources/config/deliberation-harness/tasks.edn`.
@@ -90,7 +91,7 @@ Deviations from the snapshot:
   needs every observation; the public view hides the sealed answer.
 
 Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
-sandbox, so a local stand-in replaced malli): 27 tests, 66 assertions,
+sandbox, so a local stand-in replaced malli): 29 tests, 72 assertions,
 0 failures. clj-kondo 2026.10.26 (the CI version) over `bases components
 development/src`: 0 errors. `poly test` and the Polylith check ran only in CI.
 

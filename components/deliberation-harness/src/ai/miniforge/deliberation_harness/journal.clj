@@ -51,12 +51,17 @@
 
 (defn- ^{:stratum 0} record-files
   "The record files in `directory` in numeric sequence order, or an anomaly
-   when the directory cannot be listed."
+   when the directory cannot be listed or holds anything but record files:
+   a journal directory holds records only, so nothing in it is skipped."
   [directory]
-  (if-let [files (.listFiles (io/file directory))]
-    (sort-by record-number (filter record-number files))
-    (anomaly/anomaly :unavailable (messages/system-t :anomaly/unlistable-journal)
-                     {:directory (str directory)})))
+  (let [files (.listFiles (io/file directory))
+        stray (some #(when-not (record-number %) %) files)]
+    (cond
+      (nil? files) (anomaly/anomaly :unavailable (messages/system-t :anomaly/unlistable-journal)
+                                    {:directory (str directory)})
+      stray (anomaly/anomaly :conflict (messages/system-t :anomaly/stray-journal-file)
+                             {:file (str stray)})
+      :else (sort-by record-number files))))
 
 (defn- ^{:stratum 0} chain-anomaly [file]
   (anomaly/anomaly :conflict (messages/system-t :anomaly/broken-chain)
