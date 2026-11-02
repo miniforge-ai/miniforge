@@ -13,6 +13,8 @@
 
 (defn ^{:stratum 0} throw-failure! [failure & _args] (throw failure))
 
+(defn ^{:stratum 0} ordinary-failure [cause] (Exception. "secret configuration failure" cause))
+
 (defn ^{:stratum 0} structured-failure [cause]
   (ex-info "secret configuration failure" {:config/resource "secret-path"} cause))
 

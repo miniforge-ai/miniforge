@@ -22,11 +22,16 @@ cancellation. Structured configuration exceptions need the same boundary policy.
 - Keep operational defaults in EDN; never discover endpoints or credentials.
 - Preserve critical causes before converting ordinary failures to anomalies.
 - Reuse shared, producer-shaped configuration fixtures.
+- Canonicalize case-insensitive URI schemes without changing escaped paths.
+- Reject reserved port zero and preserve omitted or valid explicit ports.
 
 ## Testing Plan
 
 Run malformed settings, port bounds, structured failures and wrapped critical
 causes. Verify both consuming products, native packaging, standards and normal hooks.
+
+Review regressions first reproduced five failing assertions without errors.
+Critical-cause coverage now includes ordinary and producer-shaped structured wrappers.
 
 ## Deployment Plan
 
