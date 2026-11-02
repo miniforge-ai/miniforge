@@ -43,6 +43,12 @@
   [text]
   (codec/read-text text))
 
+(defn read-edn-file
+  "Read and parse the plain EDN file at `path`, or return an anomaly naming
+   it when it cannot be read; see `codec/read-source`."
+  [path]
+  (codec/read-source path))
+
 (defn open-journal!
   "Start a journal in a new directory; see `journal/open!`."
   [directory]

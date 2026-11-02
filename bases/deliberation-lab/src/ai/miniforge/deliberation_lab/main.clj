@@ -34,7 +34,7 @@
 (def ^{:stratum 0} usage-exit-code 2)
 
 (defn- ^{:stratum 0} read-manifest [path]
-  (harness/read-edn (slurp path)))
+  (harness/read-edn-file path))
 
 (defn- ^{:stratum 0} call-for
   "The model call for `command`: the offline mock for smoke runs, the
