@@ -28,9 +28,9 @@
        vals
        (filter #(= :goal (:object/type %)))))
 
+;; Activations held back from ordinary work for the forced-synthesis
+;; closure. The reserve sits inside the activation budget (N14 §6.3).
 (defn- ^{:stratum 0} closure-reserve
-  "Activations held back from ordinary work for the forced-synthesis
-   closure. The reserve sits inside the activation budget (N14 §6.3)."
   [workspace]
   (get workspace :workspace/closure-reserve 0))
 
@@ -43,7 +43,7 @@
 (defn- ^{:stratum 1} goal-rejected? [workspace]
   (some #(= :rejected (:object/status %)) (goals workspace)))
 
-(defn- ^{:stratum 1} exhausted-budget
+(defn ^{:stratum 1} exhausted-budget
   "The budget dimension that ran out, or nil while ordinary work can still
    spend. Ordinary work stops where the closure reserve begins."
   [workspace]
@@ -54,9 +54,9 @@
                            (- activations (closure-reserve workspace)))) :activations
       (and cost (>= (get spent :cost 0) cost)) :cost)))
 
+;; N14 §7: every participant scheduled for ordinary work passed since the
+;; last committed contribution, and no structural tier has work waiting.
 (defn- ^{:stratum 1} quiescent?
-  "N14 §7: every participant scheduled for ordinary work passed since the
-   last committed contribution, and no structural tier has work waiting."
   [workspace]
   (let [population (scheduler/ordinary-participants workspace)]
     (and (seq population)

@@ -34,9 +34,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+;; Harness backstop on loop iterations. Budgets and closing rules should end
+;; a run first; a run that reaches this bound is a defect worth surfacing.
 (def ^{:stratum 0} default-max-steps
-  "Harness backstop on loop iterations. Budgets and closing rules should end
-   a run first; a run that reaches this bound is a defect worth surfacing."
   1000)
 
 (defn- ^{:stratum 0} record-event [workspace event]
@@ -63,13 +63,22 @@
       (assoc :workspace/last-actor participant)
       (assoc-in [:workspace/last-seen participant] (:workspace/version workspace))))
 
+;; Record that `participant` contributed nothing this turn (N14 §7).
 (defn- ^{:stratum 0} note-quiet
-  "Record that `participant` contributed nothing this turn (N14 §7)."
   [workspace participant]
   (update workspace :workspace/passed (fnil conj #{}) participant))
 
 ;; True while every configured run-level ceiling (activations, cost) has
 ;; room left; a dimension with no ceiling never blocks.
+;; Pass and frame-refusal markers hold only for the version they were recorded
+;; at: any commit, through this loop or straight through admission, starts a
+;; new round, so a stale marker can neither close the run nor exclude anyone.
+(defn- ^{:stratum 0} current-round [workspace]
+  (if (= (:workspace/round-version workspace) (:workspace/version workspace))
+    workspace
+    (assoc workspace :workspace/passed #{} :workspace/frame-refused #{}
+           :workspace/round-version (:workspace/version workspace))))
+
 (defn- ^{:stratum 0} allowance-remains?
   [workspace]
   (every? (fn [dimension]
@@ -85,8 +94,8 @@
   (and (= :full (get workspace :workspace/visibility :full))
        (nil? (get-in workspace [:workspace/readable participant]))))
 
+;; The first participant holding synthesizer responsibility, or nil.
 (defn- ^{:stratum 0} closer
-  "The first participant holding synthesizer responsibility, or nil."
   [workspace]
   (first (filter #(= :synthesizer (scheduler/responsibility-of workspace %))
                  (get workspace :workspace/roles []))))
@@ -103,8 +112,8 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+;; Fold `proposed` into `spent` through admission, logging the outcome.
 (defn- ^{:stratum 1} settle
-  "Fold `proposed` into `spent` through admission, logging the outcome."
   [spent proposed participant context]
   (let [result (admission/admit spent proposed context)]
     (if (anomaly/anomaly? result)
@@ -115,14 +124,13 @@
                       (open-view? spent participant) (assoc :reason (anomaly/subtype result))))
           (record-event {:event :transaction/rejected :role participant
                          :reason (anomaly/subtype result)}))
-      (-> (:workspace result)
-          (assoc :workspace/passed #{} :workspace/frame-refused #{})
+      (-> (current-round (:workspace result))
           (assoc-in [:workspace/feedback participant] {:status :committed})
           (record-event {:event :transaction/committed :role participant})))))
 
+;; Invoke the model for `participant` on `projection` and settle what it
+;; proposes. The turn is charged whether it commits, passes or is rejected.
 (defn- ^{:stratum 1} run-turn
-  "Invoke the model for `participant` on `projection` and settle what it
-   proposes. The turn is charged whether it commits, passes or is rejected."
   [workspace activate {:keys [participant reason target]} projection]
   (let [role (scheduler/responsibility-of workspace participant)
         context {:role role :participant participant
@@ -141,11 +149,11 @@
           (record-event {:event :transaction/passed :role participant}))
       (settle spent proposed participant context))))
 
+;; Record a turn refused before any model call because the participant's
+;; read scope withholds part of the required frame. Nothing ran, so nothing
+;; is charged; the participant counts as quiet, and the scheduler passes it
+;; over until the next commit changes the graph its frame is drawn from.
 (defn- ^{:stratum 1} refuse-turn
-  "Record a turn refused before any model call because the participant's
-   read scope withholds part of the required frame. Nothing ran, so nothing
-   is charged; the participant counts as quiet, and the scheduler passes it
-   over until the next commit changes the graph its frame is drawn from."
   [workspace participant withheld]
   (-> workspace
       (assoc :workspace/last-actor participant)
@@ -157,17 +165,21 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} activate-participant
-  "Run one work turn for `participant`. Identity, activation and basis come
-   from the runtime; the model's output is only a proposal. `activation` is
-   `{:participant :reason :target}`; a closure turn uses the same path. A
-   participant whose read scope withholds a goal or `:hard` constraint is
-   refused before the model runs (N14 §4)."
-  [workspace activate {:keys [participant] :as activation}]
-  (let [projection (render workspace participant)
-        withheld (seq (:projection/withheld-frame projection))]
-    (if withheld
-      (refuse-turn workspace participant withheld)
-      (run-turn workspace activate activation projection))))
+  "One work turn for `participant` (`activation`: `{:participant :reason :target}`).
+   An ordinary turn past the closure reserve, or a `:closure` turn with no
+   allowance left, is `:activation/unfunded`; one whose read scope withholds a
+   goal or `:hard` constraint is refused (N14 §4). Neither runs the model."
+  [workspace activate {:keys [participant reason] :as activation}]
+  (let [ws (current-round workspace)
+        projection (render ws participant)
+        withheld (seq (:projection/withheld-frame projection))
+        funded? (if (= :closure reason)
+                  (allowance-remains? ws)
+                  (nil? (termination/exhausted-budget ws)))]
+    (cond
+      (not funded?) (record-event ws {:event :activation/unfunded :role participant :reason reason})
+      withheld (refuse-turn ws participant withheld)
+      :else (run-turn ws activate activation projection))))
 
 (defn ^{:stratum 2} step
   "Run the next scheduled activation, or record that none is eligible.
@@ -199,7 +211,7 @@
              (assoc :termination/closure (closure-status workspace closed funded?))))))
 
 (defn- ^{:stratum 2} drive [workspace activate max-steps]
-  (loop [ws workspace
+  (loop [ws (current-round workspace)
          steps 0]
     (if-let [closing (termination/closing-rule ws)]
       (close ws activate closing)

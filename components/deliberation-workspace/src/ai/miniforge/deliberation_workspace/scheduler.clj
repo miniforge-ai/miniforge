@@ -42,9 +42,9 @@
        (remove object/terminal?)
        (sort-by :object/id)))
 
+;; Responsibilities activated only by deadlock or budget events, never by
+;; ordinary scheduling (N14 §5.2).
 (def ^{:stratum 0} event-only-responsibilities
-  "Responsibilities activated only by deadlock or budget events, never by
-   ordinary scheduling (N14 §5.2)."
   #{:meta-watchdog})
 
 (defn ^{:stratum 0} responsibility-of
@@ -53,17 +53,17 @@
   [workspace participant]
   (get-in workspace [:workspace/participant-roles participant] participant))
 
+;; The participant that acted most recently.
 (defn- ^{:stratum 0} last-actor
-  "The participant that acted most recently."
   [workspace]
   (let [logged (peek (get workspace :workspace/log []))]
     (get workspace :workspace/last-actor
          (or (:tx/participant logged) (:tx/role logged)))))
 
+;; The first of `candidates` following `previous` in `roster` order, wrapping.
+;; Rotation runs over the full roster, so a participant skipped this time
+;; never moves the rotation back to the start.
 (defn- ^{:stratum 0} next-after
-  "The first of `candidates` following `previous` in `roster` order, wrapping.
-   Rotation runs over the full roster, so a participant skipped this time
-   never moves the rotation back to the start."
   [roster candidates previous]
   (let [roster (vec roster)
         [before after] (split-at (inc (.indexOf roster previous)) roster)]
@@ -82,10 +82,10 @@
                  (contains? refused %))
             (get workspace :workspace/roles []))))
 
+;; Ordinary participants whose responsibility subscribes to `event`, in
+;; manifest order so selection never depends on map iteration order.
+;; Event-only participants never take structural work (N14 §5.2).
 (defn- ^{:stratum 1} eligible-participants
-  "Ordinary participants whose responsibility subscribes to `event`, in
-   manifest order so selection never depends on map iteration order.
-   Event-only participants never take structural work (N14 §5.2)."
   [workspace event]
   (let [subscribed (set (get-in workspace [:workspace/eligibility event] #{}))]
     (filter #(contains? subscribed (responsibility-of workspace %))

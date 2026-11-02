@@ -40,8 +40,14 @@ success, and counts quiescence by object growth.
     is included only when the participant sees every object (full visibility,
     no read scope), because otherwise the reason could reveal whether a hidden
     object exists. Trusted events always keep the reason.
-  - A pass or a rejection marks the participant quiet; a commit clears the
-    round.
+  - A pass or a rejection marks the participant quiet. Pass and
+    frame-refusal markers belong to the workspace version they were recorded
+    at, so any commit starts a new round, including one made directly
+    through `admit` or `replay-transaction`.
+  - `activate-participant` enforces the budget itself, so the public one-turn
+    entry point cannot bypass `run`'s checks. An ordinary turn past the
+    closure reserve, or a closure turn with no allowance left, is recorded as
+    `:activation/unfunded` without calling the model or charging anything.
   - New `close`: at a budget boundary, runs one closure turn for the first
     synthesizer when `:workspace/closure-reserve` is positive and activation
     allowance remains. It records `:termination/closure` as `:executed` or
@@ -101,7 +107,7 @@ before deadlock closure, and cost metering.
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 12 deliberation-workspace
-suites, 188 tests, 582 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
+suites, 190 tests, 588 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
 version) on the component: 0 errors. `poly test` and the Polylith check ran
 only in CI.
 
