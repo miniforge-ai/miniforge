@@ -62,7 +62,7 @@
 
 (defn- ^{:stratum 0} parse-json
   "Plain `try`: this base has no slingshot dependency and would add one
-   only for its two leaf catches (dewey 211, exemption 1). Unparseable text
+   only for its leaf catches (dewey 211, exemption 1). Unparseable text
    yields nil."
   [text]
   (try
@@ -80,11 +80,14 @@
      :provider-usd 0}))
 
 (defn- ^{:stratum 0} metered?
-  "True when `usage` is provider metering. Every real request sends input,
-   cached or not, so zero total input marks the llm client's default for a
-   response that reported none."
+  "True when `usage` is complete provider metering: an output count, and
+   positive total input, cached or not. Every real request sends input, so
+   zero total input marks the llm client's default for a response that
+   reported none."
   [usage]
-  (and (map? usage) (pos? (:input (metered-usage usage)))))
+  (and (map? usage)
+       (nat-int? (:output-tokens usage))
+       (pos? (:input (metered-usage usage)))))
 
 
 (defn- ^{:stratum 0} failure [subtype message-key]
@@ -120,6 +123,15 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn- ^{:stratum 1} complete!
+  "One streaming completion, or nil when the transport itself throws, as
+   it does when the `claude` executable is missing. Plain `try`: see
+   `parse-json`."
+  [client request]
+  (try
+    (llm/complete-stream client request (constantly nil))
+    (catch Exception _ nil)))
+
 (defn ^{:stratum 2} claude-call
   "A `call` for `run-cell`: one isolated completion per request, through
    the streaming path, which parses the provider's usage, with the
@@ -129,9 +141,8 @@
   (let [client (llm/create-client {:backend :claude :model model :isolated? true})
         prompt (system-prompt)]
     (fn [request]
-      (call-result (llm/complete-stream client
-                                        {:system prompt
-                                         :budget-usd (:call-cap-usd adapter)
-                                         :messages [{:role "user"
-                                                     :content (json/generate-string request)}]}
-                                        (constantly nil))))))
+      (call-result (complete! client
+                              {:system prompt
+                               :budget-usd (:call-cap-usd adapter)
+                               :messages [{:role "user"
+                                           :content (json/generate-string request)}]})))))

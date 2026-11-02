@@ -24,6 +24,7 @@
    [ai.miniforge.deliberation-lab.adapter :as adapter]
    [ai.miniforge.deliberation-lab.lab :as lab]
    [ai.miniforge.deliberation-lab.main :as main]
+   [ai.miniforge.llm.interface :as llm]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]])
   (:import
@@ -73,6 +74,8 @@
   (let [ok {:success true :content "not json"}]
     (is (anomaly/anomaly? (adapter/call-result (assoc ok :usage {:input-tokens 0 :output-tokens 0}))))
     (is (anomaly/anomaly? (adapter/call-result ok)))
+    (testing "input without an output count is incomplete metering"
+      (is (anomaly/anomaly? (adapter/call-result (assoc ok :usage {:input-tokens 10})))))
     (testing "cached input alone is still metered"
       (is (= {:input 50 :output 3 :provider-usd 0}
              (:usage (adapter/call-result (assoc ok :usage {:input-tokens 0 :output-tokens 3
@@ -113,3 +116,17 @@
                         {:kind :experiment-completed}]]
           (harness/append! journal record))
         (is (anomaly/anomaly? (lab/verify! output)))))))
+
+(deftest ^{:stratum 1 :integration true} a-malformed-task-package-fails-verification
+  (with-output
+    (fn [output]
+      (.mkdir (io/file output))
+      (let [journal (harness/open-journal! (str (io/file output "journal")))]
+        (doseq [record [{:kind :experiment-opened :tasks 42} {:kind :experiment-completed}]]
+          (harness/append! journal record))
+        (is (anomaly/anomaly? (lab/verify! output)))))))
+
+(deftest ^{:stratum 1} a-transport-that-throws-is-a-failed-call
+  (with-redefs [llm/complete-stream (fn [& _] (throw (java.io.IOException. "no claude")))]
+    (let [call (adapter/claude-call manifest)]
+      (is (anomaly/anomaly? (call {:task {:id "t"}}))))))

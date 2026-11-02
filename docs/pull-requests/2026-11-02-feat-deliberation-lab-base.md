@@ -36,8 +36,10 @@ base requires no component internals (dewey 311).
   - Token usage comes from the provider envelope. The adapter uses the
     streaming path, which parses it; the buffered path substitutes zero
     usage when none is parsed. A response without positive input tokens,
-    cached or uncached, is therefore a missing-usage failure, never a free
-    call.
+    cached or uncached, or without an output count, is therefore a
+    missing-usage failure, never a free or under-counted call. A transport
+    that throws, such as a missing `claude` executable, is an adapter
+    failure.
   - A model envelope with any field outside
     `#{:operations :inspect :solution :rationale}` is an invalid, charged
     payload.
@@ -61,7 +63,8 @@ base requires no component internals (dewey 311).
     `file-durability`, so a write failure is an anomaly.
   - `verify!` checks the chain, that the journal opens and closes a run, and
     that every recorded board replays from its own transaction log. A log
-    that cannot be replayed at all fails verification instead of throwing.
+    that cannot be replayed at all, or an opened record whose task package
+    is not a sequence of maps, fails verification instead of throwing.
   - `mock-call` for offline smoke runs.
 - `main`: `smoke`, `run`, `verify`. Results and anomalies print as data; an
   anomaly exits non-zero. A wrong argument count prints the usage instead of
@@ -118,11 +121,12 @@ Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
 sandbox), with scratch stand-ins outside the repo for the `llm` namespace
 (no calls are made) and for cheshire's JSON parsing:
 
-- `manifest_test` and `lab_test`: 8 tests, 36 assertions, 0 failures. The
+- `manifest_test` and `lab_test`: 10 tests, 39 assertions, 0 failures. The
   smoke test failed before the `journal/` change, the usage test before the
   argument-count change, and the metering, refusal and shape tests before
   the review fixes. The cached-usage, unreplayable-log and price-table cases
-  fail on the code before the second review round.
+  fail on the code before the second review round, and the output-count,
+  transport and task-package cases on the code before the third.
 - clj-kondo 2026.10.26 (the CI version) on `bases components development/src`:
   0 errors.
 

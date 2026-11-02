@@ -141,7 +141,7 @@
   "True when the board recorded for an activation rebuilds from its log. A
    log that cannot be replayed at all, such as one naming an absent object,
    does not rebuild. Plain `try`: this base has no slingshot dependency and
-   would add one only for its two leaf catches (dewey 211, exemption 1)."
+   would add one only for its leaf catches (dewey 211, exemption 1)."
   [tasks-by-id {:keys [task workspace]}]
   (try
     (= (:workspace/objects workspace)
@@ -186,18 +186,25 @@
       (anomaly/anomaly? journal) journal
       :else (record-run! pinned tasks journal output (make-call pinned)))))
 
+(defn- ^{:stratum 1} task-package?
+  "True when `tasks` is a sequence of task maps, as an opened record holds."
+  [tasks]
+  (and (sequential? tasks) (every? map? tasks)))
+
 (defn ^{:stratum 2} verify!
   "Verify the journal of the run in `directory`: one unbroken chain that opens and
    closes a run, with every recorded board rebuilt from its own log."
   [directory]
   (let [records (harness/read-journal (journal-path directory))
         payloads (when-not (anomaly/anomaly? records) (map :payload records))
-        tasks-by-id (into {} (map (juxt :id identity)) (:tasks (first payloads)))
+        tasks (:tasks (first payloads))
+        tasks-by-id (when (task-package? tasks) (into {} (map (juxt :id identity)) tasks))
         activations (filter #(= :activation (:kind %)) payloads)]
     (cond
       (anomaly/anomaly? records) records
       (not (and (= :experiment-opened (:kind (first payloads)))
-                (= :experiment-completed (:kind (last payloads)))))
+                (= :experiment-completed (:kind (last payloads)))
+                (task-package? tasks)))
       (refuse :conflict :anomaly/incomplete-run {:directory (str directory)})
       (not-every? #(replays? tasks-by-id %) activations)
       (refuse :conflict :anomaly/replay-mismatch {:directory (str directory)})
