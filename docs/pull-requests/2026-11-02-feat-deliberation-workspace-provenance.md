@@ -57,7 +57,7 @@ New admission tests cover:
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 12 deliberation-workspace
-suites, 174 tests, 581 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
+suites, 177 tests, 588 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
 version) on the component: 0 errors. `poly test` and the Polylith check ran
 only in CI.
 
@@ -67,7 +67,7 @@ None.
 
 ## Related Issues/PRs
 
-- Base: #2331. Contract: #2328.
+- Base: main, after #2331 merged. Contract: #2328.
 
 ## Checklist
 
