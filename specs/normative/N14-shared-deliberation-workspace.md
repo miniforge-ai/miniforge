@@ -182,12 +182,12 @@ Status transitions MUST be governed by structural rules, not numeric confidence:
 
 ### 2.5 Derived conflicts
 
-The workspace engine MUST derive `conflict` objects automatically when: two `:open`,
-`:contested` or `:accepted` claims are linked `contradicts`; an artifact-ref or plan violates a `:hard`
-constraint; or two `:open`, `:contested` or `:accepted` decisions target the same
-choice point. Rejected and superseded decisions are retained history and derive no new
-conflict. Conflicts MUST NOT be closed by
-deletion — only by a transaction that resolves or supersedes a participant.
+The workspace engine MUST derive `conflict` objects automatically when, among live
+records (`:open`, `:contested` or `:accepted`): two claims are linked `contradicts`; an
+artifact-ref or plan violates a `:hard` constraint; or two decisions target the same
+choice point. Rejected and superseded records are retained history and derive
+no new conflict. Conflicts MUST NOT be closed by deletion — only by a transaction that
+resolves or supersedes a participant.
 
 ## 3. Transactions
 
@@ -566,8 +566,10 @@ semantic admission, closure inside the total allowance) are not yet reflected in
 
 None of §9.1's event types is registered in N3 §6, so none is emitted. N6 exports,
 full Ariadne ownership, labels and provider policy, governed capsule execution, cost
-reservation, wall-clock budgeting, and watchdog and OCI integration are absent. Nothing
-here is an adopted workflow or a production authority boundary; §0.4 keeps this pre-gate.
+reservation, wall-clock budgeting, and watchdog and OCI integration are absent.
+Conflicts are derived only from `contradicts` links; §2.5's `:hard`-constraint violation
+and shared-choice-point triggers are not implemented. Nothing here is an adopted
+workflow or a production authority boundary; §0.4 keeps this pre-gate.
 
 ---
 
