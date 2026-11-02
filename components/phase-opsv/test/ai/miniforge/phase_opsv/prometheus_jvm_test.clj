@@ -6,6 +6,11 @@
   (:require [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.boundary.prometheus-http :as http]
             [ai.miniforge.phase-opsv.boundary.bounded-io :as io]
+            [ai.miniforge.phase-opsv.boundary.http-transport :as transport]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-http :as kubernetes]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-settings :as kubernetes-settings]
+            [ai.miniforge.phase-opsv.kubernetes-http-test-support :as kubernetes-wire]
+            [ai.miniforge.phase-opsv.kubernetes-reference-test-support :as target]
             [ai.miniforge.phase-opsv.measurement-test-support :as measurement]
             [ai.miniforge.phase-opsv.prometheus-test-support :as fixture :refer [failed-future]]
             [clojure.test :refer [deftest is]]
@@ -108,6 +113,24 @@
                   io/remaining-ms (constantly 0)]
       (is (= :timeout (:anomaly/type
                        (phase/observe-prometheus-window! (fixture/settings) (measurement/request))))))
+    (is (= 1 @closed))))
+
+(deftest ^{:stratum 2} test-kubernetes-real-jdk-bodies-close-on-success-absence-and-rejection
+  (let [settings (kubernetes-settings/load-settings (target/settings))]
+    (doseq [[status text] [[200 "{}"] [404 ""] [302 ""]]]
+      (let [closed (atom 0)
+            pending (fixture/completed (response closed status text))]
+        (with-redefs [transport/start! (constantly pending)]
+          (kubernetes/read-resource! settings (kubernetes-wire/deadline) kubernetes-wire/resource-path {}))
+        (is (= 1 @closed))))))
+
+(deftest ^{:stratum 2} test-kubernetes-real-jdk-body-closes-after-malformed-json
+  (let [settings (kubernetes-settings/load-settings (target/settings))
+        closed (atom 0)
+        pending (fixture/completed (response closed 200 "not-json"))]
+    (with-redefs [transport/start! (constantly pending)]
+      (is (thrown? Exception
+                   (kubernetes/read-resource! settings (kubernetes-wire/deadline) kubernetes-wire/resource-path {}))))
     (is (= 1 @closed))))
 
 (comment ::real-jdk-response-acceptance)

@@ -32,6 +32,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} json-get-options [uri token timeout-ms params]
+  {:uri uri
+   :method :get
+   :headers {"Accept" "application/json"
+             "Accept-Encoding" identity-coding}
+   :oauth-token token
+   :query-params params
+   :timeout timeout-ms
+   :async true
+   :raw true})
+
 (defn- ^{:stratum 1} identity-coding? [coding]
   (= identity-coding (.toLowerCase ^String (str/trim coding) Locale/ROOT)))
 

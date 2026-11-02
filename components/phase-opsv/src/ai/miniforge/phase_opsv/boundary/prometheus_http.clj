@@ -23,15 +23,8 @@
   (let [base (str/replace (:prometheus/base-url settings) #"/+$" "")
         uri (str base "/api/v1/query_range")
         params (query-parameters settings request)]
-    {:uri uri
-     :method :get
-     :headers {"Accept" "application/json"
-               "Accept-Encoding" transport/identity-coding}
-     :oauth-token (:prometheus/bearer-token settings)
-     :query-params params
-     :timeout (:prometheus/timeout-ms settings)
-     :async true
-     :raw true}))
+    (transport/json-get-options uri (:prometheus/bearer-token settings)
+                                (:prometheus/timeout-ms settings) params)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
