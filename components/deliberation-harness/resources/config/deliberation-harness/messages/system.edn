@@ -1,0 +1,16 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
+{:deliberation-harness/system
+ {:anomaly/unreadable-edn "Text is not readable EDN"
+  :anomaly/not-one-form   "EDN text must hold exactly one form"
+  :anomaly/unreadable-source "Source could not be read"
+  :anomaly/missing-resource "Resource is not on the classpath"
+  :anomaly/unlistable-journal "Journal directory cannot be listed"
+  :anomaly/unencodable-payload "Journal payloads must be plain EDN that reads back unchanged"
+  :anomaly/unscorable-task "A task needs a non-empty reference map and a map of experiments, and inspected ids must be a collection"
+  :anomaly/stray-journal-file "A journal directory holds record files only"
+  :anomaly/unknown-tag    "EDN carries a reader tag; journals and manifests hold plain data only"
+  :anomaly/journal-exists "Output directory must be new, with an existing parent"
+  :anomaly/broken-chain   "Experiment journal record breaks the hash chain"}}
