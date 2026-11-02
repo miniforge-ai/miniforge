@@ -34,11 +34,17 @@ Use captured-shape fixtures only, with no cluster access. Verify drift sensitivi
 stable ordering, malformed observations and sanitized diagnostics. Run affected
 product tests, packaged acceptance, adversarial standards review and normal gates.
 
-The public decoder, projections, schemas and assembly pass 13 native source tests
-and 52 assertions. The contract requires explicit cluster and node-pool selection,
+The public decoder, projections, schemas and assembly pass 15 native source tests
+and 64 assertions. The contract requires explicit cluster and node-pool selection,
 physical resource UIDs and immutable image IDs. Shared factories retain native
 Kubernetes string keys. Regressions cover inconsistent identities, missing or
 mismatched container status, image tags and sanitized unsupported content.
+
+Repeated logical or physical identities must agree on fingerprint material,
+including observed images and node runtime. Configuration admits typed v1
+ConfigMap, Secret, Namespace, Node and Pod observations; unknown kinds and versions
+are rejected. Workload-controller schemas are not claimed by this decoder.
+The review regressions first reproduced six failures without errors.
 
 The decoder does not establish capture freshness, authenticity or completeness
 against a live cluster. Read-only acquisition must bind target selection and

@@ -34,6 +34,12 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(def ^{:stratum 1} ClusterMetadata
+  [:and Metadata [:map ["namespace" {:optional true} :nil]]])
+
+(def ^{:stratum 1} NamespacedMetadata
+  [:and Metadata [:map ["namespace" schema/NonBlankString]]])
+
 (def ^{:stratum 1} Resource
   [:map ["apiVersion" schema/NonBlankString] ["kind" schema/NonBlankString] ["metadata" Metadata]])
 
@@ -53,7 +59,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (def ^{:stratum 2} Namespace
-  [:and Resource [:map ["apiVersion" [:= "v1"]] ["kind" [:= "Namespace"]]]])
+  [:and Resource [:map ["apiVersion" [:= "v1"]] ["kind" [:= "Namespace"]]
+                  ["metadata" ClusterMetadata]]])
 
 (def ^{:stratum 2} Secret
   [:and Resource
@@ -64,10 +71,12 @@
 
 (def ^{:stratum 2} Node
   [:and Resource [:map ["apiVersion" [:= "v1"]] ["kind" [:= "Node"]]
+                  ["metadata" ClusterMetadata]
                   ["status" [:map ["nodeInfo" NodeInfo]]]]])
 
 (def ^{:stratum 2} Pod
   [:and Resource [:map ["apiVersion" [:= "v1"]] ["kind" [:= "Pod"]]
+                  ["metadata" NamespacedMetadata]
                   ["spec" PodSpec] ["status" PodStatus]]])
 
 (comment ::kubernetes-producer-shapes)

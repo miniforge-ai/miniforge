@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-admission
   "Cross-resource consistency for a structurally admitted captured target."
-  (:require [ai.miniforge.phase-opsv.kubernetes-pod-consistency :as pod]
+  (:require [ai.miniforge.phase-opsv.kubernetes-identity-consistency :as identity]
+            [ai.miniforge.phase-opsv.kubernetes-pod-consistency :as pod]
             [ai.miniforge.phase-opsv.kubernetes-resource :as resource]
             [clojure.string :as str]))
 
@@ -13,12 +14,6 @@
 
 (defn- ^{:stratum 0} unique-by? [selector resources]
   (= (count resources) (count (set (map selector resources)))))
-
-(defn- ^{:stratum 0} same-identity? [resources]
-  (apply = (map resource/identity-key resources)))
-
-(defn- ^{:stratum 0} logical-identity [resource]
-  (pop (resource/identity-key resource)))
 
 (defn- ^{:stratum 0} node-usable? [label node]
   (and (nil? (resource/namespace-of node))
@@ -32,9 +27,6 @@
      :node-names node-names}))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} physical-identities-consistent? [resources]
-  (every? same-identity? (vals (group-by resource/uid resources))))
 
 (defn- ^{:stratum 1} config-scope? [target resource]
   (let [namespace (resource/namespace-of resource)
@@ -57,8 +49,8 @@
          (every? (comp nil? resource/namespace-of) [cluster namespace])
          (unique-by? resource/name-of nodes)
          (unique-by? resource/name-of pods)
-         (unique-by? logical-identity configuration)
-         (physical-identities-consistent? resources)
+         (unique-by? identity/logical-identity configuration)
+         (identity/consistent? resources)
          (every? (partial node-usable? label) nodes)
          (every? (partial pod/complete? context) pods)
          (every? (partial config-scope? (:namespace context)) configuration))))

@@ -3,14 +3,14 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-snapshot-schema
   "Captured observations for one explicit target; no acquisition or authority."
-  (:require [ai.miniforge.phase-opsv.kubernetes-resource-schema :as resource]
+  (:require [ai.miniforge.phase-opsv.kubernetes-configuration-schema :as configuration]
+            [ai.miniforge.phase-opsv.kubernetes-resource-schema :as resource]
             [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ConfigurationResource
-  [:or resource/Secret
-   [:and resource/Resource [:map ["kind" [:not [:= "Secret"]]]]]])
+  [:or configuration/ConfigMap resource/Secret resource/Namespace resource/Node resource/Pod])
 
 (def ^{:stratum 0} NodeList
   [:map ["apiVersion" [:= "v1"]] ["kind" [:= "NodeList"]]
