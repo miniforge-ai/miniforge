@@ -499,10 +499,11 @@
    object graph."
   [check-schema check-id-fields check-creates check-links check-outcome check-statement])
 
-;; The §5.3 role-permission stage alone. §3.4 orders permission before basis
-;; staleness, so admission runs this over the whole transaction before it
-;; checks the declared basis.
-(def ^{:stratum 2} permission-stages [check-permission])
+(def ^{:stratum 2} permission-stages
+  "The §5.3 role-permission stage alone. §3.4 orders permission before basis
+   staleness, so admission runs this over the whole transaction before it
+   checks the declared basis."
+  [check-permission])
 
 (def ^{:stratum 2} basis-stages
   "The §3.3 basis-staleness stage alone, for checking a transaction's
