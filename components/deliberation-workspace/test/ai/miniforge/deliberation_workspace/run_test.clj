@@ -260,3 +260,18 @@
     (is (nil? (get-in after [:workspace/spent :activations])))
     (is (= [{:event :activation/refused :role :proposer :withheld ["goal-1"]}]
            (events-of after :activation/refused)))))
+
+(deftest ^{:stratum 2} a-frame-refused-participant-does-not-stall-the-run
+  (let [ws (workspace :workspace/readable {:proposer #{}} :workspace/budget {:activations 2})
+        seen (atom [])
+        closed (run/run ws (fn [{:keys [participant]}] (swap! seen conj participant) nil)
+                        {:max-steps 20})]
+    (is (not= :step-bound-exceeded (get-in closed [:workspace/termination :termination/rule])))
+    (is (= [:skeptic :synthesizer] @seen))))
+
+(deftest ^{:stratum 2} a-refused-closure-is-recorded-as-refused
+  (let [ws (workspace :workspace/budget {:activations 3} :workspace/closure-reserve 1
+                      :workspace/spent {:activations 2}
+                      :workspace/readable {:synthesizer #{}})
+        closed (run/run ws (fn [_] (throw (ex-info "must not run" {}))) {})]
+    (is (= :refused (get-in closed [:workspace/termination :termination/closure])))))

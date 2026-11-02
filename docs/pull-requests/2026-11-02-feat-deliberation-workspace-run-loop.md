@@ -42,9 +42,13 @@ success, and counts quiescence by object growth.
     synthesizer when `:workspace/closure-reserve` is positive and activation
     allowance remains. It records `:termination/closure` as `:executed` or
     `:unfunded`.
-  - A turn whose read scope withholds a goal or `:hard` constraint is
-    refused before the model runs (N14 §4). It is not charged, it counts as
-    quiet, and the rotation moves on.
+  - A turn whose read scope withholds a goal or `:hard` constraint (the
+    projection's new `:projection/withheld-frame`) is refused before the
+    model runs (N14 §4). It is not charged, it counts as quiet, and the
+    scheduler passes the participant over until the next commit. A refused
+    closure turn is recorded as `:refused`.
+- `projection`: optional `:readable-ids` read scope (moved here from #2330)
+  and `:projection/withheld-frame`.
   - `:workspace/stages` is gone; admission's stage chain is fixed.
 - `scheduler`
   - `:workspace/participant-roles` maps participants to responsibilities.
@@ -88,7 +92,7 @@ before deadlock closure, and cost metering.
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 13 deliberation-workspace
-suites, 169 tests, 543 assertions, 0 failures. `poly test`, clj-kondo and
+suites, 176 tests, 555 assertions, 0 failures. `poly test`, clj-kondo and
 the Polylith check ran only in CI.
 
 ## Deployment Plan

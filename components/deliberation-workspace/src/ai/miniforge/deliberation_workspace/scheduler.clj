@@ -71,11 +71,15 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} ordinary-participants
-  "The population in manifest order, without event-only responsibilities.
-   These are the participants a quiescence round covers (N14 §7)."
+  "The population in manifest order, without event-only responsibilities
+   and without participants refused since the last commit because their
+   read scope withholds the required frame. These are the participants a
+   quiescence round covers (N14 §7)."
   [workspace]
-  (remove #(contains? event-only-responsibilities (responsibility-of workspace %))
-          (get workspace :workspace/roles [])))
+  (let [refused (get workspace :workspace/frame-refused #{})]
+    (remove #(or (contains? event-only-responsibilities (responsibility-of workspace %))
+                 (contains? refused %))
+            (get workspace :workspace/roles []))))
 
 (defn- ^{:stratum 1} eligible-participants
   "Ordinary participants whose responsibility subscribes to `event`, in

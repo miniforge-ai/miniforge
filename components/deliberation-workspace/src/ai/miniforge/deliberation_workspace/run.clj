@@ -27,7 +27,6 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-workspace.admission :as admission]
-   [ai.miniforge.deliberation-workspace.object :as object]
    [ai.miniforge.deliberation-workspace.projection :as projection]
    [ai.miniforge.deliberation-workspace.scheduler :as scheduler]
    [ai.miniforge.deliberation-workspace.termination :as termination]))
@@ -75,27 +74,21 @@
     (or (nil? budget)
         (< (get-in workspace [:workspace/spent :activations] 0) budget))))
 
-(defn- ^{:stratum 0} frame-ids
-  "Ids of the task frame every participant must receive: goals and `:hard`
-   constraints (N14 §4.2)."
-  [workspace]
-  (->> (vals (get workspace :workspace/objects {}))
-       (filter #(or (= :goal (:object/type %)) (object/hard-constraint? %)))
-       (map :object/id)
-       set))
-
-(defn- ^{:stratum 0} withheld-frame
-  "Frame ids `projection` does not deliver. Non-empty when the runtime read
-   scope hides a required goal or constraint: the turn must be refused
-   rather than run on a partial frame (N14 §4)."
-  [workspace projection]
-  (remove (set (map :object/id (:projection/objects projection))) (frame-ids workspace)))
-
 (defn- ^{:stratum 0} closer
   "The first participant holding synthesizer responsibility, or nil."
   [workspace]
   (first (filter #(= :synthesizer (scheduler/responsibility-of workspace %))
                  (get workspace :workspace/roles []))))
+
+(defn- ^{:stratum 0} closure-status
+  "How the closure turn ended: never attempted, refused before the model
+   ran (nothing was charged), or executed."
+  [before after funded?]
+  (cond
+    (not funded?) :unfunded
+    (= (get-in before [:workspace/spent :activations])
+       (get-in after [:workspace/spent :activations])) :refused
+    :else :executed))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -111,7 +104,7 @@
           (record-event {:event :transaction/rejected :role participant
                          :reason (anomaly/subtype result)}))
       (-> (:workspace result)
-          (assoc :workspace/passed #{})
+          (assoc :workspace/passed #{} :workspace/frame-refused #{})
           (assoc-in [:workspace/feedback participant] {:status :committed})
           (record-event {:event :transaction/committed :role participant})))))
 
@@ -139,10 +132,12 @@
 (defn- ^{:stratum 1} refuse-turn
   "Record a turn refused before any model call because the participant's
    read scope withholds part of the required frame. Nothing ran, so nothing
-   is charged; the participant counts as quiet and the rotation moves on."
+   is charged; the participant counts as quiet, and the scheduler passes it
+   over until the next commit changes the graph its frame is drawn from."
   [workspace participant withheld]
   (-> workspace
       (assoc :workspace/last-actor participant)
+      (update :workspace/frame-refused (fnil conj #{}) participant)
       (note-quiet participant)
       (record-event {:event :activation/refused :role participant
                      :withheld (vec (sort withheld))})))
@@ -157,7 +152,7 @@
    refused before the model runs (N14 §4)."
   [workspace activate {:keys [participant] :as activation}]
   (let [projection (render workspace participant)
-        withheld (seq (withheld-frame workspace projection))]
+        withheld (seq (:projection/withheld-frame projection))]
     (if withheld
       (refuse-turn workspace participant withheld)
       (run-turn workspace activate activation projection))))
@@ -174,7 +169,8 @@
 (defn ^{:stratum 2} close
   "Attach `closing` to `workspace`. A budget boundary runs one closure turn
    for the synthesizer when the manifest reserved one (N14 §6.3, §7.2);
-   without a reserve or a synthesizer the closure is recorded unfunded."
+   without a reserve, allowance or synthesizer it is recorded `:unfunded`,
+   and a closure turn refused for a withheld frame is recorded `:refused`."
   [workspace activate closing]
   (let [participant (closer workspace)
         funded? (and (:termination/forced-synthesis closing)
@@ -188,7 +184,7 @@
     (assoc closed :workspace/termination
            (cond-> closing
              (:termination/forced-synthesis closing)
-             (assoc :termination/closure (if funded? :executed :unfunded))))))
+             (assoc :termination/closure (closure-status workspace closed funded?))))))
 
 (defn ^{:stratum 2} run
   "Drive the loop until a §7 closing rule fires, then return the closed
