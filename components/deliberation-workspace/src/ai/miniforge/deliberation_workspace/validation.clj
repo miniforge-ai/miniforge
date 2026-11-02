@@ -43,6 +43,21 @@
   [workspace]
   (get workspace :workspace/objects {}))
 
+(defn ^{:stratum 0} created-specs
+  "The object specifications `operation` asks to create."
+  [operation]
+  (get operation :creates []))
+
+(defn ^{:stratum 0} text?
+  "True when `value` is a non-blank string."
+  [value]
+  (and (string? value) (not (str/blank? value))))
+
+(defn ^{:stratum 0} reject-operation
+  "An `:invalid-input` rejection of `operation` with `subtype`."
+  [subtype message operation]
+  (anomaly/sub-anomaly :invalid-input subtype message {:op (:op operation)}))
+
 (defn- ^{:stratum 0} link-defect
   "The first structural defect in a `:links` map, as `[reason data]`, or nil
    when the engine can write every edge the map declares: a map, keyed by
@@ -454,6 +469,20 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(def ^{:stratum 2} payload-stages
+  "The §3.4 stages that read only the transaction's own payload, never the
+   object graph."
+  [check-schema check-id-fields check-creates check-links check-outcome check-statement])
+
+(def ^{:stratum 2} basis-stages
+  "The §3.3 basis-staleness stage alone, for checking a transaction's
+   declared basis separately from its other graph checks."
+  [check-basis])
+
+(def ^{:stratum 2} graph-stages
+  "The §3.4 stages that read the object graph."
+  (into [check-targets check-replacement check-permission] basis-stages))
+
 (def ^{:stratum 2} concurrency-stages
   "Ordered §3.4 stages. Schema conformance runs first because every later
    stage reads the operation vocabulary, and payload conformance follows it
@@ -476,5 +505,4 @@
    transaction can carry a malformed payload and a missing target at once,
    and the payload is the more basic fault: the ids a graph stage would
    report come out of the same payload whose shape is not yet established."
-  [check-schema check-id-fields check-creates check-links check-outcome
-   check-statement check-targets check-replacement check-permission check-basis])
+  (into payload-stages graph-stages))
