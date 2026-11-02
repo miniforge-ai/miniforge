@@ -36,7 +36,10 @@
   "Record files are the sequence number, zero-padded to at least six digits."
   #"([0-9]{6,})\.edn")
 
-(def ^{:stratum 0} record-name-format "%06d.edn")
+(def ^{:stratum 0} record-name-format
+  "The sequence zero-padded to six digits, so names list in sequence order up
+   to 999999; `record-files` sorts numerically past that."
+  "%06d.edn")
 
 (defn- ^{:stratum 0} record-name [sequence]
   (String/format Locale/ROOT record-name-format (to-array [sequence])))
@@ -44,8 +47,8 @@
 (defn- ^{:stratum 0} record-file [directory sequence]
   (io/file directory (record-name sequence)))
 
+;; The sequence number a record file's name carries, or nil for another file.
 (defn- ^{:stratum 0} record-number
-  "The sequence number a record file's name carries, or nil for another file."
   [^File file]
   (some-> (re-matches record-name-pattern (.getName file)) second bigint))
 
@@ -70,8 +73,8 @@
 (defn- ^{:stratum 0} failure [result]
   (when (anomaly/anomaly? result) result))
 
+;; `record` with its own hash, computed over everything else in it.
 (defn- ^{:stratum 0} sealed
-  "`record` with its own hash, computed over everything else in it."
   [record]
   (assoc record :hash (codec/digest record)))
 
@@ -97,8 +100,8 @@
       (anomaly/anomaly :conflict (messages/system-t :anomaly/journal-exists)
                        {:directory (str dir)}))))
 
+;; Write `record` to its file and force it, returning nil or the anomaly.
 (defn- ^{:stratum 1} persist!
-  "Write `record` to its file and force it, returning nil or the anomaly."
   [directory record]
   (let [file (record-file directory (:sequence record))]
     (or (failure (durable/write-new-text! file (codec/encode record)))
@@ -124,10 +127,10 @@
           :else (chain-anomaly file)))
       records)))
 
+;; Seal and force `payload` as the next record, returning its hash or the
+;; write anomaly. A failed write leaves the position where it was, so
+;; nothing later can chain onto a record that was not forced.
 (defn- ^{:stratum 1} write-next!
-  "Seal and force `payload` as the next record, returning its hash or the
-   write anomaly. A failed write leaves the position where it was, so
-   nothing later can chain onto a record that was not forced."
   [journal payload]
   (let [directory (:journal/directory journal)
         position (:journal/position journal)]

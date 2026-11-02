@@ -33,7 +33,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} digest-algorithm "SHA-256")
+(def ^{:stratum 0} digest-algorithm
+  "SHA-256: collision-resistant and present in every JDK, so a digest computed
+   on one host verifies on any other."
+  "SHA-256")
 
 (deftype ^{:stratum 0} RejectedTag [tag])
 

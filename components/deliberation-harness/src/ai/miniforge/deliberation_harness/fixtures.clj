@@ -26,7 +26,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} tasks-resource "config/deliberation-harness/tasks.edn")
+(def ^{:stratum 0} tasks-resource
+  "Classpath resource holding the synthetic tasks and their sealed answers,
+   packaged with the component so a run never reads them from the working tree."
+  "config/deliberation-harness/tasks.edn")
 
 (def ^{:stratum 0} public-keys
   "The only task fields a model request may carry."
@@ -43,9 +46,9 @@
 (defn- ^{:stratum 0} complete-inspection? [task inspected]
   (= (set (keys (:experiments task))) (set inspected)))
 
+;; True when `task` has a non-empty reference map, its experiments (if any)
+;; are a map, and `inspected` is a collection of experiment ids (or nil).
 (defn- ^{:stratum 0} scorable?
-  "True when `task` has a non-empty reference map, its experiments (if any)
-   are a map, and `inspected` is a collection of experiment ids (or nil)."
   [task inspected]
   (and (map? (:reference task)) (seq (:reference task))
        (or (nil? (:experiments task)) (map? (:experiments task)))
