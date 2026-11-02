@@ -82,13 +82,15 @@
          (receipt-matches? receipt :execution (:object/statement evidence)))))
 
 (defn- ^{:stratum 1} attaches-execution?
-  "True when `operation` creates or links `:execution` evidence."
+  "True when `operation` creates `:execution` evidence or links any to a
+   target — through its own `:supports` or a created object's."
   [workspace operation]
-  (let [objects (validation/objects-of workspace)]
-    (or (some #(execution-class? (get-in % [:attrs :source-class]))
-              (validation/created-specs operation))
-        (some #(execution-class? (get-in objects [% :object/attrs :source-class]))
-              (get-in operation [:links :supports] [])))))
+  (let [objects (validation/objects-of workspace)
+        created (validation/created-specs operation)
+        supports (concat (get-in operation [:links :supports] [])
+                         (mapcat #(get-in % [:links :supports] []) created))]
+    (or (some #(execution-class? (get-in % [:attrs :source-class])) created)
+        (some #(execution-class? (get-in objects [% :object/attrs :source-class])) supports))))
 
 (defn- ^{:stratum 1} check-provenance [workspace operation {:keys [role]}]
   (when (or (some #(unattested-spec? workspace role %) (validation/created-specs operation))
@@ -108,7 +110,7 @@
           created (into {} (map (juxt :id :type)) (validation/created-specs operation))
           type-of #(or (:object/type (get (validation/objects-of workspace) %)) (get created %))]
       (when (or (empty? supports)
-                (not-every? (set supports) (keys created))
+                (not-every? (set supports) (concat (keys created) (get operation :evidence [])))
                 (some #(not= :evidence (type-of %)) supports))
         (validation/reject-operation :anomalies.deliberation/evidence-link
                                      (messages/system-t :anomaly/evidence-link) operation)))))

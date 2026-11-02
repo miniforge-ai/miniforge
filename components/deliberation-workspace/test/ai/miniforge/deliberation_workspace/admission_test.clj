@@ -275,3 +275,23 @@
                          {:op :accept-decision :targets ["d1" "d2"]}))]
     (is (some? (admitted ws :synthesizer {:op :close-goal :targets [goal-id "goal-2"]
                                           :outcome :accepted :links {:resolves ["d1" "d2"]}})))))
+
+(deftest ^{:stratum 1} a-created-claim-cannot-link-execution-evidence-for-a-non-verifier
+  (let [ws (admitted (receipted (seed-workspace) "r-1" "observed") :verifier (claim "c")
+                     {:op :attach-evidence :targets ["c"] :links {:supports ["e"]}
+                      :creates [(execution-evidence "e" "r-1" "observed")]})]
+    (is (= :anomalies.deliberation/unattested-provenance
+           (subtype-of (submit ws :proposer
+                               {:op :assert-claim
+                                :creates [{:id "c2" :type :claim :statement "borrowed"
+                                           :links {:supports ["e"]}}]}))))))
+
+(deftest ^{:stratum 1} cited-evidence-must-be-attached
+  (let [analysis (fn [id] {:id id :type :evidence :statement id
+                           :attrs {:source-class :agent-analysis}})
+        ws (admitted (seed-workspace) :proposer (claim "c")
+                     {:op :attach-evidence :targets ["c"] :links {:supports ["e1" "e2"]}
+                      :creates [(analysis "e1") (analysis "e2")]})]
+    (is (= :anomalies.deliberation/evidence-link
+           (subtype-of (submit ws :proposer {:op :attach-evidence :targets ["c"]
+                                             :links {:supports ["e1"]} :evidence ["e2"]}))))))
