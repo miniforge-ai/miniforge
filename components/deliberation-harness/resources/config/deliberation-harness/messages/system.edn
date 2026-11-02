@@ -1,0 +1,9 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
+{:deliberation-harness/system
+ {:anomaly/unreadable-edn "Text is not readable EDN"
+  :anomaly/unknown-tag    "EDN carries a reader tag; journals and manifests hold plain data only"
+  :anomaly/journal-exists "Output directory must be new, with an existing parent"
+  :anomaly/broken-chain   "Experiment journal record breaks the hash chain"}}
