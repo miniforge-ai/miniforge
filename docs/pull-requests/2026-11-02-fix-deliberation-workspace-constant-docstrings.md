@@ -16,7 +16,7 @@ value means and why it was chosen.
 ## Motivation
 
 `named-constants` (dewey 006, `alwaysApply`, hard-halt) says a named `def`
-carries a docstring explaining its intent, and `documentation-discipline`
+carries a docstring explaining its intent. `documentation-discipline`
 (dewey 600) asks that 006 docstrings be preserved verbatim. A `;;` comment
 above a `def` is not attached to the var, so `doc` and tooling cannot see it.
 The budget pressure that caused the conversion is gone now that #2331 has

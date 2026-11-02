@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-test-support
   "Captured-shape read fixtures; no Kubernetes calls."
-  (:require [ai.miniforge.phase-opsv.kubernetes-container-test-support :as containers]))
+  (:require [ai.miniforge.phase-opsv.kubernetes-container-test-support :as containers]
+            [ai.miniforge.phase-opsv.kubernetes-api :as api]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -60,7 +61,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} snapshot []
-  (let [cluster (kube-resource "Namespace" (metadata "kube-system" nil "cluster-uid") {})
+  (let [cluster (kube-resource "Namespace" (metadata api/cluster-identity-namespace nil "cluster-uid") {})
         namespace (kube-resource "Namespace" (metadata "staging" nil "namespace-uid") {})
         nodes (resource-list "NodeList" [(node)])
         pods (resource-list "PodList" [(pod)])

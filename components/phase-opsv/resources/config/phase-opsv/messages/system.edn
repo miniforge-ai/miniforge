@@ -1,5 +1,7 @@
 {:phase-opsv/system
  {:adapter/missing "The OPSV workflow requires an adapter implementing OPSVAdapter."
+  :discovery/invalid-settings "Signal discovery requires explicit target settings, queries and distinct metric-label bindings."
+  :discovery/unbound-signal "The acquired metric labels do not match the declared Kubernetes service target."
   :prometheus/invalid-settings "Prometheus requires a valid explicit endpoint and bounded transport settings; bearer credentials require HTTPS."
   :prometheus/unavailable "Prometheus measurement acquisition failed; no complete observation is available."
   :prometheus/timeout "Prometheus measurement acquisition exceeded its deadline."
@@ -15,6 +17,10 @@
   :verification/environment-mismatch "The verification environment differs from the experiment environment."
   :kubernetes/invalid-snapshot "Kubernetes observations are incomplete or inconsistent for the declared target."
   :kubernetes/invalid-settings "Kubernetes acquisition requires a valid explicit HTTPS endpoint and bounded target settings."
+  :kubernetes/invalid-response "Kubernetes returned an invalid or incomplete bounded observation."
+  :kubernetes/http-status "Kubernetes API read returned an unsuccessful HTTP status."
+  :kubernetes/timeout "Kubernetes acquisition exceeded its declared capture deadline."
+  :kubernetes/unavailable "Kubernetes acquisition failed without a complete observation."
   :pr/policy-mismatch "Prepared PR target does not match the verified policy."
   :pr/invalid-correlation "OPSV PR preparation requires a workflow UUID and a valid owner/repository identity."
   :pr/unconfirmed "OPSV PR execution has no confirmed successful outcome."

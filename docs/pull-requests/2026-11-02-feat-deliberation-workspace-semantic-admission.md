@@ -21,8 +21,8 @@ N14 §0.5 and `N14.WS.7` require participant, responsibility, activation and
 basis to come from the runtime, never from model output. §3.4 requires each
 operation to enforce its creation and target types, required fields and
 reference integrity. It also forbids model-supplied authority, policy or
-unattested provenance, requires goal closure to name an adopted covering
-decision, and requires candidate validation to see earlier operations in the
+unattested provenance. Goal closure must name an adopted covering decision.
+Candidate validation must see earlier operations in the
 same transaction without publishing partial state. Main has none of these
 checks.
 
@@ -31,7 +31,7 @@ checks.
 - `admission` (new): `admit [workspace proposal context]`. Returns
   `{:workspace :transaction}` or a rejection anomaly, leaving the workspace
   untouched on rejection. Admission runs five steps in order:
-  1. Rejects a non-map, invalid or future context, a proposal field outside
+  1. Rejects a non-map, invalid or future context. Also rejects a proposal field outside
      `#{:tx/operations :tx/role}`, a `:tx/role` that differs from the
      context, or an operation count outside 1 to 128.
   2. Runs the payload stages over the whole transaction.
@@ -41,8 +41,8 @@ checks.
   4. Checks the declared basis against the real workspace.
   5. Validates each operation against the candidate (graph, semantic and
      guard stages), then commits the whole transaction once. The candidate is
-     folded through the new `commit/stage`, which does not derive conflicts,
-     so conflicts are derived once at the same transaction boundary that
+     folded through the new `commit/stage`, which does not derive conflicts.
+     Conflicts are therefore derived once at the same transaction boundary that
      publication uses.
 - `semantics` (new):
   - closed operation, creation and attribute fields;
@@ -79,8 +79,8 @@ Deviations from the snapshot:
   checks are named stages, each with its own anomaly subtype, so the
   scheduler can route on the reason.
 - Attestation (hard-constraint sources, evidence receipts, experiment
-  results, artifact exports) moves to a follow-up PR stacked on this one, so
-  that each PR stays under the 600-line budget.
+  results, artifact exports) moves to a follow-up PR stacked on this one.
+  This keeps each PR under the 600-line budget.
 - `admit` returns an anomaly rather than `{:rejection ...}`.
 - A proposal may no longer carry `:tx/activation` or `:tx/basis`; the
   snapshot accepted them and silently overwrote them.
@@ -107,8 +107,8 @@ New `admission_test` covers:
 - dangling references, distinct contributions versus retries, and basis
   staleness.
 
-Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
-unreachable from the authoring sandbox): all 12 deliberation-workspace suites,
+Ran locally on plain Clojure 1.12 with a local malli stand-in.
+Clojars is unreachable from the authoring sandbox. All 12 deliberation-workspace suites ran:
 169 tests, 549 assertions, 0 failures. clj-kondo 2026.10.26 (the CI version)
 on the component: 0 errors. `poly test` and the Polylith check ran only in CI.
 

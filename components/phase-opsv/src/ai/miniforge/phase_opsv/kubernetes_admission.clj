@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.kubernetes-admission
   "Cross-resource consistency for a structurally admitted captured target."
   (:require [ai.miniforge.phase-opsv.kubernetes-identity-consistency :as identity]
+            [ai.miniforge.phase-opsv.kubernetes-api :as api]
             [ai.miniforge.phase-opsv.kubernetes-pod-consistency :as pod]
             [ai.miniforge.phase-opsv.kubernetes-resource :as resource]
             [clojure.string :as str]))
@@ -38,7 +39,7 @@
         configuration (:kubernetes/configuration snapshot)
         context (capture-scope snapshot)
         resources (concat [cluster namespace] nodes pods configuration)]
-    (and (= "kube-system" (resource/name-of cluster))
+    (and (= api/cluster-identity-namespace (resource/name-of cluster))
          (every? (comp nil? resource/namespace-of) [cluster namespace])
          (unique-by? resource/name-of nodes)
          (unique-by? resource/name-of pods)

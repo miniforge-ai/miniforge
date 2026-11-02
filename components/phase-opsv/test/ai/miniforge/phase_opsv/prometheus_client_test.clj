@@ -11,7 +11,8 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]])
-  (:import [java.util Locale]
+  (:import [java.net HttpURLConnection]
+           [java.util Locale]
            [java.util.concurrent CompletableFuture TimeoutException]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -42,7 +43,7 @@
                     (fixture/response (str (fixture/successful-text) " trailing-data"))
                     (fixture/response (str/replace (fixture/successful-text) "\"status\":\"success\""
                                                    "\"status\":\"error\",\"status\":\"success\""))
-                    (fixture/response (fixture/successful-text) {:status 302})
+                    (fixture/response (fixture/successful-text) {:status HttpURLConnection/HTTP_MOVED_TEMP})
                     (fixture/response (fixture/successful-text) {:status 503})
                     (fixture/response (fixture/successful-text) {:encodings ["gzip"]})]]
     (is (anomaly/anomaly? (observe (fixture/settings) (fixture/completed response) (atom [])))))

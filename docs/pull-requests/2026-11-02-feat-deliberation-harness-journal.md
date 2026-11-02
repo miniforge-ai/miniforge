@@ -30,8 +30,8 @@ codec and fixtures belong in a component.
     then value's canonical text, set elements by their own text. No sorted
     collection is built, so ordering never has to agree with Clojure
     equality and no entry is merged or dropped. A record, host collection or
-    array is tagged with its class and a float is written as the exact double it widens to, so
-    neither shares a digest with a different value. Printer settings are pinned,
+    array is tagged with its class. A float is written as the exact double it
+    widens to. Neither shares a digest with a different value. Printer settings are pinned,
     so a caller's `*print-length*` cannot truncate a record.
   - SHA-256 digest.
   - `read-text`: parses exactly one plain EDN form and returns an anomaly
@@ -39,7 +39,7 @@ codec and fixtures belong in a component.
     becomes a `deftype` marker that plain EDN cannot construct. It neither
     throws nor evaluates a tag.
   - `read-source`: reads a file or resource as strict UTF-8, so malformed
-    bytes are an anomaly rather than U+FFFD; a read or parse failure is an
+    bytes are an anomaly rather than U+FFFD. A read or parse failure is an
     anomaly naming the source.
   - `plain?`: true when a value reads back unchanged after encoding. Anything
     but EDN's own scalars and Clojure collections is refused before encoding.
@@ -47,8 +47,8 @@ codec and fixtures belong in a component.
     object whose printing throws cannot make `append!` throw.
 - `journal`
   - `open!` refuses a directory that already exists.
-  - `append!` refuses a payload that is not `plain?` (it could not be
-    replayed), then writes each record to a new file through `file-durability`
+  - `append!` refuses a payload that is not `plain?`, since it could not be
+    replayed. It writes each record to a new file through `file-durability`
     and forces it. The position only advances after a successful write.
   - Record names are the sequence zero-padded to at least six digits,
     formatted with `Locale/ROOT` and ordered numerically, so sequence
@@ -84,18 +84,17 @@ Deviations from the snapshot:
 
 ## Testing Plan
 
-- `codec_test`: order-independent encoding, digest stability, refused
-  custom tags, unreadable text, trailing forms, an unforgeable tag marker,
-  encoding under hostile printer bindings, no entry ever dropped, equal
-  keys counted once, nil keys, `plain?`, a self-referential host collection
-  and an object whose printing throws, and a tag inside anomaly-shaped text.
-- `journal_test` (marked `:integration`; it writes a temporary directory,
-  because durable files are the journal's contract): round trip, refusal
-  to reuse a directory, tamper detection, an unlistable directory, an
-  unreadable record, numeric ordering past six digits, an unreplayable
-  payload refused without moving the position, a failed write that leaves
-  the position where it was, a malformed record naming its file, malformed
-  UTF-8 that never verifies.
+- `codec_test`: order-independent encoding, digest stability, refused custom
+  tags, unreadable text and trailing forms. Coverage includes an unforgeable tag
+  marker, hostile printer bindings, no dropped entries, equal keys counted once,
+  nil keys and `plain?`. Cases also include a self-referential host collection,
+  an object whose printing throws, and a tag inside anomaly-shaped text.
+- `journal_test` is marked `:integration` and writes a temporary directory:
+  durable files are the journal's contract. Cases cover round trip, directory
+  reuse refusal, tamper detection, unlistable directories and unreadable records.
+  Numeric ordering past six digits is tested. Unreplayable payloads and failed
+  writes must leave the position unchanged. Malformed records name their files;
+  malformed UTF-8 never verifies.
 - `fixtures_test`: every reference passes and every distractor fails; success
   needs every observation; the public view hides the sealed answer.
 

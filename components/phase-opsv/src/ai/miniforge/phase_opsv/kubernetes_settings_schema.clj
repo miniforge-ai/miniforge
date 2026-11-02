@@ -3,21 +3,17 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-settings-schema
   (:require [ai.miniforge.phase-opsv.http-schema :as http]
+            [ai.miniforge.phase-opsv.kubernetes-name-schema :as names]
             [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} NamespaceName
-  [:and [:string {:max 63}] [:re #"\A[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\z"]])
-
-;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} Settings
+(def ^{:stratum 0} Settings
   [:map {:closed true}
    [:kubernetes/base-url schema/NonBlankString]
    [:kubernetes/bearer-token {:optional true} http/BearerToken]
    [:kubernetes/cluster-id schema/NonBlankString]
-   [:kubernetes/namespace NamespaceName]
+   [:kubernetes/namespace names/NamespaceName]
    [:kubernetes/pod-selector schema/NonBlankString]
    [:kubernetes/node-pool-label schema/NonBlankString]
    [:kubernetes/timeout-ms http/TimeoutMillis]
