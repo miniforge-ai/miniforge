@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.kubernetes-read-plan
   "Explicit native API reads for one admitted Pod selection."
   (:require [ai.miniforge.phase-opsv.kubernetes-configuration-schema :as configuration]
+            [ai.miniforge.phase-opsv.kubernetes-api :as api]
             [ai.miniforge.phase-opsv.kubernetes-resource-schema :as resource])
   (:import [java.net URLEncoder]
            [java.nio.charset StandardCharsets]))
@@ -33,10 +34,10 @@
 (defn ^{:stratum 2} request [kind namespace optional? name]
   (let [[plural schema] (get resource-types kind)
         prefix (namespace-path namespace)
-        path (str "/api/v1" prefix "/" plural "/" (segment name))]
+        path (str api/core-api-prefix prefix "/" plural "/" (segment name))]
     [path schema [kind namespace name] optional?]))
 
 (defn ^{:stratum 2} pods-path [namespace]
-  (str "/api/v1" (namespace-path namespace) "/pods"))
+  (str api/core-api-prefix (namespace-path namespace) "/pods"))
 
 (comment ::typed-kubernetes-read-requests)

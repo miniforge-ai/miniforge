@@ -8,6 +8,7 @@
             [ai.miniforge.phase-opsv.boundary.kubernetes-resource-reads :as reads]
             [ai.miniforge.phase-opsv.boundary.kubernetes-response :as response]
             [ai.miniforge.phase-opsv.boundary.kubernetes-fingerprint :as fingerprint]
+            [ai.miniforge.phase-opsv.kubernetes-api :as api]
             [ai.miniforge.phase-opsv.kubernetes-capture-plan :as plan]
             [ai.miniforge.phase-opsv.kubernetes-read-plan :as requests]))
 
@@ -31,7 +32,7 @@
 (defn ^{:stratum 1} capture! [settings until]
   (anomaly/let-ok [pods (pods/read! settings until)
                    planned (admit-plan settings pods)
-                   cluster (reads/read! settings until (requests/request "Namespace" nil false "kube-system"))
+                   cluster (reads/read! settings until (requests/request "Namespace" nil false api/cluster-identity-namespace))
                    namespace (reads/read! settings until (requests/request "Namespace" nil false (:kubernetes/namespace settings)))
                    nodes (read-many! settings until (:plan/nodes planned))
                    configuration (read-many! settings until (:plan/configuration planned))]
