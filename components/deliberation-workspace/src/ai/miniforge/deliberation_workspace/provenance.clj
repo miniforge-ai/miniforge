@@ -22,6 +22,7 @@
    what the model asserts."
   (:require
    [ai.miniforge.deliberation-workspace.messages :as messages]
+   [ai.miniforge.deliberation-workspace.object :as object]
    [ai.miniforge.deliberation-workspace.validation :as validation]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -115,11 +116,20 @@
         (validation/reject-operation :anomalies.deliberation/evidence-link
                                      (messages/system-t :anomaly/evidence-link) operation)))))
 
+;; A result cites attested execution evidence that every target experiment
+;; links under `:supports`, already or through this operation's `:links`, so
+;; the completed experiment keeps its observation.
 (defn- ^{:stratum 1} check-experiment-result [workspace operation _context]
-  (when (and (= :record-experiment-result (:op operation))
-             (not (some #(attested-execution? workspace %) (get operation :evidence []))))
-    (validation/reject-operation :anomalies.deliberation/unbacked-result
-                                 (messages/system-t :anomaly/unbacked-result) operation)))
+  (let [linked (set (get-in operation [:links :supports] []))
+        supported? (fn [id target]
+                     (or (contains? linked id)
+                         (contains? (object/linked (get (validation/objects-of workspace) target) :supports) id)))
+        backs? (fn [id] (and (attested-execution? workspace id)
+                             (every? #(supported? id %) (get operation :targets []))))]
+    (when (and (= :record-experiment-result (:op operation))
+               (not (some backs? (get operation :evidence []))))
+      (validation/reject-operation :anomalies.deliberation/unbacked-result
+                                   (messages/system-t :anomaly/unbacked-result) operation))))
 
 (defn- ^{:stratum 1} check-artifact-export
   "An artifact reference names a capsule export the runtime recorded."

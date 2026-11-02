@@ -230,6 +230,23 @@
            (subtype-of (submit ws :verifier {:op :record-experiment-result :targets ["x"]
                                              :evidence ["e"]}))))))
 
+(deftest ^{:stratum 1} an-experiment-result-keeps-its-evidence-link
+  (let [ws (-> (receipted (seed-workspace) "r-1" "observed")
+               (admitted :proposer {:op :propose-experiment
+                                    :creates [{:id "x" :type :experiment :statement "probe"}]}))
+        attach {:op :attach-evidence :targets ["x"] :links {:supports ["e"]}
+                :creates [(execution-evidence "e" "r-1" "observed")]}
+        result {:op :record-experiment-result :targets ["x"] :evidence ["e"]}
+        done (admitted ws :verifier attach result)]
+    (is (= :completed (:object/status (object-at done "x"))))
+    (is (contains? (get-in (object-at done "x") [:object/links :supports]) "e"))
+    (let [elsewhere (admitted ws :verifier (claim "c") (assoc attach :targets ["c"]))]
+      (is (some? elsewhere))
+      (is (= :anomalies.deliberation/unbacked-result (subtype-of (submit elsewhere :verifier result))))
+      (is (contains? (get-in (admitted elsewhere :verifier (assoc result :links {:supports ["e"]}))
+                             [:workspace/objects "x" :object/links :supports])
+                     "e")))))
+
 (deftest ^{:stratum 1} one-adoption-cannot-name-a-choice-point-twice
   (let [ws (admitted (seed-workspace) :synthesizer
                      {:op :propose-decision :creates [(decision "d1" "same") (decision "d2" "same")]})]

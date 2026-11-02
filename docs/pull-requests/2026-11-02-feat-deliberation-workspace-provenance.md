@@ -33,7 +33,9 @@ label its own analysis `:execution` evidence and satisfy the acceptance rule.
     creates or references under `:supports`, and every `:supports`
     destination is evidence.
   - `check-experiment-result`: `record-experiment-result` needs evidence that
-    is `:execution` class and receipt-backed.
+    is `:execution` class and receipt-backed, and that every target
+    experiment links under `:supports` (already, or through the result's own
+    `:links`), so a completed experiment keeps its observation.
   - `check-artifact-export`: an `artifact-ref` must match a recorded capsule
     export.
 - Message catalog: four keys.
@@ -53,11 +55,12 @@ New admission tests cover:
 - execution evidence with and without a receipt;
 - verifier-only execution evidence;
 - unlinked evidence;
-- an experiment result backed only by non-execution evidence.
+- an experiment result backed only by non-execution evidence;
+- an experiment result whose evidence the experiment does not link.
 
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox): all 12 deliberation-workspace
-suites, 177 tests, 588 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
+suites, 178 tests, 594 assertions, 0 failures. clj-kondo 2026.10.26 (the CI
 version) on the component: 0 errors. `poly test` and the Polylith check ran
 only in CI.
 

@@ -33,7 +33,7 @@
   :anomaly/invalid-attribute         "Evidence needs a known source class; a constraint needs a hard or soft kind; a claim kind must be fact, inference, assumption or prediction"
   :anomaly/unattested-provenance     "Hard constraints come from the user or the interpreter citing a recorded spec source; execution evidence is attached only by the verifier or the user; execution and user evidence need a runtime receipt"
   :anomaly/evidence-link             "Attached evidence must be named under :supports and be evidence"
-  :anomaly/unbacked-result           "Experiment result needs execution evidence backed by a runtime receipt"
+  :anomaly/unbacked-result           "Experiment result needs receipt-backed execution evidence that the experiment links under :supports"
   :anomaly/uncovered-closure         "Goal closure must resolve to an adopted decision covering every closed goal"
   :anomaly/choice-point              "Adoption needs a choice point no other adopted decision holds; supersede it first"
   :anomaly/unregistered-artifact     "Artifact reference must match a recorded capsule export"
