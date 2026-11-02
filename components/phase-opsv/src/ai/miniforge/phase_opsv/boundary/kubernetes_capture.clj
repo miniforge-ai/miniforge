@@ -7,7 +7,7 @@
             [ai.miniforge.phase-opsv.boundary.kubernetes-pods :as pods]
             [ai.miniforge.phase-opsv.boundary.kubernetes-resource-reads :as reads]
             [ai.miniforge.phase-opsv.boundary.kubernetes-response :as response]
-            [ai.miniforge.phase-opsv.boundary.kubernetes-snapshot :as snapshot]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-fingerprint :as fingerprint]
             [ai.miniforge.phase-opsv.kubernetes-capture-plan :as plan]
             [ai.miniforge.phase-opsv.kubernetes-read-plan :as requests]))
 
@@ -36,7 +36,7 @@
                    nodes (read-many! settings until (:plan/nodes planned))
                    configuration (read-many! settings until (:plan/configuration planned))]
     (let [node-list (requests/node-list nodes)]
-      (snapshot/decode
+      (fingerprint/from-admitted
        {:kubernetes/cluster-id (:kubernetes/cluster-id settings)
         :kubernetes/cluster cluster
         :kubernetes/namespace namespace

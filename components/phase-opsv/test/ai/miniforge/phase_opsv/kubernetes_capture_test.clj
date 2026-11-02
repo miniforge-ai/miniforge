@@ -5,10 +5,16 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.boundary.bounded-io :as io]
             [ai.miniforge.phase-opsv.kubernetes-capture-test-support :as fixture]
+            [ai.miniforge.phase-opsv.kubernetes-snapshot-schema :as snapshot-schema]
             [ai.miniforge.phase-opsv.prometheus-test-support :as failures]
+            [malli.core :as m]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} counted-validation [calls validate schema value & options]
+  (when (identical? snapshot-schema/Snapshot schema) (swap! calls inc))
+  (apply validate schema value options))
 
 (deftest ^{:stratum 0} test-public-capture-binds-the-target-and-reads-all-configuration
   (let [[result calls] (fixture/observe! (fixture/routes false) {})]
@@ -68,5 +74,15 @@
           [thrown flagged?] (failures/interrupted-result operation)]
       (is (identical? failure thrown))
       (is (= (instance? InterruptedException failure) flagged?)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} test-admitted-resources-are-not-structurally-revalidated-internally
+  (let [calls (atom 0)
+        validate (partial counted-validation calls m/validate)]
+    (with-redefs [m/validate validate]
+      (let [[result] (fixture/observe! (fixture/routes false) {})]
+        (is (not (anomaly/anomaly? result)))
+        (is (zero? @calls))))))
 
 (comment ::explicit-bounded-acquisition-acceptance)
