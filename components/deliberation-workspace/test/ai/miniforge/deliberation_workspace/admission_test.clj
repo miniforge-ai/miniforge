@@ -327,3 +327,21 @@
                    (assoc export :paths ["src/b.clj"])]]
       (is (= :anomalies.deliberation/unregistered-artifact
              (subtype-of (submit ws :implementer (register attrs))))))))
+
+(deftest ^{:stratum 1} attested-evidence-needs-an-exact-receipt
+  (doseq [[source-class role] [[:execution :verifier] [:user :proposer]]]
+    (let [attach (fn [receipt statement]
+                   {:op :attach-evidence :targets ["c"] :links {:supports ["e"]}
+                    :creates [{:id "e" :type :evidence :statement statement
+                               :attrs {:source-class source-class :receipt receipt}}]})
+          other-class (if (= :execution source-class) :user :execution)
+          ws (-> (seed-workspace)
+                 (assoc-in [:workspace/receipts "r-ok"] {:source-class source-class :statement "seen"})
+                 (assoc-in [:workspace/receipts "r-class"] {:source-class other-class :statement "seen"})
+                 (admitted :proposer (claim "c")))]
+      (testing (str source-class " evidence with an exact receipt is admitted")
+        (is (some? (admitted ws role (attach "r-ok" "seen")))))
+      (testing (str source-class " evidence with a missing, wrong-class or wrong-statement receipt is refused")
+        (doseq [[receipt statement] [["r-none" "seen"] ["r-class" "seen"] ["r-ok" "other"]]]
+          (is (= :anomalies.deliberation/unattested-provenance
+                 (subtype-of (submit ws role (attach receipt statement))))))))))
