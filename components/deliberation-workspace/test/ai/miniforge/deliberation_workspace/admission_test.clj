@@ -212,3 +212,23 @@
                          {:op :accept-decision :targets ["d1" "d2"]}))]
     (is (some? (admitted ws :synthesizer {:op :close-goal :targets [goal-id "goal-2"]
                                           :outcome :accepted :links {:resolves ["d1" "d2"]}})))))
+
+(deftest ^{:stratum 1} proposals-cannot-occupy-derived-conflict-ids
+  (let [ws (admitted (seed-workspace) :proposer (claim "b"))]
+    (is (= :anomalies.deliberation/reserved-id
+           (subtype-of (submit ws :proposer
+                               {:op :assert-claim
+                                :creates [{:id "a" :type :claim :statement "a"
+                                           :links {:contradicts ["b"]}}
+                                          {:id "conflict-a-b" :type :claim :statement "squat"}]}))))))
+
+(deftest ^{:stratum 1} a-malformed-context-is-refused-not-thrown
+  (is (= :anomalies.deliberation/invalid-context
+         (subtype-of (board/admit (seed-workspace) {:tx/operations [(claim "c")]}
+                                  '(:role :proposer :participant))))))
+
+(deftest ^{:stratum 1} claim-kinds-come-from-the-vocabulary
+  (let [claim-of-kind #(assoc-in (claim "c") [:creates 0 :attrs] {:kind %})]
+    (is (= :anomalies.deliberation/invalid-attribute
+           (subtype-of (submit (seed-workspace) :proposer (claim-of-kind :hard)))))
+    (is (some? (admitted (seed-workspace) :proposer (claim-of-kind :prediction))))))
