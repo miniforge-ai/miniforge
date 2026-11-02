@@ -122,6 +122,15 @@
       (spit (io/file dir "000000.edn") "{:sequence")
       (is (some? (get-in (journal/read-journal dir) [:anomaly/data :source]))))))
 
+(deftest ^{:stratum 1 :integration true} malformed-utf8-never-verifies
+  (with-journal-dir
+    (fn [dir]
+      (journal/append! (journal/open! dir) {:s "\uFFFD"})
+      (let [file (io/file dir "000000.edn")
+            latin (String. (Files/readAllBytes (.toPath file)) "ISO-8859-1")]
+        (io/copy (.getBytes (.replace latin "\u00EF\u00BF\u00BD" "\u00FF") "ISO-8859-1") file)
+        (is (anomaly/anomaly? (journal/read-journal dir)))))))
+
 (deftest ^{:stratum 1 :integration true} anomaly-shaped-record-data-breaks-the-chain
   (with-journal-dir
     (fn [dir]

@@ -90,8 +90,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} open!
-  "Start a journal in `directory`, which must not exist yet and whose parent
-   must. Returns the journal, or an anomaly: a run never reuses a directory."
+  "Start a journal in a new `directory` under an existing parent, or an anomaly."
   [directory]
   (let [dir (io/file directory)]
     (if (.mkdir dir)
@@ -146,18 +145,16 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} append!
-  "Durably append `payload` as the next record. Returns the record's hash, an
-   `:invalid-input` anomaly for a payload that is not plain EDN (it could
-   not be replayed), or the anomaly from writing it."
+  "Durably append `payload`; its hash, an `:invalid-input` anomaly for a payload
+   that is not `codec/plain?`, or the write's anomaly."
   [journal payload]
   (if (codec/plain? payload)
     (write-next! journal payload)
     (anomaly/anomaly :invalid-input (messages/system-t :anomaly/unencodable-payload) {})))
 
 (defn ^{:stratum 2} read-journal
-  "Every record in `directory`, verified as one unbroken chain from sequence
-   zero, or an anomaly naming the directory or the first record that breaks
-   or cannot be read."
+  "Every record in `directory`, verified as one chain from sequence zero, or an
+   anomaly naming the directory or the first record that breaks or cannot be read."
   [directory]
   (let [files (record-files directory)]
     (if (anomaly/anomaly? files) files (verified-records files))))

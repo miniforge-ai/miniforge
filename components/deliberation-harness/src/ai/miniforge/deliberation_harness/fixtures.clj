@@ -57,8 +57,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} tasks
-  "The synthetic task package, or an anomaly when the resource is missing or
-   unreadable."
+  "The synthetic task package, or an anomaly when its resource is missing or unreadable."
   []
   (if-let [resource (io/resource tasks-resource)]
     (codec/read-source resource)
@@ -66,10 +65,8 @@
                      {:resource tasks-resource})))
 
 (defn ^{:stratum 1} score
-  "Score `solution` for `task` given the experiment ids `inspected`. Success
-   needs every reference choice and every available observation inspected.
-   An `:invalid-input` anomaly when the task has no reference to score
-   against or `inspected` is not a collection."
+  "Score `solution` against `task`'s reference choices and observations given the
+   experiment ids `inspected`, or an `:invalid-input` anomaly for unscorable input."
   [task solution inspected]
   (if-not (scorable? task inspected)
     (anomaly/anomaly :invalid-input (messages/system-t :anomaly/unscorable-task)
@@ -85,8 +82,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} fixture-defects
-  "Every task whose reference fails, or whose distractor passes, its own
-   scoring — empty when the package can discriminate."
+  "Tasks whose reference fails or whose distractor passes; empty when all discriminate."
   [task-package]
   (for [task task-package
         [candidate expected] (cons [(:reference task) 1]

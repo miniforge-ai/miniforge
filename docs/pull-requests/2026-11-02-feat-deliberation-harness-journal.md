@@ -38,9 +38,12 @@ codec and fixtures belong in a component.
     for unreadable text, trailing forms or a custom reader tag. A tag
     becomes a `deftype` marker that plain EDN cannot construct. It neither
     throws nor evaluates a tag.
-  - `read-source`: reads a file or resource as UTF-8; a read or parse
-    failure is an anomaly naming the source.
-  - `plain?`: true when a value reads back unchanged after encoding.
+  - `read-source`: reads a file or resource as strict UTF-8, so malformed
+    bytes are an anomaly rather than U+FFFD; a read or parse failure is an
+    anomaly naming the source.
+  - `plain?`: true when a value reads back unchanged after encoding. Any
+    host collection is refused before encoding, so a self-referential one
+    cannot recurse forever.
 - `journal`
   - `open!` refuses a directory that already exists.
   - `append!` refuses a payload that is not `plain?` (it could not be
@@ -79,19 +82,20 @@ Deviations from the snapshot:
 - `codec_test`: order-independent encoding, digest stability, refused
   custom tags, unreadable text, trailing forms, an unforgeable tag marker,
   encoding under hostile printer bindings, no entry ever dropped, equal
-  keys counted once, nil keys, `plain?`, and a tag inside anomaly-shaped
-  text.
+  keys counted once, nil keys, `plain?`, a self-referential host collection,
+  and a tag inside anomaly-shaped text.
 - `journal_test` (marked `:integration`; it writes a temporary directory,
   because durable files are the journal's contract): round trip, refusal
   to reuse a directory, tamper detection, an unlistable directory, an
   unreadable record, numeric ordering past six digits, an unreplayable
   payload refused without moving the position, a failed write that leaves
-  the position where it was, a malformed record naming its file.
+  the position where it was, a malformed record naming its file, malformed
+  UTF-8 that never verifies.
 - `fixtures_test`: every reference passes and every distractor fails; success
   needs every observation; the public view hides the sealed answer.
 
 Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
-sandbox, so a local stand-in replaced malli): 33 tests, 83 assertions,
+sandbox, so a local stand-in replaced malli): 35 tests, 85 assertions,
 0 failures. clj-kondo 2026.10.26 (the CI version) over `bases components
 development/src`: 0 errors. `poly test` and the Polylith check ran only in CI.
 

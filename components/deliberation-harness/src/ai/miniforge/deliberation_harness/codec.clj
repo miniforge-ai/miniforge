@@ -25,10 +25,13 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-harness.messages :as messages]
    [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.string :as str])
   (:import
    (java.io PushbackReader StringReader)
    (java.math BigInteger)
+   (java.nio ByteBuffer)
+   (java.nio.charset CodingErrorAction StandardCharsets)
    (java.security MessageDigest)))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -90,13 +93,13 @@
   (some #(when (instance? RejectedTag %) (.-tag ^RejectedTag %))
         (tree-seq coll? seq value)))
 
+;; Call `f`, which returns `[:ok value]` or `[:failure anomaly]`. A throw
+;; becomes `[:failure anomaly]` of `type` carrying `message`, `data` and the
+;; exception's provenance. Success is tracked by the tag, never by the
+;; value's shape, so parsed data that looks like an anomaly stays data.
+;; Plain `try`: this component has no slingshot dependency and this is its
+;; one catch (dewey 211, exemption 1).
 (defn- ^{:stratum 0} attempt
-  "Call `f`, which returns `[:ok value]` or `[:failure anomaly]`. A throw
-   becomes `[:failure anomaly]` of `type` carrying `message`, `data` and the
-   exception's provenance. Success is tracked by the tag, never by the
-   value's shape, so parsed data that looks like an anomaly stays data.
-   Plain `try`: this component has no slingshot dependency and this is its
-   one catch (dewey 211, exemption 1)."
   [f type message data]
   (try
     (f)
@@ -123,9 +126,8 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} encode
-  "The canonical EDN text of `value`. A float is written as the exact double
-   it widens to, so it shares a text only with the double it equals, and a
-   journal replays it as that double."
+  "The canonical EDN text of `value`. A float is written as the exact double it
+   widens to, so it shares a text only with that double, and replays as it."
   [value]
   (stably #(emit value)))
 
@@ -139,9 +141,17 @@
         hashed (.digest (MessageDigest/getInstance digest-algorithm) bytes)]
     (format "%064x" (BigInteger. 1 hashed))))
 
+;; The text of `source` decoded as strict UTF-8: malformed bytes throw rather
+;; than becoming U+FFFD, so two different files never read as the same text.
+(defn- ^{:stratum 0} strict-utf8 [source]
+  (let [decoder (doto (.newDecoder StandardCharsets/UTF_8)
+                  (.onMalformedInput CodingErrorAction/REPORT)
+                  (.onUnmappableCharacter CodingErrorAction/REPORT))]
+    (str (.decode decoder (ByteBuffer/wrap (with-open [in (io/input-stream source)] (.readAllBytes in)))))))
+
+;; `[:ok value]` for `text` holding exactly one plain EDN form, otherwise
+;; `[:failure anomaly]`: unparseable, not one form, or a custom reader tag.
 (defn- ^{:stratum 1} parse
-  "`[:ok value]` for `text` holding exactly one plain EDN form, otherwise
-   `[:failure anomaly]`: unparseable, not one form, or a custom reader tag."
   [text]
   (let [[status value :as result]
         (attempt #(single-form text) :invalid-input (messages/system-t :anomaly/unreadable-edn) {})
@@ -151,21 +161,18 @@
       result)))
 
 (defn ^{:stratum 1} parse-source
-  "`[:ok value]` for the one plain EDN form in the UTF-8 text of `source`,
-   or `[:failure anomaly]` naming the source when reading or parsing fails.
-   Callers that must tell data from failure use this, not `read-source`."
+  "`[:ok value]` for the one plain EDN form in strict UTF-8 `source`, or
+   `[:failure anomaly]` naming it; use this, not `read-source`, to tell data from failure."
   [source]
   (let [[status text :as read]
-        (attempt #(vector :ok (slurp source :encoding "UTF-8")) :unavailable
+        (attempt #(vector :ok (strict-utf8 source)) :unavailable
                  (messages/system-t :anomaly/unreadable-source) {})]
     (with-source (if (= :ok status) (parse text) read) source)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} read-text
-  "Parse `text` as exactly one plain EDN form, or return an `:invalid-input`
-   anomaly for text that does not parse, holds other than one form, or
-   carries a custom reader tag."
+  "Parse `text` as exactly one plain EDN form, or an `:invalid-input` anomaly."
   [text]
   (second (parse text)))
 
@@ -178,11 +185,13 @@
 ;; in value and in encoding, so a record written from it replays to the same
 ;; hash. False for objects EDN cannot carry (an `Instant`, a function), for
 ;; text UTF-8 cannot hold, and for host collections such as a
-;; `LinkedHashMap`, whose replay is a different value.
+;; `LinkedHashMap`, whose replay is a different value. Host collections are
+;; refused before encoding, so a self-referential one cannot recurse forever.
 (defn ^{:stratum 2} plain? [value]
-  (let [encoded (encode value)
-        [status read-back] (parse encoded)]
-    (and (= :ok status)
-         (= encoded (String. (.getBytes ^String encoded "UTF-8") "UTF-8"))
-         (= value read-back)
-         (= encoded (encode read-back)))))
+  (and (not-any? #(seq (host-tag %)) (tree-seq coll? seq value))
+       (let [encoded (encode value)
+             [status read-back] (parse encoded)]
+         (and (= :ok status)
+              (= encoded (String. (.getBytes ^String encoded "UTF-8") "UTF-8"))
+              (= value read-back)
+              (= encoded (encode read-back))))))
