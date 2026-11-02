@@ -42,10 +42,14 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} success-closes-before-budget-exhaustion
-  (let [ws (workspace [(obj "goal-1" :goal :status :accepted)]
+  (let [cover (assoc-in (obj "d" :decision :status :accepted) [:object/links :depends-on] #{"goal-1"})
+        ws (workspace [(obj "goal-1" :goal :status :accepted) cover]
                       :workspace/budget {:activations 5}
                       :workspace/spent {:activations 5})]
-    (is (= :success (:termination/rule (termination/closing-rule ws))))))
+    (is (= :success (:termination/rule (termination/closing-rule ws))))
+    (testing "a covering decision superseded after closure no longer counts (N14 §7.1)"
+      (is (= :budget-boundary (:termination/rule (termination/closing-rule
+                                                  (assoc-in ws [:workspace/objects "d" :object/status] :superseded))))))))
 
 (deftest ^{:stratum 1} budget-exhaustion-forces-a-synthesis
   (let [ws (workspace [(obj "goal-1" :goal)]

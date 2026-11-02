@@ -61,8 +61,11 @@
     (is (= 3 (get-in closed [:workspace/spent :activations])))))
 
 (deftest ^{:stratum 2} a-run-closes-as-success-when-every-goal-is-terminal
-  (let [ws (workspace :workspace/objects
-                      {"goal-1" (assoc (goal "goal-1") :object/status :accepted)})]
+  (let [cover (assoc (object/new-object {:id "d" :type :decision :statement "d" :role :synthesizer
+                                         :activation "a" :version 1 :links {:depends-on ["goal-1"]}})
+                     :object/status :accepted)
+        ws (workspace :workspace/objects
+                      {"goal-1" (assoc (goal "goal-1") :object/status :accepted) "d" cover})]
     (is (= :success (get-in (run/run ws passes {})
                             [:workspace/termination :termination/rule])))))
 
