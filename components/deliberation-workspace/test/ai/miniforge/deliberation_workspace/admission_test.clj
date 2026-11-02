@@ -315,3 +315,15 @@
     (is (= :anomalies.deliberation/invalid-attribute
            (subtype-of (submit (seed-workspace) :proposer (claim-of-kind :hard)))))
     (is (some? (admitted (seed-workspace) :proposer (claim-of-kind :prediction))))))
+
+(deftest ^{:stratum 1} artifact-references-match-a-recorded-export
+  (let [export {:capsule-id "cap-1" :digest "sha256:aa" :paths ["src/a.clj"]}
+        ws (assoc-in (seed-workspace) [:workspace/artifact-exports "sha256:aa"] export)
+        register (fn [attrs] {:op :register-artifact
+                              :creates [{:id "art" :type :artifact-ref :statement "a" :attrs attrs}]})]
+    (is (some? (admitted ws :implementer (register export))))
+    (doseq [attrs [(assoc export :digest "sha256:bb")
+                   (assoc export :capsule-id "cap-2")
+                   (assoc export :paths ["src/b.clj"])]]
+      (is (= :anomalies.deliberation/unregistered-artifact
+             (subtype-of (submit ws :implementer (register attrs))))))))
