@@ -32,7 +32,7 @@
 ;; closure. The reserve sits inside the activation budget (N14 §6.3).
 (defn- ^{:stratum 0} closure-reserve
   [workspace]
-  (get workspace :workspace/closure-reserve 0))
+  (let [reserve (get workspace :workspace/closure-reserve 0)] (if (nat-int? reserve) reserve 0)))
 
 ;------------------------------------------------------------------------------ Layer 1
 

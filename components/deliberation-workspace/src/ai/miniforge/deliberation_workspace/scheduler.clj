@@ -112,8 +112,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} triggered-activation
-  "The highest §6.1 structural tier with work and an eligible participant,
-   rotating after the last actor; nil when none."
+  "The highest §6.1 structural tier with work and an eligible participant, or nil."
   [workspace]
   (let [triggers [[:conflict (first (open-conflicts workspace))]
                   [:blocked-goal (first (blocked-goals workspace))]

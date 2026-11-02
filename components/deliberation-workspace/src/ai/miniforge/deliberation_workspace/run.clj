@@ -142,8 +142,7 @@
       (-> spent
           (note-quiet participant)
           (assoc-in [:workspace/feedback participant]
-                    (cond-> {:status :rejected}
-                      (open-view? spent participant) (assoc :reason (anomaly/subtype result))))
+                    {:status :rejected :reason (anomaly/subtype result)})
           (record-event {:event :transaction/rejected :role participant
                          :reason (anomaly/subtype result)}))
       (-> (current-round (:workspace result))
@@ -161,7 +160,8 @@
         proposed (activate (assoc context
                                   :projection projection
                                   :closing? (= :closure reason)
-                                  :feedback (get-in workspace [:workspace/feedback participant])))
+                                  :feedback (cond-> (get-in workspace [:workspace/feedback participant])
+                                              (not (open-view? workspace participant)) (dissoc :reason))))
         spent (-> (spend workspace participant)
                   (record-event {:event :activation/completed :role participant
                                  :reason reason :target target}))]
@@ -187,10 +187,9 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} activate-participant
-  "One work turn for `participant` (`activation`: `{:participant :reason :target}`).
-   An ordinary turn past the closure reserve, or a `:closure` turn with no
-   allowance left, is `:activation/unfunded`; one whose read scope withholds a
-   goal or `:hard` constraint is refused (N14 §4). Neither runs the model."
+  "One work turn (`activation`: `{:participant :reason :target}`). A turn past the
+   closure reserve (or a `:closure` with no allowance) is `:activation/unfunded`;
+   one whose read scope withholds a goal or `:hard` constraint is refused (N14 §4)."
   [workspace activate {:keys [participant reason] :as activation}]
   (let [ws (current-round workspace)
         projection (render ws participant)
@@ -238,8 +237,7 @@
         (recur (step ws activate) (inc steps))))))
 
 (defn ^{:stratum 2} run
-  "Drive the loop to a §7 closing rule; a closed workspace is returned unchanged,
-   and a closure reserve that is not a nat-int is an `:invalid-input` anomaly."
+  "Drive the loop to a §7 closing rule. A closed workspace passes through; a bad reserve is `:invalid-input`."
   [workspace activate {:keys [max-steps] :or {max-steps default-max-steps}}]
   (let [reserve (get workspace :workspace/closure-reserve 0)]
     (cond

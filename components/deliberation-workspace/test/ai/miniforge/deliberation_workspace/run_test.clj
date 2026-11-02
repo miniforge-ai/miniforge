@@ -94,11 +94,12 @@
              (:reason (first (events-of after :transaction/rejected))))))))
 
 (deftest ^{:stratum 2} a-restricted-participant-gets-no-rejection-reason
-  (let [reject (fn [_] {:tx/operations [{:op :not-an-operation}]})
-        feedback #(get-in (run/step % reject) [:workspace/feedback :proposer])]
-    (is (= :anomalies.deliberation/unknown-operation (:reason (feedback (workspace)))))
-    (is (= {:status :rejected} (feedback (workspace :workspace/visibility :none))))
-    (is (= {:status :rejected} (feedback (workspace :workspace/readable {:proposer #{"goal-1"}}))))))
+  (let [turn #(run/activate-participant %1 %2 {:participant :proposer :reason :round-robin})
+        rejected (turn (workspace) (fn [_] {:tx/operations [{:op :not-an-operation}]}))
+        delivered #(let [seen (atom nil)] (turn (merge rejected %) (fn [r] (reset! seen (:feedback r)) nil)) @seen)]
+    (is (= :anomalies.deliberation/unknown-operation (:reason (delivered {}))))
+    (is (= {:status :rejected} (delivered {:workspace/visibility :none})
+           (delivered {:workspace/readable {:proposer #{"goal-1"}}})))))
 
 (deftest ^{:stratum 2} the-ablation-setting-reaches-the-projection
   (let [seen (atom nil)
@@ -307,7 +308,9 @@
     (is (= 1 (count (events-of (turn ws :round-robin never) :activation/unfunded))))
     (is (= 3 (get-in (turn ws :closure passes) [:workspace/spent :activations])))
     (is (= 1 (count (events-of (turn (workspace :workspace/spent {:activations 3}) :closure never)
-                               :activation/unfunded))))))
+                               :activation/unfunded))))
+    (is (= 1 (count (events-of (turn (assoc ws :workspace/closure-reserve -1 :workspace/spent {:activations 3})
+                                     :round-robin never) :activation/unfunded))))))
 
 (deftest ^{:stratum 2} a-commit-outside-the-loop-starts-a-new-round
   (let [closed (run/run (workspace :workspace/version 2 :workspace/round-version 1

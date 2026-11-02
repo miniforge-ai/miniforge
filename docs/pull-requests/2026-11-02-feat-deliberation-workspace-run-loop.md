@@ -37,9 +37,10 @@ success, and counts quiescence by object growth.
     `:role :participant :activation :basis :projection :closing? :feedback`,
     and the proposal goes through `admission/admit`.
   - `:feedback` reports the last transaction's status. A rejection's reason
-    is included only when the participant sees every object (full visibility,
-    no read scope), because otherwise the reason could reveal whether a hidden
-    object exists. Trusted events always keep the reason.
+    is delivered only when the participant sees every object (full visibility,
+    no read scope) at the time of delivery. Otherwise the reason could reveal
+    whether a hidden object exists, including after a read scope narrows.
+    Trusted events always keep the reason.
   - A pass or a rejection marks the participant quiet. Pass and
     frame-refusal markers belong to the workspace version they were recorded
     at, so any commit starts a new round, including one made directly
@@ -55,6 +56,9 @@ success, and counts quiescence by object growth.
     entry point cannot bypass `run`'s checks. An ordinary turn past the
     closure reserve, or a closure turn with no allowance left, is recorded as
     `:activation/unfunded` without calling the model or charging anything.
+    A closure reserve that is not a non-negative integer counts as zero in
+    that arithmetic, so a direct call can never spend past the budget. `run`
+    still refuses such a reserve outright.
   - New `close`: at a budget boundary, runs one closure turn for the first
     synthesizer when `:workspace/closure-reserve` is positive and activation
     allowance remains. It records `:termination/closure` as `:executed` or
