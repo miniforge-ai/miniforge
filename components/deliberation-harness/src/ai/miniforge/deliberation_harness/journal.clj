@@ -38,8 +38,11 @@
 
 (def ^{:stratum 0} record-name-format "%06d.edn")
 
+(defn- ^{:stratum 0} record-name [sequence]
+  (String/format Locale/ROOT record-name-format (to-array [sequence])))
+
 (defn- ^{:stratum 0} record-file [directory sequence]
-  (io/file directory (String/format Locale/ROOT record-name-format (to-array [sequence]))))
+  (io/file directory (record-name sequence)))
 
 (defn- ^{:stratum 0} record-number
   "The sequence number a record file's name carries, or nil for another file."
@@ -98,7 +101,9 @@
 
 (defn- ^{:stratum 1} verified-records
   "The records in `files`, verified as one unbroken chain from sequence zero,
-   or the anomaly for the first file that cannot be read or breaks it."
+   or the anomaly for the first file that cannot be read or breaks it. A
+   file breaks the chain when its name is not exactly the name `append!`
+   gives its sequence, so a misnumbered file can never be replayed."
   [files]
   (loop [files files
          previous nil
@@ -108,7 +113,8 @@
       (let [[status record] (codec/parse-source file)]
         (cond
           (= :failure status) record
-          (links? record sequence previous)
+          (and (= (record-name sequence) (.getName ^File file))
+               (links? record sequence previous))
           (recur (next files) (:hash record) (inc sequence) (conj records record))
           :else (chain-anomaly file)))
       records)))

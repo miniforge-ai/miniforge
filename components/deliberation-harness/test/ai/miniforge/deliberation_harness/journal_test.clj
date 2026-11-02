@@ -120,3 +120,13 @@
       (let [result (journal/read-journal dir)]
         (is (= :conflict (:anomaly/type result)))
         (is (some? (get-in result [:anomaly/data :file])))))))
+
+(deftest ^{:stratum 1 :integration true} a-misnumbered-record-file-breaks-the-chain
+  (with-journal-dir
+    (fn [dir]
+      (let [log (journal/open! dir)]
+        (journal/append! log {:turn 1})
+        (.renameTo (io/file dir "000000.edn") (io/file dir "0000000.edn"))
+        (let [result (journal/read-journal dir)]
+          (is (= :conflict (:anomaly/type result)))
+          (is (some? (get-in result [:anomaly/data :file]))))))))
