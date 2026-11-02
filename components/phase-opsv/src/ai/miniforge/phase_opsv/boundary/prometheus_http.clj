@@ -14,6 +14,12 @@
 (def ^{:stratum 0} ^:private timeout-classes
   #{"java.net.http.HttpTimeoutException" "java.util.concurrent.TimeoutException"})
 
+(def ^{:stratum 0} ^:private identity-coding
+  "No-transform coding only; bounded response reads never decompress content."
+  "identity")
+
+(defn- ^{:stratum 0} header-codings [header] (str/split header #"," -1))
+
 (def ^{:stratum 0} ^:private client
   (delay (http/client {:follow-redirects :never})))
 
@@ -34,6 +40,9 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} identity-coding? [coding]
+  (= identity-coding (str/lower-case (str/trim coding))))
+
 (defn- ^{:stratum 1} timeout? [failure]
   ;; Some JDK timeout classes are not exposed by Babashka's class resolver.
   (->> (class failure)
@@ -49,7 +58,7 @@
     {:uri uri
      :method :get
      :headers {"Accept" "application/json"
-               "Accept-Encoding" "identity"}
+               "Accept-Encoding" identity-coding}
      :oauth-token (:prometheus/bearer-token settings)
      :query-params params
      :timeout (:prometheus/timeout-ms settings)
@@ -64,6 +73,9 @@
     (some-> (.getNow pending nil) response-fields :body .close)))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} unencoded? [encodings]
+  (every? identity-coding? (mapcat header-codings encodings)))
 
 (defn ^{:stratum 2} timeout-cause [failure] (cleanup/find-cause timeout? failure))
 

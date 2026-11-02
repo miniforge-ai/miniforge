@@ -55,6 +55,14 @@
       (is (= :timeout (:anomaly/type (observe (fixture/settings) pending (atom []))))))
     (is (.isCancelled pending))))
 
+(deftest ^{:stratum 0} test-content-coding-tokens-are-case-insensitive-without-enabling-compression
+  (doseq [encodings [["IDENTITY"] [" Identity "] ["identity, IDENTITY"] ["identity" "IDENTITY"]]]
+    (let [response (fixture/response (fixture/successful-text) {:encodings encodings})]
+      (is (not (anomaly/anomaly? (observe (fixture/settings) (fixture/completed response) (atom [])))))))
+  (doseq [encodings [["identity, GZIP"] ["br" "identity"]]]
+    (let [response (fixture/response (fixture/successful-text) {:encodings encodings})]
+      (is (anomaly/anomaly? (observe (fixture/settings) (fixture/completed response) (atom [])))))))
+
 (deftest ^{:stratum 0} test-expired-header-deadline-does-not-mask-completed-critical-failures
   (with-redefs [io/remaining-ms (constantly 0)]
     (is (thrown? AssertionError

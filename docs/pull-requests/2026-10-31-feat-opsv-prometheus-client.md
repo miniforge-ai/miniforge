@@ -81,6 +81,8 @@ preserve its structured-cause tests alongside transport and reader regressions.
 Expired waits use the future's zero-timeout read, preserving completed critical
 failures without blocking. Public acquisition still rejects late successful data.
 Regressions cover both actual completed reader tasks and HTTP futures.
+Content-coding tokens are case-insensitive and tolerate optional whitespace.
+Only identity codings are admitted; compression and mixed encodings remain refused.
 
 ## Deployment Plan
 

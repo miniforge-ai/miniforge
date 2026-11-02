@@ -20,7 +20,7 @@
         {:keys [status encodings body]} response]
     (cond
       (not= 200 status) (anomaly/anomaly :unavailable (msg/ts :prometheus/http-status) {:http/status status})
-      (not (or (empty? encodings) (= ["identity"] encodings))) (window/invalid-response)
+      (not (http/unencoded? encodings)) (window/invalid-response)
       :else (body/decode! settings request until body))))
 
 ;------------------------------------------------------------------------------ Layer 1
