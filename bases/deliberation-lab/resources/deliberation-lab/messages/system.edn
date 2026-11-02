@@ -1,0 +1,12 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
+{:deliberation-lab/system
+ {:anomaly/adapter-failure  "Agent call failed; usage may be unsettled"
+  :anomaly/missing-usage    "Provider returned no token usage"
+  :anomaly/invalid-manifest "Development manifest is invalid"
+  :anomaly/invalid-fixtures "Synthetic task package cannot discriminate references from distractors"
+  :anomaly/incomplete-run   "Experiment journal does not open and close a run"
+  :anomaly/replay-mismatch  "A recorded board does not replay from its transaction history"
+  :lab/invalid-response     "Invalid model JSON; the activation is charged"}}
