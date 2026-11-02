@@ -3,12 +3,16 @@
   Author: Christopher Lester (christopher@miniforge.ai)
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
-# refactor(gate): move every gate message into the gate catalog
+# refactor: Move every gate message into the gate catalog
 
-**Tier:** standards / i18n
-**Theme:** gates, message catalogs, Codex §7.4.3 gate
+## Overview
 
-## Problem
+Every user-visible string in the gate component now lives in its message
+catalog (`config/gate/messages/en-US.edn`, or `system.edn` for log text),
+with the text unchanged. A new test fails when a gate uses a key the
+catalog does not have.
+
+## Motivation
 
 The gate component already has `config/gate/messages/en-US.edn` and
 `system.edn`. The stale-references, no-secrets, behavioral, opsv,
@@ -21,7 +25,7 @@ descriptions also used literals. Registry unknown-gate and noop entries did too,
 as did the interface's missing-repair failure. There were 45 strings in all,
 counting the six added in review.
 
-## Changes
+## Changes in Detail
 
 - Each literal moves to a catalog key with the same text. Two were built
   with `str`, `:registry/unknown-gate {gate}` and
@@ -74,13 +78,13 @@ the one programmer-error `ex-info`. The
 anomaly text goes to `system.edn`, the default when the audience is
 unclear (050).
 
-## Testing
+## Testing Plan
 
 Run here with Clojure 1.12 from Maven Central. Clojars is 403 through
 this environment's proxy, so only namespaces without Clojars
 dependencies could load:
 
-- `messages-test`: 1 test, 109 assertions, passing. It was also run against
+- `messages-test`: 1 test, 110 assertions, passing on main after merge. It was also run against
   a copy of the catalog with `:tests-pass/failed-one` and
   `:opsv/abort-remediation` deleted. Both deletions were reported, so the
   test catches the indirect keys.
@@ -92,3 +96,24 @@ dependencies could load:
 Not run here: `registry`, `policy`, `lint`, `format`, `tests-pass`,
 `capabilities` and `interface` tests. They need malli, babashka.fs or
 slingshot from Clojars. CI runs them.
+
+## Deployment Plan
+
+No configuration or data migration. Rendered text is byte-identical except
+for the pre-commit repair message, which loses the source indentation that
+had leaked into the literal.
+
+## Related Issues/PRs
+
+- Follow-up to the Codex §7.4.3 consultation gate.
+- Three Copilot review rounds found literals the earlier sweeps had
+  missed: indirect keys the first test version did not see, and six prose
+  literals. All were fixed before merge.
+- Merged as `8e016d1`.
+
+## Checklist
+
+- [x] Catalog keys and their uses are covered by `messages-test`
+- [x] Rendered text checked byte-for-byte against the replaced literals
+- [x] CI green on a head containing current main
+- [x] Copilot findings fixed and resolved

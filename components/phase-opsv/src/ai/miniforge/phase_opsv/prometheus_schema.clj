@@ -13,7 +13,7 @@
 (def ^{:stratum 1} Settings
   [:map {:closed true}
    [:prometheus/base-url schema/NonBlankString]
-   [:prometheus/bearer-token {:optional true} [:re #"\A[!-~]+\z"]]
+   [:prometheus/bearer-token {:optional true} [:re #"\A[A-Za-z0-9._~+/-]+=*\z"]]
    [:prometheus/timeout-ms [:int {:min 1
                                  :max Integer/MAX_VALUE}]]
    [:prometheus/max-response-bytes [:int {:min 1

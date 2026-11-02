@@ -29,6 +29,7 @@
                     {:prometheus/base-url "https://metrics.invalid#secret"}
                     {:prometheus/base-url "file:///secret"}
                     {:prometheus/base-url "https://metrics.invalid:65536/prometheus/"}
+                    {:prometheus/base-url "https://metrics.invalid:0/prometheus/"}
                     {:prometheus/base-url "http://metrics.invalid"
                      :prometheus/bearer-token "secret"}
                     {:prometheus/bearer-token "secret\r\nInjected: value"}
@@ -43,16 +44,34 @@
   (doseq [overrides [nil {}]]
     (is (anomaly/anomaly? (settings/load-settings overrides)))))
 
+(deftest ^{:stratum 0} test-bearer-credentials-follow-the-wire-grammar
+  (doseq [token ["abc,def" "abc:xyz" "abc=def" "=" "" "token\u00e9"]]
+    (is (anomaly/anomaly?
+          (settings/load-settings (fixture/settings {:prometheus/bearer-token token})))))
+  (doseq [token ["AZaz09-._~+/" "token=" "token=="]]
+    (is (= token (:prometheus/bearer-token
+                   (settings/load-settings (fixture/settings {:prometheus/bearer-token token})))))))
+
+(deftest ^{:stratum 0} test-case-insensitive-http-schemes-are-admitted-and-canonicalized
+  (doseq [[overrides expected]
+          [[{:prometheus/base-url "HTTP://metrics.invalid/"} "http://metrics.invalid/"]
+           [{:prometheus/base-url "HTTPS://metrics.invalid/prom%2Ftenant/"
+              :prometheus/bearer-token "opaque-token"} "https://metrics.invalid/prom%2Ftenant/"]]]
+    (let [result (settings/load-settings (fixture/settings overrides))]
+      (is (not (anomaly/anomaly? result)))
+      (is (= expected (:prometheus/base-url result))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} test-settings-loading-preserves-wrapped-critical-causes
-  (is (thrown? AssertionError (load-failure (Exception. "secret" (AssertionError.)))))
-  (try
-    (let [[failure flagged?] (fixture/interrupted-result
-                              (partial load-failure (Exception. "secret" (InterruptedException.))))]
-      (is (instance? InterruptedException failure))
-      (is flagged?))
-    (finally (Thread/interrupted))))
+  (doseq [wrap [fixture/ordinary-failure fixture/structured-failure]]
+    (is (thrown? AssertionError (load-failure (wrap (AssertionError.)))))
+    (try
+      (let [[failure flagged?] (fixture/interrupted-result
+                                (partial load-failure (wrap (InterruptedException.))))]
+        (is (instance? InterruptedException failure))
+        (is flagged?))
+      (finally (Thread/interrupted)))))
 
 (deftest ^{:stratum 1} test-ordinary-and-structured-configuration-failures-are-sanitized
   (doseq [failure [(Exception. "secret") (fixture/structured-failure nil)]]

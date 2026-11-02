@@ -32,7 +32,7 @@ timeouts, size limits, HTTP errors, malformed JSON, redirects and resource
 cleanup without contacting a metric server. Run consuming-product, packaged,
 standards and normal signed-hook gates.
 
-Native-runtime source acceptance passes 37 tests and 189 assertions. These
+Native-runtime source acceptance passes 39 tests and 207 assertions. These
 tests use in-memory bodies and an explicit external-response projection, without
 network calls, JVM processes or test repositories. This is not packaged proof.
 The separate JVM fixture exercises actual JDK responses and stream closure.
@@ -46,8 +46,8 @@ Interrupt tests capture the flag before test reporting can consume it.
 An expired body deadline also prevents reader-thread creation.
 
 Reconciliation with merged main preserves the reviewed sample-limit regression.
-Both consuming product suites pass. A fresh stripped CLI jar passes isolated
-acceptance: 37 tests and 189 assertions, without production-source overlays.
+Both consuming product suites are checked after foundation integration. A fresh
+stripped CLI jar must pass isolated acceptance without production-source overlays.
 The catalog regression covers every new transport message.
 
 Normal merge hooks also found inherited lint debt. Six overlong sentences in
@@ -62,7 +62,7 @@ Cause selection reuses cycle-safe cleanup traversal, preserving fatal and interr
 Cleanup passes in all four products, and workflow passes in all three.
 The final pass also reproduced synchronous timeout masking of a fatal cause.
 Removing the special timeout catch routes every failure through shared cause priority.
-Focused JVM acceptance passes 14 tests and 47 assertions.
+Focused JVM acceptance separately checks actual JDK responses and cleanup.
 A real blocked pipe now tests deadline expiry after reader entry, original-task
 cancellation and owned stream closure. Promise waits are bounded; no sleeps are used.
 Disabling cancellation or release independently makes its corresponding assertion fail.
@@ -73,6 +73,10 @@ without losing timeout, fatal or interruption priority. The new cases first
 reproduced three failing assertions and two escaping errors.
 Upstream warning-test fixtures now reuse the acknowledged gate context instead
 of claiming durable publication from a sinkless stream. Production remains fail-closed.
+
+The merged settings foundation, PR #2327, owns endpoint admission, URI scheme
+canonicalization, valid port bounds and RFC 6750 Bearer grammar. Shared fixtures
+preserve its structured-cause tests alongside transport and reader regressions.
 
 ## Deployment Plan
 
