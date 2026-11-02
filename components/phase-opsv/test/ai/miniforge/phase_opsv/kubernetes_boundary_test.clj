@@ -72,9 +72,9 @@
       (is (anomaly/anomaly?
             (phase/decode-kubernetes-fingerprint
               (update captured :kubernetes/configuration conj resource)))))
-    (is (not (anomaly/anomaly?
-               (phase/decode-kubernetes-fingerprint
-                 (update captured :kubernetes/configuration conj pod)))))))
+    (is (anomaly/anomaly?
+          (phase/decode-kubernetes-fingerprint
+            (update captured :kubernetes/configuration conj pod))))))
 
 (deftest ^{:stratum 0} test-configuration-payloads-and-scope-must-be-supported
   (let [captured (fixture/snapshot)
@@ -92,5 +92,18 @@
       (is (anomaly/anomaly?
             (phase/decode-kubernetes-fingerprint
               (assoc captured :kubernetes/configuration [resource])))))))
+
+(deftest ^{:stratum 0} test-runtime-observations-cannot-hide-in-configuration
+  (let [captured (fixture/snapshot)]
+    (doseq [resource [(fixture/pod) (fixture/node) (:kubernetes/namespace captured)]]
+      (is (anomaly/anomaly?
+            (phase/decode-kubernetes-fingerprint
+              (update captured :kubernetes/configuration conj resource)))))))
+
+(deftest ^{:stratum 0} test-non-pod-status-is-not-interpreted-as-container-observations
+  (let [captured (fixture/snapshot)
+        changed (assoc-in captured [:kubernetes/configuration 0 "status" "containerStatuses"] 42)]
+    (is (= (phase/decode-kubernetes-fingerprint captured)
+           (phase/decode-kubernetes-fingerprint changed)))))
 
 (comment ::public-captured-target-admission)

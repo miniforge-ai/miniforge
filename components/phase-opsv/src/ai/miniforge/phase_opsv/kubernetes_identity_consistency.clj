@@ -3,8 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-identity-consistency
   "Repeated observations must agree on identity and fingerprint material."
-  (:require [ai.miniforge.phase-opsv.kubernetes-images :as images]
-            [ai.miniforge.phase-opsv.kubernetes-resource :as resource]))
+  (:require [ai.miniforge.phase-opsv.kubernetes-resource :as resource]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -13,7 +12,7 @@
 
 (defn- ^{:stratum 0} material [resource]
   [(resource/identity-key resource) (resource/configuration resource)
-   (get-in resource ["status" "nodeInfo"]) (images/pod-images resource)])
+   (resource/observed-runtime resource)])
 
 ;------------------------------------------------------------------------------ Layer 1
 

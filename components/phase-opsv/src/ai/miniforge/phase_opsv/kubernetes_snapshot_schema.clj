@@ -10,7 +10,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ConfigurationResource
-  [:or configuration/ConfigMap resource/Secret resource/Namespace resource/Node resource/Pod])
+  [:or configuration/ConfigMap resource/Secret])
 
 (def ^{:stratum 0} NodeList
   [:map ["apiVersion" [:= "v1"]] ["kind" [:= "NodeList"]]

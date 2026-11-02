@@ -27,7 +27,7 @@
 
 (defn- ^{:stratum 1} node-profile [label node]
   (let [desired (resource/configuration node)
-        runtime (get-in node ["status" "nodeInfo"])
+        runtime (resource/observed-runtime node)
         content {:node/desired desired
                  :node/runtime runtime}
         observed (profile node content)

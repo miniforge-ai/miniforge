@@ -10,8 +10,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} ^:private namespaced-config-kinds #{"ConfigMap" "Secret"})
-
 (defn- ^{:stratum 0} unique-by? [selector resources]
   (= (count resources) (count (set (map selector resources)))))
 
@@ -26,17 +24,12 @@
     {:namespace namespace
      :node-names node-names}))
 
+(defn- ^{:stratum 0} config-scope? [target resource]
+  (= target (resource/namespace-of resource)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} config-scope? [target resource]
-  (let [namespace (resource/namespace-of resource)
-        namespaced? (contains? namespaced-config-kinds (get resource "kind"))]
-    (and (or (nil? namespace) (= target namespace))
-         (or (some? namespace) (not namespaced?)))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} consistent? [snapshot]
+(defn ^{:stratum 1} consistent? [snapshot]
   (let [cluster (:kubernetes/cluster snapshot)
         namespace (:kubernetes/namespace snapshot)
         label (:kubernetes/node-pool-label snapshot)

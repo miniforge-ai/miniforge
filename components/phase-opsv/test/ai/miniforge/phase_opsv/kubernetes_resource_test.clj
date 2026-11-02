@@ -2,8 +2,9 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-resource-test
-  (:require [ai.miniforge.phase-opsv.kubernetes-resource :as resource]
-            [ai.miniforge.phase-opsv.kubernetes-test-support :refer [config-map secret]]
+  (:require [ai.miniforge.phase-opsv.kubernetes-identity-consistency :as identity]
+            [ai.miniforge.phase-opsv.kubernetes-resource :as resource]
+            [ai.miniforge.phase-opsv.kubernetes-test-support :as fixture :refer [config-map secret]]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]))
 
@@ -34,5 +35,17 @@
     (is (not (str/includes? (pr-str projection) "cHJpdmF0ZS12YWx1ZQ==")))
     (is (not= projection
               (resource/configuration (assoc-in original ["metadata" "resourceVersion"] "43"))))))
+
+(deftest ^{:stratum 0} test-repeated-observations-agree-on-identity-configuration-and-runtime
+  (let [pod (fixture/pod)
+        node (fixture/node)
+        namespace (:kubernetes/cluster (fixture/snapshot))
+        image (str/replace fixture/image-id "sha256:a" "sha256:b")]
+    (doseq [observations [[pod (assoc-in pod ["spec" "containers" 0 "image"] "registry.invalid/service:other")]
+                          [pod (assoc-in pod ["status" "containerStatuses" 0 "imageID"] image)]
+                          [node (assoc-in node ["status" "nodeInfo" "kubeletVersion"] "v1.34.0")]
+                          [namespace (assoc-in namespace ["metadata" "uid"] "replacement-namespace")]]]
+      (is (false? (identity/consistent? observations))))
+    (is (true? (identity/consistent? [pod pod])))))
 
 (comment ::stable-kubernetes-resource-projections)

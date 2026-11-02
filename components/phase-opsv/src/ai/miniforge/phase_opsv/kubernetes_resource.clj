@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-resource
   "Stable identity and configuration projections for admitted Kubernetes resources.
-   API status and bookkeeping metadata are not desired configuration.")
+   API status and bookkeeping metadata are not desired configuration."
+  (:require [ai.miniforge.phase-opsv.kubernetes-images :as images]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -14,6 +15,12 @@
 (defn ^{:stratum 0} name-of [resource] (get-in resource ["metadata" "name"]))
 
 (defn ^{:stratum 0} namespace-of [resource] (get-in resource ["metadata" "namespace"]))
+
+(defn ^{:stratum 0} observed-runtime [resource]
+  (case (get resource "kind")
+    "Node" (get-in resource ["status" "nodeInfo"])
+    "Pod" (images/pod-images resource)
+    nil))
 
 (defn- ^{:stratum 0} secret? [resource]
   (and (= "v1" (get resource "apiVersion")) (= "Secret" (get resource "kind"))))
