@@ -34,7 +34,11 @@ conformance; `turn/conditions` says so in its docstring.
   - `respond`: never sends a request over `:max-input-bytes`, and never
     retries an adapter anomaly.
   - `commit-turn` admits the payload through
-    `board/activate-participant`.
+    `board/activate-participant`. No operations is a pass; any other
+    malformed shape goes to admission, which rejects it, so a bad payload
+    never throws out of a cell.
+  - The model view keeps a question's answer and a superseded record's
+    replacement, which the snapshot's field whitelist dropped.
   - Each board is seeded with the goal and one experiment object per
     fixture observation.
   - `attach-observation` records the receipt, then admits the observation
@@ -94,6 +98,8 @@ condition's allowance; that is left for the operator to decide.
   each observation supports its experiment.
 - Model-made execution evidence with a valid-looking receipt is rejected.
 - An unknown condition is refused before any call or record.
+- A malformed `:operations` value is rejected and the cell completes.
+- `turn_test`: the model view keeps an answer.
 - An over-budget closing call cannot succeed.
 - A journal failure stops the cell.
 - The report states G0 is not evaluated and shows the paired delta.
@@ -101,8 +107,9 @@ condition's allowance; that is left for the operator to decide.
 Ran locally on plain Clojure 1.12 with a local malli stand-in (Clojars is
 unreachable from the authoring sandbox):
 
-- the 4 harness suites: 44 tests, 146 assertions, 0 failures. The credit,
-  squatting and unknown-condition tests fail on the previous code; the forgery test guards
+- the 5 harness suites: 46 tests, 149 assertions, 0 failures. The credit,
+  squatting, unknown-condition, malformed-operations and model-view tests
+  fail on the previous code; the forgery test guards
   #2335's provenance stages;
 - clj-kondo 2026.10.26 (the CI version) on `bases components development/src`:
   0 errors.
