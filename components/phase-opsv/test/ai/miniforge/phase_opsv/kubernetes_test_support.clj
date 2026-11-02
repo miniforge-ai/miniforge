@@ -20,10 +20,14 @@
     namespace (assoc "namespace" namespace)))
 
 (defn ^{:stratum 0} kube-resource [kind metadata fields]
-  (merge {"apiVersion" "v1" "kind" kind "metadata" metadata} fields))
+  (merge {"apiVersion" "v1"
+          "kind" kind
+          "metadata" metadata} fields))
 
 (defn ^{:stratum 0} resource-list [kind items]
-  {"apiVersion" "v1" "kind" kind "items" items})
+  {"apiVersion" "v1"
+   "kind" kind
+   "items" items})
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -38,8 +42,10 @@
 
 (defn ^{:stratum 1} node []
   (let [meta (assoc (metadata "worker-a" nil "node-uid") "labels" {pool-label "pool-a"})
-        runtime {"architecture" "amd64" "operatingSystem" "linux"
-                 "kernelVersion" "6.8.0" "containerRuntimeVersion" "containerd://2.0.0"
+        runtime {"architecture" "amd64"
+                 "operatingSystem" "linux"
+                 "kernelVersion" "6.8.0"
+                 "containerRuntimeVersion" "containerd://2.0.0"
                  "kubeletVersion" "v1.33.0"}]
     (kube-resource "Node" meta {"status" {"nodeInfo" runtime}})))
 
@@ -48,7 +54,8 @@
         spec {"nodeName" "worker-a"
                "containers" [(containers/container "service")]}
         status {"containerStatuses" [(containers/status "service" image-id)]}]
-    (kube-resource "Pod" meta {"spec" spec "status" status})))
+    (kube-resource "Pod" meta {"spec" spec
+                               "status" status})))
 
 ;------------------------------------------------------------------------------ Layer 2
 
