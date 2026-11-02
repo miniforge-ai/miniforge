@@ -215,6 +215,10 @@ requires synthesizer responsibility.
 | mergeable | refine-claim, revise-plan, answer-question | Commit if touched objects unchanged since basis; otherwise reject with current state returned |
 | exclusive | accept-decision, reject-decision, record-experiment-result, merge-hypotheses, invalidate-artifact, close-goal, add-goal, add-constraint, retire-question, supersede | Commit only against current version of touched objects; single writer wins |
 
+The additive rule's non-terminal requirement has one exception: `challenge` and
+`attach-evidence` MAY target an `:accepted` object (§2.3). The target keeps its
+`:accepted` disposition; a challenge records the separate contested marker.
+
 ### 3.4 Validation pipeline
 
 The engine MUST validate, in order: schema conformance; role permission (§5.3); basis
@@ -229,8 +233,10 @@ Every operation MUST enforce its creation and target types, required fields and
 reference integrity. The runtime MUST reject model-supplied authority, policy or
 unattested provenance metadata. Goal closure MUST name an adopted decision that
 covers that goal. Candidate validation MUST account for earlier operations in the
-same transaction without publishing partial state. Choice-point uniqueness is
-checked at admission; agents cannot bypass it by creating different decision ids.
+same transaction without publishing partial state. Unadopted alternative decisions MAY
+coexist at one choice point. Choice-point uniqueness binds adoption: admitting
+`accept-decision` MUST reject a decision whose choice point already has another
+`:accepted` decision, so agents cannot bypass it by creating different decision ids.
 
 ### 3.5 Anti-livelock rules
 
@@ -281,7 +287,8 @@ fetch objects outside the projection by id.
 ### 4.4 Ablation switch (normative)
 
 A conforming implementation MUST support `cross_visibility: none`. Under it, the visible
-set for a role is exactly: objects authored by that role, objects authored by the
+set for a participant is exactly: objects authored by that participant (by runtime
+participant identity, not by shared responsibility), objects authored by the
 interpreter (the specification-derived set), objects injected via OCI (source `:user`),
 and all goals and `:hard` constraints. §4.2's required content is then computed over the
 visible set only: derived objects (conflicts) appear iff every object they reference is in

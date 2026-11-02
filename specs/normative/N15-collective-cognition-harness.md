@@ -302,8 +302,9 @@ tiers. Promote iff both:
 2. the ablation delta on **success** or **coverage** is positive under §8.1.
 
 Fail → the tested N14 protocol, population, task, and budget configuration is not
-promoted; its negative result is retained and that protocol version is demoted or
-revised. A later version needs a new preregistration and new evidence. C2/C3 remain
+promoted; its negative result is retained and that protocol version is demoted per
+N14 §0.4. A revised protocol is a new version that needs a new preregistration and new
+evidence. C2/C3 remain
 available as ordinary workflows; the negative result is recorded in the decision record.
 
 ### 8.5 Gate G1 — N14 Stage 1 → Stage 2
