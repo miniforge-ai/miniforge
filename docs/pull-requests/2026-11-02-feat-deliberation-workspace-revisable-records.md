@@ -48,6 +48,9 @@ projection named hidden ids.
     `:object/history`.
   - An answer is recorded as `:object/answer`.
   - A supersession records `:object/superseded-by`.
+- Message catalog: three new keys (`missing-statement`, `invalid-replacement`,
+  `inapplicable-replacement`). Three guard messages now say "Participant" or
+  name the new backing option.
 - `guards`
   - A challenge is also backed by a non-blank `:reason` plus `:resolution`.
   - Idempotency compares the whole payload per participant.
@@ -82,8 +85,8 @@ adds the accepted case as positive coverage.
 
 Ran locally on plain Clojure 1.12 with a classpath of the component sources
 (Clojars is unreachable from the authoring sandbox, so a local stand-in
-replaced malli): all 11 deliberation-workspace suites, 141 tests,
-461 assertions, 0 failures. `poly test`, clj-kondo and the Polylith check ran
+replaced malli): all 12 deliberation-workspace suites, 142 tests,
+464 assertions, 0 failures. `poly test`, clj-kondo and the Polylith check ran
 only in CI.
 
 ## Deployment Plan
@@ -92,7 +95,8 @@ None. The component is experimental (N14 §0.4) and has no production caller.
 
 ## Related Issues/PRs
 
-- Depends on the N14/N15 specs PR (#2328) for the contract.
+- Depends on the N14/N15 specs PR (#2328) for the contract, and on the
+  message catalog PR (#2329), which is this PR's base branch.
 - Next: semantic admission, run loop, scheduler and termination.
 
 ## Checklist
