@@ -175,7 +175,7 @@
         report (when-not (anomaly/anomaly? results) (harness/render-report pinned results))
         closed (when report
                  (record! {:kind :experiment-completed :manifest-hash (harness/digest pinned)
-                           :results results :report report :gate {:G0 :not-evaluated}}))]
+                           :results (mapv #(dissoc % :boards) results) :report report :gate {:G0 :not-evaluated}}))]
     (cond
       (anomaly/anomaly? results) results
       (anomaly/anomaly? closed) closed

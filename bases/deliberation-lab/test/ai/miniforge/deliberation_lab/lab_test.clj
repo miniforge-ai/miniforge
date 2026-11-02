@@ -57,6 +57,8 @@
         (is (true? (:verified? (lab/verify! output))))
         (is (.exists (io/file output "report.md")))
         (is (.exists (io/file output "journal" "000000.edn")))
+        (is (not-any? :boards (:results (:payload (last (harness/read-journal
+                                                         (str (io/file output "journal"))))))))
         (testing "a run never reuses its directory"
           (is (anomaly/anomaly? (smoke! output))))
         (testing "an edited record breaks verification"

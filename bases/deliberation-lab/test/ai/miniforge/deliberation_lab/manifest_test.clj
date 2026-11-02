@@ -47,6 +47,8 @@
     (is (= [:tiers] (manifest/defects (assoc valid :tiers 42))))
     (is (= [:tiers] (manifest/defects (assoc valid :tiers [42]))))
     (is (= [:adapter] (manifest/defects (dissoc valid :adapter))))
+    (is (= [:adapter] (manifest/defects (assoc valid :adapter {:call-cap-usd ##Inf}))))
+    (is (= [:price-table] (manifest/defects (assoc-in valid [:price-table :input-per-million] ##NaN))))
     (is (= [:price-table] (manifest/defects (assoc valid :price-table
                                                    '(:input-per-million 3 :output-per-million)))))
     (is (some #{:manifest} (manifest/defects [])))))

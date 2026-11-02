@@ -34,10 +34,10 @@
   2)
 
 (defn- ^{:stratum 0} non-negative-number? [x]
-  (and (number? x) (not (neg? x))))
+  (and (number? x) (Double/isFinite (double x)) (not (neg? x))))
 
 (defn- ^{:stratum 0} positive-number? [x]
-  (and (number? x) (pos? x)))
+  (and (number? x) (Double/isFinite (double x)) (pos? x)))
 
 (defn- ^{:stratum 0} distinct-seq? [xs]
   (and (seq xs) (= (count xs) (count (set xs)))))

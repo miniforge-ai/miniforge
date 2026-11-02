@@ -102,6 +102,10 @@ activation as failed with unknown usage, never as free, but it cannot stop
 the second call: that needs a request opt-out in the `llm` component, a
 separate brick, which is left for a follow-up.
 
+Failed calls: a failed or cut stream is recorded with unknown usage and is
+never shown as settled spend, but any partial token counts it carried are not
+kept. Keeping them as a metered failure is a follow-up.
+
 Input cap: `:max-input-bytes` is checked by the harness against the
 canonical EDN request the journal records. The adapter sends that request as
 JSON, which can differ in size by a few percent; the provider still enforces
@@ -129,7 +133,9 @@ Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
 sandbox), with scratch stand-ins outside the repo for the `llm` namespace
 (no calls are made) and for cheshire's JSON parsing:
 
-- `manifest_test` and `lab_test`: 11 tests, 41 assertions, 0 failures.
+- `manifest_test` and `lab_test`: 11 tests, 44 assertions, 0 failures.
+  Non-finite weights and caps are named defects, and the closing record
+  carries no unverified board snapshots.
 - The stratum heading check (SL006) over the base, the harness and the
   workspace: 0 mismatches. The
   smoke test failed before the `journal/` change, the usage test before the
