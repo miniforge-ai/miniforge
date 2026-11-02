@@ -23,6 +23,9 @@ harness PRs (#2334, #2346).
 The lab runs synthetic development comparisons under N15 §0.5 without
 touching the canonical software-factory workflow. Under Polylith (dewey 210),
 a base stays a thin entry point over component interfaces.
+`lab` holds only this CLI's run orchestration (preflight, journal layout,
+verification); the reusable parts are harness interface functions, and the
+base requires no component internals (dewey 311).
 
 ## Changes in Detail
 
