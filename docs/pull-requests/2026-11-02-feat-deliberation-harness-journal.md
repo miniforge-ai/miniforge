@@ -26,7 +26,8 @@ codec and fixtures belong in a component.
 ## Changes in Detail
 
 - `codec`
-  - Canonical EDN, with maps and sets in printed-key order. Printer
+  - Canonical EDN, with maps and sets in printed-key order; ties between
+    values that print alike are broken by class, so no entry merges. Printer
     settings are pinned for encoding and for the ordering comparator, so a
     caller's `*print-length*` cannot truncate or reorder a record.
   - SHA-256 digest.
@@ -34,11 +35,13 @@ codec and fixtures belong in a component.
     for unreadable text, trailing forms or a custom reader tag. A tag
     becomes a `deftype` marker that plain EDN cannot construct. It neither
     throws nor evaluates a tag.
-  - `read-source`: reads a file or resource; a read failure is an anomaly
-    naming the source.
+  - `read-source`: reads a file or resource as UTF-8; a read or parse
+    failure is an anomaly naming the source.
+  - `plain?`: true when a value reads back unchanged after encoding.
 - `journal`
   - `open!` refuses a directory that already exists.
-  - `append!` writes each record to a new file through `file-durability`
+  - `append!` refuses a payload that is not `plain?` (it could not be
+    replayed), then writes each record to a new file through `file-durability`
     and forces it. The position only advances after a successful write.
   - Record names are the sequence zero-padded to at least six digits,
     formatted with `Locale/ROOT` and ordered numerically, so sequence
@@ -69,16 +72,19 @@ Deviations from the snapshot:
 
 - `codec_test`: order-independent encoding, digest stability, refused
   custom tags, unreadable text, trailing forms, an unforgeable tag marker,
-  and encoding and ordering under hostile printer bindings.
+  and encoding and ordering under hostile printer bindings; look-alike keys
+  staying distinct; `plain?`; a tag inside anomaly-shaped text.
 - `journal_test` (marked `:integration`; it writes a temporary directory,
   because durable files are the journal's contract): round trip, refusal
   to reuse a directory, tamper detection, an unlistable directory, an
-  unreadable record, numeric ordering past six digits.
+  unreadable record, numeric ordering past six digits, an unreplayable
+  payload refused without moving the position, a malformed record naming
+  its file.
 - `fixtures_test`: every reference passes and every distractor fails; success
   needs every observation; the public view hides the sealed answer.
 
 Ran locally on plain Clojure 1.12 (Clojars is unreachable from the authoring
-sandbox, so a local stand-in replaced malli): 15 tests, 31 assertions,
+sandbox, so a local stand-in replaced malli): 20 tests, 41 assertions,
 0 failures. clj-kondo 2026.10.26 (the CI version) over `bases components
 development/src`: 0 errors. `poly test` and the Polylith check ran only in CI.
 
