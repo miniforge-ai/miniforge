@@ -50,6 +50,13 @@
    The host must retain the digest before effects; this function grants no authority."
   environment-comparison/pin)
 
+(def ^{:stratum 0} compare-verification-environment
+  "Compare an observation with an independently retained contract digest and binding.
+   Candidate mode applies only exact declared changes; rollback mode uses the baseline.
+   Acquisition must independently establish target identity and replica membership.
+   Returns the observation unchanged or an anomaly, not a verification or authority grant."
+  environment-comparison/compare-observation)
+
 (def ^{:stratum 0} observe-prometheus-window!
   "Read a bounded window from an explicit Prometheus endpoint without mutation authority."
   prometheus/observe-window!)

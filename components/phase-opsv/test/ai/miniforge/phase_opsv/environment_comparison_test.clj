@@ -32,4 +32,84 @@
       (is (= :invalid-input
              (:anomaly/type (phase/pin-verification-environment invalid)))))))
 
+(deftest ^{:stratum 0} undeclared-image-values-remain-baseline-invariants-test
+  (let [plan (assoc (fixtures/plan) :comparison/changes {:config-hash "candidate-config"})
+        pinned (phase/pin-verification-environment plan)
+        expected (assoc (fixtures/fingerprint) :config-hash "candidate-config")
+        request (fixtures/request pinned :candidate expected)]
+    (is (= expected (phase/compare-verification-environment request)))
+    (is (anomaly/anomaly?
+          (phase/compare-verification-environment
+            (assoc-in request [:comparison/observed :image-digests] {"catalog" "sha256:foreign"}))))))
+
+(deftest ^{:stratum 0} exact-predeclared-changes-match-but-unrelated-drift-does-not-test
+  (let [pinned (phase/pin-verification-environment (fixtures/plan))
+        candidate (merge (fixtures/fingerprint) (fixtures/changes))
+        request (fixtures/request pinned :candidate candidate)]
+    (is (identical? candidate (phase/compare-verification-environment request)))
+    (doseq [[key value] [[:cluster "foreign"] [:node-pools ["foreign"]]
+                         [:image-digests {"catalog" "sha256:foreign"}]
+                         [:config-hash "undeclared-config"]]]
+      (is (= :environment-drift
+             (get-in (phase/compare-verification-environment
+                       (assoc-in request [:comparison/observed key] value))
+                     [:anomaly/data :comparison/reason]))))))
+
+(deftest ^{:stratum 0} rollback-compares-original-baseline-not-candidate-test
+  (let [plan (fixtures/plan)
+        pinned (phase/pin-verification-environment plan)
+        baseline (:comparison/baseline plan)
+        candidate (merge baseline (:comparison/changes plan))]
+    (is (identical? baseline
+                   (phase/compare-verification-environment
+                     (fixtures/request pinned :rollback baseline))))
+    (is (= :environment-drift
+           (get-in (phase/compare-verification-environment
+                     (fixtures/request pinned :rollback candidate))
+                   [:anomaly/data :comparison/reason])))))
+
+(deftest ^{:stratum 0} independent-pin-rejects-rehashed-contract-and-stale-bindings-test
+  (let [plan (fixtures/plan)
+        pinned (phase/pin-verification-environment plan)
+        baseline (:comparison/baseline plan)
+        request (fixtures/request pinned :rollback baseline)
+        changed (phase/pin-verification-environment (assoc plan :comparison/changes {}))]
+    (is (= :contract-mismatch
+           (get-in (phase/compare-verification-environment
+                     (assoc request :comparison/pin changed))
+                   [:anomaly/data :comparison/reason])))
+    (is (= :contract-mismatch
+           (get-in (phase/compare-verification-environment
+                     (assoc-in request [:comparison/pin :comparison/contract
+                                        :comparison/changes :config-hash] "substituted"))
+                   [:anomaly/data :comparison/reason])))
+    (doseq [[key value] (fixtures/stale-bindings)]
+      (is (= :binding-mismatch
+             (get-in (phase/compare-verification-environment
+                       (assoc-in request [:comparison/binding key] value))
+                     [:anomaly/data :comparison/reason]))))))
+
+(deftest ^{:stratum 0} malformed-comparison-and-undeclared-fields-fail-closed-test
+  (let [pinned (phase/pin-verification-environment (fixtures/plan))
+        baseline (fixtures/fingerprint)
+        request (fixtures/request pinned :rollback baseline)]
+    (doseq [invalid [nil {}
+                     (assoc request :comparison/stage :unexpected)
+                     (dissoc request :comparison/expected-hash)
+                     (assoc request :comparison/observed {})
+                     (assoc-in request [:comparison/observed :config-hash] nil)
+                     (assoc-in request [:comparison/observed :replicas] [])]]
+      (is (= :invalid-input
+             (:anomaly/type (phase/compare-verification-environment invalid)))))))
+
+(deftest ^{:stratum 0} no-declared-changes-retains-exact-baseline-matching-test
+  (let [plan (assoc (fixtures/plan) :comparison/changes {})
+        pinned (phase/pin-verification-environment plan)
+        baseline (:comparison/baseline plan)
+        request (fixtures/request pinned :candidate baseline)]
+    (is (identical? baseline (phase/compare-verification-environment request)))
+    (is (anomaly/anomaly?
+          (phase/compare-verification-environment
+            (assoc-in request [:comparison/observed :config-hash] "undeclared"))))))
+
 (comment ::predeclared-canonical-environment-contract)

@@ -26,7 +26,28 @@
   {:config-hash "candidate-config"
    :image-digests {"catalog" "sha256:candidate"}})
 
+(defn ^{:stratum 0} request [pin stage observed]
+  (let [contract (:comparison/contract pin)
+        expected-hash (:comparison/hash pin)
+        attempt (:comparison/binding contract)]
+    {:comparison/pin pin
+     :comparison/expected-hash expected-hash
+     :comparison/binding attempt
+     :comparison/stage stage
+     :comparison/observed observed}))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} stale-bindings []
+  (let [target (get-in (verification-binding) [:runtime/target])]
+    [[:workflow/id (random-uuid)]
+     [:verification/id (random-uuid)]
+     [:candidate/hash (hash/content-hash :another-candidate)]
+     [:experiment-pack/hash (hash/content-hash :another-pack)]
+     [:runtime/target (assoc target :cluster "foreign")]
+     [:runtime/target (assoc target :namespace "foreign")]
+     [:runtime/target (assoc target :workload-uid "foreign")]
+     [:runtime/target (assoc target :namespace-uid "foreign")]]))
 
 (defn ^{:stratum 1} plan []
   {:comparison/binding (verification-binding)

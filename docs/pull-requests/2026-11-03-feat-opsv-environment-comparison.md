@@ -36,11 +36,20 @@ Pin exact changes, unrelated drift, stale bindings, changed contracts, missing
 values, recovery-baseline substitution, and closed input shapes. Run structural
 checks and both affected project contexts, normal hooks, and packaged proof.
 
+Completed: focused source tests (8 tests, 42 assertions), workspace structure,
+and all `phase-opsv` tests in both product contexts. A fresh CLI build passed
+27 packaged tests with 175 assertions from an isolated directory, without any
+production source overlay. The packaged suites also cover the existing
+verification, drift publication, and phase interface contracts.
+
 ## Deployment Plan
 
 No execution authority or live effects. Runner admission, durable contract
 retention, and native replica-membership projection follow in separate slices.
 The API alone cannot prove that a caller retained its digest before effects.
+Acquisition must independently establish the observed target and native resource
+membership. This slice does not interpret raw Kubernetes fingerprints or permit
+replica churn. The current runner still uses exact-baseline matching.
 
 ## Related Issues/PRs
 
@@ -48,6 +57,6 @@ Base branch: `main`. Contract dependency: #2353, the approved N7 §6.3 amendment
 
 ## Checklist
 
-- [ ] Add contract and boundary regression tests.
-- [ ] Run owner adversarial and applicable-standards reviews.
+- [x] Add contract and boundary regression tests.
+- [x] Run owner adversarial and applicable-standards reviews.
 - [ ] Pass project contexts, hooks, packaging, CI, and full-head review.
