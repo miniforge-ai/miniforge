@@ -13,6 +13,8 @@
   :control/unconfirmed "OPSV run control refused the operation or could not confirm stop cleanup. Inspect the retained run and grant results before recovery."
   :adapter/invalid-callbacks "OPSV adapter callbacks must be functions."
   :verification/missing "The runtime requires a fresh candidate verification adapter."
+  :verification/preparation-missing "The adapter does not provide read-only verification preparation."
+  :verification/preparation-invalid "The verification preparation observations are invalid."
   :verification/failed "The candidate verification adapter failed."
   :verification/invalid "The candidate verification measurements are invalid."
   :verification/mismatched "The verification measurements do not match this candidate execution."

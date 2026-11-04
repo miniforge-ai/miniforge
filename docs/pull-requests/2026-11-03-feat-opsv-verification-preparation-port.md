@@ -33,6 +33,11 @@ Test correlation, input shape, missing preparation, callback validation, and
 existing adapter behavior. Run both product contexts, native packaging, normal
 hooks, CI, and full-head review.
 
+Focused preparation, verification, and drift coverage passes 22 tests and
+131 assertions. Both affected product contexts pass. Fresh isolated CLI
+packaging passes 45 tests and 239 assertions without production source overlays.
+The receipt extraction preserves existing wire shapes and failure handling.
+
 ## Deployment Plan
 
 No native acquisition or live effects. Durable contract retention and the
@@ -41,13 +46,13 @@ The adapter must independently establish the observation's target and membership
 
 ## Related Issues/PRs
 
-Depends on merged #2353 and #2354 and the replica-comparison parent PR.
+Depends on merged #2353 and #2354 and replica-comparison parent #2355.
 This private branch uses the parent's shared target and replica observation
 schemas. Publish against actual `main` only after that parent merges, excluding
 its inherited changes from this PR's scope.
 
 ## Checklist
 
-- [ ] Cover the public preparation contract and legacy adapter behavior.
-- [ ] Complete owner adversarial and applicable-standards review.
+- [x] Cover the public preparation contract and legacy adapter behavior.
+- [x] Complete owner adversarial and applicable-standards review.
 - [ ] Pass all product, package, hook, CI, and full-review gates.
