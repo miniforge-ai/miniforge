@@ -19,9 +19,9 @@ Generic secret-key matching alone does not identify every native payload role.
 
 ## Changes in Detail
 
-Base branch: main, including verification capture #2366 and outside invariants
-PR #2367. Preserve both public APIs and message families when resolving the
-main-merge conflicts; rerun integration gates on that resulting source.
+Base branch: main, including capture #2366, outside invariants #2367 and bounded
+controller configuration #2369. Normal integration preserves all public APIs and
+message families; final gates run on that resulting source.
 
 Add one reporting-only API with a fixed, versioned field policy. Retain scalar
 native identity/provenance, owner-reference identities and explicit int32 desired
@@ -60,14 +60,13 @@ Prove original comparison differences survive while reports withhold values.
 Retain original PII findings and refuse opaque, deferred or metadata-bearing data.
 Simulate failed shared redaction and require a value-free failure.
 
-Before the second review, both product contexts, poly check and a fresh CLI build
-passed. Isolated packaging passed 184 tests and 1,023 assertions.
+Both product contexts, poly check and a fresh CLI build pass on current main.
+Isolated packaging passes 202 tests and 1,130 assertions. The 23 reporting cases
+contain 118 assertions; each measures below 100 ms. All 17 deliberate defects
+are detected without test errors. The committed scan reports zero findings across
+290 files. Strict source/test lint and explicit changed-namespace strata pass.
 The second review findings reproduce six assertion failures and zero errors
-against that package. Corrected source passes 23 cases and 118 assertions.
-All 17 deliberate defects are detected without test errors, including untyped
-composite exemptions and standalone-item bypasses. Final-source product, package,
-mutation and scan gates remain required before pushing this correction.
-No exception is requested.
+against the prior package. No gate, signing or size exception is used.
 
 ## Deployment Plan
 
