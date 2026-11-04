@@ -34,6 +34,8 @@
    [ai.miniforge.phase-opsv.run-control :as run-control]
    [ai.miniforge.phase-opsv.run-control-state :as control-state]
    [ai.miniforge.phase-opsv.protocol :as protocol]
+   [ai.miniforge.phase-opsv.verification-preparation :as preparation]
+   [ai.miniforge.phase-opsv.verification-preparation-schema :as preparation-schema]
    [ai.miniforge.phase-opsv.verification-run :as verification-run]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -41,6 +43,23 @@
 (def ^{:stratum 0} OPSVAdapter protocol/OPSVAdapter)
 
 (def ^{:stratum 0} VerificationAdapter protocol/VerificationAdapter)
+
+(def ^{:stratum 0} VerificationPreparationAdapter
+  "Read-only target acquisition before verification effects; not admission or authority."
+  protocol/VerificationPreparationAdapter)
+
+(def ^{:stratum 0} prepare-verification
+  "Invoke read-only preparation. The host must independently admit and retain its result."
+  protocol/prepare-verification)
+
+(def ^{:stratum 0} VerificationPreparationReceipt
+  "Closed receipt schema for correlated preparation observations, not freshness or membership proof."
+  preparation-schema/Receipt)
+
+(def ^{:stratum 0} verification-preparation-receipt
+  "Correlate an observation with the request's invocation and candidate/pack hashes.
+   Returns a typed receipt or anomaly; acquisition and admission remain caller obligations."
+  preparation/receipt)
 
 (def ^{:stratum 0} run-verification protocol/run-verification)
 
@@ -135,11 +154,15 @@
    ctx (get-in ctx [:execution/phase-results :opsv/verify :result :output])))
 
 (defn ^{:stratum 0} functional-adapter
-  "Build an adapter; a missing verification callback fails closed at VERIFY."
+  "Build an adapter with explicit discovery, ramp, optional preparation and verification callbacks.
+   Two/three retain their meaning; four add a separate read-only preparation callback.
+   The host owns invocation order; missing callbacks are unavailable, never fabricated."
   ([discover-fn guarded-ramp-fn]
    (adapter-factory/create discover-fn guarded-ramp-fn))
   ([discover-fn guarded-ramp-fn verify-fn]
-   (adapter-factory/create discover-fn guarded-ramp-fn verify-fn)))
+   (adapter-factory/create discover-fn guarded-ramp-fn verify-fn))
+  ([discover-fn guarded-ramp-fn prepare-fn verify-fn]
+   (adapter-factory/create discover-fn guarded-ramp-fn prepare-fn verify-fn)))
 
 (def ^{:stratum 0} decode-kubernetes-fingerprint
   "Decode one explicitly captured target into drift-sensitive evidence.
