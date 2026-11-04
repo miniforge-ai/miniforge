@@ -97,3 +97,24 @@
         protected (reporting/protect input)]
     (is (not (anomaly/anomaly? protected)))
     (is (= (:generic input) (:generic protected)))))
+
+(deftest ^{:stratum 0} native-material-hidden-in-map-or-list-metadata-is-refused-before-discovery-test
+  (let [hidden (fixtures/frame "opaque-native-value")]
+    (doseq [value [(with-meta {:ordinary true} hidden)
+                   (with-meta (list :ordinary) hidden)]]
+      (let [result (reporting/protect value)]
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (= {} (:anomaly/data result)))))))
+
+(deftest ^{:stratum 0} list-carrier-metadata-cannot-be-dropped-before-original-pii-scanning-test
+  (let [value (with-meta (list (fixtures/frame "opaque-native-value")) {:private "123-45-6789"})
+        result (artifacts/record (fixtures/context) {:report value} [:verification :review :report])]
+    (is (= :invalid-input (:anomaly/type result)))
+    (is (not (contains? result :artifact/id)))))
+
+(deftest ^{:stratum 0} opaque-or-deferred-language-metadata-is-refused-without-inspection-test
+  (let [deferred (lazy-seq (throw (ex-info "metadata must not be realized" {})))
+        value (with-meta {:ordinary true} {:private deferred})
+        result (reporting/admit value)]
+    (is (= :invalid-input (:anomaly/type result)))
+    (is (not (realized? deferred)))))

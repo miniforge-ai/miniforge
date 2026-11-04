@@ -25,6 +25,9 @@
 (defn- ^{:stratum 0} native-frame? [value]
   (and (map? value) (contains? value policy/native-verification-key)))
 
+(defn- ^{:stratum 0} metadata-free-node? [value]
+  (nil? (meta value)))
+
 (defn- ^{:stratum 0} candidate? [frame]
   (let [value (get frame policy/native-verification-key)]
     (and (nil? (meta frame)) (map? value) (fields/supported? value)
@@ -36,6 +39,9 @@
 (defn- ^{:stratum 1} native-frames [value]
   (filter native-frame? (tree-seq coll? seq value)))
 
+(defn- ^{:stratum 1} metadata-free? [value]
+  (every? metadata-free-node? (tree-seq coll? seq value)))
+
 (defn- ^{:stratum 1} node [value]
   (if (native-frame? value) (update value policy/native-verification-key reporting-copy) value))
 
@@ -46,7 +52,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} supported? [value]
-  (and (redaction/supported? value) (compatible? value (native-frames value))))
+  ;; Metadata is outside the shared scanner's bounded data tree. Reject it without traversing it.
+  (and (redaction/supported? value) (metadata-free? value) (compatible? value (native-frames value))))
 
 (defn ^{:stratum 2} project [value]
   (if (seq (native-frames value)) (walk/postwalk node value) value))

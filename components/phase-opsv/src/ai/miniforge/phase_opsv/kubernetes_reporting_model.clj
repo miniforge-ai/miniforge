@@ -33,3 +33,5 @@
   (let [classified (node (fields/ordinary-maps value))]
     {:kubernetes/reporting-profile policy/profile
      :kubernetes/reporting classified}))
+
+(comment (reporting-copy {"kind" "Pod"}))

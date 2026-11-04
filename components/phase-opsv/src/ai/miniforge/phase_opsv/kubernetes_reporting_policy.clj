@@ -41,3 +41,5 @@
 (def ^{:stratum 0} confidential-semantic-fields
   "Native semantic payloads retain original values for hashing/scanning, not reporting plaintext."
   #{:kubernetes/pod-spec :resource/ownership-and-lifecycle :resource/runtime})
+
+(comment profile native-verification-key)

@@ -48,3 +48,5 @@
   (if (map? value)
     (into (empty value) (map (partial protected-entry allowed)) value)
     (confidential value)))
+
+(comment (ordinary-maps (sorted-map "kind" "Pod")))

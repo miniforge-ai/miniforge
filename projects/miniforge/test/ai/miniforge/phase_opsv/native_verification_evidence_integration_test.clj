@@ -9,11 +9,16 @@
             [ai.miniforge.phase-opsv.candidate-verification-fixtures :as verification]
             [ai.miniforge.phase-opsv.environment-comparison-fixtures :as environment]
             [ai.miniforge.phase-opsv.interface :as phase]
+            [ai.miniforge.phase-opsv.native-material-fixtures :as native]
             [ai.miniforge.phase-opsv.native-verification-evidence-fixtures :as fixtures]
             [ai.miniforge.phase-opsv.test-support :as support]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} counted-refusal [calls _request]
+  (swap! calls conj :invoked)
+  (anomaly/anomaly :unavailable "injected callback refusal" {}))
 
 (defn- ^{:stratum 0} verify-literal-privacy [ctx directory baseline]
   (let [{:keys [result retained final stages]} (fixtures/reports ctx directory baseline "opaque-native-value")]
@@ -52,6 +57,18 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} verify-inherited-metadata [ctx _directory _baseline]
+  (doseq [configured [ctx (update ctx :execution/opts dissoc :opsv/verification-environment)]]
+    (let [calls (atom [])
+          hidden (native/frame "opaque-native-value")
+          configured (update-in configured [:execution/phase-results :opsv/synthesize :result :output]
+                                #(with-meta % hidden))
+          callback (partial counted-refusal calls)
+          result (verification/verify configured callback callback)]
+      (is (anomaly/anomaly? result))
+      (is (empty? @calls))
+      (is (= {} (:anomaly/data result))))))
+
 (deftest ^{:stratum 1} native-literals-are-protected-before-retention-and-return-test
   (verification/with-context verify-literal-privacy))
 
@@ -60,3 +77,8 @@
 
 (deftest ^{:stratum 1} native-protection-finalizes-with-original-findings-in-its-immutable-lineage-test
   (verification/with-context verify-native-finalization))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} inherited-language-metadata-cannot-reach-either-adapter-mode-test
+  (verification/with-context verify-inherited-metadata))

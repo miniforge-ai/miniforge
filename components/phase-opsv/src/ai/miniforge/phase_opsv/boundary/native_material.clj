@@ -19,10 +19,15 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} classify [value]
-  (if (projection/supported? value) (wrapped (projection/project value)) (invalid)))
+(defn ^{:stratum 1} admit [value]
+  (if (projection/supported? value) (wrapped value) (invalid)))
 
 (defn ^{:stratum 1} confirm [value]
   (if (projection/protected? (redaction/marker) value) (wrapped value) (failed)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} classify [value]
+  (anomaly/let-ok [admitted (admit value)] (wrapped (projection/project (:reporting/value admitted)))))
 
 (comment (classify {:unrelated :data}))

@@ -31,3 +31,5 @@
   (anomaly/let-ok [data (admitted value)
                   prepared (evidence/prepare-artifact-content (model/reporting-copy (:reporting/value data)))]
     (protected prepared)))
+
+(comment (prepare {"kind" "Pod"}))
