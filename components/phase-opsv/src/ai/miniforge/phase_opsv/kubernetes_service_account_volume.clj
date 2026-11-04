@@ -11,7 +11,7 @@
 
 (def ^{:stratum 0} ^:private generated-name
   "Kubernetes service-account admission's generated prefix and five-character suffix."
-  #"\Akube-api-access-[a-z0-9]{5}\z")
+  #"\Akube-api-access-[bcdfghjklmnpqrstvwxz2456789]{5}\z")
 
 (def ^{:stratum 0} ^:private native-source-kinds
   "Ordered, exclusive native sources; unknown or additional source kinds stay literal."
