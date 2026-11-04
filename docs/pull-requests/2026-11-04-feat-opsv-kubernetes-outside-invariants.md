@@ -46,7 +46,9 @@ Order resources canonically; retain the versioned semantic view beside its hash.
 Admit finalizers as unique strings and owner references as unique UID-keyed records
 before canonicalizing their order. Preserve the original metadata and all retained
 reference content; reject malformed collections rather than dropping entries.
-These collection semantics follow native Kubernetes ObjectMeta, not a new policy.
+These collection semantics follow native
+[Kubernetes ObjectMeta](https://github.com/kubernetes/apimachinery/blob/v0.35.0/pkg/apis/meta/v1/types.go),
+not a new policy.
 
 This is an outside-only comparison value, not a complete OPSV fingerprint.
 Owned controller desired configuration and counts, replica invariants, freshness,
@@ -62,12 +64,13 @@ identity changes remain visible. Cover ordering, omitted TypeMeta, duplicate and
 incomplete inputs, Secret treatment and unsupported content.
 Run product, isolated package, mutation and complete PR gates.
 
-Before the latest metadata correction, both product contexts and poly check passed;
-fresh isolated native packaging passed 146 tests and 855 assertions.
-The metadata regressions fail against that package with 11 assertion failures and
-zero errors. Current source passes all 22 outside cases and 101 assertions.
-Each case measures below 100 ms. Product, fresh-package, mutation and scan gates will be rerun on the
-committed correction before the next push.
+Both product contexts and poly check pass. Fresh isolated native packaging passes
+149 tests and 873 assertions. All 14 deliberate bypasses are detected without test
+errors, including omitted canonicalization and metadata admission.
+The metadata regressions fail against the prior package with 11 assertion failures
+and zero errors. Current packaging passes all 22 outside cases and 101 assertions.
+Each case measures below 100 ms. The committed component scan reports zero findings
+across 277 files. The PR remains below its size limit without an exception.
 
 ## Deployment Plan
 
