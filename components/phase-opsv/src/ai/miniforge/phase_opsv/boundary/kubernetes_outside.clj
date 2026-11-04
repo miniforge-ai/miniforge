@@ -31,7 +31,7 @@
       (invalid)))
 
 (defn- ^{:stratum 1} membership [input]
-  (or (:kubernetes/membership (partition/project (:kubernetes/inventory input))) (conflict)))
+  (get (partition/project (:kubernetes/inventory input)) :kubernetes/membership (conflict)))
 
 (defn- ^{:stratum 1} resources [input]
   (let [all (inventory/resources input)]
