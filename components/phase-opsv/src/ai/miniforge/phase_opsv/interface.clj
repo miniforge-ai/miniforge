@@ -39,6 +39,8 @@
    [ai.miniforge.phase-opsv.protocol :as protocol]
    [ai.miniforge.phase-opsv.verification-preparation :as preparation]
    [ai.miniforge.phase-opsv.verification-preparation-schema :as preparation-schema]
+   [ai.miniforge.phase-opsv.verification-environment :as verification-environment]
+   [ai.miniforge.phase-opsv.verification-environment-schema :as verification-environment-schema]
    [ai.miniforge.phase-opsv.verification-run :as verification-run]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -67,6 +69,19 @@
 (def ^{:stratum 0} run-verification protocol/run-verification)
 
 (def ^{:stratum 0} verification-receipt verification-run/receipt)
+
+(def ^{:stratum 0} VerificationEnvironmentDeclaration
+  "Opt-in :opsv/verification-environment execution option: exact candidate/pack hashes,
+   target and permitted differences. The host supplies the baseline and invocation IDs."
+  verification-environment-schema/Declaration)
+
+(def ^{:stratum 0} CandidateVerificationReceipt
+  "Closed measurements with target, canonical fingerprint, raw observations and optional replica population."
+  verification-environment-schema/Receipt)
+
+(def ^{:stratum 0} candidate-verification-receipt
+  "Correlate candidate-aware measurements; no environment admission or execution authority."
+  verification-environment/receipt)
 
 (def ^{:stratum 0} VerificationEnvironmentPlan
   "Closed plan schema: binding, baseline, exact image/config changes and optional replica contract.

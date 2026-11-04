@@ -47,6 +47,9 @@
 
 (def ^{:stratum 0} snapshot-kinds [:metric-snapshot :verification-measurements])
 
+(def ^{:stratum 0} verification-environment-material
+  [:verification-environment :opsv-verification-report :opsv/verification-environment])
+
 (defn- ^{:stratum 0} append-reference [references id]
   (vec (distinct (conj references id))))
 
@@ -63,6 +66,8 @@
 
 (defn ^{:stratum 1} records [ctx phase-key output]
   (let [materials (cond-> (get phase-materials phase-key [])
+                    (and (= :opsv/verify phase-key) (contains? output :opsv/verification-environment))
+                    (conj verification-environment-material)
                     (and (= :opsv/actuate phase-key) (contains? output :opsv/effect-transactions))
                     (conj [:effect-transactions :review :opsv/effect-transactions])
                     (and (= :opsv/actuate phase-key) (contains? output :opsv/phase-failure))
