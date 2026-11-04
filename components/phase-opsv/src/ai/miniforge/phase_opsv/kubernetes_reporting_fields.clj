@@ -7,8 +7,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} update-present [value key transform]
-  (if (and (map? value) (contains? value key)) (update value key transform) value))
+(defn ^{:stratum 0} replace-present [projected original key transform]
+  (if (and (map? original) (contains? original key))
+    (assoc projected key (transform (get original key))) projected))
 
 (defn ^{:stratum 0} node-supported? [value]
   (and (nil? (meta value))
@@ -29,7 +30,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} protected-entry [allowed [key value]]
-  [key (if (contains? allowed key) value (confidential value))])
+  [key (if (and (contains? allowed key) (not (coll? value))) value (confidential value))])
 
 (defn ^{:stratum 1} supported? [value]
   (and (redaction/supported? value) (every? node-supported? (tree-seq coll? seq value))))

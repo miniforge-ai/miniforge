@@ -14,31 +14,26 @@
   :kubernetes/data-minimized-reporting-v1)
 
 (def ^{:stratum 0} metadata-fields
-  "Retain provenance and lifecycle; classify annotations, labels, managed fields and unknown content as confidential."
-  #{"name" "namespace" "uid" "resourceVersion" "generation" "creationTimestamp"
-    "deletionTimestamp" "deletionGracePeriodSeconds" "ownerReferences" "finalizers" "generateName"})
+  "Scalar native identity and server provenance; composite metadata requires dedicated projections."
+  #{"name" "namespace" "uid" "resourceVersion" "creationTimestamp"})
 
 (def ^{:stratum 0} resource-fields
   "Public native headers. Payloads and unknown fields require explicit reporting treatment."
-  #{"apiVersion" "kind" "metadata"})
+  #{"apiVersion" "kind"})
 
 (def ^{:stratum 0} reference-fields
   "Native owner-reference provenance remains inspectable; unknown reference extensions remain confidential."
-  #{"apiVersion" "kind" "name" "uid" "controller" "blockOwnerDeletion"})
+  #{"apiVersion" "kind" "name" "uid"})
 
-(def ^{:stratum 0} container-fields
-  "Keep identity and scaling resources; literal environment, images, commands, probes and unknown fields may carry credentials."
-  #{"name" "resources" "imagePullPolicy"})
+(def ^{:stratum 0} controller-types
+  "Only native apps/v1 scale controllers receive the typed desired-count projection."
+  #{["apps/v1" "Deployment"] ["apps/v1" "ReplicaSet"]})
 
-(def ^{:stratum 0} pod-fields
-  "Keep placement and typed container groups; other native Pod configuration remains in original hashes, not report plaintext."
-  #{"containers" "initContainers" "ephemeralContainers" "nodeName" "restartPolicy"
-    "terminationGracePeriodSeconds" "serviceAccountName"})
+(def ^{:stratum 0} resource-shape-fields
+  "Conservative native shape cues include captured List items whose TypeMeta is omitted."
+  #{"metadata" "spec" "status" "data" "binaryData" "stringData" "items" "containers"
+    "initContainers" "ephemeralContainers" "template" "env" "envFrom" "command" "args"})
 
-(def ^{:stratum 0} controller-fields
-  "Keep scaling and rollout controls; selectors may repeat confidential label values."
-  #{"replicas" "template" "strategy" "minReadySeconds" "revisionHistoryLimit" "paused" "progressDeadlineSeconds"})
-
-(def ^{:stratum 0} template-fields
-  "Native template structure; its metadata and PodSpec receive the same fixed treatment as captured Pods."
-  #{"metadata" "spec"})
+(def ^{:stratum 0} confidential-semantic-fields
+  "Native semantic payloads retain original values for hashing/scanning, not reporting plaintext."
+  #{:kubernetes/pod-spec :resource/ownership-and-lifecycle :resource/runtime})

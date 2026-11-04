@@ -181,7 +181,7 @@
 (def ^{:stratum 0} prepare-kubernetes-reporting
   "Prepare data-minimized native reporting through the shared N6 scan/redaction policy, before storage.
    Compute comparison hashes from originals first. This copy is not a manifest, comparison or recovery contract.
-   Preserve native identity/scaling fields; classify payloads and unknown native fields as confidential.
+   Preserve native identity/provenance and typed desired counts; raw specs/status and semantic payloads are confidential.
    Returns protected artifact content/compliance metadata or a value-free anomaly; no storage or authority."
   kubernetes-reporting/prepare)
 

@@ -26,7 +26,7 @@
 
 (defn- ^{:stratum 1} native-content [value]
   (let [normalized (ordinary-maps value)
-        classified (walk/postwalk #(if (map? %) (model/node %) %) normalized)]
+        classified (model/node normalized)]
     {:kubernetes/reporting-profile policy/profile
      :kubernetes/reporting classified}))
 
