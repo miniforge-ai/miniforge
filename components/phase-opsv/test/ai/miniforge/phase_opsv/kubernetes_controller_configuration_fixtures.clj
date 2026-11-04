@@ -17,11 +17,15 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} input []
-  (let [captured (:kubernetes/inventory (outside/input))]
-    {:kubernetes/inventory
-     (-> captured
-         (update :kubernetes/deployment (partial controller 2))
-         (update-in [:kubernetes/replica-set-inventory "items" 0] (partial controller 1))
-         (update-in [:kubernetes/replica-set-inventory "items" 1] (partial controller 1)))
+(defn- ^{:stratum 1} configured-inventory [captured]
+  (-> captured
+      (update :kubernetes/deployment (partial controller 2))
+      (update-in [:kubernetes/replica-set-inventory "items" 0] (partial controller 1))
+      (update-in [:kubernetes/replica-set-inventory "items" 1] (partial controller 1))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} input []
+  (let [captured (configured-inventory (:kubernetes/inventory (outside/input)))]
+    {:kubernetes/inventory captured
      :comparison/bounds {:replicas/min-count 1 :replicas/max-count 3}}))

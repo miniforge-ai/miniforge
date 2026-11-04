@@ -24,22 +24,28 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} counts [controllers]
-  (let [replica-sets (into {} (map (juxt resource/uid desired-count)) (rest controllers))]
-    {:controller/deployment-replicas (desired-count (first controllers))
-     :controller/replica-set-total (reduce + 0 (vals replica-sets))
+  (let [replica-sets (into {} (map (juxt resource/uid desired-count)) (rest controllers))
+        deployment-count (desired-count (first controllers))
+        replica-set-total (reduce + 0 (vals replica-sets))]
+    {:controller/deployment-replicas deployment-count
+     :controller/replica-set-total replica-set-total
      :controller/replica-set-replicas replica-sets}))
+
+(defn- ^{:stratum 1} projection [membership controllers]
+  (let [values (mapv configuration (profiles/ordered controllers))]
+    {:kubernetes/projection :kubernetes/controller-desired-configuration-v1
+     :runtime/target (:runtime/target membership)
+     :kubernetes/controllers values}))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} project [input membership controllers]
   (let [observed-counts (counts controllers)]
     (when (in-bounds? (:comparison/bounds input) observed-counts)
-      (let [projected {:kubernetes/projection :kubernetes/controller-desired-configuration-v1
-                       :runtime/target (:runtime/target membership)
-                       :kubernetes/controllers (mapv configuration (profiles/ordered controllers))}]
-        (anomaly/let-ok [digest (artifact/content-digest projected)]
-          {:kubernetes/source input
-           :kubernetes/membership membership
-           :kubernetes/controller-counts observed-counts
-           :kubernetes/controller-configuration projected
-           :kubernetes/controller-configuration-hash digest})))))
+      (anomaly/let-ok [projected (projection membership controllers)
+                      digest (artifact/content-digest projected)]
+        {:kubernetes/source input
+         :kubernetes/membership membership
+         :kubernetes/controller-counts observed-counts
+         :kubernetes/controller-configuration projected
+         :kubernetes/controller-configuration-hash digest}))))
