@@ -56,20 +56,28 @@
     (is (not (.contains (pr-str reloaded) "123-45-6789")))))
 
 (defn- ^{:stratum 0} verify-legacy-findings [ctx directory baseline]
-  (let [measure #(phase/verification-receipt %
-                  (-> support/verification-measurements
-                      (assoc :environment-fingerprint baseline)
-                      (assoc-in [:observations "native"] (native/frame "person@example.com"))))
-        ready (-> (storage/configured ctx)
-                  (update :execution/opts dissoc :opsv/verification-environment)
-                  (assoc-in [:execution/opts :opsv/adapter]
-                            (phase/functional-adapter identity identity identity measure)))
+  (let [ready (fixtures/legacy-email-context ctx baseline)
         verified (storage/step ready [:opsv/verify phase/verify])
         completed (storage/step verified [:opsv/actuate phase/actuate])
         output (support/phase-output completed :opsv/actuate)
         record (artifact/read-published directory
                  (get-in output [:opsv/phase-artifact-ids :verification-measurements]))]
     (is (:valid? (evidence/validate-published-bundle (:opsv/evidence-bundle output))))
+    (is (not (.contains (pr-str output) "person@example.com")))
+    (is (not (.contains (pr-str record) "person@example.com")))
+    (is (true? (get-in record [:artifact/metadata :evidence/contains-pii?])))
+    (is (contains? (set (map :finding/type (get-in record [:artifact/metadata :compliance/sensitive-findings]))) :email))))
+
+(defn- ^{:stratum 0} verify-criterion-findings [ctx directory baseline]
+  (let [pack (assoc-in (:opsv/experiment-pack (verification/synthesized ctx))
+                      [:experiment-pack/success-criteria :criteria]
+                      [{:criterion/id "native" :criterion/expected (native/frame "person@example.com")}])
+        ready (assoc-in (fixtures/legacy-email-context ctx baseline)
+                        [:execution/phase-results :opsv/synthesize :result :output :opsv/experiment-pack] pack)
+        verified (storage/step ready [:opsv/verify phase/verify])
+        output (support/phase-output verified :opsv/verify)
+        record (artifact/read-published directory (get-in output [:opsv/phase-artifact-ids :verification]))]
+    (is (true? (get-in output [:opsv/verification-result :passed?])))
     (is (not (.contains (pr-str output) "person@example.com")))
     (is (not (.contains (pr-str record) "person@example.com")))
     (is (true? (get-in record [:artifact/metadata :evidence/contains-pii?])))
@@ -100,6 +108,9 @@
 
 (deftest ^{:stratum 1} legacy-native-original-pii-findings-survive-publication-and-finalization-test
   (verification/with-context verify-legacy-findings))
+
+(deftest ^{:stratum 1} native-criterion-original-findings-survive-verification-publication-test
+  (verification/with-context verify-criterion-findings))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -28,32 +28,32 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} prepare-verification [value]
+  (if (anomaly/anomaly? value) (reporting/protect value) (protection/prepare value)))
+
 (defn- ^{:stratum 0} attach-verification
   [prepared synthesized verification]
   (let [run (:artifact/content prepared)
-        summary (select-keys verification [:passed? :confidence :caveats])
+        summary (select-keys (:artifact/content verification) [:passed? :confidence :caveats])
         policy (assoc (:opsv/operational-policy synthesized)
                       :operational-policy/verification-summary summary)
         validated (opsv/validate-operational-policy policy)]
     (if (anomaly/anomaly? validated)
       validated
-      (assoc synthesized
-             :opsv/verification-result verification
-             :opsv/verification-run run
-             :opsv/verification-protection (dissoc prepared :artifact/content)
-             :opsv/operational-policy validated
-             :opsv/policy-hash (content-hash/content-hash validated)
-             :opsv/metric-snapshot-artifact-refs
-             (:metric-snapshot-artifact-refs run)))))
+      (protection/attach
+        (assoc synthesized
+               :opsv/operational-policy validated
+               :opsv/policy-hash (content-hash/content-hash validated)
+               :opsv/metric-snapshot-artifact-refs (:metric-snapshot-artifact-refs run))
+        {:opsv/verification-run prepared :opsv/verification-result verification}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} output [synthesized run]
   (let [original-run (dissoc run :verification/output)]
     (anomaly/let-ok [report (reporting/protect (get run :verification/output synthesized))
-                    prepared (reporting/prepare original-run)
-                    reported-run (protection/stamp prepared)]
-      (let [verification (reporting/protect (criteria/evaluate (:opsv/experiment-pack synthesized) original-run))]
+                    reported-run (protection/prepare original-run)]
+      (let [verification (prepare-verification (criteria/evaluate (:opsv/experiment-pack synthesized) original-run))]
         (flow/continue verification (partial attach-verification reported-run report))))))
 
 (comment

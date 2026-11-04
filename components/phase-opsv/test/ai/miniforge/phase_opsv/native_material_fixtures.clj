@@ -29,7 +29,7 @@
 
 (defn ^{:stratum 0} measurement-record [ctx value retained]
   (artifacts/record ctx
-    {:opsv/verification-run value :opsv/verification-protection retained}
+    {:opsv/verification-run value :opsv/verification-protection {:opsv/verification-run retained}}
     [:verification-measurements :telemetry :opsv/verification-run]))
 
 ;------------------------------------------------------------------------------ Layer 1

@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.native-material-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.boundary.native-material :as native]
+            [ai.miniforge.phase-opsv.boundary.verification-protection :as protection]
             [ai.miniforge.phase-opsv.boundary.verification-reporting :as reporting]
             [ai.miniforge.phase-opsv.native-material-fixtures :as fixtures]
             [ai.miniforge.redaction.interface :as redaction]
@@ -160,6 +161,15 @@
         (is (not (contains? result :artifact/id)))))
     (is (= :invalid-input
            (:anomaly/type (fixtures/measurement-record ctx (assoc content :changed true) retained))))))
+
+(deftest ^{:stratum 0} current-producer-replaces-inherited-protection-instead-of-reusing-it-test
+  (let [prepared (fixtures/stamped-frame "person@example.com")
+        inherited {:opsv/verification-protection {:stale :untrusted}}
+        output (protection/attach inherited {:opsv/verification-run prepared})]
+    (is (= #{:opsv/verification-run} (set (keys (:opsv/verification-protection output)))))
+    (is (= (:artifact/content prepared) (:opsv/verification-run output)))
+    (is (= (dissoc prepared :artifact/content)
+           (get-in output [:opsv/verification-protection :opsv/verification-run])))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

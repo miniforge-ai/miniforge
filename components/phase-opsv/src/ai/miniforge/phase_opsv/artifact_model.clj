@@ -31,9 +31,10 @@
 
 (defn ^{:stratum 0} record [ctx output [kind type content-key]]
   (anomaly/let-ok [prepared (reporting/prepare (get output content-key))
-                  prepared (if (and (= :verification-measurements kind)
-                                    (contains? output :opsv/verification-protection))
-                             (protection/restore prepared (:opsv/verification-protection output)) prepared)]
+                  prepared (if (and (contains? #{:verification :verification-measurements} kind)
+                                    (contains? (:opsv/verification-protection output) content-key))
+                             (protection/restore prepared (get-in output [:opsv/verification-protection content-key]))
+                             prepared)]
     (protected/record ctx kind type (:artifact/content prepared) (:artifact/metadata prepared))))
 
 (def ^{:stratum 0} snapshot-kinds [:metric-snapshot :verification-measurements])
