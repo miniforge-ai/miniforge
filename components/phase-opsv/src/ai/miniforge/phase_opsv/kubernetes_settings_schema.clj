@@ -4,7 +4,8 @@
 (ns ai.miniforge.phase-opsv.kubernetes-settings-schema
   (:require [ai.miniforge.phase-opsv.http-schema :as http]
             [ai.miniforge.phase-opsv.kubernetes-name-schema :as names]
-            [ai.miniforge.schema.interface :as schema]))
+            [ai.miniforge.schema.interface :as schema]
+            [malli.util :as mu]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -19,5 +20,12 @@
    [:kubernetes/timeout-ms http/TimeoutMillis]
    [:kubernetes/max-response-bytes http/ResponseBytes]
    [:kubernetes/max-resources [:int {:min 1 :max Integer/MAX_VALUE}]]])
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} NamespaceInventorySettings
+  (-> Settings
+      (mu/dissoc :kubernetes/pod-selector)
+      (mu/dissoc :kubernetes/node-pool-label)))
 
 (comment ::explicit-kubernetes-acquisition-settings)
