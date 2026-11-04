@@ -3,11 +3,9 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.artifact-model
   "Pure phase-material selection and content-bound artifact identity."
-  (:require [ai.miniforge.artifact.interface :as artifact]
-            [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.phase-opsv.runtime-context :as context])
-  (:import [java.nio.charset StandardCharsets]
-           [java.util UUID]))
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.phase-opsv.protected-material :as protected]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -31,19 +29,8 @@
    :opsv/actuate [[:actuation :review :opsv/actuation-record]]})
 
 (defn ^{:stratum 0} record [ctx output [kind type content-key]]
-  (let [workflow-id (context/workflow-id ctx)
-        bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
-        content (get output content-key)
-        digest (artifact/content-digest [workflow-id bundle-id kind content])
-        metadata {:workflow/id workflow-id
-                  :opsv/evidence-bundle-id bundle-id
-                  :opsv/material-kind kind
-                  :content/hash digest}]
-    (if (anomaly/anomaly? digest)
-      digest
-      (artifact/build-artifact
-       {:id (UUID/nameUUIDFromBytes (.getBytes ^String digest StandardCharsets/UTF_8))
-        :type type :version "1.0.0" :content content :metadata metadata}))))
+  (anomaly/let-ok [prepared (evidence/prepare-artifact-content (get output content-key))]
+    (protected/record ctx kind type (:artifact/content prepared) (:artifact/metadata prepared))))
 
 (def ^{:stratum 0} snapshot-kinds [:metric-snapshot :verification-measurements])
 
@@ -64,17 +51,19 @@
       (update :opsv/phase-produced-artifact-refs append-reference id)
       (update :opsv/artifact-refs append-reference id)))
 
-(defn ^{:stratum 1} records [ctx phase-key output]
-  (let [materials (cond-> (get phase-materials phase-key [])
+(defn ^{:stratum 1} materials [phase-key output]
+  (cond-> (get phase-materials phase-key [])
                     (and (= :opsv/verify phase-key) (contains? output :opsv/verification-environment))
                     (conj verification-environment-material)
                     (and (= :opsv/actuate phase-key) (contains? output :opsv/effect-transactions))
                     (conj [:effect-transactions :review :opsv/effect-transactions])
                     (and (= :opsv/actuate phase-key) (contains? output :opsv/phase-failure))
-                    (conj [:actuation-failure :review :opsv/phase-failure]))]
-    (mapv (partial record ctx output) materials)))
+                    (conj [:actuation-failure :review :opsv/phase-failure])))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} records [ctx phase-key output]
+  (mapv (partial record ctx output) (materials phase-key output)))
 
 (defn ^{:stratum 2} confirmed-output [output]
   (if (contains? output :opsv/metric-snapshot-artifact-refs)
