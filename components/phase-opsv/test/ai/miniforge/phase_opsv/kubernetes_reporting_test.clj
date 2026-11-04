@@ -124,3 +124,20 @@
         result (with-redefs [redaction/redact identity] (phase/prepare-kubernetes-reporting input))]
     (is (= :unavailable (:anomaly/type result)))
     (is (not (.contains (pr-str result) "opaque-native-value")))))
+
+(deftest ^{:stratum 1} native-lists-with-omitted-item-type-meta-still-protect-payloads-test
+  (let [pod (dissoc (with-literal "opaque-native-value") "apiVersion" "kind")
+        input (kube/resource-list "PodList" [pod])
+        prepared (phase/prepare-kubernetes-reporting input)]
+    (is (evidence/valid-protected-artifact-content? prepared))
+    (is (not (.contains (pr-str prepared) "opaque-native-value")))
+    (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting "items" :kubernetes.reporting/secret])))))
+
+(deftest ^{:stratum 1} foreign-api-kinds-do-not-receive-native-public-field-treatment-test
+  (let [input (-> (with-literal "opaque-native-value")
+                  (assoc "apiVersion" "example.invalid/v1")
+                  (assoc-in ["spec" "containers" 0 "resources"] {"custom" "opaque-native-value"}))
+        prepared (phase/prepare-kubernetes-reporting input)]
+    (is (evidence/valid-protected-artifact-content? prepared))
+    (is (not (.contains (pr-str prepared) "opaque-native-value")))
+    (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting "spec" :kubernetes.reporting/secret])))))

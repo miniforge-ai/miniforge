@@ -10,7 +10,7 @@
 
 (defn- ^{:stratum 0} resource? [value]
   (and (string? (get value "kind"))
-       (some #(contains? value %) ["metadata" "spec" "data" "binaryData" "stringData"])))
+       (some #(contains? value %) ["metadata" "spec" "data" "binaryData" "stringData" "items"])))
 
 (defn- ^{:stratum 0} template [value]
   (fields/update-present (fields/retain-fields policy/template-fields value) "spec" containers/pod-spec))
@@ -29,8 +29,11 @@
 
 (defn ^{:stratum 2} node [value]
   (let [value (native-fields value)
-        kind (get value "kind")
-        transform (case kind "Pod" containers/pod-spec "Deployment" controller-spec "ReplicaSet" controller-spec fields/confidential)
+        native-type [(get value "apiVersion") (get value "kind")]
+        transform (case native-type ["v1" "Pod"] containers/pod-spec
+                                   ["apps/v1" "Deployment"] controller-spec
+                                   ["apps/v1" "ReplicaSet"] controller-spec
+                                   fields/confidential)
         allowed (conj policy/resource-fields "spec")]
     (if (resource? value)
       (fields/update-present (fields/retain-fields allowed value) "spec" transform)

@@ -25,6 +25,9 @@ Add one reporting-only API with a fixed, versioned field policy. Retain native
 identity, provenance and scaling fields. Classify payloads, literal environment,
 commands, labels, annotations and unknown native fields as confidential.
 Treat native Pods, controller templates and versioned PodSpec projections alike.
+Bind native field treatment to both API version and kind. Classify list payloads
+even when ListMeta or item TypeMeta is omitted. Foreign API kinds receive the
+conservative payload treatment, not a native Pod's public-field policy.
 
 Classification preserves original values for the shared scanner. A producer-owned
 secret key invokes existing redaction without duplicating secret or PII patterns.
@@ -48,14 +51,12 @@ Prove original comparison differences survive while reports withhold values.
 Retain original PII findings and refuse opaque, deferred or metadata-bearing data.
 Simulate failed shared redaction and require a value-free failure.
 
-Focused source tests pass 11 cases and 54 assertions.
-Both product contexts, poly check and a fresh CLI build pass.
-Isolated packaging passes 156 tests and 902 assertions without source overlays.
-All seven deliberate privacy/admission defects are detected without test errors.
-The focused packaged cases measure 1.2–18.8 ms each.
-The committed component scan reports zero findings across 275 files.
-Changed namespaces pass explicit strata checks; full source/test lint has no
-warnings or errors. All commits and the complete PR remain within normal limits.
+Before the final native-type correction, both product contexts, poly check and a
+fresh CLI build passed. Isolated packaging passed 156 tests and 902 assertions.
+All seven deliberate privacy/admission defects were detected without test errors.
+Two additional native-type regressions reproduce four assertion failures and zero
+errors against that package. Final-source product, package, mutation and scan gates
+remain required before publication. No gate or size exception is requested.
 
 ## Deployment Plan
 
