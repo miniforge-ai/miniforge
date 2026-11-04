@@ -24,11 +24,7 @@
     (is (= 3 (count (get-in result [:kubernetes/inventory :kubernetes/pod-inventory "items"]))))))
 
 (deftest ^{:stratum 0} list-context-restores-semantic-types-without-altering-raw-items-test
-  (let [raw (-> (fixtures/observation)
-                (update-in [:kubernetes/replica-set-inventory "items"]
-                           #(mapv (fn [item] (dissoc item "apiVersion" "kind")) %))
-                (update-in [:kubernetes/pod-inventory "items"]
-                           #(mapv (fn [item] (dissoc item "apiVersion" "kind")) %)))
+  (let [raw (fixtures/without-item-types)
         result (phase/partition-kubernetes-deployment-inventory raw)]
     (is (not (anomaly/anomaly? result)))
     (is (identical? raw (:kubernetes/inventory result)))
@@ -61,28 +57,20 @@
       (is (= :conflict (:anomaly/type (phase/partition-kubernetes-deployment-inventory changed)))))))
 
 (deftest ^{:stratum 0} labels-pending-unmanaged-and-zero-do-not-become-health-or-membership-proof-test
-  (let [raw (fixtures/with-outside-resources)
-        raw (-> raw
-                (assoc-in [:kubernetes/pod-inventory "items" 2 "metadata" "labels"] {"app" "catalog"})
-                (update-in [:kubernetes/pod-inventory "items" 0 "spec"] dissoc "nodeName")
-                (assoc-in [:kubernetes/pod-inventory "items" 0 "status" "phase"] "Pending"))
+  (let [raw (fixtures/pending-member-with-matching-outside-labels)
         result (phase/partition-kubernetes-deployment-inventory raw)]
     (is (= 2 (count (get-in result [:kubernetes/membership :kubernetes/pods "items"]))))
     (is (identical? raw (:kubernetes/inventory result)))
     (is (not (contains? result :opsv/verification-result))))
-  (let [raw (-> (fixtures/observation)
-                (update-in [:kubernetes/pod-inventory "items" 0 "metadata"] dissoc "ownerReferences"))
+  (let [raw (fixtures/unmanaged-first :kubernetes/pod-inventory)
         result (phase/partition-kubernetes-deployment-inventory raw)]
     (is (= 1 (count (get-in result [:kubernetes/membership :kubernetes/pods "items"])))))
-  (let [raw (-> (fixtures/observation)
-                (update-in [:kubernetes/replica-set-inventory "items" 0 "metadata"] dissoc "ownerReferences"))
+  (let [raw (fixtures/unmanaged-first :kubernetes/replica-set-inventory)
         result (phase/partition-kubernetes-deployment-inventory raw)]
     (is (identical? raw (:kubernetes/inventory result)))
     (is (= 1 (count (get-in result [:kubernetes/membership :kubernetes/replica-sets]))))
     (is (= 1 (count (get-in result [:kubernetes/membership :kubernetes/pods "items"])))))
-  (let [raw (-> (fixtures/observation)
-                (assoc-in [:kubernetes/replica-set-inventory "items"] [])
-                (assoc-in [:kubernetes/pod-inventory "items"] []))
+  (let [raw (fixtures/empty-inventory)
         result (phase/partition-kubernetes-deployment-inventory raw)]
     (is (m/validate phase/KubernetesDeploymentInventoryPartition result))
     (is (empty? (get-in result [:kubernetes/membership :kubernetes/replica-sets])))

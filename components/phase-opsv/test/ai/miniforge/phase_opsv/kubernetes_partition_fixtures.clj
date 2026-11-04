@@ -22,6 +22,9 @@
      :kubernetes/replica-set-inventory (get routes inventory/replica-sets-path)
      :kubernetes/pod-inventory (get routes inventory/pods-path)}))
 
+(defn- ^{:stratum 0} without-types [items]
+  (mapv #(dissoc % "apiVersion" "kind") items))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} with-outside-resources []
@@ -29,5 +32,26 @@
     (-> (observation)
         (update-in [:kubernetes/replica-set-inventory "items"] conj parent)
         (update-in [:kubernetes/pod-inventory "items"] conj pod))))
+
+(defn ^{:stratum 1} without-item-types []
+  (-> (observation)
+      (update-in [:kubernetes/replica-set-inventory "items"] without-types)
+      (update-in [:kubernetes/pod-inventory "items"] without-types)))
+
+(defn ^{:stratum 1} unmanaged-first [collection]
+  (update-in (observation) [collection "items" 0 "metadata"] dissoc "ownerReferences"))
+
+(defn ^{:stratum 1} empty-inventory []
+  (-> (observation)
+      (assoc-in [:kubernetes/replica-set-inventory "items"] [])
+      (assoc-in [:kubernetes/pod-inventory "items"] [])))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} pending-member-with-matching-outside-labels []
+  (-> (with-outside-resources)
+      (assoc-in [:kubernetes/pod-inventory "items" 2 "metadata" "labels"] {"app" "catalog"})
+      (update-in [:kubernetes/pod-inventory "items" 0 "spec"] dissoc "nodeName")
+      (assoc-in [:kubernetes/pod-inventory "items" 0 "status" "phase"] "Pending")))
 
 (comment ::raw-inventory-and-independently-named-outside-controller-chain)
