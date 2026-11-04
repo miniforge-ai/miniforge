@@ -5,6 +5,7 @@
   "Pure phase-material selection and content-bound artifact identity."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.phase-opsv.boundary.native-material :as native]
             [ai.miniforge.phase-opsv.protected-material :as protected]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -29,8 +30,10 @@
    :opsv/actuate [[:actuation :review :opsv/actuation-record]]})
 
 (defn ^{:stratum 0} record [ctx output [kind type content-key]]
-  (anomaly/let-ok [prepared (evidence/prepare-artifact-content (get output content-key))]
-    (protected/record ctx kind type (:artifact/content prepared) (:artifact/metadata prepared))))
+  (anomaly/let-ok [classified (native/classify (get output content-key))
+                  prepared (evidence/prepare-artifact-content (:reporting/value classified))
+                  confirmed (native/confirm (:artifact/content prepared))]
+    (protected/record ctx kind type (:reporting/value confirmed) (:artifact/metadata prepared))))
 
 (def ^{:stratum 0} snapshot-kinds [:metric-snapshot :verification-measurements])
 

@@ -3,9 +3,13 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-reporting-fields
   (:require [ai.miniforge.phase-opsv.kubernetes-reporting-policy :as policy]
-            [ai.miniforge.redaction.interface :as redaction]))
+            [ai.miniforge.redaction.interface :as redaction]
+            [clojure.walk :as walk]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} ordinary-maps [value]
+  (walk/prewalk #(if (map? %) (into {} %) %) value))
 
 (defn ^{:stratum 0} replace-present [projected original key transform]
   (if (and (map? original) (contains? original key))
