@@ -10,14 +10,19 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} Observation
-  [:map {:closed true}
-   [:environment-fingerprint fingerprint/Fingerprint]
-   [:runtime/target target/Target]
-   [:comparison/replica-observations {:optional true} [:vector replicas/Observation]]])
+(def ^{:stratum 0} RawObservations [:and [:map-of :keyword :any] [:fn seq]])
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} Receipt (mu/merge verification/Identity Observation))
+(def ^{:stratum 1} Observation
+  [:map {:closed true}
+   [:environment-fingerprint fingerprint/Fingerprint]
+   [:runtime/target target/Target]
+   [:environment/raw-observations {:optional true} RawObservations]
+   [:comparison/replica-observations {:optional true} [:vector replicas/Observation]]])
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} Receipt (mu/merge verification/Identity Observation))
 
 (comment ::read-only-observation-not-target-admission)
