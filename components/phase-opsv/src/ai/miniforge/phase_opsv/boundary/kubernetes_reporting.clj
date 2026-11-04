@@ -6,10 +6,8 @@
             [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.phase-opsv.kubernetes-reporting-fields :as fields]
             [ai.miniforge.phase-opsv.kubernetes-reporting-model :as model]
-            [ai.miniforge.phase-opsv.kubernetes-reporting-policy :as policy]
             [ai.miniforge.phase-opsv.messages :as msg]
-            [ai.miniforge.redaction.interface :as redaction]
-            [clojure.walk :as walk]))
+            [ai.miniforge.redaction.interface :as redaction]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -19,16 +17,7 @@
 (defn- ^{:stratum 0} failed []
   (anomaly/anomaly :unavailable (msg/ts :kubernetes/reporting-protection-failed) {}))
 
-(defn- ^{:stratum 0} ordinary-maps [value]
-  (walk/prewalk #(if (map? %) (into {} %) %) value))
-
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} native-content [value]
-  (let [normalized (ordinary-maps value)
-        classified (model/node normalized)]
-    {:kubernetes/reporting-profile policy/profile
-     :kubernetes/reporting classified}))
 
 (defn- ^{:stratum 1} admitted [value]
   (if (fields/supported? value) {:reporting/value value} (invalid)))
@@ -40,5 +29,7 @@
 
 (defn ^{:stratum 2} prepare [value]
   (anomaly/let-ok [data (admitted value)
-                  prepared (evidence/prepare-artifact-content (native-content (:reporting/value data)))]
+                  prepared (evidence/prepare-artifact-content (model/reporting-copy (:reporting/value data)))]
     (protected prepared)))
+
+(comment (prepare {"kind" "Pod"}))

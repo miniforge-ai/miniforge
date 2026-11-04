@@ -5,6 +5,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} native-verification-key
+  "Reserved raw-observation marker for native capture/semantic material, not an authority claim."
+  :kubernetes/verification)
+
 (def ^{:stratum 0} confidential-key
   "Producer-owned classification; its local name uses shared secret-key policy and its namespace isolates the proof."
   :kubernetes.reporting/secret)
@@ -37,3 +41,5 @@
 (def ^{:stratum 0} confidential-semantic-fields
   "Native semantic payloads retain original values for hashing/scanning, not reporting plaintext."
   #{:kubernetes/pod-spec :resource/ownership-and-lifecycle :resource/runtime})
+
+(comment profile native-verification-key)

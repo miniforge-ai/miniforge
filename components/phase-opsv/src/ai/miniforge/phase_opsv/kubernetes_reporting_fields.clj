@@ -3,9 +3,19 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-reporting-fields
   (:require [ai.miniforge.phase-opsv.kubernetes-reporting-policy :as policy]
-            [ai.miniforge.redaction.interface :as redaction]))
+            [ai.miniforge.redaction.interface :as redaction]
+            [clojure.walk :as walk]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} exact-entry [value expected]
+  (some #(when (= expected (key %)) %) value))
+
+(defn- ^{:stratum 0} canonical-profile? [key value]
+  (and (= :kubernetes/reporting-profile key) (= policy/profile value)))
+
+(defn ^{:stratum 0} ordinary-maps [value]
+  (walk/prewalk #(if (map? %) (into {} %) %) value))
 
 (defn ^{:stratum 0} replace-present [projected original key transform]
   (if (and (map? original) (contains? original key))
@@ -30,7 +40,8 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} protected-entry [allowed [key value]]
-  [key (if (and (contains? allowed key) (not (coll? value))) value (confidential value))])
+  [key (if (or (canonical-profile? key value)
+               (and (contains? allowed key) (not (coll? value)))) value (confidential value))])
 
 (defn ^{:stratum 1} supported? [value]
   (and (redaction/supported? value) (every? node-supported? (tree-seq coll? seq value))))
@@ -44,3 +55,5 @@
   (if (map? value)
     (into (empty value) (map (partial protected-entry allowed)) value)
     (confidential value)))
+
+(comment (ordinary-maps (sorted-map "kind" "Pod")))
