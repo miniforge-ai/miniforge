@@ -51,13 +51,30 @@
 
 (deftest ^{:stratum 0} confidential-native-scalars-do-not-inherit-generic-scalar-preservation-test
   (doseq [value [nil false 42]]
-    (let [prepared (phase/prepare-kubernetes-reporting
-                     {"apiVersion" "example.invalid/v1" "kind" "Other"
-                      "metadata" {"name" "test"} "spec" value})]
+    (let [input (kube/kube-resource "Other" (kube/metadata "test" nil "test-uid") {"spec" value})
+          prepared (phase/prepare-kubernetes-reporting input)]
       (is (evidence/valid-protected-artifact-content? prepared))
       (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting "spec" :kubernetes.reporting/secret]))))))
 
+(deftest ^{:stratum 0} native-labels-and-annotations-are-classified-without-secret-looking-keys-test
+  (let [input (-> (kube/pod)
+                  (assoc-in ["metadata" "labels"] {"group" "opaque-native-meta"})
+                  (assoc-in ["metadata" "annotations"] {"note" "opaque-native-meta"}))
+        prepared (phase/prepare-kubernetes-reporting input)]
+    (is (evidence/valid-protected-artifact-content? prepared))
+    (is (not (.contains (pr-str prepared) "opaque-native-meta")))
+    (is (.contains (pr-str input) "opaque-native-meta"))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} native-init-and-ephemeral-groups-receive-the-same-payload-protection-test
+  (let [pod (with-literal "opaque-native-value")
+        container (get-in pod ["spec" "containers" 0])]
+    (doseq [field ["initContainers" "ephemeralContainers"]]
+      (let [prepared (phase/prepare-kubernetes-reporting (assoc-in pod ["spec" field] [container]))]
+        (is (evidence/valid-protected-artifact-content? prepared))
+        (is (not (.contains (pr-str prepared) "opaque-native-value")))
+        (is (= "service" (get-in prepared [:artifact/content :kubernetes/reporting "spec" field 0 "name"])))))))
 
 (deftest ^{:stratum 1} native-literal-environment-and-commands-do-not-depend-on-key-name-detection-test
   (let [input (with-literal "opaque-native-value")
@@ -89,13 +106,14 @@
 (deftest ^{:stratum 1} desired-templates-versioned-pod-projections-and-unknown-native-kinds-are-safe-test
   (let [pod (with-literal "opaque-native-value")
         spec (get pod "spec")
-        controller {"apiVersion" "apps/v1" "kind" "Deployment" "metadata" (get pod "metadata")
-                    "spec" {"replicas" 2 "template" {"spec" spec}}}
+        metadata (get pod "metadata")
+        desired {"spec" {"replicas" 2 "template" {"spec" spec}}}
+        controller (assoc (kube/kube-resource "Deployment" metadata desired) "apiVersion" "apps/v1")
+        unknown (kube/kube-resource "Other" metadata {"spec" {"arbitrary" "opaque-native-value"}})
         prepared (phase/prepare-kubernetes-reporting
                    {:controller controller
                     :semantic {:kubernetes/pod-spec spec}
-                    :unknown {"apiVersion" "example.invalid/v1" "kind" "Other" "metadata" (get pod "metadata")
-                              "spec" {"arbitrary" "opaque-native-value"}}})]
+                    :unknown unknown})]
     (is (evidence/valid-protected-artifact-content? prepared))
     (is (not (.contains (pr-str prepared) "opaque-native-value")))
     (is (= 2 (get-in prepared [:artifact/content :kubernetes/reporting :controller "spec" "replicas"])))

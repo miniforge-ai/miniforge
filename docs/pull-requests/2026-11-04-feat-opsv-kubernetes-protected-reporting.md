@@ -48,7 +48,7 @@ Prove original comparison differences survive while reports withhold values.
 Retain original PII findings and refuse opaque, deferred or metadata-bearing data.
 Simulate failed shared redaction and require a value-free failure.
 
-Focused source tests pass nine cases and 45 assertions, each below 25 ms.
+Focused source tests pass 11 cases and 54 assertions.
 Product, fresh-package, mutation and scan gates remain required before publication.
 
 ## Deployment Plan
