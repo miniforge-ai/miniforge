@@ -24,6 +24,24 @@ candidate effect.
 - Fail closed for an explicitly malformed, stale or unavailable declaration.
 - Require target-correlated preparation and durable evidence acknowledgement.
 - Compare candidate observations only with the original, host-retained contract.
+- Retain both raw observations and semantic projections, with explicit comparison
+  outcomes and links to the pre-effect report.
+- Share adapter exception handling and drift payload construction with legacy
+  verification. Preserve fatal errors and cancellation.
+
+Configure `:opsv/verification-environment` in execution options. Its closed public
+schema requires candidate and Experiment Pack hashes, the exact runtime target,
+and exact permitted changes. Replica rules are optional but must declare both
+candidate and recovery expectations. An explicitly nil declaration fails closed.
+
+Candidate-aware adapters provide raw observations as
+`:environment/raw-observations`, alongside the canonical fingerprint and target.
+Preparation is read-only. The host confirms immutable publication and evidence
+assembly acknowledgement before calling verification. Final observations and
+comparison outcomes must also be retained before success can be returned.
+
+The preparation comparison uses recovery expectations to admit the original
+baseline. It does not execute or attest a rollback.
 
 Ownership: `phase-opsv` application orchestration. Reuse comparison, adapter,
 immutable artifact publication and evidence assembly owners. No new dependencies.
