@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.environment-comparison-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.environment-comparison-fixtures :as fixtures]
+            [ai.miniforge.phase-opsv.replica-contract-fixtures :as replicas]
             [ai.miniforge.phase-opsv.interface :as phase]
             [clojure.test :refer [deftest is]]
             [malli.core :as m]))
@@ -114,5 +115,8 @@
     (is (anomaly/anomaly?
           (phase/compare-verification-environment
             (assoc-in request [:comparison/observed :config-hash] "undeclared"))))))
+
+(deftest ^{:stratum 0} predeclared-replica-expectations-can-be-pinned-test
+  (is (not (anomaly/anomaly? (phase/pin-verification-environment (replicas/plan))))))
 
 (comment ::predeclared-canonical-environment-contract)

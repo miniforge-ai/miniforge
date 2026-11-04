@@ -47,11 +47,13 @@
 (def ^{:stratum 0} verification-receipt verification-run/receipt)
 
 (def ^{:stratum 0} VerificationEnvironmentPlan
-  "Closed plan schema: attempt binding, canonical baseline and exact image/config changes."
+  "Closed plan schema: binding, baseline, exact image/config changes and optional replica contract.
+   Replica contracts declare separate candidate and recovery membership rules and count bounds."
   environment-schema/Plan)
 
 (def ^{:stratum 0} VerificationEnvironmentComparisonRequest
-  "Closed comparison schema: pinned contract, independent digest, binding, stage and observation."
+  "Closed comparison request with an independent digest, binding, stage and fingerprint.
+   Replica observations are required exactly when the pinned contract declares replica rules."
   environment-request-schema/Request)
 
 (def ^{:stratum 0} pin-verification-environment
