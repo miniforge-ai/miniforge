@@ -193,8 +193,8 @@
   vocab/task-statuses)
 
 (def ^{:stratum 0} artifact-types
-  "Vector of artifact-type keywords (`:spec`, `:plan`, `:adr`, `:code`,
-   `:test`, `:review`, `:manifest`, `:image`, `:telemetry`, `:incident`)."
+  "Allowed generic and N6 OPSV artifact-type keywords.
+   Type admission does not validate domain content, provenance, or execution authority."
   vocab/artifact-types)
 
 (def ^{:stratum 0} workflow-phases
