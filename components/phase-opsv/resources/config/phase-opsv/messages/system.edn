@@ -20,6 +20,8 @@
   :verification/mismatched "The verification measurements do not match this candidate execution."
   :verification/environment-mismatch "The verification environment differs from the experiment environment."
   :kubernetes/invalid-snapshot "Kubernetes observations are incomplete or inconsistent for the declared target."
+  :kubernetes/invalid-membership "Kubernetes controller membership observations are malformed or unsupported."
+  :kubernetes/membership-mismatch "The observed Kubernetes controller identities do not belong to the declared workload target."
   :kubernetes/invalid-settings "Kubernetes acquisition requires a valid explicit HTTPS endpoint and bounded target settings."
   :kubernetes/invalid-response "Kubernetes returned an invalid or incomplete bounded observation."
   :kubernetes/http-status "Kubernetes API read returned an unsuccessful HTTP status."

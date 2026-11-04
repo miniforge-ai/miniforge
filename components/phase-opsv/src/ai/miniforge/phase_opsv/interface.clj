@@ -22,6 +22,8 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-snapshot :as kubernetes-snapshot]
    [ai.miniforge.phase-opsv.boundary.kubernetes-client :as kubernetes-client]
    [ai.miniforge.phase-opsv.boundary.kubernetes-discovery :as kubernetes-discovery]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-membership :as kubernetes-membership]
+   [ai.miniforge.phase-opsv.kubernetes-membership-schema :as membership-schema]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -106,6 +108,17 @@
 (def ^{:stratum 0} observe-prometheus-window!
   "Read a bounded window from an explicit Prometheus endpoint without mutation authority."
   prometheus/observe-window!)
+
+(def ^{:stratum 0} KubernetesDeploymentMembershipObservation
+  "Closed captured shape for a declared target and native namespace/controller/Pod observations.
+   Schema validation alone does not admit controller membership."
+  membership-schema/Observation)
+
+(def ^{:stratum 0} admit-kubernetes-deployment-membership
+  "Admit captured Pod-to-ReplicaSet-to-Deployment controller identities by UID.
+   Returns the original observation or an anomaly. This proves no freshness,
+   template/configuration match, replica bounds, stability or execution authority."
+  kubernetes-membership/admit)
 
 (def ^{:stratum 0} decode-measurement-window
   "Decode one complete Prometheus float series against a declared bounded grid.
