@@ -27,6 +27,7 @@
    [ai.miniforge.phase-opsv.kubernetes-workload-inventory-schema :as inventory-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-partition :as kubernetes-partition]
    [ai.miniforge.phase-opsv.kubernetes-partition-schema :as partition-schema]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-volume-projection :as volume-projection]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -147,6 +148,13 @@
    Outside observations remain available for independent drift comparison, never ignored.
    Returns a partition or anomaly; establishes no freshness, configuration, health or authority."
   kubernetes-partition/admit)
+
+(def ^{:stratum 0} project-kubernetes-pod-volume-bindings
+  "Project one recognized generated service-account volume binding into a versioned semantic view.
+   All volume content, ordinary names and other PodSpec fields remain intact.
+   Hash the complete versioned representation; retain raw observations separately.
+   Returns a representation or anomaly, never a native manifest, full template match or execution authority."
+  volume-projection/project)
 
 (def ^{:stratum 0} decode-measurement-window
   "Decode one complete Prometheus float series against a declared bounded grid.
