@@ -19,7 +19,9 @@ Generic secret-key matching alone does not identify every native payload role.
 
 ## Changes in Detail
 
-Base branch: main, including verification capture #2366.
+Base branch: main, including verification capture #2366 and outside invariants
+PR #2367. Preserve both public APIs and message families when resolving the
+main-merge conflicts; rerun integration gates on that resulting source.
 
 Add one reporting-only API with a fixed, versioned field policy. Retain native
 identity, provenance and scaling fields. Classify payloads, literal environment,
@@ -55,12 +57,14 @@ Prove original comparison differences survive while reports withhold values.
 Retain original PII findings and refuse opaque, deferred or metadata-bearing data.
 Simulate failed shared redaction and require a value-free failure.
 
-Before initial review, both product contexts, poly check and a fresh CLI build
-passed. Isolated packaging passed 158 tests and 908 assertions.
+Both product contexts, poly check and a fresh CLI build pass on current main.
+Isolated packaging passes 184 tests and 1,023 assertions, including outside-resource
+regressions from the merged prerequisite. All 13 deliberate defects are detected
+without test errors. The 17 focused cases contain 74 assertions and measure
+1.2–19.0 ms each. The committed scan reports zero findings across 283 files.
 The three review findings plus reference-provenance coverage reproduce eight
-assertion failures and zero errors against that package. Corrected source passes
-17 cases and 74 assertions. Final-source product, fresh-package, mutation and scan
-gates remain required before the correction push. No exception is requested.
+assertion failures and zero errors against the prior package. Explicit strata
+and full source/test lint pass without warnings or errors. No exception is used.
 
 ## Deployment Plan
 
