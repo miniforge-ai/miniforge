@@ -7,7 +7,6 @@
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.kubernetes-controller-configuration-fixtures :as fixtures]
             [ai.miniforge.phase-opsv.kubernetes-inventory-fixtures :as inventory]
-            [ai.miniforge.phase-opsv.kubernetes-outside-fixtures :as outside]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -28,9 +27,7 @@
 
 (deftest ^{:stratum 0} bounded-count-changes-preserve-desired-configuration-without-erasing-count-observations-test
   (let [input (fixtures/input)
-        changed (-> input
-                    (assoc-in [:kubernetes/inventory :kubernetes/deployment "spec" "replicas"] 3)
-                    (assoc-in [:kubernetes/inventory :kubernetes/replica-set-inventory "items" 0 "spec" "replicas"] 2))
+        changed (fixtures/with-desired-counts input 3 2 1)
         baseline (phase/project-kubernetes-controller-configuration input)
         observed (phase/project-kubernetes-controller-configuration changed)]
     (is (= (:kubernetes/controller-configuration-hash baseline) (:kubernetes/controller-configuration-hash observed)))
@@ -40,21 +37,13 @@
 
 (deftest ^{:stratum 0} deployment-and-total-owned-replica-set-counts-must-each-stay-within-bounds-test
   (let [input (fixtures/input)]
-    (doseq [changed [(assoc-in input [:kubernetes/inventory :kubernetes/deployment "spec" "replicas"] 4)
-                     (assoc-in input [:kubernetes/inventory :kubernetes/deployment "spec" "replicas"] 0)
-                     (assoc-in input [:kubernetes/inventory :kubernetes/replica-set-inventory "items" 0 "spec" "replicas"] 3)
-                     (-> input
-                         (assoc-in [:kubernetes/inventory :kubernetes/replica-set-inventory "items" 0 "spec" "replicas"] 0)
-                         (assoc-in [:kubernetes/inventory :kubernetes/replica-set-inventory "items" 1 "spec" "replicas"] 0))]]
-      (is (= :conflict (:anomaly/type (phase/project-kubernetes-controller-configuration changed)))))))
+    (doseq [counts [[4 1 1] [0 1 1] [2 3 1] [2 0 0]]]
+      (let [changed (apply fixtures/with-desired-counts input counts)]
+        (is (= :conflict (:anomaly/type (phase/project-kubernetes-controller-configuration changed))))))))
 
 (deftest ^{:stratum 0} zero-is-explicit-and-missing-or-malformed-native-counts-never-default-to-it-test
   (let [input (fixtures/input)
-        zero (-> input
-                 (assoc :comparison/bounds {:replicas/min-count 0 :replicas/max-count 0})
-                 (assoc-in [:kubernetes/inventory :kubernetes/deployment "spec" "replicas"] 0)
-                 (assoc-in [:kubernetes/inventory :kubernetes/replica-set-inventory "items"] [])
-                 (assoc-in [:kubernetes/inventory :kubernetes/pod-inventory "items"] []))
+        zero (fixtures/zero-population input)
         result (phase/project-kubernetes-controller-configuration zero)]
     (is (= 0 (get-in result [:kubernetes/controller-counts :controller/deployment-replicas])))
     (is (= 0 (get-in result [:kubernetes/controller-counts :controller/replica-set-total])))
@@ -89,8 +78,8 @@
                                   "metadata" "ownerReferences" 0 "uid"] "former-deployment")
         baseline (phase/project-kubernetes-controller-configuration input)
         observed (phase/project-kubernetes-controller-configuration changed)
-        before (assoc (outside/input) :kubernetes/inventory (:kubernetes/inventory input))
-        after (assoc before :kubernetes/inventory (:kubernetes/inventory changed))]
+        before (fixtures/outside-capture input)
+        after (fixtures/outside-capture changed)]
     (is (not (anomaly/anomaly? observed)))
     (is (not= (:kubernetes/controller-configuration-hash baseline) (:kubernetes/controller-configuration-hash observed)))
     (is (not= (:kubernetes/outside-hash (phase/project-kubernetes-outside-invariants before))
@@ -122,12 +111,8 @@
 (deftest ^{:stratum 0} owned-controller-metadata-order-is-not-desired-configuration-drift-test
   (doseq [path [[:kubernetes/inventory :kubernetes/deployment "metadata"]
                 [:kubernetes/inventory :kubernetes/replica-set-inventory "items" 0 "metadata"]]]
-    (let [input (-> (fixtures/input)
-                    (assoc-in (conj path "finalizers") ["example.invalid/hold" "example.invalid/archive"])
-                    (update-in (conj path "ownerReferences") (fnil conj []) (inventory/non-controller-rbac-reference)))
-          changed (-> input
-                      (update-in (conj path "finalizers") (comp vec reverse))
-                      (update-in (conj path "ownerReferences") (comp vec reverse)))
+    (let [input (fixtures/with-orderable-metadata (fixtures/input) path)
+          changed (fixtures/reverse-metadata input path)
           baseline (phase/project-kubernetes-controller-configuration input)
           observed (phase/project-kubernetes-controller-configuration changed)]
       (is (= (:kubernetes/controller-configuration-hash baseline) (:kubernetes/controller-configuration-hash observed)))
@@ -150,8 +135,8 @@
         changed (assoc-in input [:kubernetes/inventory :kubernetes/replica-set-inventory "items" 2 "spec" "replicas"] 999)
         baseline (phase/project-kubernetes-controller-configuration input)
         observed (phase/project-kubernetes-controller-configuration changed)
-        before (assoc (outside/input) :kubernetes/inventory (:kubernetes/inventory input))
-        after (assoc before :kubernetes/inventory (:kubernetes/inventory changed))]
+        before (fixtures/outside-capture input)
+        after (fixtures/outside-capture changed)]
     (is (= (:kubernetes/controller-configuration-hash baseline) (:kubernetes/controller-configuration-hash observed)))
     (is (not= (:kubernetes/outside-hash (phase/project-kubernetes-outside-invariants before))
               (:kubernetes/outside-hash (phase/project-kubernetes-outside-invariants after))))))
