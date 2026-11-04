@@ -72,15 +72,17 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} verify-original-criteria [ctx directory baseline]
-  (let [ctx (criterion-context ctx "DB_PASSWORD=fake-expected")
-        measured (assoc (fixtures/observations (merge baseline (environment/changes)))
-                         :observations {"private" "DB_PASSWORD=fake-observed"})
-        calls (atom [])
-        result (fixtures/verify ctx (partial fixtures/prepare calls (fixtures/observations baseline))
-                 (partial fixtures/measure calls directory measured))]
-    (is (not (anomaly/anomaly? result)))
-    (is (false? (get-in result [:opsv/verification-result :passed?])))
-    (is (redaction/clean? result))))
+  (doseq [observed ["DB_PASSWORD=fake-observed" "DB_PASSWORD=fake-expected"]]
+    (let [expected "DB_PASSWORD=fake-expected"
+          ctx (criterion-context ctx expected)
+          measured (assoc (fixtures/observations (merge baseline (environment/changes)))
+                           :observations {"private" observed})
+          calls (atom [])
+          result (fixtures/verify ctx (partial fixtures/prepare calls (fixtures/observations baseline))
+                   (partial fixtures/measure calls directory measured))]
+      (is (not (anomaly/anomaly? result)))
+      (is (= (= expected observed) (get-in result [:opsv/verification-result :passed?])))
+      (is (redaction/clean? result)))))
 
 (defn- ^{:stratum 1} verify-protected-finalization [ctx directory baseline]
   (let [calls (atom [])
