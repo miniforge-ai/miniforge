@@ -5,7 +5,6 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.boundary.bounded-io :as io]
             [ai.miniforge.phase-opsv.boundary.http-transport :as http]
-            [ai.miniforge.phase-opsv.boundary.kubernetes-settings :as settings]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.resource-cleanup.interface :as cleanup]
             [slingshot.slingshot :refer [try+]]))
@@ -32,10 +31,10 @@
 
 (defn ^{:stratum 2} observe!
   "Run a component-owned read operation with validated settings and one deadline."
-  [overrides operation]
+  [settings-loader overrides operation]
   (try+
     (when (.isInterrupted (Thread/currentThread)) (throw (InterruptedException.)))
-    (anomaly/let-ok [options (settings/load-settings overrides)]
+    (anomaly/let-ok [options (settings-loader overrides)]
       (acquire! operation options))
     (catch Object _ (failed! (:throwable &throw-context)))))
 
