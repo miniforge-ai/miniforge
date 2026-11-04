@@ -21,6 +21,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.content-hash.interface :as content-hash]
+   [ai.miniforge.evidence-bundle.artifact-material :as artifact-material]
    [ai.miniforge.evidence-bundle.canonical-validation :as canonical]
    [ai.miniforge.evidence-bundle.chain-evidence :as chain-evidence]
    [ai.miniforge.evidence-bundle.collector :as collector]
@@ -30,6 +31,7 @@
    [ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk]
    [ai.miniforge.evidence-bundle.opsv-assembly :as opsv-assembly]
    [ai.miniforge.evidence-bundle.opsv-finalization :as opsv-finalization]
+   [ai.miniforge.evidence-bundle.opsv-diagnostics :as diagnostics]
    [ai.miniforge.evidence-bundle.opsv-sealed-validation :as opsv-sealed-validation]
    [ai.miniforge.evidence-bundle.opsv-sealed-restoration :as opsv-sealed-restoration]
    [ai.miniforge.evidence-bundle.publication-validation :as publication-validation]
@@ -38,9 +40,20 @@
    [ai.miniforge.evidence-bundle.schema.domain :as domain]
    [ai.miniforge.evidence-bundle.schema.opsv :as opsv-schema]
    [ai.miniforge.evidence-bundle.interface.protocols.evidence-bundle :as p]
-   [ai.miniforge.evidence-bundle.protocols.records.evidence-bundle :as records]))
+   [ai.miniforge.evidence-bundle.protocols.records.evidence-bundle :as records]
+   [ai.miniforge.redaction.interface :as redaction]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} prepare-artifact-content
+  "Scan and redact finite content before hashing or storing an artifact.
+   Returns protected :artifact/content and :artifact/metadata compliance fields,
+   or a value-free anomaly for unsupported content. This does not seal a bundle
+   or authorize use of the reporting copy as an execution/recovery contract."
+  [content]
+  (if (redaction/supported? content)
+    (artifact-material/prepare content)
+    (diagnostics/unsupported-material)))
 
 (def ^{:stratum 0} OpsvEvidence
   "Canonical N6 section 2.8 OPSV evidence schema."
