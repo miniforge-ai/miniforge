@@ -29,6 +29,8 @@
   :kubernetes/uncorrelated-replicas "Captured Kubernetes replica ownership, placement or configuration cannot be correlated."
   :kubernetes/invalid-outside "Captured Kubernetes outside-resource observations are malformed or unsupported."
   :kubernetes/uncorrelated-outside "Captured Kubernetes resource identities or workload membership cannot be correlated."
+  :kubernetes/invalid-controller-configuration "Captured controller counts or configuration inputs are malformed or unsupported."
+  :kubernetes/controller-configuration-mismatch "Captured controller membership or desired replica counts do not match the declared bounds."
   :kubernetes/membership-mismatch "The observed Kubernetes controller identities do not belong to the declared workload target."
   :kubernetes/invalid-settings "Kubernetes acquisition requires a valid explicit HTTPS endpoint and bounded target settings."
   :kubernetes/invalid-response "Kubernetes returned an invalid or incomplete bounded observation."
