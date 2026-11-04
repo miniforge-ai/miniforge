@@ -10,6 +10,7 @@
             [ai.miniforge.phase-opsv.boundary.kubernetes-resource-reads :as reads]
             [ai.miniforge.phase-opsv.boundary.kubernetes-response :as response]
             [ai.miniforge.phase-opsv.kubernetes-api :as api]
+            [ai.miniforge.phase-opsv.kubernetes-inventory-observation :as observation]
             [ai.miniforge.phase-opsv.kubernetes-list-schema :as list-schema]
             [ai.miniforge.phase-opsv.kubernetes-capture-plan :as requests]
             [ai.miniforge.phase-opsv.kubernetes-read-plan :as read-plan]
@@ -26,6 +27,10 @@
 (defn- ^{:stratum 0} cluster! [settings until]
   (reads/read! settings until (read-plan/request "Namespace" nil false api/cluster-identity-namespace)))
 
+(defn- ^{:stratum 0} original-inventory! [declaration settings until]
+  (anomaly/let-ok [captured (inventory/capture-with-roots! declaration settings until)]
+    (or (observation/original captured) (membership/mismatch))))
+
 (defn- ^{:stratum 0} dependency-plan [captured]
   (let [pods (plan/dependency-pods captured)]
     (if (m/validate schema/DependencyPods pods)
@@ -40,14 +45,14 @@
 (defn- ^{:stratum 1} confirm! [declaration settings until captured cluster]
   (anomaly/let-ok [confirmed (inventory/roots declaration settings until)
                   observed-cluster (cluster! settings until)]
-    (if (and (plan/roots-unchanged? captured confirmed) (= cluster observed-cluster))
+    (if (and (observation/roots-unchanged? captured confirmed) (= cluster observed-cluster))
       captured
       (membership/mismatch))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} capture! [declaration settings until]
-  (anomaly/let-ok [captured (inventory/capture! declaration settings until)
+  (anomaly/let-ok [captured (original-inventory! declaration settings until)
                   remaining (inventory/reserve settings (plan/used-resources captured))
                   planned (dependency-plan captured)
                   cluster (cluster! settings until)

@@ -57,7 +57,7 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} capture! [declaration settings until]
+(defn ^{:stratum 2} capture-with-roots! [declaration settings until]
   (anomaly/let-ok [_settings (admit-settings declaration settings)
                   budget (reserve settings root-resource-count)
                   root (roots declaration settings until)
@@ -73,6 +73,6 @@
       (if-not (inventory/unique-identities? observed)
         (membership/mismatch)
         (anomaly/let-ok [confirmed (roots declaration settings until)]
-          (merge observed confirmed))))))
+          {:inventory/observed observed :inventory/confirmed-roots confirmed})))))
 
 (comment ::bounded-namespace-inventory-no-selector-or-owner-derived-paths)

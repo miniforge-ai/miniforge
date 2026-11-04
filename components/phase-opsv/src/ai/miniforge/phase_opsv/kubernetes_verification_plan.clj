@@ -14,10 +14,6 @@
 (defn ^{:stratum 0} used-resources [captured]
   (inc (count (inventory/resources captured))))
 
-(defn ^{:stratum 0} roots-unchanged? [before after]
-  (every? (fn [key] (= (get before key) (get after key)))
-          [:kubernetes/namespace :kubernetes/deployment]))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} dependency-pods [captured]

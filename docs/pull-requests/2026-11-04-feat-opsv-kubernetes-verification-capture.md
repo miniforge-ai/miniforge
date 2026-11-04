@@ -19,8 +19,8 @@ templates. Separate acquisition calls also lose the shared budget and deadline.
 
 ## Changes in Detail
 
-Base branch: main. Replica observations #2365 are a private prerequisite until
-merged. Reconcile that history before publication.
+Base branch: main, including merged replica observations #2365. Private history
+was reconciled with whole-prerequisite tree equality and feature-tree preservation.
 
 Reuse namespace inventory acquisition, typed resource reads, dependency admission
 and request construction. Read dependencies from every captured Pod, Deployment
@@ -36,6 +36,10 @@ Recheck namespace, Deployment and cluster identity after dependencies are read.
 Conservatively refuse any root-record change, including resource-version changes.
 This bounded multi-read is not an atomic cluster snapshot.
 
+Keep initial and confirmed inventory roots separate internally. Verification
+requires unchanged roots and preserves the initial records. Legacy namespace
+inventory still reports its confirmed latest roots under the existing UID checks.
+
 Return raw observations with an explicit schema. Raw values can contain secrets;
 consumers must compute original comparison hashes before protecting reporting
 copies for N6 storage. This API does not publish or retain evidence.
@@ -50,6 +54,11 @@ Use injected native-shaped HTTP responses only. Cover shared bounds, zero replic
 desired and old-controller dependencies, Pending and unrelated Pods, incomplete
 Nodes, malformed references, missing configuration and late root changes.
 Run product tests, isolated packaging, mutation checks and all PR gates.
+
+Both affected product contexts and poly check pass. Fresh native packaging passes
+127 tests and 772 assertions; the 14 new cases contain 71 assertions. Eight
+deliberate bypasses are detected without test errors. The committed source scan
+reports zero findings across the committed component. New cases measure below 100 ms.
 
 ## Deployment Plan
 

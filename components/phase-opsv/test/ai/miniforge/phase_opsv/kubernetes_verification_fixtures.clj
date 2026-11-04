@@ -26,6 +26,18 @@
                   transport/response-fields identity]
       [(phase/observe-kubernetes-verification! (merge base overrides) declared) @calls])))
 
+(defn ^{:stratum 0} with-root-change! [path from-read operation]
+  (let [reply wire/reply!
+        seen (atom {})]
+    (with-redefs [wire/reply!
+                  (fn [routes calls options]
+                    (let [current (wire/path options)
+                          n (get (swap! seen update current (fnil inc 0)) current)
+                          routes (if (and (= current path) (>= n from-read))
+                                   (assoc-in routes [path "metadata" "resourceVersion"] "changed") routes)]
+                      (reply routes calls options)))]
+      (operation))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} routes []
