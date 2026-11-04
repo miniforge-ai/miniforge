@@ -20,7 +20,11 @@
 
 (def ^{:stratum 0} resource-fields
   "Public native headers. Payloads and unknown fields require explicit reporting treatment."
-  #{"apiVersion" "kind" "metadata" "type" "immutable"})
+  #{"apiVersion" "kind" "metadata"})
+
+(def ^{:stratum 0} reference-fields
+  "Native owner-reference provenance remains inspectable; unknown reference extensions remain confidential."
+  #{"apiVersion" "kind" "name" "uid" "controller" "blockOwnerDeletion"})
 
 (def ^{:stratum 0} container-fields
   "Keep identity and scaling resources; literal environment, images, commands, probes and unknown fields may carry credentials."

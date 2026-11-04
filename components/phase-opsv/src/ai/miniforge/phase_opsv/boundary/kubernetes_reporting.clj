@@ -19,12 +19,16 @@
 (defn- ^{:stratum 0} failed []
   (anomaly/anomaly :unavailable (msg/ts :kubernetes/reporting-protection-failed) {}))
 
-(defn- ^{:stratum 0} native-content [value]
-  (let [classified (walk/postwalk #(if (map? %) (model/node %) %) value)]
-    {:kubernetes/reporting-profile policy/profile
-     :kubernetes/reporting classified}))
+(defn- ^{:stratum 0} ordinary-maps [value]
+  (walk/prewalk #(if (map? %) (into {} %) %) value))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} native-content [value]
+  (let [normalized (ordinary-maps value)
+        classified (walk/postwalk #(if (map? %) (model/node %) %) normalized)]
+    {:kubernetes/reporting-profile policy/profile
+     :kubernetes/reporting classified}))
 
 (defn- ^{:stratum 1} admitted [value]
   (if (fields/supported? value) {:reporting/value value} (invalid)))

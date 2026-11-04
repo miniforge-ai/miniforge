@@ -5,12 +5,23 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.phase-opsv.exception-policy :as exception-policy]
             [ai.miniforge.phase-opsv.interface :as phase]
+            [ai.miniforge.phase-opsv.kubernetes-inventory-fixtures :as inventory]
             [ai.miniforge.phase-opsv.kubernetes-test-support :as kube]
             [ai.miniforge.redaction.interface :as redaction]
-            [clojure.test :refer [deftest is]]))
+            [clojure.walk :as walk]
+            [clojure.test :refer [deftest is]]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} report-outcome [input]
+  (try+ (phase/prepare-kubernetes-reporting input)
+        (catch InterruptedException interrupted
+          (.interrupt (Thread/currentThread))
+          (throw interrupted))
+        (catch exception-policy/nonfatal? failure failure)))
 
 (defn- ^{:stratum 0} with-literal [value]
   (-> (kube/pod)
@@ -64,6 +75,32 @@
     (is (evidence/valid-protected-artifact-content? prepared))
     (is (not (.contains (pr-str prepared) "opaque-native-meta")))
     (is (.contains (pr-str input) "opaque-native-meta"))))
+
+(deftest ^{:stratum 0} metadata-free-resource-envelopes-do-not-bypass-payload-classification-test
+  (let [input (dissoc (kube/kube-resource "Status" {} {"message" "opaque-native-value"}) "metadata")
+        prepared (phase/prepare-kubernetes-reporting input)]
+    (is (evidence/valid-protected-artifact-content? prepared))
+    (is (not (.contains (pr-str prepared) "opaque-native-value")))
+    (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting "message" :kubernetes.reporting/secret])))))
+
+(deftest ^{:stratum 0} foreign-top-level-type-and-immutable-values-are-payloads-not-public-native-headers-test
+  (let [input (assoc (kube/kube-resource "Pod" {} {}) "apiVersion" "example.invalid/v1"
+                     "type" "opaque-native-value" "immutable" "opaque-native-value")
+        prepared (phase/prepare-kubernetes-reporting input)]
+    (is (evidence/valid-protected-artifact-content? prepared))
+    (is (not (.contains (pr-str prepared) "opaque-native-value")))
+    (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting "type" :kubernetes.reporting/secret])))
+    (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting "immutable" :kubernetes.reporting/secret])))))
+
+(deftest ^{:stratum 0} owner-reference-identity-stays-public-while-reference-extensions-are-confidential-test
+  (let [reference (assoc (inventory/non-controller-rbac-reference) "note" "opaque-native-value")
+        input (assoc-in (kube/pod) ["metadata" "ownerReferences"] [reference])
+        prepared (phase/prepare-kubernetes-reporting input)
+        observed (get-in prepared [:artifact/content :kubernetes/reporting "metadata" "ownerReferences" 0])]
+    (is (evidence/valid-protected-artifact-content? prepared))
+    (is (= "discovery-role-uid" (get observed "uid")))
+    (is (= "system:discovery" (get observed "name")))
+    (is (not (.contains (pr-str prepared) "opaque-native-value")))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -141,3 +178,10 @@
     (is (evidence/valid-protected-artifact-content? prepared))
     (is (not (.contains (pr-str prepared) "opaque-native-value")))
     (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting "spec" :kubernetes.reporting/secret])))))
+
+(deftest ^{:stratum 1} string-keyed-sorted-maps-are-normalized-without-changing-originals-test
+  (let [input (walk/postwalk #(if (map? %) (into (sorted-map) %) %) (with-literal "opaque-native-value"))
+        prepared (report-outcome input)]
+    (is (evidence/valid-protected-artifact-content? prepared))
+    (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting "spec" "containers" 0 "env" :kubernetes.reporting/secret])))
+    (is (= "opaque-native-value" (get-in input ["spec" "containers" 0 "env" 0 "value"])))))
