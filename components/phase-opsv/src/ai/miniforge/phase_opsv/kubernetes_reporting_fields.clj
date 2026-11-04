@@ -8,6 +8,12 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} exact-entry [value expected]
+  (some #(when (= expected (key %)) %) value))
+
+(defn- ^{:stratum 0} canonical-profile? [key value]
+  (and (= :kubernetes/reporting-profile key) (= policy/profile value)))
+
 (defn ^{:stratum 0} ordinary-maps [value]
   (walk/prewalk #(if (map? %) (into {} %) %) value))
 
@@ -34,7 +40,8 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} protected-entry [allowed [key value]]
-  [key (if (and (contains? allowed key) (not (coll? value))) value (confidential value))])
+  [key (if (or (canonical-profile? key value)
+               (and (contains? allowed key) (not (coll? value)))) value (confidential value))])
 
 (defn ^{:stratum 1} supported? [value]
   (and (redaction/supported? value) (every? node-supported? (tree-seq coll? seq value))))

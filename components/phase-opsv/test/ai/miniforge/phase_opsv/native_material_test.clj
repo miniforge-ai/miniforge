@@ -3,14 +3,17 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.native-material-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.phase-opsv.artifact-model :as artifacts]
             [ai.miniforge.phase-opsv.boundary.native-material :as native]
             [ai.miniforge.phase-opsv.boundary.verification-reporting :as reporting]
             [ai.miniforge.phase-opsv.native-material-fixtures :as fixtures]
             [ai.miniforge.redaction.interface :as redaction]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} attempted [operation value]
+  (try+ (operation value) (catch ClassCastException _ ::comparator-failure)))
 
 (deftest ^{:stratum 0} classification-retains-originals-and-does-not-change-comparison-admission-test
   (let [original (fixtures/frame "opaque-native-value")
@@ -59,7 +62,7 @@
 (deftest ^{:stratum 0} native-artifact-protection-failure-cannot-create-a-record-test
   (let [value (fixtures/frame "opaque-native-value")
         result (with-redefs [redaction/redact identity]
-                 (artifacts/record (fixtures/context) {:report value} [:verification :review :report]))]
+                 (fixtures/record value))]
     (is (= :unavailable (:anomaly/type result)))
     (is (not (contains? result :artifact/id)))
     (is (not (.contains (pr-str result) "opaque-native-value")))))
@@ -108,7 +111,7 @@
 
 (deftest ^{:stratum 0} list-carrier-metadata-cannot-be-dropped-before-original-pii-scanning-test
   (let [value (with-meta (list (fixtures/frame "opaque-native-value")) {:private "123-45-6789"})
-        result (artifacts/record (fixtures/context) {:report value} [:verification :review :report])]
+        result (fixtures/record value)]
     (is (= :invalid-input (:anomaly/type result)))
     (is (not (contains? result :artifact/id)))))
 
@@ -118,3 +121,30 @@
         result (reporting/admit value)]
     (is (= :invalid-input (:anomaly/type result)))
     (is (not (realized? deferred)))))
+
+(deftest ^{:stratum 0} nested-native-frames-preserve-canonical-profiles-and-republication-test
+  (let [input {:kubernetes/verification {:child (fixtures/frame "opaque-native-value")}}
+        protected (reporting/protect input)
+        republished (reporting/protect protected)
+        record (fixtures/record protected)]
+    (is (= :kubernetes/data-minimized-reporting-v1
+           (get-in protected [:kubernetes/verification :child :kubernetes/verification :kubernetes/reporting-profile])))
+    (is (not (.contains (pr-str protected) "opaque-native-value")))
+    (is (= protected republished))
+    (is (:artifact/id record))
+    (is (= protected (:artifact/content record)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} sorted-string-keys-do-not-trigger-reserved-key-comparisons-test
+  (let [generic (sorted-map "ordinary" true)
+        frame (update (fixtures/frame "opaque-native-value") :kubernetes/verification
+                      #(into (sorted-map) %))]
+    (is (= generic (attempted reporting/protect generic)))
+    (is (= generic (:reporting/value (attempted native/classify generic))))
+    (doseq [input [frame {:ordinary (sorted-map "nested" frame)}
+                  (fixtures/comparator-sensitive-frame "opaque-native-value")]]
+      (let [protected (attempted reporting/protect input)]
+        (is (map? protected))
+        (is (not (anomaly/anomaly? protected)))
+        (is (not (.contains (pr-str protected) "opaque-native-value")))))))

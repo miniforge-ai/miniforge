@@ -15,7 +15,7 @@
   (if (map? value) (fields/node-supported? value) (not (and (set? value) (sorted? value)))))
 
 (defn- ^{:stratum 0} protected-frame? [marker frame]
-  (fields/classified-protected? marker (get frame policy/native-verification-key)))
+  (fields/classified-protected? marker (second (fields/exact-entry frame policy/native-verification-key))))
 
 (defn- ^{:stratum 0} reporting-copy [value]
   (let [prepared (model/reporting-copy value)]
@@ -23,16 +23,16 @@
            :kubernetes/reporting-profile (:kubernetes/reporting-profile prepared))))
 
 (defn- ^{:stratum 0} native-frame? [value]
-  (and (map? value) (contains? value policy/native-verification-key)))
+  (and (map? value) (some? (fields/exact-entry value policy/native-verification-key))))
 
 (defn- ^{:stratum 0} metadata-free-node? [value]
   (nil? (meta value)))
 
 (defn- ^{:stratum 0} candidate? [frame]
-  (let [value (get frame policy/native-verification-key)]
+  (let [value (second (fields/exact-entry frame policy/native-verification-key))
+        profile (when (map? value) (fields/exact-entry value :kubernetes/reporting-profile))]
     (and (nil? (meta frame)) (map? value) (fields/supported? value)
-         (or (not (contains? value :kubernetes/reporting-profile))
-             (= policy/profile (:kubernetes/reporting-profile value))))))
+         (or (nil? profile) (= policy/profile (val profile))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -56,7 +56,7 @@
   (and (redaction/supported? value) (metadata-free? value) (compatible? value (native-frames value))))
 
 (defn ^{:stratum 2} project [value]
-  (if (seq (native-frames value)) (walk/postwalk node value) value))
+  (if (seq (native-frames value)) (walk/postwalk node (fields/ordinary-maps value)) value))
 
 (defn ^{:stratum 2} protected? [marker value]
   (every? (partial protected-frame? marker) (native-frames value)))
