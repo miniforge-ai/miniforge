@@ -13,7 +13,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} typed-list [kind resource-list]
+(defn ^{:stratum 1} typed-list [kind resource-list]
   (update resource-list "items" (partial mapv (partial typed-item kind))))
 
 ;------------------------------------------------------------------------------ Layer 2
