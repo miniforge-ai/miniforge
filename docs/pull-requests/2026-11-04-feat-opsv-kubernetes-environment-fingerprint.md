@@ -58,11 +58,20 @@ normalization, outside drift, desired configuration and runtime differences.
 Reject missing/malformed capture, invalid bounds and heterogeneous runtime.
 Cover selected-Pod lifecycle, noncontroller ownership and native metadata ordering.
 
-Measured component cases run below 100 ms. Slower composed scenarios belong in
-the project integration suite, using the same native-shape fixture factories.
-Deliberate faults must break assertions without test errors. Run both product
-contexts, a fresh isolated CLI package, strict lint, explicit strata and a committed
-native scan before publishing. Record final evidence after these gates finish.
+Both product contexts, poly check and a fresh CLI build pass. Isolated packaging
+passes 191 tests and 1,068 assertions without a production-source overlay.
+The two component cases contain 17 assertions and measure below 60 milliseconds.
+Ten composed scenarios contain 39 assertions in the project integration suite.
+All twelve cases pass, using shared native-shape fixture factories.
+
+Eleven deliberate faults break assertions with zero test errors.
+They cover outside, controller, template and lifecycle hashes; homogeneity;
+runtime images; Node pools; source and replica observations; configurations; and count bounds.
+The committed native scan reports zero findings across
+289 component files. Strict full-source/new-test lint and explicit strata pass.
+Owner review covers every changed file and all applicable standards. No signing,
+size, hook, review or CI gate is waived. Final evidence changes documentation only
+against tested source c0ae008c1ee6957c9991cbd1a0c451640927480a.
 
 ## Deployment Plan
 
