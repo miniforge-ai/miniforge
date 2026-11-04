@@ -37,7 +37,9 @@
      config-path configuration
      secret-path secret}))
 
-(defn- ^{:stratum 1} reply! [routes calls options]
+(defn ^{:stratum 1} reply!
+  "Return one injected HTTP result and record its request; never contact a cluster."
+  [routes calls options]
   (let [path (path options)
         value (get routes path)]
     (swap! calls conj options)

@@ -24,6 +24,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-discovery :as kubernetes-discovery]
    [ai.miniforge.phase-opsv.boundary.kubernetes-membership :as kubernetes-membership]
    [ai.miniforge.phase-opsv.kubernetes-membership-schema :as membership-schema]
+   [ai.miniforge.phase-opsv.kubernetes-workload-inventory-schema :as inventory-schema]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -113,6 +114,21 @@
   "Closed captured shape for a declared target and native namespace/controller/Pod observations.
    Schema validation alone does not admit controller membership."
   membership-schema/Observation)
+
+(def ^{:stratum 0} KubernetesDeploymentInventoryTarget
+  "Explicit runtime target and Deployment name for a complete namespace inventory."
+  inventory-schema/Target)
+
+(def ^{:stratum 0} KubernetesDeploymentInventoryObservation
+  "Complete raw namespace inventories, not an admitted member population or verification verdict."
+  inventory-schema/Observation)
+
+(def ^{:stratum 0} observe-kubernetes-deployment-inventory!
+  "Read a bounded complete namespace Pod/ReplicaSet inventory after matching root UIDs.
+   Sequential reads recheck root UIDs before returning; this is not an atomic snapshot.
+   Takes explicit namespace-inventory settings and target declaration; selector overrides fail.
+   No membership, configuration, health or execution authority is established."
+  kubernetes-client/observe-inventory!)
 
 (def ^{:stratum 0} admit-kubernetes-deployment-membership
   "Admit captured Pod-to-ReplicaSet-to-Deployment controller identities by UID.

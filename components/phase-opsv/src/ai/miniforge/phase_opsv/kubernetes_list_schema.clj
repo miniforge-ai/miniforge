@@ -4,9 +4,15 @@
 (ns ai.miniforge.phase-opsv.kubernetes-list-schema
   "Native list items may omit TypeMeta; explicit contradictory types remain invalid."
   (:require [ai.miniforge.phase-opsv.kubernetes-resource-schema :as resource]
+            [ai.miniforge.schema.interface :as schema]
             [malli.util :as mu]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ListMetadata
+  [:map ["resourceVersion" schema/NonBlankString]
+   ["continue" {:optional true} :string]
+   ["remainingItemCount" {:optional true} [:int {:min 0}]]])
 
 (defn- ^{:stratum 0} native-item [typed-resource]
   (let [fields (reduce mu/merge (rest typed-resource))]
