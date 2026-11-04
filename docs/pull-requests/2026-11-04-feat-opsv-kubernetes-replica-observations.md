@@ -19,8 +19,8 @@ adapter's labels or assertion of intentional change are not sufficient.
 
 ## Changes in Detail
 
-Base branch: main. Prerequisite: volume projection #2363. Merge that dependency
-privately for local development and publish only this slice after it merges.
+Base branch: main. Volume projection #2363 and evidence protection #2364 are
+merged prerequisites. Private prerequisite history was reconciled before publication.
 
 Reuse the complete inventory partition, native image correlation, service-account
 volume projection and replica comparison vocabulary. The fixed, versioned
@@ -61,10 +61,11 @@ Explicit pure API only. Live preparation and effect wiring remain separate.
 
 ## Related Issues/PRs
 
-N7 section 6.3; merged inventory partition #2362; volume projection #2363.
+N7 section 6.3; merged inventory partition #2362, volume projection #2363 and
+evidence protection #2364.
 
 ## Checklist
 
-- [ ] Native ownership, configuration, image and placement correlations proved.
-- [ ] Raw observations and versioned semantic projection retained separately.
+- [x] Native ownership, configuration, image and placement correlations proved.
+- [x] Raw observations and versioned semantic projection retained separately.
 - [ ] Local, owner, CI and full-review gates pass.
