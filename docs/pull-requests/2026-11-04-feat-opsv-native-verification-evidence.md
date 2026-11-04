@@ -44,6 +44,10 @@ run first; opaque or deferred metadata is never realized by native discovery.
 Reject comparator-sorted sets and complex carrier keys before transforming native
 material, so comparisons cannot collapse original values before scanning.
 Ordinary list/set carrier types remain intact. Re-publication is idempotent.
+Reserved-key discovery uses equality over existing entries, never a sorted map's
+incompatible comparator. Marked carrier maps normalize before reconstruction.
+Nested projections preserve only the exact canonical reporting profile value;
+arbitrary profile values and payloads remain confidential.
 
 No live experiments, native runner wiring, cluster calls or execution authority.
 Native preparation and its pre-effect target/attempt binding remain separate.
@@ -62,19 +66,19 @@ reporting fault checks because its pure classification code is shared.
 
 Both product contexts and poly check pass on current main.
 All 18 scoped OPSV/N6 project namespaces pass: 72 tests and 955 assertions.
-A fresh isolated CLI package passes 252 tests and 1,430 assertions, including
+A fresh isolated CLI package passes 254 tests and 1,446 assertions, including
 the existing list/vector immutable-publication identity suite.
-Fifteen new component cases contain 52 assertions; each measures below six milliseconds.
+Seventeen new component cases contain 68 assertions; each measures below 100 milliseconds.
 Four focused integration cases contain 46 assertions.
 
-All nine new deliberate faults are detected without test errors.
-Their assertion-failure counts are 13, 22, nine, six, one, two, four, five and eight.
+All eleven new deliberate faults are detected without test errors.
+Their assertion-failure counts are 18, 27, nine, six, one, three, four, five, eight, five and four.
 All 19 prior native-reporting faults are also detected without test errors.
 Strict source/new-test lint reports zero warnings or errors. Explicit strata pass.
 Committed scans find zero violations across 300 component files and 13 project files.
 The owner traced every changed file against all applicable standards before expensive gates.
-Normal signed commits remain below 200 reportable lines; the PR contains 314/600.
-Final evidence changes documentation only against tested source 05521ebea09fb9b3aa53eed39719a8441b2a8505.
+Normal signed commits remain below 200 reportable lines; the PR contains 354/600.
+Final evidence changes documentation only against tested source a0716f3f3b11bc3e52b8b5346c7c7e0700bd2997.
 
 The exact pre-fix package reproduces both metadata findings with six assertion
 failures and zero errors. Regressions reject hidden native frames and list-carrier
@@ -83,6 +87,10 @@ The existing identity test constructs a metadata-free list instead of a quoted
 list carrying reader metadata; every identity and publication assertion remains.
 Native protection postconditions apply only to marked frames, preserving shared
 nil/false/numeric policy on unrelated generic siblings.
+The exact published package also reproduces both overview-only review findings:
+eight assertion failures and zero errors. Source regressions cover string-keyed
+sorted maps, comparator-sensitive marked carriers and nested profile republication
+through artifact creation. Deliberate faults independently reverse both fixes.
 
 The broad local project run was cancelled, not counted as a pass.
 Its unrelated executor lifecycle tests can mutate configured external backends.
