@@ -121,24 +121,6 @@
    :message (str "Switching to backend: " (:to-backend workaround))
    :to-backend (:to-backend workaround)})
 
-;; GitHub issue integration (for future enhancement)
-(defn ^{:stratum 0} fetch-workaround-from-github
-  "Fetch workaround suggestions from GitHub issues.
-
-   This is a placeholder for future GitHub API integration.
-
-   Arguments:
-     _error-message - String error message (unused - future implementation)
-     _repo - String repo (unused - future implementation)
-
-   Returns: Vector of suggested workarounds or nil"
-  [_error-message _repo]
-  ;; TODO: Implement GitHub API search for issues matching error message
-  ;; Search for closed issues with labels: 'workaround', 'resolved'
-  ;; Parse issue body for commands/fixes
-  ;; Return structured workaround suggestions
-  nil)
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} workaround-patterns
