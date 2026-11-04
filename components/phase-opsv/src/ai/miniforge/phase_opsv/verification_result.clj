@@ -22,7 +22,8 @@
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.opsv.interface :as opsv]
    [ai.miniforge.phase-opsv.verification-criteria :as criteria]
-   [ai.miniforge.phase-opsv.flow :as flow]))
+   [ai.miniforge.phase-opsv.flow :as flow]
+   [ai.miniforge.redaction.interface :as redaction]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -47,8 +48,8 @@
 (defn ^{:stratum 1} output [synthesized run]
   (let [synthesized (get run :verification/output synthesized)
         run (dissoc run :verification/output)
-        verification (criteria/evaluate (:opsv/experiment-pack synthesized) run)]
-    (flow/continue verification (partial attach-verification run synthesized))))
+        verification (redaction/redact (criteria/evaluate (:opsv/experiment-pack synthesized) run))]
+    (flow/continue verification (partial attach-verification (redaction/redact run) synthesized))))
 
 (comment
   (output {} {}))

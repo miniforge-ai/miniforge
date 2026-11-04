@@ -6,6 +6,8 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.phase-opsv.candidate-verification-fixtures :as fixtures]
             [ai.miniforge.phase-opsv.environment-comparison-fixtures :as environment]
+            [ai.miniforge.phase-opsv.interface :as phase]
+            [ai.miniforge.phase-opsv.test-support :as support]
             [ai.miniforge.redaction.interface :as redaction]
             [clojure.test :refer [deftest is]]))
 
@@ -28,6 +30,29 @@
                  (partial fixtures/measure calls directory (fixtures/observations baseline)))]
     (is (anomaly/any-anomaly? result))
     (is (= [:prepare] (mapv first @calls)))
+    (is (redaction/clean? result))))
+
+(defn- ^{:stratum 0} verify-adapter-failures [ctx directory baseline]
+  (let [calls (atom [])
+        failure (anomaly/anomaly :unavailable "injected adapter failure" {:password "fake-test-password"})
+        fail (constantly failure)
+        prepare (partial fixtures/prepare calls (fixtures/observations baseline))
+        measure (partial fixtures/measure calls directory
+                         (fixtures/observations (merge baseline (environment/changes))))]
+    (doseq [[prepare measure] [[fail measure] [prepare fail]]]
+      (let [result (fixtures/verify ctx prepare measure)]
+        (is (= :unavailable (:anomaly/type result)))
+        (is (redaction/clean? result))))))
+
+(defn- ^{:stratum 0} verify-legacy-reporting [ctx _directory baseline]
+  (let [ctx (update ctx :execution/opts dissoc :opsv/verification-environment)
+        measurements (-> support/verification-measurements
+                         (assoc :environment-fingerprint baseline)
+                         (assoc-in [:observations "private"] "DB_PASSWORD=fake-test-password"))
+        measure #(phase/verification-receipt % measurements)
+        result (fixtures/verify ctx identity measure)]
+    (is (not (anomaly/anomaly? result)))
+    (is (true? (get-in result [:opsv/verification-result :passed?])))
     (is (redaction/clean? result))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -71,6 +96,12 @@
 
 (deftest ^{:stratum 1} unsupported-preparation-cannot-reach-candidate-effects-test
   (fixtures/with-context verify-unsupported-preparation))
+
+(deftest ^{:stratum 1} adapter-failures-are-protected-before-returning-test
+  (fixtures/with-context verify-adapter-failures))
+
+(deftest ^{:stratum 1} legacy-verification-reporting-is-protected-after-evaluation-test
+  (fixtures/with-context verify-legacy-reporting))
 
 ;------------------------------------------------------------------------------ Layer 2
 

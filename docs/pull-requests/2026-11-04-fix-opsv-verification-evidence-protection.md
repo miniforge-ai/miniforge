@@ -25,6 +25,8 @@ secret-bearing payload, and bind the compliance metadata into that identity.
 Refuse uninspectable content without echoing it. Failure reports remain artifact
 data, not pipeline control. Return protected verification reporting values only
 after evaluating the original receipt against the original pinned contract.
+Protect adapter failures at receipt admission, and protect the older verification
+path's reporting values only after evaluating its original measurements.
 
 The protected report is not a substitute execution or recovery contract. No
 live endpoints, candidate effects, policy permissions or experiments are added.
