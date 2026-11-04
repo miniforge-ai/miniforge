@@ -10,6 +10,7 @@
             [ai.miniforge.phase-opsv.kubernetes-verification-fixtures :as fixtures]
             [ai.miniforge.phase-opsv.prometheus-test-support :as failures]
             [clojure.test :refer [deftest is]]
+            [clojure.walk :as walk]
             [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -91,6 +92,26 @@
         [result calls] (fixtures/capture! routes {})]
     (is (anomaly/anomaly? result))
     (is (= 6 (count calls)))))
+
+(deftest ^{:stratum 0} current-pod-only-dependencies-are-read-independently-of-desired-templates-test
+  (let [routes (assoc-in (fixtures/routes) [inventory/pods-path "items" 0 "spec" "imagePullSecrets"]
+                         [{"name" "missing-pod-only-dependency"}])
+        [result calls] (fixtures/capture! routes {})]
+    (is (anomaly/anomaly? result))
+    (is (some #(= "/api/v1/namespaces/staging/secrets/missing-pod-only-dependency" (wire/path %)) calls))))
+
+(deftest ^{:stratum 0} optional-reference-absence-remains-distinct-from-a-required-use-test
+  (let [routes (walk/postwalk
+                 #(if (and (map? %) (contains? % "configMapKeyRef"))
+                    (assoc-in % ["configMapKeyRef" "optional"] true) %)
+                 (dissoc (fixtures/routes) wire/config-path))
+        [optional] (fixtures/capture! routes {})
+        [required] (fixtures/capture!
+                     (assoc-in routes [inventory/pods-path "items" 0 "spec" "containers" 0
+                                        "env" 0 "valueFrom" "configMapKeyRef" "optional"] false) {})]
+    (is (m/validate phase/KubernetesVerificationObservation optional))
+    (is (= ["Secret"] (mapv #(get % "kind") (:kubernetes/configuration optional))))
+    (is (anomaly/anomaly? required))))
 
 (deftest ^{:stratum 0} incomplete-node-list-and-required-configuration-absence-fail-closed-test
   (doseq [routes [(assoc-in (fixtures/routes) [fixtures/nodes-path "metadata" "continue"] "next")
