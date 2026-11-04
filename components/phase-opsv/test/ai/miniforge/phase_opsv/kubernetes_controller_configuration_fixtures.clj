@@ -12,7 +12,8 @@
         spec (dissoc (get (kube/pod) "spec") "nodeName")]
     (assoc value "spec" {"replicas" replicas
                          "selector" {"matchLabels" labels}
-                         "template" {"metadata" {"labels" labels} "spec" spec}})))
+                         "template" {"metadata" {"labels" labels "annotations" {"replicas" "configuration-value"}}
+                                      "spec" spec}})))
 
 ;------------------------------------------------------------------------------ Layer 1
 

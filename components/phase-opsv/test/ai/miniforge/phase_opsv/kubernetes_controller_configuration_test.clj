@@ -101,6 +101,7 @@
         baseline (:kubernetes/controller-configuration-hash (phase/project-kubernetes-controller-configuration input))
         deployment [:kubernetes/inventory :kubernetes/deployment]]
     (doseq [[path value] [[(into deployment ["spec" "template" "spec" "containers" 0 "image"]) "registry.invalid/other:version"]
+                          [(into deployment ["spec" "template" "metadata" "annotations" "replicas"]) "other-configuration-value"]
                           [(into deployment ["spec" "strategy"]) {"type" "Recreate"}]
                           [(into deployment ["metadata" "annotations"]) {"example.invalid/owner" "other"}]]]
       (let [result (phase/project-kubernetes-controller-configuration (assoc-in input path value))]
