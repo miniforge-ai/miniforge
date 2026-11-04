@@ -15,6 +15,13 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} project-outcome [input]
+  (try+ (phase/project-kubernetes-outside-invariants input)
+        (catch InterruptedException interrupted
+          (.interrupt (Thread/currentThread))
+          (throw interrupted))
+        (catch exception-policy/nonfatal? failure failure)))
+
 (defn- ^{:stratum 0} assert-drift [changes]
   (let [input (fixtures/input)
         baseline (:kubernetes/outside-hash (phase/project-kubernetes-outside-invariants input))]
@@ -112,23 +119,6 @@
     (is (anomaly/anomaly? result))
     (is (not (.contains (pr-str result) (str opaque))))))
 
-(deftest ^{:stratum 0} malformed-outside-runtime-status-is-an-anomaly-not-an-exception-or-success-test
-  (let [input (fixtures/input)
-        path [:kubernetes/inventory :kubernetes/pod-inventory "items" 2 "status"]]
-    (doseq [status [{"containerStatuses" 42}
-                    {"containerStatuses" [1]}
-                    {"initContainerStatuses" {"name" "service"}}
-                    {"ephemeralContainerStatuses" [(containers/status nil "")]}
-                    {"containerStatuses" [(containers/status "service" 1)]}
-                    {"containerStatuses" [{"name" "service"} {"name" "service"}]}
-                    {"containerStatuses" [(containers/status "undeclared" "")]}]]
-      (let [result (try+ (phase/project-kubernetes-outside-invariants (assoc-in input path status))
-                        (catch InterruptedException interrupted
-                          (.interrupt (Thread/currentThread))
-                          (throw interrupted))
-                        (catch exception-policy/nonfatal? failure failure))]
-        (is (anomaly/anomaly? result))))))
-
 (deftest ^{:stratum 0} pending-and-unreported-outside-runtime-remain-explicit-raw-observations-test
   (let [input (fixtures/input)
         path [:kubernetes/inventory :kubernetes/pod-inventory "items" 2]]
@@ -162,6 +152,45 @@
         (is (identical? changed (:kubernetes/source result)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} malformed-outside-runtime-status-is-an-anomaly-not-an-exception-or-success-test
+  (let [input (fixtures/input)
+        path [:kubernetes/inventory :kubernetes/pod-inventory "items" 2 "status"]]
+    (doseq [status [{"containerStatuses" 42}
+                    {"containerStatuses" [1]}
+                    {"initContainerStatuses" {"name" "service"}}
+                    {"ephemeralContainerStatuses" [(containers/status nil "")]}
+                    {"containerStatuses" [(containers/status "service" 1)]}
+                    {"containerStatuses" [{"name" "service"} {"name" "service"}]}
+                    {"containerStatuses" [(containers/status "undeclared" "")]}]]
+      (is (anomaly/anomaly? (project-outcome (assoc-in input path status)))))))
+
+(deftest ^{:stratum 1} ownership-and-finalizer-permutations-preserve-hash-and-original-source-test
+  (let [path [:kubernetes/inventory :kubernetes/pod-inventory "items" 2 "metadata"]
+        input (-> (fixtures/input)
+                  (assoc-in (conj path "finalizers") ["example.invalid/hold" "example.invalid/archive"])
+                  (update-in (conj path "ownerReferences") conj (inventory/non-controller-rbac-reference)))
+        baseline (phase/project-kubernetes-outside-invariants input)]
+    (doseq [fields [["finalizers"] ["ownerReferences"] ["finalizers" "ownerReferences"]]
+            :let [changed (reduce #(update-in %1 (conj path %2) (comp vec reverse)) input fields)
+                  observed (project-outcome changed)]]
+      (is (= (:kubernetes/outside-hash baseline) (:kubernetes/outside-hash observed)))
+      (is (identical? changed (:kubernetes/source observed))))))
+
+(deftest ^{:stratum 1} malformed-or-duplicate-metadata-collections-fail-before-canonicalization-test
+  (let [path [:kubernetes/nodes "items" 0 "metadata"]
+        reference (inventory/non-controller-rbac-reference)]
+    (doseq [[field value] [["finalizers" nil] ["finalizers" 42] ["finalizers" ["hold" "hold"]]
+                           ["finalizers" [1 "hold"]] ["ownerReferences" nil]
+                           ["ownerReferences" [reference reference]]
+                           ["ownerReferences" [(dissoc reference "uid")]]
+                           ["ownerReferences" [1 reference]]]]
+      (is (anomaly/anomaly? (project-outcome (assoc-in (fixtures/input) (conj path field) value)))))))
+
+(deftest ^{:stratum 1} canonical-metadata-retains-finalizer-and-owner-reference-content-test
+  (assert-drift [[[:kubernetes/nodes "items" 0 "metadata" "finalizers"] ["example.invalid/hold"]]
+                 [[:kubernetes/configuration 0 "metadata" "ownerReferences"]
+                  [(inventory/non-controller-rbac-reference)]]]))
 
 (deftest ^{:stratum 1} cluster-and-namespace-invariants-remain-independent-test
   (assert-drift [[[:kubernetes/cluster "metadata" "uid"] "other-cluster"]

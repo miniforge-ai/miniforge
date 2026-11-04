@@ -5,6 +5,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.kubernetes-inventory-partition :as partition]
             [ai.miniforge.phase-opsv.kubernetes-api :as api]
+            [ai.miniforge.phase-opsv.kubernetes-metadata-schema :as metadata]
             [ai.miniforge.phase-opsv.kubernetes-outside-inventory :as inventory]
             [ai.miniforge.phase-opsv.kubernetes-outside-projection :as projection]
             [ai.miniforge.phase-opsv.kubernetes-resource :as resource]
@@ -40,11 +41,16 @@
   (let [outside-pods (filterv #(= "Pod" (get % "kind")) (inventory/outside resources membership))]
     (if (m/validate [:vector runtime/Pod] outside-pods) resources (invalid))))
 
+(defn- ^{:stratum 1} admitted-metadata [resources membership]
+  (let [values (mapv #(get % "metadata") (inventory/outside resources membership))]
+    (if (m/validate [:vector metadata/Metadata] values) resources (invalid))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} project [input]
   (anomaly/let-ok [input (admitted input)
                   selected (membership input)
                   all (resources input)
-                  all (admitted-runtime all selected)]
+                  all (admitted-runtime all selected)
+                  all (admitted-metadata all selected)]
     (projection/project input selected all)))
