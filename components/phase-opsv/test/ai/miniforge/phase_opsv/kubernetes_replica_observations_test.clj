@@ -81,6 +81,8 @@
                      (update-in input (into pod-path ["spec"]) dissoc "nodeName")
                      (assoc-in input (into pod-path ["status" "containerStatuses"]) [])
                      (assoc-in input (into pod-path ["status" "containerStatuses" 0 "name"]) "foreign")
+                     (assoc-in input (into pod-path ["status" "containerStatuses" 0 "imageID"]) "registry.invalid/service:mutable")
+                     (assoc-in input (into pod-path ["spec" "containers" 0 "volumeMounts" 0 "name"]) "unresolved-volume")
                      (assoc-in input (into pod-path ["metadata" "ownerReferences" 0 "uid"]) "foreign")]]
       (is (anomaly/anomaly? (phase/project-kubernetes-deployment-replicas changed))))))
 
