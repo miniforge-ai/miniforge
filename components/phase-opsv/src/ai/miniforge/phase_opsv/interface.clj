@@ -29,6 +29,7 @@
    [ai.miniforge.phase-opsv.kubernetes-partition-schema :as partition-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-volume-projection :as volume-projection]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replicas :as kubernetes-replicas]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-reporting :as kubernetes-reporting]
    [ai.miniforge.phase-opsv.kubernetes-verification-schema :as kubernetes-verification-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-outside :as kubernetes-outside]
    [ai.miniforge.phase-opsv.boundary.kubernetes-controller-configuration :as controller-configuration]
@@ -177,6 +178,13 @@
 (def ^{:stratum 0} KubernetesVerificationObservation
   "Raw bounded verification-capture shape, not a membership, health or execution proof."
   kubernetes-verification-schema/Observation)
+
+(def ^{:stratum 0} prepare-kubernetes-reporting
+  "Prepare data-minimized native reporting through the shared N6 scan/redaction policy, before storage.
+   Compute comparison hashes from originals first. This copy is not a manifest, comparison or recovery contract.
+   Preserve native identity/provenance and typed desired counts; raw specs/status and semantic payloads are confidential.
+   Returns protected artifact content/compliance metadata or a value-free anomaly; no storage or authority."
+  kubernetes-reporting/prepare)
 
 (def ^{:stratum 0} project-kubernetes-outside-invariants
   "Hash captured resources outside the natively proven Deployment/ReplicaSet/Pod population.

@@ -27,6 +27,8 @@
   :kubernetes/invalid-volume-projection "Pod volume bindings are malformed, unresolved, duplicated or unsupported."
   :kubernetes/invalid-replicas "Captured Kubernetes replica input is malformed or lacks runtime observations."
   :kubernetes/uncorrelated-replicas "Captured Kubernetes replica ownership, placement or configuration cannot be correlated."
+  :kubernetes/invalid-reporting "Native reporting requires bounded inspectable data with string or keyword keys and no language metadata."
+  :kubernetes/reporting-protection-failed "Native reporting protection could not be confirmed."
   :kubernetes/invalid-outside "Captured Kubernetes outside-resource observations are malformed or unsupported."
   :kubernetes/uncorrelated-outside "Captured Kubernetes resource identities or workload membership cannot be correlated."
   :kubernetes/invalid-controller-configuration "Captured controller counts or configuration inputs are malformed or unsupported."
