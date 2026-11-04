@@ -19,7 +19,7 @@
         owner-uid (get reference "uid")]
     (cond
       (= deployment-uid owner-uid) false
-      (= ["apps/v1" "ReplicaSet"] [(get reference "apiVersion") (get reference "kind")])
+      (ownership/native-replica-set? reference)
       (contains? by-uid owner-uid)
       :else true)))
 
