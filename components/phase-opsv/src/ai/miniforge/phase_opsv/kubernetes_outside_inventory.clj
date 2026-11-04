@@ -19,17 +19,20 @@
     (and (= (count uids) (count (distinct uids)))
          (= (count logical) (count (distinct logical))))))
 
-(defn ^{:stratum 0} resources [captured]
-  (let [raw (-> (:kubernetes/inventory captured)
-                (update :kubernetes/replica-set-inventory (partial lists/typed-list "ReplicaSet"))
-                (update :kubernetes/pod-inventory (partial lists/typed-list "Pod")))
+(defn- ^{:stratum 0} typed-inventory [captured]
+  (-> (:kubernetes/inventory captured)
+      (update :kubernetes/replica-set-inventory (partial lists/typed-list "ReplicaSet"))
+      (update :kubernetes/pod-inventory (partial lists/typed-list "Pod"))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} resources [captured]
+  (let [raw (typed-inventory captured)
         nodes (lists/typed-list "Node" (:kubernetes/nodes captured))
         cluster (:kubernetes/cluster captured)
         cluster-root (when-not (= cluster (:kubernetes/namespace raw)) [cluster])]
     (vec (concat cluster-root (inventory/resources raw)
                  (get nodes "items") (:kubernetes/configuration captured)))))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} outside [resources membership]
   (let [owned (owned-uids membership)]

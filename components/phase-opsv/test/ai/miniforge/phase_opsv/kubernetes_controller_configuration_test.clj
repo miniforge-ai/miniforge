@@ -119,6 +119,32 @@
         (is (not (anomaly/anomaly? observed)))
         (is (not= baseline (:kubernetes/controller-configuration-hash observed)))))))
 
+(deftest ^{:stratum 0} owned-controller-metadata-order-is-not-desired-configuration-drift-test
+  (doseq [path [[:kubernetes/inventory :kubernetes/deployment "metadata"]
+                [:kubernetes/inventory :kubernetes/replica-set-inventory "items" 0 "metadata"]]]
+    (let [input (-> (fixtures/input)
+                    (assoc-in (conj path "finalizers") ["example.invalid/hold" "example.invalid/archive"])
+                    (update-in (conj path "ownerReferences") (fnil conj []) (inventory/non-controller-rbac-reference)))
+          changed (-> input
+                      (update-in (conj path "finalizers") (comp vec reverse))
+                      (update-in (conj path "ownerReferences") (comp vec reverse)))
+          baseline (phase/project-kubernetes-controller-configuration input)
+          observed (phase/project-kubernetes-controller-configuration changed)]
+      (is (= (:kubernetes/controller-configuration-hash baseline) (:kubernetes/controller-configuration-hash observed)))
+      (is (identical? changed (:kubernetes/source observed))))))
+
+(deftest ^{:stratum 0} owned-controller-metadata-must-be-admitted-before-canonicalization-test
+  (let [reference (inventory/non-controller-rbac-reference)]
+    (doseq [[field value] [["finalizers" 42] ["finalizers" ["hold" "hold"]]
+                           ["ownerReferences" [reference (assoc reference "name" "other-role")]]
+                           ["ownerReferences" [{"uid" "malformed"}]]]
+            path [[:kubernetes/inventory :kubernetes/deployment "metadata"]
+                   [:kubernetes/inventory :kubernetes/replica-set-inventory "items" 0 "metadata"]]]
+      (let [input (fixtures/input)
+            values (if (= "ownerReferences" field) (into (get-in input (conj path field) []) value) value)]
+        (is (anomaly/anomaly? (phase/project-kubernetes-controller-configuration
+                               (assoc-in input (conj path field) values))))))))
+
 (deftest ^{:stratum 0} unowned-controller-counts-remain-outside-rather-than-normalized-test
   (let [input (fixtures/input)
         changed (assoc-in input [:kubernetes/inventory :kubernetes/replica-set-inventory "items" 2 "spec" "replicas"] 999)

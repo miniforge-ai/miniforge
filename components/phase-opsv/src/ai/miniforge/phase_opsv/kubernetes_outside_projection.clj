@@ -12,10 +12,11 @@
 
 (defn ^{:stratum 0} project [input membership resources]
   (let [outside (profiles/ordered (inventory/outside resources membership))
+        resource-profiles (mapv invariant/profile outside)
         projected {:kubernetes/projection :kubernetes/outside-workload-invariants-v1
                    :kubernetes/cluster-id (get-in input [:kubernetes/inventory :kubernetes/cluster-id])
                    :kubernetes/node-pool-label (:kubernetes/node-pool-label input)
-                   :kubernetes/resources (mapv invariant/profile outside)}]
+                   :kubernetes/resources resource-profiles}]
     (anomaly/let-ok [digest (artifact/content-digest projected)]
       {:kubernetes/source input
        :kubernetes/membership membership

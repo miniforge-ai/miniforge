@@ -43,6 +43,12 @@ Reuse the existing desired resource view, which excludes status and bookkeeping
 metadata except the explicitly retained lifecycle and runtime fields. Secret
 configuration uses its server resource version, never Secret data or annotations.
 Order resources canonically; retain the versioned semantic view beside its hash.
+Admit finalizers as unique strings and owner references as unique UID-keyed records
+before canonicalizing their order. Preserve the original metadata and all retained
+reference content; reject malformed collections rather than dropping entries.
+These collection semantics follow native
+[Kubernetes ObjectMeta](https://github.com/kubernetes/apimachinery/blob/v0.35.0/pkg/apis/meta/v1/types.go),
+not a new policy.
 
 This is an outside-only comparison value, not a complete OPSV fingerprint.
 Owned controller desired configuration and counts, replica invariants, freshness,
@@ -59,9 +65,12 @@ incomplete inputs, Secret treatment and unsupported content.
 Run product, isolated package, mutation and complete PR gates.
 
 Both product contexts and poly check pass. Fresh isolated native packaging passes
-146 tests and 855 assertions. Deliberate bypasses are detected without test errors.
-The 19 new cases contain 83 assertions and measure below 100 ms each.
-The committed component scan reports zero findings.
+149 tests and 873 assertions. All 14 deliberate bypasses are detected without test
+errors, including omitted canonicalization and metadata admission.
+The metadata regressions fail against the prior package with 11 assertion failures
+and zero errors. Current packaging passes all 22 outside cases and 101 assertions.
+Each case measures below 100 ms. The committed component scan reports zero findings
+across 277 files. The PR remains below its size limit without an exception.
 
 ## Deployment Plan
 
