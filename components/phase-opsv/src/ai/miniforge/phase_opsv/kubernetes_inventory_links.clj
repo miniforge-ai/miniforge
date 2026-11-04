@@ -10,10 +10,9 @@
 (defn- ^{:stratum 0} unambiguous? [child]
   (<= (count (filter #(true? (get % "controller")) (get-in child ["metadata" "ownerReferences"]))) 1))
 
-(defn- ^{:stratum 0} known-parent-consistent? [by-uid child]
-  (if-let [parent (get by-uid (get (ownership/controller child) "uid"))]
-    (ownership/owns? parent child)
-    true))
+(defn- ^{:stratum 0} scope-matches? [parent child]
+  (let [parent-namespace (resource/namespace-of parent)]
+    (or (nil? parent-namespace) (= parent-namespace (resource/namespace-of child)))))
 
 (defn- ^{:stratum 0} canonical-pod-chain? [by-uid deployment-uid pod]
   (let [reference (ownership/controller pod)
@@ -26,7 +25,15 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} consistent? [inventory replica-sets pods]
+(defn- ^{:stratum 1} known-parent-consistent? [by-uid child]
+  (let [reference (ownership/controller child)
+        parent (get by-uid (get reference "uid"))]
+    (or (nil? parent)
+        (and (ownership/identifies? parent reference) (scope-matches? parent child)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} consistent? [inventory replica-sets pods]
   (let [roots [(:kubernetes/namespace inventory) (:kubernetes/deployment inventory)]
         by-uid (into {} (map (juxt resource/uid identity) (concat roots replica-sets pods)))
         deployment-uid (resource/uid (:kubernetes/deployment inventory))

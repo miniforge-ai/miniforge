@@ -52,6 +52,11 @@
       (assoc-in [:kubernetes/replica-set-inventory "items"] [])
       (assoc-in [:kubernetes/pod-inventory "items"] [])))
 
+(defn ^{:stratum 1} with-namespace-owner [collection]
+  (let [raw (observation)
+        reference (membership/owner-reference (:kubernetes/namespace raw))]
+    (assoc-in raw [collection "items" 0 "metadata" "ownerReferences"] [reference])))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} pending-member-with-matching-outside-labels []
