@@ -10,7 +10,7 @@
 (defn- ^{:stratum 0} target-resource? [namespace value]
   (= namespace (resource/namespace-of value)))
 
-(defn- ^{:stratum 0} complete? [value]
+(defn ^{:stratum 0} complete? [value]
   (let [continuation (get-in value ["metadata" "continue"])
         remaining (get-in value ["metadata" "remainingItemCount"])]
     (and (or (nil? continuation) (= "" continuation))
