@@ -29,6 +29,10 @@
       (assoc-in ["spec" "containers" 0 "command"] [value])
       (assoc-in ["spec" "containers" 0 "resources"] {"limits" {"cpu" "1"}})))
 
+(defn- ^{:stratum 0} controller [spec]
+  (let [metadata (kube/metadata "catalog" "staging" "deployment-uid")]
+    (assoc (kube/kube-resource "Deployment" metadata {"spec" spec}) "apiVersion" "apps/v1")))
+
 (deftest ^{:stratum 0} native-secret-and-config-payloads-use-shared-protected-material-test
   (let [snapshot (kube/snapshot)
         prepared (phase/prepare-kubernetes-reporting snapshot)
@@ -102,6 +106,20 @@
     (is (= "system:discovery" (get observed "name")))
     (is (not (.contains (pr-str prepared) "opaque-native-value")))))
 
+(deftest ^{:stratum 0} semantic-runtime-and-ownership-payloads-are-not-plaintext-exemptions-test
+  (doseq [field [:resource/runtime :resource/ownership-and-lifecycle]]
+    (let [input {:captured {field {"extension" "opaque-native-value"}}}
+          prepared (phase/prepare-kubernetes-reporting input)]
+      (is (evidence/valid-protected-artifact-content? prepared))
+      (is (not (.contains (pr-str prepared) "opaque-native-value")))
+      (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting :captured field :kubernetes.reporting/secret]))))))
+
+(deftest ^{:stratum 0} public-identity-fields-do-not-exempt-composite-children-test
+  (doseq [field ["name" "uid" "resourceVersion"]]
+    (let [prepared (phase/prepare-kubernetes-reporting (assoc-in (kube/pod) ["metadata" field] {"note" "opaque-native-value"}))]
+      (is (evidence/valid-protected-artifact-content? prepared))
+      (is (not (.contains (pr-str prepared) "opaque-native-value"))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} native-init-and-ephemeral-groups-receive-the-same-payload-protection-test
@@ -111,7 +129,7 @@
       (let [prepared (phase/prepare-kubernetes-reporting (assoc-in pod ["spec" field] [container]))]
         (is (evidence/valid-protected-artifact-content? prepared))
         (is (not (.contains (pr-str prepared) "opaque-native-value")))
-        (is (= "service" (get-in prepared [:artifact/content :kubernetes/reporting "spec" field 0 "name"])))))))
+        (is (= "pod-uid" (get-in prepared [:artifact/content :kubernetes/reporting "metadata" "uid"])))))))
 
 (deftest ^{:stratum 1} native-literal-environment-and-commands-do-not-depend-on-key-name-detection-test
   (let [input (with-literal "opaque-native-value")
@@ -119,10 +137,10 @@
         report (get-in prepared [:artifact/content :kubernetes/reporting])]
     (is (evidence/valid-protected-artifact-content? prepared))
     (is (not (.contains (pr-str prepared) "opaque-native-value")))
-    (is (= "service" (get-in report ["spec" "containers" 0 "name"])))
-    (is (= {"limits" {"cpu" "1"}} (get-in report ["spec" "containers" 0 "resources"])))
+    (is (= "service-a" (get-in report ["metadata" "name"])))
+    (is (= "pod-uid" (get-in report ["metadata" "uid"])))
     (is (= "opaque-native-value" (get-in input ["spec" "containers" 0 "env" 0 "value"])))
-    (is (= (redaction/marker) (get-in report ["spec" "containers" 0 "env" :kubernetes.reporting/secret])))))
+    (is (= (redaction/marker) (get-in report ["spec" :kubernetes.reporting/secret])))))
 
 (deftest ^{:stratum 1} original-comparison-differences-survive-while-reporting-values-are-withheld-test
   (let [first-input (with-literal "opaque-native-first")
@@ -143,12 +161,10 @@
 (deftest ^{:stratum 1} desired-templates-versioned-pod-projections-and-unknown-native-kinds-are-safe-test
   (let [pod (with-literal "opaque-native-value")
         spec (get pod "spec")
-        metadata (get pod "metadata")
-        desired {"spec" {"replicas" 2 "template" {"spec" spec}}}
-        controller (assoc (kube/kube-resource "Deployment" metadata desired) "apiVersion" "apps/v1")
-        unknown (kube/kube-resource "Other" metadata {"spec" {"arbitrary" "opaque-native-value"}})
+        deployment (controller {"replicas" 2 "template" {"spec" spec}})
+        unknown (kube/kube-resource "Other" (get pod "metadata") {"spec" {"arbitrary" "opaque-native-value"}})
         prepared (phase/prepare-kubernetes-reporting
-                   {:controller controller
+                   {:controller deployment
                     :semantic {:kubernetes/pod-spec spec}
                     :unknown unknown})]
     (is (evidence/valid-protected-artifact-content? prepared))
@@ -180,8 +196,45 @@
     (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting "spec" :kubernetes.reporting/secret])))))
 
 (deftest ^{:stratum 1} string-keyed-sorted-maps-are-normalized-without-changing-originals-test
-  (let [input (walk/postwalk #(if (map? %) (into (sorted-map) %) %) (with-literal "opaque-native-value"))
-        prepared (report-outcome input)]
-    (is (evidence/valid-protected-artifact-content? prepared))
-    (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting "spec" "containers" 0 "env" :kubernetes.reporting/secret])))
+  (let [input (walk/postwalk #(if (map? %) (into (sorted-map) %) %) (with-literal "opaque-native-value"))]
+    (doseq [[value path] [[input [:artifact/content :kubernetes/reporting "spec" :kubernetes.reporting/secret]]
+                          [(sorted-map :captured input)
+                           [:artifact/content :kubernetes/reporting :captured "spec" :kubernetes.reporting/secret]]]]
+      (let [prepared (report-outcome value)]
+        (is (evidence/valid-protected-artifact-content? prepared))
+        (is (= (redaction/marker) (get-in prepared path)))))
     (is (= "opaque-native-value" (get-in input ["spec" "containers" 0 "env" 0 "value"])))))
+
+(deftest ^{:stratum 1} unchecked-composite-public-fields-cannot-retain-confidential-children-test
+  (let [pod (kube/pod)
+        deployment (controller {"replicas" 2 "strategy" {"note" "opaque-native-value"}})]
+    (doseq [input [(assoc-in pod ["spec" "containers" 0 "resources"] {"note" "opaque-native-value"})
+                   deployment
+                   (assoc-in pod ["metadata" "generation"] {"note" "opaque-native-value"})
+                   (assoc-in pod ["metadata" "finalizers"] [{"note" "opaque-native-value"}])]]
+      (let [prepared (phase/prepare-kubernetes-reporting input)]
+        (is (evidence/valid-protected-artifact-content? prepared))
+        (is (not (.contains (pr-str prepared) "opaque-native-value")))))))
+
+(deftest ^{:stratum 1} standalone-and-nested-items-without-type-meta-still-withhold-native-payloads-test
+  (let [pod (dissoc (with-literal "opaque-native-value") "apiVersion" "kind")]
+    (doseq [input [pod {:captured pod}]]
+      (let [prepared (phase/prepare-kubernetes-reporting input)]
+        (is (evidence/valid-protected-artifact-content? prepared))
+        (is (not (.contains (pr-str prepared) "opaque-native-value")))))))
+
+(deftest ^{:stratum 1} public-controller-counts-require-native-nonnegative-int32-values-test
+  (doseq [value [0 2]]
+    (let [prepared (phase/prepare-kubernetes-reporting (controller {"replicas" value}))]
+      (is (evidence/valid-protected-artifact-content? prepared))
+      (is (= value (get-in prepared [:artifact/content :kubernetes/reporting "spec" "replicas"])))))
+  (doseq [value [-1 (inc (long Integer/MAX_VALUE)) "opaque-native-value" {"note" "opaque-native-value"}]]
+    (let [prepared (phase/prepare-kubernetes-reporting (controller {"replicas" value}))]
+      (is (evidence/valid-protected-artifact-content? prepared))
+      (is (not (.contains (pr-str prepared) "opaque-native-value")))
+      (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting "spec" "replicas" :kubernetes.reporting/secret]))))))
+
+(deftest ^{:stratum 1} foreign-controller-identities-do-not-publicize-desired-count-fields-test
+  (let [prepared (phase/prepare-kubernetes-reporting (assoc (controller {"replicas" 2}) "apiVersion" "example.invalid/v1"))]
+    (is (evidence/valid-protected-artifact-content? prepared))
+    (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting "spec" :kubernetes.reporting/secret])))))

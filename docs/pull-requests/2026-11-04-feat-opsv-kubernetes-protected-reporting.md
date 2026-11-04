@@ -23,17 +23,20 @@ Base branch: main, including verification capture #2366 and outside invariants
 PR #2367. Preserve both public APIs and message families when resolving the
 main-merge conflicts; rerun integration gates on that resulting source.
 
-Add one reporting-only API with a fixed, versioned field policy. Retain native
-identity, provenance and scaling fields. Classify payloads, literal environment,
-commands, labels, annotations and unknown native fields as confidential.
-Treat native Pods, controller templates and versioned PodSpec projections alike.
+Add one reporting-only API with a fixed, versioned field policy. Retain scalar
+native identity/provenance, owner-reference identities and explicit int32 desired
+replica counts. Whitelist no composite value wholesale. Raw specifications,
+status, lifecycle collections, labels, annotations and unknown fields are confidential.
+Detailed resources and strategy remain in originals for comparison and typed
+policy artifacts, not plaintext in this raw-data reporting profile.
 Bind native field treatment to both API version and kind. Classify list payloads
 even when ListMeta or item TypeMeta is omitted. Foreign API kinds receive the
 conservative payload treatment, not a native Pod's public-field policy.
-Classify metadata-free envelopes conservatively. Keep owner-reference identity
-fields public while withholding reference extensions. Type and immutable fields
-are not generic public headers. Normalize reporting maps before classification so
-accepted sorted maps cannot fail on mixed key lookups; preserve original input.
+Classify metadata-free envelopes and standalone items without TypeMeta
+conservatively. Project metadata and references with explicit field policies.
+Public identity fields admit no composite children. Keep known semantic payloads
+confidential and stop classification at confidential branches without discarding
+their originals. Normalize maps before classification, preserving original input.
 
 Classification preserves original values for the shared scanner. A producer-owned
 secret key invokes existing redaction without duplicating secret or PII patterns.
@@ -57,14 +60,14 @@ Prove original comparison differences survive while reports withhold values.
 Retain original PII findings and refuse opaque, deferred or metadata-bearing data.
 Simulate failed shared redaction and require a value-free failure.
 
-Both product contexts, poly check and a fresh CLI build pass on current main.
-Isolated packaging passes 184 tests and 1,023 assertions, including outside-resource
-regressions from the merged prerequisite. All 13 deliberate defects are detected
-without test errors. The 17 focused cases contain 74 assertions and measure
-1.2–19.0 ms each. The committed scan reports zero findings across 283 files.
-The three review findings plus reference-provenance coverage reproduce eight
-assertion failures and zero errors against the prior package. Explicit strata
-and full source/test lint pass without warnings or errors. No exception is used.
+Before the second review, both product contexts, poly check and a fresh CLI build
+passed. Isolated packaging passed 184 tests and 1,023 assertions.
+The second review findings reproduce six assertion failures and zero errors
+against that package. Corrected source passes 23 cases and 118 assertions.
+All 17 deliberate defects are detected without test errors, including untyped
+composite exemptions and standalone-item bypasses. Final-source product, package,
+mutation and scan gates remain required before pushing this correction.
+No exception is requested.
 
 ## Deployment Plan
 
