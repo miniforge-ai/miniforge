@@ -30,6 +30,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-volume-projection :as volume-projection]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replicas :as kubernetes-replicas]
    [ai.miniforge.phase-opsv.kubernetes-verification-schema :as kubernetes-verification-schema]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-outside :as kubernetes-outside]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -175,6 +176,13 @@
 (def ^{:stratum 0} KubernetesVerificationObservation
   "Raw bounded verification-capture shape, not a membership, health or execution proof."
   kubernetes-verification-schema/Observation)
+
+(def ^{:stratum 0} project-kubernetes-outside-invariants
+  "Hash captured resources outside the natively proven Deployment/ReplicaSet/Pod population.
+   Retain source and versioned projection, including controller links, lifecycle and runtime identities.
+   This does not check owned controller configuration/counts, replica invariants, freshness or health.
+   Protect sensitive reporting copies only after hashing; no storage, I/O or execution authority."
+  kubernetes-outside/project)
 
 (def ^{:stratum 0} decode-measurement-window
   "Decode one complete Prometheus float series against a declared bounded grid.
