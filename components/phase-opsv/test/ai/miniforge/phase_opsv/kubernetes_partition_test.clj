@@ -76,4 +76,16 @@
     (is (empty? (get-in result [:kubernetes/membership :kubernetes/replica-sets])))
     (is (empty? (get-in result [:kubernetes/membership :kubernetes/pods "items"])))))
 
+(deftest ^{:stratum 0} captured-namespace-owners-retain-exact-identity-without-a-parent-namespace-test
+  (doseq [collection [:kubernetes/replica-set-inventory :kubernetes/pod-inventory]]
+    (let [raw (fixtures/with-namespace-owner collection)
+          result (phase/partition-kubernetes-deployment-inventory raw)]
+      (is (not (anomaly/anomaly? result)))
+      (is (identical? raw (:kubernetes/inventory result)))
+      (is (= 1 (count (get-in result [:kubernetes/membership :kubernetes/pods "items"])))))
+    (doseq [[field changed] [["name" "wrong-namespace"] ["kind" "Deployment"] ["apiVersion" "apps/v1"]]]
+      (let [raw (assoc-in (fixtures/with-namespace-owner collection)
+                          [collection "items" 0 "metadata" "ownerReferences" 0 field] changed)]
+        (is (= :conflict (:anomaly/type (phase/partition-kubernetes-deployment-inventory raw))))))))
+
 (comment ::outside-observations-remain-drift-sensitive-not-silently-filtered)

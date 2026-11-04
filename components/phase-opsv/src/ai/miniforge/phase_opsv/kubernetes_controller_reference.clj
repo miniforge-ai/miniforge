@@ -10,15 +10,18 @@
   (let [references (filter #(true? (get % "controller")) (get-in child ["metadata" "ownerReferences"]))]
     (when (= 1 (count references)) (first references))))
 
+(defn ^{:stratum 0} identifies? [parent reference]
+  (and (some? parent) (some? reference)
+       (= (get parent "apiVersion") (get reference "apiVersion"))
+       (= (get parent "kind") (get reference "kind"))
+       (= (resource/name-of parent) (get reference "name"))
+       (= (resource/uid parent) (get reference "uid"))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} owns? [parent child]
   (let [reference (controller child)]
-    (and (some? parent) (some? reference)
-         (= (resource/namespace-of parent) (resource/namespace-of child))
-         (= (get parent "apiVersion") (get reference "apiVersion"))
-         (= (get parent "kind") (get reference "kind"))
-         (= (resource/name-of parent) (get reference "name"))
-         (= (resource/uid parent) (get reference "uid")))))
+    (and (identifies? parent reference)
+         (= (resource/namespace-of parent) (resource/namespace-of child)))))
 
 (comment ::controller-links-require-uid-name-kind-api-and-namespace)
