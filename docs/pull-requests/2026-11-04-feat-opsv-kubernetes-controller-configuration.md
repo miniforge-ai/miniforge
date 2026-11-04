@@ -19,9 +19,9 @@ and lifecycle changes must remain visible to native verification.
 
 ## Changes in Detail
 
-Base branch: main, including merged verification capture #2366. Outside invariants
-PR #2367 is reviewed but still awaiting merge gates. Reconcile that prerequisite's
-history with actual main before publication; never publish its inherited diff.
+Base branch: main, including merged verification capture #2366 and outside
+invariants PR #2367. Reconcile the exact tree-identical prerequisite squash using
+signed ancestry-only merges, preserving the complete tested feature tree.
 
 Reuse native inventory partition and the existing count-bounds vocabulary.
 Require explicit nonnegative native counts. Check the Deployment count and total
@@ -52,7 +52,12 @@ The owned-metadata regressions fail against the prior package with nine assertio
 failures and zero errors. Current source passes 12 controller cases and 63
 assertions. Combined controller/outside source tests pass 34 cases and 164 assertions.
 Controller cases measure 13.4–78.0 ms; source/test lint and explicit strata pass.
-Final-source product, fresh-package, mutation and scan gates remain required.
+Both product contexts, poly check and a fresh CLI build pass. Isolated packaging
+passes 179 tests and 1,012 assertions. All 11 controller and 14 shared-profile
+defects are detected without test errors. The committed scan reports zero findings
+across 283 files. Shared-profile extraction matches the prerequisite package hash.
+Later ancestry-only reconciliation preserves the complete tested tree; the final
+evidence update changes this document alone. No gate or size exception is used.
 
 ## Deployment Plan
 
