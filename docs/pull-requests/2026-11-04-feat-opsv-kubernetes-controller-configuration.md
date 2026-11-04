@@ -19,8 +19,9 @@ and lifecycle changes must remain visible to native verification.
 
 ## Changes in Detail
 
-Base branch: main. Verification capture #2366 and outside invariants are private
-prerequisites until merged. Reconcile that history before publication.
+Base branch: main, including merged verification capture #2366. Outside invariants
+PR #2367 is reviewed but still awaiting merge gates. Reconcile that prerequisite's
+history with actual main before publication; never publish its inherited diff.
 
 Reuse native inventory partition and the existing count-bounds vocabulary.
 Require explicit nonnegative native counts. Check the Deployment count and total
@@ -31,6 +32,8 @@ Keep controller counts by UID beside the fixed, versioned configuration view.
 
 Share the resource-profile factory with outside-resource projection. Preserve
 that projection's existing behavior instead of duplicating its record shape.
+Reuse its canonical native metadata vocabulary. Admit owned finalizers and
+UID-keyed owner references before sorting; preserve originals and reject duplicates.
 Extract count fields without changing the existing replica contract wire format.
 
 This API does not prove that bounds were predeclared. Its caller must derive
@@ -45,6 +48,11 @@ Cover both independent bounds, explicit zero versus missing counts, malformed
 native values, controller ownership, other desired fields and unrelated resources.
 Check the shared profile against existing outside-resource tests.
 Run product tests, isolated native packaging, mutation and complete PR gates.
+The owned-metadata regressions fail against the prior package with nine assertion
+failures and zero errors. Current source passes 12 controller cases and 63
+assertions. Combined controller/outside source tests pass 34 cases and 164 assertions.
+Controller cases measure 13.4–78.0 ms; source/test lint and explicit strata pass.
+Final-source product, fresh-package, mutation and scan gates remain required.
 
 ## Deployment Plan
 
