@@ -39,6 +39,14 @@
         request (fixtures/request plan :candidate [])]
     (is (= :invalid-input (:anomaly/type (phase/compare-verification-environment request))))))
 
+(deftest ^{:stratum 0} placement-drift-retains-the-declared-vector-in-evidence-test
+  (let [plan (contract/plan)
+        request (fixtures/request plan :candidate ["replacement"])
+        foreign (assoc-in request [:comparison/replica-observations 0 :replica/node-pool] "foreign")
+        result (phase/compare-verification-environment foreign)
+        expected (get-in plan [:comparison/replica-contract :candidate :replica/node-pools])]
+    (is (= expected (get-in result [:anomaly/data :comparison/expected])))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} population-bounds-and-duplicate-identities-fail-closed-test

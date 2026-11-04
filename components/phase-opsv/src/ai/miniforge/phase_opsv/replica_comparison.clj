@@ -11,9 +11,11 @@
   [:replica/target :replica/template-hash :replica/image-digests])
 
 (defn- ^{:stratum 0} duplicate-identities [replicas]
-  (let [ids (mapv :replica/id replicas)]
-    (when (not= (count ids) (count (distinct ids)))
-      (failure/mismatch :duplicate-replica (count (distinct ids)) (count ids)))))
+  (let [ids (mapv :replica/id replicas)
+        total (count ids)
+        unique-count (count (distinct ids))]
+    (when (not= total unique-count)
+      (failure/mismatch :duplicate-replica unique-count total))))
 
 (defn- ^{:stratum 0} population-bounds [expected replicas]
   (let [lower (:replicas/min-count expected)
@@ -31,7 +33,8 @@
         placement (:replica/node-pool replica)]
     (cond
       (not= invariants observed) (failure/mismatch :replica-drift invariants observed)
-      (not (contains? pools placement)) (failure/mismatch :replica-placement-drift pools placement)
+      (not (contains? pools placement))
+      (failure/mismatch :replica-placement-drift (:replica/node-pools expected) placement)
       :else nil)))
 
 ;------------------------------------------------------------------------------ Layer 2
