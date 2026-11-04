@@ -107,9 +107,7 @@
 
 (deftest ^{:stratum 0} generic-owner-names-do-not-weaken-workload-name-validation-test
   (let [routes (fixtures/routes)
-        reference (assoc (get-in routes [fixtures/pods-path "items" 0 "metadata" "ownerReferences" 0])
-                         "apiVersion" "rbac.authorization.k8s.io/v1" "kind" "ClusterRole"
-                         "name" "system:discovery" "uid" "discovery-role-uid" "controller" false)]
+        reference (fixtures/non-controller-rbac-reference)]
     (doseq [[path result-key] [[fixtures/replica-sets-path :kubernetes/replica-set-inventory]
                               [fixtures/pods-path :kubernetes/pod-inventory]]]
       (let [changed (update-in routes [path "items" 0 "metadata" "ownerReferences"] conj reference)

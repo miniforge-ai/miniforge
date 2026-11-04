@@ -28,6 +28,11 @@
                   transport/response-fields identity]
       [(phase/observe-kubernetes-deployment-inventory! (merge base overrides) declared) @calls])))
 
+(defn ^{:stratum 0} non-controller-rbac-reference []
+  (let [reference (get-in (membership/observation) [:kubernetes/pods "items" 0 "metadata" "ownerReferences" 0])]
+    (assoc reference "apiVersion" "rbac.authorization.k8s.io/v1" "kind" "ClusterRole"
+                     "name" "system:discovery" "uid" "discovery-role-uid" "controller" false)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} routes []
