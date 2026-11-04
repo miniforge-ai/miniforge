@@ -46,10 +46,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} output [synthesized run]
-  (let [synthesized (get run :verification/output synthesized)
+  (let [reporting (redaction/redact (get run :verification/output synthesized))
         run (dissoc run :verification/output)
         verification (redaction/redact (criteria/evaluate (:opsv/experiment-pack synthesized) run))]
-    (flow/continue verification (partial attach-verification (redaction/redact run) synthesized))))
+    (flow/continue verification (partial attach-verification (redaction/redact run) reporting))))
 
 (comment
   (output {} {}))

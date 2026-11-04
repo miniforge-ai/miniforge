@@ -4,6 +4,9 @@
 (ns ai.miniforge.phase-opsv.verification-evidence-protection-integration-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.artifact.interface :as artifact]
+            [ai.miniforge.content-hash.interface :as hash]
+            [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.phase-opsv.artifact-test-support :as storage]
             [ai.miniforge.phase-opsv.candidate-verification-fixtures :as fixtures]
             [ai.miniforge.phase-opsv.environment-comparison-fixtures :as environment]
             [ai.miniforge.phase-opsv.interface :as phase]
@@ -45,7 +48,10 @@
         (is (redaction/clean? result))))))
 
 (defn- ^{:stratum 0} verify-legacy-reporting [ctx _directory baseline]
-  (let [ctx (update ctx :execution/opts dissoc :opsv/verification-environment)
+  (let [baseline (assoc baseline :config-hash "DB_PASSWORD=fake-inherited")
+        ctx (-> ctx
+                (update :execution/opts dissoc :opsv/verification-environment)
+                (assoc-in [:execution/phase-results :opsv/synthesize :result :output :opsv/environment-fingerprint] baseline))
         measurements (-> support/verification-measurements
                          (assoc :environment-fingerprint baseline)
                          (assoc-in [:observations "private"] "DB_PASSWORD=fake-test-password"))
@@ -55,7 +61,43 @@
     (is (true? (get-in result [:opsv/verification-result :passed?])))
     (is (redaction/clean? result))))
 
+(defn- ^{:stratum 0} criterion-context [ctx expected]
+  (let [pack (assoc-in (:opsv/experiment-pack (fixtures/synthesized ctx))
+                       [:experiment-pack/success-criteria :criteria]
+                       [{:criterion/id "private" :criterion/expected expected}])]
+    (-> ctx
+        (assoc-in [:execution/phase-results :opsv/synthesize :result :output :opsv/experiment-pack] pack)
+        (assoc-in [:execution/opts :opsv/verification-environment :experiment-pack/hash] (hash/content-hash pack)))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} verify-original-criteria [ctx directory baseline]
+  (let [ctx (criterion-context ctx "DB_PASSWORD=fake-expected")
+        measured (assoc (fixtures/observations (merge baseline (environment/changes)))
+                         :observations {"private" "DB_PASSWORD=fake-observed"})
+        calls (atom [])
+        result (fixtures/verify ctx (partial fixtures/prepare calls (fixtures/observations baseline))
+                 (partial fixtures/measure calls directory measured))]
+    (is (not (anomaly/anomaly? result)))
+    (is (false? (get-in result [:opsv/verification-result :passed?])))
+    (is (redaction/clean? result))))
+
+(defn- ^{:stratum 1} verify-protected-finalization [ctx directory baseline]
+  (let [calls (atom [])
+        prepare (partial fixtures/prepare calls (sensitive-observation baseline))
+        measure (partial fixtures/measure calls directory
+                         (sensitive-observation (merge baseline (environment/changes))))
+        ready (assoc-in (storage/configured ctx) [:execution/opts :opsv/adapter]
+                         (phase/functional-adapter identity identity prepare measure))
+        verified (storage/step ready [:opsv/verify phase/verify])
+        completed (storage/step verified [:opsv/actuate phase/actuate])
+        output (support/phase-output completed :opsv/actuate)
+        bundle (:opsv/evidence-bundle output)
+        final (artifact/read-published directory
+                (get-in output [:opsv/phase-artifact-ids :verification-environment]))]
+    (is (:valid? (evidence/validate-published-bundle bundle)))
+    (is (redaction/clean? output))
+    (assert-protected final)))
 
 (defn- ^{:stratum 1} verify-protected-readback [ctx directory baseline]
   (let [calls (atom [])
@@ -110,3 +152,9 @@
 
 (deftest ^{:stratum 2} redacted-reporting-cannot-conceal-original-drift-test
   (fixtures/with-context verify-original-comparison))
+
+(deftest ^{:stratum 2} redacted-reporting-cannot-make-distinct-criterion-values-pass-test
+  (fixtures/with-context verify-original-criteria))
+
+(deftest ^{:stratum 2} protected-evidence-finalizes-with-original-bound-findings-test
+  (fixtures/with-context verify-protected-finalization))

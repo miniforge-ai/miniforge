@@ -22,11 +22,18 @@ scanning and redaction before storage, not just when sealing the final bundle.
 Reuse the evidence component's shared scanning, redaction and compliance policy
 when constructing phase artifacts. Hash the protected content, not the original
 secret-bearing payload, and bind the compliance metadata into that identity.
+Bind the artifact type and version too. Verify retained findings without
+replacing them with a scan of already-redacted content. Finalization checks the
+stored identity, workflow, bundle, material kind/type, acknowledged reference
+and current protected content. Clean legacy identities remain read-only;
+unsafe legacy payloads are refused, never rewritten.
 Refuse uninspectable content without echoing it. Failure reports remain artifact
 data, not pipeline control. Return protected verification reporting values only
 after evaluating the original receipt against the original pinned contract.
 Protect adapter failures at receipt admission, and protect the older verification
 path's reporting values only after evaluating its original measurements.
+Both the original pack and receipt survive through criterion evaluation in
+memory; distinct values that redact identically cannot become a passing result.
 
 The protected report is not a substitute execution or recovery contract. No
 live endpoints, candidate effects, policy permissions or experiments are added.
@@ -38,7 +45,7 @@ Check preparation readback before the candidate callback, final artifact content
 compliance metadata and returned output. Prove redaction cannot mask drift.
 Keep storage tests in the product integration suite; measured native runtimes
 were 282–539 ms. Pure artifact identity tests remain in the component suite.
-Run strict lint, namespace strata checks, both product test contexts, an isolated
+Run strict lint, namespace strata checks, all affected product test contexts, an isolated
 packaged suite and the committed-source compliance scan before publication.
 
 ## Deployment Plan

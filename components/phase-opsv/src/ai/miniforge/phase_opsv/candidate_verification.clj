@@ -73,7 +73,8 @@
         (get-in matched [:anomaly/data :opsv/environment-drift])
         (assoc-in [:anomaly/data :opsv/environment-drift]
                   (redaction/redact (get-in matched [:anomaly/data :opsv/environment-drift]))))
-      (with-output (redaction/redact (if (anomaly/anomaly? matched) matched measured)) retained))))
+      ;; Keep the successful receipt in memory until original criteria are evaluated.
+      (with-output (if (anomaly/anomaly? matched) (redaction/redact matched) measured) retained))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
