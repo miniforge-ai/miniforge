@@ -6,8 +6,8 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} typed-item [kind resource]
-  (let [known-type {"apiVersion" "v1"
+(defn- ^{:stratum 0} typed-item [api-version kind resource]
+  (let [known-type {"apiVersion" api-version
                     "kind" kind}]
     (merge known-type resource)))
 
@@ -16,7 +16,8 @@
 (defn ^{:stratum 1} typed-list
   "Restore known TypeMeta defaults only after native list admission; no validation."
   [kind resource-list]
-  (update resource-list "items" (partial mapv (partial typed-item kind))))
+  (update resource-list "items"
+          (partial mapv (partial typed-item (get resource-list "apiVersion") kind))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

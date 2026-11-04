@@ -25,6 +25,8 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-membership :as kubernetes-membership]
    [ai.miniforge.phase-opsv.kubernetes-membership-schema :as membership-schema]
    [ai.miniforge.phase-opsv.kubernetes-workload-inventory-schema :as inventory-schema]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-partition :as kubernetes-partition]
+   [ai.miniforge.phase-opsv.kubernetes-partition-schema :as partition-schema]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -135,6 +137,16 @@
    Returns the original observation or an anomaly. This proves no freshness,
    template/configuration match, replica bounds, stability or execution authority."
   kubernetes-membership/admit)
+
+(def ^{:stratum 0} KubernetesDeploymentInventoryPartition
+  "Raw complete inventory and its derived controller-membership view; schema alone is not proof."
+  partition-schema/Partition)
+
+(def ^{:stratum 0} partition-kubernetes-deployment-inventory
+  "Prove captured Deployment membership while retaining the complete raw inventory unchanged.
+   Outside observations remain available for independent drift comparison, never ignored.
+   Returns a partition or anomaly; establishes no freshness, configuration, health or authority."
+  kubernetes-partition/admit)
 
 (def ^{:stratum 0} decode-measurement-window
   "Decode one complete Prometheus float series against a declared bounded grid.
