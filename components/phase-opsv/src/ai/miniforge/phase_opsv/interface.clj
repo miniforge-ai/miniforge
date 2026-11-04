@@ -32,6 +32,7 @@
    [ai.miniforge.phase-opsv.kubernetes-verification-schema :as kubernetes-verification-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-outside :as kubernetes-outside]
    [ai.miniforge.phase-opsv.boundary.kubernetes-controller-configuration :as controller-configuration]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-environment-fingerprint :as native-fingerprint]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -191,6 +192,14 @@
    Callers must derive bounds from a retained contract matching this target and attempt before effects.
    This pure projection does not prove that predeclaration, replica runtime invariants, freshness or health."
   controller-configuration/project)
+
+(def ^{:stratum 0} project-kubernetes-environment-fingerprint
+  "Compose a complete native capture and independently predeclared count bounds into canonical observed values.
+   Preserve raw source, semantic projection, controller counts and separate replica observations.
+   Require nonempty homogeneous observed runtime; never fill missing images from expectations.
+   Callers must bind bounds to the retained target/attempt contract before effects and compare the result.
+   No freshness, health, population verdict, storage, I/O or execution authority. Protect copies before reporting."
+  native-fingerprint/project)
 
 (def ^{:stratum 0} decode-measurement-window
   "Decode one complete Prometheus float series against a declared bounded grid.
