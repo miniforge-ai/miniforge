@@ -22,6 +22,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.evidence-bundle.artifact-material :as artifact-material]
+   [ai.miniforge.evidence-bundle.boundary.artifact-material :as material-boundary]
    [ai.miniforge.evidence-bundle.canonical-validation :as canonical]
    [ai.miniforge.evidence-bundle.chain-evidence :as chain-evidence]
    [ai.miniforge.evidence-bundle.collector :as collector]
@@ -31,7 +32,6 @@
    [ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk]
    [ai.miniforge.evidence-bundle.opsv-assembly :as opsv-assembly]
    [ai.miniforge.evidence-bundle.opsv-finalization :as opsv-finalization]
-   [ai.miniforge.evidence-bundle.opsv-diagnostics :as diagnostics]
    [ai.miniforge.evidence-bundle.opsv-sealed-validation :as opsv-sealed-validation]
    [ai.miniforge.evidence-bundle.opsv-sealed-restoration :as opsv-sealed-restoration]
    [ai.miniforge.evidence-bundle.publication-validation :as publication-validation]
@@ -52,9 +52,7 @@
    or a value-free anomaly for unsupported content. This does not seal a bundle
    or authorize use of the reporting copy as an execution/recovery contract."
   [content]
-  (if (redaction/supported? content)
-    (artifact-material/prepare content)
-    (diagnostics/unsupported-material)))
+  (material-boundary/prepare content))
 
 (defn ^{:stratum 0} valid-protected-artifact-content?
   "Verify protected content and its original bound compliance metadata without rescanning away historical findings.

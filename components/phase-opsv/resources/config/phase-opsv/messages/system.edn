@@ -1,5 +1,6 @@
 {:phase-opsv/system
- {:verification/invalid-environment-contract "Invalid predeclared verification environment contract"
+ {:verification/unsupported-report "Verification reporting contains unsupported or excessive values."
+  :verification/invalid-environment-contract "Invalid predeclared verification environment contract"
   :verification/environment-contract-mismatch "The verification environment does not match its retained contract, attempt or expected state"
   :adapter/missing "The OPSV workflow requires an adapter implementing OPSVAdapter."
   :discovery/invalid-settings "Signal discovery requires explicit target settings, queries and distinct metric-label bindings."

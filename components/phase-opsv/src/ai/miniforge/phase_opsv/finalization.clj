@@ -42,11 +42,13 @@
 (defn- ^{:stratum 0} confirmed-record? [ctx output refs [kind type content-key]]
   (let [id (get-in output [:opsv/phase-artifact-ids kind])
         directory (get-in ctx [:execution/opts :opsv/artifact-directory])
-        stored (artifact/read-published directory id)]
+        stored (artifact/read-published directory id)
+        expected-hash (artifact/content-digest (redaction/redact (get output content-key)))
+        stored-hash (artifact/content-digest (:artifact/content stored))]
     (and (contains? refs id) (= id (:artifact/id stored))
          (= kind (get-in stored [:artifact/metadata :opsv/material-kind]))
          (= type (:artifact/type stored)) (protected/valid? ctx stored)
-         (= (redaction/redact (get output content-key)) (:artifact/content stored)))))
+         (string? expected-hash) (= expected-hash stored-hash))))
 
 (defn- ^{:stratum 0} publish-valid-bundle! [ctx output bundle]
   (let [expected (model/bundle-artifact bundle)

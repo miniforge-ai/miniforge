@@ -23,7 +23,7 @@
    [ai.miniforge.opsv.interface :as opsv]
    [ai.miniforge.phase-opsv.verification-criteria :as criteria]
    [ai.miniforge.phase-opsv.flow :as flow]
-   [ai.miniforge.redaction.interface :as redaction]))
+   [ai.miniforge.phase-opsv.boundary.verification-reporting :as reporting]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -46,10 +46,11 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} output [synthesized run]
-  (let [reporting (redaction/redact (get run :verification/output synthesized))
-        run (dissoc run :verification/output)
-        verification (redaction/redact (criteria/evaluate (:opsv/experiment-pack synthesized) run))]
-    (flow/continue verification (partial attach-verification (redaction/redact run) reporting))))
+  (let [original-run (dissoc run :verification/output)]
+    (anomaly/let-ok [report (reporting/protect (get run :verification/output synthesized))
+                    reported-run (reporting/protect original-run)]
+      (let [verification (reporting/protect (criteria/evaluate (:opsv/experiment-pack synthesized) original-run))]
+        (flow/continue verification (partial attach-verification reported-run report))))))
 
 (comment
   (output {} {}))

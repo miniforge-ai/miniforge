@@ -6,7 +6,7 @@
             [ai.miniforge.phase-opsv.artifact-confirmation :as confirmation]
             [ai.miniforge.phase-opsv.artifact-model :as model]
             [ai.miniforge.phase-opsv.artifacts :as artifacts]
-            [ai.miniforge.redaction.interface :as redaction]))
+            [ai.miniforge.phase-opsv.boundary.verification-reporting :as reporting]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -17,7 +17,8 @@
 
 (defn ^{:stratum 0} retain! [ctx output content]
   (let [value (assoc output :opsv/verification-environment content)]
-    (anomaly/let-ok [record (model/record ctx value model/verification-environment-material)]
-      (confirmation/publish-with-exception-handling ctx record (redaction/redact value)))))
+    (anomaly/let-ok [report (reporting/protect value)
+                    record (model/record ctx value model/verification-environment-material)]
+      (confirmation/publish-with-exception-handling ctx record report))))
 
 (comment ::acknowledged-immutable-evidence-before-candidate-effects)

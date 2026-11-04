@@ -34,6 +34,11 @@ Protect adapter failures at receipt admission, and protect the older verificatio
 path's reporting values only after evaluating its original measurements.
 Both the original pack and receipt survive through criterion evaluation in
 memory; distinct values that redact identically cannot become a passing result.
+Admit the complete inherited reporting value before callbacks. Refuse opaque or
+excessive values without echoing them. Protect host-generated failure details
+before drift publication or return. The protected envelope itself must fit the
+structural budget. Finalization compares type-preserving content digests, so
+equal-valued lists and vectors cannot reuse each other's retained material.
 
 The protected report is not a substitute execution or recovery contract. No
 live endpoints, candidate effects, policy permissions or experiments are added.
