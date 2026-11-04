@@ -46,10 +46,10 @@ The adapter must independently establish the observation's target and membership
 
 ## Related Issues/PRs
 
-Depends on merged #2353 and #2354 and replica-comparison parent #2355.
-This private branch uses the parent's shared target and replica observation
-schemas. Publish against actual `main` only after that parent merges, excluding
-its inherited changes from this PR's scope.
+Base branch: `main`. Depends on merged #2353, #2354, and #2355.
+The private branch used #2355's shared target and replica observation schemas.
+Reconciliation against actual main excludes those inherited changes from this
+PR's scope and retains all original signed commits.
 
 ## Checklist
 
