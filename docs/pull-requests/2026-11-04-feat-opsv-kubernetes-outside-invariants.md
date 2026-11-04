@@ -28,6 +28,11 @@ inventories and global duplicate physical or logical identities.
 Only an identical Namespace serving both cluster identity and target is coalesced;
 duplicate collection entries remain invalid.
 
+Admit present outside-Pod runtime records before projection. Status collections
+and entries must have valid shapes, unique names and declared-container linkage.
+Absent, empty and partial reports remain explicit for Pending Pods; they do not
+become complete runtime-image proofs. Selected replica admission stays strict.
+
 Exclude exactly the proven Deployment, ReplicaSets and Pods by UID. Keep cluster
 and namespace identities, captured Nodes, configuration and unrelated workloads.
 The projection retains desired configuration, native owner references, finalizers,
@@ -54,9 +59,9 @@ incomplete inputs, Secret treatment and unsupported content.
 Run product, isolated package, mutation and complete PR gates.
 
 Both product contexts and poly check pass. Fresh isolated native packaging passes
-142 tests and 835 assertions. Ten deliberate bypasses are detected without test
-errors. The 15 new cases contain 63 assertions and measure below 100 ms each.
-The committed component scan reports zero findings across 274 files.
+145 tests and 851 assertions. Deliberate bypasses are detected without test errors.
+The 18 new cases contain 79 assertions and measure below 100 ms each.
+The committed component scan reports zero findings.
 
 ## Deployment Plan
 
