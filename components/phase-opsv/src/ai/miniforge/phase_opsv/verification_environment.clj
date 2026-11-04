@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.verification-environment
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.boundary.environment-comparison :as comparison]
+            [ai.miniforge.phase-opsv.boundary.verification-receipt :as receipts]
             [ai.miniforge.phase-opsv.environment-comparison-failure :as failure]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.runtime-context :as context]
@@ -27,6 +28,10 @@
 
 (defn- ^{:stratum 0} hashes [value]
   (select-keys value [:candidate/hash :experiment-pack/hash]))
+
+(defn ^{:stratum 0} receipt [request measurements]
+  (receipts/admit schema/Receipt :verification/invalid request
+                  (receipts/correlate request measurements)))
 
 (defn ^{:stratum 0} compare-observation [pin expected-hash stage observed]
   (let [binding (get-in pin [:comparison/contract :comparison/binding])

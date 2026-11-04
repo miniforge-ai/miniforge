@@ -7,15 +7,15 @@
             [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.artifact-confirmation :as confirmation]
+            [ai.miniforge.phase-opsv.boundary.verification-adapter :as boundary]
             [ai.miniforge.phase-opsv.boundary.verification-receipt :as receipts]
-            [ai.miniforge.phase-opsv.exception-policy :as exception-policy]
+            [ai.miniforge.phase-opsv.candidate-verification :as candidate]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.policy :as policy]
             [ai.miniforge.phase-opsv.protocol :as port]
             [ai.miniforge.phase-opsv.runtime-context :as context]
             [ai.miniforge.phase-opsv.verification-drift :as drift]
-            [ai.miniforge.phase-opsv.verification-schema :as schema]
-            [slingshot.slingshot :refer [try+]]))
+            [ai.miniforge.phase-opsv.verification-schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -27,16 +27,6 @@
      :experiment-pack/hash pack-hash
      :candidate/policy policy
      :experiment-pack pack}))
-
-(defn- ^{:stratum 0} invoke-with-exception-handling [adapter request]
-  ;; Adapter failures must preserve cancellation and fatal JVM outcomes.
-  (try+
-    (port/run-verification adapter request)
-    (catch InterruptedException interrupted
-      (.interrupt (Thread/currentThread))
-      (throw interrupted))
-    (catch exception-policy/nonfatal? _
-      (anomaly/anomaly :unavailable (msg/ts :verification/failed) {}))))
 
 (defn- ^{:stratum 0} validate-receipt [request fingerprint result]
   (anomaly/let-ok [admitted (receipts/admit schema/Receipt :verification/invalid request result)]
@@ -73,8 +63,10 @@
       (not (policy/confirmed-evidence? ctx (:opsv/operational-policy synthesized)))
       (confirmation/failure synthesized)
       (satisfies? port/VerificationAdapter adapter)
-      (validate-receipt request (:opsv/environment-fingerprint synthesized)
-                        (invoke-with-exception-handling adapter request))
+      (if (contains? (:execution/opts ctx) :opsv/verification-environment)
+        (candidate/execute ctx synthesized request)
+        (validate-receipt request (:opsv/environment-fingerprint synthesized)
+                          (boundary/invoke port/run-verification adapter request)))
       :else (anomaly/anomaly :unavailable (msg/ts :verification/missing) {}))))
 
 (comment
