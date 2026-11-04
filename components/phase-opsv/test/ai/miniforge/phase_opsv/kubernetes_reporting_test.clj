@@ -116,6 +116,14 @@
       (is (evidence/valid-protected-artifact-content? prepared))
       (is (not (.contains (pr-str prepared) "opaque-native-value"))))))
 
+(deftest ^{:stratum 0} malformed-type-meta-still-classifies-the-complete-native-envelope-test
+  (doseq [input [{"kind" {"message" "opaque-native-value"}}
+                 {"apiVersion" ["opaque-native-value"] "message" "opaque-native-value"}
+                 {:captured {"kind" nil "message" "opaque-native-value"}}]]
+    (let [prepared (phase/prepare-kubernetes-reporting input)]
+      (is (evidence/valid-protected-artifact-content? prepared))
+      (is (not (.contains (pr-str prepared) "opaque-native-value"))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} native-labels-and-annotations-are-classified-without-secret-looking-keys-test
@@ -132,6 +140,9 @@
 
 (defn- ^{:stratum 1} sorted-pod [value]
   (walk/postwalk #(if (map? %) (into (sorted-map) %) %) (with-literal value)))
+
+(defn- ^{:stratum 1} keyword-pod [value]
+  (walk/postwalk #(if (map? %) (update-keys % keyword) %) (with-literal value)))
 
 (deftest ^{:stratum 1} native-init-and-ephemeral-groups-receive-the-same-payload-protection-test
   (let [pod (with-literal "opaque-native-value")
@@ -232,6 +243,16 @@
     (is (= (redaction/marker) (get-in prepared [:artifact/content :kubernetes/reporting "spec" :kubernetes.reporting/secret])))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} keyword-native-keys-never-bypass-classification-test
+  (let [pod (keyword-pod "opaque-native-value")]
+    (doseq [input [pod {:captured pod}
+                   (dissoc pod :apiVersion :kind :metadata)
+                   {:data {:setting "opaque-native-value"}}
+                   (assoc pod "kind" "Pod" "data" {"setting" "other-opaque-native-value"})]]
+      (let [prepared (phase/prepare-kubernetes-reporting input)]
+        (is (evidence/valid-protected-artifact-content? prepared))
+        (is (not (.contains (pr-str prepared) "opaque-native-value")))))))
 
 (deftest ^{:stratum 2} foreign-api-kinds-do-not-receive-native-public-field-treatment-test
   (let [input (foreign-pod "opaque-native-value")

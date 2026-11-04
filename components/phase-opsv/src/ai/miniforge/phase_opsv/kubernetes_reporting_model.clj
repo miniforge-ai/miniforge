@@ -9,7 +9,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} resource? [value]
-  (or (string? (get value "kind")) (some (partial contains? value) policy/resource-shape-fields)))
+  (some #(or (contains? value %) (contains? value (keyword %))) policy/resource-shape-fields))
 
 (defn- ^{:stratum 0} reference? [value]
   (and (string? (get value "name")) (string? (get value "uid")) (not (contains? value "metadata"))))

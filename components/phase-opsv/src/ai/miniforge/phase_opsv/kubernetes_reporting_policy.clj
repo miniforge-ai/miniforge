@@ -30,8 +30,8 @@
   #{["apps/v1" "Deployment"] ["apps/v1" "ReplicaSet"]})
 
 (def ^{:stratum 0} resource-shape-fields
-  "Conservative native shape cues include captured List items whose TypeMeta is omitted."
-  #{"metadata" "spec" "status" "data" "binaryData" "stringData" "items" "containers"
+  "Native field presence, including malformed TypeMeta and equivalent unqualified keyword keys."
+  #{"apiVersion" "kind" "metadata" "spec" "status" "data" "binaryData" "stringData" "items" "containers"
     "initContainers" "ephemeralContainers" "template" "env" "envFrom" "command" "args"})
 
 (def ^{:stratum 0} confidential-semantic-fields
