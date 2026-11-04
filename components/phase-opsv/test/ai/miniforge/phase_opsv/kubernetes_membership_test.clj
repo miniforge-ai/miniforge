@@ -80,11 +80,16 @@
                              (assoc-in [:kubernetes/pods "items"] []))
         native-items (update-in observed [:kubernetes/pods "items"]
                                #(mapv (fn [pod] (dissoc pod "apiVersion" "kind")) %))
+        pending-pods (update-in observed [:kubernetes/pods "items"]
+                                #(mapv (fn [pod]
+                                         (-> pod
+                                             (update "spec" dissoc "nodeName")
+                                             (assoc "status" {"phase" "Pending"}))) %))
         non-controller (assoc (first (get-in observed [:kubernetes/pods "items" 0 "metadata" "ownerReferences"]))
                              "controller" false "uid" "other-non-controller-owner")
         multiple-owners (update-in observed [:kubernetes/pods "items" 0 "metadata" "ownerReferences"]
                                     conj non-controller)]
-    (doseq [value [empty-population native-items multiple-owners]]
+    (doseq [value [empty-population native-items pending-pods multiple-owners]]
       (is (identical? value (phase/admit-kubernetes-deployment-membership value))))))
 
 (comment ::membership-is-not-freshness-configuration-or-effect-authority)
