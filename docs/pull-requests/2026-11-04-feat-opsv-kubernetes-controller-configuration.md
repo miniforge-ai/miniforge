@@ -51,13 +51,15 @@ Run product tests, isolated native packaging, mutation and complete PR gates.
 The owned-metadata regressions fail against the prior package with nine assertion
 failures and zero errors. Current source passes 12 controller cases and 63
 assertions. Combined controller/outside source tests pass 34 cases and 164 assertions.
-Controller cases measure 13.4–78.0 ms; source/test lint and explicit strata pass.
+Controller cases measure below 100 ms; source/test lint and explicit strata pass.
 Both product contexts, poly check and a fresh CLI build pass. Isolated packaging
 passes 179 tests and 1,012 assertions. All 11 controller and 14 shared-profile
 defects are detected without test errors. The committed scan reports zero findings
 across 283 files. Shared-profile extraction matches the prerequisite package hash.
-Later ancestry-only reconciliation preserves the complete tested tree; the final
-evidence update changes this document alone. No gate or size exception is used.
+Later ancestry-only reconciliation preserves the complete tested tree.
+Final fixture-only decomposition changes two test files and this document, not
+production. Both product contexts and packaged tests rerun against that identical
+production build. No redundant production build, gate bypass or size exception.
 
 ## Deployment Plan
 
