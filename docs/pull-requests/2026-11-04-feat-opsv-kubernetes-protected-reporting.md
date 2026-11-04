@@ -37,6 +37,9 @@ conservatively. Project metadata and references with explicit field policies.
 Public identity fields admit no composite children. Keep known semantic payloads
 confidential and stop classification at confidential branches without discarding
 their originals. Normalize maps before classification, preserving original input.
+Recognize native fields by presence, including malformed TypeMeta and equivalent
+unqualified keyword keys. Keep string and keyword keys distinct: do not rewrite
+or merge colliding keys. Keyword-native payloads receive conservative protection.
 
 Classification preserves original values for the shared scanner. A producer-owned
 secret key invokes existing redaction without duplicating secret or PII patterns.
@@ -61,12 +64,15 @@ Retain original PII findings and refuse opaque, deferred or metadata-bearing dat
 Simulate failed shared redaction and require a value-free failure.
 
 Both product contexts, poly check and a fresh CLI build pass on current main.
-Isolated packaging passes 202 tests and 1,130 assertions. The 23 reporting cases
-contain 118 assertions; each measures below 100 ms. All 17 deliberate defects
+Isolated packaging passes 204 tests and 1,146 assertions. The 25 reporting cases
+contain 134 assertions; each measures below 100 ms. All 19 deliberate defects
 are detected without test errors. The committed scan reports zero findings across
 290 files. Strict source/test lint and explicit changed-namespace strata pass.
 The second review findings reproduce six assertion failures and zero errors
-against the prior package. No gate, signing or size exception is used.
+against the prior package. Third-review keyword and malformed-TypeMeta regressions
+reproduce seven failures and zero errors against the pushed package. The final
+mixed-key case proves classification does not merge or lose colliding keys.
+No gate, signing or size exception is used.
 
 ## Deployment Plan
 
