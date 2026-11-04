@@ -14,6 +14,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} typed-list [kind resource-list]
+  "Restore known TypeMeta defaults only after native list admission; no validation."
   (update resource-list "items" (partial mapv (partial typed-item kind))))
 
 ;------------------------------------------------------------------------------ Layer 2

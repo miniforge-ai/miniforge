@@ -95,7 +95,8 @@
   prometheus/observe-window!)
 
 (def ^{:stratum 0} KubernetesDeploymentMembershipObservation
-  "Captured namespace, Deployment, ReplicaSets and Pods bound to an exact runtime target."
+  "Closed captured shape for a declared target and native namespace/controller/Pod observations.
+   Schema validation alone does not admit controller membership."
   membership-schema/Observation)
 
 (def ^{:stratum 0} admit-kubernetes-deployment-membership
