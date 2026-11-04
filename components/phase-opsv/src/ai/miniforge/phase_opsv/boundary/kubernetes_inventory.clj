@@ -17,7 +17,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ^:private root-resource-count
-  "Namespace and Deployment are observed before listing their namespace."
+  "Distinct Namespace and Deployment objects; final UID rechecks read those same objects."
   2)
 
 (defn- ^{:stratum 0} admit-settings [declaration settings]
@@ -38,7 +38,11 @@
 
 (defn- ^{:stratum 0} read-uid! [settings until [expected request]]
   (anomaly/let-ok [value (reads/read! settings until request)]
-    (if (= expected (resource/uid value)) value (membership/mismatch))))
+    (if (= expected (resource/uid value))
+      value
+      (assoc (membership/mismatch) :anomaly/data
+             {:kubernetes/expected-uid expected
+              :kubernetes/observed-identity (resource/identity-key value)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -66,6 +70,9 @@
                               :kubernetes/cluster-id (:kubernetes/cluster-id settings)
                               :kubernetes/replica-set-inventory replica-sets
                               :kubernetes/pod-inventory pods)]
-      (if (inventory/unique-identities? observed) observed (membership/mismatch)))))
+      (if-not (inventory/unique-identities? observed)
+        (membership/mismatch)
+        (anomaly/let-ok [confirmed (roots declaration settings until)]
+          (merge observed confirmed))))))
 
 (comment ::bounded-namespace-inventory-no-selector-or-owner-derived-paths)

@@ -4,36 +4,41 @@
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
 
-# feat: Capture target-bound Kubernetes Deployment membership
+# feat: Capture target-bound Kubernetes workload inventory
 
 ## Overview
 
-Acquire the declared namespace, Deployment, selected Pods and their ReplicaSets
-through bounded read-only Kubernetes requests. Admit their actual controller
-UID chain against the independently supplied runtime target.
+Acquire the declared namespace, Deployment, complete Pod inventory and complete
+ReplicaSet inventory through bounded read-only Kubernetes requests. Bind namespace
+and Deployment UIDs to the independently supplied runtime target.
+Recheck root UIDs before returning, under the same deadline. These sequential
+observations do not claim an atomic cluster snapshot.
 
 ## Motivation
 
-The captured-membership model needs a native acquisition boundary before a live
-preparation adapter can use it. Label selection alone cannot prove membership.
+The captured-membership model needs a complete native inventory before a live
+preparation adapter can use it. A label-filtered view can omit replicas.
 
 ## Changes in Detail
 
 Reuse existing HTTPS settings, transport, response admission, shared deadline
-and resource-count limits. Fetch only known Deployment/ReplicaSet resource kinds
-and validate every owner-derived resource name before making its request.
+and distinct-object resource limits. The new namespace-inventory profile rejects selector
+overrides. Existing filtered fingerprint discovery keeps its original contract.
+No request path is derived from an owner reference.
 Shared selection admission also rejects contradictory or malformed remaining
 item counts before derived reads. An empty continuation token cannot override
 evidence that a list is incomplete.
 
-Ownership: `phase-opsv` Kubernetes read-side boundary. No mutations, experiments,
-authority grants, configuration projection or runtime-health verdicts.
+Ownership: `phase-opsv` Kubernetes read-side boundary. Raw inventory does not
+attest membership, configuration, health or execution authority. Later partitioning
+must prove controller chains and preserve unrelated observations.
 
 ## Testing Plan
 
 Use local/injected HTTP fixtures only. Test request bounds, target mismatch,
-UID replacement and unsupported owners. Cover empty and Pending Pods, deadlines,
-cancellation, fatal errors, and refusal of arbitrary owner-derived reads.
+UID replacement and selector refusal. Cover unrelated, empty and Pending Pods,
+deadlines, cancellation, fatal errors, and fixed read paths.
+Recreate roots during collection and require refusal before returning data.
 Run product, native, standards,
 normal signed hook, CI and full-head review gates.
 
@@ -45,7 +50,7 @@ membership prerequisite merges and its inherited diff is excluded.
 
 ## Related Issues/PRs
 
-N7 §6.3 and captured Deployment membership implementation.
+N7 §6.3 and captured Deployment membership (#2359).
 [Kubernetes collection completeness](https://kubernetes.io/docs/reference/using-api/api-concepts/#retrieving-large-results-sets-in-chunks).
 
 ## Checklist

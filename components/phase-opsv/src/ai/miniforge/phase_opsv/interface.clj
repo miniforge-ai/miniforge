@@ -110,6 +110,7 @@
 
 (def ^{:stratum 0} observe-kubernetes-deployment-inventory!
   "Read a bounded complete namespace Pod/ReplicaSet inventory after matching root UIDs.
+   Sequential reads recheck root UIDs before returning; this is not an atomic snapshot.
    Takes explicit namespace-inventory settings and target declaration; selector overrides fail.
    No membership, configuration, health or execution authority is established."
   kubernetes-client/observe-inventory!)
