@@ -6,6 +6,7 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.phase-opsv.exception-policy :as exception-policy]
             [ai.miniforge.phase-opsv.interface :as phase]
+            [ai.miniforge.phase-opsv.kubernetes-container-test-support :as containers]
             [ai.miniforge.phase-opsv.kubernetes-inventory-fixtures :as inventory]
             [ai.miniforge.phase-opsv.kubernetes-outside-fixtures :as fixtures]
             [ai.miniforge.phase-opsv.kubernetes-replica-fixtures :as replicas]
@@ -117,10 +118,10 @@
     (doseq [status [{"containerStatuses" 42}
                     {"containerStatuses" [1]}
                     {"initContainerStatuses" {"name" "service"}}
-                    {"ephemeralContainerStatuses" [{"name" nil "imageID" ""}]}
-                    {"containerStatuses" [{"name" "service" "imageID" 1}]}
+                    {"ephemeralContainerStatuses" [(containers/status nil "")]}
+                    {"containerStatuses" [(containers/status "service" 1)]}
                     {"containerStatuses" [{"name" "service"} {"name" "service"}]}
-                    {"containerStatuses" [{"name" "undeclared" "imageID" ""}]}]]
+                    {"containerStatuses" [(containers/status "undeclared" "")]}]]
       (let [result (try+ (phase/project-kubernetes-outside-invariants (assoc-in input path status))
                         (catch InterruptedException interrupted
                           (.interrupt (Thread/currentThread))
@@ -141,9 +142,21 @@
 (deftest ^{:stratum 0} pending-runtime-image-identities-remain-unknown-not-fabricated-proofs-test
   (let [input (fixtures/input)
         path [:kubernetes/inventory :kubernetes/pod-inventory "items" 2 "status"]]
-    (doseq [status [{"phase" "Pending" "containerStatuses" [{"name" "service" "imageID" ""}]}
+    (doseq [status [{"phase" "Pending" "containerStatuses" [(containers/status "service" "")]}
                     {"containerStatuses" [{"name" "service"}]}]]
       (let [changed (assoc-in input path status)
+            result (phase/project-kubernetes-outside-invariants changed)]
+        (is (not (anomaly/anomaly? result)))
+        (is (identical? changed (:kubernetes/source result)))))))
+
+(deftest ^{:stratum 0} partial-init-and-ephemeral-statuses-use-their-own-declarations-test
+  (let [input (fixtures/input)
+        pod [:kubernetes/inventory :kubernetes/pod-inventory "items" 2]]
+    (doseq [[spec-field status-field] [["initContainers" "initContainerStatuses"]
+                                       ["ephemeralContainers" "ephemeralContainerStatuses"]]]
+      (let [changed (-> input
+                        (assoc-in (into pod ["spec" spec-field]) [(containers/container "helper")])
+                        (assoc-in (into pod ["status" status-field]) [(containers/status "helper" "")]))
             result (phase/project-kubernetes-outside-invariants changed)]
         (is (not (anomaly/anomaly? result)))
         (is (identical? changed (:kubernetes/source result)))))))

@@ -59,8 +59,8 @@ incomplete inputs, Secret treatment and unsupported content.
 Run product, isolated package, mutation and complete PR gates.
 
 Both product contexts and poly check pass. Fresh isolated native packaging passes
-145 tests and 851 assertions. Deliberate bypasses are detected without test errors.
-The 18 new cases contain 79 assertions and measure below 100 ms each.
+146 tests and 855 assertions. Deliberate bypasses are detected without test errors.
+The 19 new cases contain 83 assertions and measure below 100 ms each.
 The committed component scan reports zero findings.
 
 ## Deployment Plan
