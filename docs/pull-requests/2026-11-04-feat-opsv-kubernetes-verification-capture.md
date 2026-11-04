@@ -36,6 +36,10 @@ Recheck namespace, Deployment and cluster identity after dependencies are read.
 Conservatively refuse any root-record change, including resource-version changes.
 This bounded multi-read is not an atomic cluster snapshot.
 
+Keep initial and confirmed inventory roots separate internally. Verification
+requires unchanged roots and preserves the initial records. Legacy namespace
+inventory still reports its confirmed latest roots under the existing UID checks.
+
 Return raw observations with an explicit schema. Raw values can contain secrets;
 consumers must compute original comparison hashes before protecting reporting
 copies for N6 storage. This API does not publish or retain evidence.
@@ -52,9 +56,9 @@ Nodes, malformed references, missing configuration and late root changes.
 Run product tests, isolated packaging, mutation checks and all PR gates.
 
 Both affected product contexts and poly check pass. Fresh native packaging passes
-125 tests and 765 assertions; the 12 new cases contain 64 assertions. Eight
+127 tests and 772 assertions; the 14 new cases contain 71 assertions. Eight
 deliberate bypasses are detected without test errors. The committed source scan
-reports zero findings across 268 files. All new cases measure below 100 ms.
+reports zero findings across the committed component. New cases measure below 100 ms.
 
 ## Deployment Plan
 

@@ -121,18 +121,22 @@
       (is (anomaly/anomaly? result)))))
 
 (deftest ^{:stratum 0} final-root-changes-after-dependency-capture-cannot-pass-as-original-target-test
-  (let [reply wire/reply!]
-    (doseq [[path nth-read] [[inventory/namespace-path 3] [inventory/deployment-path 3] [fixtures/cluster-path 2]]]
-      (let [seen (atom {})
-            [result] (with-redefs [wire/reply!
-                                  (fn [routes calls options]
-                                    (let [current (wire/path options)
-                                          n (get (swap! seen update current (fnil inc 0)) current)
-                                          routes (if (and (= current path) (= n nth-read))
-                                                   (assoc-in routes [path "metadata" "resourceVersion"] "changed") routes)]
-                                      (reply routes calls options)))]
-                       (fixtures/capture! (fixtures/routes) {}))]
-        (is (= :conflict (:anomaly/type result)))))))
+  (doseq [[path nth-read] [[inventory/namespace-path 3] [inventory/deployment-path 3] [fixtures/cluster-path 2]]]
+    (let [[result] (fixtures/with-root-change! path nth-read #(fixtures/capture! (fixtures/routes) {}))]
+      (is (= :conflict (:anomaly/type result))))))
+
+(deftest ^{:stratum 0} root-change-persisting-from-second-read-cannot-replace-the-initial-observation-test
+  (doseq [path [inventory/namespace-path inventory/deployment-path]]
+    (let [[result calls] (fixtures/with-root-change! path 2 #(fixtures/capture! (fixtures/routes) {}))]
+      (is (= :conflict (:anomaly/type result)))
+      (is (= 6 (count calls))))))
+
+(deftest ^{:stratum 0} legacy-namespace-inventory-still-reports-its-confirmed-latest-root-records-test
+  (let [[result calls] (fixtures/with-root-change! inventory/namespace-path 2
+                         #(inventory/capture! (fixtures/routes) {}))]
+    (is (not (anomaly/anomaly? result)))
+    (is (= "changed" (get-in result [:kubernetes/namespace "metadata" "resourceVersion"])))
+    (is (= 6 (count calls)))))
 
 (deftest ^{:stratum 0} selectors-and-invalid-targets-never-reach-kubernetes-test
   (doseq [overrides [{:kubernetes/pod-selector "app=only-one"}
