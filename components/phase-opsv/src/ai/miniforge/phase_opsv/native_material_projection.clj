@@ -14,6 +14,9 @@
 (defn- ^{:stratum 0} carrier-node? [value]
   (if (map? value) (fields/node-supported? value) (not (and (set? value) (sorted? value)))))
 
+(defn- ^{:stratum 0} protected-frame? [marker frame]
+  (fields/classified-protected? marker (get frame policy/native-verification-key)))
+
 (defn- ^{:stratum 0} reporting-copy [value]
   (let [prepared (model/reporting-copy value)]
     (assoc (:kubernetes/reporting prepared)
@@ -47,5 +50,8 @@
 
 (defn ^{:stratum 2} project [value]
   (if (seq (native-frames value)) (walk/postwalk node value) value))
+
+(defn ^{:stratum 2} protected? [marker value]
+  (every? (partial protected-frame? marker) (native-frames value)))
 
 (comment ::classification-preserves-original-values-for-the-shared-scanner)

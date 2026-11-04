@@ -9,6 +9,9 @@
 (defn ^{:stratum 0} literal-environment [value]
   [{"name" "SETTING" "value" value}])
 
+(defn ^{:stratum 0} generic-secret-scalar [value]
+  {:kubernetes.reporting/secret value})
+
 (defn ^{:stratum 0} context []
   {:execution/id (random-uuid)
    :execution/input {:opsv/evidence-bundle-id (random-uuid)}})

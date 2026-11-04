@@ -86,3 +86,14 @@
     (is (list? (:ordinary classified)))
     (is (set? (second (:ordinary classified))))
     (is (.contains (pr-str classified) "opaque-native-value"))))
+
+(deftest ^{:stratum 0} generic-secret-scalars-outside-native-frames-retain-shared-policy-test
+  (doseq [value [nil false 42]]
+    (let [input (fixtures/generic-secret-scalar value)]
+      (is (= input (reporting/protect input))))))
+
+(deftest ^{:stratum 0} unrelated-generic-scalars-remain-unchanged-alongside-a-native-frame-test
+  (let [input (assoc (fixtures/frame "opaque-native-value") :generic (fixtures/generic-secret-scalar false))
+        protected (reporting/protect input)]
+    (is (not (anomaly/anomaly? protected)))
+    (is (= (:generic input) (:generic protected)))))
