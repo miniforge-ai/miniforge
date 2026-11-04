@@ -42,8 +42,24 @@ Base branch: `main`. Depends on: none. Follows merged #2343, #2350, and #2351.
 Source: the operator's November 3 approval of candidate-aware verification in
 the N7 implementation-completion session. N7 remains implementation-incomplete.
 
+### Approval record
+
+The operator reviewed two alternatives: retain exact baseline equality, or
+permit predeclared candidate changes and bounded replica replacement.
+The recommended option required exact candidate/target binding, unrelated-drift
+rejection, the original recovery baseline, and no post-execution rebasing.
+Existing safety and review gates remained mandatory. The recommendation
+explicitly authorized implementation only, not experiments or cluster changes.
+
+The operator's November 3 response in that session was:
+
+> Agree with the recommendation. Proceed.
+
+This records the direct approval without publishing the session's unrelated
+history. Section 6.3 specifies the approved behavior, not existing implementation.
+
 ## Checklist
 
-- [ ] Check consistency with N1–N6 and N7–N10.
-- [ ] Complete adversarial and applicable-standards review.
+- [x] Check consistency with N1–N6 and N7–N10.
+- [x] Complete adversarial and applicable-standards review.
 - [ ] Pass hooks, CI, and full current-head Copilot review.
