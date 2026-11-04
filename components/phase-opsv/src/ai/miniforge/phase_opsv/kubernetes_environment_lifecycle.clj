@@ -21,3 +21,5 @@
     (or (first (filter anomaly/anomaly? observations))
         {:kubernetes/pod-lifecycle-hashes (hashes observations)
          :kubernetes/pod-lifecycles (into {} (map entry) observations)})))
+
+(comment ::instance-multiplicity-is-admitted-separately-by-the-retained-contract)

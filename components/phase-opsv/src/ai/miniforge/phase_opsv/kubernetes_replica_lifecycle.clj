@@ -31,3 +31,5 @@
       {:replica/id (resource/uid pod)
        :kubernetes/pod-lifecycle projected
        :content/hash digest})))
+
+(comment ::admitted-metadata-and-proven-native-membership-required)
