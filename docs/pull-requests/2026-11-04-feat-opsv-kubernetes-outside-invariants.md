@@ -19,8 +19,8 @@ desired configuration alone omits native controller links and deletion state.
 
 ## Changes in Detail
 
-Base branch: main. Verification capture #2366 is a private prerequisite until
-merged. Reconcile that history before publication.
+Base branch: main, including merged verification capture #2366. Private history
+was reconciled with whole-prerequisite tree equality and feature-tree preservation.
 
 Reuse native inventory partition and complete capture admission. Normalize
 omitted list-item TypeMeta only after schema admission. Refuse incomplete Node
@@ -52,6 +52,11 @@ invariants. Prove unrelated ownership, lifecycle, image, configuration and Node
 identity changes remain visible. Cover ordering, omitted TypeMeta, duplicate and
 incomplete inputs, Secret treatment and unsupported content.
 Run product, isolated package, mutation and complete PR gates.
+
+Both product contexts and poly check pass. Fresh isolated native packaging passes
+142 tests and 835 assertions. Ten deliberate bypasses are detected without test
+errors. The 15 new cases contain 63 assertions and measure below 100 ms each.
+The committed component scan reports zero findings across 274 files.
 
 ## Deployment Plan
 
