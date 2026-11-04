@@ -52,7 +52,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} supported? [value]
-  ;; Metadata is outside the shared scanner's bounded data tree. Reject it without traversing it.
+  ;; Metadata is outside native classification's body tree; refuse it before transformation can drop it.
   (and (redaction/supported? value) (metadata-free? value) (compatible? value (native-frames value))))
 
 (defn ^{:stratum 2} project [value]
