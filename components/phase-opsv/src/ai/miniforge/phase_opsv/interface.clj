@@ -23,6 +23,8 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-client :as kubernetes-client]
    [ai.miniforge.phase-opsv.boundary.kubernetes-discovery :as kubernetes-discovery]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
+   [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
+   [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
    [ai.miniforge.phase-opsv.evidence-recovery :as recovery]
    [ai.miniforge.phase-opsv.finalization-boundary :as finalization]
    [ai.miniforge.phase-opsv.adapter-factory :as adapter-factory]
@@ -43,6 +45,14 @@
 (def ^{:stratum 0} run-verification protocol/run-verification)
 
 (def ^{:stratum 0} verification-receipt verification-run/receipt)
+
+(def ^{:stratum 0} VerificationEnvironmentPlan
+  "Closed plan schema: attempt binding, canonical baseline and exact image/config changes."
+  environment-schema/Plan)
+
+(def ^{:stratum 0} VerificationEnvironmentComparisonRequest
+  "Closed comparison schema: pinned contract, independent digest, binding, stage and observation."
+  environment-request-schema/Request)
 
 (def ^{:stratum 0} pin-verification-environment
   "Bind a canonical baseline and exact image/config changes to one target and attempt.

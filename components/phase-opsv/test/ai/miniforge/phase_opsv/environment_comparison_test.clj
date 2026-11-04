@@ -5,7 +5,8 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.environment-comparison-fixtures :as fixtures]
             [ai.miniforge.phase-opsv.interface :as phase]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]]
+            [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -14,6 +15,7 @@
         pinned (phase/pin-verification-environment plan)
         unchanged (phase/pin-verification-environment (assoc plan :comparison/changes {}))]
     (is (not (anomaly/anomaly? pinned)))
+    (is (m/validate phase/VerificationEnvironmentPlan plan))
     (is (= plan (:comparison/contract pinned)))
     (is (= pinned (phase/pin-verification-environment plan)))
     (is (not= (:comparison/hash pinned) (:comparison/hash unchanged)))))
@@ -46,6 +48,7 @@
   (let [pinned (phase/pin-verification-environment (fixtures/plan))
         candidate (merge (fixtures/fingerprint) (fixtures/changes))
         request (fixtures/request pinned :candidate candidate)]
+    (is (m/validate phase/VerificationEnvironmentComparisonRequest request))
     (is (identical? candidate (phase/compare-verification-environment request)))
     (doseq [[key value] [[:cluster "foreign"] [:node-pools ["foreign"]]
                          [:image-digests {"catalog" "sha256:foreign"}]

@@ -24,6 +24,7 @@ digest keep those concerns separate.
 - Compare candidate observations against the expected state and recovery
   observations against the retained baseline.
 - Require the caller's independently retained digest; reject altered contracts.
+- Publish the closed input schemas so callers need not import internal namespaces.
 
 Ownership: `phase-opsv`, which owns verification admission and adapter contracts.
 The comparison rules are pure. There is no new cross-brick dependency.
@@ -36,9 +37,9 @@ Pin exact changes, unrelated drift, stale bindings, changed contracts, missing
 values, recovery-baseline substitution, and closed input shapes. Run structural
 checks and both affected project contexts, normal hooks, and packaged proof.
 
-Completed: focused source tests (8 tests, 42 assertions), workspace structure,
+Completed: focused source tests (8 tests, 44 assertions), workspace structure,
 and all `phase-opsv` tests in both product contexts. A fresh CLI build passed
-27 packaged tests with 175 assertions from an isolated directory, without any
+27 packaged tests with 177 assertions from an isolated directory, without any
 production source overlay. The packaged suites also cover the existing
 verification, drift publication, and phase interface contracts.
 
