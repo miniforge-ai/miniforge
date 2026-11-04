@@ -25,18 +25,22 @@ Normal integration preserves both APIs. No generic artifact store is rewritten.
 
 Reserve `:kubernetes/verification` for explicit native capture or semantic material.
 It is a reporting marker, not proof of target ownership or execution authority.
-Unmarked generic material retains its existing behavior without reconstruction.
+Unmarked, metadata-free generic material retains its behavior without reconstruction.
 
 Reuse the native reporting vocabulary from a pure lower projection. Classify
 original native values before the shared evidence preparer scans and redacts.
 Verify native confidentiality tags after protection, before constructing a record
 or returning a report. Return a value-free anomaly when protection fails.
 
-Keep comparison admission unchanged. Only reporting and artifact production
-receive classified copies. Shared policy still owns scanning and redaction;
+Admitted authoritative comparison values remain unchanged. Only reporting and
+artifact production receive classified copies. Shared policy owns scanning and redaction;
 no secret or PII patterns are copied. Original findings bind immutable identity.
 
-Reject unsupported native frames, reserved-profile collisions and language metadata.
+Reject unsupported native frames and reserved-profile collisions. Refuse language
+metadata on every body node before native discovery or either adapter mode;
+this intentionally tightens admission of metadata-bearing generic inputs too.
+Kubernetes JSON `metadata` fields are unaffected. Shared inspectability bounds
+run first; opaque or deferred metadata is never realized by native discovery.
 Reject comparator-sorted sets and complex carrier keys before transforming native
 material, so comparisons cannot collapse original values before scanning.
 Ordinary list/set carrier types remain intact. Re-publication is idempotent.
@@ -57,19 +61,28 @@ Deliberate faults must break assertions without test errors. Rerun prior native
 reporting fault checks because its pure classification code is shared.
 
 Both product contexts and poly check pass on current main.
-All 18 scoped OPSV/N6 project namespaces pass: 71 tests and 944 assertions.
-A fresh isolated CLI package passes 242 tests and 1,395 assertions.
-Ten new component cases contain 39 assertions; each measures below six milliseconds.
-Three focused integration cases contain 35 assertions.
+All 18 scoped OPSV/N6 project namespaces pass: 72 tests and 955 assertions.
+A fresh isolated CLI package passes 252 tests and 1,430 assertions, including
+the existing list/vector immutable-publication identity suite.
+Fifteen new component cases contain 52 assertions; each measures below six milliseconds.
+Four focused integration cases contain 46 assertions.
 
-All seven new deliberate faults are detected without test errors.
-Their assertion-failure counts are 13, 24, nine, six, one, two and four.
+All nine new deliberate faults are detected without test errors.
+Their assertion-failure counts are 13, 22, nine, six, one, two, four, five and eight.
 All 19 prior native-reporting faults are also detected without test errors.
 Strict source/new-test lint reports zero warnings or errors. Explicit strata pass.
 Committed scans find zero violations across 300 component files and 13 project files.
 The owner traced every changed file against all applicable standards before expensive gates.
-Normal signed commits remain below 200 reportable lines; the PR contains 246/600.
-Final evidence changes documentation only against tested source 2a4e71ff72c11a495ca86d1e9c563784ed8b4856.
+Normal signed commits remain below 200 reportable lines; the PR contains 314/600.
+Final evidence changes documentation only against tested source 05521ebea09fb9b3aa53eed39719a8441b2a8505.
+
+The exact pre-fix package reproduces both metadata findings with six assertion
+failures and zero errors. Regressions reject hidden native frames and list-carrier
+PII metadata, without losing original findings or invoking either adapter mode.
+The existing identity test constructs a metadata-free list instead of a quoted
+list carrying reader metadata; every identity and publication assertion remains.
+Native protection postconditions apply only to marked frames, preserving shared
+nil/false/numeric policy on unrelated generic siblings.
 
 The broad local project run was cancelled, not counted as a pass.
 Its unrelated executor lifecycle tests can mutate configured external backends.
