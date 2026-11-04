@@ -29,6 +29,7 @@
    [ai.miniforge.phase-opsv.kubernetes-partition-schema :as partition-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-volume-projection :as volume-projection]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replicas :as kubernetes-replicas]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-reporting :as kubernetes-reporting]
    [ai.miniforge.phase-opsv.kubernetes-verification-schema :as kubernetes-verification-schema]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
@@ -175,6 +176,13 @@
 (def ^{:stratum 0} KubernetesVerificationObservation
   "Raw bounded verification-capture shape, not a membership, health or execution proof."
   kubernetes-verification-schema/Observation)
+
+(def ^{:stratum 0} prepare-kubernetes-reporting
+  "Prepare data-minimized native reporting through the shared N6 scan/redaction policy, before storage.
+   Compute comparison hashes from originals first. This copy is not a manifest, comparison or recovery contract.
+   Preserve native identity/scaling fields; classify payloads and unknown native fields as confidential.
+   Returns protected artifact content/compliance metadata or a value-free anomaly; no storage or authority."
+  kubernetes-reporting/prepare)
 
 (def ^{:stratum 0} decode-measurement-window
   "Decode one complete Prometheus float series against a declared bounded grid.
