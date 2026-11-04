@@ -51,12 +51,14 @@ Prove original comparison differences survive while reports withhold values.
 Retain original PII findings and refuse opaque, deferred or metadata-bearing data.
 Simulate failed shared redaction and require a value-free failure.
 
-Before the final native-type correction, both product contexts, poly check and a
-fresh CLI build passed. Isolated packaging passed 156 tests and 902 assertions.
-All seven deliberate privacy/admission defects were detected without test errors.
-Two additional native-type regressions reproduce four assertion failures and zero
-errors against that package. Final-source product, package, mutation and scan gates
-remain required before publication. No gate or size exception is requested.
+Both product contexts, poly check and a fresh CLI build pass after the native-type
+correction. Isolated packaging passes 158 tests and 908 assertions.
+All nine deliberate privacy/admission defects are detected without test errors.
+The 13 focused packaged cases contain 60 assertions and measure 1.2–22.1 ms each.
+The two native-type regressions reproduce four assertion failures and zero errors
+against the prior package. The committed scan reports zero findings across 275
+files; explicit strata and full source/test lint pass without warnings or errors.
+No gate or size exception is requested.
 
 ## Deployment Plan
 
