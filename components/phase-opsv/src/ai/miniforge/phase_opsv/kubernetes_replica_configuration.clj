@@ -12,10 +12,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} project [pod]
+(defn ^{:stratum 1} project [pool-label pod]
   ;; Placement is correlated independently against captured Nodes and compared by pool.
   (let [spec (dissoc (get pod "spec") "nodeName")]
     (when-let [plan (bindings/plan spec)]
       {:kubernetes/projection kind
+       :kubernetes/node-pool-label pool-label
        :kubernetes/resource (dissoc (resource/configuration pod) "spec")
        :kubernetes/pod-spec-projection (volumes/project plan spec)})))

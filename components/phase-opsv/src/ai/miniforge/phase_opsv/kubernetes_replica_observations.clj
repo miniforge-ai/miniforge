@@ -12,7 +12,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} replica [target context pod]
-  (when-let [projected (configuration/project pod)]
+  (when-let [projected (configuration/project (:pool-label context) pod)]
     (anomaly/let-ok [digest (artifact/content-digest projected)]
       {:observation {:replica/id (resource/uid pod)
                      :replica/target target

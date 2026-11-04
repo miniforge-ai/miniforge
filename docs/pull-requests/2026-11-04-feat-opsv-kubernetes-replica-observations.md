@@ -31,6 +31,8 @@ Profile `:kubernetes/deployment-replica-configuration-v1` uses the existing desi
 resource view, retaining labels and annotations while excluding status and
 bookkeeping metadata. Only `nodeName` is removed from PodSpec configuration;
 captured Node correlation and the declared pool contract cover placement.
+The configured pool-label key is bound into this projection and its hash. It
+cannot change interpretation after observation while preserving the same match.
 The versioned service-account projection retains all remaining PodSpec content.
 Image digests come from complete matching container status records, not image
 tags or template labels. Raw input and per-UID configuration views remain visible.
