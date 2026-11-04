@@ -19,8 +19,8 @@ templates. Separate acquisition calls also lose the shared budget and deadline.
 
 ## Changes in Detail
 
-Base branch: main. Replica observations #2365 are a private prerequisite until
-merged. Reconcile that history before publication.
+Base branch: main, including merged replica observations #2365. Private history
+was reconciled with whole-prerequisite tree equality and feature-tree preservation.
 
 Reuse namespace inventory acquisition, typed resource reads, dependency admission
 and request construction. Read dependencies from every captured Pod, Deployment
@@ -50,6 +50,11 @@ Use injected native-shaped HTTP responses only. Cover shared bounds, zero replic
 desired and old-controller dependencies, Pending and unrelated Pods, incomplete
 Nodes, malformed references, missing configuration and late root changes.
 Run product tests, isolated packaging, mutation checks and all PR gates.
+
+Both affected product contexts and poly check pass. Fresh native packaging passes
+125 tests and 765 assertions; the 12 new cases contain 64 assertions. Eight
+deliberate bypasses are detected without test errors. The committed source scan
+reports zero findings across 268 files. All new cases measure below 100 ms.
 
 ## Deployment Plan
 
