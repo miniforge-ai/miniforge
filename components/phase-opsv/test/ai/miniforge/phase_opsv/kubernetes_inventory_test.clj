@@ -105,4 +105,20 @@
             [result] (fixtures/capture! routes {})]
         (is (= :conflict (:anomaly/type result)))))))
 
+(deftest ^{:stratum 0} generic-owner-names-do-not-weaken-workload-name-validation-test
+  (let [routes (fixtures/routes)
+        reference (assoc (get-in routes [fixtures/pods-path "items" 0 "metadata" "ownerReferences" 0])
+                         "apiVersion" "rbac.authorization.k8s.io/v1" "kind" "ClusterRole"
+                         "name" "system:discovery" "uid" "discovery-role-uid" "controller" false)]
+    (doseq [[path result-key] [[fixtures/replica-sets-path :kubernetes/replica-set-inventory]
+                              [fixtures/pods-path :kubernetes/pod-inventory]]]
+      (let [changed (update-in routes [path "items" 0 "metadata" "ownerReferences"] conj reference)
+            [result] (fixtures/capture! changed {})]
+        (is (not (anomaly/anomaly? result)))
+        (is (= reference (last (get-in result [result-key "items" 0 "metadata" "ownerReferences"]))))))
+    (doseq [path [fixtures/replica-sets-path fixtures/pods-path]]
+      (let [changed (assoc-in routes [path "items" 0 "metadata" "name"] "not:a-workload-name")
+            [result] (fixtures/capture! changed {})]
+        (is (anomaly/anomaly? result))))))
+
 (comment ::inventory-is-not-a-membership-or-verification-verdict)
