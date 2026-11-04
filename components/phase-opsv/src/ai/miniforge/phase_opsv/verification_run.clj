@@ -7,29 +7,17 @@
             [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.artifact-confirmation :as confirmation]
+            [ai.miniforge.phase-opsv.boundary.verification-receipt :as receipts]
             [ai.miniforge.phase-opsv.exception-policy :as exception-policy]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.policy :as policy]
             [ai.miniforge.phase-opsv.protocol :as port]
             [ai.miniforge.phase-opsv.runtime-context :as context]
             [ai.miniforge.phase-opsv.verification-drift :as drift]
-            [malli.core :as m]
+            [ai.miniforge.phase-opsv.verification-schema :as schema]
             [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} correlation-keys
-  [:verification/id :candidate/hash :experiment-pack/hash])
-
-(def ^{:stratum 0} Receipt
-  [:map {:closed true}
-   [:verification/id :uuid]
-   [:candidate/hash :string]
-   [:experiment-pack/hash :string]
-   [:environment-fingerprint [:and [:map-of :keyword :any] [:fn seq]]]
-   [:observations [:map-of :string :any]]
-   [:confidence [:and number? [:fn #(<= 0 % 1)]]]
-   [:metric-snapshot-artifact-refs [:vector {:min 1} :uuid]]])
 
 (defn- ^{:stratum 0} request-values [policy pack]
   (let [policy-hash (hash/content-hash policy)
@@ -50,6 +38,12 @@
     (catch exception-policy/nonfatal? _
       (anomaly/anomaly :unavailable (msg/ts :verification/failed) {}))))
 
+(defn- ^{:stratum 0} validate-receipt [request fingerprint result]
+  (anomaly/let-ok [admitted (receipts/admit schema/Receipt :verification/invalid request result)]
+    (if (and (seq fingerprint) (= fingerprint (:environment-fingerprint admitted)))
+      admitted
+      (drift/mismatch fingerprint admitted))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} request [synthesized]
@@ -63,30 +57,13 @@
       (anomaly/anomaly :invalid-input (msg/ts :adapter/missing-fingerprint) {})
       :else (request-values policy pack))))
 
-(defn- ^{:stratum 1} correlated-measurements
-  [request measurements]
-  (when (and (map? request) (map? measurements))
-    (merge (select-keys request correlation-keys) measurements)))
-
-(defn- ^{:stratum 1} validate-receipt [request fingerprint result]
-  (cond
-    (anomaly/anomaly? result)
-    (update result :anomaly/data dissoc :opsv/environment-drift :opsv/drift-publication-failure)
-    (not (m/validate Receipt result))
-    (anomaly/anomaly :invalid-input (msg/ts :verification/invalid) {})
-    (not= (select-keys request correlation-keys) (select-keys result correlation-keys))
-    (anomaly/anomaly :conflict (msg/ts :verification/mismatched) {})
-    (not (and (seq fingerprint) (= fingerprint (:environment-fingerprint result))))
-    (drift/mismatch fingerprint result)
-    :else result))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} receipt
+(defn ^{:stratum 1} receipt
   "Correlate measurements after an adapter executes this request; no authority."
   [request measurements]
-  (let [result (correlated-measurements request measurements)]
+  (let [result (receipts/correlate request measurements)]
     (validate-receipt request (:environment-fingerprint result) result)))
+
+;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} execute [ctx synthesized]
   (let [adapter (context/adapter ctx)
@@ -101,4 +78,4 @@
       :else (anomaly/anomaly :unavailable (msg/ts :verification/missing) {}))))
 
 (comment
-  (m/validate Receipt {}))
+  (receipt {} {}))
