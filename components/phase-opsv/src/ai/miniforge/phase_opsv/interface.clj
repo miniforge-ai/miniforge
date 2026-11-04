@@ -29,6 +29,7 @@
    [ai.miniforge.phase-opsv.kubernetes-partition-schema :as partition-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-volume-projection :as volume-projection]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replicas :as kubernetes-replicas]
+   [ai.miniforge.phase-opsv.kubernetes-verification-schema :as kubernetes-verification-schema]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -163,6 +164,17 @@
    Pending or incomplete selected Pods cannot prove runtime observations; empty populations remain explicit.
    This proves no freshness, approved template match, health, outside-resource stability or execution authority."
   kubernetes-replicas/project)
+
+(def ^{:stratum 0} observe-kubernetes-verification!
+  "Capture complete namespace workload/Node inventories and current/desired configuration dependencies.
+   Use explicit settings, one deadline and a shared object budget; recheck declared roots after all reads.
+   Raw values may be sensitive: compare/hash originals before protecting reporting copies for storage.
+   This read-only, bounded multi-read is not atomic, a verification verdict or execution authority."
+  kubernetes-client/observe-verification!)
+
+(def ^{:stratum 0} KubernetesVerificationObservation
+  "Raw bounded verification-capture shape, not a membership, health or execution proof."
+  kubernetes-verification-schema/Observation)
 
 (def ^{:stratum 0} decode-measurement-window
   "Decode one complete Prometheus float series against a declared bounded grid.

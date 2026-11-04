@@ -29,7 +29,7 @@
             [(:kubernetes/cluster-id settings) (:kubernetes/namespace settings)]) (membership/mismatch)
       :else settings)))
 
-(defn- ^{:stratum 0} reserve [settings used]
+(defn ^{:stratum 0} reserve [settings used]
   (let [remaining (- (:kubernetes/max-resources settings) used)]
     ;; Kubernetes interprets limit=0 as unbounded, so never issue that request.
     (if (pos? remaining)
@@ -46,7 +46,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} roots [declaration settings until]
+(defn ^{:stratum 1} roots [declaration settings until]
   (let [{:keys [namespace namespace-uid workload-uid]} (:runtime/target declaration)]
     (anomaly/let-ok [observed-namespace (read-uid! settings until
                                         [namespace-uid (requests/request "Namespace" nil false namespace)])
