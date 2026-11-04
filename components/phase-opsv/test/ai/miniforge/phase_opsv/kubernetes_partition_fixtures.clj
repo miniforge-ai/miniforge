@@ -25,6 +25,12 @@
 (defn- ^{:stratum 0} without-types [items]
   (mapv #(dissoc % "apiVersion" "kind") items))
 
+(defn ^{:stratum 0} capture-lists! [raw]
+  (let [routes (assoc (inventory/routes)
+                     inventory/replica-sets-path (:kubernetes/replica-set-inventory raw)
+                     inventory/pods-path (:kubernetes/pod-inventory raw))]
+    (inventory/capture! routes {})))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} with-outside-resources []
@@ -53,5 +59,9 @@
       (assoc-in [:kubernetes/pod-inventory "items" 2 "metadata" "labels"] {"app" "catalog"})
       (update-in [:kubernetes/pod-inventory "items" 0 "spec"] dissoc "nodeName")
       (assoc-in [:kubernetes/pod-inventory "items" 0 "status" "phase"] "Pending")))
+
+(defn ^{:stratum 2} with-non-controller-rbac-owner []
+  (update-in (with-outside-resources) [:kubernetes/pod-inventory "items" 0 "metadata" "ownerReferences"]
+             conj (inventory/non-controller-rbac-reference)))
 
 (comment ::raw-inventory-and-independently-named-outside-controller-chain)
