@@ -5,6 +5,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} confidential-key
+  "Producer-owned classification; its local name uses shared secret-key policy and its namespace isolates the proof."
+  :kubernetes.reporting/secret)
+
 (def ^{:stratum 0} profile
   "Fixed data-minimized reporting profile, never a native manifest or comparison projection."
   :kubernetes/data-minimized-reporting-v1)
