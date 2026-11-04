@@ -12,7 +12,9 @@
             [ai.miniforge.phase-opsv.finalization-model :as model]
             [ai.miniforge.phase-opsv.finalization-retained :as retained]
             [ai.miniforge.phase-opsv.publication-boundary :as publication]
-            [ai.miniforge.phase-opsv.runtime-context :as context]))
+            [ai.miniforge.phase-opsv.protected-material :as protected]
+            [ai.miniforge.phase-opsv.runtime-context :as context]
+            [ai.miniforge.redaction.interface :as redaction]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -35,16 +37,16 @@
          (= (context/workflow-id ctx) (get-in record [:artifact/metadata :workflow/id]))
          (= (get-in ctx [:execution/input :opsv/evidence-bundle-id])
             (get-in record [:artifact/metadata :opsv/evidence-bundle-id]))
-         (= record (material/record ctx {::content (:artifact/content record)}
-                                    [(get-in record [:artifact/metadata :opsv/material-kind])
-                                     (:artifact/type record) ::content])))))
+         (protected/valid? ctx record))))
 
-(defn- ^{:stratum 0} confirmed-record? [ctx output expected]
-  (let [id (:artifact/id expected)
-        kind (get-in expected [:artifact/metadata :opsv/material-kind])
-        directory (get-in ctx [:execution/opts :opsv/artifact-directory])]
-    (and (= id (get-in output [:opsv/phase-artifact-ids kind]))
-         (= expected (artifact/read-published directory id)))))
+(defn- ^{:stratum 0} confirmed-record? [ctx output refs [kind type content-key]]
+  (let [id (get-in output [:opsv/phase-artifact-ids kind])
+        directory (get-in ctx [:execution/opts :opsv/artifact-directory])
+        stored (artifact/read-published directory id)]
+    (and (contains? refs id) (= id (:artifact/id stored))
+         (= kind (get-in stored [:artifact/metadata :opsv/material-kind]))
+         (= type (:artifact/type stored)) (protected/valid? ctx stored)
+         (= (redaction/redact (get output content-key)) (:artifact/content stored)))))
 
 (defn- ^{:stratum 0} publish-valid-bundle! [ctx output bundle]
   (let [expected (model/bundle-artifact bundle)
@@ -63,10 +65,10 @@
                                (context/stream ctx) (context/workflow-id ctx))
       record)))
 
-(defn- ^{:stratum 1} confirmed-output? [ctx output]
-  (let [records (mapcat #(material/records ctx % output)
+(defn- ^{:stratum 1} confirmed-output? [ctx output refs]
+  (let [materials (mapcat #(material/materials % output)
                        [:opsv/discover :opsv/execute :opsv/converge :opsv/verify :opsv/actuate])]
-    (every? (partial confirmed-record? ctx output) records)))
+    (every? (partial confirmed-record? ctx output (set refs)) materials)))
 
 (defn- ^{:stratum 1} publish-bundle! [ctx output bundle]
   (if (or (anomaly/any-anomaly? bundle)
@@ -81,7 +83,7 @@
         refs (:opsv/artifact-refs record)]
     (if-not (and (= :assembling (:opsv.assembly/status record))
                  (every? (partial available? ctx) refs)
-                 (confirmed-output? ctx output))
+                 (confirmed-output? ctx output refs))
       (model/failure output :unavailable-material)
       (publish-bundle! ctx output (retained-or-finalized! ctx record output)))))
 

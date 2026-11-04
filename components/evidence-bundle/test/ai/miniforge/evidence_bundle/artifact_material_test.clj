@@ -21,6 +21,19 @@
       (is (= :redacted (get-in prepared [:artifact/metadata :compliance/pii-handling])))
       (is (seq (get-in prepared [:artifact/metadata :compliance/sensitive-findings]))))))
 
+(deftest ^{:stratum 0} retained-findings-are-verified-not-replaced-by-a-rescan-test
+  (let [prepared (evidence/prepare-artifact-content {:password "fake-test-password"})
+        rescanned (evidence/prepare-artifact-content (:artifact/content prepared))]
+    (is (not= (:artifact/metadata prepared) (:artifact/metadata rescanned)))
+    (is (evidence/valid-protected-artifact-content? prepared))
+    (is (evidence/valid-protected-artifact-content? rescanned))
+    (doseq [changed [(assoc-in prepared [:artifact/content :password] "fake-new-password")
+                     (assoc-in prepared [:artifact/metadata :compliance/sensitive-data] false)
+                     (assoc-in prepared [:artifact/metadata :compliance/pii-handling] :none)
+                     (assoc-in prepared [:artifact/metadata :evidence/content-protection] :unknown)
+                     (assoc-in prepared [:artifact/metadata :unbound] true)]]
+      (is (false? (evidence/valid-protected-artifact-content? changed))))))
+
 (deftest ^{:stratum 0} clean-content-is-preserved-and-declared-test
   (let [content {:replicas 2 :token-name "reference-only"}
         prepared (evidence/prepare-artifact-content content)]

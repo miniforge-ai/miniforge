@@ -41,7 +41,8 @@
    [ai.miniforge.evidence-bundle.schema.opsv :as opsv-schema]
    [ai.miniforge.evidence-bundle.interface.protocols.evidence-bundle :as p]
    [ai.miniforge.evidence-bundle.protocols.records.evidence-bundle :as records]
-   [ai.miniforge.redaction.interface :as redaction]))
+   [ai.miniforge.redaction.interface :as redaction]
+   [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -54,6 +55,14 @@
   (if (redaction/supported? content)
     (artifact-material/prepare content)
     (diagnostics/unsupported-material)))
+
+(defn ^{:stratum 0} valid-protected-artifact-content?
+  "Verify protected content and its original bound compliance metadata without rescanning away historical findings.
+   This validates reporting material only; its immutable identity and run binding are the producer's responsibility."
+  [value]
+  (and (redaction/supported? value)
+       (m/validate artifact-material/Content value)
+       (artifact-material/protected? value)))
 
 (def ^{:stratum 0} OpsvEvidence
   "Canonical N6 section 2.8 OPSV evidence schema."
