@@ -52,6 +52,7 @@ and exclude inherited changes from this PR. Native verification wiring is separa
 N7 §6.3; inventory partition #2362.
 [Native service-account admission](https://github.com/kubernetes/kubernetes/blob/v1.35.0/plugin/pkg/admission/serviceaccount/admission.go).
 [Native name generation](https://github.com/kubernetes/kubernetes/blob/v1.35.0/staging/src/k8s.io/apiserver/pkg/storage/names/generate.go).
+[Exact native suffix alphabet](https://github.com/kubernetes/apimachinery/blob/v0.35.0/pkg/util/rand/rand.go).
 
 ## Checklist
 
