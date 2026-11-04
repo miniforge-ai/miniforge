@@ -23,13 +23,15 @@
    [ai.miniforge.opsv.interface :as opsv]
    [ai.miniforge.phase-opsv.verification-criteria :as criteria]
    [ai.miniforge.phase-opsv.flow :as flow]
+   [ai.miniforge.phase-opsv.boundary.verification-protection :as protection]
    [ai.miniforge.phase-opsv.boundary.verification-reporting :as reporting]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} attach-verification
-  [run synthesized verification]
-  (let [summary (select-keys verification [:passed? :confidence :caveats])
+  [prepared synthesized verification]
+  (let [run (:artifact/content prepared)
+        summary (select-keys verification [:passed? :confidence :caveats])
         policy (assoc (:opsv/operational-policy synthesized)
                       :operational-policy/verification-summary summary)
         validated (opsv/validate-operational-policy policy)]
@@ -38,6 +40,7 @@
       (assoc synthesized
              :opsv/verification-result verification
              :opsv/verification-run run
+             :opsv/verification-protection (dissoc prepared :artifact/content)
              :opsv/operational-policy validated
              :opsv/policy-hash (content-hash/content-hash validated)
              :opsv/metric-snapshot-artifact-refs
@@ -48,7 +51,8 @@
 (defn ^{:stratum 1} output [synthesized run]
   (let [original-run (dissoc run :verification/output)]
     (anomaly/let-ok [report (reporting/protect (get run :verification/output synthesized))
-                    reported-run (reporting/protect original-run)]
+                    prepared (reporting/prepare original-run)
+                    reported-run (protection/stamp prepared)]
       (let [verification (reporting/protect (criteria/evaluate (:opsv/experiment-pack synthesized) original-run))]
         (flow/continue verification (partial attach-verification reported-run report))))))
 

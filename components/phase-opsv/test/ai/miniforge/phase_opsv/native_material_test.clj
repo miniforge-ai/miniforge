@@ -134,6 +134,33 @@
     (is (:artifact/id record))
     (is (= protected (:artifact/content record)))))
 
+(deftest ^{:stratum 0} carried-original-findings-bind-immutable-measurement-identity-test
+  (let [ctx (fixtures/context)
+        original (fixtures/stamped-frame "person@example.com")
+        clean (fixtures/stamped-frame "opaque-native-value")
+        content (:artifact/content original)
+        record (fixtures/measurement-record ctx content (dissoc original :artifact/content))
+        other (fixtures/measurement-record ctx content (dissoc clean :artifact/content))]
+    (is (= content (:artifact/content clean)))
+    (is (true? (get-in record [:artifact/metadata :evidence/contains-pii?])))
+    (is (not= (:artifact/id record) (:artifact/id other)))
+    (is (not (.contains (pr-str record) "person@example.com")))))
+
+(deftest ^{:stratum 0} stale-or-malformed-carried-protection-cannot-create-a-measurement-record-test
+  (let [ctx (fixtures/context)
+        prepared (fixtures/stamped-frame "person@example.com")
+        content (:artifact/content prepared)
+        retained (dissoc prepared :artifact/content)]
+    (doseq [changed [(assoc retained :reporting/content-hash "mismatch")
+                     (assoc-in retained [:artifact/metadata :evidence/contains-pii?] false)
+                     (assoc retained :artifact/metadata (Object.)) nil]]
+      (let [result (fixtures/measurement-record ctx content changed)]
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (= {} (:anomaly/data result)))
+        (is (not (contains? result :artifact/id)))))
+    (is (= :invalid-input
+           (:anomaly/type (fixtures/measurement-record ctx (assoc content :changed true) retained))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} sorted-string-keys-do-not-trigger-reserved-key-comparisons-test
