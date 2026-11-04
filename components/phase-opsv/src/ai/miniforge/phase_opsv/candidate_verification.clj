@@ -12,7 +12,8 @@
             [ai.miniforge.phase-opsv.verification-drift :as drift]
             [ai.miniforge.phase-opsv.verification-environment :as environment]
             [ai.miniforge.phase-opsv.verification-environment-artifacts :as artifacts]
-            [ai.miniforge.phase-opsv.verification-environment-schema :as schema]))
+            [ai.miniforge.phase-opsv.verification-environment-schema :as schema]
+            [ai.miniforge.redaction.interface :as redaction]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -71,8 +72,8 @@
       (cond-> retained
         (get-in matched [:anomaly/data :opsv/environment-drift])
         (assoc-in [:anomaly/data :opsv/environment-drift]
-                  (get-in matched [:anomaly/data :opsv/environment-drift])))
-      (with-output (if (anomaly/anomaly? matched) matched measured) retained))))
+                  (redaction/redact (get-in matched [:anomaly/data :opsv/environment-drift]))))
+      (with-output (redaction/redact (if (anomaly/anomaly? matched) matched measured)) retained))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

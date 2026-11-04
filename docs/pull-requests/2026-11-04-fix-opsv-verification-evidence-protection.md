@@ -21,7 +21,9 @@ scanning and redaction before storage, not just when sealing the final bundle.
 
 Reuse the evidence component's shared scanning, redaction and compliance policy
 when constructing phase artifacts. Hash the protected content, not the original
-secret-bearing payload. Return protected verification reporting values only
+secret-bearing payload, and bind the compliance metadata into that identity.
+Refuse uninspectable content without echoing it. Failure reports remain artifact
+data, not pipeline control. Return protected verification reporting values only
 after evaluating the original receipt against the original pinned contract.
 
 The protected report is not a substitute execution or recovery contract. No
@@ -32,6 +34,8 @@ live endpoints, candidate effects, policy permissions or experiments are added.
 First reproduce failures using real local artifact storage and fake secrets.
 Check preparation readback before the candidate callback, final artifact content,
 compliance metadata and returned output. Prove redaction cannot mask drift.
+Keep storage tests in the product integration suite; measured native runtimes
+were 282–539 ms. Pure artifact identity tests remain in the component suite.
 Run strict lint, namespace strata checks, both product test contexts, an isolated
 packaged suite and the committed-source compliance scan before publication.
 
@@ -46,7 +50,7 @@ N7 candidate-aware verification, N6 section 7.2, and N3 section 8.
 
 ## Checklist
 
-- [ ] Regression failures reproduced before implementation.
-- [ ] Shared policy reused without duplicate detection patterns.
-- [ ] Original contract and observations remain independent of protected reports.
+- [x] Regression failures reproduced before implementation.
+- [x] Shared policy reused without duplicate detection patterns.
+- [x] Original contract and observations remain independent of protected reports.
 - [ ] Local gates, owner standards review, CI and full Copilot review pass.

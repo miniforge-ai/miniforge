@@ -5,6 +5,7 @@
   "Pure phase-material selection and content-bound artifact identity."
   (:require [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.phase-opsv.runtime-context :as context])
   (:import [java.nio.charset StandardCharsets]
            [java.util UUID]))
@@ -32,18 +33,17 @@
 
 (defn ^{:stratum 0} record [ctx output [kind type content-key]]
   (let [workflow-id (context/workflow-id ctx)
-        bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])
-        content (get output content-key)
-        digest (artifact/content-digest [workflow-id bundle-id kind content])
-        metadata {:workflow/id workflow-id
-                  :opsv/evidence-bundle-id bundle-id
-                  :opsv/material-kind kind
-                  :content/hash digest}]
-    (if (anomaly/anomaly? digest)
-      digest
+        bundle-id (get-in ctx [:execution/input :opsv/evidence-bundle-id])]
+    (anomaly/let-ok [protected (evidence/prepare-artifact-content (get output content-key))
+                    digest (artifact/content-digest [workflow-id bundle-id kind protected])]
       (artifact/build-artifact
        {:id (UUID/nameUUIDFromBytes (.getBytes ^String digest StandardCharsets/UTF_8))
-        :type type :version "1.0.0" :content content :metadata metadata}))))
+        :type type :version "1.0.0" :content (:artifact/content protected)
+        :metadata (merge (:artifact/metadata protected)
+                         {:workflow/id workflow-id
+                          :opsv/evidence-bundle-id bundle-id
+                          :opsv/material-kind kind
+                          :content/hash digest})}))))
 
 (def ^{:stratum 0} snapshot-kinds [:metric-snapshot :verification-measurements])
 
