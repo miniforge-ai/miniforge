@@ -49,7 +49,13 @@ Retain original PII findings and refuse opaque, deferred or metadata-bearing dat
 Simulate failed shared redaction and require a value-free failure.
 
 Focused source tests pass 11 cases and 54 assertions.
-Product, fresh-package, mutation and scan gates remain required before publication.
+Both product contexts, poly check and a fresh CLI build pass.
+Isolated packaging passes 156 tests and 902 assertions without source overlays.
+All seven deliberate privacy/admission defects are detected without test errors.
+The focused packaged cases measure 1.2–18.8 ms each.
+The committed component scan reports zero findings across 275 files.
+Changed namespaces pass explicit strata checks; full source/test lint has no
+warnings or errors. All commits and the complete PR remain within normal limits.
 
 ## Deployment Plan
 
