@@ -6,7 +6,8 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.phase-opsv.candidate-verification-fixtures :as fixtures]
             [ai.miniforge.phase-opsv.environment-comparison-fixtures :as environment]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -76,7 +77,7 @@
         (is (= :unavailable (:anomaly/type (run (partial throw-failure (java.io.IOException.))))))
         (is (thrown? AssertionError (run (partial throw-failure (AssertionError.)))))
         (let [interrupted (InterruptedException.)]
-          (try
+          (try+
             (run (partial throw-failure interrupted))
             (is false "interruption must propagate")
             (catch InterruptedException caught
