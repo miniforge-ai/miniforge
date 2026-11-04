@@ -31,6 +31,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-replicas :as kubernetes-replicas]
    [ai.miniforge.phase-opsv.boundary.kubernetes-reporting :as kubernetes-reporting]
    [ai.miniforge.phase-opsv.kubernetes-verification-schema :as kubernetes-verification-schema]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-outside :as kubernetes-outside]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -183,6 +184,13 @@
    Preserve native identity/scaling fields; classify payloads and unknown native fields as confidential.
    Returns protected artifact content/compliance metadata or a value-free anomaly; no storage or authority."
   kubernetes-reporting/prepare)
+
+(def ^{:stratum 0} project-kubernetes-outside-invariants
+  "Hash captured resources outside the natively proven Deployment/ReplicaSet/Pod population.
+   Retain source and versioned projection, including controller links, lifecycle and runtime identities.
+   This does not check owned controller configuration/counts, replica invariants, freshness or health.
+   Protect sensitive reporting copies only after hashing; no storage, I/O or execution authority."
+  kubernetes-outside/project)
 
 (def ^{:stratum 0} decode-measurement-window
   "Decode one complete Prometheus float series against a declared bounded grid.

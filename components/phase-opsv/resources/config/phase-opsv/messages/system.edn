@@ -29,6 +29,8 @@
   :kubernetes/uncorrelated-replicas "Captured Kubernetes replica ownership, placement or configuration cannot be correlated."
   :kubernetes/invalid-reporting "Native reporting requires bounded inspectable data with string or keyword keys and no language metadata."
   :kubernetes/reporting-protection-failed "Native reporting protection could not be confirmed."
+  :kubernetes/invalid-outside "Captured Kubernetes outside-resource observations are malformed or unsupported."
+  :kubernetes/uncorrelated-outside "Captured Kubernetes resource identities or workload membership cannot be correlated."
   :kubernetes/membership-mismatch "The observed Kubernetes controller identities do not belong to the declared workload target."
   :kubernetes/invalid-settings "Kubernetes acquisition requires a valid explicit HTTPS endpoint and bounded target settings."
   :kubernetes/invalid-response "Kubernetes returned an invalid or incomplete bounded observation."
