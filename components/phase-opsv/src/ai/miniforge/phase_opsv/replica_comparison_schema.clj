@@ -13,9 +13,11 @@
 
 (def ^{:stratum 0} Observation
   [:map {:closed true}
-   [:replica/id fingerprint/Text]
+   [:replica/id {:description "Provider-issued instance UID; names are not instance identity."} fingerprint/Text]
    [:replica/target target/Target]
-   [:replica/template-hash opsv/PolicyHash]
+   [:replica/template-hash
+    {:description "Content hash of the observed replica configuration under the predeclared projection."}
+    opsv/PolicyHash]
    [:replica/node-pool fingerprint/Text]
    [:replica/image-digests fingerprint/Images]])
 

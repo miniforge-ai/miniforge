@@ -53,9 +53,10 @@ and durable guarded-runner admission. No changes to runtime execution authority.
 
 ## Related Issues/PRs
 
-Depends on #2353 and #2354. The private branch starts from #2354's implementation
-because its comparison contracts are required. Publish only after the parents
-merge and reconcile against actual `main`, excluding inherited parent changes.
+Base branch: `main`. Depends on merged #2353 and #2354. The private branch
+started from #2354 because its contracts were required. Reconciliation against
+actual main retains the replica changes and excludes inherited parent changes
+from the published diff. All original signed commits remain in the branch.
 
 ## Checklist
 

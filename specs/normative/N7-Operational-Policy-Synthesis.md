@@ -6,8 +6,8 @@
 
 # N7 — Operational Policy Synthesis With Verification
 
-**Version:** 0.3.3-draft
-**Date:** 2026-09-29
+**Version:** 0.3.4-draft
+**Date:** 2026-11-03
 **Status:** Complete
 **Conformance:** MUST
 **Class:** Extension spec (N7+)
@@ -350,6 +350,48 @@ Verification failure MUST block direct apply and MUST NOT be overridden by a
 policy pack. `PR_ONLY` MAY emit a failed candidate for review only when the PR
 is marked ineligible for merge and includes the failed criteria and evidence.
 
+### 6.3 Predeclared environment comparison
+
+Before a verification attempt's first candidate mutation or load effect, OPSV
+MUST retain an immutable comparison contract in its N6 verification-report
+artifact lineage. The contract MUST bind the workflow run, verification attempt,
+candidate content hash, and Experiment Pack content hash.
+It MUST also bind the exact runtime target, original baseline observation, and
+permitted candidate differences.
+Changing the candidate or contract MUST require a new verification attempt and
+fresh admission through the applicable N4/N8/N10 gates.
+
+Candidate differences MUST specify exact expected values or content hashes for
+the declared changes. Fields outside those changes MUST retain their baseline
+values. Wildcard field exclusions, observations adopted as expectations after
+execution, and an adapter's assertion that a difference is intentional MUST NOT
+establish a match. Without a comparison contract, verification MUST retain exact
+baseline matching; a runner needing candidate differences MUST fail closed.
+
+Replica churn MAY differ from raw baseline identity only within predeclared
+replica-count bounds and an explicit workload membership rule. Replacement
+replicas MUST retain the declared workload/controller identity, approved template
+and configuration, allowed node pools, and expected runtime image digests.
+Cluster and namespace identity, unrelated resources, and undeclared changes MUST
+remain drift-sensitive. Churn admission MUST NOT establish scaling stability or
+SLO success; those remain separate §6.1–§6.2 criteria.
+
+The comparison MUST preserve both the raw observations and the semantic
+projection used to admit permitted differences. A missing, malformed,
+uncorrelated, or out-of-contract observation MUST prevent verification success
+and direct apply. Detected environment drift MUST use the existing N3 §3.14
+drift event and N6 §2.8 evidence linkage.
+
+The original baseline MUST remain the recovery reference, never the candidate's
+observed state. Verified rollback MUST check restoration of baseline desired
+configuration and runtime invariants using separately predeclared recovery
+replica bounds and membership rules. It MUST NOT require recreating expired Pod
+identities or accept the candidate expectation as the rollback baseline.
+The contract, baseline, observations, and comparison outcomes MUST remain
+traceable through the existing N6 verification-report artifacts. A comparison
+contract grants no execution authority and MUST NOT bypass §5.4 or N10 recovery
+authorization.
+
 ## 7. Emission and remediation
 
 ### 7.1 Artifact emission
@@ -403,6 +445,8 @@ IDs are never reused; a withdrawn requirement is marked withdrawn.
 | N7.EX.4 | MUST | Emit the §3.14 event family of N3 for every lifecycle transition. |
 | N7.VF.1 | MUST | Evaluate verification against pre-declared criteria, not criteria chosen after the run (§6). |
 | N7.VF.2 | MUST | Link every OPSV event and artifact to its evidence bundle per N6 (§4, §7.1). |
+| N7.VF.3 | MUST | Bind permitted environment differences before effects and reject unrelated drift (§6.3). |
+| N7.VF.4 | MUST | Preserve the original baseline and verify recovery against its declared invariants (§6.3). |
 | N7.AC.1 | MUST | Default effective actuation to `:recommend-only`; PR emission and direct apply require the respective §5.4 authority checks (§5.3, §7.2, §7.3, §9). |
 | N7.AC.2 | MUST | Execute apply actions as N10-governed effects with verified rollback (§7.3). |
 | N7.AC.3 | MUST | Record both apply and rollback outcomes as artifacts, events, and evidence on postcondition failure (§7.3). |
@@ -417,6 +461,12 @@ IDs are never reused; a withdrawn requirement is marked withdrawn.
 3. `APPLY_ALLOWED` is refused when the §5.4 gate has not passed (N7.AC.1).
 4. A failed postcondition produces both outcomes in evidence, not just the
    rollback (N7.AC.3).
+5. An exact predeclared candidate change and bounded replica replacement match;
+   an unrelated change, foreign replica, or out-of-bounds count does not (N7.VF.3).
+6. A stale candidate/pack/target binding, changed contract, or expectation learned
+   from execution cannot establish verification success (N7.VF.3).
+7. Rollback checks the retained baseline, rejects candidate-state substitution,
+   and admits replacement replicas only under the recovery contract (N7.VF.4).
 
 ---
 
@@ -488,6 +538,8 @@ depends on machinery that is not there.
 
 **Version History:**
 
+- 0.3.4-draft (2026-11-03): Formalized the operator-approved candidate-aware
+  environment comparison and retained-baseline recovery contract (§6.3).
 - 0.3.3-draft (2026-09-29): Aligned N7.AC.1 and §5.3 with the §9 recommendation-only
   default; retained mandatory governed PR capability and optional gated apply
 - 0.3.2-draft (2026-09-28): Added governed disposition events and emission timing

@@ -265,6 +265,10 @@ Defines:
 - Verification requirements: pass/fail semantics, success criteria evaluation
 - Fleet Mode integration: per-service policy state, experiment governance
 - Risk scoring plus requested/effective actuation decisions (RECOMMEND_ONLY, PR_ONLY, APPLY_ALLOWED)
+- Predeclared candidate-aware environment comparison and retained-baseline recovery (§6.3)
+
+Decision source for §6.3:
+[operator approval record](../docs/pull-requests/2026-11-03-feat-opsv-candidate-environment-contract.md#approval-record).
 
 ### N8 — Observability Control Interface 🆕
 
