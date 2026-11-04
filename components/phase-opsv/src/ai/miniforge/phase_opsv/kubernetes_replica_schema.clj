@@ -14,9 +14,7 @@
   [:map {:closed true}
    [:kubernetes/inventory inventory/Observation]
    [:kubernetes/node-pool-label schema/NonBlankString]
-   [:kubernetes/nodes
-    [:map ["apiVersion" [:= "v1"]] ["kind" [:= "NodeList"]]
-     ["metadata" lists/ListMetadata] ["items" [:vector lists/NodeItem]]]]])
+   [:kubernetes/nodes lists/CompleteNodeList]])
 
 (def ^{:stratum 0} RuntimePods
   [:vector [:and resource/Pod [:map ["spec" volumes/PodSpec]]]])

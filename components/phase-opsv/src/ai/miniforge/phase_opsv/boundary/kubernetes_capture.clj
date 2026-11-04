@@ -20,7 +20,7 @@
       planned
       (response/invalid-response))))
 
-(defn- ^{:stratum 0} read-many! [settings until planned]
+(defn ^{:stratum 0} read-many! [settings until planned]
   (into []
         (comp (map (partial reads/read! settings until))
               (halt-when anomaly/anomaly?)

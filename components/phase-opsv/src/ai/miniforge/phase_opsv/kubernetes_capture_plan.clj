@@ -23,11 +23,14 @@
   (->> pods (map node-name) distinct sort
        (mapv (partial requests/request "Node" nil false))))
 
+(defn ^{:stratum 1} configuration-requests [pods]
+  (mapv configuration-request (references/configuration-references pods)))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} create [pods]
   (let [nodes (node-requests pods)
-        configuration (mapv configuration-request (references/configuration-references pods))
+        configuration (configuration-requests pods)
         total (+ identity-resource-count (count pods) (count nodes) (count configuration))]
     {:plan/nodes nodes
      :plan/configuration configuration

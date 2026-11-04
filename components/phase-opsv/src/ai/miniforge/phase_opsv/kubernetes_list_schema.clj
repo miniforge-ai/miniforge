@@ -34,4 +34,8 @@
   [:map ["apiVersion" [:= "v1"]] ["kind" [:= "NodeList"]]
    ["items" [:vector {:min 1} NodeItem]]])
 
+(def ^{:stratum 2} CompleteNodeList
+  [:map ["apiVersion" [:= "v1"]] ["kind" [:= "NodeList"]]
+   ["metadata" ListMetadata] ["items" [:vector NodeItem]]])
+
 (comment ::native-kubernetes-list-contracts)

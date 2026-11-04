@@ -28,4 +28,6 @@
       (mu/dissoc :kubernetes/pod-selector)
       (mu/dissoc :kubernetes/node-pool-label)))
 
+(def ^{:stratum 1} VerificationSettings (mu/dissoc Settings :kubernetes/pod-selector))
+
 (comment ::explicit-kubernetes-acquisition-settings)
