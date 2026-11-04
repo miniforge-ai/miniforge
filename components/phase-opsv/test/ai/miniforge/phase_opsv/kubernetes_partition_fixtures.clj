@@ -57,6 +57,10 @@
         reference (membership/owner-reference (:kubernetes/namespace raw))]
     (assoc-in raw [collection "items" 0 "metadata" "ownerReferences"] [reference])))
 
+(defn ^{:stratum 1} with-pod-controller [version uid]
+  (let [path [:kubernetes/pod-inventory "items" 0 "metadata" "ownerReferences" 0]]
+    (update-in (observation) path assoc "apiVersion" version "uid" uid)))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} pending-member-with-matching-outside-labels []

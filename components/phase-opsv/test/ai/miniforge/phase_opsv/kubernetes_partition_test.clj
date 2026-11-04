@@ -88,4 +88,17 @@
                           [collection "items" 0 "metadata" "ownerReferences" 0 field] changed)]
         (is (= :conflict (:anomaly/type (phase/partition-kubernetes-deployment-inventory raw))))))))
 
+(deftest ^{:stratum 0} unresolved-native-replica-set-owners-cannot-hide-behind-another-version-test
+  (let [original (fixtures/observation)
+        captured-uid (get-in original [:kubernetes/replica-set-inventory "items" 0 "metadata" "uid"])]
+    (doseq [version ["apps/v1beta2" "extensions/v1beta1" "apps/v2"]
+            uid [captured-uid "missing-native-parent"]]
+      (let [raw (fixtures/with-pod-controller version uid)]
+        (is (= :conflict (:anomaly/type (phase/partition-kubernetes-deployment-inventory raw))))))
+    (let [raw (fixtures/with-pod-controller "example.invalid/v1" "uncaptured-custom-parent")
+          result (phase/partition-kubernetes-deployment-inventory raw)]
+      (is (not (anomaly/anomaly? result)))
+      (is (identical? raw (:kubernetes/inventory result)))
+      (is (= 1 (count (get-in result [:kubernetes/membership :kubernetes/pods "items"])))))))
+
 (comment ::outside-observations-remain-drift-sensitive-not-silently-filtered)
