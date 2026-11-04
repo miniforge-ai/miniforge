@@ -35,6 +35,12 @@ Test replacements, count limits, foreign membership, template/image/pool drift,
 duplicate identities, missing observations, and independent recovery expectations.
 Run both affected product contexts, native packaging, normal hooks, and review.
 
+Focused source coverage passes: 17 tests, 75 assertions. Positive cases include
+one-to-three replacement replicas, exact recovery membership, and explicitly
+declared zero capacity. Negative cases cover all target identity fields,
+template/image/pool drift, count bounds, duplicate identities, omitted population
+observations, expanded expectations, and contract substitution.
+
 ## Deployment Plan
 
 No live operation. This is the replica-comparison stratum below native projection
@@ -48,6 +54,6 @@ merge and reconcile against actual `main`, excluding inherited parent changes.
 
 ## Checklist
 
-- [ ] Pin positive and negative population cases through the public interface.
+- [x] Pin positive and negative population cases through the public interface.
 - [ ] Complete owner standards and adversarial review.
 - [ ] Pass product, package, hook, CI, and full-head review gates.

@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.environment-comparison-bindings
-  (:require [clojure.set :as set]))
+  (:require [ai.miniforge.phase-opsv.environment-expectation :as expectation]
+            [clojure.set :as set]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -10,14 +11,8 @@
   (= (get-in plan [:comparison/baseline :cluster])
      (get-in plan [:comparison/binding :runtime/target :cluster])))
 
-(defn- ^{:stratum 0} expected-fingerprint [plan stage]
-  (cond-> (:comparison/baseline plan)
-    (= stage :candidate) (merge (:comparison/changes plan))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} replica-expectation-bound? [plan [stage expected]]
-  (let [fingerprint (expected-fingerprint plan stage)
+(defn- ^{:stratum 0} replica-expectation-bound? [plan [stage expected]]
+  (let [fingerprint (expectation/fingerprint plan stage)
         target (get-in plan [:comparison/binding :runtime/target])
         pools (set (:node-pools fingerprint))
         allowed (set (:replica/node-pools expected))]
@@ -25,9 +20,9 @@
          (= (:image-digests fingerprint) (:replica/image-digests expected))
          (set/subset? allowed pools))))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 2} replicas-consistent? [plan]
+(defn ^{:stratum 1} replicas-consistent? [plan]
   (if-let [contract (:comparison/replica-contract plan)]
     (every? (partial replica-expectation-bound? plan) contract)
     true))

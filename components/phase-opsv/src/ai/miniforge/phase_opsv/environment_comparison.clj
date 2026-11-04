@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.environment-comparison
   (:require [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.phase-opsv.environment-comparison-failure :as failure]
+            [ai.miniforge.phase-opsv.environment-expectation :as expectation]
             [ai.miniforge.phase-opsv.replica-comparison :as replicas]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -12,12 +13,6 @@
   (let [digest (hash/content-hash plan)]
     {:comparison/contract plan
      :comparison/hash digest}))
-
-(defn- ^{:stratum 0} expected-fingerprint [contract stage]
-  (let [baseline (:comparison/baseline contract)]
-    (case stage
-      :candidate (merge baseline (:comparison/changes contract))
-      :rollback baseline)))
 
 (defn- ^{:stratum 0} admit-population [contract stage observations fingerprint]
   (if-let [expected (get-in contract [:comparison/replica-contract stage])]
@@ -32,7 +27,7 @@
         stored-hash (:comparison/hash pin)
         actual-hash (hash/content-hash contract)
         expected-binding (:comparison/binding contract)
-        expected (expected-fingerprint contract stage)]
+        expected (expectation/fingerprint contract stage)]
     (cond
       (not= expected-hash stored-hash actual-hash)
       (failure/mismatch :contract-mismatch expected-hash [stored-hash actual-hash])
