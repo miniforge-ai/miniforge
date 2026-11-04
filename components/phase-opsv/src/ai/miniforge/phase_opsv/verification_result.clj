@@ -22,7 +22,8 @@
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.opsv.interface :as opsv]
    [ai.miniforge.phase-opsv.verification-criteria :as criteria]
-   [ai.miniforge.phase-opsv.flow :as flow]))
+   [ai.miniforge.phase-opsv.flow :as flow]
+   [ai.miniforge.phase-opsv.boundary.verification-reporting :as reporting]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -45,10 +46,11 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} output [synthesized run]
-  (let [synthesized (get run :verification/output synthesized)
-        run (dissoc run :verification/output)
-        verification (criteria/evaluate (:opsv/experiment-pack synthesized) run)]
-    (flow/continue verification (partial attach-verification run synthesized))))
+  (let [original-run (dissoc run :verification/output)]
+    (anomaly/let-ok [report (reporting/protect (get run :verification/output synthesized))
+                    reported-run (reporting/protect original-run)]
+      (let [verification (reporting/protect (criteria/evaluate (:opsv/experiment-pack synthesized) original-run))]
+        (flow/continue verification (partial attach-verification reported-run report))))))
 
 (comment
   (output {} {}))

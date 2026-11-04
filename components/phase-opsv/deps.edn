@@ -14,6 +14,7 @@
         ai.miniforge/opsv-actuation {:local/root "../opsv-actuation"}
         ai.miniforge/opsv-provider-github {:local/root "../opsv-provider-github"}
         ai.miniforge/phase {:local/root "../phase"}
+        ai.miniforge/redaction {:local/root "../redaction"}
         ai.miniforge/resource-cleanup {:local/root "../resource-cleanup"}
         ai.miniforge/schema {:local/root "../schema"}
         cheshire/cheshire {:mvn/version "5.13.0"}
