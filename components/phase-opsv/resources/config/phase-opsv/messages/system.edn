@@ -24,6 +24,8 @@
   :kubernetes/invalid-inventory-target "Namespace inventory requires an explicit runtime target and valid Deployment name."
   :kubernetes/invalid-inventory "Kubernetes namespace inventory observations are malformed or unsupported."
   :kubernetes/invalid-volume-projection "Pod volume bindings are malformed, unresolved, duplicated or unsupported."
+  :kubernetes/invalid-replicas "Captured Kubernetes replica input is malformed or lacks runtime observations."
+  :kubernetes/uncorrelated-replicas "Captured Kubernetes replica ownership, placement or configuration cannot be correlated."
   :kubernetes/membership-mismatch "The observed Kubernetes controller identities do not belong to the declared workload target."
   :kubernetes/invalid-settings "Kubernetes acquisition requires a valid explicit HTTPS endpoint and bounded target settings."
   :kubernetes/invalid-response "Kubernetes returned an invalid or incomplete bounded observation."

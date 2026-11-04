@@ -7,6 +7,11 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} resources [inventory]
+  (concat [(:kubernetes/namespace inventory) (:kubernetes/deployment inventory)]
+          (get-in inventory [:kubernetes/replica-set-inventory "items"])
+          (get-in inventory [:kubernetes/pod-inventory "items"])))
+
 (defn- ^{:stratum 0} logical-key [type value]
   (into type [(resource/namespace-of value) (resource/name-of value)]))
 
@@ -16,7 +21,7 @@
   (let [roots [(:kubernetes/namespace inventory) (:kubernetes/deployment inventory)]
         replica-sets (get-in inventory [:kubernetes/replica-set-inventory "items"])
         pods (get-in inventory [:kubernetes/pod-inventory "items"])
-        uids (map resource/uid (concat roots replica-sets pods))
+        uids (map resource/uid (resources inventory))
         logical (concat (map identity/logical-identity roots)
                         (map (partial logical-key ["apps/v1" "ReplicaSet"]) replica-sets)
                         (map (partial logical-key ["v1" "Pod"]) pods))]

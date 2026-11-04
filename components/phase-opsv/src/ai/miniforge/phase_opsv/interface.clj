@@ -28,6 +28,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-partition :as kubernetes-partition]
    [ai.miniforge.phase-opsv.kubernetes-partition-schema :as partition-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-volume-projection :as volume-projection]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-replicas :as kubernetes-replicas]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -155,6 +156,13 @@
    Hash the complete versioned representation; retain raw observations separately.
    Returns a representation or anomaly, never a native manifest, full template match or execution authority."
   volume-projection/project)
+
+(def ^{:stratum 0} project-kubernetes-deployment-replicas
+  "Derive replica identities, configuration hashes, pools and runtime image digests from captured data.
+   Preserve raw input and versioned per-Pod configuration projections. Placement uses captured Nodes.
+   Pending or incomplete selected Pods cannot prove runtime observations; empty populations remain explicit.
+   This proves no freshness, approved template match, health, outside-resource stability or execution authority."
+  kubernetes-replicas/project)
 
 (def ^{:stratum 0} decode-measurement-window
   "Decode one complete Prometheus float series against a declared bounded grid.
