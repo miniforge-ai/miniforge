@@ -10,7 +10,8 @@
    caller cannot mistake it for a clean file.
 
    Layer 0: code-fence stripping, per-violation canonicalization,
-     rule-id coercion, by-rule indexing, failure message keys
+     rule-id coercion, by-rule indexing, single-form reading, failure
+     message keys
    Layer 1: whole-response parsing, canonicalization and judge-failure
      violations (over Layer 0)"
   (:require
@@ -53,6 +54,18 @@
                   (catch Exception _ nil))
     :else        nil))
 
+(defn- ^{:stratum 0} read-single-form
+  "The one EDN form `s` holds, or nil when it holds none or anything
+   follows that form (a second form or trailing prose). `edn/read-string`
+   reads only the first form, so a clean `[]` could hide findings after it."
+  [s]
+  (with-open [reader (java.io.PushbackReader. (java.io.StringReader. s))]
+    (let [eof  (Object.)
+          form (edn/read {:eof eof} reader)]
+      (when (and (not (identical? eof form))
+                 (identical? eof (edn/read {:eof eof} reader)))
+        form))))
+
 (def ^{:stratum 0} ^:private failure-message-keys
   "Message key for each way the judge can fail to give a judgement."
   {:call-failed       :judge/call-failed
@@ -72,11 +85,12 @@
    Returns a vector of violations (empty when the judge found none), or nil
    when the response is not an EDN vector of maps — the judge gave no
    judgement. A vector with any non-map entry (`[nil]`, `[:error]`, a
-   string) is no judgement, not a clean file."
+   string), or an answer with anything after its vector, is no judgement,
+   not a clean file."
   [response-text]
   (try
     (let [cleaned (-> (str response-text) str/trim strip-code-fences str/trim)
-          parsed  (edn/read-string cleaned)]
+          parsed  (read-single-form cleaned)]
       (when (and (vector? parsed) (every? map? parsed))
         parsed))
     (catch Exception _ nil)))

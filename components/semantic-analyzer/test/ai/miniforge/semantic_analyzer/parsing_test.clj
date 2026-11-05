@@ -47,7 +47,12 @@
     (is (nil? (sut/parse-judge-response "[nil]")))
     (is (nil? (sut/parse-judge-response "[:error]")))
     (is (nil? (sut/parse-judge-response "[\"unable to judge\"]")))
-    (is (nil? (sut/parse-judge-response "[{:line 1 :message \"a\"} :error]")))))
+    (is (nil? (sut/parse-judge-response "[{:line 1 :message \"a\"} :error]"))))
+
+  (testing "anything after the finding vector is no answer: a clean prefix
+            cannot hide the findings after it"
+    (is (nil? (sut/parse-judge-response "[]\n[{:line 1 :message \"violation\"}]")))
+    (is (nil? (sut/parse-judge-response "[] No violations found.")))))
 
 ;; ============================================================================
 ;; Violation canonicalization

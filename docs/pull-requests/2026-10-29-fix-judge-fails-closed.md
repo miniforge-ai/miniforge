@@ -26,8 +26,11 @@ bounds the gate's batched judge with a deadline that also fails closed.
 
 1. `parsing/parse-judge-response` returns nil for an answer that is not a
    finding list, including a vector with any non-map entry (`[nil]`,
-   `[:error]`, a string), which was filtered down to `[]` and read as clean
-   (Copilot review). A real `[]` still means no findings.
+   `[:error]`, a string), which was filtered down to `[]` and read as clean,
+   and an answer with anything after its vector: it reads exactly one EDN form
+   and requires end of input, because `edn/read-string` read only the first,
+   so `[]` followed by findings read as clean (Copilot review). A real `[]`
+   still means no findings.
 2. `judge/analyze-file` and `judge/analyze-file-batched` turn a failed call or an
    unparseable answer into a judge-failure violation for every rule asked about
    (`parsing/judge-failure-violation`). The violation carries
@@ -63,7 +66,8 @@ deadline blocks until the deadline is raised in `limits.edn`.
 ## Testing Plan
 
 1. `parsing_test.clj`: prose, nil, malformed and non-vector answers parse to nil,
-   and so do vectors with a non-map entry.
+   and so do vectors with a non-map entry and answers with a second form or
+   prose after the vector.
 2. `judge_test.clj`: an unparseable answer and a failed call each give one
    `:semantic/judge-failure` violation; a failed batched call blocks every rule
    in the batch.
