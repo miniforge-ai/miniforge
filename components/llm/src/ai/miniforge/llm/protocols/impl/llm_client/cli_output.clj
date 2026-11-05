@@ -152,7 +152,8 @@
 
    `codex exec --json` emits JSONL events (`ThreadEvent` in
    codex-rs/exec/src/exec_events.rs):
-   - thread.started: session began
+   - thread.started: session began; parsed to a heartbeat carrying
+     :invocation-id (the thread id), because item ids restart per exec
    - turn.started: turn began
    - item.started / item.updated: an item in progress (not parsed)
    - item.completed: agent_message, reasoning, and the native tool items
@@ -286,7 +287,15 @@
           "error"
           {:delta (str "\nError: " (:message data "unknown")) :done? true}
 
-          ;; thread.started, turn.started, item.started — ignore
+          ;; Each `codex exec` starts a thread and numbers its items
+          ;; item_0, item_1, ... afresh, so an item id is unique only
+          ;; within one invocation. Surface the thread id; the streaming
+          ;; callback qualifies the call ids that follow with it.
+          "thread.started"
+          (when-let [thread-id (:thread_id data)]
+            {:delta "" :done? false :heartbeat true :invocation-id thread-id})
+
+          ;; turn.started, item.started, item.updated — ignore
           nil)))
     (catch Exception _e
       nil)))

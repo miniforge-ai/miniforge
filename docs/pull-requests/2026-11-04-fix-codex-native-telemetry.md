@@ -73,6 +73,21 @@ run:
    removes one), and a `:tool-call-timeout` rule would later report it
    as timed out. Claude's `tool_use` / `tool_result` pairing is
    unchanged.
+4. Codex numbers its items `item_0`, `item_1`, ... afresh in every
+   `codex exec` (the exec event processor's `next_item_id` counter), so
+   a planning turn's `item_1` and an implement turn's `item_1` were the
+   same published call id, and the timeline named both after the later
+   one. `thread.started` now parses to a heartbeat carrying
+   `:invocation-id` (the thread id). The callback publishes the call ids
+   that follow as `<thread id>/<item id>` until a `:done?` event ends the
+   invocation. A provider that names no invocation (Claude) keeps its
+   ids. The ids are qualified where they are produced, not in one
+   consumer, because the observer, the timeline and anything reading
+   persisted events all key on `:tool/call-id`.
+5. `event-stream/timeline.clj`: a `:tool/call-completed` with neither
+   `:tool/success?` nor `:tool/error` renders as `outcome unknown`
+   (new message `:timeline/status-unknown`) instead of `success`. A
+   Codex item still `in_progress` when its turn ended has no outcome.
 
 No change to `stream-with-parser`: it already counts every parsed
 `:tool-name` into `:tools-called`.
@@ -100,7 +115,13 @@ A Claude `tool_use` still waits for its result. Against the first commit's
 `cli_output.clj` and `callbacks.clj`, it and the parser's completion
 assertions fail 9 of 41 assertions.
 
-With both commits, these pass together with `ai.miniforge.llm.interface-test`,
+New `components/event-stream/test/ai/miniforge/event_stream/codex_call_ids_test.clj`
+covers two execs that both report `item_1`. They publish distinct ids,
+and the timeline names each call correctly. It also checks that
+unqualified providers keep their ids, and that a call without an outcome
+renders as unknown. Against the second commit's sources, it fails.
+
+With all commits, these pass together with `ai.miniforge.llm.interface-test`,
 `ai.miniforge.observer.alerts-test` and `ai.miniforge.event-stream.interface-test`
 (101 tests, 584 assertions).
 

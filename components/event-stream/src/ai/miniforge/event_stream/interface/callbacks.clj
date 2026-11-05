@@ -65,6 +65,11 @@
                        later tool-result will close it
      :tool-error?    — with :tool-completed: true when the call failed;
                        absent when the provider gave no outcome
+     :invocation-id — the provider's id for one CLI invocation (Codex
+                      thread id). Codex numbers its items afresh in every
+                      invocation, so the call ids that follow are
+                      published as \"<invocation-id>/<call-id>\" until a
+                      :done? event ends the invocation.
      :tool-result — boolean, true when the LLM streamed a tool-result
                     block (outcome of a prior tool-use)
      :tool-result-call-id — provider id correlating this result to its
@@ -104,11 +109,20 @@
         ;; lifetime of this callback instance.  Callbacks are short-lived
         ;; per agent turn, so the practical leak bound is O(concurrent
         ;; outstanding tool calls) — negligible in normal operation.
-        tool-start-times (atom {})]
+        tool-start-times (atom {})
+        ;; The current invocation's id, when the provider names one.
+        current-invocation (atom nil)
+        qualify (fn [id]
+                  (when id
+                    (if-let [invocation @current-invocation]
+                      (str invocation "/" id)
+                      id)))]
     (fn [{:keys [delta done? tool-use tool-result heartbeat
                  tool-name tool-names tool-call-id tool-args-preview
                  tool-result-call-id tool-result-content tool-result-is-error
-                 tool-completed tool-error?]}]
+                 tool-completed tool-error? invocation-id]}]
+      (when invocation-id
+        (reset! current-invocation invocation-id))
       (cond
         tool-use
         (do
@@ -134,7 +148,7 @@
               (events/agent-tool-call stream-atom workflow-id agent-id
                                       {:tool-name tool-name
                                        :tool-names tool-names
-                                       :tool-call-id tool-call-id
+                                       :tool-call-id (qualify tool-call-id)
                                        :tool-args-preview tool-args-preview}))
 
             ;; ── New paired started event — replaces :agent/status :tool-calling
@@ -152,7 +166,7 @@
                 ;; consistent digest map rather than silently dropping
                 ;; the field.
                 (cond-> {:tool/name    tool-name
-                         :tool/call-id tool-call-id}
+                         :tool/call-id (qualify tool-call-id)}
                   (seq tool-names) (assoc :tool/names (vec tool-names))
                   (some? tool-args-preview)
                   (assoc :tool/args-digest
@@ -165,7 +179,7 @@
                 stream-atom
                 (events/tool-call-completed
                   stream-atom workflow-id
-                  (cond-> {:tool/call-id tool-call-id}
+                  (cond-> {:tool/call-id (qualify tool-call-id)}
                     (some? tool-error?) (assoc :tool/success? (not tool-error?))))))))
 
         ;; Tool-result closes the latency span opened by tool-use.
@@ -190,7 +204,7 @@
                 stream-atom workflow-id
                 ;; cond-> excludes optional keys explicitly when nil,
                 ;; decoupled from constructor nil-filtering behaviour.
-                (cond-> {:tool/call-id  correlated-id
+                (cond-> {:tool/call-id  (qualify correlated-id)
                          :tool/success? (not (true? tool-result-is-error))}
                   result-digest (assoc :tool/result-digest result-digest)
                   duration-ms   (assoc :tool/duration-ms duration-ms))))))
@@ -200,6 +214,8 @@
 
         :else
         (do
+          (when done?
+            (reset! current-invocation nil))
           (when (and print? (not quiet?) (seq delta))
             (print delta)
             (flush))

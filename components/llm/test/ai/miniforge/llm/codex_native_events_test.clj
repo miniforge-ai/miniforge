@@ -135,6 +135,12 @@
     (is (nil? (parse-event (nth hello-run-events 10))))
     (is (nil? (parse-event (nth hello-run-events 12))))))
 
+(deftest ^{:stratum 1} thread-started-names-the-invocation-test
+  (testing "item ids restart per exec, so the thread id scopes them"
+    (is (= {:delta "" :done? false :heartbeat true
+            :invocation-id "0199a213-81c0-7800-8aa1-bbab2a035a53"}
+           (parse-event (first hello-run-events))))))
+
 (deftest ^{:stratum 1} turn-completed-keeps-cache-write-tokens-test
   (testing "the prompt-cache write count Codex reports rides on :usage"
     (is (= {:input-tokens 24763 :output-tokens 122
