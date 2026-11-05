@@ -68,9 +68,18 @@
 
 (defn ^{:stratum 0} enrich-violation
   "Attach remediation metadata from the pack rule to a violation map.
-   Downstream classify and execute phases use these fields."
+   Downstream classify and execute phases use these fields.
+
+   `:remediation-strategy` must be carried: `classify` refuses to auto-fix a
+   `:semantic` or `:manual` strategy, and it can only do that if the declared
+   strategy survives the hop from pack rule to violation. Omitting it made that
+   refusal unreachable, so a rule declaring `strategy: semantic` was classified
+   auto-fixable on its `autoFixable` default alone."
   [violation remediation]
   (cond-> violation
+    (get remediation :strategy)
+    (assoc :remediation-strategy (get remediation :strategy))
+
     (get remediation :type)
     (assoc :remediation-type (get remediation :type))
 
