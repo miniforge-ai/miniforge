@@ -68,7 +68,16 @@ Three published-build counterexample tests produce eight assertion failures with
 zero errors, including revoked-grant snapshots. No missing-API failures substitute
 for evidence. All three normal signed commits pass hooks: 147, 182 and 174
 reportable lines; each smoke 375 tests/1,452 assertions and compatibility 17/775.
-Aggregate PR is 491/600 reportable lines; no size or gate exceptions.
+The initial PR was 491/600 reportable lines, with no size or gate exceptions.
+
+CI found the hand-maintained Babashka CLI task classpath lacked the shared target
+source path. Add it explicitly; project dependencies alone do not populate task paths.
+A real CLI-startup regression reproduces the old failure: one assertion failure,
+zero test errors. All ten task entrypoints now load successfully.
+Startup passes one test/two assertions; the existing real hook test passes six assertions.
+Strict lint is clean. All 14 changed namespaces pass true inferred strata, with a maximum of three.
+The correction adds 19 reportable lines; the complete PR is 510/600.
+The failed run is not merged; repeat current-head review and CI after the correction.
 
 ## Deployment Plan
 
