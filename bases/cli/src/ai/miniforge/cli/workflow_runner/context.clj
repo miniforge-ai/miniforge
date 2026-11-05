@@ -252,6 +252,11 @@
                                       ;; the routing trigger that fired this workflow.
                                       {:routing/trigger-event-id routing-trigger-event-id}))
     (cond-> callbacks
+      ;; The run id announced above and registered with the operator
+      ;; channel. The pipeline adopts it as :execution/id; without it the
+      ;; pipeline mints its own, so checkpoints and phase events land
+      ;; under an id that a `workflow cancel` cannot reach.
+      workflow-id (assoc :workflow-id workflow-id)
       llm-client (assoc :llm-backend llm-client)
       artifact-store (assoc :artifact-store artifact-store)
       on-chunk (assoc :on-chunk on-chunk)
