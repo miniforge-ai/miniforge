@@ -5,6 +5,12 @@
 -->
 # refactor(semantic-analyzer): split core.clj into seven namespaces (rule 210)
 
+## Overview
+
+Splits `semantic_analyzer/core.clj` (8 layers) into seven namespaces plus a
+reduced `core.clj`, each within rule 210's 3-layer budget. No behaviour change;
+`interface.clj` keeps the same eight public vars.
+
 **Theme:** standards / rule 210 layer budget
 **Type:** pure movement — no behaviour change
 
@@ -15,7 +21,7 @@ qualification, visibility on the definitions that now cross a namespace
 boundary, and one local rebinding. core.clj cannot be committed in pieces —
 see "Why this is one commit" below.
 
-## Problem
+## Motivation
 
 `components/semantic-analyzer/src/ai/miniforge/semantic_analyzer/core.clj` ran
 8 distinct call-graph layers against the rule 210 budget of 3. It carried no
@@ -45,7 +51,7 @@ PR #2025 (`feat/pack-exclude-globs`) solely because of it — honouring
 this component's path scope through the shared matcher. Both land in a follow-up
 on top of this split.
 
-## The layer assignment that forced the split
+### The layer assignment that forced the split
 
 `stratum-lint --fix` on the `origin/main` copy assigned strata 0 through 7:
 
@@ -64,7 +70,7 @@ The groups in the split were chosen from that graph, not from the heading
 comments, and each resulting file was re-checked with the linter rather than by
 hand.
 
-## Changes
+## Changes in Detail
 
 Seven new namespaces plus a reduced `core.clj`. Layer counts are the linter's,
 after `--fix`:
@@ -132,7 +138,7 @@ a reader should not have to know that.
 `core_test.clj` declared `(def under-size-limit? (var-get #'sut/under-size-limit?))`
 and never used it. It is not carried into `selection_test.clj`.
 
-## Tests
+## Testing Plan
 
 The six test namespaces mirror the src split. The same 16 tests and 69
 assertions as before, none rewritten:
@@ -151,7 +157,7 @@ component-internal public vars, so their tests call them directly instead of
 through `(var-get #'sut/...)`. `strip-code-fences` is still private and still
 reached that way.
 
-## Verification
+### Verification
 
 ```text
 stratum-lint (8 src files + interface)    exit=0, no findings
@@ -191,7 +197,18 @@ exists:
 `MINIFORGE_COMMIT_BUDGET_OVERRIDE` and `MINIFORGE_PR_BUDGET_OVERRIDE` both carry
 this rationale.
 
-## Follow-up (not in this PR)
+## Deployment Plan
+
+No deployment step. The change is internal to the component and ships with the
+next release; no configuration, data or interface changes.
+
+## Related Issues/PRs
+
+1. #2025 (`feat/pack-exclude-globs`): two changes were reverted out of it
+   because of this file; they return in the follow-up below.
+2. #2249 (`fix/judge-fails-closed`) is stacked on this PR.
+
+### Follow-up (not in this PR)
 
 On top of this split, in a small PR stacked on #2025:
 
@@ -216,5 +233,13 @@ On top of this split, in a small PR stacked on #2025:
 with #2025, so the follow-up stacks on that branch rather than this one.
 `components/semantic-analyzer/deps.edn` already depends on `policy-pack`, so no
 dependency change is needed.
+
+## Checklist
+
+- [x] All 33 definitions moved; normalized bodies identical
+- [x] Same 16 tests and 69 assertions
+- [x] `interface.clj` exposes the same eight vars
+- [x] Every new namespace within the 3-layer budget
+- [ ] Follow-up for `:exclude-globs` and the shared matcher
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
