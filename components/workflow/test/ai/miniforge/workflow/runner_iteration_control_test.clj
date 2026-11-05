@@ -131,3 +131,49 @@
           (is (map? (:result result)))
           (is (false? (:interrupted-during? result)))
           (is (false? (:interrupted-after? result))))))))
+
+(deftest ^{:stratum 1} swallowed-interrupt-is-sent-again-test
+  (testing "a phase that swallows the cancel's interrupt and blocks again
+            (a fallback agent call) is interrupted again"
+    (let [control-state (running-control-state)
+          started       (promise)]
+      (with-redefs [monitoring/check-workflow-supervision (constantly {:status :ok})
+                    phase-step/execute-phase (fn [_ _ _]
+                                               (deliver started true)
+                                               (try
+                                                 (Thread/sleep blocked-phase-ms)
+                                                 (catch InterruptedException _ nil))
+                                               (Thread/sleep blocked-phase-ms))]
+        (let [iteration (future (iterate-and-report-interrupt (test-context) control-state))]
+          (try
+            (deref started stop-wait-ms nil)
+            (swap! control-state assoc :stopped true)
+            (let [[result interrupted?] (deref iteration stop-wait-ms [::still-running])]
+              (is (not= ::still-running result) "the second wait is interrupted too")
+              (is (= :failed (:execution/status result)))
+              (is (false? interrupted?)))
+            (finally
+              (future-cancel iteration))))))))
+
+(deftest ^{:stratum 1} fatal-error-during-cancel-is-rethrown-test
+  (testing "an Error a phase throws after the cancel is not read as a stop"
+    (let [control-state (running-control-state)
+          started       (promise)]
+      (with-redefs [monitoring/check-workflow-supervision (constantly {:status :ok})
+                    phase-step/execute-phase (fn [_ _ _]
+                                               (deliver started true)
+                                               (try
+                                                 (Thread/sleep blocked-phase-ms)
+                                                 (catch InterruptedException e
+                                                   (throw (ex-info "phase failed" {}
+                                                                   (StackOverflowError. (ex-message e)))))))]
+        (let [iteration (future
+                          (try
+                            (runner/execute-single-iteration [] (test-context) {} 1 control-state)
+                            ::returned
+                            (catch Throwable t t)))]
+          (deref started stop-wait-ms nil)
+          (swap! control-state assoc :stopped true)
+          (let [outcome (deref iteration stop-wait-ms ::still-running)]
+            (is (instance? Throwable outcome) "the failure propagates")
+            (is (instance? StackOverflowError (ex-cause outcome)))))))))

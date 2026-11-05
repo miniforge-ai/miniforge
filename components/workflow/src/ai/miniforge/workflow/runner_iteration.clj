@@ -10,6 +10,7 @@
             [ai.miniforge.workflow.monitoring :as monitoring]
             [ai.miniforge.workflow.runner-checkpoint :as runner-checkpoint]
             [ai.miniforge.workflow.runner-defaults :as defaults]
+            [ai.miniforge.workflow.runner-environment :as env]
             [ai.miniforge.workflow.runner-outcome :as outcome]
             [ai.miniforge.workflow.runner-phase-step :as phase-step]
             [slingshot.slingshot :refer [try+ throw+]]))
@@ -38,25 +39,46 @@
       (monitoring/handle-supervision-halt context result ctx/transition-to-failed)
       (phase-step/execute-phase pipeline context callbacks))))
 
+(defn- ^{:stratum 0} fatal-error?
+  "True when THROWABLE or a cause in its chain is a JVM Error (out of
+   memory, stack overflow): never something a cancel explains."
+  [throwable]
+  (loop [t throwable seen #{}]
+    (cond
+      (or (nil? t) (contains? seen t)) false
+      (instance? Error t)              true
+      :else                            (recur (.getCause ^Throwable t) (conj seen t)))))
+
 (defn- ^{:stratum 0} interrupt-on-cancel!
   "Interrupt the calling thread when CONTROL-STATE is stopped, now or until
    the returned function is called. Interrupting the phase thread is what
    stops an in-flight agent call: the LLM client destroys the agent's
-   process tree when its thread is interrupted. The returned function ends
-   the watch and returns true when it sent the interrupt, clearing the flag
-   it set so the runner's own waits and checkpoint writes are not
-   interrupted after the phase. The lock keeps a cancel racing the end of
-   the phase from interrupting the thread after the flag is cleared."
+   process tree when its thread is interrupted. Once fired, the interrupt
+   is sent again every `cancel-reinterrupt-ms` until the phase ends, so a
+   handler that swallows one (and goes on to another agent call) is
+   interrupted again. The returned function ends the watch and returns true
+   when it fired, clearing the flag so the runner's own waits and
+   checkpoint writes are not interrupted after the phase. The lock keeps an
+   interrupt from landing after the flag is cleared."
   [control-state]
-  (let [thread    (Thread/currentThread)
-        watch-key (Object.)
-        lock      (Object.)
-        state     (volatile! :armed)
-        fire!     (fn [control]
-                    (locking lock
-                      (when (and (:stopped control) (= :armed @state))
-                        (vreset! state :fired)
-                        (.interrupt thread))))]
+  (let [thread     (Thread/currentThread)
+        watch-key  (Object.)
+        lock       (Object.)
+        state      (volatile! :armed)
+        interrupt! (fn [] (locking lock
+                            (when (= :fired @state) (.interrupt thread) true)))
+        fire!      (fn [control]
+                     (when (locking lock
+                             (when (and (:stopped control) (= :armed @state))
+                               (vreset! state :fired)
+                               (.interrupt thread)
+                               true))
+                       (doto (Thread. ^Runnable
+                                      (fn []
+                                        (while (interrupt!)
+                                          (Thread/sleep (long (defaults/cancel-reinterrupt-ms))))))
+                         (.setDaemon true)
+                         (.start))))]
     (add-watch control-state watch-key (fn [_ _ _ control] (fire! control)))
     (fire! @control-state)
     (fn disarm! []
@@ -84,17 +106,17 @@
 
 (defn- ^{:stratum 1} run-until-cancelled
   "Run phase step F, interrupting it if CONTROL-STATE is stopped while it
-   runs. Returns {:result r} when F returns, even after an interrupt, and
-   {:cancelled? true} when F threw after the cancel interrupted it. Anything
-   F throws without a cancel is rethrown unchanged."
+   runs. Returns {:result r} when F returns, with :interrupted? true when
+   the cancel interrupted it anyway, and {:cancelled? true} when F threw
+   after the cancel interrupted it. Anything F throws without a cancel, and
+   a JVM Error even after one, is rethrown unchanged."
   [control-state f]
   (let [disarm! (interrupt-on-cancel! control-state)]
     (try+
       (let [result (f)]
-        (disarm!)
-        {:result result})
+        {:result result :interrupted? (disarm!)})
       (catch Object _
-        (if (disarm!)
+        (if (and (disarm!) (not (fatal-error? (:throwable &throw-context))))
           {:cancelled? true}
           (throw+))))))
 
@@ -124,13 +146,23 @@
                        stop-anomaly
                        (apply-dashboard-stop context stop-anomaly)
 
-                       ;; The cancel cut the phase short: stop the run from
+                       ;; The cancel cut the phase short: commit what it left
+                       ;; in the worktree, as its boundary would have, so
+                       ;; cleanup does not delete it, then stop the run from
                        ;; the context the phase started with.
                        (:cancelled? outcome)
-                       (apply-dashboard-stop context (check-stopped control-state))
+                       (do (env/persist-workspace-at-phase-boundary! context context)
+                           (apply-dashboard-stop context (check-stopped control-state)))
 
-                       ;; A phase that returned despite the interrupt is kept;
-                       ;; the next iteration takes the stop path.
+                       ;; A phase that returned despite the interrupt is kept,
+                       ;; and the next iteration takes the stop path. Persist
+                       ;; again: the interrupt may have cut short its own
+                       ;; boundary persist (a second one with nothing new to
+                       ;; commit changes nothing).
+                       (:interrupted? outcome)
+                       (do (env/persist-workspace-at-phase-boundary! context (:result outcome))
+                           (:result outcome))
+
                        :else
                        (:result outcome))]
     ;; A failed write is warned about and published, never thrown, so

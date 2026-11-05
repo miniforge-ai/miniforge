@@ -31,26 +31,34 @@ subprocess."
 1. `runner-iteration/interrupt-on-cancel!`: watches the control state for
    the length of one phase step and interrupts the calling thread when the
    run is stopped (including a stop already set when the watch starts).
-   Ending the watch clears the interrupt flag it set, so the runner's own
-   checkpoint write and pause waits are not interrupted afterwards. A lock
-   keeps a cancel racing the end of the phase from interrupting the thread
-   after the flag is cleared.
+   Once fired it interrupts again every `cancel-reinterrupt-ms` (200 ms,
+   `runner/defaults.edn`) until the phase ends: a handler that swallows one
+   interrupt and goes on to another agent call (implement's curator
+   fallback) is interrupted again. Ending the watch clears the interrupt
+   flag, so the runner's own checkpoint write and pause waits are not
+   interrupted afterwards; a lock keeps an interrupt from landing after the
+   flag is cleared.
 2. `runner-iteration/run-until-cancelled`: runs the phase step under that
    watch. A phase that throws after the cancel interrupted it reports
-   `:cancelled?`; anything thrown without a cancel is rethrown unchanged.
-3. `execute-single-iteration`: a cancelled phase stops the run through the
-   existing dashboard-stop path, from the context the phase started with.
-   A phase that returns despite the interrupt keeps its result; the next
-   iteration takes the stop path as before.
+   `:cancelled?`. Anything thrown without a cancel, and any JVM `Error` in
+   the cause chain even after a cancel, is rethrown unchanged, so fatal
+   errors still reach the runner's fatal-cause handling.
+3. `execute-single-iteration`: a cancelled phase first runs the boundary
+   persist (`persist-workspace-at-phase-boundary!`) on what it left in the
+   worktree, so post-workflow cleanup does not delete its partial work,
+   then stops the run through the existing dashboard-stop path from the
+   context the phase started with. A phase that returns despite the
+   interrupt keeps its result and is persisted again, since the interrupt
+   may have cut short its own boundary persist; the next iteration takes
+   the stop path as before.
 
 One change covers both execution paths: DAG sub-workflows run their own
 runner loop through `execute-single-iteration` with the parent's control
 state (`dag-sub-workflow`), so each task's thread is interrupted on its
 own watch.
 
-A phase cut short does not run its boundary persist. Its partial work stays
-in the worktree, uncommitted, as it would after a crash; a resume starts
-the phase again.
+A resume starts the cancelled phase again, from a task branch that holds
+its partial work.
 
 ## Testing Plan
 
@@ -61,6 +69,10 @@ the phase again.
    runner thread's interrupt flag is clear.
 2. After a phase returns, a later cancel does not interrupt the runner
    thread (the watch is gone), and no interrupt is left set.
+3. A phase that swallows the first interrupt and blocks again is
+   interrupted again; the run stops.
+4. A `StackOverflowError` wrapped in the exception a phase throws after a
+   cancel propagates instead of becoming a stop.
 
 The existing pause-then-cancel test is unchanged.
 

@@ -29,6 +29,7 @@
       [:max-backoff-ms                 {:optional true} :int]
       [:backoff-base-ms                {:optional true} :int]
       [:pause-poll-interval-ms         {:optional true} :int]
+      [:cancel-reinterrupt-ms          {:optional true} :int]
       [:default-workdir                {:optional true} :string]
       [:task-branch-prefix             {:optional true} :string]
       [:default-docker-image           {:optional true} :string]]"
@@ -71,6 +72,13 @@
 (defn ^{:stratum 1} backoff-base-ms      [] (get @defaults :backoff-base-ms 1000))
 
 (defn ^{:stratum 1} pause-poll-interval-ms [] (get @defaults :pause-poll-interval-ms 1000))
+
+(defn ^{:stratum 1} cancel-reinterrupt-ms
+  "How often a cancelled phase's thread is interrupted again until the phase
+   ends, so a handler that swallows one interrupt cannot start another agent
+   call that runs to completion."
+  []
+  (get @defaults :cancel-reinterrupt-ms 200))
 
 (defn ^{:stratum 1} default-workdir      [] (get @defaults :default-workdir "/workspace"))
 
