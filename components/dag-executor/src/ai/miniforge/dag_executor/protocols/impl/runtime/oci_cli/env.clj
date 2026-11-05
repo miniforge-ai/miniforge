@@ -118,15 +118,17 @@
       (not (re-find execution-plan/env-name-pattern n))))
 
 ;; ============================================================================
-;; Plan env and image ENV reading
+;; Env normalizing and image ENV reading
 ;; ============================================================================
-(defn ^{:stratum 0} normalize-plan-env
-  "Normalize an env-config :env map to the string→string shape
-   ExecutionPlanSchema requires: keyword keys via `name`, values via `str`
-   (a numeric port or boolean flag becomes its printed form — the same
-   text the container would see on the wire). The plan is the canonical,
-   schema-conformant record of the launch, so both normalize here — once,
-   at the writer — rather than at every reader."
+(defn ^{:stratum 0} normalize-env
+  "Normalize an env map to the string→string shape ExecutionPlanSchema
+   requires: keyword keys via `name`, values via `str` (a numeric port or
+   boolean flag becomes its printed form — the same text the container
+   would see on the wire). Two writers use it, once each, rather than every
+   reader: `build-launch-plan` for env-config's :env, since the plan is the
+   canonical, schema-conformant record of the launch, and
+   `with-git-credentials` for an execute! :env, which the GIT_CONFIG_*
+   readers then see as git will."
   [env]
   (into {}
         (map (fn [[k v]] [(name k) (str v)]))

@@ -23,9 +23,10 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.container
     :refer [chain-container-command container-exec-fn container-git-count]]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.env :refer [normalize-env]]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.git-credentials
     :refer [combine-git-env credential-git-check git-auth git-config-entries git-credential-env
-            git-network-command? git-remote git-trace-off-env string-keys]]
+            git-network-command? git-remote git-trace-off-env]]
    [ai.miniforge.dag-executor.result :as result]
    [clojure.string :as str]))
 
@@ -49,11 +50,13 @@
    config, such as release's push retry, is kept and wins. An env left
    holding GIT_CONFIG_* entries gets `git-trace-off-env` last, so a
    caller's own header is not traced when no credential resolved. The
-   caller's env is read by string name first (`string-keys`), so a keyword
-   and a string spelling of one variable cannot both reach the command."
+   caller's env is first put in the string→string form the command gets
+   (`normalize-env`), so a keyword and a string spelling of one variable
+   cannot both reach the command, and a numeric GIT_CONFIG_COUNT reads as
+   the text git sees."
   [opts cred-env]
   (let [opts (cond-> opts
-               (:env opts)              (update :env string-keys)
+               (:env opts)              (update :env normalize-env)
                (:git-credentials? opts) (update :env #(combine-git-env @cred-env %)))]
     (cond-> opts
       (seq (git-config-entries (:env opts))) (update :env merge git-trace-off-env))))

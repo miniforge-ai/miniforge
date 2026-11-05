@@ -496,7 +496,7 @@
       (doseq [{e :env} @seen]
         (is (= header (get e "GIT_CONFIG_VALUE_0")))
         (is (= "1" (get e "GIT_TRACE_REDACT")))
-        (is (= ["" ""] (map #(get e %) ["GIT_TRACE_CURL" "GIT_TRACE2_EVENT"])))))))
+        (is (= ["0" "0"] (map #(get e %) ["GIT_TRACE_CURL" "GIT_TRACE2_EVENT"])))))))
 
 (deftest ^{:stratum 0} credential-env-forces-git-trace-redaction-test
   (testing "a credentialed git command runs with header redaction forced on
@@ -510,7 +510,7 @@
                                                    (result/ok {:exit-code 0}))]
         (proto/execute! (recorded-remote-executor) "c1" ["git" "push"] {:git-credentials? true})
         (is (= "1" (get-in @seen [:env "GIT_TRACE_REDACT"])))
-        (is (= ["" "" ""] (map #(get-in @seen [:env %]) ["GIT_TRACE" "GIT_TRACE_CURL" "GIT_TRACE2_EVENT"])))
+        (is (= ["0" "0" "0"] (map #(get-in @seen [:env %]) ["GIT_TRACE" "GIT_TRACE_CURL" "GIT_TRACE2_EVENT"])))
         (is (not (contains? (:env @seen) "GIT_CURL_VERBOSE")))))))
 
 (deftest ^{:stratum 0} credentialed-exec-overrides-keyword-keyed-trace-settings-test
@@ -527,8 +527,30 @@
                         {:git-credentials? true
                          :env {:GIT_TRACE_CURL "/tmp/trace" :GIT_TRACE_REDACT "0"}})
         (is (every? string? (keys (:env @seen))))
-        (is (= "" (get-in @seen [:env "GIT_TRACE_CURL"])))
+        (is (= "0" (get-in @seen [:env "GIT_TRACE_CURL"])))
         (is (= "1" (get-in @seen [:env "GIT_TRACE_REDACT"])))))))
+
+(deftest ^{:stratum 0} execute-reads-a-numeric-git-config-count-test
+  (testing "a caller's GIT_CONFIG_COUNT given as a number, which the env file
+            writes as its text, is read as that text: with and without
+            :git-credentials? the command runs, gets \"1\" and the caller's
+            header, and runs with git tracing off"
+    (let [seen   (atom [])
+          header "Authorization: Basic eC1hY2Nlc3MtdG9rZW46dA=="
+          env    {"GIT_CONFIG_COUNT"   1
+                  "GIT_CONFIG_KEY_0"   "http.https://github.com/.extraHeader"
+                  "GIT_CONFIG_VALUE_0" header}]
+      (with-redefs [oci-git/resolve-git-token (fn [_url _opts] nil)
+                    oci-ctr/exec-in-container (fn [_d _id _cmd opts] (swap! seen conj opts)
+                                                (result/ok {:exit-code 0}))]
+        (let [executor (recorded-remote-executor)]
+          (doseq [opts [{:git-credentials? true :env env} {:env env}]]
+            (is (result/ok? (proto/execute! executor "c1" ["git" "push"] opts))))))
+      (is (= 2 (count @seen)))
+      (doseq [{e :env} @seen]
+        (is (= "1" (get e "GIT_CONFIG_COUNT")))
+        (is (= header (get e "GIT_CONFIG_VALUE_0")))
+        (is (= "0" (get e "GIT_TRACE2_EVENT")))))))
 
 (deftest ^{:stratum 0} credential-env-follows-the-containers-git-config-test
   (testing "the credential's GIT_CONFIG_* entries are numbered after the
@@ -591,6 +613,43 @@
         (finally
           (run! #(.delete ^java.io.File %) (reverse (file-seq dir))))))))
 
+(deftest ^{:stratum 0} git-trace-off-env-overrides-a-configured-trace2-target-test
+  (testing "trace2 targets set in global git config, with trace2.envVars
+            naming the credential's GIT_CONFIG_VALUE_n, record the
+            Authorization header unless git-trace-off-env turns them off;
+            git reads an empty GIT_TRACE2* as unset and uses the config"
+    (let [home    (.toFile (java.nio.file.Files/createTempDirectory
+                            "trace2-home" (make-array java.nio.file.attribute.FileAttribute 0)))
+          kinds   ["normal" "event" "perf"]
+          targets (mapv #(java.io.File. home ^String %) kinds)
+          cred    ((private-fn 'git-credential-env) "https://github.com/o/r.git"
+                                                    {:user "x-access-token" :token fake-token})
+          ;; No inherited GIT_* (a hook's GIT_CONFIG_GLOBAL), so HOME's
+          ;; .gitconfig is the only config git reads.
+          host    (into {} (remove #(clojure.string/starts-with? (key %) "GIT_")) (System/getenv))
+          git     (fn [env]
+                    (shell/sh "git" "version"
+                              :env (merge host
+                                          {"HOME" (str home) "XDG_CONFIG_HOME" (str home)
+                                           "GIT_CONFIG_NOSYSTEM" "1"}
+                                          cred env)))]
+      (try
+        (spit (java.io.File. home ".gitconfig")
+              (str "[trace2]\n"
+                   (apply str (map #(str "\t" %1 "Target = " %2 "\n") kinds targets))
+                   "\tenvVars = "
+                   (clojure.string/join "," (filter #(clojure.string/starts-with? % "GIT_CONFIG_VALUE_")
+                                                    (keys cred)))
+                   "\n"))
+        (git {})
+        (is (every? #(and (.exists ^java.io.File %) (token-in? (slurp %))) targets)
+            "control: with no trace env, each configured target records the header")
+        (run! #(.delete ^java.io.File %) targets)
+        (git oci-git/git-trace-off-env)
+        (is (not-any? #(.exists ^java.io.File %) targets))
+        (finally
+          (run! #(.delete ^java.io.File %) (reverse (file-seq home))))))))
+
 (deftest ^{:stratum 0} write-env-file-deletes-the-file-when-the-write-fails-test
   (testing "a write that fails after the temp file exists (a full /tmp)
             deletes it before the error propagates, so no partial
@@ -625,7 +684,7 @@
              ((private-fn 'git-config-entries) credentialed)))
       (doseq [env [credentialed plain]]
         (is (every? string? (keys env)))
-        (is (= "" (get env "GIT_TRACE")))
+        (is (= "0" (get env "GIT_TRACE")))
         (is (= "1" (get env "GIT_TRACE_REDACT")))
         (is (= "/capsule-home" (get env "HOME"))))
       (is (= [["http.proxy" "http://proxy.example:3128"]]

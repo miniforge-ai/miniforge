@@ -61,7 +61,7 @@ Tests follow the moved definitions:
 2. stratum-lint on every new file: no findings, and `--fix` leaves each file unchanged.
 3. clj-kondo on dag-executor's src and test: no warnings beyond those already on the base.
 4. dag-executor, release-executor, redaction, task-executor and llm-interface tests, under the
-   shared JVM lock: 984 pass, with every review fix and #2221's head merged in.
+   shared JVM lock: 987 pass, with every review fix and #2221's head merged in.
 
 When the base moves, the split is regenerated from the base's `oci_cli.clj` and test files with
 the same name-to-namespace assignment, the checks above are rerun, and this PR's own commits are
@@ -71,7 +71,8 @@ re-applied on top.
 
 Capsule stack review fixes that edit `oci_cli.clj` land here, one commit each. Items 5 to 9 come
 from the merge-gate review (rule 720 and the rules review), whose comment on this PR lists the
-traced flow and what was left:
+traced flow and what was left. Items 10 and 11 are Copilot findings on #2221 whose code lives
+here:
 
 1. A failed env-file write deletes the temp file (#2143 thread).
 2. Persist and restore of a capsule cloned without an HTTP credential go to the URL it cloned
@@ -93,6 +94,15 @@ traced flow and what was left:
    binding for the launch-plan env and `inspected-env-entry` (210), `try+` in `write-env-file!`
    (211), two section banners renamed for the code under them (001), and shared test helpers
    (400).
+10. `git-trace-off-env` sets each trace target to `"0"`, not empty. git reads an empty
+    `GIT_TRACE2`, `GIT_TRACE2_EVENT` or `GIT_TRACE2_PERF` as unset and falls back to a
+    `trace2.*Target` in the image's system or global git config; with `trace2.envVars` naming a
+    `GIT_CONFIG_VALUE_n`, that target records the Authorization header. A real-git test sets the
+    three targets in a global config.
+11. `with-git-credentials` puts the `execute!` env in string→string form with `normalize-env`
+    (the launch plan's normalizer, renamed), which replaces `string-keys`. A numeric
+    `GIT_CONFIG_COUNT` now reads as the `"1"` the env file writes, rather than failing the
+    command with `:exec-failed`.
 
 ## Deployment Plan
 

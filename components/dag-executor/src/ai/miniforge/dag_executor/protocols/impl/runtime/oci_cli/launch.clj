@@ -23,7 +23,7 @@
    [ai.miniforge.dag-executor.plan-security :as plan-security]
    [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.env
-    :refer [agent-credential-names filter-env-by-trust normalize-plan-env refused-env-name?
+    :refer [agent-credential-names filter-env-by-trust normalize-env refused-env-name?
             untrusted-env-blanks]]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.llm.interface :as llm]
@@ -67,7 +67,7 @@
          keep-names  (-> agent-credential-names
                          (into (llm/backend-credential-env backend))
                          (into (map name) (:env-passthrough env-config)))
-         env         (filter-env-by-trust (normalize-plan-env (get env-config :env {}))
+         env         (filter-env-by-trust (normalize-env (get env-config :env {}))
                                           trust-level keep-names)
          plan-env    (cond->> env
                        (= :untrusted trust-level)

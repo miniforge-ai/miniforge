@@ -88,8 +88,8 @@
                  (iterate inc offset) entries))))
 
 (defn ^{:stratum 0} git-config-count
-  "The GIT_CONFIG_COUNT in `env`; an empty or non-numeric one, as git reads
-   it, is 0."
+  "The GIT_CONFIG_COUNT in `env`, a string→string env; an empty one, as git
+   reads it, is 0. git refuses a non-numeric one; here it is 0 too."
   [env]
   (or (parse-long (get env "GIT_CONFIG_COUNT" "")) 0))
 
@@ -118,30 +118,26 @@
        (= "git" (first cmd))
        (contains? #{"ls-remote" "push" "fetch"} (second cmd))))
 
-(defn ^{:stratum 0} string-keys
-  "`env` with each key as its name: an exec env may name a variable by
-   keyword or string, and the GIT_CONFIG_* readers look names up as strings.
-   `with-git-credentials` applies it where execute! opts come in."
-  [env]
-  (update-keys env name))
-
 (def ^{:stratum 0} git-trace-off-env
   "Env that keeps git's tracing from recording the Authorization header:
    header redaction forced on, over an inherited GIT_TRACE_REDACT=0, and
-   each trace target empty, which git reads as off. GIT_CURL_VERBOSE stays
-   as inherited: git only checks that it is set, so an empty value would
-   turn it on; its stderr output goes through the same redaction."
+   each trace target \"0\", which git reads as off. Not empty: git takes an
+   empty GIT_TRACE2, GIT_TRACE2_EVENT or GIT_TRACE2_PERF as unset and falls
+   back to the trace2.*Target the image's system or global git config sets.
+   GIT_CURL_VERBOSE stays as inherited: git only checks that it is set, so
+   any value, \"0\" too, turns it on; its stderr output goes through the
+   same redaction."
   (into {"GIT_TRACE_REDACT" "1"}
         (map vector ["GIT_TRACE" "GIT_TRACE_CURL" "GIT_TRACE_PACKET" "GIT_TRACE_PACK_ACCESS"
                      "GIT_TRACE_PERFORMANCE" "GIT_TRACE_SETUP" "GIT_TRACE_SHALLOW"
                      "GIT_TRACE2" "GIT_TRACE2_EVENT" "GIT_TRACE2_PERF"]
-             (repeat ""))))
+             (repeat "0"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} git-config-entries
   "The [key value] pairs GIT_CONFIG_COUNT / KEY_n / VALUE_n in `env` set,
-   in order. An empty or non-numeric count, as git reads it, sets none."
+   in order. An empty or non-numeric count (`git-config-count`) sets none."
   [env]
   (for [i (range (git-config-count env))]
     [(get env (str "GIT_CONFIG_KEY_" i)) (get env (str "GIT_CONFIG_VALUE_" i))]))
