@@ -725,7 +725,9 @@
                        :prepared {}
                        :metrics {:files-written 2 :tokens 300 :duration-ms 800}})
                     release-executor/publish-release
-                    (constantly {:success? true :artifacts [] :metrics {}})]
+                    (constantly {:success? true :metrics {}
+                                 :artifacts [{:artifact/content {:pr-number 1
+                                                                 :pr-url "https://github.com/o/r/pull/1"}}]})]
         (let [ctx (create-base-context worktree)
               ctx-with-config (assoc ctx :phase-config {:phase :release})
               interceptor (phase/get-phase-interceptor {:phase :release})
