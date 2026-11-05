@@ -142,6 +142,22 @@ Step 3 of the ratified Ariadne adoption order. Identity stops being
 | blocker | ○ | ariadne-tenancy | `ariadne-owned-records.spec.edn` — Ariadne step 3c: every record is born owned | correctness+scale+governancecredibility |
 | high | ○ | ariadne-tenancy | `ariadne-engagement.spec.edn` — Ariadne step 3d: engagement as a relation, not containment | correctness+scale+governancecredibility |
 
+## Theme — Codex gap measurement (`codex-gap`, status: in-flight)
+
+Measure how far the codex runs actually get falls short of the ideal
+   one. Every in-run failure becomes a miss-ledger entry, classified at the
+   first rung that leaked (coverage, routing, anchoring, delivery,
+   attention, learning), and the gap report shows each rung beside its
+   member misses. The ledger, classifier, phase wiring and report are on
+   main; two report slots are not yet measured.
+
+**Informative spec:** `work/done/codex-gap-instrument.spec.edn`
+
+| tier | r | theme | spec | axes |
+|---|---|---|---|---|
+| medium | ● | codex-gap | `codex-gap-consultation-match-rate.spec.edn` — Codex gap report — measure the consultation match rate | observation |
+| low | ● | codex-gap | `codex-gap-learning-latency.spec.edn` — Codex gap report — measure learning latency from miss to harvest decision | observation |
+
 ## Theme — unassigned (`unassigned`, status: planned)
 
 (no theme description)

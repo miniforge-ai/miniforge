@@ -25,7 +25,8 @@ mixed one concrete fix with two open investigations.
 1. Moved to `work/done/` (work on main; checked in source):
    1. `ariadne-identity-boundary` — `tenancy` component, `resolve-operator`.
    2. `codex-gap-instrument` — `codex-gap` component, `gap_wiring.clj`,
-      `bb codex-gap-report`.
+      `bb codex-gap-report`. Two gap-report measures it lists are still
+      `:not-instrumented`; item 7 adds a spec for each.
    3. `dogfood-monitor-retest` — `algorithms/graph.clj` `reachable-count` (#1226).
    4. `per-task-base-chaining` — `dag_executor/branch_registry.clj`. Its
       multi-parent-rejection criterion was superseded by multi-parent merge.
@@ -64,7 +65,14 @@ mixed one concrete fix with two open investigations.
    `:anomalies.workflow/workspace-restore-failed` instead of continuing with
    no environment. `workflow-resume-fsm-advance-investigation` keeps causes
    (b) and (c) and is now blocked by it.
-7. `work/QUEUE.md` regenerated with `bb work:queue`.
+7. New `codex-gap-consultation-match-rate` and `codex-gap-learning-latency`:
+   the two slots `codex-gap.report/build-report` leaves `:not-instrumented`.
+   The match rate reads the consultation records phases already write, once
+   each record keeps the anomaly that separates an unmatched situation from
+   an unreadable codex. Learning latency needs harvest entries to name the
+   misses they decide. Both sit under a new `codex-gap` theme in
+   `work/themes.edn`, anchored on T2 §3–§4; no existing theme covered it.
+8. `work/QUEUE.md` regenerated with `bb work:queue`.
 
 ## Testing Plan
 
