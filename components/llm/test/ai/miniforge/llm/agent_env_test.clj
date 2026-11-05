@@ -22,6 +22,7 @@
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
    [ai.miniforge.llm.protocols.impl.llm-client.stream-exec :as stream-exec]
    [ai.miniforge.llm.protocols.impl.llm-client.subprocess :as subprocess]))
@@ -67,7 +68,50 @@
            (subprocess/allowed-env {:allow ["PATH"] :allow-prefixes ["GH"] :deny-prefixes ["GH_"]}
                                    {"Path" "C:\\Windows" "gh_token" "x"})))))
 
+(deftest ^{:stratum 0} opencode-call-carries-its-deny-config-test
+  (testing "an OpenCode call outside a session reaches exec with --pure and the deny-all config"
+    (let [calls  (atom [])
+          record (fn [cmd opts] (swap! calls conj [cmd opts]) {:out "ok" :err "" :exit 0})
+          client (llm/create-client {:backend :opencode
+                                     :exec-fn (fn ([cmd] (record cmd nil)) ([cmd opts] (record cmd opts)))})]
+      (llm/complete client {:prompt "hi"})
+      (let [[cmd opts] (first @calls)]
+        (is (some #{"--pure"} cmd))
+        (is (contains? (:env opts) "OPENCODE_CONFIG_CONTENT"))))))
+
+(deftest ^{:stratum 0} one-arity-exec-fn-refuses-env-entries-test
+  (let [calls (atom 0)
+        exec  (impl/normalize-exec-fn (fn [_cmd] (swap! calls inc) {:out "ok" :err "" :exit 0}))]
+    (testing "a 1-arity exec-fn cannot receive a call's env entries, so the call is refused, not run without them"
+      (is (= 1 (:exit (exec ["opencode" "run" "p"] {:env {"OPENCODE_CONFIG_CONTENT" "{}"}}))))
+      (is (zero? @calls)))
+    (testing "calls without env entries still run through it"
+      (is (= "ok" (:out (exec ["claude" "-p"] {:stdin "x"}))))
+      (is (= "ok" (:out (exec ["claude" "-p" "x"]))))
+      (is (= 2 @calls)))))
+
+(deftest ^{:stratum 0} capsule-exec-refuses-env-entries-test
+  (let [seen (atom nil)
+        exec (impl/capsule-exec-fn (fn [_executor _env-id cmd opts] (reset! seen (assoc opts :cmd cmd)) {:data {:stdout "ok"}})
+                                   :executor "env-1" "/workspace")]
+    (testing "a call carrying env entries is refused, not run without its permissions or with them in argv"
+      (let [result (exec ["opencode" "run" "p"] {:env {"OPENCODE_CONFIG_CONTENT" "{\"k\":\"secret\"}"}})]
+        (is (= 1 (:exit result)))
+        (is (nil? @seen) "the executor is not called")
+        (is (not (re-find #"secret" (:err result))) "the error names the entries, not their values")))
+    (testing "a call without them runs in the capsule as before"
+      (is (= "ok" (:out (exec ["claude" "-p" "x"] {:stdin "x"}))))
+      (is (= "/workspace" (:workdir @seen))))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} backend-env-entries-reach-the-process-test
+  (testing "env entries a backend adds are set on top of the agent environment"
+    (with-redefs [subprocess/host-env (constantly operator-env)]
+      (let [names (env-names (:out (impl/default-exec-fn ["env"] {:env {"OPENCODE_CONFIG_CONTENT" "{}"}})))]
+        (is (contains? names "OPENCODE_CONFIG_CONTENT"))
+        (is (contains? names "ANTHROPIC_API_KEY"))
+        (is (not-any? names withheld-names))))))
 
 (deftest ^{:stratum 1} agent-env-keeps-only-allowed-names-test
   (testing "the shipped allowlist keeps the basics and provider keys and drops miniforge's credentials"

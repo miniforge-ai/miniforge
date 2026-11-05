@@ -19,7 +19,8 @@
   "Syntax validation gate.
 
    Checks that code artifacts parse without errors."
-  (:require [ai.miniforge.gate.registry :as registry]))
+  (:require [ai.miniforge.gate.messages :as messages]
+            [ai.miniforge.gate.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -54,7 +55,7 @@
   {:success? false
    :artifact artifact
    :errors errors
-   :message "Syntax repair requires LLM agent"})
+   :message (messages/t :syntax/repair-requires-llm)})
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -85,7 +86,7 @@
 (defmethod ^{:stratum 2} registry/get-gate :syntax
   [_]
   {:name :syntax
-   :description "Validates code parses without syntax errors"
+   :description (messages/t :syntax/description)
    :check check-syntax
    :repair repair-syntax})
 

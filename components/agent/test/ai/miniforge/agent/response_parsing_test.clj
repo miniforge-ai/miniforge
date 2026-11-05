@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.response-parsing-test
   "Integration test for agent response parsing and validation.
 
@@ -24,12 +23,13 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.edn :as edn]
-   [ai.miniforge.agent.implementer :as impl]
+   [ai.miniforge.agent.implementer.code :as impl-code]
    [ai.miniforge.response.interface :as response]))
 
-;------------------------------------------------------------------------------ Mock Data
+;------------------------------------------------------------------------------ Layer 0
 
-(def mock-llm-plan-response
+;; Mock Data
+(def ^{:stratum 0} mock-llm-plan-response
   "Mock LLM response for a plan generation request."
   {:role "assistant"
    :content "```clojure
@@ -47,7 +47,7 @@
    :task/estimated-effort :small}]}
 ```"})
 
-(def mock-llm-code-response
+(def ^{:stratum 0} mock-llm-code-response
   "Mock LLM response for code generation."
   {:role "assistant"
    :content "```clojure
@@ -62,7 +62,7 @@
  :code/language \"clojure\"}
 ```"})
 
-(def mock-llm-test-response
+(def ^{:stratum 0} mock-llm-test-response
   "Mock LLM response for test generation."
   {:role "assistant"
    :content "```clojure
@@ -75,7 +75,7 @@
  :test/framework \"clojure.test\"}
 ```"})
 
-(def mock-llm-review-response
+(def ^{:stratum 0} mock-llm-review-response
   "Mock LLM response for code review."
   {:role "assistant"
    :content "```clojure
@@ -89,7 +89,7 @@
  :review/quality-score 8.5}
 ```"})
 
-(def mock-llm-malformed-response
+(def ^{:stratum 0} mock-llm-malformed-response
   "Mock LLM response with malformed EDN."
   {:role "assistant"
    :content "```clojure
@@ -97,16 +97,123 @@
  :code/files [\"this is wrong\"]}
 ```"})
 
-(def mock-llm-missing-fields-response
+(def ^{:stratum 0} mock-llm-missing-fields-response
   "Mock LLM response missing required fields."
   {:role "assistant"
    :content "```clojure
 {:code/id #uuid \"44444444-4444-4444-4444-444444444444\"}
 ```"})
 
-;------------------------------------------------------------------------------ Mock Functions
+(defn ^{:stratum 0} extract-code-block
+  "Extract Clojure code block from markdown response."
+  [content]
+  (when-let [match (re-find #"(?s)```clojure\n(.*?)\n```" content)]
+    (second match)))
 
-(defn mock-llm-backend
+;; Parser Helpers
+(defn ^{:stratum 0} parse-edn
+  "Parse EDN string into Clojure data structure."
+  [edn-str]
+  (when edn-str
+    (try
+      (edn/read-string edn-str)
+      (catch Exception _e
+        nil))))
+
+(defn ^{:stratum 0} parse-uuid-str
+  "Parse UUID string."
+  [uuid-str]
+  (when uuid-str
+    (java.util.UUID/fromString uuid-str)))
+
+(defn ^{:stratum 0} valid-file-action?
+  "Check if file action is valid."
+  [action]
+  (contains? #{:create :modify :delete} action))
+
+(deftest ^{:stratum 0} response-wrapper-structure-test
+  (testing "Agent responses are properly wrapped in response protocol"
+    (let [artifact {:code/id (random-uuid)
+                    :code/files []}
+          success-response (response/success artifact {:tokens 500})
+          failure-response (response/failure (ex-info "Test error" {}))]
+
+      ;; Test success response structure
+      (is (response/success? success-response)
+          "Success response should have :success status")
+      (is (= artifact (:output success-response))
+          "Success response should contain artifact")
+      (is (map? (:metrics success-response))
+          "Success response should have metrics")
+
+      ;; Test failure response structure
+      (is (false? (:success failure-response))
+          "Failure response should have :success false")
+      (is (string? (get-in failure-response [:error :message]))
+          "Failure response should have error message"))))
+
+(deftest ^{:stratum 0} nested-structure-parsing-test
+  (testing "Deeply nested response structures are parsed correctly"
+    (let [nested-response {:plan/id (random-uuid)
+                           :plan/tasks
+                           [{:task/id "t1"
+                             :task/subtasks
+                             [{:subtask/id "st1"
+                               :subtask/checks
+                               [{:check/name "validate"
+                                 :check/params {:strict true}}]}]}]}]
+
+      (is (uuid? (:plan/id nested-response))
+          "Top-level UUID should be valid")
+      (is (= "t1" (get-in nested-response [:plan/tasks 0 :task/id]))
+          "Should access nested task ID")
+      (is (= {:strict true}
+             (get-in nested-response [:plan/tasks 0 :task/subtasks 0
+                                      :subtask/checks 0 :check/params]))
+          "Should access deeply nested params"))))
+
+(deftest ^{:stratum 0} error-message-extraction-test
+  (testing "Error messages are extracted from failed responses"
+    (let [error (ex-info "Parsing failed" {:line 10 :column 5})
+          failure-response (response/failure error)]
+
+      (is (= "Parsing failed" (get-in failure-response [:error :message]))
+          "Should extract error message")
+      (is (map? (get-in failure-response [:error :data]))
+          "Should preserve error data"))))
+
+(deftest ^{:stratum 0} metrics-accumulation-test
+  (testing "Metrics from multiple agent calls accumulate correctly"
+    (let [response1 (response/success {} {:tokens 100 :duration-ms 1000})
+          response2 (response/success {} {:tokens 200 :duration-ms 2000})
+          combined-metrics (merge-with + (:metrics response1) (:metrics response2))]
+
+      (is (= 300 (:tokens combined-metrics))
+          "Tokens should sum correctly")
+      (is (= 3000 (:duration-ms combined-metrics))
+          "Duration should sum correctly"))))
+
+(deftest ^{:stratum 0} narrative-only-response-test
+  (testing "Agent narrative EDN summary without :code/files produces no code blocks"
+    (let [;; Exact shape of what the agent emitted in the failing dogfood run:
+          ;; agent narrated success but never called Write
+          narrative-content
+          "{:summary \"Created the classification Polylith component from scratch.\"
+           :breaking-change? false
+           :rationale \"All six files are net-new under components/classification/\"}"
+          parsed  (impl-code/parse-code-response narrative-content)
+          blocks  (impl-code/extract-code-blocks narrative-content)]
+      (is (map? parsed)
+          "parse-code-response should parse the EDN map")
+      (is (not (contains? parsed :code/files))
+          "Narrative-only EDN must NOT have :code/files — it is not a code artifact")
+      (is (nil? blocks)
+          "extract-code-blocks must return nil when content has no markdown code blocks"))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Mock Functions
+(defn ^{:stratum 1} mock-llm-backend
   "Create a mock LLM backend that returns predefined responses."
   [response-map]
   (fn [messages _opts]
@@ -116,35 +223,7 @@
       (or (get response-map role)
           mock-llm-code-response))))
 
-(defn extract-code-block
-  "Extract Clojure code block from markdown response."
-  [content]
-  (when-let [match (re-find #"(?s)```clojure\n(.*?)\n```" content)]
-    (second match)))
-
-;------------------------------------------------------------------------------ Parser Helpers
-
-(defn parse-edn
-  "Parse EDN string into Clojure data structure."
-  [edn-str]
-  (when edn-str
-    (try
-      (edn/read-string edn-str)
-      (catch Exception _e
-        nil))))
-
-(defn parse-uuid-str
-  "Parse UUID string."
-  [uuid-str]
-  (when uuid-str
-    (java.util.UUID/fromString uuid-str)))
-
-(defn valid-file-action?
-  "Check if file action is valid."
-  [action]
-  (contains? #{:create :modify :delete} action))
-
-(defn validate-code-artifact
+(defn ^{:stratum 1} validate-code-artifact
   "Validate code artifact structure."
   [artifact]
   (let [has-id? (some? (:code/id artifact))
@@ -162,9 +241,8 @@
                (not has-files?) (conj "Missing or invalid :code/files")
                (and has-files? (not files-valid?)) (conj "Invalid file specifications"))}))
 
-;------------------------------------------------------------------------------ Tests
-
-(deftest parse-plan-response-test
+;; Tests
+(deftest ^{:stratum 1} parse-plan-response-test
   (testing "Parsing plan response from LLM"
     (let [code-block (extract-code-block (:content mock-llm-plan-response))
           parsed (parse-edn code-block)]
@@ -182,7 +260,7 @@
       (is (every? :task/description (:plan/tasks parsed))
           "All tasks should have descriptions"))))
 
-(deftest parse-code-response-test
+(deftest ^{:stratum 1} parse-code-response-test
   (testing "Parsing code artifact response from LLM"
     (let [code-block (extract-code-block (:content mock-llm-code-response))
           parsed (parse-edn code-block)]
@@ -204,7 +282,7 @@
       (is (= "clojure" (:code/language parsed))
           "Should specify language"))))
 
-(deftest parse-test-response-test
+(deftest ^{:stratum 1} parse-test-response-test
   (testing "Parsing test artifact response from LLM"
     (let [code-block (extract-code-block (:content mock-llm-test-response))
           parsed (parse-edn code-block)]
@@ -222,7 +300,7 @@
       (is (number? (get-in parsed [:test/coverage :lines]))
           "Should have line coverage percentage"))))
 
-(deftest parse-review-response-test
+(deftest ^{:stratum 1} parse-review-response-test
   (testing "Parsing review response from LLM"
     (let [code-block (extract-code-block (:content mock-llm-review-response))
           parsed (parse-edn code-block)]
@@ -238,7 +316,7 @@
       (is (number? (:review/quality-score parsed))
           "Should have numeric quality score"))))
 
-(deftest malformed-response-handling-test
+(deftest ^{:stratum 1} malformed-response-handling-test
   (testing "Handling malformed EDN in response"
     (let [code-block (extract-code-block (:content mock-llm-malformed-response))
           result (try
@@ -251,24 +329,7 @@
               (nil? result))
           "Should handle malformed EDN without crashing"))))
 
-(deftest missing-required-fields-test
-  (testing "Detecting missing required fields in response"
-    (let [code-block (extract-code-block (:content mock-llm-missing-fields-response))
-          parsed (parse-edn code-block)]
-
-      (is (some? parsed)
-          "Should parse even with missing fields")
-      (is (uuid? (:code/id parsed))
-          "Should have ID")
-      (is (nil? (:code/files parsed))
-          "Should detect missing files field")
-
-      ;; Validation should catch this
-      (let [validation-result (validate-code-artifact parsed)]
-        (is (false? (:valid? validation-result))
-            "Validation should fail for missing required fields")))))
-
-(deftest agent-response-to-phase-integration-test
+(deftest ^{:stratum 1} agent-response-to-phase-integration-test
   (testing "Agent response can be consumed by workflow phase"
     (let [code-block (extract-code-block (:content mock-llm-code-response))
           parsed (parse-edn code-block)
@@ -282,45 +343,7 @@
       (is (map? (:metrics phase-result))
           "Phase should have metrics"))))
 
-(deftest response-wrapper-structure-test
-  (testing "Agent responses are properly wrapped in response protocol"
-    (let [artifact {:code/id (random-uuid)
-                    :code/files []}
-          success-response (response/success artifact {:tokens 500})
-          failure-response (response/failure (ex-info "Test error" {}))]
-
-      ;; Test success response structure
-      (is (response/success? success-response)
-          "Success response should have :success status")
-      (is (= artifact (:output success-response))
-          "Success response should contain artifact")
-      (is (map? (:metrics success-response))
-          "Success response should have metrics")
-
-      ;; Test failure response structure
-      (is (false? (:success failure-response))
-          "Failure response should have :success false")
-      (is (string? (get-in failure-response [:error :message]))
-          "Failure response should have error message"))))
-
-(deftest schema-validation-integration-test
-  (testing "Parsed responses are validated against schema"
-    (let [valid-code (parse-edn (extract-code-block (:content mock-llm-code-response)))
-          invalid-code {:code/files "should-be-vector"}]
-
-      ;; Valid artifact should pass
-      (let [valid-result (validate-code-artifact valid-code)]
-        (is (true? (:valid? valid-result))
-            "Valid artifact should pass validation"))
-
-      ;; Invalid artifact should fail
-      (let [invalid-result (validate-code-artifact invalid-code)]
-        (is (false? (:valid? invalid-result))
-            "Invalid artifact should fail validation")
-        (is (seq (:errors invalid-result))
-            "Validation should provide error details")))))
-
-(deftest file-action-validation-test
+(deftest ^{:stratum 1} file-action-validation-test
   (testing "File actions are validated"
     (let [valid-actions [:create :modify :delete]
           invalid-action :invalid]
@@ -332,7 +355,7 @@
       (is (not (valid-file-action? invalid-action))
           "Invalid action should be rejected"))))
 
-(deftest uuid-parsing-test
+(deftest ^{:stratum 1} uuid-parsing-test
   (testing "UUID strings are parsed correctly"
     (let [uuid-str "a1b2c3d4-e5f6-7890-1234-567890abcdef"
           parsed (parse-uuid-str uuid-str)]
@@ -352,48 +375,7 @@
       (is (= :error result)
           "Should handle invalid UUID gracefully"))))
 
-(deftest nested-structure-parsing-test
-  (testing "Deeply nested response structures are parsed correctly"
-    (let [nested-response {:plan/id (random-uuid)
-                           :plan/tasks
-                           [{:task/id "t1"
-                             :task/subtasks
-                             [{:subtask/id "st1"
-                               :subtask/checks
-                               [{:check/name "validate"
-                                 :check/params {:strict true}}]}]}]}]
-
-      (is (uuid? (:plan/id nested-response))
-          "Top-level UUID should be valid")
-      (is (= "t1" (get-in nested-response [:plan/tasks 0 :task/id]))
-          "Should access nested task ID")
-      (is (= {:strict true}
-             (get-in nested-response [:plan/tasks 0 :task/subtasks 0
-                                      :subtask/checks 0 :check/params]))
-          "Should access deeply nested params"))))
-
-(deftest error-message-extraction-test
-  (testing "Error messages are extracted from failed responses"
-    (let [error (ex-info "Parsing failed" {:line 10 :column 5})
-          failure-response (response/failure error)]
-
-      (is (= "Parsing failed" (get-in failure-response [:error :message]))
-          "Should extract error message")
-      (is (map? (get-in failure-response [:error :data]))
-          "Should preserve error data"))))
-
-(deftest metrics-accumulation-test
-  (testing "Metrics from multiple agent calls accumulate correctly"
-    (let [response1 (response/success {} {:tokens 100 :duration-ms 1000})
-          response2 (response/success {} {:tokens 200 :duration-ms 2000})
-          combined-metrics (merge-with + (:metrics response1) (:metrics response2))]
-
-      (is (= 300 (:tokens combined-metrics))
-          "Tokens should sum correctly")
-      (is (= 3000 (:duration-ms combined-metrics))
-          "Duration should sum correctly"))))
-
-(deftest response-idempotency-test
+(deftest ^{:stratum 1} response-idempotency-test
   (testing "Parsing the same response multiple times yields same result"
     (let [code-block (extract-code-block (:content mock-llm-code-response))
           parsed1 (parse-edn code-block)
@@ -402,19 +384,38 @@
       (is (= parsed1 parsed2)
           "Parsing should be idempotent"))))
 
-(deftest narrative-only-response-test
-  (testing "Agent narrative EDN summary without :code/files produces no code blocks"
-    (let [;; Exact shape of what the agent emitted in the failing dogfood run:
-          ;; agent narrated success but never called Write
-          narrative-content
-          "{:summary \"Created the classification Polylith component from scratch.\"
-           :breaking-change? false
-           :rationale \"All six files are net-new under components/classification/\"}"
-          parsed  (impl/parse-code-response narrative-content)
-          blocks  (impl/extract-code-blocks narrative-content)]
-      (is (map? parsed)
-          "parse-code-response should parse the EDN map")
-      (is (not (contains? parsed :code/files))
-          "Narrative-only EDN must NOT have :code/files — it is not a code artifact")
-      (is (nil? blocks)
-          "extract-code-blocks must return nil when content has no markdown code blocks"))))
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} missing-required-fields-test
+  (testing "Detecting missing required fields in response"
+    (let [code-block (extract-code-block (:content mock-llm-missing-fields-response))
+          parsed (parse-edn code-block)]
+
+      (is (some? parsed)
+          "Should parse even with missing fields")
+      (is (uuid? (:code/id parsed))
+          "Should have ID")
+      (is (nil? (:code/files parsed))
+          "Should detect missing files field")
+
+      ;; Validation should catch this
+      (let [validation-result (validate-code-artifact parsed)]
+        (is (false? (:valid? validation-result))
+            "Validation should fail for missing required fields")))))
+
+(deftest ^{:stratum 2} schema-validation-integration-test
+  (testing "Parsed responses are validated against schema"
+    (let [valid-code (parse-edn (extract-code-block (:content mock-llm-code-response)))
+          invalid-code {:code/files "should-be-vector"}]
+
+      ;; Valid artifact should pass
+      (let [valid-result (validate-code-artifact valid-code)]
+        (is (true? (:valid? valid-result))
+            "Valid artifact should pass validation"))
+
+      ;; Invalid artifact should fail
+      (let [invalid-result (validate-code-artifact invalid-code)]
+        (is (false? (:valid? invalid-result))
+            "Invalid artifact should fail validation")
+        (is (seq (:errors invalid-result))
+            "Validation should provide error details")))))

@@ -51,6 +51,15 @@
       (is (gate/passed? (assoc result :gate :format)))
       (is (= [] (get-in result [:output :formattable-files]))))))
 
+(deftest ^{:stratum 0} passing-format-gate-allows-the-phase-envelope
+  (testing "the phase envelope reads check-format's result as passed (#2376):
+            the CLI printed `Gate :format passed`, then denied the phase"
+    (let [checks (gate/check-gates [:format] {:code/files []} {})
+          envelope (gate/gates->envelope checks false)]
+      (is (:passed? checks))
+      (is (= :allow (:envelope/decision envelope)))
+      (is (empty? (:envelope/reasons envelope))))))
+
 (deftest ^{:stratum 0} check-format-reports-formattable-files
   (testing "Formattable files are listed in the result output"
     (let [artifact {:code/files [{:path "a.clj"} {:path "b.md"}]}

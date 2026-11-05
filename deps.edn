@@ -53,6 +53,11 @@
                        "components/task-executor/resources"
                        "components/decision/src"
                        "components/deliberation-workspace/src"
+                       "components/deliberation-workspace/resources"
+                       "components/deliberation-harness/src"
+                       "components/deliberation-harness/resources"
+                       "bases/deliberation-lab/src"
+                       "bases/deliberation-lab/resources"
                        "components/loop/src"
                        "components/loop/resources"
                        "components/knowledge/src"
@@ -70,6 +75,7 @@
                        "components/phase-software-factory/resources"
                        "components/phase-opsv/src"
                        "components/phase-opsv/resources"
+                       "components/kubernetes-target/src"
                        "components/opsv-adapter-simulated/src"
                        "components/gate/src"
                        "components/gate/resources"
@@ -288,6 +294,7 @@
                       ai.miniforge/phase {:local/root "components/phase"}
                       ai.miniforge/phase-software-factory {:local/root "components/phase-software-factory"}
                       ai.miniforge/phase-opsv {:local/root "components/phase-opsv"}
+                      ai.miniforge/kubernetes-target {:local/root "components/kubernetes-target"}
                       ai.miniforge/opsv-adapter-simulated {:local/root "components/opsv-adapter-simulated"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
@@ -430,6 +437,7 @@
                        "components/phase-software-factory/test"
                        "components/phase-opsv/test"
                        "components/phase-opsv/test-resources"
+                       "components/kubernetes-target/test"
                        "components/opsv-adapter-simulated/test"
                        "components/gate/test"
                        "components/workflow/test"
@@ -487,6 +495,8 @@
                        "components/governance-provenance/test"
                        "components/context-pack/test"
                        "components/deliberation-workspace/test"
+                       "components/deliberation-harness/test"
+                       "bases/deliberation-lab/test"
                        "components/bb-dev-tools/test"
                        "bases/mcp-context-server/test"
                        "components/control-plane/test"
@@ -583,6 +593,7 @@
                       ai.miniforge/phase {:local/root "components/phase"}
                       ai.miniforge/phase-software-factory {:local/root "components/phase-software-factory"}
                       ai.miniforge/phase-opsv {:local/root "components/phase-opsv"}
+                      ai.miniforge/kubernetes-target {:local/root "components/kubernetes-target"}
                       ai.miniforge/opsv-adapter-simulated {:local/root "components/opsv-adapter-simulated"}
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}

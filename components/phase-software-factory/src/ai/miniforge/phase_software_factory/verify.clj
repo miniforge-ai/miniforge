@@ -47,6 +47,12 @@
   "Phase defaults loaded from config/phase/defaults.edn."
   (phase-config/defaults-for :verify))
 
+(defn- ^{:stratum 0} gate-output
+  "Verify's canonical :output, the artifact its gates validate: the test
+   verdict. The code under test stays in the implement phase's artifact."
+  [passed?]
+  {:verify/tests-passed? (boolean passed?)})
+
 (def ^{:stratum 0} ^:private timeout-message-fragment
   "Substring that marks a non-actionable verify timeout.
    Produced by `run-tests!` when the test command exceeds its deadline,
@@ -155,6 +161,13 @@
   (phase/handle-error ctx ex 3))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} verify-result
+  [env-id passed? summary metrics]
+  (let [phase-result (if passed?
+                       (phase/success env-id summary metrics)
+                       (phase/error env-id summary summary metrics))]
+    (assoc phase-result :output (gate-output passed?))))
 
 (defn- ^{:stratum 1} require-environment!
   "Boundary wrapper around the anomaly-returning
@@ -418,9 +431,7 @@
         summary    (if passed?
                      (messages/t :verify/tests-passed {:pass-count pass-count})
                      (output/verify-failure-message test-results raw-fails raw-errors))
-        result     (if passed?
-                     (phase/success env-id summary metrics)
-                     (phase/error   env-id summary summary metrics))]
+        result     (verify-result env-id passed? summary metrics)]
 
     (phase/enter-context ctx :verify nil gates budget start-time result)))
 

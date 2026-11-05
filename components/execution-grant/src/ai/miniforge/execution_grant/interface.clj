@@ -16,20 +16,12 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.execution-grant.interface
-  "Public API for the execution-grant component (Ariadne step 2a):
-   bounded authority to perform an irreversible effect.
-
-   Decision gating consumes authorization results, and
-   effect-transaction rechecks grants at commit. Production call sites
-   still await integration with the runtime issuer before they can
-   remove their explicit unenforced-authority marker. This component
-   owns the object and its rules: issuance, attenuated delegation,
-   revocation as a state, scope and ceiling authorization, and liveness
-   over lineage."
+  "API surface class 1: internal EDN bounded effect authority, with current scope and liveness checks."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.attenuation :as attenuation]
    [ai.miniforge.execution-grant.breach :as breach]
+   [ai.miniforge.execution-grant.boundary.opsv-authorization :as opsv-authorization]
    [ai.miniforge.execution-grant.constraints :as constraints]
    [ai.miniforge.execution-grant.core :as core]
    [ai.miniforge.execution-grant.eligibility :as eligibility]
@@ -38,6 +30,7 @@
    [ai.miniforge.execution-grant.issuance.schema :as issuance-schema]
    [ai.miniforge.execution-grant.lineage :as lineage]
    [ai.miniforge.execution-grant.messages :as msg]
+   [ai.miniforge.execution-grant.opsv-scope-schema :as opsv-schema]
    [ai.miniforge.execution-grant.revocation :as revocation]
    [ai.miniforge.execution-grant.schema :as schema]
    [ai.miniforge.execution-grant.store :as store]
@@ -65,6 +58,14 @@
 (def ^{:stratum 0} ExecutionGrant
   "Closed Malli schema for a grant."
   schema/ExecutionGrant)
+
+(def ^{:stratum 0} OpsvExperimentScope
+  "Complete temporary staging authority bindings; not preflight, ownership, or provider proof."
+  opsv-schema/Scope)
+
+(def ^{:stratum 0} experiment-authority-required?
+  "Whether an effect class/proposal requires explicit experiment authority; classification only, not permission."
+  opsv-schema/experiment-effect?)
 
 (defn ^{:stratum 0} valid?
   "Validate a value against the closed grant schema."
@@ -123,7 +124,7 @@
   "The one check site: is this effect within its grant, as of now?
    Called at decide() and AGAIN at commit — a grant live at the first
    call and revoked before the second fails the second."
-  constraints/authorize)
+  opsv-authorization/authorize)
 
 (def ^{:stratum 0} authorized?
   "True when an `authorize` result is `:authorized`."

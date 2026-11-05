@@ -1,0 +1,88 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
+# feat: Protect native Kubernetes reporting material
+
+## Overview
+
+Prepare data-minimized native reporting copies through the existing evidence scan
+and redaction policy. Original observations remain comparison inputs, not reports.
+
+## Motivation
+
+Native environment entries use generic name/value fields. Commands, annotations,
+configuration payloads and unknown native fields can also contain credentials.
+Generic secret-key matching alone does not identify every native payload role.
+
+## Changes in Detail
+
+Base branch: main, including capture #2366, outside invariants #2367 and bounded
+controller configuration #2369. Normal integration preserves all public APIs and
+message families; final gates run on that resulting source.
+
+Add one reporting-only API with a fixed, versioned field policy. Retain scalar
+native identity/provenance, owner-reference identities and explicit int32 desired
+replica counts. Whitelist no composite value wholesale. Raw specifications,
+status, lifecycle collections, labels, annotations and unknown fields are confidential.
+Detailed resources and strategy remain in originals for comparison and typed
+policy artifacts, not plaintext in this raw-data reporting profile.
+Bind native field treatment to both API version and kind. Classify list payloads
+even when ListMeta or item TypeMeta is omitted. Foreign API kinds receive the
+conservative payload treatment, not a native Pod's public-field policy.
+Classify metadata-free envelopes and standalone items without TypeMeta
+conservatively. Project metadata and references with explicit field policies.
+Public identity fields admit no composite children. Keep known semantic payloads
+confidential and stop classification at confidential branches without discarding
+their originals. Normalize maps before classification, preserving original input.
+Recognize native fields by presence, including malformed TypeMeta and equivalent
+unqualified keyword keys. Keep string and keyword keys distinct: do not rewrite
+or merge colliding keys. Keyword-native payloads receive conservative protection.
+
+Classification preserves original values for the shared scanner. A producer-owned
+secret key invokes existing redaction without duplicating secret or PII patterns.
+The shared evidence preparer scans before redaction, preserving original findings.
+Confirm that every surviving producer classification contains the canonical marker.
+If protection fails, return a value-free anomaly rather than unsafe material.
+
+Require bounded inspectable data, simple keys and no Clojure language metadata.
+Anomaly-shaped payloads remain artifact data rather than pipeline control.
+
+Compute comparison hashes from original observations before requesting a report.
+Reporting copies are deliberately lossy: never use them as manifests, comparison
+inputs or recovery contracts. This API introduces no storage, effects or authority.
+Native preparation and runner integration remain separate.
+
+## Testing Plan
+
+Cover Secret and ConfigMap payloads, literal environment, commands, templates,
+semantic PodSpecs, unknown kinds and retained identity/scaling information.
+Prove original comparison differences survive while reports withhold values.
+Retain original PII findings and refuse opaque, deferred or metadata-bearing data.
+Simulate failed shared redaction and require a value-free failure.
+
+Both product contexts, poly check and a fresh CLI build pass on current main.
+Isolated packaging passes 204 tests and 1,146 assertions. The 25 reporting cases
+contain 134 assertions; each measures below 100 ms. All 19 deliberate defects
+are detected without test errors. The committed scan reports zero findings across
+290 files. Strict source/test lint and explicit changed-namespace strata pass.
+The second review findings reproduce six assertion failures and zero errors
+against the prior package. Third-review keyword and malformed-TypeMeta regressions
+reproduce seven failures and zero errors against the pushed package. The final
+mixed-key case proves classification does not merge or lose colliding keys.
+No gate, signing or size exception is used.
+
+## Deployment Plan
+
+Explicit reporting API only. No live experiments or cluster changes.
+
+## Related Issues/PRs
+
+N7 section 6.3; N3 protection and N6 evidence policy; verification capture #2366.
+
+## Checklist
+
+- [x] Reuse shared scanning and redaction without losing original findings.
+- [ ] Complete owner, product, package, CI and full-review gates.

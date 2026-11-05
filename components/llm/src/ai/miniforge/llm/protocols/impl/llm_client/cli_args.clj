@@ -21,7 +21,9 @@
   (:require
    [clojure.string :as str]
    [cheshire.core :as json]
-   [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]))
+   [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]
+   [ai.miniforge.response.interface :as response]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -79,8 +81,15 @@
   "text")
 
 (defn ^{:stratum 0} codex-args
-  "Build CLI arguments for the Codex backend."
-  [{:keys [prompt model system prompt-via]
+  "Build CLI arguments for the Codex backend.
+
+   The sandbox stays `workspace-write` and approvals stay off. A request
+   with `:network-access? true`, which only a client created with it sets
+   (see `completion/with-client-config`), also gets
+   `-c sandbox_workspace_write.network_access=true`: commands the agent
+   runs inside that sandbox may then reach the network. Without it
+   Codex's default applies, and those commands have no network."
+  [{:keys [prompt model system prompt-via network-access?]
     :or {prompt-via :stdin}}]
   (let [stdin? (= prompt-via :stdin)]
     (cond-> ["exec"
@@ -89,6 +98,7 @@
              "--sandbox=workspace-write"
              "--skip-git-repo-check"]
       true   (into ["-c" "approval_policy=never"])
+      (true? network-access?) (into ["-c" "sandbox_workspace_write.network_access=true"])
       model  (into ["-m" model])
       system (into ["-c" (str "system_prompt=" (json/generate-string system))])
       stdin? (conj "-")
@@ -116,25 +126,56 @@
       model (into ["--model" model])
       true  (conj prompt))))
 
-(defn ^{:stratum 0} opencode-args
-  "Build CLI arguments for the OpenCode backend.
+(def ^{:stratum 0} ^:private policy-agent
+  "The OpenCode agent every call selects. Its permissions come from the
+   call's inline config (`opencode-env`), and OpenCode applies an agent's
+   rules after the global ones, so the agent's own rules win over any
+   allow the operator's global config holds. The worktree's project config
+   is not read at all. The name is random per process."
+  (delay (str "miniforge-" (subs (str (java.util.UUID/randomUUID)) 0 8))))
 
-   OpenCode owns provider credentials, model aliases, project config,
-   agent profiles, MCP config, and permissions. Miniforge passes the
-   selected model/profile knobs through and treats OpenCode as the
-   common provider wrapper instead of handling API keys directly."
-  [{:keys [prompt model agent attach command session continue? fork? files format]}]
-  (cond-> ["run"]
-    attach    (into ["--attach" attach])
-    command   (into ["--command" command])
-    continue? (conj "--continue")
-    session   (into ["--session" session])
-    fork?     (conj "--fork")
-    model     (into ["--model" model])
-    agent     (into ["--agent" agent])
-    (seq files) (into (mapcat (fn [file] ["--file" file]) files))
-    format    (into ["--format" format])
-    true      (conj prompt)))
+(defn ^{:stratum 0} operator-opencode-config
+  "The OPENCODE_CONFIG_CONTENT the operator set, parsed, so an isolated
+   call keeps its provider, model and endpoint settings; {} when unset.
+   Throws an :anomalies/incorrect anomaly when it is set but is not a
+   plain JSON object: OpenCode also reads JSONC, which miniforge cannot
+   rewrite without dropping the operator's settings."
+  []
+  (let [raw (settings/getenv-value "OPENCODE_CONFIG_CONTENT")]
+    (if (str/blank? raw)
+      {}
+      (let [parsed (try+ (json/parse-string raw) (catch Object _ nil))]
+        (if (map? parsed)
+          parsed
+          (response/throw-anomaly! :anomalies/incorrect
+                                   "OPENCODE_CONFIG_CONTENT must be a plain JSON object for miniforge to set an OpenCode call's permissions"
+                                   {}))))))
+
+(defn ^{:stratum 0} opencode-permission
+  "The OpenCode permission block for a call: the role's block a session
+   call carries as `:opencode-permission` under `:supervision`, and every
+   permission denied (`[:opencode :deny-all-permission]` in
+   llm/client-defaults.edn) for anything else: a call outside an artifact
+   session, one that asks to be `:isolated?`, and a session call that
+   carries no block."
+  [{:keys [supervision isolated?]}]
+  (let [deny (settings/client-default [:opencode :deny-all-permission])]
+    (if isolated? deny (get supervision :opencode-permission deny))))
+
+(defn ^{:stratum 0} external-directory-rule
+  "OpenCode's external_directory permission for a call: every path
+   outside the worktree denied, and OpenCode's own tool-output directory
+   (where it keeps every session's full tool output) denied by its exact
+   glob. OpenCode's agent resolver appends an allow for that glob unless
+   the same glob is denied, so a plain \"deny\" would leave it open. The
+   glob is joined as OpenCode's path.join does: separators collapsed, and
+   the wildcard after the platform's own `separator` (a backslash on
+   Windows), since the resolver compares the glob as text."
+  [& [separator]]
+  (let [data (or (not-empty (settings/getenv-value "XDG_DATA_HOME"))
+                 (str (settings/getenv-value "HOME") "/.local/share"))
+        dir  (java.nio.file.Paths/get (str data) (into-array String ["opencode" "tool-output"]))]
+    (array-map "*" "deny" (str (.normalize dir) (or separator java.io.File/separator) "*") "deny")))
 
 (defn ^{:stratum 0} echo-args
   "Build CLI arguments for the echo (test) backend."
@@ -146,6 +187,55 @@
   (settings/client-default [:claude-cli :default-budget-usd]))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} opencode-args
+  "Build CLI arguments for the OpenCode backend.
+
+   OpenCode owns provider credentials, model aliases, and MCP config.
+   Miniforge passes the selected model through and treats OpenCode as the
+   common provider wrapper instead of handling API keys directly.
+
+   Every call runs `--pure` (no external plugins) as `policy-agent`, whose
+   permissions `opencode-env` sets (`opencode-permission`). A call may not
+   `:attach` to a running server (its own config decides its tools), run a
+   configured `:command` (one can expand shell expressions and name its own
+   agent), or resume a session with `:session`, `:continue?` or `:fork?` (a
+   session's saved permission rules apply after the agent's)."
+  [{:keys [prompt model files format] :as request}]
+  (when-let [refused (seq (filter #(get request %) [:attach :command :session :continue? :fork?]))]
+    (response/throw-anomaly! :anomalies/incorrect
+                             "An OpenCode call cannot attach, run a configured command, or resume a session"
+                             {:refused (vec refused)}))
+  (cond-> ["run" "--pure" "--agent" @policy-agent]
+    model       (into ["--model" model])
+    (seq files) (into (mapcat (fn [file] ["--file" file]) files))
+    format      (into ["--format" format])
+    true        (conj prompt)))
+
+(defn ^{:stratum 1} opencode-env
+  "Environment entries for an OpenCode call: OPENCODE_PURE=1,
+   OPENCODE_DISABLE_PROJECT_CONFIG=1, and OPENCODE_CONFIG_CONTENT, the
+   operator's own inline config (`operator-opencode-config`) with the
+   call's permissions (`opencode-permission`) set globally and on
+   `policy-agent`, which the call selects, with external_directory set by
+   `external-directory-rule`. Key order is kept, since OpenCode applies
+   the last rule that matches. Project config is off
+   because the worktree is content an agent can write: an opencode.json or
+   .opencode/agent/<name>.md there would merge into the agent once its
+   name is known (it shows in the process list), and a project MCP server
+   would start even under --pure."
+  [request]
+  (let [permission (assoc (opencode-permission request) "external_directory" (external-directory-rule))
+        agent      {"mode" "primary"
+                    "description" "miniforge: the tools this call may use"
+                    "permission" permission}]
+    {"OPENCODE_PURE" "1"
+     "OPENCODE_DISABLE_PROJECT_CONFIG" "1"
+     "OPENCODE_CONFIG_CONTENT"
+     (json/generate-string
+      (-> (operator-opencode-config)
+          (assoc "permission" permission)
+          (update "agent" #(assoc (if (map? %) % {}) @policy-agent agent))))}))
 
 (defn ^{:stratum 1} claude-args
   "Build CLI arguments for the Claude backend.

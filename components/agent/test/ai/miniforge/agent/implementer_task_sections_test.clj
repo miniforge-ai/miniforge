@@ -21,19 +21,19 @@
    claim what task->text actually rendered."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [ai.miniforge.agent.implementer :as implementer]))
+            [ai.miniforge.agent.implementer.prompt :as impl-prompt]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (deftest ^{:stratum 0} task-sections-mirror-what-renders-test
   (testing "an EMPTY :task/gate-failures is neither rendered nor claimed"
     (let [task {:task/description "x" :task/gate-failures []}]
-      (is (= [] (implementer/task-sections task)))
-      (is (not (str/includes? (implementer/task->text task) "Gate denial")))))
+      (is (= [] (impl-prompt/task-sections task)))
+      (is (not (str/includes? (impl-prompt/task->text task) "Gate denial")))))
   (testing "a non-empty denial is both rendered and claimed, in render order"
     (let [task {:task/description "x"
                 :task/verify-failures {:test-results {:fail-count 1}}
                 :task/gate-failures [{:gate :g :errors [{:message "m"}]}]}]
       (is (= [:task/gate-failures :task/verify-failures]
-             (implementer/task-sections task)))
-      (is (str/includes? (implementer/task->text task) "Gate denial")))))
+             (impl-prompt/task-sections task)))
+      (is (str/includes? (impl-prompt/task->text task) "Gate denial")))))

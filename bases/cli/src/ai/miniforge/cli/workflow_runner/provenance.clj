@@ -23,7 +23,8 @@
    concern moves to its own layer-coherent file)."
   (:require
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.cli.workflow-runner.display :as display]))
+   [ai.miniforge.cli.workflow-runner.display :as display]
+   [ai.miniforge.llm.interface :as llm]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -36,11 +37,14 @@
 (defn- ^{:stratum 0} runtime-provenance-lines
   "Banner lines for the run's runtime. In :local execution mode (the
    default) the first line says the agent runs unisolated, with the
-   operator's privileges, and how to isolate it."
+   operator's privileges, and how to isolate it. A run whose client gives
+   the Codex agent network access says so next."
   [context]
   (concat
    (when (= :local (get context :execution-mode :local))
      [[:yellow (messages/t :workflow-runner/local-mode-notice)]])
+   (when (llm/client-network-access? (:llm-backend context))
+     [[:yellow (messages/t :workflow-runner/codex-network-notice)]])
    [[:cyan (messages/t :workflow-runner/runtime-source
                        {:path (:source-root context)})]
     [:cyan (messages/t :workflow-runner/runtime-worktree

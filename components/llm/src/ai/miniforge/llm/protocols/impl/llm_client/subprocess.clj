@@ -22,6 +22,7 @@
   (:require
    [clojure.java.io :as io]
    [clojure.string :as str]
+   [ai.miniforge.llm.cancellation :as cancellation]
    [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]
    [slingshot.slingshot :refer [try+]])
   (:import
@@ -89,12 +90,6 @@
       (doseq [[k v] env]
         (.put target-env k v)))))
 
-(defn ^{:stratum 0} wait-for-stream-process
-  [^Process process timeout-ms]
-  (if (.waitFor process (long timeout-ms) TimeUnit/MILLISECONDS)
-    {:exit (.exitValue process)}
-    {:exit -1 :err "Process timed out"}))
-
 (defn ^{:stratum 0} destroy-process-tree!
   "Forcibly kill `process` and every process it spawned.
 
@@ -116,6 +111,28 @@
     (.destroyForcibly process)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} wait-for-stream-process
+  "Wait up to TIMEOUT-MS for PROCESS to exit: {:exit n}, or {:exit -1 :err}
+   when it does not. The wait is sliced by the stream poll interval so a
+   cancelled run (`llm.cancellation`) is noticed while waiting, as on a
+   CLI that closed stdout but did not exit: the process tree is destroyed
+   and the result carries the `:cancelled` reason as `:timeout`."
+  [^Process process timeout-ms]
+  (let [started  (System/currentTimeMillis)
+        deadline (+ started (long timeout-ms))
+        slice    (long (settings/client-default [:stream :poll-interval-ms]))]
+    (loop []
+      (let [remaining (- deadline (System/currentTimeMillis))
+            exited?   (.waitFor process (max 0 (min slice remaining)) TimeUnit/MILLISECONDS)
+            cancelled (when-not exited?
+                        (cancellation/cancelled-timeout (- (System/currentTimeMillis) started)))]
+        (cond
+          exited?            {:exit (.exitValue process)}
+          cancelled          (do (destroy-process-tree! process)
+                                 {:exit -1 :err (:message cancelled) :timeout cancelled})
+          (<= remaining slice) {:exit -1 :err "Process timed out"}
+          :else              (recur))))))
 
 (defn ^{:stratum 1} agent-env
   "The environment an agent CLI process gets: `host-env` filtered by the
@@ -160,9 +177,11 @@
                         stderr))
 
 (defn ^{:stratum 2} start-capture-process!
-  [cmd {:keys [workdir stdin]}]
+  "Start `cmd` with the agent environment plus the backend's own `env`
+   entries (config miniforge supplies, such as OpenCode's inline config)."
+  [cmd {:keys [workdir stdin env]}]
   (let [builder (ProcessBuilder. ^java.util.List cmd)]
-    (apply-process-env! builder (agent-env))
+    (apply-process-env! builder (merge (agent-env) env))
     (when workdir
       (.directory builder (io/file workdir)))
     (let [process (.start builder)

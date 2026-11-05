@@ -35,6 +35,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.coerce.interface :as coerce]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.boundary.checkpoint-directory :as directory]
    [ai.miniforge.workflow.boundary.checkpoint-file :as checkpoint-file]
    [ai.miniforge.workflow.boundary.checkpoint-history :as history]
@@ -123,7 +124,7 @@
    (let [dir (checkpoint-paths/workflow-checkpoint-dir
               (checkpoint-paths/resolve-checkpoint-root opts)
               workflow-run-id)]
-     (boolean (and (fs/directory? dir) (seq (fs/list-dir dir)))))))
+     (directory/populated? dir))))
 
 (defn- ^{:stratum 0} pin-failure [workflow-run-id data e]
   (anomaly/exception-anomaly :unavailable
@@ -132,6 +133,12 @@
                                           :error (or (ex-message e) (.getName (class e)))})
                              data
                              e))
+
+(defn- ^{:stratum 0} interrupted-anomaly?
+  "True when `result` is an anomaly the checkpoint lock made of an
+   interrupt: its wait consumed the interrupt flag."
+  [result]
+  (= (.getName InterruptedException) (get-in result [:anomaly/data :anomaly/ex-class])))
 
 (defn- ^{:stratum 0} write-edn-atomically!
   [target-path data]
@@ -195,7 +202,8 @@
                    ;; datum, so a history consumer reads what a checkpoint
                    ;; consumer reads.
                    :phase/gate-errors (:phase/gate-errors phase-result)
-                   :phase/gate-failures (:phase/gate-failures phase-result)}]
+                   :phase/gate-failures (:phase/gate-failures phase-result)
+                   :phase/gate-warnings (:phase/gate-warnings phase-result)}]
         ;; Same instant normalization the checkpoint records get: gate
         ;; errors carry java.time.Instant values (policy-pack violations'
         ;; :timestamp), which pr-str would emit as #object[...] and make
@@ -323,18 +331,45 @@
   "Point a run's manifest at where its spec file now lives (the CLI moves
    a work spec to work/done or work/failed when the run ends), keeping the
    recorded hash. Returns the manifest path; nil when the run has no
-   readable manifest; an anomaly when it cannot be written."
+   readable manifest; an anomaly when it cannot be written or the run's
+   lock stays busy. It holds the run's lock: a checkpoint write between
+   its read and its write would otherwise be undone, leaving a manifest
+   that names a generation the write pruned."
   ([workflow-run-id spec-path]
    (record-spec-path! workflow-run-id spec-path {}))
   ([workflow-run-id spec-path opts]
-   (let [path (checkpoint-paths/manifest-path (checkpoint-paths/resolve-checkpoint-root opts)
-                                              workflow-run-id)
-         manifest (read-checkpoint-file path)]
-     (when (and (map? manifest) (not (anomaly/anomaly? manifest)))
-       (try+
-         (write-edn-atomically! path (assoc manifest :workflow/spec-path (str spec-path)))
-         (catch Exception e
-           (write-failure (checkpoint-paths/resolve-checkpoint-root opts) workflow-run-id nil e)))))))
+   (let [requested-root (checkpoint-paths/resolve-checkpoint-root opts)
+         ;; As in persist-execution-state!: a pending interrupt is held off
+         ;; for the lock wait and the write, and kept.
+         interrupted? (Thread/interrupted)]
+     (try+
+       (let [;; As in persist-execution-state!: the root is resolved once,
+             ;; and the lock and the manifest both come from it, so an alias
+             ;; retargeted meanwhile cannot split them. The path as given is
+             ;; checked first (its ancestry and links), as a checkpoint write
+             ;; checks it; the run directory too.
+             checkpoint-root (if (fs/exists? requested-root)
+                               (str (directory/existing! requested-root))
+                               requested-root)
+             recorded (checkpoint-lock/with-run-lock
+                       checkpoint-root workflow-run-id
+                       (fn []
+                         (let [run-dir (checkpoint-paths/workflow-checkpoint-dir checkpoint-root workflow-run-id)
+                               path (str (fs/path (if (fs/exists? run-dir) (directory/existing! run-dir) run-dir)
+                                                  checkpoint-paths/manifest-filename))
+                               manifest (read-checkpoint-file path)]
+                           (when (and (map? manifest) (not (anomaly/anomaly? manifest)))
+                             (write-edn-atomically! path (assoc manifest :workflow/spec-path (str spec-path)))))))]
+         (when (interrupted-anomaly? recorded)
+           (.interrupt (Thread/currentThread)))
+         recorded)
+       (catch InterruptedException e
+         (.interrupt (Thread/currentThread))
+         (write-failure requested-root workflow-run-id nil e))
+       (catch Exception e
+         (write-failure requested-root workflow-run-id nil e))
+       (finally
+         (when interrupted? (.interrupt (Thread/currentThread))))))))
 
 (defn ^{:stratum 2} persist-execution-state!
   "Persist a machine snapshot, manifest, and current phase checkpoint,
@@ -452,17 +487,23 @@
                                            :workflow/phase-checkpoints (merge existing-paths phase-paths))
                            manifest-path (write-edn-atomically! manifest-path manifest)
                            ;; A failed initial pin must remain a failed checkpoint.
+                           location (es/checkpoint-location checkpoint-root (str run-dir))
                            pin (when (and (true? (get-in ctx [:execution/opts :checkpoint/pin?]))
                                           (not (fs/exists? (fs/path run-dir checkpoint-paths/pin-marker-filename))))
                                  (write-pin-marker! run-dir workflow-run-id))]
                        (if (anomaly/anomaly? pin)
                          pin
                          (cond-> {:checkpoint/root checkpoint-root
+                                  :checkpoint/location location
                                   :checkpoint/machine-snapshot-path snapshot-path
                                   :checkpoint/manifest-path manifest-path}
                            phase-path
                            (assoc :checkpoint/phase phase-name
                                   :checkpoint/phase-path phase-path))))))))]
+          ;; The lock wait turns an interrupt into its anomaly, clearing
+          ;; the flag: set it again so the cancel is not lost.
+          (when (interrupted-anomaly? written)
+            (.interrupt (Thread/currentThread)))
           (if (anomaly/anomaly? written)
             (assoc-in written [:anomaly/data :phase/name] phase-name)
             written))

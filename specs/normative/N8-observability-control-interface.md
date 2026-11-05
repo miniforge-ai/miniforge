@@ -6,8 +6,8 @@
 
 # N8 — Observability Control Interface
 
-**Version:** 0.4.1-draft
-**Date:** 2026-10-04
+**Version:** 0.5.0-draft
+**Date:** 2026-11-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -391,7 +391,7 @@ Safe-mode MUST be triggerable by:
 When safe-mode is active, implementations MUST:
 
 1. **Demote autonomy** — All subsystem autonomy levels MUST be demoted to A0 (Observe)
-   per N1 §5.6. No autonomous write actions are permitted.
+   per N1 §5.6. New forward write actions MUST NOT execute.
 2. **Queue new workflows** — New workflow submissions MUST be queued, not executed.
    Queued workflows MUST be persisted and released when safe-mode exits.
 3. **Pause in-flight workflows** — In-flight workflows MUST be paused at the next phase
@@ -401,6 +401,14 @@ When safe-mode is active, implementations MUST:
 5. **Emit event** — A `:safe-mode/entered` event MUST be emitted (see §3.4.4).
 6. **Display indicator** — The TUI/CLI MUST display a prominent safe-mode indicator
    (see N5 extensions).
+
+For active N7 staging trials, the runtime MUST invoke only the separately
+authorized compensation path in N7 §5.5 and N10 §1.5. This path MUST stop load,
+clean up proven experiment-owned resources, and restore and verify the original
+baseline. It MUST retain its own current authority and provider postconditions;
+safe-mode entry MUST NOT grant recovery authority or reopen general write circuits.
+Missing recovery authority MUST leave new forward effects fenced and produce
+an explicit unresolved recovery disposition for operator action.
 
 #### 3.4.3 Safe-Mode Exit
 
@@ -942,6 +950,7 @@ deleted.
 | N8.CTL.4 | MUST NOT | Modify workflow state when an action fails (§12.2). |
 | N8.CTL.5 | MUST | Carry `:scope/type` and the matching scope key on every control-action event (N3 §2.3). |
 | N8.CTL.6 | MUST | Treat control-action events as `:audit` retention class (§5.3, N3 §4.3.1). |
+| N8.CTL.7 | MUST | Fence forward OPSV effects while admitting only separately authorized staging-trial compensation during safe-mode (§3.4.2). |
 
 #### Privacy
 
@@ -974,6 +983,9 @@ A conformance suite MUST cover, at minimum:
    is rejected if it carries a function (N8.PRV.4, N8.PRV.5).
 6. **Audit retention** — control-action events survive the one-year floor and
    are not expired by a shorter deployment policy (N8.CTL.6).
+7. **OPSV recovery isolation** — safe-mode rejects new forward effects and
+   unauthorized compensation; valid recovery authority permits only bounded
+   cleanup and verified original-baseline restoration (N8.CTL.7).
 
 ---
 
@@ -1047,6 +1059,9 @@ any requirement in §0–§14.
 ---
 
 **Version History:**
+
+- 0.5.0-draft (2026-11-04): Aligned safe-mode with the approved separate OPSV
+  staging-trial compensation path, without restoring forward mutation authority.
 
 - 0.4.1-draft (2026-10-04): Defer inherited-scope coverage to N3's registry, including chain runs.
 

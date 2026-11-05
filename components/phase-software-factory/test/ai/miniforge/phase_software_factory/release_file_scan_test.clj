@@ -28,6 +28,7 @@
    [babashka.fs :as fs]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase-software-factory.release]
+   [ai.miniforge.phase-software-factory.release-worktree]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.release-executor.interface :as release-executor]))
 
@@ -48,16 +49,17 @@
 
 (defn ^{:stratum 0} scan-local
   [root-path]
-  (#'ai.miniforge.phase-software-factory.release/git-dirty-files root-path))
+  (#'ai.miniforge.phase-software-factory.release-worktree/git-dirty-files root-path))
 
 (defn ^{:stratum 0} scan-capsule
   [execute-fn root-path]
-  (#'ai.miniforge.phase-software-factory.release/git-dirty-files-capsule
+  (#'ai.miniforge.phase-software-factory.release-worktree/git-dirty-files-capsule
    execute-fn :mock-executor "env-1" root-path))
 
 (defn ^{:stratum 0} stub-execute-fn
-  "Executor stub: `responses` maps a command prefix (\"git status\",
-   \"cat\") to the result `execute!` returns for it."
+  "Executor stub: `responses` maps a command prefix (\"git status\", or
+   \"if [\" for the capsule reader's guarded cat) to the result `execute!`
+   returns for it."
   [responses]
   (fn [_executor _env-id command _opts]
     (some (fn [[prefix result]]
@@ -160,7 +162,7 @@
     (let [result (scan-capsule (stub-execute-fn {"git status" {:ok? true
                                                                :data {:exit-code 0
                                                                       :stdout "?? src/feature.clj\u0000"}}
-                                                 "cat"        {:ok? true
+                                                 "if ["       {:ok? true
                                                                :data {:exit-code 1
                                                                       :stdout ""
                                                                       :stderr "cat: src/feature.clj: Permission denied"}}})
@@ -180,7 +182,7 @@
     (let [result (scan-capsule (stub-execute-fn {"git status" {:ok? true
                                                                :data {:exit-code 0
                                                                       :stdout "?? src/feature.clj\u0000 D src/old.clj\u0000"}}
-                                                 "cat"        {:ok? true
+                                                 "if ["       {:ok? true
                                                                :data {:exit-code 0
                                                                       :stdout "(ns feature)"}}})
                                "/workspace")]

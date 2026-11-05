@@ -274,18 +274,27 @@
    timeout-ms]
   (try+
     (let [initial-result (wait-for-stream-process process timeout-ms)
-          timed-out? (= -1 (:exit initial-result))
-          result (if timed-out?
+          result (cond
+                   ;; The run was cancelled: the wait destroyed the tree.
+                   ;; Wait again only to reap it, keeping the cancellation.
+                   (:timeout initial-result)
+                   (do (wait-for-stream-process process (post-kill-join-timeout-ms))
+                       initial-result)
+
+                   (= -1 (:exit initial-result))
                    (do
                      (subprocess/destroy-process-tree! process)
                      (wait-for-stream-process process (post-kill-join-timeout-ms)))
+
+                   :else
                    initial-result)]
       (doseq [thread [stdin-thread stdout-thread stderr-thread]
               :when thread]
         (.join ^Thread thread subprocess/stream-reader-join-timeout-ms))
-      {:out (or @stdout "")
-       :err (or (not-empty (:err result)) @stderr "")
-       :exit (:exit result)})
+      (cond-> {:out (or @stdout "")
+               :err (or (not-empty (:err result)) @stderr "")
+               :exit (:exit result)}
+        (:timeout result) (assoc :timeout (:timeout result))))
     (catch InterruptedException _
       (subprocess/destroy-process-tree! process)
       (.interrupt (Thread/currentThread))
@@ -344,7 +353,18 @@
         accumulated-tools (atom [])
         accumulated-session-id (atom nil)
         accumulated-stop-reason (atom nil)
-        accumulated-turns (atom nil)]
+        accumulated-turns (atom nil)
+        cli-text (atom nil)
+        ;; The text of the last text message when the CLI wrote it itself
+        ;; (its rate-limit notice), kept apart from the accumulated answer,
+        ;; so a notice after earlier answer text is still read as one. A
+        ;; later message from the model clears it: the notice was not the
+        ;; run's last word.
+        observed-parser (fn [line]
+                          (let [parsed (stream-parser line)]
+                            (when-not (str/blank? (:delta parsed))
+                              (reset! cli-text (:cli-text parsed)))
+                            parsed))]
     (when logger
       (log/info logger :system :agent/streaming-prompt-sent
                 {:data (assoc (prompt-size-telemetry (:system request) prompt)
@@ -358,7 +378,7 @@
                              (prompts/exec-opts-for-prompt-via prompt-via prompt))
           result (stream-fn
                   full-cmd
-                  (stream-with-parser stream-parser on-chunk progress-monitor
+                  (stream-with-parser observed-parser on-chunk progress-monitor
                                       accumulated-content accumulated-usage
                                       accumulated-cost accumulated-tools
                                       accumulated-session-id
@@ -426,7 +446,7 @@
                                                   usage resolved-cost
                                                   stop-reason num-turns
                                                   tool-call-count final-message-preview
-                                                  (:err result))
+                                                  (:err result) @cli-text)
                 (seq tools) (assoc :tools-called tools)
                 session-id  (assoc :session-id session-id))
               ;; A run that was cut (timeout) or died still consumed
@@ -457,12 +477,14 @@
 
    2-arity opts map supports:
    - `:stdin`  — string piped to the subprocess's stdin
-   - `:workdir` — directory where the subprocess runs"
+   - `:workdir` — directory where the subprocess runs
+   - `:env`    — entries added to the agent environment"
   ([cmd] (default-exec-fn cmd {}))
-  ([cmd {:keys [stdin workdir]}]
+  ([cmd {:keys [stdin workdir env]}]
    (let [timeout-ms 600000
          process (start-capture-process! cmd {:stdin stdin
-                                              :workdir workdir})]
+                                              :workdir workdir
+                                              :env env})]
      (stop-capture-process! process timeout-ms))))
 
 (defn ^{:stratum 2} complete-stream-impl [client request on-chunk]

@@ -71,6 +71,11 @@
             (update :output-tokens (fnil + 0) (:output-tokens usage)))
           (vary-meta assoc ::message-id message-id)))))
 
+(def ^{:stratum 0} ^:private cli-written-model
+  "The model the Claude CLI names on an assistant message it wrote itself
+   (its rate-limit notice, an API error), not the model's answer."
+  "<synthetic>")
+
 (defn ^{:stratum 0} rate-limited?
   "True when `content` is a CLI rate-limit notice rather than an answer.
    The Claude CLI exits 0 and prints the notice as its whole output
@@ -145,16 +150,34 @@
 (defn ^{:stratum 0} parse-codex-stream-line
   "Parse a line from Codex CLI streaming output.
 
-   Codex emits JSONL events:
-   - thread.started: session began
+   `codex exec --json` emits JSONL events (`ThreadEvent` in
+   codex-rs/exec/src/exec_events.rs):
+   - thread.started: session began; parsed to a heartbeat carrying
+     :invocation-id (the thread id), because item ids restart per exec
    - turn.started: turn began
-   - item.completed: reasoning, agent_message, mcp_tool_call, etc.
-   - turn.completed: carries usage data and optional finish_reason
+   - item.started / item.updated: an item in progress (not parsed)
+   - item.completed: agent_message, reasoning, and the native tool items
+     command_execution, file_change, mcp_tool_call, collab_tool_call and
+     web_search
+   - turn.completed: carries usage data (and finish_reason, when present)
    - turn.failed / error: failure events
+
+   A native tool item parses to one tool-use signal on its item.completed
+   event only. The exec event processor emits item.completed once per
+   item, also for an item still running when the turn ends, and emits a
+   file_change only as completed; counting item.started as well would
+   count most calls twice. The tool name is the Codex item type, except
+   for mcp_tool_call, which names the MCP tool. The signal also carries
+   :tool-completed, because no later event closes the call, and
+   :tool-error? from the item's status: true for failed or declined,
+   false for completed, absent otherwise.
 
    Diagnostic fields returned on turn.completed:
    - :stop-reason   — normalized finish_reason (\"end_turn\", \"max_turns\", etc.)
-   - :increment-turns — true, signalling the accumulator to bump its turn counter
+   - :increment-turns — true, signalling the accumulator to bump its turn
+     counter. A turn is one `codex exec` prompt; it is not a tool call.
+   - :invocation-ended? — true (also on turn.failed): the exec ends here.
+     A top-level error event does not end it.
 
    Arguments:
      line - String line from stream
@@ -168,7 +191,22 @@
           ;; Agent message — the actual text output
           "item.completed"
           (let [item (:item data)
-                item-type (:type item)]
+                item-type (:type item)
+                ;; Outcome from the item's status; nil when it gives none
+                ;; (web_search has no status; an item still in_progress
+                ;; when the turn ended has no outcome yet).
+                failed? (case (:status item)
+                          ("failed" "declined") true
+                          "completed" false
+                          nil)
+                ;; A tool item arrives here only once it has finished, so
+                ;; the signal is a use and its completion in one:
+                ;; :tool-completed tells the streaming callback to close
+                ;; the call it opens.
+                completed-call (cond-> {:delta "" :done? false
+                                        :tool-use true :tool-completed true
+                                        :tool-call-id (:id item)}
+                                 (some? failed?) (assoc :tool-error? failed?))]
             (case item-type
               "agent_message"
               {:delta (str (:text item) "\n") :done? false}
@@ -176,12 +214,19 @@
               ;; MCP tool invocation — emit a tool-use signal so the
               ;; callback can publish :agent/tool-call with the real name
               "mcp_tool_call"
-              {:delta "" :done? false :tool-use true
-               :tool-name (or (get-in item [:tool :name])
-                              (:tool item)
-                              (:tool_name item)
-                              (:name item))
-               :tool-call-id (:id item)}
+              (assoc completed-call
+                     :tool-name (or (get-in item [:tool :name])
+                                    (:tool item)
+                                    (:tool_name item)
+                                    (:name item)
+                                    item-type))
+
+              ;; Native Codex tools: shell commands, patch application,
+              ;; sub-agent calls and web searches. Same signal as an MCP
+              ;; call, named by the item type, so the run's tool count
+              ;; includes the local work the session did.
+              ("command_execution" "file_change" "collab_tool_call" "web_search")
+              (assoc completed-call :tool-name item-type)
 
               ;; Native tool call (pre-MCP) — same treatment
               "tool_call"
@@ -210,8 +255,8 @@
                :tool-output  (:output item)
                :tool-error?  (boolean (:is_error item))}
 
-              ;; reasoning — ignored for content but could be surfaced
-              ;; later as :agent/reasoning events if useful
+              ;; reasoning, todo_list and error items — ignored; reasoning
+              ;; could be surfaced later as :agent/reasoning events
               nil))
 
           ;; Turn completed carries usage and optional finish_reason.
@@ -222,6 +267,7 @@
                 stop-reason (responses/normalize-finish-reason (:finish_reason data))]
             (cond-> {:delta "" :done? true
                      :increment-turns true
+                     :invocation-ended? true
                      ;; input/output stay present even when nil (existing
                      ;; contract); the cache and reasoning counts ride
                      ;; along only when Codex reports a number.
@@ -229,19 +275,36 @@
                                      :output-tokens (:output_tokens usage)}
                               (number? (:cached_input_tokens usage))
                               (assoc :cached-input-tokens (:cached_input_tokens usage))
+                              (number? (:cache_write_input_tokens usage))
+                              (assoc :cache-write-input-tokens
+                                     (:cache_write_input_tokens usage))
                               (number? (:reasoning_output_tokens usage))
                               (assoc :reasoning-output-tokens
                                      (:reasoning_output_tokens usage)))}
               stop-reason (assoc :stop-reason stop-reason)))
 
-          ;; Turn failed
+          ;; Turn failed. turn.completed and turn.failed are the two
+          ;; events after which the exec processor shuts down, so they
+          ;; carry :invocation-ended?.
           "turn.failed"
-          {:delta (str "\nError: " (get-in data [:error :message] "unknown")) :done? true}
+          {:delta (str "\nError: " (get-in data [:error :message] "unknown")) :done? true
+           :invocation-ended? true}
 
+          ;; A top-level error notification. The exec processor keeps
+          ;; running after it (it can still reconcile items and emit
+          ;; turn.failed), so it does not end the invocation.
           "error"
           {:delta (str "\nError: " (:message data "unknown")) :done? true}
 
-          ;; thread.started, turn.started, item.started — ignore
+          ;; Each `codex exec` starts a thread and numbers its items
+          ;; item_0, item_1, ... afresh, so an item id is unique only
+          ;; within one invocation. Surface the thread id; the streaming
+          ;; callback qualifies the call ids that follow with it.
+          "thread.started"
+          (when-let [thread-id (:thread_id data)]
+            {:delta "" :done? false :heartbeat true :invocation-id thread-id})
+
+          ;; turn.started, item.started, item.updated — ignore
           nil)))
     (catch Exception _e
       nil)))
@@ -317,6 +380,7 @@
                 ;; implement turns logged `:tokens 0`).
                 message-usage (parsed-usage (get-in data [:message :usage]))
                 message-id (get-in data [:message :id])
+                cli-written? (= cli-written-model (get-in data [:message :model]))
                 with-usage (fn [parsed]
                              (cond-> parsed
                                message-usage (assoc :message-usage message-usage)
@@ -337,7 +401,8 @@
 
               (not (str/blank? text))
               (cond-> (with-usage {:delta text :done? false})
-                stop-reason (assoc :stop-reason stop-reason))
+                stop-reason (assoc :stop-reason stop-reason)
+                cli-written? (assoc :cli-text text))
 
               ;; No text + no tool calls — still carry stop-reason if
               ;; present so "empty turn" shows a reason.
@@ -499,20 +564,30 @@
    - :stop-reason          — why the model stopped (\"end_turn\", \"max_turns\", etc.)
    - :num-turns            — number of conversation turns consumed
    - :tool-call-count      — total number of tool invocations during the run
-   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)"
-  [content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview stderr]
-  (if (rate-limited? content)
-    (responses/llm-error :anomalies.agent/rate-limited "rate_limit"
-               (str "Claude CLI rate limited: " (str/trim content))
-               {:exit-code exit-code :stdout content
-                :stop-reason stop-reason :num-turns num-turns})
-    (cond-> (responses/llm-success content {:exit-code exit-code :usage usage})
-      cost-usd                    (assoc :cost-usd cost-usd)
-      stop-reason                 (assoc :stop-reason stop-reason)
-      num-turns                   (assoc :num-turns num-turns)
-      (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
-      (seq final-message-preview) (assoc :final-message-preview final-message-preview)
-      (seq stderr)                (assoc :stderr stderr))))
+   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)
+
+   `cli-text` is the text of the last message the CLI wrote itself
+   (`:cli-text` from the stream parser), checked for the rate-limit notice
+   on its own: a notice that follows earlier answer text is too long,
+   together with it, to read as one. Only CLI-written text is checked, so
+   a model's own short answer or a streamed fragment never is."
+  ([content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview stderr]
+   (streaming-success-response content exit-code usage cost-usd stop-reason num-turns
+                               tool-call-count final-message-preview stderr nil))
+  ([content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview stderr
+    cli-text]
+   (if-let [notice (first (filter rate-limited? [content cli-text]))]
+     (responses/llm-error :anomalies.agent/rate-limited "rate_limit"
+                (str "Claude CLI rate limited: " (str/trim notice))
+                {:exit-code exit-code :stdout content
+                 :stop-reason stop-reason :num-turns num-turns})
+     (cond-> (responses/llm-success content {:exit-code exit-code :usage usage})
+       cost-usd                    (assoc :cost-usd cost-usd)
+       stop-reason                 (assoc :stop-reason stop-reason)
+       num-turns                   (assoc :num-turns num-turns)
+       (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
+       (seq final-message-preview) (assoc :final-message-preview final-message-preview)
+       (seq stderr)                (assoc :stderr stderr)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
