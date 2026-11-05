@@ -377,7 +377,9 @@
       (try
         (let [result (deref outcome return-timeout-ms nil)]
           (is (some? result) "the call returns instead of waiting out its timeout")
-          (is (= -1 (:exit result))))
+          (is (= -1 (:exit result)))
+          (is (= :cancelled (get-in result [:timeout :type]))
+              "the cancellation survives the wait that reaps the killed process"))
         (is (= [] (token-survivors token))
             "neither the shell nor its child is left running")
         (finally
