@@ -66,10 +66,15 @@ with no policy packs or when the check throws.
    default gates are `[:pre-verify-lint :tests-pass :policy-verify]`.
 4. `verify_failure_modes_test.clj`: a three-binary Cargo workspace output
    counts 9 tests, and a failure in a later binary is counted.
-5. After merging current `main` (which moved every gate message into the
-   catalog, #2307, and added `gate.result`, #2382): the gate,
-   phase-software-factory, phase and workflow component tests and the
-   project integration tests that run verify pass.
+5. After merging `main` (which moved every gate message into the catalog,
+   #2307, and added `gate.result`, #2382): every gate component test, the
+   verify and implement tests, the phase registry test, the workflow
+   environment-promotion and metrics-accumulation tests, and the project
+   handoff, configurable-integration and runner-integration tests pass
+   (364 tests, 0 failures).
+6. Against `main`'s versions of the changed sources, the new and changed
+   tests in `tests_pass_test`, `behavioral_test`, `verify_test` and
+   `verify_failure_modes_test` fail (23 failures, 1 error).
 
 ## Deployment Plan
 
