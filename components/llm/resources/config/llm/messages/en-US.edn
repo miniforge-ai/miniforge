@@ -42,6 +42,9 @@
   :backend.system/request-failed
   "LLM backend request failed"
 
+  :client/network-access-invalid
+  ":network-access? takes true or false, and true only on the codex backend; got {value} on {backend}"
+
   :http-provider.system/parse-failed
   "Failed to parse response: {reason}"
 
