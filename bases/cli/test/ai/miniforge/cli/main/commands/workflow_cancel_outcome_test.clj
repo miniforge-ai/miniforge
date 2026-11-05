@@ -75,24 +75,29 @@
         (is (nil? exit))))))
 
 (deftest ^{:stratum 1} a-cancel-no-run-picks-up-is-not-reported-as-sent-test
-  (testing "an id no running workflow owns: the request stays queued, the command says so and exits 1"
+  (testing "an id no running workflow owns: the outcome is unknown, the command says so and exits 1"
     (fs/with-temp-dir [dir {:prefix "cancel-outcome-"}]
       (let [control-state (es/create-control-state)
             {:keys [out exit]} (cancel-with-live-run dir (random-uuid) control-state
                                                      (random-uuid) 1500)]
         (is (false? (:stopped @control-state)))
-        (is (str/includes? out "stays queued"))
+        (is (str/includes? out "Cancel outcome unknown"))
+        (is (str/includes? out "may still be queued"))
         (is (not (str/includes? out "Cancel applied")))
         (is (not (str/includes? out "Cancel signal sent")))
         (is (= 1 exit))))))
 
 (deftest ^{:stratum 1} a-cancel-the-run-fails-to-apply-is-reported-failed-test
-  (testing "applying the cancel throws: the failure and its reason are reported, exit 1"
+  (testing "applying the cancel throws after the stop flag is set: the failure and
+            its reason are reported without claiming the cancel had no effect, exit 1"
     (fs/with-temp-dir [dir {:prefix "cancel-outcome-"}]
       (let [run-id (random-uuid)
             control-state (doto (es/create-control-state)
                             (add-watch ::refuse (fn [& _] (throw (ex-info "refused" {})))))
             {:keys [out exit]} (cancel-with-live-run dir run-id control-state run-id 10000)]
-        (is (str/includes? out "was not applied"))
+        (is (true? (:stopped @control-state)) "the stop flag was set before the watch threw")
+        (is (str/includes? out "could not apply or verify"))
+        (is (str/includes? out "may already be set"))
+        (is (not (str/includes? out "was not applied")))
         (is (not (str/includes? out "Cancel applied")))
         (is (= 1 exit))))))

@@ -186,10 +186,12 @@
    of the process running that workflow applies it, flips the run's
    control state, and records each lifecycle step in the run's event
    directory. This command waits up to `cancel-confirm-ms` for that
-   record. It exits 0 only when the cancel was applied and verified; a
-   cancel that failed, or that no running workflow picked up in time
-   (a wrong id, a run that has ended, another MINIFORGE_HOME), exits
-   non-zero and says the request is still queued. (Pre-D-4 this wrote
+   record. It exits 0 only when the cancel was applied and verified. A
+   failed lifecycle exits non-zero with its reason, without claiming the
+   cancel had no effect (the stop flag can be set before a later step
+   fails). No terminal record in time (a wrong id, a run that has ended,
+   another MINIFORGE_HOME, or a run with no file sink) exits non-zero
+   and says the outcome is unknown. (Pre-D-4 this wrote
    an ungoverned `.edn` command file whose legacy verb was `stop`; the
    intervention vocabulary names the same operation `:cancel`.)"
   [opts]
@@ -229,16 +231,16 @@
 
                   (:failed :rejected)
                   (do (display/print-error
-                       (messages/t :workflow-cmd/cancel-not-applied
+                       (messages/t :workflow-cmd/cancel-failed-lifecycle
                                    {:id id
                                     :reason (get seen :intervention/reason (name state))}))
                       (shared/exit! exit-code-error))
 
-                  ;; Nothing terminal in time: almost always no process
-                  ;; consumed the request, so it stays queued. (Applying
-                  ;; and verifying a cancel happen in one consumer pass.)
+                  ;; Nothing terminal in time: usually no process consumed
+                  ;; the request, but a run with no file sink applies it
+                  ;; without a record this command can read.
                   (do (display/print-error
-                       (messages/t :workflow-cmd/cancel-unconfirmed {:id id :seconds seconds}))
+                       (messages/t :workflow-cmd/cancel-outcome-unknown {:id id :seconds seconds}))
                       (shared/exit! exit-code-error)))))))
         (catch Exception e
           (display/print-error (messages/t :workflow-cmd/cancel-failed

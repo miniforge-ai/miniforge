@@ -34,12 +34,15 @@ the operator.
    the cancel was requested, then waits:
    1. `:verified` (the run's stop flag reads back as set): "Cancel applied",
       exit 0.
-   2. `:failed` or `:rejected`: the reason, exit 1.
-   3. Nothing terminal within the wait: says the cancel is not confirmed and the
-      request stays queued, exit 1.
+   2. `:failed` or `:rejected`: the run could not apply or verify the cancel,
+      with the reason, exit 1. It does not claim the cancel had no effect: the
+      stop flag can be set before a later step fails.
+   3. Nothing terminal within the wait: the outcome is unknown, exit 1. The
+      request may still be queued, or a run with no file sink may have applied
+      it without a record this command can read.
 3. Messages through the CLI catalog: `cancel-success` is replaced by
-   `cancel-requested`, `cancel-applied`, `cancel-not-applied` and
-   `cancel-unconfirmed`. The help summary says the command waits.
+   `cancel-requested`, `cancel-applied`, `cancel-failed-lifecycle` and
+   `cancel-outcome-unknown`. The help summary says the command waits.
 
 ## Testing Plan
 
@@ -49,8 +52,9 @@ temp events directory:
 
 1. The run applies the cancel: the run's stop flag is set, the output says
    "Cancel applied", and there is no exit call.
-2. An id no running workflow owns: "stays queued", exit 1.
-3. Applying throws: "was not applied", exit 1.
+2. An id no running workflow owns: "Cancel outcome unknown", exit 1.
+3. Applying throws after the stop flag is set: the flag reads back set, and the
+   command says it "could not apply or verify" the cancel, exit 1.
 
 All three fail against main's command (run with only the wait-time override
 removed, since main has no wait). The existing request-shape test stubs the
