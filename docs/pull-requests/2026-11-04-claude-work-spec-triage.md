@@ -42,9 +42,7 @@ mixed one concrete fix with two open investigations.
       (`require-environment-result`); release scans git;
       `environment_promotion_integration_test.clj`. Its "one code path"
       criterion was dropped: release keeps a host mode for local runs.
-   10. `n06-compliance-metadata` — `compliance_defaults.clj`. Access-log
-       entries are not yet written on real reads.
-   11. `n06-sensitive-data-scanning` — superseded by the `redaction`
+   10. `n06-sensitive-data-scanning` — superseded by the `redaction`
        component, which `collector.clj` applies before hashing.
 2. `work/in-progress/`: removed four byte-identical copies of specs already
    in `work/done/` and an older copy of `n05-cli-command-wiring`; moved
@@ -52,16 +50,21 @@ mixed one concrete fix with two open investigations.
    `work/done/`.
 3. `work/failed/phase-transition-graph-validator` moved back to `work/`. It
    was never implemented, and `docs/architecture/state-ownership-and-phase-graph.md`
-   links it at that path.
-4. Archived to `work/archive/stale/`: `workflow-redesign-use-case-targeted`
+   links it at that path. Its `:scope` now also lists the test dirs,
+   `workflow/fsm.clj` (where its Task 0 finds the transition edges) and
+   `bb.edn` (its validation task), which its acceptance criteria need.
+4. `n06-compliance-metadata` stays in `work/`: its defaults and overrides are
+   on main (`compliance_defaults.clj`), but nothing outside tests calls
+   `append-access-log-entry`, so its access-log criterion is unmet.
+5. Archived to `work/archive/stale/`: `workflow-redesign-use-case-targeted`
    (superseded by the canonical workflow set) and `dashboard-production-ready`
    (no `:spec/acceptance-criteria`, and its `:scope` is prose, not paths).
-5. New `workflow-resume-restore-failure-escalates`: in local mode, a failed
+6. New `workflow-resume-restore-failure-escalates`: in local mode, a failed
    workspace restore on resume throws
    `:anomalies.workflow/workspace-restore-failed` instead of continuing with
    no environment. `workflow-resume-fsm-advance-investigation` keeps causes
    (b) and (c) and is now blocked by it.
-6. `work/QUEUE.md` regenerated with `bb work:queue`.
+7. `work/QUEUE.md` regenerated with `bb work:queue`.
 
 ## Testing Plan
 

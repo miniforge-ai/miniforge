@@ -164,6 +164,7 @@ Step 3 of the ratified Ariadne adoption order. Identity stops being
 | medium | ● | unassigned | `n04-knowledge-safety-pack.spec.edn` — N4: Knowledge-safety policy pack with prompt-injection detection | - |
 | medium | ● | unassigned | `n04-kubernetes-diff-parsing.spec.edn` — N4: Kubernetes manifest diff parsing for policy gate evaluation | - |
 | medium | ● | unassigned | `n05-http-api-decision.spec.edn` — N5: Resolve HTTP REST + SSE vs winsock and implement API layer | - |
+| medium | ● | unassigned | `n06-compliance-metadata.spec.edn` — N6: Add compliance metadata fields to evidence bundles | - |
 | medium | ● | unassigned | `n08-oci-governance.spec.edn` — N8: OCI governance — RBAC, listener capabilities, control actions, audit | - |
 | medium | ● | unassigned | `n08-otel-trace-context.spec.edn` — N8: OpenTelemetry alignment and W3C Trace Context propagation | - |
 | medium | ● | unassigned | `n08-privacy-retention.spec.edn` — N8: Privacy levels for event access and data retention policies | - |
