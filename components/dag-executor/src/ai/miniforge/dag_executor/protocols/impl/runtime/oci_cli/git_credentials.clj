@@ -35,15 +35,20 @@
 ;; ============================================================================
 ;; Repository host and token resolution (N11 §4.2)
 ;; ============================================================================
-(defn- ^{:stratum 0} infer-host-kind
-  "Infer the git hosting provider from a repository URL.
-   Returns :github, :gitlab, or :generic."
+(def ^{:stratum 0} ^:private provider-hosts
+  "Host kind of each hosting provider's own host. A provider's token
+   (GH_TOKEN, `gh auth token`, GITLAB_TOKEN, the profile's) goes only to
+   the host listed for it."
+  {"github.com" :github
+   "gitlab.com" :gitlab})
+
+(defn- ^{:stratum 0} url-host
+  "The lowercased host of a repository URL, `scheme://[userinfo@]host[:port]/…`
+   or scp-like `[user@]host:path`, or nil for a local path."
   [repo-url]
-  (cond
-    (str/includes? repo-url "github.com")  :github
-    (str/includes? repo-url "gitlab.com")  :gitlab
-    (str/includes? repo-url "gitlab")      :gitlab
-    :else                                  :generic))
+  (some-> (or (second (re-find #"^[A-Za-z][A-Za-z0-9+.-]*://(?:[^/]*@)?([^/:?#]+)" repo-url))
+              (second (re-matches #"(?:[^@/]+@)?([^/:]+):.*" repo-url)))
+          str/lower-case))
 
 (defn- ^{:stratum 0} resolve-git-token
   "Resolve a git authentication token for capsule clone.
@@ -141,6 +146,15 @@
   [env]
   (for [i (range (git-config-count env))]
     [(get env (str "GIT_CONFIG_KEY_" i)) (get env (str "GIT_CONFIG_VALUE_" i))]))
+
+(defn- ^{:stratum 1} infer-host-kind
+  "The git hosting provider of a repository URL, from its host alone:
+   `provider-hosts`, else :generic. A host or path that only names a
+   provider (github.com.example.net, example.net/github.com/r.git,
+   gitlab.example.com) is :generic, so no provider token is sent to it;
+   env-config's :host-kind names the provider of a self-hosted instance."
+  [repo-url]
+  (get provider-hosts (url-host repo-url) :generic))
 
 (defn- ^{:stratum 1} split-userinfo
   "[url auth] for an http(s) URL: the URL with its scheme lowercased (the

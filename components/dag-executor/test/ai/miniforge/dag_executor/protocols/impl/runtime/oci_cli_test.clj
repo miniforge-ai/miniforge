@@ -377,6 +377,28 @@
                                                                           {:user "u" :token "t"}))
                          k)))))))
 
+(deftest ^{:stratum 0} git-remote-infers-the-provider-from-the-host-alone-test
+  (testing "a provider's host, in any case, port or URL form, names that
+            provider; a host or path that only contains its name is
+            :generic, so no GitHub or GitLab token is resolved for it; an
+            explicit :host-kind still wins"
+    (let [host-kind #(:host-kind ((private-fn 'git-remote) {:repo-url %}))]
+      (doseq [url ["https://github.com/o/r.git" "HTTPS://GitHub.COM/o/r.git"
+                   "https://bob:pw@github.com:443/o/r.git" "git@github.com:o/r.git"
+                   "ssh://git@github.com/o/r.git"]]
+        (is (= :github (host-kind url)) url))
+      (is (= :gitlab (host-kind "https://gitlab.com/g/r.git")))
+      (doseq [url ["https://github.com.attacker.example/o/r.git"
+                   "https://attacker.example/github.com/r.git"
+                   "https://attacker.example/r.git?x=github.com"
+                   "git@attacker.example:github.com/r.git"
+                   "https://bob:github.com@attacker.example/r.git"
+                   "https://gitlab.attacker.example/g/r.git"
+                   "/srv/github.com/r.git"]]
+        (is (= :generic (host-kind url)) url))
+      (is (= :gitlab (:host-kind ((private-fn 'git-remote)
+                                  {:repo-url "https://git.example.com/g/r.git" :host-kind :gitlab})))))))
+
 (deftest ^{:stratum 0} git-auth-test
   (let [git-auth (private-fn 'git-auth)]
     (with-redefs [oci-git/resolve-git-token (fn [_url _opts] "tok")]
