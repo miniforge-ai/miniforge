@@ -11,13 +11,14 @@
    (`analyze-rules-on-files`).
 
    Layer 0: one rule over the changed files; the rules that apply to one
-     file; deadline failures for a file
+     file; deadline failures for a file; one judge call within the budget
    Layer 1: the batched per-file fold across all rules (over Layer 0)"
   (:require
    [ai.miniforge.semantic-analyzer.judge :as judge]
    [ai.miniforge.semantic-analyzer.limits :as limits]
    [ai.miniforge.semantic-analyzer.parsing :as parsing]
-   [ai.miniforge.semantic-analyzer.selection :as selection]))
+   [ai.miniforge.semantic-analyzer.selection :as selection]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -64,6 +65,23 @@
   (mapv #(parsing/judge-failure-violation % path :deadline-exceeded deadline-ms)
         applicable))
 
+(defn- ^{:stratum 0} judge-within
+  "(judge-fn) bounded by `remaining-ms`: its result, or ::deadline when the
+   call is still running then, after cancelling it. An exception judge-fn
+   throws is rethrown as itself; an interrupt of the waiting thread
+   cancels the call too."
+  [remaining-ms judge-fn]
+  (let [call (future (judge-fn))]
+    (try+
+     (let [result (deref call (max 0 remaining-ms) ::deadline)]
+       (when (= ::deadline result) (future-cancel call))
+       result)
+     (catch java.util.concurrent.ExecutionException e
+       (throw (or (.getCause e) e)))
+     (catch InterruptedException e
+       (future-cancel call)
+       (throw e)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} analyze-rules-on-files
@@ -77,9 +95,11 @@
    rule) into one call per file: the rule pack is sent once per file, not once
    per (rule, file).
 
-   Bounded by `:deadline-ms` (default `limits/judge-deadline-ms`): every file
-   still unjudged when it passes gets judge-failure violations for its
-   applicable rules, and the status is :deadline-exceeded. Nothing is skipped."
+   Bounded by `:deadline-ms` (default `limits/judge-deadline-ms`): each judge
+   call runs within what is left of it, and a call still running when it
+   passes is cancelled. That file and every file still unjudged get
+   judge-failure violations for their applicable rules, and the status is
+   :deadline-exceeded. Nothing is skipped."
   ([llm-client complete-fn rules files]
    (analyze-rules-on-files llm-client complete-fn rules files {}))
   ([llm-client complete-fn rules files {:keys [deadline-ms]
@@ -98,12 +118,20 @@
                                       (parsing/index-by-rule
                                        by-rule (deadline-violations applicable path deadline-ms))
                                       analyzed calls true)
-             ;; judged — one call made; fold its violations (possibly none)
-             :else             (recur (next fs)
-                                      (parsing/index-by-rule
-                                       by-rule (judge/analyze-file-batched
-                                                llm-client complete-fn applicable path content))
-                                      (inc analyzed) (inc calls) false)))
+             :else
+             (let [remaining (- deadline-ms (- (System/currentTimeMillis) start-ms))
+                   judged    (judge-within remaining
+                                           #(judge/analyze-file-batched
+                                             llm-client complete-fn applicable path content))]
+               (if (= ::deadline judged)
+                 ;; the call outlasted the deadline — fail closed on this file
+                 (recur (next fs)
+                        (parsing/index-by-rule
+                         by-rule (deadline-violations applicable path deadline-ms))
+                        analyzed (inc calls) true)
+                 ;; judged — one call made; fold its violations (possibly none)
+                 (recur (next fs) (parsing/index-by-rule by-rule judged)
+                        (inc analyzed) (inc calls) false)))))
          {:by-rule        by-rule
           :files-analyzed analyzed
           :calls          calls

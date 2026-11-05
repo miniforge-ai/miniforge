@@ -70,13 +70,15 @@
 (defn ^{:stratum 1} parse-judge-response
   "Parse the LLM's EDN response into violation maps.
    Returns a vector of violations (empty when the judge found none), or nil
-   when the response is not an EDN vector — the judge gave no judgement."
+   when the response is not an EDN vector of maps — the judge gave no
+   judgement. A vector with any non-map entry (`[nil]`, `[:error]`, a
+   string) is no judgement, not a clean file."
   [response-text]
   (try
     (let [cleaned (-> (str response-text) str/trim strip-code-fences str/trim)
           parsed  (edn/read-string cleaned)]
-      (when (vector? parsed)
-        (filterv map? parsed)))
+      (when (and (vector? parsed) (every? map? parsed))
+        parsed))
     (catch Exception _ nil)))
 
 (defn ^{:stratum 1} judge-failure-violation

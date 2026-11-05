@@ -25,7 +25,9 @@ bounds the gate's batched judge with a deadline that also fails closed.
 ## Changes in Detail
 
 1. `parsing/parse-judge-response` returns nil for an answer that is not a
-   finding list. A real `[]` still means no findings.
+   finding list, including a vector with any non-map entry (`[nil]`,
+   `[:error]`, a string), which was filtered down to `[]` and read as clean
+   (Copilot review). A real `[]` still means no findings.
 2. `judge/analyze-file` and `judge/analyze-file-batched` turn a failed call or an
    unparseable answer into a judge-failure violation for every rule asked about
    (`parsing/judge-failure-violation`). The violation carries
@@ -33,9 +35,13 @@ bounds the gate's batched judge with a deadline that also fails closed.
    carries the call's error or an excerpt of the answer. The gate already blocks
    on any violation of an acting rule.
 3. `changed-files/analyze-rules-on-files` takes an optional `{:deadline-ms}`
-   (default `limits/judge-deadline-ms`, 20 minutes). Each file still unjudged
-   when it passes gets a `:deadline-exceeded` failure for each applicable rule,
-   without a call, and the status is `:deadline-exceeded`. No file is skipped.
+   (default `limits/judge-deadline-ms`, 20 minutes). Each judge call runs within
+   what is left of it (`judge-within`, a future dereferenced with the remaining
+   budget); a call still running when it passes is cancelled and its file gets
+   a `:deadline-exceeded` failure (Copilot review). Each file still unjudged
+   then gets the same failure for each applicable rule, without a call, and the
+   status is `:deadline-exceeded`. No file is skipped. The component now depends
+   on slingshot for `judge-within`'s `try+` (rule 211).
 4. `limits.edn` holds the deadline and the answer-excerpt length
    (`:judge-answer-excerpt-chars`, 200).
 5. New message catalog `config/semantic-analyzer/messages/en-US.edn` and its
@@ -56,16 +62,22 @@ deadline blocks until the deadline is raised in `limits.edn`.
 
 ## Testing Plan
 
-1. `parsing_test.clj`: prose, nil, malformed and non-vector answers parse to nil.
+1. `parsing_test.clj`: prose, nil, malformed and non-vector answers parse to nil,
+   and so do vectors with a non-map entry.
 2. `judge_test.clj`: an unparseable answer and a failed call each give one
    `:semantic/judge-failure` violation; a failed batched call blocks every rule
    in the batch.
 3. `changed_files_test.clj`: with `:deadline-ms 0`, no call is made, the
    applicable file becomes a `:deadline-exceeded` violation, and the
-   non-applicable file is still skipped.
+   non-applicable file is still skipped. A call that sleeps 5 s against a
+   200 ms deadline is cancelled: the file is a `:deadline-exceeded` violation
+   and the result returns well before the call would have.
 4. Against #2093's semantic-analyzer source these three namespaces fail
    (9 failures, 2 errors) and pass with this change.
-5. `components/semantic-analyzer`, `components/gate` and
+5. The two review fixes' tests fail on the previous source (7 failures) and
+   pass with them; the semantic-analyzer suites and the gate's
+   `policy-pack-test` pass (44 tests).
+6. `components/semantic-analyzer`, `components/gate` and
    `components/policy-pack` (497 tests) pass on this branch merged with current
    `main`.
 

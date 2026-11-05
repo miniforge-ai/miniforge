@@ -41,7 +41,13 @@
     (is (nil? (sut/parse-judge-response "The code looks fine, no violations.")))
     (is (nil? (sut/parse-judge-response nil)))
     (is (nil? (sut/parse-judge-response "[{:line broken")))
-    (is (nil? (sut/parse-judge-response "{:not \"a vector\"}")))))
+    (is (nil? (sut/parse-judge-response "{:not \"a vector\"}"))))
+
+  (testing "a vector with any non-map entry is no answer, not a clean file"
+    (is (nil? (sut/parse-judge-response "[nil]")))
+    (is (nil? (sut/parse-judge-response "[:error]")))
+    (is (nil? (sut/parse-judge-response "[\"unable to judge\"]")))
+    (is (nil? (sut/parse-judge-response "[{:line 1 :message \"a\"} :error]")))))
 
 ;; ============================================================================
 ;; Violation canonicalization

@@ -94,3 +94,17 @@
       (is (= [:deadline-exceeded]
              (mapv :semantic/judge-failure (get-in result [:by-rule :std/a])))
           "only the file a rule applies to becomes a failure"))))
+
+(deftest ^{:stratum 0} analyze-rules-on-files-call-outlasting-deadline-fails-closed-test
+  (testing "a judge call still running at the deadline is cancelled, and its
+            file is a deadline failure; the gate does not wait for the call"
+    (let [rule   {:rule/id :std/a :rule/title "A" :rule/category "001" :rule/severity :high
+                  :rule/knowledge-content "k" :rule/applies-to {:file-globs ["src/*.clj"]}}
+          stalled (fn [_client _request] (Thread/sleep 5000) {:success true :content "[]"})
+          result (sut/analyze-rules-on-files :mock stalled [rule]
+                                             [{:path "src/a.clj" :content "(def a 1)"}]
+                                             {:deadline-ms 200})]
+      (is (= :deadline-exceeded (:status result)))
+      (is (= [:deadline-exceeded]
+             (mapv :semantic/judge-failure (get-in result [:by-rule :std/a]))))
+      (is (< (:duration-ms result) 4000) "returned at the deadline, not after the call"))))
