@@ -4,10 +4,9 @@
 (ns ai.miniforge.phase-opsv.boundary.bounded-io
   "Owned, bounded response reads; these throwing effect ports are converted at ingress."
   (:require [ai.miniforge.resource-cleanup.interface :as cleanup]
+            [ai.miniforge.utf8.interface :as utf8]
             [slingshot.slingshot :refer [try+]])
-  (:import [java.nio ByteBuffer]
-           [java.nio.charset CodingErrorAction StandardCharsets]
-           [java.util.concurrent Callable Future FutureTask TimeUnit TimeoutException]))
+  (:import [java.util.concurrent Callable Future FutureTask TimeUnit TimeoutException]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -30,11 +29,12 @@
 (defn- ^{:stratum 0} start-reader! [^FutureTask task]
   (doto (Thread. task) (.setDaemon true) (.start)))
 
-(defn ^{:stratum 0} utf8-text [bytes]
-  (let [decoder (doto (.newDecoder StandardCharsets/UTF_8)
-                  (.onMalformedInput CodingErrorAction/REPORT)
-                  (.onUnmappableCharacter CodingErrorAction/REPORT))]
-    (str (.decode decoder (ByteBuffer/wrap bytes)))))
+(defn ^{:stratum 0} utf8-text
+  "Strict UTF-8 text of a response body; malformed bytes throw, like the
+   other effect ports here, and are converted at ingress."
+  [bytes]
+  (or (utf8/decode-strict bytes)
+      (throw (IllegalArgumentException.))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

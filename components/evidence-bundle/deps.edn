@@ -11,6 +11,7 @@
         ai.miniforge/response     {:local/root "../response"}
         ai.miniforge/schema       {:local/root "../schema"}
         ai.miniforge/workflow     {:local/root "../workflow"}
+        ai.miniforge/utf8 {:local/root "../utf8"}
         metosin/malli            {:mvn/version "0.16.4"}}
  :aliases
  {:test {:extra-paths ["test"]

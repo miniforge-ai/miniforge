@@ -6,6 +6,7 @@
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge/logging {:local/root "../logging"}
+        ai.miniforge/utf8 {:local/root "../utf8"}
         datalevin/datalevin {:mvn/version "0.9.16"}
         com.cognitect/transit-clj {:mvn/version "1.0.333"}
         cheshire/cheshire {:mvn/version "5.13.0"}}
