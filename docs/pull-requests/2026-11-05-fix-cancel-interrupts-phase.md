@@ -46,11 +46,17 @@ avoids all of them.
    progress monitor's timeouts on every poll. A cancelled stream ends like
    any other adaptive timeout: the process tree is destroyed and the call
    returns a timeout result.
-3. `runner-iteration/execute-supervised`: runs the phase step under a
+3. `subprocess/wait-for-stream-process`, the wait every agent CLI call
+   ends in (the streaming client after its stream closes, and the
+   non-streaming capture client), now waits in poll-interval slices and
+   checks the cancel between them: a CLI that closed stdout but did not
+   exit, or a non-streaming call, is killed with its tree when the run is
+   cancelled, and the result carries the `:cancelled` reason.
+4. `runner-iteration/execute-supervised`: runs the phase step under a
    cancel check that reads the run's control state. DAG sub-workflows run
    their own iterations against the parent's control state, so their calls
    see the cancel too; futures a phase starts inherit the binding.
-4. A new message, `:stream.system/run-cancelled`, carries the reason text.
+5. A new message, `:stream.system/run-cancelled`, carries the reason text.
 
 `:cancelled` is not one of the infra-timeout types the agents retry
 (`:stream-idle`, `:stagnation`, `:hard-limit`) or auto-resume
@@ -70,7 +76,11 @@ call made on a thread that does not inherit Clojure bindings (a raw
    `:cancelled` timeout without throwing, and neither the shell nor its
    10-minute child is left running.
 2. A call made after the cancel returns a `:cancelled` timeout at once and
-   leaves nothing running.
+   leaves nothing running. Its processes are found by a unique token in
+   their command lines, since the cancelled call never reads the pids they
+   print.
+3. A cancel while waiting for a CLI that closed stdout but did not exit
+   ends the wait with a `:cancelled` timeout and kills the tree.
 
 `runner_iteration_control_test.clj`: the phase step runs under a cancel
 check that is false while the run is live and true once it is cancelled.

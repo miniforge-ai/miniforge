@@ -24,6 +24,7 @@
    neither pid is alive afterwards."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [clojure.string :as str]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
@@ -96,6 +97,28 @@
    left holding stdout keeps it open until this limit)."
   5000)
 
+(defn- ^{:stratum 0} token-sleep-cmd
+  "A shell that starts a 10-minute child whose command line carries
+   TOKEN (sleep accepts fractional seconds, so the token is the duration),
+   then waits. The shell's own command line carries the token too, so
+   both can be found without either printing a pid."
+  [token]
+  ["sh" "-c" (str "sleep " token " & wait")])
+
+(defn- ^{:stratum 0} unique-sleep-token
+  "A 10-minute sleep duration unique to one test run."
+  []
+  (str "600." (System/nanoTime)))
+
+(defn- ^{:stratum 0} token-pids
+  "Pids of live processes whose command line contains TOKEN."
+  [token]
+  (->> (iterator-seq (.iterator (java.lang.ProcessHandle/allProcesses)))
+       (filter (fn [^java.lang.ProcessHandle handle]
+                 (and (.isAlive handle)
+                      (str/includes? (.orElse (.commandLine (.info handle)) "") token))))
+       (mapv (fn [^java.lang.ProcessHandle handle] (.pid handle)))))
+
 (defn- ^{:stratum 0} alive?
   "True when `pid` is a running process. A killed process nobody has
    reaped yet (a zombie: its shell died first and the container's PID 1
@@ -159,6 +182,18 @@
     (.start thread)
     {:thread thread
      :outcome outcome}))
+
+(defn- ^{:stratum 1} token-survivors
+  "Pids of processes carrying TOKEN still alive when none are left or
+   `death-timeout-ms` has passed, whichever is first."
+  [token]
+  (let [deadline (+ (System/currentTimeMillis) death-timeout-ms)]
+    (loop []
+      (let [alive (token-pids token)]
+        (if (or (empty? alive) (> (System/currentTimeMillis) deadline))
+          alive
+          (do (Thread/sleep poll-interval-ms)
+              (recur)))))))
 
 (defn- ^{:stratum 1} start-cancellable-stream-thread
   "Like `start-stream-thread`, with the LLM cancel check bound to
@@ -289,15 +324,39 @@
 (deftest ^{:stratum 2} call-after-cancel-ends-at-once-test
   (testing "a call made after the run was cancelled returns a :cancelled
             timeout at once and leaves nothing running"
-    (let [pids (atom {})
+    (let [token (unique-sleep-token)
           {:keys [outcome]} (start-cancellable-stream-thread
                              (atom true)
-                             spawning-shell-cmd
-                             (partial record-pid! pids (promise))
+                             (token-sleep-cmd token)
+                             (fn [_] nil)
                              {:progress-monitor (pm/create-progress-monitor {})})]
       (try
         (let [{:keys [result]} (deref outcome return-timeout-ms nil)]
           (is (= :cancelled (get-in result [:timeout :type]))))
-        (is (= [] (survivors (vals @pids))))
+        (is (= [] (token-survivors token))
+            "neither the shell nor its child is left running")
+        (finally
+          (kill-pids! (token-pids token)))))))
+
+(deftest ^{:stratum 2} cancel-after-stdout-closes-kills-process-tree-test
+  (testing "a cancel while waiting for a CLI that closed stdout but did not
+            exit ends the wait, returns :cancelled and kills the tree"
+    (let [pids      (atom {})
+          reported  (promise)
+          cancelled (atom false)
+          {:keys [outcome]} (start-cancellable-stream-thread
+                             cancelled
+                             stdout-closing-shell-cmd
+                             (partial record-pid! pids reported)
+                             {:progress-monitor (pm/create-progress-monitor {})})]
+      (try
+        (is (true? (deref reported pid-report-timeout-ms false))
+            "the shell printed both pids before closing stdout")
+        (reset! cancelled true)
+        (let [{:keys [result]} (deref outcome return-timeout-ms nil)]
+          (is (= :cancelled (get-in result [:timeout :type]))
+              "the post-EOF wait sees the cancel instead of running out"))
+        (is (= [] (survivors (vals @pids)))
+            "no process from the tree is left running")
         (finally
           (kill-pids! (vals @pids)))))))

@@ -321,6 +321,11 @@
            anomaly
            (stream-anomaly-result lines anomaly)
 
+           ;; The run was cancelled while waiting for a CLI that closed
+           ;; stdout to exit; the wait destroyed its process tree.
+           (:timeout result)
+           (timeout-result lines (:timeout result))
+
            :else
            (success-result lines result)))
        (catch InterruptedException _
