@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-opsv.interface
-  "Public OPSV application transformations and adapter port."
+  "API surface class 1: internal EDN OPSV application transformations and adapter port."
   (:require
    [ai.miniforge.phase-opsv.actuation :as actuation]
    [ai.miniforge.phase-opsv.boundary.kubernetes-snapshot :as kubernetes-snapshot]
@@ -45,6 +45,7 @@
    [ai.miniforge.phase-opsv.model :as model]
    [ai.miniforge.phase-opsv.boundary.measurement :as measurement]
    [ai.miniforge.phase-opsv.boundary.prometheus-client :as prometheus]
+   [ai.miniforge.phase-opsv.boundary.prometheus-criteria :as prometheus-criteria]
    [ai.miniforge.phase-opsv.run-control :as run-control]
    [ai.miniforge.phase-opsv.run-control-state :as control-state]
    [ai.miniforge.phase-opsv.protocol :as protocol]
@@ -120,6 +121,17 @@
 (def ^{:stratum 0} observe-prometheus-window!
   "Read a bounded window from an explicit Prometheus endpoint without mutation authority."
   prometheus/observe-window!)
+
+(def ^{:stratum 0} observe-prometheus-criteria!
+  "Read declared criterion windows, requiring cluster/namespace/service label correlation.
+   Configuration supplies :measurement/prometheus, :measurement/target, :measurement/service,
+   :measurement/label-names and :measurement/criteria (id, request, reduction).
+   Explicit :maximum, :minimum or :last reductions produce :observations by criterion ID;
+   :measurement/windows retains declarations and original query/window/labels/samples.
+   :measurement/declaration retains the declared target/service/label names, never credentials.
+   An anomaly prevents partial results. Each read is bounded, not an atomic batch.
+   No target UID attestation, confidence, artifact IDs, retention, experiments or verification verdict."
+  prometheus-criteria/observe!)
 
 (def ^{:stratum 0} KubernetesDeploymentMembershipObservation
   "Closed captured shape for a declared target and native namespace/controller/Pod observations.

@@ -8,18 +8,25 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} expected-labels [configuration]
-  (let [labels (:discovery/metric-labels configuration)
-        target (:discovery/kubernetes configuration)]
-    {(:cluster labels) (:kubernetes/cluster-id target)
-     (:namespace labels) (:kubernetes/namespace target)
-     (:service labels) (:discovery/service configuration)}))
+(defn ^{:stratum 0} expected-labels
+  ([configuration]
+   (let [labels (:discovery/metric-labels configuration)
+         target (:discovery/kubernetes configuration)]
+     (expected-labels (:kubernetes/cluster-id target) (:kubernetes/namespace target) (:discovery/service configuration) labels)))
+  ([cluster namespace service labels]
+   {(:cluster labels) cluster
+    (:namespace labels) namespace
+    (:service labels) service}))
 
-(defn ^{:stratum 0} driver [kind expected observation]
-  (let [observed (select-keys (:measurement/labels observation) (keys expected))]
-    (if (= expected observed)
-      {:driver kind
-       :measurement observation}
-      (anomaly/anomaly :conflict (msg/ts :discovery/unbound-signal) {}))))
+(defn ^{:stratum 0} matches? [expected observation]
+  (= expected (select-keys (:measurement/labels observation) (keys expected))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} driver [kind expected observation]
+  (if (matches? expected observation)
+    {:driver kind
+     :measurement observation}
+    (anomaly/anomaly :conflict (msg/ts :discovery/unbound-signal) {})))
 
 (comment ::correlated-observations-not-verification)
