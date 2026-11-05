@@ -46,6 +46,15 @@
   (when (some? content)
     (digest/digest-content content)))
 
+(defn- ^{:stratum 0} qualified-call-id
+  "The call id as published: \"<invocation>/<id>\" inside a provider
+   invocation, `id` alone outside one, nil for a nil `id`."
+  [invocation id]
+  (when id
+    (if invocation
+      (str invocation "/" id)
+      id)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} create-streaming-callback
@@ -115,12 +124,7 @@
         ;; outstanding tool calls) — negligible in normal operation.
         tool-start-times (atom {})
         ;; The current invocation's id, when the provider names one.
-        current-invocation (atom nil)
-        qualify (fn [id]
-                  (when id
-                    (if-let [invocation @current-invocation]
-                      (str invocation "/" id)
-                      id)))]
+        current-invocation (atom nil)]
     (fn [{:keys [delta done? tool-use tool-result heartbeat
                  tool-name tool-names tool-call-id tool-args-preview
                  tool-result-call-id tool-result-content tool-result-is-error
@@ -152,7 +156,7 @@
               (events/agent-tool-call stream-atom workflow-id agent-id
                                       {:tool-name tool-name
                                        :tool-names tool-names
-                                       :tool-call-id (qualify tool-call-id)
+                                       :tool-call-id (qualified-call-id @current-invocation tool-call-id)
                                        :tool-args-preview tool-args-preview}))
 
             ;; ── New paired started event — replaces :agent/status :tool-calling
@@ -170,7 +174,7 @@
                 ;; consistent digest map rather than silently dropping
                 ;; the field.
                 (cond-> {:tool/name    tool-name
-                         :tool/call-id (qualify tool-call-id)}
+                         :tool/call-id (qualified-call-id @current-invocation tool-call-id)}
                   (seq tool-names) (assoc :tool/names (vec tool-names))
                   (some? tool-args-preview)
                   (assoc :tool/args-digest
@@ -183,7 +187,7 @@
                 stream-atom
                 (events/tool-call-completed
                   stream-atom workflow-id
-                  (cond-> {:tool/call-id (qualify tool-call-id)}
+                  (cond-> {:tool/call-id (qualified-call-id @current-invocation tool-call-id)}
                     (some? tool-error?) (assoc :tool/success? (not tool-error?))))))))
 
         ;; Tool-result closes the latency span opened by tool-use.
@@ -208,7 +212,7 @@
                 stream-atom workflow-id
                 ;; cond-> excludes optional keys explicitly when nil,
                 ;; decoupled from constructor nil-filtering behaviour.
-                (cond-> {:tool/call-id  (qualify correlated-id)
+                (cond-> {:tool/call-id  (qualified-call-id @current-invocation correlated-id)
                          :tool/success? (not (true? tool-result-is-error))}
                   result-digest (assoc :tool/result-digest result-digest)
                   duration-ms   (assoc :tool/duration-ms duration-ms))))))
