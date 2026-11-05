@@ -68,8 +68,12 @@
      :invocation-id — the provider's id for one CLI invocation (Codex
                       thread id). Codex numbers its items afresh in every
                       invocation, so the call ids that follow are
-                      published as \"<invocation-id>/<call-id>\" until a
-                      :done? event ends the invocation.
+                      published as \"<invocation-id>/<call-id>\" until an
+                      event with :invocation-ended? (Codex turn.completed or
+                      turn.failed) ends the invocation, or the next
+                      :invocation-id replaces it. :done? alone does not end
+                      it: a Codex top-level error is :done? while the exec
+                      keeps running.
      :tool-result — boolean, true when the LLM streamed a tool-result
                     block (outcome of a prior tool-use)
      :tool-result-call-id — provider id correlating this result to its
@@ -120,7 +124,7 @@
     (fn [{:keys [delta done? tool-use tool-result heartbeat
                  tool-name tool-names tool-call-id tool-args-preview
                  tool-result-call-id tool-result-content tool-result-is-error
-                 tool-completed tool-error? invocation-id]}]
+                 tool-completed tool-error? invocation-id invocation-ended?]}]
       (when invocation-id
         (reset! current-invocation invocation-id))
       (cond
@@ -214,7 +218,7 @@
 
         :else
         (do
-          (when done?
+          (when invocation-ended?
             (reset! current-invocation nil))
           (when (and print? (not quiet?) (seq delta))
             (print delta)

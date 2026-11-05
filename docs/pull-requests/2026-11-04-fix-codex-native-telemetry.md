@@ -79,8 +79,13 @@ run:
    same published call id, and the timeline named both after the later
    one. `thread.started` now parses to a heartbeat carrying
    `:invocation-id` (the thread id). The callback publishes the call ids
-   that follow as `<thread id>/<item id>` until a `:done?` event ends the
-   invocation. A provider that names no invocation (Claude) keeps its
+   that follow as `<thread id>/<item id>` until the invocation ends.
+   Only `turn.completed` and `turn.failed` end it. They now carry
+   `:invocation-ended?`, and the exec processor shuts down after them.
+   A top-level `error` is `:done?` but does not end it, because the
+   processor keeps running (`ServerNotification::Error` returns
+   `CodexStatus::Running`) and can still reconcile items before
+   `turn.failed`. A provider that names no invocation (Claude) keeps its
    ids. The ids are qualified where they are produced, not in one
    consumer, because the observer, the timeline and anything reading
    persisted events all key on `:tool/call-id`.
@@ -120,6 +125,9 @@ covers two execs that both report `item_1`. They publish distinct ids,
 and the timeline names each call correctly. It also checks that
 unqualified providers keep their ids, and that a call without an outcome
 renders as unknown. Against the second commit's sources, it fails.
+Its `error`, then `item.completed`, then `turn.failed` case, and the
+parser's `only-turn-end-events-end-the-invocation-test`, fail against
+the third commit's sources.
 
 With all commits, these pass together with `ai.miniforge.llm.interface-test`,
 `ai.miniforge.observer.alerts-test` and `ai.miniforge.event-stream.interface-test`

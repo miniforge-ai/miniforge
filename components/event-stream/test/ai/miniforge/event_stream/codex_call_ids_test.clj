@@ -34,6 +34,20 @@
            :tool-name tool-name :tool-call-id call-id}
     (some? outcome) (assoc :tool-error? (= :failed outcome))))
 
+(def ^{:stratum 0} turn-completed
+  "parse-codex-stream-line's turn.completed (usage left out)."
+  {:delta "" :done? true :increment-turns true :invocation-ended? true})
+
+(defn ^{:stratum 0} turn-failed
+  [message]
+  {:delta (str "\nError: " message) :done? true :invocation-ended? true})
+
+(defn ^{:stratum 0} top-level-error
+  "parse-codex-stream-line's top-level error event: done, but the exec
+   keeps running."
+  [message]
+  {:delta (str "\nError: " message) :done? true})
+
 (defn ^{:stratum 0} published-events
   [parsed]
   (let [stream (es/create-event-stream {:sinks []})
@@ -59,10 +73,10 @@
     (let [events (published-events
                   [{:delta "" :done? false :heartbeat true :invocation-id "thread-plan"}
                    (completed-call "command_execution" "item_1" :completed)
-                   {:delta "" :done? true}
+                   turn-completed
                    {:delta "" :done? false :heartbeat true :invocation-id "thread-impl"}
                    (completed-call "file_change" "item_1" :completed)
-                   {:delta "" :done? true}])
+                   turn-completed])
           started (filter #(= :agent/tool-call-started (:event/type %)) events)
           completed (filter #(= :tool/call-completed (:event/type %)) events)]
       (is (= ["thread-plan/item_1" "thread-impl/item_1"] (map :tool/call-id started)))
@@ -76,9 +90,25 @@
   (testing "ids after the invocation ends are no longer qualified"
     (let [events (published-events
                   [{:delta "" :done? false :heartbeat true :invocation-id "thread-a"}
-                   {:delta "" :done? true}
+                   turn-completed
                    {:tool-use true :tool-name "Bash" :tool-call-id "toolu_2"}])]
-      (is (= ["toolu_2"] (distinct (keep :tool/call-id events)))))))
+      (is (= ["toolu_2"] (distinct (keep :tool/call-id events))))))
+  (testing "a top-level error does not end the invocation: items Codex
+            reconciles before turn.failed keep the thread id"
+    (let [events (published-events
+                  [{:delta "" :done? false :heartbeat true :invocation-id "thread-a"}
+                   (top-level-error "stream disconnected")
+                   (completed-call "command_execution" "item_2" nil)
+                   (turn-failed "stream disconnected")
+                   {:delta "" :done? false :heartbeat true :invocation-id "thread-b"}
+                   (top-level-error "stream disconnected")
+                   (completed-call "file_change" "item_2" nil)
+                   (turn-failed "stream disconnected")])
+          started (filter #(= :agent/tool-call-started (:event/type %)) events)]
+      (is (= ["thread-a/item_2" "thread-b/item_2"] (map :tool/call-id started)))
+      (let [[a-line b-line] (completed-lines events)]
+        (is (str/includes? a-line "command_execution"))
+        (is (str/includes? b-line "file_change"))))))
 
 (deftest ^{:stratum 1} unreported-outcome-renders-as-unknown-test
   (testing "an item still in progress when its turn ended is not shown as a success"

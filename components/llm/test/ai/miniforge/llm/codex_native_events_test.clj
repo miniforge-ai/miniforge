@@ -141,6 +141,15 @@
             :invocation-id "0199a213-81c0-7800-8aa1-bbab2a035a53"}
            (parse-event (first hello-run-events))))))
 
+(deftest ^{:stratum 1} only-turn-end-events-end-the-invocation-test
+  (testing "turn.completed and turn.failed end the exec; a top-level error does not"
+    (is (true? (:invocation-ended? (parse-event (last hello-run-events)))))
+    (is (true? (:invocation-ended? (parse-event {:type "turn.failed"
+                                                 :error {:message "boom"}}))))
+    (let [parsed (parse-event {:type "error" :message "stream disconnected"})]
+      (is (true? (:done? parsed)))
+      (is (not (contains? parsed :invocation-ended?))))))
+
 (deftest ^{:stratum 1} turn-completed-keeps-cache-write-tokens-test
   (testing "the prompt-cache write count Codex reports rides on :usage"
     (is (= {:input-tokens 24763 :output-tokens 122

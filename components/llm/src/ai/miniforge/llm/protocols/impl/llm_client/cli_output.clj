@@ -176,6 +176,8 @@
    - :stop-reason   — normalized finish_reason (\"end_turn\", \"max_turns\", etc.)
    - :increment-turns — true, signalling the accumulator to bump its turn
      counter. A turn is one `codex exec` prompt; it is not a tool call.
+   - :invocation-ended? — true (also on turn.failed): the exec ends here.
+     A top-level error event does not end it.
 
    Arguments:
      line - String line from stream
@@ -265,6 +267,7 @@
                 stop-reason (responses/normalize-finish-reason (:finish_reason data))]
             (cond-> {:delta "" :done? true
                      :increment-turns true
+                     :invocation-ended? true
                      ;; input/output stay present even when nil (existing
                      ;; contract); the cache and reasoning counts ride
                      ;; along only when Codex reports a number.
@@ -280,10 +283,16 @@
                                      (:reasoning_output_tokens usage)))}
               stop-reason (assoc :stop-reason stop-reason)))
 
-          ;; Turn failed
+          ;; Turn failed. turn.completed and turn.failed are the two
+          ;; events after which the exec processor shuts down, so they
+          ;; carry :invocation-ended?.
           "turn.failed"
-          {:delta (str "\nError: " (get-in data [:error :message] "unknown")) :done? true}
+          {:delta (str "\nError: " (get-in data [:error :message] "unknown")) :done? true
+           :invocation-ended? true}
 
+          ;; A top-level error notification. The exec processor keeps
+          ;; running after it (it can still reconcile items and emit
+          ;; turn.failed), so it does not end the invocation.
           "error"
           {:delta (str "\nError: " (:message data "unknown")) :done? true}
 
