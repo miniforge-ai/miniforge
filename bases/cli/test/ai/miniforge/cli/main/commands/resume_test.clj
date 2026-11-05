@@ -27,6 +27,7 @@
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.control :as control]
    [ai.miniforge.cli.main.commands.resume :as sut]
+   [ai.miniforge.cli.main.commands.resume-anomaly :as resume-anomaly]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
@@ -70,7 +71,7 @@
                                   "Invalid resume request"
                                   {:workflow-id "bad"})
           thrown (try+
-                  (#'sut/throw-resume-anomaly! source)
+                  (resume-anomaly/throw-resume-anomaly! source)
                   (catch [:anomaly/category :anomalies/incorrect] m m))]
       (is (= :anomalies/incorrect (:anomaly/category thrown)))
       (is (= :invalid-input (:anomaly/type thrown)))
@@ -152,6 +153,21 @@
         (is (= {:branch "task-a"
                 :bundle-path "/tmp/task-a.bundle"}
                (:resume-workspace @run-pipeline-opts)))))))
+
+(deftest ^{:stratum 0} required-operator-refuses-an-unowned-resume-before-writing-test
+  (let [pipeline-ran? (atom false)
+        pinned? (atom false)]
+    (with-redefs [wr/reconstruct-context
+                  (fn [_ _] {:machine-snapshot {:execution/id (random-uuid)}
+                             :phase-results {}})
+                  context/require-operator? (constantly true)
+                  workflow/pin-checkpoint! (fn [& _] (reset! pinned? true))
+                  main-display/print-info (fn [& _] nil)
+                  sut/run-pipeline (fn [& _] (reset! pipeline-ran? true))]
+      (is (thrown-with-msg? Exception #"Refusing to resume"
+                            (sut/resume-workflow (random-uuid) {:quiet true :pin true})))
+      (is (false? @pipeline-ran?) "the runner never sees the refused resume")
+      (is (false? @pinned?) "nothing is written for a refused resume"))))
 
 (deftest ^{:stratum 0} terminal-status-predicate-test
   (testing "explicit terminal statuses are accepted"
@@ -375,6 +391,45 @@
       (let [{:keys [workflow opts]} (resume-with events-only {:from-phase :plan})]
         (is (= [{:phase :plan} {:phase :implement} {:phase :verify}] (:workflow/pipeline workflow)))
         (is (nil? (:resume-phase-results opts)))))))
+
+(deftest ^{:stratum 1} a-running-run-is-not-resumed-test
+  (testing "the run's owner lock is held: the resume is refused before anything runs"
+    (let [ran (atom false)]
+      (with-redefs [workflow/run-owner (constantly {:owner/pid 4242
+                                                    :owner/started-at "2026-10-29T00:00:00Z"})
+                    sut/run-pipeline (fn [& _] (reset! ran true) {:execution/status :completed})]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"still running \(process 4242"
+                              (resume-with {:completed-phases [:plan]
+                                            :machine-snapshot {:execution/id (random-uuid)}}
+                                           {}))))
+      (is (false? @ran))))
+  (testing "a root that cannot be looked up refuses the resume; --force checks the default root"
+    (let [roots (atom [])
+          unknown (anomaly/anomaly :unavailable "events unreadable" {})
+          recorded {:completed-phases [:plan] :machine-snapshot {:execution/id (random-uuid)}}]
+      (with-redefs [workflow/run-checkpoint-root (constantly unknown)
+                    workflow/run-owner (fn [_ root] (swap! roots conj root) nil)]
+        (is (thrown? clojure.lang.ExceptionInfo (resume-with recorded {})))
+        (is (= [] @roots) "no lock is looked up under an unknown root")
+        (is (map? (resume-with recorded {:force true})))
+        (is (= [nil] @roots) "with --force the default root is checked")))))
+
+(deftest ^{:stratum 1} new-attempt-keeps-the-run-lineage-test
+  (let [snapshot-id (random-uuid)
+        snapshotted {:completed-phases [:plan]
+                     :phase-results {:plan {}}
+                     :machine-snapshot {:execution/id snapshot-id}}]
+    (testing "a new attempt continues the run it resumes"
+      (let [{:keys [opts]} (resume-with snapshotted {:run-id (str (random-uuid))})]
+        (is (= snapshot-id (:origin-id opts)))
+        (is (= snapshot-id (get-in opts [:resume-machine-snapshot :execution/origin-id])))))
+    (testing "an attempt of an attempt keeps the first run's lineage"
+      (let [origin (random-uuid)
+            {:keys [opts]} (resume-with (assoc-in snapshotted [:machine-snapshot :execution/origin-id] origin)
+                                        {:run-id (str (random-uuid))})]
+        (is (= origin (:origin-id opts)))))
+    (testing "a rewind, which drops the snapshot, keeps the lineage too"
+      (is (= snapshot-id (:origin-id (:opts (resume-with snapshotted {:from-phase :plan}))))))))
 
 (deftest ^{:stratum 1} run-id-option-test
   (let [snapshot-id (random-uuid)

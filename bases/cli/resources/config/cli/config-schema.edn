@@ -35,6 +35,8 @@
 {:config/keys
  {[:llm :backend]                                   :backend
   [:llm :model]                                     :string
+  [:llm :codex :network-access?]                    :boolean
+  [:execution :require-governed?]                   :boolean
   [:agents :default-models :thinking]               :string
   [:agents :default-models :execution]              :string
 
@@ -74,6 +76,7 @@
   [:fleet :repos]                                   :vector
 
   [:tenancy :operator-name]                         :string
+  [:tenancy :require-operator?]                     :boolean
 
   [:observability :event-sinks]                     :vector
   [:observability :log-sinks]                       :vector

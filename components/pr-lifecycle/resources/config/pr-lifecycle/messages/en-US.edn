@@ -38,6 +38,12 @@
   "The merge outcome is unknown"
   :merge/not-ready
   "PR is not ready to merge"
+  :merge/readiness-blocked
+  "Merge readiness check blocked the merge: {reason}"
+  :merge/head-unavailable
+  "Could not read the pull request head commit"
+  :merge/grant-substituted
+  "The merge proposal names a grant this attempt did not issue"
   :controller/lifecycle-starting
   "Starting PR lifecycle"
   :controller/pr-creation-failed

@@ -180,14 +180,14 @@
 (defmethod ^{:stratum 2} registry/get-gate :tests-pass
   [_]
   {:name :tests-pass
-   :description "Validates all tests pass"
+   :description (messages/t :tests-pass/description)
    :check check-tests-pass
    :repair nil})
 
 (defmethod ^{:stratum 2} registry/get-gate :coverage
   [_]
   {:name :coverage
-   :description "Validates test coverage meets threshold (default 80%)"
+   :description (messages/t :coverage/description)
    :check check-coverage
    :repair nil})
 

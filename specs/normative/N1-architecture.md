@@ -6,8 +6,8 @@
 
 # N1 — Core Architecture & Concepts
 
-**Version:** 0.9.0-draft
-**Date:** 2026-10-04
+**Version:** 0.9.1-draft
+**Date:** 2026-11-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -831,14 +831,18 @@ See N7 for detailed Experiment Pack specification.
 An **Actuation Mode** governs whether OPSV workflows produce recommendations, PRs, or
 request direct changes:
 
-- **RECOMMEND_ONLY** (`:recommend-only`): produce policy proposals and evidence; no changes emitted.
+- **RECOMMEND_ONLY** (`:recommend-only`): produce policy proposals and evidence; no final policy changes emitted.
 - **PR_ONLY** (`:pr-only`): produce changes as PRs against declared repos.
 - **APPLY_ALLOWED** (`:apply-allowed`): request direct apply eligibility when permitted by policy packs and gates.
 
 An Actuation Mode expresses intent and MUST NOT be treated as an authority grant.
-PR creation and direct apply require a valid N10 capability at execution time;
+PR creation and direct apply require a valid N10 ExecutionGrant at execution time;
 the effective mode may be less autonomous than requested. `APPLY_ALLOWED` MUST
 be disabled by default. See N7 §1.4 and §5.4.
+
+Temporary staging experiments MUST require the independent authority in N7 §5.5
+and N10 §1.5. Recommend-only alone MUST remain read-only; experiment permission
+MUST NOT imply authority for PR creation or permanent apply.
 
 ### 2.14 Verification (N7)
 
@@ -2349,6 +2353,10 @@ map to these unified levels for cross-cutting governance.
  }
 ```
 
+Safe-mode MUST NOT grant new write authority. Only the separately authorized,
+runtime-owned OPSV compensation path in N8 §3.4.2 MAY execute during demotion.
+It MUST NOT raise an agent's autonomy ceiling or permit new forward effects.
+
 #### 5.6.2 Cross-Spec Mapping
 
 Each spec retains its own terminology but MUST map to the unified level:
@@ -2926,6 +2934,8 @@ N1 states the model; the gaps surface downstream.
 
 **Version History:**
 
+- 0.9.1-draft (2026-11-04): Clarified the operator-approved separation between
+  OPSV final actuation and independently authorized temporary staging experiments.
 - 0.9.0-draft (2026-10-04): Added chain definitions/runs/steps/edges and durable
   work-specification identity. Product-owner approval and scope are recorded in
   SPEC_INDEX's approved contract decisions.

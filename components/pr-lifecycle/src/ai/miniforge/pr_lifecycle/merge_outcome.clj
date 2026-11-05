@@ -75,7 +75,10 @@
       (= :failed (:effect/state settled))
       (dag/err :merge-failed
                (messages/t :merge/command-failed)
-               {:gh-error (:effect/failure settled)})
+               (cond-> {:gh-error (:effect/failure settled)}
+                 (:grant/revocation-failure settled)
+                 (assoc :grant/revocation-failure
+                        (:grant/revocation-failure settled))))
 
       merge-sha
       (merged-result operations worktree-path pr-number

@@ -1,4 +1,4 @@
-{:min-bb-version "1.3.0"
+{:min-bb-version "1.12.215"
 
  :deps {io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}
         ai.miniforge/bb-utils {:local/root "projects/bb-utils"}}
@@ -496,7 +496,6 @@
                ;; other author, including mf's own release commit in this clone.
                (when install-hooks? (run 'setup:hooks))
                (println "\n📦 Installing the mf CLI...\n")
-               (bootstrap/check-private-dep-access!)
                (run 'install:local)
                (bootstrap/check-mf-install! (str (fs/home) "/.local/bin/mf"))
                (println "\n🎉 Bootstrap complete. Run 'mf version' to check the CLI, 'bb' to list tasks.\n"))}

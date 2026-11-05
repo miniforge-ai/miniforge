@@ -18,5 +18,6 @@
                  :backend-switch-cooldown-ms 1800000
                  :allowed-failover-backends [:opencode]
                  :max-cost-per-workflow nil}
+  :execution {:require-governed? false}
   :dashboard {:port 7878
               :auto-open false}}}

@@ -26,7 +26,8 @@
    [ai.miniforge.phase-deployment.manifest-credentials]
    [ai.miniforge.phase-deployment.messages :as msg]
    [ai.miniforge.phase-deployment.policy :as policy]
-   [ai.miniforge.policy-pack.interface :as policy-pack])
+   [ai.miniforge.policy-pack.interface :as policy-pack]
+   [clojure.string :as str])
   (:import
    [java.time Instant]))
 
@@ -118,15 +119,39 @@
               :server-dry-run :deploy/server-dry-run
               :rollback-info :deploy/rollback-info}))
 
+(defn ^{:stratum 0} preflight-result
+  "`:allow` only when deployment policy allowed and the rendered manifests
+   passed a server dry run; issuance refuses anything else."
+  [policy-envelope preflight]
+  (if (and (gate/decision-allowed? policy-envelope)
+           (not (str/blank? (:rendered-yaml preflight)))
+           (not (str/blank? (:server-dry-run preflight))))
+    :allow
+    :deny))
+
+(defn- ^{:stratum 0} issue-registered
+  "Issue a grant and register it in `dir`, so commit can re-read and
+   revoke it. Registration can fail after the record became readable, so
+   a failure revokes the issued id and reports both."
+  [dir request now]
+  (let [issued (grant/issue-for-effect dir request now)
+        registered (if (anomaly/anomaly? issued) issued (grant/register! dir issued))]
+    (if (and (anomaly/anomaly? registered) (not (anomaly/anomaly? issued)))
+      (update registered :anomaly/data assoc
+              :grant/id (:grant/id issued)
+              :grant/revocation (grant/revoke-stored! dir (:grant/id issued)
+                                                      :revocation/superseded now))
+      registered)))
+
 (defn ^{:stratum 0} request
-  "Build the closed runtime request for one preflight-approved deployment."
-  [context effect-id target]
+  "Build the closed runtime request for one deployment of `target`."
+  [context effect-id target preflight-result]
   {:workflow-run/id (:execution/id context)
    :workflow-run/status :running
    :effect/id effect-id
    :effect/class :effect/deploy
    :effect/preflight {:preflight/type :preflight/deploy-policy-and-dry-run
-                      :preflight/result :allow}
+                      :preflight/result preflight-result}
    :kustomize-dir (:kustomize-dir target)
    :context (:context target)
    :default-context (:context target)
@@ -178,18 +203,19 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} prepare
-  "Evaluate policy, issue exact authority, and derive one deploy decision."
+  "Evaluate policy, issue and register exact authority, and derive one
+   deploy decision."
   [context effect-id target preflight ^Instant now]
   (if-some [invalid-input (canonical-input-anomaly context target)]
     invalid-input
     (let [preflight (if (map? preflight) preflight {})
-          request (request context effect-id target)
           classification (policy-classification context target preflight)
           policy-envelope (gate/decide classification deployment-policy-pins)
           policy-allowed? (gate/decision-allowed? policy-envelope)
+          request (request context effect-id target
+                           (preflight-result policy-envelope preflight))
           grant-record (when policy-allowed?
-                         (grant/issue-for-effect
-                          (breach-dir context) request now))]
+                         (issue-registered (breach-dir context) request now))]
       (cond
         (not policy-allowed?)
         (authority-record request classification nil nil policy-envelope

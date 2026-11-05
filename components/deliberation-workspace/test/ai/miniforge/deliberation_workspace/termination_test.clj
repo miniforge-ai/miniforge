@@ -36,13 +36,20 @@
           :workspace/log []}
          extra))
 
+(def ^{:stratum 0} ^:private everyone-passed
+  #{:proposer :skeptic :synthesizer})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} success-closes-before-budget-exhaustion
-  (let [ws (workspace [(obj "goal-1" :goal :status :accepted)]
+  (let [cover (assoc-in (obj "d" :decision :status :accepted) [:object/links :depends-on] #{"goal-1"})
+        ws (workspace [(obj "goal-1" :goal :status :accepted) cover]
                       :workspace/budget {:activations 5}
                       :workspace/spent {:activations 5})]
-    (is (= :success (:termination/rule (termination/closing-rule ws))))))
+    (is (= :success (:termination/rule (termination/closing-rule ws))))
+    (testing "a covering decision superseded after closure no longer counts (N14 §7.1)"
+      (is (= :budget-boundary (:termination/rule (termination/closing-rule
+                                                  (assoc-in ws [:workspace/objects "d" :object/status] :superseded))))))))
 
 (deftest ^{:stratum 1} budget-exhaustion-forces-a-synthesis
   (let [ws (workspace [(obj "goal-1" :goal)]
@@ -54,8 +61,35 @@
     (is (:termination/forced-synthesis result))))
 
 (deftest ^{:stratum 1} quiescence-closes-a-run-that-stopped-producing
-  (let [ws (workspace [(obj "goal-1" :goal)] :workspace/quiet-rounds 3)]
-    (is (= :quiescence (:termination/rule (termination/closing-rule ws))))))
+  (testing "every ordinary participant passed since the last contribution"
+    (let [ws (workspace [(obj "goal-1" :goal)] :workspace/passed everyone-passed)]
+      (is (= :quiescence (:termination/rule (termination/closing-rule ws))))))
+  (testing "a participant that has not passed keeps the round open"
+    (let [ws (workspace [(obj "goal-1" :goal)] :workspace/passed #{:proposer :skeptic})]
+      (is (nil? (termination/closing-rule ws)))))
+  (testing "an event-only meta-watchdog is outside the round"
+    (let [ws (workspace [(obj "goal-1" :goal)]
+                        :workspace/roles [:proposer :skeptic :synthesizer :meta-watchdog]
+                        :workspace/passed everyone-passed)]
+      (is (= :quiescence (:termination/rule (termination/closing-rule ws))))))
+  (testing "structural work waiting for an eligible participant is not quiet"
+    (let [ws (workspace [(obj "goal-1" :goal) (obj "conflict-1" :conflict)]
+                        :workspace/eligibility {:conflict [:skeptic]}
+                        :workspace/passed everyone-passed)]
+      (is (nil? (termination/closing-rule ws))))))
+
+(deftest ^{:stratum 1} a-rejected-goal-is-not-success
+  (let [ws (workspace [(obj "goal-1" :goal :status :accepted)
+                       (obj "goal-2" :goal :status :rejected)])]
+    (is (= :completed-with-rejected-goals
+           (:termination/rule (termination/closing-rule ws))))))
+
+(deftest ^{:stratum 1} the-closure-reserve-ends-ordinary-work-early
+  (let [ws (workspace [(obj "goal-1" :goal)]
+                      :workspace/budget {:activations 5}
+                      :workspace/closure-reserve 1
+                      :workspace/spent {:activations 4})]
+    (is (= :budget-boundary (:termination/rule (termination/closing-rule ws))))))
 
 (deftest ^{:stratum 1} a-live-run-does-not-terminate
   (let [ws (workspace [(obj "goal-1" :goal)] :workspace/log [{:tx/role :proposer}])]

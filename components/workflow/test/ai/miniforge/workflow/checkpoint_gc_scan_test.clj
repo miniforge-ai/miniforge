@@ -5,7 +5,8 @@
   "The checkpoint GC's scan of a run directory while files in it are
    renamed: a checkpoint or pin write landing mid-scan must not fail it,
    and a pin marker's temporary file is not a change to the run."
-  (:require [ai.miniforge.workflow.checkpoint-store-paths :as paths]
+  (:require [ai.miniforge.workflow.boundary.checkpoint-file :as checkpoint-file]
+            [ai.miniforge.workflow.checkpoint-store-paths :as paths]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.interface :as workflow]
             [babashka.fs :as fs]
@@ -25,8 +26,8 @@
     (let [root (str root)
           id (fixture/expired-run! root)
           written (atom [])
-          write spit]
-      (with-redefs [spit (fn [f & args]
+          write checkpoint-file/fill!]
+      (with-redefs [checkpoint-file/fill! (fn [f & args]
                            (swap! written conj (str f))
                            (apply write f args))]
         (is (string? (workflow/pin-checkpoint! id {:checkpoint/root root}))))

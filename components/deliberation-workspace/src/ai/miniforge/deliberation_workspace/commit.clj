@@ -93,36 +93,45 @@
    from it."
   [workspace operation context version]
   (if (= :challenge (:op operation))
-    (let [start (count (get workspace :workspace/challenges {}))]
+    (let [start (count (get workspace :workspace/challenges {}))
+          evidence (set (get operation :evidence #{}))]
       (reduce (fn [ws [ordinal id]]
                 (let [challenge-id (str "challenge-" version "-"
                                         (+ start ordinal) "-" id)]
                   (assoc-in ws [:workspace/challenges challenge-id]
                             {:challenge/id challenge-id
-                             :challenge/role (:role context)
+                             :challenge/participant (:participant context)
                              :challenge/target id
                              :challenge/status :open
-                             :challenge/version version})))
+                             :challenge/version version
+                             :challenge/reason (:reason operation)
+                             :challenge/resolution (:resolution operation)
+                             :challenge/evidence evidence})))
               workspace
               (map-indexed vector (sort (tx/touched-ids operation)))))
     workspace))
 
+;; Insert the objects `operation` creates, stamping provenance from the
+;; transaction rather than trusting the activation's own report of it. What an
+;; operation `:discriminates` becomes a `:discriminates` link on each object it
+;; creates, so the experiment backing a challenge keeps that record.
 (defn- ^{:stratum 0} insert-created
-  "Insert the objects `operation` creates, stamping provenance from the
-   transaction rather than trusting the activation's own report of it."
-  [workspace operation {:keys [role activation version]}]
+  [workspace operation {:keys [role participant activation version]}]
   (reduce (fn [ws spec]
-            (let [created (object/new-object
-                           (assoc spec :role role :activation activation
-                                  :version version))]
+            (let [linked (cond-> spec (seq (:discriminates operation))
+                           (update-in [:links :discriminates] (fnil into #{}) (:discriminates operation)))
+                  created (-> (object/new-object
+                               (assoc linked :role role :activation activation
+                                      :version version))
+                              (assoc :object/participant participant))]
               (assoc-in ws [:workspace/objects (:object/id created)] created)))
           workspace
           (get operation :creates [])))
 
 (defn- ^{:stratum 0} apply-status
-  "Impose the operation's status on its targets and advance their staleness
-   clock. A status illegal for the target's type is skipped; the object is
-   still touched, so the clock stays honest.
+  "Impose the operation's status and content on its targets and advance
+   their staleness clock. The object is touched whatever the status effect,
+   so the clock stays honest.
 
    Every target is known to exist by the time this runs — see
    `assert-known-targets` — so `update-in` always lands on a real object
@@ -132,12 +141,10 @@
                  (tx/goal-outcomes (:outcome operation))
                  (get tx/status-effect (:op operation)))]
     (reduce (fn [ws id]
-              (let [current (get-in ws [:workspace/objects id])]
-                (if (and status (object/legal-status? (:object/type current) status))
-                  (update-in ws [:workspace/objects id]
-                             #(-> % (assoc :object/status status)
-                                  (object/touch version)))
-                  (update-in ws [:workspace/objects id] object/touch version))))
+              (update-in ws [:workspace/objects id]
+                         #(-> % (tx/with-status (:op operation) status)
+                              (tx/with-content operation)
+                              (object/touch version))))
             workspace
             (tx/touched-ids operation))))
 
@@ -154,8 +161,11 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} commit
-  "Apply a validated transaction and advance the workspace version.
+(defn ^{:stratum 2} stage
+  "Apply a validated transaction, advance the version and log it, without
+   deriving conflicts. Admission folds operations through this, so the
+   candidate derives conflicts at the same transaction boundary that
+   publication does.
 
    The version increments once per committed transaction — it is the clock
    every basis check and staleness measure reads, so it must move exactly
@@ -166,12 +176,20 @@
    than being quietly absorbed."
   [workspace transaction]
   (let [version (inc (get workspace :workspace/version 0))
+        participant (or (:tx/participant transaction) (:tx/role transaction))
         context {:role (:tx/role transaction)
+                 :participant participant
                  :activation (:tx/activation transaction)
                  :version version}]
     (-> (reduce #(apply-operation %1 %2 context)
                 workspace
                 (:tx/operations transaction))
-        (conflict/derive-conflicts version)
         (assoc :workspace/version version)
         (update :workspace/log (fnil conj []) transaction))))
+
+(defn ^{:stratum 2} commit
+  "Apply a validated transaction (see `stage`) and derive the conflicts the
+   resulting graph implies (N14 §2.5)."
+  [workspace transaction]
+  (let [staged (stage workspace transaction)]
+    (conflict/derive-conflicts staged (:workspace/version staged))))

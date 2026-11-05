@@ -307,6 +307,21 @@
                                             args))]
       (f))))
 
+(deftest ^{:stratum 0} interrupted-host-calls-are-unknown-outcomes-test
+  (testing "an interrupt during a host push or PR create may have taken effect:
+            the result says so, no HTTPS retry follows, and the flag is kept"
+    (let [calls (atom 0)]
+      (with-redefs [shell/run-bounded (fn [& _] (swap! calls inc) (throw (InterruptedException. "cancelled")))]
+        (let [pushed (git/push-branch! "/tmp/wt" "feat/x" "token")
+              push-flag (Thread/interrupted)
+              created (git/create-pr! "/tmp/wt" {:title "t" :body "b" :base-branch "main"} "token")
+              create-flag (Thread/interrupted)]
+          (is (:interrupted? pushed))
+          (is (= 2 @calls) "one push, one create: no retry over HTTPS")
+          (is push-flag)
+          (is (:interrupted? created))
+          (is create-flag))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} init-repo!
@@ -358,6 +373,19 @@
       (testing "create-branch! rejects an option-injection name before any git call"
         (let [r (git/create-branch! dir "-rf")]
           (is (not (:success? r)))))
+      (testing "an existing branch that contains HEAD is reused, not renamed"
+        (let [r (git/create-branch! dir "release/x")]
+          (is (:success? r))
+          (is (= "release/x" (:branch r)))
+          (is (:reused? r))))
+      (testing "an existing branch that does not contain HEAD is refused"
+        (sh! dir "git" "checkout" "-q" "-b" "work")
+        (spit (str (fs/path dir "new.txt")) "new\n")
+        (sh! dir "git" "add" ".")
+        (sh! dir "git" "commit" "-q" "-m" "new work")
+        (let [r (git/create-branch! dir "release/x")]
+          (is (not (:success? r)))
+          (is (re-find #"does not contain HEAD" (str (:error r))))))
       (finally (fs/delete-tree dir)))))
 
 (deftest ^{:stratum 2} range-fns-reject-unsafe-base-test
