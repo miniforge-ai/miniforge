@@ -30,9 +30,8 @@
         (is (identical? observed (:measurement/observation record)))))))
 
 (deftest ^{:stratum 0} observations-are-keyed-by-declared-identifiers-test
-  (let [observed (fixtures/observation)
-        configuration (fixtures/configuration)
-        records (mapv #(criteria/record % observed) (:measurement/criteria configuration))
+  (let [configuration (fixtures/configuration)
+        records (fixtures/records configuration)
         result (criteria/result configuration records)]
     (is (= (fixtures/expected-observations) (:observations result)))
     (is (identical? records (:measurement/windows result)))
@@ -41,9 +40,10 @@
     (is (= #{:observations :measurement/declaration :measurement/windows} (set (keys result))))))
 
 (deftest ^{:stratum 0} endpoint-credentials-are-not-measurement-declarations-test
-  (let [configuration (assoc-in (fixtures/configuration) [:measurement/prometheus :opaque] "sensitive-endpoint-option")
-        result (criteria/result configuration [])]
-    (is (not (.contains (pr-str result) "sensitive-endpoint-option")))
+  (let [configuration (fixtures/with-credentials)
+        records (fixtures/records configuration)
+        result (criteria/result configuration records)]
+    (is (not (.contains (pr-str result) fixtures/bearer-token)))
     (is (not (contains? (:measurement/declaration result) :measurement/prometheus)))))
 
 ;------------------------------------------------------------------------------ Layer 1

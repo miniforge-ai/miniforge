@@ -17,10 +17,11 @@
     (is (empty? calls))))
 
 (deftest ^{:stratum 0} actual-client-preserves-complete-windows-and-explicit-reductions-test
-  (let [configuration (criteria/configuration)
+  (let [configuration (criteria/with-credentials)
         [result calls] (fixtures/observe! configuration (fixtures/responses))
         windows (:measurement/windows result)]
     (is (= (criteria/expected-observations) (:observations result)))
+    (is (not (.contains (pr-str result) criteria/bearer-token)))
     (is (= (mapv :measurement/request (:measurement/criteria configuration)) (mapv second calls)))
     (is (= ["peak" "floor" "tail"] (mapv :criterion/id windows)))
     (is (= [:maximum :minimum :last] (mapv :measurement/reduction windows)))

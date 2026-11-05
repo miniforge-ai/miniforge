@@ -6,9 +6,14 @@
             [ai.miniforge.phase-opsv.kubernetes-discovery-test-support :as discovery]
             [ai.miniforge.phase-opsv.kubernetes-inventory-fixtures :as native]
             [ai.miniforge.phase-opsv.measurement-test-support :as measurement]
+            [ai.miniforge.phase-opsv.prometheus-criteria :as model]
             [ai.miniforge.phase-opsv.prometheus-test-support :as wire]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} bearer-token
+  "Non-secret credential fixture for the supported HTTPS bearer-token option."
+  "sensitive-endpoint-option")
 
 (defn ^{:stratum 0} expected-observations []
   {"peak" 3.0
@@ -44,6 +49,13 @@
     (phase/decode-measurement-window request (response))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} with-credentials []
+  (assoc-in (configuration) [:measurement/prometheus :prometheus/bearer-token] bearer-token))
+
+(defn ^{:stratum 2} records [configuration]
+  (let [observed (observation)]
+    (mapv #(model/record % observed) (:measurement/criteria configuration))))
 
 (defn ^{:stratum 2} with-endpoint-cap [maximum]
   (-> (configuration)
