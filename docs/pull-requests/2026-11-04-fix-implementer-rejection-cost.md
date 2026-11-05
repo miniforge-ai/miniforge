@@ -30,10 +30,10 @@ back to its flat per-token estimate (`tokens × 0.000015`) for that turn.
 ## Testing Plan
 
 New `components/agent/test/ai/miniforge/agent/implementer_rejection_spend_test.clj`
-covers the three rejection paths and the nil-cost case. Against the
-base branch's `response.clj` it fails 3 of its assertions (each
-rejection's cost is nil). With the fix it passes, together with the
-implementer tests.
+covers the three rejection paths and the nil-cost case. Against main's
+`response.clj` it fails 3 of its assertions: each rejection's cost is
+nil. With the fix it passes, together with the whole `components/agent`
+suite.
 
 ## Deployment Plan
 
@@ -41,8 +41,8 @@ No configuration change.
 
 ## Related Issues/PRs
 
-- Stacked on the `implementer.clj` split (#2391). It lands after that
-  merges.
+- Builds on the `implementer.clj` split (#2391, merged). Before the
+  split, the over-budget `implementer.clj` could not be edited.
 - The rest of this #2378 fix keeps the implementer's tokens through
   curator fallback and failure in `phase_software_factory/implement.clj`.
   That file is over the SL003 budget and is on hold for #2277.
