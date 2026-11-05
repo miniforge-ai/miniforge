@@ -108,14 +108,20 @@ here, and items 12 to 14 are Copilot findings on this PR in code the split moved
     `github.com` or `gitlab` anywhere in the URL, so `https://github.com.attacker.example/o/r.git`
     was `:github` and bootstrap sent the GitHub token to that host. Only `github.com` and
     `gitlab.com` name a provider now; every other host is `:generic`. A self-hosted GitLab needs
-    env-config's `:host-kind :gitlab` to get `GITLAB_TOKEN`.
+    env-config's `:host-kind :gitlab` to get `GITLAB_TOKEN`. Main has this leak today: the
+    substring match is in main's `oci_cli.clj` (`infer-host-kind`), from 3c93876d5 (#445,
+    2026-04-08), and every release since `ariadne/v1.6.0` carries it. Nothing configures
+    enterprise hosts, so the exact host is the whole rule.
 13. A bootstrap that throws removes its container. Acquire removed it only for a returned error,
     so a throw (a failed env-file write) left a running container whose id the caller never got.
     Everything after container creation runs under `removing-unless-ok`.
 14. Runtime output reads are bounded by the call's deadline. After the runtime CLI exited, both
     runners read stdout and stderr to end-of-stream, so a child holding either open outlasted the
-    exec, copy and release timeouts. They now wait until the deadline, then close and cancel
-    unfinished readers (`settle-drains!` in `runtime.process`).
+    exec, copy and release timeouts. One deadline now covers the exit and both reads: output
+    still open at the deadline closes and cancels its readers (`settle-drains!` in
+    `runtime.process`), destroys the process tree, and returns the timeout result (exit 124),
+    not output that may be incomplete, since `image-env` decides which image ENV entries to
+    blank from it.
 
 ## Deployment Plan
 
