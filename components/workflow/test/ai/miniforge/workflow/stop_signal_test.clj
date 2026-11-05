@@ -61,6 +61,69 @@
 (defn- ^{:stratum 0} cancel-after! [control-state ms]
   (future (Thread/sleep ms) (es/cancel! control-state)))
 
+(defn- ^{:stratum 0} alias-script!
+  "Write `body` as an executable sh script in a new temp directory, for a
+   git alias to run as git's child. Returns {:dir :script}."
+  [body]
+  (let [dir    (str (java.nio.file.Files/createTempDirectory
+                     "run-git-" (make-array java.nio.file.attribute.FileAttribute 0)))
+        script (str dir "/helper.sh")]
+    (spit script (str "#!/bin/sh\n" body))
+    (.setExecutable (java.io.File. script) true)
+    {:dir dir :script script}))
+
+(defn- ^{:stratum 0} pids-written
+  "The pids in file `path` once it exists (scripts write it with a rename),
+   waiting up to `ms`; nil if it never appears."
+  [path ms]
+  (let [deadline (+ (System/currentTimeMillis) ms)
+        f        (java.io.File. ^String path)]
+    (loop []
+      (cond
+        (.exists f) (mapv parse-long (str/split-lines (slurp f)))
+        (< (System/currentTimeMillis) deadline) (do (Thread/sleep 20) (recur))
+        :else nil))))
+
+(defn- ^{:stratum 0} with-ancestors
+  "`pids` plus each one's ancestors below this JVM: git, and the shell it
+   runs an alias in. A pid whose ancestry does not reach this JVM adds
+   none, so cleanup can never reach an unrelated process."
+  [pids]
+  (let [jvm (.pid (java.lang.ProcessHandle/current))
+        ancestors (fn [pid]
+                    (let [chain (->> (.orElse (java.lang.ProcessHandle/of pid) nil)
+                                     (iterate #(some-> ^java.lang.ProcessHandle % .parent (.orElse nil)))
+                                     rest
+                                     (take-while some?)
+                                     (take 10)
+                                     (map #(.pid ^java.lang.ProcessHandle %)))
+                          below (take-while #(not= jvm %) chain)]
+                      (if (< (count below) (count chain)) below [])))]
+    (into (set pids) (mapcat ancestors) pids)))
+
+(defn- ^{:stratum 0} none-alive-within?
+  "True once no process in `pids` is alive, waiting up to `ms`."
+  [pids ms]
+  (let [deadline (+ (System/currentTimeMillis) ms)
+        live     (fn [] (filter #(.orElse (.map (java.lang.ProcessHandle/of %)
+                                                 (reify java.util.function.Function
+                                                   (apply [_ h] (.isAlive ^java.lang.ProcessHandle h))))
+                                           false)
+                                pids))]
+    (loop []
+      (cond
+        (empty? (live)) true
+        (< (System/currentTimeMillis) deadline) (do (Thread/sleep 50) (recur))
+        :else false))))
+
+(defn- ^{:stratum 0} kill-all!
+  "Test cleanup: kill whatever in `pids` is still running."
+  [pids]
+  (doseq [pid pids]
+    (.ifPresent (java.lang.ProcessHandle/of pid)
+                (reify java.util.function.Consumer
+                  (accept [_ h] (.destroyForcibly ^java.lang.ProcessHandle h))))))
+
 (deftest ^{:stratum 0} on-stop-fires-once-test
   (let [cs    (es/create-control-state)
         calls (atom 0)
@@ -155,19 +218,61 @@
         (is (= :completed (:execution/status result)))
         (is (not-any? #{:dashboard-stop} (map :type (:execution/errors result))))))))
 
-(deftest ^{:stratum 0} an-interrupted-git-call-ends-git-and-its-children-test
-  ;; The alias runs `sleep` as git's child, standing in for a merge driver.
-  (let [thread (Thread/currentThread)
-        _      (future (Thread/sleep 300) (.interrupt thread))
-        thrown (try (merge-git/run-git "." "-c" "alias.wait=!sleep 30" "wait")
-                    (catch InterruptedException e e))
-        alive  (filter #(and (.isAlive ^java.lang.ProcessHandle %)
-                             (str/includes? (.orElse (.commandLine (.info ^java.lang.ProcessHandle %)) "") "sleep 30"))
-                       (iterator-seq (.iterator (.descendants (java.lang.ProcessHandle/current)))))]
-    (is (instance? InterruptedException thrown))
-    (is (empty? alive))))
-
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} an-interrupted-git-call-ends-git-and-its-children-test
+  ;; The alias script stands in for a merge driver: git -> script -> sleep.
+  ;; Every pid is taken before the interrupt, so a process that outlives
+  ;; it is found even after it is re-parented away from this JVM.
+  (let [{:keys [dir script]} (alias-script!
+                              (str "sleep 30 &\n"
+                                   "echo $$ > \"$(dirname \"$0\")/pids.tmp\"\n"
+                                   "echo $! >> \"$(dirname \"$0\")/pids.tmp\"\n"
+                                   "mv \"$(dirname \"$0\")/pids.tmp\" \"$(dirname \"$0\")/pids\"\n"
+                                   "wait\n"))
+        thread (Thread/currentThread)
+        pids   (promise)
+        _      (future (deliver pids (with-ancestors (pids-written (str dir "/pids") 10000)))
+                       (.interrupt thread))
+        thrown (try (merge-git/run-git "." "-c" (str "alias.wait=!" script) "wait")
+                    (catch InterruptedException e e))]
+    (Thread/interrupted)
+    (try
+      (is (instance? InterruptedException thrown))
+      (is (<= 3 (count @pids)) "git, the script and its child were recorded")
+      (is (none-alive-within? @pids 5000) "git and everything it started are gone")
+      (finally (kill-all! (remove nil? @pids))))))
+
+(deftest ^{:stratum 1} an-interrupted-git-call-ends-a-child-re-parented-before-the-cancel-test
+  ;; The helper's parent (a subshell) exits after starting it, so by the
+  ;; interrupt the helper is no longer git's descendant.
+  (let [{:keys [dir script]} (alias-script!
+                              (str "d=\"$(dirname \"$0\")\"\n"
+                                   "( sleep 30 & echo $! > \"$d/orphan.tmp\"; mv \"$d/orphan.tmp\" \"$d/orphan\"; sleep 0.5 )\n"
+                                   "echo $$ > \"$d/pids.tmp\"; mv \"$d/pids.tmp\" \"$d/pids\"\n"
+                                   "sleep 30\n"))
+        thread  (Thread/currentThread)
+        listed? (fn [pid] (boolean (some #(= pid (.pid ^java.lang.ProcessHandle %))
+                                         (iterator-seq (.iterator (.descendants (java.lang.ProcessHandle/current)))))))
+        orphan  (promise)
+        moved?  (promise)
+        pids    (promise)
+        _       (future
+                  (let [script-pids (with-ancestors (pids-written (str dir "/pids") 10000))
+                        [helper]    (pids-written (str dir "/orphan") 1000)]
+                    (deliver orphan helper)
+                    (deliver moved? (and (some? helper) (not (listed? helper))))
+                    (deliver pids (conj script-pids helper))
+                    (.interrupt thread)))
+        thrown  (try (merge-git/run-git "." "-c" (str "alias.wait=!" script) "wait")
+                     (catch InterruptedException e e))]
+    (Thread/interrupted)
+    (try
+      (is (instance? InterruptedException thrown))
+      (is (true? @moved?) "the helper was re-parented away from git before the cancel")
+      (is (none-alive-within? [@orphan] 5000) "the re-parented helper is gone")
+      (is (none-alive-within? @pids 5000) "git and the script are gone")
+      (finally (kill-all! (remove nil? @pids))))))
 
 (deftest ^{:stratum 1} cancel-interrupts-the-running-phase-test
   (let [cs     (es/create-control-state)

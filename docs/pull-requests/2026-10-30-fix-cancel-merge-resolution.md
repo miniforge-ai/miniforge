@@ -36,7 +36,10 @@ merge failure. Stacked on the PR that makes a cancel interrupt the running phase
    nothing once the run's control state is stopped; the loop then ends without another LLM call.
 4. `dag-merge-git/run-git` waits on git itself. On an interrupt it kills git and every process git
    started, waits for them, and rethrows, so the merge stages stop. `attempt-merge-with-cache!`
-   removes its temporary worktree before the interruption propagates.
+   removes its temporary worktree before the interruption propagates. While git runs, its
+   descendants are recorded every 100 ms and the kill set includes them: a helper whose parent
+   exited is re-parented and no longer listed as git's descendant at the interrupt (the approach
+   of release-executor's `run-bounded`).
 
 ## Testing Plan
 
@@ -47,11 +50,18 @@ before its fix:
    as the real one does, ends as `:anomalies/dag-merge-stopped` and leaves no interrupt pending.
 2. `cancel-at-callback-cooldown-and-resolution-boundaries-test`: the resolution agent is not called
    after the stop.
-3. `an-interrupted-git-call-ends-git-and-its-children-test`: git running a child `sleep` is
-   interrupted; the call throws and neither process is left. On the previous code both stayed.
-4. A merge that finished after the cancel also ends as the task's stop.
+3. `an-interrupted-git-call-ends-git-and-its-children-test`: git runs an alias script that
+   starts a `sleep`. The test takes every pid (git, the shell, the script, its child) once the
+   script reports them, then interrupts, and checks with a bounded wait that none is alive. On the
+   code before `run-git` waited on git itself, git and its child stayed.
+4. `an-interrupted-git-call-ends-a-child-re-parented-before-the-cancel-test`: the script's subshell
+   starts a `sleep` and exits, so the `sleep` is re-parented away from git before the interrupt
+   (the test checks this). It is gone afterwards; with only the snapshot taken at the interrupt it
+   stayed running.
+5. A merge that finished after the cancel also ends as the task's stop.
 
-Ran the stop-signal, merge-parent integration, merge-resolution and DAG operator-control tests (49).
+Ran the stop-signal, merge-parent integration, merge-resolution agent, merge-resolution and DAG
+operator-control tests (50).
 
 ## Deployment Plan
 

@@ -21,6 +21,8 @@
    graph stays shallow — a shared leaf like `run-git` contributes zero
    stratification depth to a file that merely requires it, versus
    nonzero depth if it were defined alongside its callers."
+  (:require
+   [slingshot.slingshot :refer [throw+ try+]])
   (:import
    (java.lang ProcessHandle)
    (java.util.concurrent TimeUnit)))
@@ -33,23 +35,36 @@
    can branch on `:exit` rather than wrapping in try/catch. An interrupt
    (a cancel) is not a failed command: git and every process it started
    (a merge driver, a hook) are killed and waited for, and the
-   InterruptedException is rethrown, so the merge stops there."
+   InterruptedException is rethrown, so the merge stops there.
+
+   While git runs, its descendants are recorded every 100 ms. A helper
+   whose parent exits is re-parented and no longer listed as git's
+   descendant, so the kill set is everything recorded plus what is listed
+   at the interrupt (the approach of release-executor's `run-bounded`).
+   ProcessHandle checks start times, so a recorded pid since reused by an
+   unrelated process is not killed."
   [cwd & args]
-  (let [proc (try (.start (ProcessBuilder. ^java.util.List (into ["git" "-C" cwd] args)))
-                  (catch Exception e e))]
+  (let [proc (try+ (.start (ProcessBuilder. ^java.util.List (into ["git" "-C" cwd] args)))
+                   (catch Exception e e))]
     (if (instance? Exception proc)
       {:exit -1 :out "" :err (or (ex-message proc) (.getName (class proc)))}
       (let [^Process proc proc
             out (future (slurp (.getInputStream proc)))
-            err (future (slurp (.getErrorStream proc)))]
+            err (future (slurp (.getErrorStream proc)))
+            observed (volatile! #{})
+            descendants #(vec (iterator-seq (.iterator (.descendants proc))))]
         (.close (.getOutputStream proc))
-        (try
-          {:exit (.waitFor proc) :out @out :err @err}
+        (try+
+          (loop []
+            (if (.waitFor proc 100 TimeUnit/MILLISECONDS)
+              {:exit (.exitValue proc) :out @out :err @err}
+              (do (vswap! observed into (descendants))
+                  (recur))))
           (catch InterruptedException e
-            (let [tree (conj (vec (iterator-seq (.iterator (.descendants proc)))) (.toHandle proc))]
+            (let [tree (conj (vec (into @observed (descendants))) (.toHandle proc))]
               (run! #(.destroyForcibly ^ProcessHandle %) tree)
-              (run! #(try (.get (.onExit ^ProcessHandle %) 5 TimeUnit/SECONDS) (catch Exception _ nil)) tree))
-            (throw e)))))))
+              (run! #(try+ (.get (.onExit ^ProcessHandle %) 5 TimeUnit/SECONDS) (catch Exception _ nil)) tree))
+            (throw+ e)))))))
 
 (defn ^{:stratum 0} host-repo-path
   "Resolve the host repository path for orchestrator-level git operations.
