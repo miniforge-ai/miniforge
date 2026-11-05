@@ -14,7 +14,9 @@
   ;; No agent: verify runs the test suite directly in the executor environment.
   :verify
   {:agent nil
-   :gates [:pre-verify-lint :tests-pass :coverage :policy-verify]
+   ;; No :coverage: nothing measures coverage yet, and the gate fails
+   ;; without a measurement.
+   :gates [:pre-verify-lint :tests-pass :policy-verify]
    :budget {:tokens 0
             :iterations 3
             :time-seconds 300}

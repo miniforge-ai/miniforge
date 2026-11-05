@@ -67,13 +67,13 @@
   :behavioral/description
   "Validates harness telemetry event stream against policy packs (phase: observe)"
 
-  ;; Behavioral gate — no-packs warning
+  ;; Behavioral gate — fail-closed no-packs error
   :behavioral/no-policy-packs
-  "No policy packs loaded — behavioral check skipped"
+  "No policy packs loaded — behavioral gate fails closed"
 
-  ;; Behavioral gate — check-error warning prefix
+  ;; Behavioral gate — fail-closed check-error prefix
   :behavioral/check-error-prefix
-  "Behavioral check failed, skipping: "
+  "Behavioral check could not run: "
 
   ;; Behavioral gate — repair-required result message
   :behavioral/repair-required
@@ -147,6 +147,12 @@
 
   ;; Tests-pass gate — neither a test-bearing phase result nor artifact metadata
   :tests-pass/no-results "No test results found"
+
+  ;; Tests-pass gate — verify succeeded but counted no tests
+  :tests-pass/no-tests-ran "Verify counted no tests, so no test passed"
+
+  ;; Tests-pass gate — the change-aware test runner reported nothing to test
+  :tests-pass/nothing-to-test "The test runner reported nothing to test for this change; no test ran"
 
   ;; Format capability — artifact content differs from its formatted form
   :format/not-formatted
@@ -284,9 +290,9 @@
   :syntax/description
   "Validates code parses without syntax errors"
 
-  ;; Coverage gate — no coverage data
+  ;; Coverage gate — no measurement reached the gate (fails closed)
   :coverage/no-data
-  "No coverage data found"
+  "No coverage data: the :coverage gate needs a coverage measurement"
 
   ;; Coverage gate — coverage under the configured threshold
   :coverage/below-threshold

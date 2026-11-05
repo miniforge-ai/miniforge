@@ -72,14 +72,51 @@
         (is (false? (:passed? result)))
         (is (= [{:test "t"}] (-> result :errors first :failures)))))))
 
-(deftest ^{:stratum 0} no-results-anywhere-warns-test
-  (testing "neither a test-bearing phase result nor artifact metadata: pass
-            with a :no-tests warning (unchanged legacy behavior)"
+(deftest ^{:stratum 0} no-results-anywhere-fails-test
+  (testing "neither a test-bearing phase result nor artifact metadata: the
+            gate has no evidence that tests passed, so it fails"
     (let [result (gate-test/check-tests-pass nil {})]
-      (is (true? (:passed? result)))
-      (is (= :no-tests (-> result :warnings first :type))))))
+      (is (false? (:passed? result)))
+      (is (= :no-tests (-> result :errors first :type))))))
+
+(defn- ^{:stratum 0} zero-test-result
+  "A successful verify result that counted no tests."
+  [metrics]
+  {:status :success
+   :environment-id "env-1"
+   :summary "0 tests passed"
+   :metrics (merge {:tokens 0 :duration-ms 0 :pass-count 0 :fail-count 0
+                    :test-output "Ran 0 tests"}
+                   metrics)})
+
+(deftest ^{:stratum 0} coverage-without-data-fails-test
+  (testing "a configured :coverage gate with no coverage data fails"
+    (let [result (gate-test/check-coverage {} {})]
+      (is (false? (:passed? result)))
+      (is (= :no-coverage (-> result :errors first :type)))))
+  (testing "an explicitly nil threshold falls back to the default"
+    (is (true? (:passed? (gate-test/check-coverage {:metadata {:coverage 85}}
+                                                   {:coverage-threshold nil})))))
+  (testing "coverage at or above the threshold passes; below it fails"
+    (is (true? (:passed? (gate-test/check-coverage {:metadata {:coverage 85}} {}))))
+    (is (false? (:passed? (gate-test/check-coverage {:metadata {:coverage 70}} {}))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} zero-tests-counted-fails-test
+  (testing "a verify that succeeded but counted no tests has not shown that
+            any test passed"
+    (let [result (gate-test/check-tests-pass nil (verify-ctx (zero-test-result {})))]
+      (is (false? (:passed? result)))
+      (is (= :no-tests-ran (-> result :errors first :type))))))
+
+(deftest ^{:stratum 1} runner-reported-nothing-to-test-passes-with-warning-test
+  (testing "a change-aware runner that reports nothing to test (:no-tests?)
+            passes, and the gate records that no test ran"
+    (let [result (gate-test/check-tests-pass
+                  nil (verify-ctx (zero-test-result {:no-tests? true})))]
+      (is (true? (:passed? result)))
+      (is (= :nothing-to-test (-> result :warnings first :type))))))
 
 (deftest ^{:stratum 1} failing-tests-deny-test
   (testing "positive :fail-count in the phase result fails the gate even with
