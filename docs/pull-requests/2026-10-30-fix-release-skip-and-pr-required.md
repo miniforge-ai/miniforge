@@ -45,13 +45,12 @@ Scope change below.
 The skip-probe half (`release-unpushed`, `release-unpushed-entries`, the
 `release-branch-name` export and their tests) is removed: `main`'s probe
 covers the same case. The two Copilot threads on that probe also applied to
-`main`'s probe; they are fixed in the release-scan PR stacked on #2396, and
-answered here with a link to it.
+`main`'s probe; they are fixed in #2398, and answered here with a link to it.
 
-This branch merged `refactor/release-split` (#2396), the movement-only split
-of `release.clj` and `release_test.clj`, because both are over the rule 210
-layer budget on `main` and the rescope edits them. The PR's base is that
-branch until #2396 merges.
+This branch builds on #2396 (merged as 453eecc6f), the movement-only split
+of `release.clj` and `release_test.clj`, because both were over the rule 210
+layer budget on `main` and the rescope edits them. It merged `main` after
+that squash, so its diff against `main` is the publish change alone.
 
 ## Testing Plan
 
@@ -69,8 +68,8 @@ No configuration or data migration. Takes effect with the next CLI build.
 ## Related Issues/PRs
 
 Follows #2253 (publish only after the gates pass) and #2261 (push and PR
-creation as effect transactions). Stacked on #2396. The skip-probe fixes the
-Copilot review asked for are in the release-scan PR stacked on #2396.
+creation as effect transactions). Builds on #2396. The skip-probe fixes the
+Copilot review asked for are in #2398.
 
 ## Checklist
 
