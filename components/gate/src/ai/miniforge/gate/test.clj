@@ -163,13 +163,9 @@
 
    Reads, in order: the gated phase's own result (verify's test metrics at
    [:phase :result :metrics] in the ctx — the production path; verify's
-   :output carries no test results), then the legacy artifact-metadata
-   :test-results.
-   With neither present the gate fails with a :no-tests error.
-
-   Before the phase-result source existed, verify's nil :output meant the
-   gate saw no results and passed every run — including runs with failing
-   tests (checkpoint f413dd80, 2026-09-04)."
+   :output is only its pass/fail verdict, with no counts or failures), then
+   the legacy artifact-metadata :test-results. With neither present the gate
+   fails with a :no-tests error."
   [artifact ctx]
   (if-let [result (phase-test-result ctx)]
     (check-phase-test-result result)

@@ -829,6 +829,7 @@
                  "components/effect-transaction/resources"
                  "components/execution-grant/src"
                  "components/execution-grant/resources"
+                 "components/kubernetes-target/src"
                  "components/file-durability/src"
                  "components/file-durability/resources"
                  "components/automation-edge-correlator/src"
@@ -1002,13 +1003,29 @@
                  "components/workflow-financial-etl/src"
                  "components/workflow-financial-etl/resources"
                  "components/workflow-security-compliance/src"
-                 "components/workflow-security-compliance/resources"]
+                 "components/workflow-security-compliance/resources"
+                 ;; bb-miniforge-classpath-test fails when this list misses a
+                 ;; brick projects/miniforge depends on, or the CLI or a phase
+                 ;; namespace cannot load on it.
+                 "components/governance-provenance/src"
+                 "components/knowledge-pack/src"
+                 "components/kubernetes-target/src"
+                 "components/opsv-actuation/src"
+                 "components/opsv-actuation/resources"
+                 "components/opsv-adapter-simulated/src"
+                 "components/opsv-provider-github/src"
+                 "components/opsv-provider-github/resources"
+                 "components/pr-label-watcher/src"
+                 "components/workbench-orchestration-adapter/src"
+                 "components/workbench-orchestration-adapter/resources"
+                 "components/workflow-opsv/resources"]
    :extra-deps {metosin/malli {:mvn/version "0.16.1"}
                 clj-statecharts/clj-statecharts {:mvn/version "0.1.5"}
                 aero/aero        {:mvn/version "1.1.6"}
                 io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}
                 http-kit/http-kit {:mvn/version "2.8.0"}
                 hiccup/hiccup     {:mvn/version "2.0.0-RC3"}
-                slingshot/slingshot {:mvn/version "0.12.2"}}
+                slingshot/slingshot {:mvn/version "0.12.2"}
+                org.clojure/data.json {:mvn/version "2.4.0"}}
    :requires ([ai.miniforge.cli.main :as cli])
    :task    (apply cli/-main *command-line-args*)}}}

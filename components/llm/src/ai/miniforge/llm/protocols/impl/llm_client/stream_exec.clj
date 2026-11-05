@@ -22,6 +22,7 @@
   (:require
    [clojure.java.io :as io]
    [clojure.string :as str]
+   [ai.miniforge.llm.cancellation :as cancellation]
    [ai.miniforge.llm.network-monitor :as nnm]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.llm.protocols.impl.llm-client.backend-registry :as backend-registry]
@@ -183,7 +184,9 @@
         reader-thread (stream-reader/start-stream-reader! out-reader line-queue)]
     (try+
       (loop []
-        (if-let [t (pm/check-timeout monitor)]
+        (if-let [t (or (cancellation/cancelled-timeout
+                        (- (System/currentTimeMillis) (:started-at @monitor)))
+                       (pm/check-timeout monitor))]
           (reset! timeout-reason t)
           (let [{:keys [done? timeout anomaly]}
                 (stream-reader/process-stream-signal (stream-reader/stream-poll-signal line-queue)
@@ -317,6 +320,11 @@
 
            anomaly
            (stream-anomaly-result lines anomaly)
+
+           ;; The run was cancelled while waiting for a CLI that closed
+           ;; stdout to exit; the wait destroyed its process tree.
+           (:timeout result)
+           (timeout-result lines (:timeout result))
 
            :else
            (success-result lines result)))
