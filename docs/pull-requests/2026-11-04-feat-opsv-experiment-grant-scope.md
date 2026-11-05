@@ -28,8 +28,9 @@ Require complete, exact experiment bindings and operation/class correspondence.
 Keep generic untagged grant behavior unchanged. Expose the typed internal schema
 and route authorization through the profile guard before ordinary grant checks.
 Keep existing deadline equality semantics and pin both the exact edge and the
-first instant after expiry. Legacy unenforced commits refuse scoped trial/load
-effects without changing ordinary legacy-effect compatibility.
+first instant after expiry. Legacy commits refuse experiment effects whether
+given unenforced markers or caller-supplied grant snapshots; only the current
+authority path can execute them. Ordinary legacy-effect compatibility remains unchanged.
 
 This foundation does not issue production experiment grants, enable a backend,
 establish target ownership, execute load, or authorize live provider changes.
@@ -47,12 +48,14 @@ or cross-class authority. Regress the ordinary grant path and durable commits.
 Run strict kondo, true inferred strata, all affected product contexts, package
 checks, targeted fault injection, and normal signed hooks in the shared slot.
 
-Cheap source checks pass: 32 tests, 297 assertions; strict kondo has no warnings
-or errors. All 11 changed namespaces pass declared and truly inferred strata
+Cheap source checks pass: 33 tests, 308 assertions; strict kondo has no warnings
+or errors. All 12 implementation/test namespaces pass declared and truly inferred strata
 (maximum three). Eight new unit tests contain 123 assertions and each takes
 under 25 ms in the measured run. Eleven deliberate authority faults all cause
-assertion failures with zero errors. Two published-build counterexamples produce
-four assertion failures with zero errors; no missing-API failures substitute for evidence.
+assertion failures with zero errors. Three published-build counterexample tests produce
+eight assertion failures with zero errors, including revoked-grant snapshots;
+no missing-API failures substitute for evidence. Full checks also cover the
+public contract documentation and untagged legacy load-effect refusal.
 
 ## Deployment Plan
 

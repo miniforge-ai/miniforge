@@ -43,7 +43,7 @@
                        (call/changes (call/result (partial effect-fn committing)))
                        now))))
 
-(defn- ^{:stratum 0} deny!
+(defn ^{:stratum 0} deny!
   "Record a failed commit-time grant recheck without firing the effect."
   [dir t auth ^Instant now]
   (let [failure (msg/t :grant/recheck-failed
@@ -64,11 +64,6 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} unenforced-commit! [dir t now effect-fn]
-  (if (grant/experiment-authority-required? (:effect/class t) (:effect/proposal t))
-    (deny! dir t (grant/authorize nil {} now) now)
-    (execute! dir t :unenforced now effect-fn)))
-
 (defn- ^{:stratum 1} authorized-commit!
   "Authorize the durable proposal, then execute or record refusal."
   [dir t grant-record ^Instant now effect-fn]
@@ -84,7 +79,7 @@
   "Authorize and claim this exact loaded record before invoking its consumer."
   [dir t grant-record now effect-fn]
   (if (= :authority/unenforced grant-record)
-    (unenforced-commit! dir t now effect-fn)
+    (execute! dir t :unenforced now effect-fn)
     (authorized-commit! dir t grant-record now effect-fn)))
 
 (comment
