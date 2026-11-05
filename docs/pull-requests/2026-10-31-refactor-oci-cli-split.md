@@ -16,9 +16,10 @@ commits on this branch carry the capsule credential review fixes that edit `oci_
 ## Motivation
 
 `oci_cli.clj` spans 8 call-graph layers against a budget of 3, so any edit to it fails SL003 in
-the pre-commit hook. The capsule credential stack (#2143, #2166, #2221) still has review fixes
-that edit it, and they should pass stratum-lint without warn mode. This PR is based on #2221,
-the top of that stack, so the split already contains every pending `oci_cli.clj` change.
+the pre-commit hook. The capsule credential stack (#2143, #2166, #2221) had review fixes that
+edit it, and they should pass stratum-lint without warn mode. This PR was based on #2221, the
+top of that stack, so the split contains every `oci_cli.clj` change the stack made. #2221 has
+merged (16bc32489), and this PR's base is now main.
 
 ## Changes in Detail
 
@@ -61,7 +62,7 @@ Tests follow the moved definitions:
 2. stratum-lint on every new file: no findings, and `--fix` leaves each file unchanged.
 3. clj-kondo on dag-executor's src and test: no warnings beyond those already on the base.
 4. dag-executor, release-executor, redaction, task-executor and llm-interface tests, under the
-   shared JVM lock: 987 pass, with every review fix and #2221's head merged in.
+   shared JVM lock: 987 pass, with every review fix and main at 16bc32489 (#2221) merged in.
 
 When the base moves, the split is regenerated from the base's `oci_cli.clj` and test files with
 the same name-to-namespace assignment, the checks above are rerun, and this PR's own commits are
@@ -111,7 +112,7 @@ Ships with the capsule credential stack; no configuration or data change.
 ## Related Issues/PRs
 
 1. Precedent: #2300 (release-executor `sandbox.clj`), #2260 (artifact-session).
-2. Stacked on #2221; merges after #2143, #2166, #2239 and #2221.
+2. Was stacked on #2221. #2143, #2166, #2239 and #2221 have merged; this PR is the last.
 
 ## Checklist
 
