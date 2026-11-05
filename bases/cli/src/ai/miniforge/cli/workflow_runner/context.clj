@@ -134,7 +134,15 @@
   "LLM client for the run's backend: the override, else the workflow's or the
    spec's, else config.edn's. An unknown backend throws an :invalid-input anomaly
    naming it and the known ones, so the run stops here rather than going on with
-   no client and failing later in the planner."
+   no client and failing later in the planner.
+
+   With `[:llm :codex :network-access?]` true in config.edn, a codex client
+   lets its agent's commands reach the network; other backends ignore the key.
+   A value other than true, false or nil throws an :invalid-input anomaly
+   naming the key, so a typo stops the run instead of running it without the
+   network it asked for. The setting is for local runs: the runner refuses a
+   governed run whose client has it (`refuse-network-access-when-governed!`
+   here, and again where the workflow acquires its environment)."
   ([workflow spec quiet] (create-llm-client workflow spec quiet nil))
   ([workflow spec _quiet backend-override]
    (let [cfg (config/load-config)
@@ -142,9 +150,19 @@
                       cfg
                       (or backend-override
                           (get-in workflow [:workflow/config :llm-backend])
-                          (:spec/llm-backend spec)))]
+                          (:spec/llm-backend spec)))
+         network-access (get-in cfg [:llm :codex :network-access?])]
+     (when-not (or (nil? network-access) (boolean? network-access))
+       (let [invalid (anomaly/anomaly :invalid-input
+                                      (messages/t :workflow-runner/codex-network-access-invalid
+                                                  {:value (pr-str network-access)})
+                                      {:config/key [:llm :codex :network-access?]
+                                       :value network-access})]
+         (throw+ invalid (:anomaly/message invalid))))
      (if (contains? llm/backends llm-backend)
-       (llm/create-client {:backend llm-backend})
+       (llm/create-client (cond-> {:backend llm-backend}
+                            (and (true? network-access) (= :codex llm-backend))
+                            (assoc :network-access? true)))
        (let [unknown (anomaly/anomaly :invalid-input
                                       (messages/t :workflow-runner/unknown-backend
                                                   {:backend (pr-str llm-backend)
@@ -152,6 +170,19 @@
                                                    :command (app-config/command-string "config backend <name>")})
                                       {:backend llm-backend})]
          (throw+ unknown (:anomaly/message unknown)))))))
+
+(defn ^{:stratum 0} refuse-network-access-when-governed!
+  "Throw an :anomalies/forbidden anomaly when a run in `mode` :governed has
+   an `llm-client` whose Codex agent may reach the network
+   ([:llm :codex :network-access?]). The CLI checks each client right after
+   creating it, before the workflow selection and preflight calls; the
+   workflow runner checks again before it acquires the run's environment."
+  [mode llm-client]
+  (when (and (= :governed mode) (llm/client-network-access? llm-client))
+    (response/throw-anomaly! :anomalies/forbidden
+                             (messages/t :workflow-runner/codex-network-access-governed)
+                             {:config/key [:llm :codex :network-access?]
+                              :execution-mode mode})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
