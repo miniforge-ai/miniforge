@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.28.0-draft
-**Date:** 2026-11-02
+**Version:** 0.29.0-draft
+**Date:** 2026-11-04
 **Status:** Living specification during OSS development
 
 ---
@@ -266,9 +266,13 @@ Defines:
 - Fleet Mode integration: per-service policy state, experiment governance
 - Risk scoring plus requested/effective actuation decisions (RECOMMEND_ONLY, PR_ONLY, APPLY_ALLOWED)
 - Predeclared candidate-aware environment comparison and retained-baseline recovery (§6.3)
+- Separate, default-off temporary staging experiment authority (§5.5, N10 §1.5)
 
 Decision source for §6.3:
 [operator approval record](../docs/pull-requests/2026-11-03-feat-opsv-candidate-environment-contract.md#approval-record).
+
+Decision source for §5.5 and N10 §1.5:
+[temporary staging authority approval](../docs/pull-requests/2026-11-04-docs-opsv-staging-experiment-authority.md#approval-record).
 
 ### N8 — Observability Control Interface 🆕
 
@@ -552,6 +556,14 @@ Documents superseded by normative specs. Retained for reference during migration
 
 ### Approved contract decisions
 
+On 2026-11-04 the product owner approved separate temporary staging experiment
+authority in N7/N10. Execution defaults off; recommend-only alone remains read-only.
+Trial/load effects require exact attempt/target/payload grants, dedicated load-test
+scope, separately authorized cleanup, and verified original-baseline recovery.
+Final PR/permanent-apply gates remain unchanged. The approval covers contract and
+implementation work, not live experiments or cluster changes. The decision source is
+`docs/pull-requests/2026-11-04-docs-opsv-staging-experiment-authority.md`.
+
 On 2026-10-31 the product owner approved optional `:checkpoint/location` on
 checkpoint/snapshot write receipts. The record pairs the validated canonical root
 and physical run directory. Payload 1.1.0 retains 1.0.0 compatibility and unchanged
@@ -656,6 +668,10 @@ Normative specs are enforced by:
 ---
 
 ## Version History
+
+- **0.29.0-draft** (2026-11-04) - Approved separate temporary staging experiment
+  authority: N7 0.4.0 and N10 0.5.0, with N1 0.9.1 and N8 0.5.0 recovery alignment.
+  Existing N3/N6 wire contracts and final PR/permanent-apply gates are unchanged.
 
 - **0.28.0-draft** (2026-11-02) - N14 0.3.0 and N15 0.3.0: Ariadne alignment of the
   deliberation workspace (runtime-established participant identity, decisions that
