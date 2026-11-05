@@ -102,6 +102,45 @@ mf config set llm.model gpt-5.4        # every role uses "gpt-5.4"
 MINIFORGE_AGENT_THINKING_MODEL=gpt-5.4-pro mf run spec.edn  # planner only
 ```
 
+## Codex network access
+
+Miniforge runs `codex exec` with `--sandbox=workspace-write`,
+`--ignore-user-config` and `approval_policy=never`. In that sandbox the
+commands the Codex agent runs (`git push`, `gh pr create`, package
+installs) have no network access. Codex loads a project's
+`.codex/config.toml` but disables it unless the project is trusted, and
+`--ignore-user-config` skips `~/.codex/config.toml`, so neither file is a
+supported way to turn network access on for a Miniforge run.
+
+To give the agent's commands network access, set
+`[:llm :codex :network-access?]`:
+
+```bash
+mf config set llm.codex.network-access? true
+```
+
+Each codex call then also gets
+`-c sandbox_workspace_write.network_access=true`. The sandbox stays
+`workspace-write` and approvals stay off. The setting is off by default.
+
+1. It is a boolean. `mf config set` and `mf config validate` reject
+   any other value, and a run with any other value in `config.edn`
+   stops before its first LLM call.
+2. It applies to the `codex` backend only. Other backends ignore it.
+3. It applies to local runs only. A governed run
+   (`--execution-mode governed`, or every run when
+   `[:execution :require-governed?]` is true) is refused while it is set,
+   because the agent CLI runs on the host, outside the capsule's network
+   settings. Set it to `false` for a governed run.
+4. Miniforge's tool policy (the command deny list in
+   `components/agent/resources/config/agent/tool-policy.edn`) reaches
+   Claude Code through a PreToolUse hook and OpenCode through its
+   permissions. Miniforge applies nothing like it to Codex, so with this
+   setting on, any command the Codex agent runs can reach any host.
+
+A local run with the setting on prints
+`Codex network access: on` under the local-mode notice.
+
 ## Timeouts and budgets
 
 No environment variable or `config.edn` key sets LLM timeouts, token budgets or
