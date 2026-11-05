@@ -27,6 +27,14 @@ script, and a handful of `bb` tasks that still assume a Unix shell.
 regressions. "Beta" means the path runs end-to-end for at least one tester
 but isn't yet a release blocker — please report issues.
 
+## Babashka Version
+
+The CLI needs Babashka 1.12.204 or newer: `:min-bb-version` in `bb.edn`.
+CI loads every `bb` task's namespaces on that minimum and on the version pinned in
+`.github/tool-versions.json`. On the minimum it also starts `bb miniforge --help`.
+Raise `:min-bb-version` when code starts to need a newer Babashka. Do not leave the
+minimum below what CI proves.
+
 ## Container Runtime Matrix
 
 In governed mode (`--execution-mode governed`) miniforge runs each task
