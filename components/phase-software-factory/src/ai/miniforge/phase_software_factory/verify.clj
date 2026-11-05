@@ -48,11 +48,8 @@
   (phase-config/defaults-for :verify))
 
 (defn- ^{:stratum 0} gate-output
-  "Verify's canonical phase :output, the artifact its gates validate.
-   Verify writes no code, so its output is the test verdict; the code under
-   verification stays in the worktree and the implement phase's artifact.
-   Without an :output the gate envelope records :reason/missing-artifact
-   and denies every verify."
+  "Verify's canonical :output, the artifact its gates validate: the test
+   verdict. The code under test stays in the implement phase's artifact."
   [passed?]
   {:verify/tests-passed? (boolean passed?)})
 
@@ -166,8 +163,6 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} verify-result
-  "Verify's phase result: success or error by `passed?`, carrying its
-   canonical :output (the test verdict) for the gates."
   [env-id passed? summary metrics]
   (let [phase-result (if passed?
                        (phase/success env-id summary metrics)

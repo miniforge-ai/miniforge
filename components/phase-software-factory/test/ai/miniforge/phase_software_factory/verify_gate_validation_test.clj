@@ -16,14 +16,10 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-software-factory.verify-gate-validation-test
-  "Verify's real :enter result through its configured gates.
-
-   The workflow's gate step hands gates the phase's canonical :output and
-   mints the decision envelope with :reason/missing-artifact when that
-   output is nil. Verify used to return no :output, so every verify was
-   denied, passing tests included. These tests make the same two calls the
-   workflow makes (check-gates on the canonical output, then
-   gates->envelope) through the public gate and response interfaces."
+  "Verify's real :enter result through its configured gates, by the two
+   calls the workflow's gate step makes: check-gates on the phase's
+   canonical :output, then gates->envelope, which denies a nil output as
+   :reason/missing-artifact."
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.gate.interface :as gate]
@@ -37,26 +33,23 @@
   #'verify/run-tests!)
 
 (def ^{:stratum 0} ^:private passing-run
-  "What `run-tests!` returns for a suite whose 5 tests all pass, built with
-   the runner's own result constructor."
+  "`run-tests!`'s result for a suite whose 5 tests all pass, built with the
+   runner's own constructor so the shape matches production."
   (verify-result/summary true 5 5 0 0 "5 tests, 5 assertions, 0 failures"))
 
 (def ^{:stratum 0} ^:private failing-run
-  "What `run-tests!` returns for a suite with 2 failing tests of 3."
+  "`run-tests!`'s result for a suite with 2 failing tests of 3."
   (verify-result/summary false 3 3 2 0 "3 tests, 3 assertions, 2 failures"))
 
 (defn- ^{:stratum 0} complete-with-no-findings
-  "LLM completion stub: the judge answers with no violations."
   [& _]
   {:success true :content "[]"})
 
 (defn- ^{:stratum 0} analyze-with-no-violations
-  "Semantic-analyze stub: every rule completes with no violations."
   [_client _complete _repo _rule]
   {:status :completed :violations []})
 
 (defn- ^{:stratum 0} gate-decision
-  "The envelope the workflow would mint for this entered verify ctx."
   [ctx]
   (let [artifact (response/phase-output (:phase ctx))
         checked  (gate/check-gates (:gates verify/default-config) artifact ctx)]
@@ -69,10 +62,9 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} verify-ctx
-  "A local-mode execution ctx entering verify. Its semantic wiring has a
-   judge that finds nothing: without wiring, :policy-verify's acting
-   semantic rules fail closed, which would hide the decision under test."
   []
+  ;; A judge that finds nothing: without semantic wiring, :policy-verify's
+  ;; acting rules fail closed and hide the decision under test.
   {:llm-client               ::stub-client
    :complete-fn              complete-with-no-findings
    :semantic-analyze-fn      analyze-with-no-violations
@@ -84,8 +76,6 @@
    :phase-config             {:phase :verify}})
 
 (defn- ^{:stratum 1} entered-verify
-  "Run the real enter-verify on `ctx` with the test runner returning
-   `test-results`."
   [ctx test-results]
   (with-redefs-fn
     {run-tests-var (fn [_ & _opts] test-results)}

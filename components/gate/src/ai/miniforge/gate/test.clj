@@ -140,11 +140,7 @@
    [:phase :result :metrics] in the ctx — the production path; verify's
    :output is only its pass/fail verdict, with no counts or failures), then
    the legacy artifact-metadata :test-results. With neither present the gate
-   passes with a :no-tests warning.
-
-   Before the phase-result source existed, verify's nil :output meant the
-   gate saw no results and passed every run — including runs with failing
-   tests (checkpoint f413dd80, 2026-09-04)."
+   passes with a :no-tests warning."
   [artifact ctx]
   (if-let [result (phase-test-result ctx)]
     (check-phase-test-result result)
