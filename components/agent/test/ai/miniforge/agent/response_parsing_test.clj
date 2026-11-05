@@ -23,7 +23,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.edn :as edn]
-   [ai.miniforge.agent.implementer :as impl]
+   [ai.miniforge.agent.implementer.code :as impl-code]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -201,8 +201,8 @@
           "{:summary \"Created the classification Polylith component from scratch.\"
            :breaking-change? false
            :rationale \"All six files are net-new under components/classification/\"}"
-          parsed  (impl/parse-code-response narrative-content)
-          blocks  (impl/extract-code-blocks narrative-content)]
+          parsed  (impl-code/parse-code-response narrative-content)
+          blocks  (impl-code/extract-code-blocks narrative-content)]
       (is (map? parsed)
           "parse-code-response should parse the EDN map")
       (is (not (contains? parsed :code/files))

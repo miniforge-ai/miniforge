@@ -22,7 +22,7 @@
    and reject other types (Symbol, List, etc.)."
   (:require [clojure.test :refer [deftest testing is]]
             [ai.miniforge.agent.planner :as planner]
-            [ai.miniforge.agent.implementer :as implementer]))
+            [ai.miniforge.agent.implementer.code :as impl-code]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -68,26 +68,26 @@
     
     (testing "returns nil for Symbol"
       (let [response "Implement"]  ; Parses as Symbol
-        (is (nil? (implementer/parse-code-response response)))))
+        (is (nil? (impl-code/parse-code-response response)))))
     
     (testing "returns nil for List"
       (let [response "(defn foo [])"]  ; Parses as List
-        (is (nil? (implementer/parse-code-response response)))))
+        (is (nil? (impl-code/parse-code-response response)))))
     
     (testing "returns map when valid EDN map"
       (let [response "{:code/id #uuid \"123e4567-e89b-12d3-a456-426614174000\" :code/files []}"]
-        (is (map? (implementer/parse-code-response response)))
-        (is (vector? (:code/files (implementer/parse-code-response response))))))
+        (is (map? (impl-code/parse-code-response response)))
+        (is (vector? (:code/files (impl-code/parse-code-response response))))))
     
     (testing "returns map from code block"
       (let [response "```edn\n{:code/id #uuid \"123e4567-e89b-12d3-a456-426614174000\" :code/files []}\n```"]
-        (is (map? (implementer/parse-code-response response)))))
+        (is (map? (impl-code/parse-code-response response)))))
 
     (testing "extracts inline {:status :already-implemented} from reasoning text"
       (let [response "Looking at the existing files, this feature is already fully implemented.\n\n{:status :already-implemented :summary \"The login module already exists with email verification.\"}"]
-        (is (= :already-implemented (:status (implementer/parse-code-response response))))
-        (is (string? (:summary (implementer/parse-code-response response))))))
+        (is (= :already-implemented (:status (impl-code/parse-code-response response))))
+        (is (string? (:summary (impl-code/parse-code-response response))))))
 
     (testing "returns nil for reasoning text without EDN map"
       (let [response "I've analyzed the codebase and the feature looks good. No changes needed."]
-        (is (nil? (implementer/parse-code-response response)))))))
+        (is (nil? (impl-code/parse-code-response response)))))))

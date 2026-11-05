@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.agent.curator :as curator]
    [ai.miniforge.agent.implementer :as implementer]
+   [ai.miniforge.agent.implementer.code :as impl-code]
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.releaser :as releaser]
    [ai.miniforge.agent.reviewer :as reviewer]
@@ -141,12 +142,12 @@
   "Malli schema (a [:map ...] vector) for the implementer's output: :code/id
    :code/files (vector of CodeFile) plus optional dependencies-added,
    tests-needed?, language, summary."
-  implementer/CodeArtifact)
+  impl-code/CodeArtifact)
 
 (def ^{:stratum 0} CodeFile
   "Malli schema (a [:map ...] vector) for one code file: :path :content
    :action (:create|:modify|:delete)."
-  implementer/CodeFile)
+  impl-code/CodeFile)
 
 (def ^{:stratum 0} TestArtifact
   "Malli schema (a [:map ...] vector) for the tester's output: :test/id
@@ -205,23 +206,23 @@
 (def ^{:stratum 0} code-summary
   "Summarize a code artifact for logging/display. Arg: artifact. Returns a
    map {:id :file-count :actions :language :tests-needed? :dependencies-added}."
-  implementer/code-summary)
+  impl-code/code-summary)
 
 (def ^{:stratum 0} files-by-action
   "Group a code artifact's files by :action. Arg: artifact. Returns a map of
    action keyword -> vector of file maps."
-  implementer/files-by-action)
+  impl-code/files-by-action)
 
 (def ^{:stratum 0} total-lines
   "Count total lines of code in an artifact (excluding :delete files). Arg:
    artifact. Returns an int."
-  implementer/total-lines)
+  impl-code/total-lines)
 
 (def ^{:stratum 0} validate-code-artifact
   "Validate a code artifact against the schema and check for issues (empty
    creates, duplicate paths). Arg: artifact. Returns a validation result
    (schema/valid or schema/invalid map)."
-  implementer/validate-code-artifact)
+  impl-code/validate-code-artifact)
 
 (def ^{:stratum 0} test-summary
   "Summarize a test artifact for logging/display. Arg: artifact. Returns a
