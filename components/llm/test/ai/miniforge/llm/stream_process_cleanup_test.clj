@@ -24,6 +24,7 @@
    neither pid is alive afterwards."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
    [ai.miniforge.llm.protocols.impl.llm-client.stream-exec :as stream-exec]))
@@ -159,6 +160,22 @@
     {:thread thread
      :outcome outcome}))
 
+(defn- ^{:stratum 1} start-cancellable-stream-thread
+  "Like `start-stream-thread`, with the LLM cancel check bound to
+   `cancelled` (an atom) inside the thread, as the workflow binds it
+   around a phase step."
+  [cancelled cmd on-line opts]
+  (let [outcome (promise)
+        thread (Thread. ^Runnable
+                        #(deliver outcome
+                                  (llm/call-with-cancel-signal
+                                   (fn [] @cancelled)
+                                   (fn [] (stream-outcome cmd on-line opts)))))]
+    (.setDaemon thread true)
+    (.start thread)
+    {:thread thread
+     :outcome outcome}))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} interrupt-kills-process-tree-test
@@ -245,3 +262,42 @@
 (comment
   (clojure.test/run-tests 'ai.miniforge.llm.stream-process-cleanup-test)
   :leave-this-here)
+
+(deftest ^{:stratum 2} cancel-kills-process-tree-test
+  (testing "cancelling the run returns the call with a :cancelled timeout and
+            kills the CLI and its children, without interrupting the caller"
+    (let [pids      (atom {})
+          reported  (promise)
+          cancelled (atom false)
+          {:keys [outcome]} (start-cancellable-stream-thread
+                             cancelled
+                             spawning-shell-cmd
+                             (partial record-pid! pids reported)
+                             {:progress-monitor (pm/create-progress-monitor {})})]
+      (try
+        (is (true? (deref reported pid-report-timeout-ms false))
+            "the shell printed both pids")
+        (reset! cancelled true)
+        (let [{:keys [result thrown]} (deref outcome return-timeout-ms nil)]
+          (is (nil? thrown) "the call returns instead of throwing")
+          (is (= :cancelled (get-in result [:timeout :type]))))
+        (is (= [] (survivors (vals @pids)))
+            "no process from the tree is left running")
+        (finally
+          (kill-pids! (vals @pids)))))))
+
+(deftest ^{:stratum 2} call-after-cancel-ends-at-once-test
+  (testing "a call made after the run was cancelled returns a :cancelled
+            timeout at once and leaves nothing running"
+    (let [pids (atom {})
+          {:keys [outcome]} (start-cancellable-stream-thread
+                             (atom true)
+                             spawning-shell-cmd
+                             (partial record-pid! pids (promise))
+                             {:progress-monitor (pm/create-progress-monitor {})})]
+      (try
+        (let [{:keys [result]} (deref outcome return-timeout-ms nil)]
+          (is (= :cancelled (get-in result [:timeout :type]))))
+        (is (= [] (survivors (vals @pids))))
+        (finally
+          (kill-pids! (vals @pids)))))))

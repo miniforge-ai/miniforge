@@ -4,7 +4,7 @@
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
 
-# fix: Cancel stops the phase in flight, and its agent subprocess
+# fix: Cancel stops the agent subprocess in flight
 
 ## Overview
 
@@ -15,10 +15,14 @@ current phase finished: the agent CLI, its MCP servers and its Bash
 children ran on, possibly for many minutes, editing the worktree and
 spending tokens after the operator said stop.
 
-The runner now interrupts the phase thread when the run is cancelled. The
-LLM client already destroys the agent's whole process tree when its
-thread is interrupted (the implement watchdog relies on it), so the
-in-flight agent call ends at once.
+The runner now gives every LLM call a phase makes a cancel check. The
+streaming client reads it in its stream loop (every
+`:stream :poll-interval-ms`, 250 ms by default): once the run is cancelled
+it destroys the agent's process tree and returns a `:cancelled` timeout,
+and a call made after the cancel returns the same way as soon as it
+starts. Nothing is interrupted, so the phase finishes its own flow,
+executor cleanup and boundary persist included, and the next iteration
+takes the existing stop path.
 
 ## Motivation
 
@@ -26,60 +30,55 @@ Readiness gap R4 from the Autodev readiness review, §6.4 "Durability,
 cancellation, and recovery": "Cancel doesn't kill an in-flight LLM
 subprocess."
 
+An earlier revision of this PR interrupted the phase thread instead.
+Review showed the interrupt reaching code that must not be interrupted:
+executor process teardown, DAG batch draining (which then cancels child
+futures), and boundary persistence. Scoping the cancel to LLM calls
+avoids all of them.
+
 ## Changes in Detail
 
-1. `runner-iteration/interrupt-on-cancel!`: watches the control state for
-   the length of one phase step and interrupts the calling thread when the
-   run is stopped (including a stop already set when the watch starts).
-   Once fired it interrupts again every `cancel-reinterrupt-ms` (200 ms,
-   `runner/defaults.edn`) until the phase ends: a handler that swallows one
-   interrupt and goes on to another agent call (implement's curator
-   fallback) is interrupted again. Ending the watch clears the interrupt
-   flag, so the runner's own checkpoint write and pause waits are not
-   interrupted afterwards; a lock keeps an interrupt from landing after the
-   flag is cleared.
-2. `runner-iteration/run-until-cancelled`: runs the phase step under that
-   watch. A phase that throws after the cancel interrupted it reports
-   `:cancelled?`. Anything thrown without a cancel, and any JVM `Error` in
-   the cause chain even after a cancel, is rethrown unchanged, so fatal
-   errors still reach the runner's fatal-cause handling.
-3. `execute-single-iteration`: a cancelled phase first runs the boundary
-   persist (`persist-workspace-at-phase-boundary!`) on what it left in the
-   worktree, so post-workflow cleanup does not delete its partial work,
-   then stops the run through the existing dashboard-stop path from the
-   context the phase started with. A phase that returns despite the
-   interrupt keeps its result and is persisted again, since the interrupt
-   may have cut short its own boundary persist; the next iteration takes
-   the stop path as before.
+1. `llm.cancellation` (new): the dynamic cancel check,
+   `call-with-cancel-signal` to bind it, and `cancelled-timeout`, the
+   adaptive-timeout reason (`:type :cancelled`) for a cancelled run.
+   Exported through `llm.interface/call-with-cancel-signal`.
+2. `stream-exec/process-stream-lines`: checks the cancel before the
+   progress monitor's timeouts on every poll. A cancelled stream ends like
+   any other adaptive timeout: the process tree is destroyed and the call
+   returns a timeout result.
+3. `runner-iteration/execute-supervised`: runs the phase step under a
+   cancel check that reads the run's control state. DAG sub-workflows run
+   their own iterations against the parent's control state, so their calls
+   see the cancel too; futures a phase starts inherit the binding.
+4. A new message, `:stream.system/run-cancelled`, carries the reason text.
 
-One change covers both execution paths: DAG sub-workflows run their own
-runner loop through `execute-single-iteration` with the parent's control
-state (`dag-sub-workflow`), so each task's thread is interrupted on its
-own watch.
+`:cancelled` is not one of the infra-timeout types the agents retry
+(`:stream-idle`, `:stagnation`, `:hard-limit`) or auto-resume
+(`:network-drop`), so a cancelled call reads as a failed call; the phase
+ends and the run stops at the next iteration.
 
-A resume starts the cancelled phase again, from a task branch that holds
-its partial work.
+Scope: this stops LLM subprocesses. Non-LLM work a phase is doing when the
+cancel lands (a test run in verify, a git command) still finishes. An LLM
+call made on a thread that does not inherit Clojure bindings (a raw
+`Thread`) does not see the cancel.
 
 ## Testing Plan
 
-`runner_iteration_control_test.clj`:
+`stream_process_cleanup_test.clj` (real processes):
 
-1. A phase blocked well past the test's wait is interrupted by a cancel;
-   the iteration returns `:failed` with a `:dashboard-stop` error, and the
-   runner thread's interrupt flag is clear.
-2. After a phase returns, a later cancel does not interrupt the runner
-   thread (the watch is gone), and no interrupt is left set.
-3. A phase that swallows the first interrupt and blocks again is
-   interrupted again; the run stops.
-4. A `StackOverflowError` wrapped in the exception a phase throws after a
-   cancel propagates instead of becoming a stop.
+1. A streaming call whose run is cancelled mid-stream returns a
+   `:cancelled` timeout without throwing, and neither the shell nor its
+   10-minute child is left running.
+2. A call made after the cancel returns a `:cancelled` timeout at once and
+   leaves nothing running.
 
-The existing pause-then-cancel test is unchanged.
+`runner_iteration_control_test.clj`: the phase step runs under a cancel
+check that is false while the run is live and true once it is cancelled.
 
 ## Deployment Plan
 
-No configuration. A cancel now ends the current phase immediately instead
-of at its end.
+No configuration. A cancel now ends the current agent call within one
+stream poll; the phase then finishes and the run stops.
 
 ## Related Issues/PRs
 

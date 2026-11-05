@@ -4,6 +4,9 @@
   :streaming-error.system/no-output
   "Process failed with no output"
 
+  :stream.system/run-cancelled
+  "Run cancelled; agent process stopped"
+
   ;; System-locale test fixtures for rate-limit classifier regressions.
   :rate-limit-test.system/claude-limit-la
   "You've hit your limit - resets 7pm (America/Los_Angeles)"

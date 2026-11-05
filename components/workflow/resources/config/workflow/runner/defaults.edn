@@ -26,7 +26,6 @@
 ;;    [:max-backoff-ms                 {:optional true} :int]
 ;;    [:backoff-base-ms                {:optional true} :int]
 ;;    [:pause-poll-interval-ms         {:optional true} :int]
-;;    [:cancel-reinterrupt-ms          {:optional true} :int]
 ;;    [:default-workdir                {:optional true} :string]
 ;;    [:task-branch-prefix             {:optional true} :string]
 ;;    [:default-docker-image           {:optional true} :string]]
@@ -45,7 +44,6 @@
   :max-backoff-ms         30000
   :backoff-base-ms        1000
   :pause-poll-interval-ms 1000
-  :cancel-reinterrupt-ms 200
 
   ;; Environment defaults
   :default-workdir        "/workspace"
