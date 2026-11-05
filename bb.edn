@@ -829,6 +829,7 @@
                  "components/effect-transaction/resources"
                  "components/execution-grant/src"
                  "components/execution-grant/resources"
+                 "components/kubernetes-target/src"
                  "components/file-durability/src"
                  "components/file-durability/resources"
                  "components/automation-edge-correlator/src"
