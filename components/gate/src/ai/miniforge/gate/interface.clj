@@ -53,6 +53,7 @@
    [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.gate.no-secrets :as no-secrets]
    [ai.miniforge.gate.registry :as registry]
+   [ai.miniforge.gate.result :as check-result]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]))
 
@@ -90,26 +91,14 @@
 
 ;;------------------------------------------------------------------------------ Layer 0.5
 ;; Gate result predicates
-(defn ^{:stratum 0} passed?
-  "Check if a gate result passed.
-
-   Accepts either of two canonical result shapes:
-   1. Hand-shaped gate result with explicit `:passed?` key
-      (legacy gate convention — syntax, lint, etc.).
-   2. Canonical response shape from `response/success` /
-      `response/error` (what format and any new gate should return).
-      `response/success?` recognizes the `:status :success` form.
-
-   Bridging both lets gates return the project-wide success/anomaly
-   factories without each one re-establishing its own ad-hoc shape.
+(def ^{:stratum 0} passed?
+  "Check if a gate result passed. Accepts the legacy `:passed?` shape
+   and the canonical `response/success` / `response/error` shape; see
+   `ai.miniforge.gate.result/passed?`, the one reader every gate-result
+   consumer shares.
 
    Returns: boolean"
-  [result]
-  (cond
-    (contains? result :passed?) (boolean (:passed? result))
-    (response/success? result)  true
-    (response/error? result)    false
-    :else                       false))
+  check-result/passed?)
 
 ;; Gate operations
 (defn ^{:stratum 0} emit-gate-event!
