@@ -8,6 +8,7 @@
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/deliberation-harness {:local/root "../../components/deliberation-harness"}
+        ai.miniforge/utf8 {:local/root "../../components/utf8"}
         ai.miniforge/deliberation-workspace {:local/root "../../components/deliberation-workspace"}
         ai.miniforge/file-durability {:local/root "../../components/file-durability"}
         ai.miniforge/llm {:local/root "../../components/llm"}
