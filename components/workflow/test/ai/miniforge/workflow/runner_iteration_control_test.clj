@@ -16,15 +16,18 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.workflow.runner-iteration-control-test
-  "Operator control at the runner's phase boundary: a run paused and then
-   cancelled must leave the pause wait and take the stop path."
+  "Operator control around the runner's phase step: a run paused and then
+   cancelled must leave the pause wait and take the stop path, and a cancel
+   during a phase interrupts the phase instead of waiting it out."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
    [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
    [ai.miniforge.workflow.context :as ctx]
+   [ai.miniforge.workflow.monitoring :as monitoring]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
-   [ai.miniforge.workflow.runner-defaults :as defaults]))
+   [ai.miniforge.workflow.runner-defaults :as defaults]
+   [ai.miniforge.workflow.runner-phase-step :as phase-step]))
 
 (use-fixtures :each
   phase-test-support/with-workflow-phase-test-support
@@ -37,9 +40,25 @@
    stop. Many poll intervals, so only a wait that ignores :stopped misses it."
   5000)
 
+(def ^{:stratum 0} ^:private blocked-phase-ms
+  "How long a stubbed phase blocks: far past `stop-wait-ms`, so only an
+   interrupt ends it in time."
+  600000)
+
 (defn- ^{:stratum 0} paused-control-state
   []
   (atom {:paused true :stopped false :adjustments {}}))
+
+(defn- ^{:stratum 0} running-control-state
+  []
+  (atom {:paused false :stopped false :adjustments {}}))
+
+(defn- ^{:stratum 0} iterate-and-report-interrupt
+  "Run one iteration on this thread; return [result interrupted?], the
+   second being whether the thread's interrupt flag is still set after."
+  [context control-state]
+  (let [result (runner/execute-single-iteration [] context {} 1 control-state)]
+    [result (Thread/interrupted)]))
 
 (defn- ^{:stratum 0} test-context
   []
@@ -74,3 +93,41 @@
             ;; Release a wait that ignored :stopped so no thread outlives the test.
             (swap! control-state assoc :paused false)
             (deref iteration stop-wait-ms nil)))))))
+
+(deftest ^{:stratum 1} cancel-interrupts-a-phase-in-flight-test
+  (testing "a cancel while a phase runs interrupts it and stops the run,
+            leaving no interrupt behind on the runner thread"
+    (let [control-state (running-control-state)
+          started       (promise)]
+      (with-redefs [monitoring/check-workflow-supervision (constantly {:status :ok})
+                    phase-step/execute-phase (fn [_ _ _]
+                                               (deliver started true)
+                                               (Thread/sleep blocked-phase-ms))]
+        (let [iteration (future (iterate-and-report-interrupt (test-context) control-state))]
+          (try
+            (deref started stop-wait-ms nil)
+            (swap! control-state assoc :stopped true)
+            (let [[result interrupted?] (deref iteration stop-wait-ms [::still-running])]
+              (is (not= ::still-running result) "the phase is interrupted, not waited out")
+              (is (= :failed (:execution/status result)))
+              (is (some #(= :dashboard-stop (:type %)) (:execution/errors result)))
+              (is (false? interrupted?) "the runner thread's interrupt flag is cleared"))
+            (finally
+              (future-cancel iteration))))))))
+
+(deftest ^{:stratum 1} finished-phase-leaves-no-cancel-watch-test
+  (testing "after a phase returns, a later cancel does not interrupt the
+            runner thread"
+    (let [control-state (running-control-state)]
+      (with-redefs [monitoring/check-workflow-supervision (constantly {:status :ok})
+                    phase-step/execute-phase (fn [_ context _] context)]
+        (let [result      @(future
+                             (let [[result interrupted?] (iterate-and-report-interrupt
+                                                          (test-context) control-state)]
+                               (swap! control-state assoc :stopped true)
+                               {:result result
+                                :interrupted-during? interrupted?
+                                :interrupted-after? (Thread/interrupted)}))]
+          (is (map? (:result result)))
+          (is (false? (:interrupted-during? result)))
+          (is (false? (:interrupted-after? result))))))))
