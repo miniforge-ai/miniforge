@@ -103,14 +103,18 @@
   "For a child that has exited: wait for each `drain-stream` handle in
    `drains` to reach end-of-stream until `deadline-ns` (a System/nanoTime
    value), and for at least `graceful-shutdown-ms` so the bytes the child
-   wrote are read, then stop any still running (`cancel-drain!`). A
-   grandchild that keeps the child's stdout or stderr open after the child
-   exits therefore cannot hold the caller past its deadline."
+   wrote are read, then stop any still running (`cancel-drain!`). True when
+   every drain finished; false when one was stopped, so its output may be
+   incomplete. A grandchild that keeps the child's stdout or stderr open
+   after the child exits therefore cannot hold the caller past its
+   deadline."
   [drains deadline-ns]
-  (let [until (max deadline-ns (+ (System/nanoTime) (* graceful-shutdown-ms 1000000)))]
-    (doseq [{f :future} drains]
-      (deref f (max 0 (quot (- until (System/nanoTime)) 1000000)) nil))
-    (run! cancel-drain! drains)))
+  (let [until (max deadline-ns (+ (System/nanoTime) (* graceful-shutdown-ms 1000000)))
+        done? (every? (fn [{f :future}]
+                        (not= ::open (deref f (max 0 (quot (- until (System/nanoTime)) 1000000)) ::open)))
+                      drains)]
+    (run! cancel-drain! drains)
+    done?))
 
 (defn ^{:stratum 1} destroy-process-tree!
   "Kill `process` and every descendant. Tries SIGTERM first (children

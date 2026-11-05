@@ -463,23 +463,31 @@
 
 (deftest ^{:stratum 0} runtime-runners-return-when-a-child-holds-the-output-open-test
   (testing "a runtime CLI that exits while a child it started keeps stdout
-            and stderr open returns by the deadline, with its exit code and
-            what it wrote, from both runners"
+            and stderr open times out at the deadline, from both runners,
+            rather than wait for the child or return output that may be
+            incomplete; without the child, the same deadline returns the
+            CLI's exit code and output"
     (let [dir    (.toFile (java.nio.file.Files/createTempDirectory
                            "orphan-runtime" (make-array java.nio.file.attribute.FileAttribute 0)))
           pids   (java.io.File. dir "pids")
-          script (java.io.File. dir "runtime")
-          desc   {:runtime/executable (str script)}]
+          plain  (java.io.File. dir "plain")
+          orphan (java.io.File. dir "orphan")
+          runs   (fn [^java.io.File exe]
+                   (let [desc {:runtime/executable (str exe)}]
+                     [["run-runtime-timed" #((private-fn 'run-runtime-timed) 1500 desc "x")]
+                      ["run-runtime-process-timed" #((private-fn 'run-runtime-process-timed) 1500 desc ["x"])]]))]
       (try
-        (spit script (str "#!/bin/sh\necho out\necho err >&2\nsleep 15 &\necho $! >> '" pids "'\nexit 3\n"))
-        (.setExecutable script true)
-        (doseq [[label run] [["run-runtime-timed" #((private-fn 'run-runtime-timed) 1500 desc "x")]
-                             ["run-runtime-process-timed"
-                              #((private-fn 'run-runtime-process-timed) 1500 desc ["x"])]]]
+        (spit plain "#!/bin/sh\necho out\necho err >&2\nexit 3\n")
+        (spit orphan (str "#!/bin/sh\necho out\necho err >&2\nsleep 15 &\necho $! >> '" pids "'\nexit 3\n"))
+        (run! #(.setExecutable ^java.io.File % true) [plain orphan])
+        (doseq [[label run] (runs plain)]
+          (is (= [3 "out\n" "err\n"] ((juxt :exit :out :err) (run))) (str label ", control")))
+        (doseq [[label run] (runs orphan)]
           (let [start (System/nanoTime)
                 r     (run)]
             (is (< (quot (- (System/nanoTime) start) 1000000) 10000) label)
-            (is (= [3 "out\n" "err\n"] [(:exit r) (:out r) (:err r)]) label)))
+            (is (= 124 (:exit r)) label)
+            (is (clojure.string/includes? (:err r) "1500") label)))
         (finally
           (doseq [pid (when (.exists pids) (clojure.string/split-lines (slurp pids)))]
             (some-> (java.lang.ProcessHandle/of (parse-long (clojure.string/trim pid)))
