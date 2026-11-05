@@ -5,7 +5,8 @@
   "Operational limits for semantic analysis, read from EDN at load time.
 
    One home for the analyzer's budgets: `selection` enforces the size and
-   count caps, `core` enforces the per-rule timeout.
+   count caps, `core` enforces the per-rule timeout, `changed-files` the
+   batched judge's deadline, and `judge` the answer excerpt length.
 
    Layer 0: the raw limits map
    Layer 1: the individual limits with their defaults (over Layer 0)"
