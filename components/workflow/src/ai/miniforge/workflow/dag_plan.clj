@@ -31,7 +31,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;--- Layer 0: Result Constructors
+;; Result Constructors
 (def ^{:stratum 0} zero-metrics
   "Canonical zeroed metrics for DAG / inner-workflow results. Used as
    the default when no per-task metrics flow through. Single source
@@ -44,9 +44,10 @@
    :tasks-completed completed
    :tasks-failed failed
    :artifacts (vec artifacts)
-   :metrics {:tokens (:total-tokens metrics-agg 0)
-             :cost-usd (:total-cost metrics-agg 0.0)
-             :duration-ms (:total-duration metrics-agg 0)}})
+   :metrics (cond-> {:tokens (:total-tokens metrics-agg 0)
+                     :cost-usd (:total-cost metrics-agg 0.0)
+                     :duration-ms (:total-duration metrics-agg 0)}
+              (:cost-unavailable? metrics-agg) (assoc :cost-unavailable? true))})
 
 (defn ^{:stratum 0} dag-execution-error [completed failed error]
   {:success? false
@@ -73,7 +74,7 @@
      :auto-resume? auto-resume?
      :metrics {}}))
 
-;--- Layer 0: Level Traversal
+;; Level Traversal
 (defn ^{:stratum 0} normalize-task-id
   "Preserve task IDs in their domain-native form.
    UUID strings are parsed to UUIDs so mixed string/UUID inputs still align."
@@ -124,7 +125,7 @@
                  (inc level-count)
                  (max max-width width)))))))
 
-;--- Layer 0: Plan to DAG Conversion
+;; Plan to DAG Conversion
 (defn ^{:stratum 0} validate-deps
   "Filter deps to only those referencing actual task IDs. Warns on phantoms."
   [task-id raw-deps valid-task-ids logger]
@@ -153,7 +154,7 @@
                   task)))
             dag-tasks))))
 
-;--- Layer 0: Branch Resolution
+;; Branch Resolution
 (defn ^{:stratum 0} default-spec-branch
   "Branch the orchestrator should treat as the spec's parent — the one root
    tasks acquire off and dep-resolution falls back to.
@@ -253,7 +254,7 @@
                         tasks)]
     (wire-stratum-deps dag-tasks)))
 
-;--- Layer 2: Plan Analysis
+;; Plan Analysis
 (defn ^{:stratum 2} parallelizable-plan? [plan]
   (let [tasks (:plan/tasks plan [])]
     (when (> (count tasks) 1)
