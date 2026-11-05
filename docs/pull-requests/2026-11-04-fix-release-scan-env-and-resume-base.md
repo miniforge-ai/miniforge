@@ -46,7 +46,12 @@ present on `main`:
    base is `git merge-base X HEAD`; a ref that names no commit here, or shares
    no history with HEAD, is left out; a git failure is the scan's
    `:release/git-status-failed` anomaly. `committed-since-base` diffs from the
-   first that resolves, as before.
+   first that resolves, as before. A resume's merge bases collapse to the one
+   nearest HEAD (fewest commits from it to HEAD): the ranges name the CLI's
+   start commit and branch, the task environment can start past that commit,
+   and the task's own commits are on none of those refs, so an older merge
+   base would count upstream commits as task work (Copilot review). First
+   attempts keep "the first commit decides".
 4. `release-scan/missing-commit?` becomes public, so the merge-base lookup
    reads a missing ref the same way `base-diff` does. It also decides "no
    shared history" for `git merge-base`: only an exit 1 that printed nothing
@@ -70,6 +75,10 @@ present on `main`:
    `merge-base-sha` with runner results built by `release-scan/command-failure`:
    exit 1 with nothing printed is nil, exit 1 with stderr is the anomaly. The
    second case fails on the code before the fix.
+   `clean-resume-past-the-start-commit-is-skipped-test`: the environment
+   started one upstream commit past the CLI's start commit and the resume
+   holds no task commit; the release is skipped. Before the nearest-merge-base
+   rule it released the upstream commit.
 3. The release, file-scan, committed-work and checking-commits tests, and the
    project tests that run the release phase.
 

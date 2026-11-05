@@ -131,6 +131,30 @@
       (finally
         (fs/delete-tree dir)))))
 
+(defn ^{:stratum 1} with-clean-resume-past-start
+  "Call `f` with a clean worktree on branch task-restored that holds no
+   task commit: the task environment started at main's tip, one upstream
+   commit past the commit the CLI started on. Also passes the start and
+   checkpoint (that tip) shas."
+  [f]
+  (let [dir (str (fs/create-temp-dir {:prefix "release-resume-clean-"}))
+        commit-file! (fn [path content]
+                       (let [file (io/file dir path)]
+                         (io/make-parents file)
+                         (spit file content)
+                         (git! dir "add" "--" path)
+                         (git! dir "commit" "-q" "-m" (str "add " path))
+                         (git! dir "rev-parse" "HEAD")))]
+    (try
+      (git! dir "init" "-q" "-b" "main")
+      (let [start      (commit-file! "README.md" "# base\n")
+            checkpoint (commit-file! "upstream.txt" "upstream\n")]
+        (git! dir "checkout" "-q" "-b" "task-restored")
+        (is (= "" (git! dir "status" "--porcelain")) "fixture: worktree is clean")
+        (f dir start checkpoint))
+      (finally
+        (fs/delete-tree dir)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} resume-without-recorded-base-measures-from-the-original-base-test
@@ -149,3 +173,13 @@
                         (mapcat (comp :code/files :artifact/content))
                         (map :path)
                         set)))))))))
+
+(deftest ^{:stratum 2} clean-resume-past-the-start-commit-is-skipped-test
+  (with-clean-resume-past-start
+    (fn [dir start checkpoint]
+      (let [ctx (resumed-ctx dir checkpoint start)]
+        (testing "the recorded refs have the producer's resume shape"
+          (is (= (str start "...HEAD") (first (:execution/task-base-refs ctx)))))
+        (testing "upstream commits past the start commit are not task work:
+                  with no task commit the release is skipped"
+          (is (nil? (enter-release ctx))))))))

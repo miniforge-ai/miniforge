@@ -65,6 +65,26 @@
           failure (release-scan/git-status-failed root-path failure)
           :else (str/trim out))))))
 
+(defn- ^{:stratum 0} nearest-to-head
+  "Of `shas`, ancestors of HEAD, the one HEAD holds the fewest commits
+   beyond (`git rev-list --count <sha>..HEAD`, run with `run`), as a
+   one-element vector, or [] for no shas; a `:release/git-status-failed`
+   anomaly when git fails."
+  [run root-path shas]
+  (let [best (reduce (fn [best sha]
+                       (let [{:keys [out failure]} (run ["rev-list" "--count" (str sha "..HEAD")])
+                             n (some-> out str/trim parse-long)]
+                         (cond
+                           failure (reduced (release-scan/git-status-failed root-path failure))
+                           (or (nil? best) (< n (:n best))) {:sha sha :n n}
+                           :else best)))
+                     nil
+                     shas)]
+    (cond
+      (anomaly/anomaly? best) best
+      best                    [(:sha best)]
+      :else                   [])))
+
 (defn- ^{:stratum 0} porcelain-scan-entry
   "A release-scan entry for one `git status` [status path] pair: no mode,
    so release-scan reads it as a file unless it was deleted."
@@ -149,16 +169,25 @@
   "The commits `bases` (see release-bases) name in this repository, in
    order: a sha as is, a merge base looked up with `run`; a base that
    names no commit here is left out. The first failed lookup's
-   `:release/git-status-failed` anomaly instead when git fails."
+   `:release/git-status-failed` anomaly instead when git fails.
+
+   Merge bases (a resume's `X...HEAD` ranges) collapse to the one nearest
+   HEAD. The ranges name the CLI's start commit and its branch; the task
+   environment can start past that commit, and the task's own commits are
+   on none of those refs, so the nearest merge base is where the task
+   began: an older one would count upstream commits as task work."
   [run root-path bases]
-  (reduce (fn [shas {:keys [sha merge-base]}]
-            (let [resolved (if merge-base (merge-base-sha run root-path merge-base) sha)]
-              (cond
-                (anomaly/anomaly? resolved) (reduced resolved)
-                (nil? resolved)             shas
-                :else                       (conj shas resolved))))
-          []
-          bases))
+  (let [shas (reduce (fn [shas {:keys [sha merge-base]}]
+                       (let [resolved (if merge-base (merge-base-sha run root-path merge-base) sha)]
+                         (cond
+                           (anomaly/anomaly? resolved) (reduced resolved)
+                           (nil? resolved)             shas
+                           :else                       (conj shas resolved))))
+                     []
+                     bases)]
+    (if (and (not (anomaly/anomaly? shas)) (some :merge-base bases))
+      (nearest-to-head run root-path (distinct shas))
+      shas)))
 
 (defn- ^{:stratum 1} git-dirty-files
   "Scan git working tree for new/modified/deleted files; return as :code/files entries.
