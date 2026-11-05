@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.implementer-extended-test
   "Extended tests for implementer: response parsing, code block extraction,
    language detection, artifact repair edge cases, formatting, and prior-attempts."
@@ -27,9 +26,9 @@
    [clojure.test :refer [deftest testing is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; parse-code-response tests
 
-(deftest parse-code-response-edn-block-test
+;; parse-code-response tests
+(deftest ^{:stratum 0} parse-code-response-edn-block-test
   (testing "parses EDN from fenced clojure code block"
     (let [text "Here is the code:\n```clojure\n{:code/id #uuid \"550e8400-e29b-41d4-a716-446655440000\"\n :code/files [{:path \"src/core.clj\" :content \"(ns core)\" :action :create}]}\n```"
           result (impl/parse-code-response text)]
@@ -46,7 +45,7 @@
           result (impl/parse-code-response text)]
       (is (map? result)))))
 
-(deftest parse-code-response-raw-edn-test
+(deftest ^{:stratum 0} parse-code-response-raw-edn-test
   (testing "parses raw EDN map directly"
     (let [text "{:code/id #uuid \"550e8400-e29b-41d4-a716-446655440000\" :code/files []}"
           result (impl/parse-code-response text)]
@@ -57,7 +56,7 @@
     (is (nil? (impl/parse-code-response "[:vector :not :map]")))
     (is (nil? (impl/parse-code-response "42")))))
 
-(deftest parse-code-response-inline-status-test
+(deftest ^{:stratum 0} parse-code-response-inline-status-test
   (testing "parses inline already-implemented status"
     (let [text "The feature is already present. {:status :already-implemented :summary \"Already done\"}"
           result (impl/parse-code-response text)]
@@ -75,7 +74,7 @@
           result (impl/parse-code-response text)]
       (is (nil? result)))))
 
-(deftest parse-code-response-nil-cases-test
+(deftest ^{:stratum 0} parse-code-response-nil-cases-test
   (testing "returns nil for plain text without EDN"
     (is (nil? (impl/parse-code-response "Just some regular text without any EDN."))))
 
@@ -88,10 +87,8 @@
   (testing "returns nil for invalid EDN in code block"
     (is (nil? (impl/parse-code-response "```clojure\n{{{invalid\n```")))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; extract-code-blocks tests
-
-(deftest extract-code-blocks-single-block-test
+(deftest ^{:stratum 0} extract-code-blocks-single-block-test
   (testing "extracts a single fenced code block"
     (let [text "### src/core.clj\n```clojure\n(ns core)\n```"
           result (impl/extract-code-blocks text)]
@@ -100,7 +97,7 @@
       (is (= "(ns core)" (:content (first result))))
       (is (= :create (:action (first result)))))))
 
-(deftest extract-code-blocks-multiple-blocks-test
+(deftest ^{:stratum 0} extract-code-blocks-multiple-blocks-test
   (testing "extracts multiple code blocks with heading paths"
     (let [text (str "### src/a.clj\n```clojure\n(ns a)\n```\n\n"
                     "### src/b.clj\n```clojure\n(ns b)\n```")
@@ -109,32 +106,32 @@
       (is (= "src/a.clj" (:path (first result))))
       (is (= "src/b.clj" (:path (second result)))))))
 
-(deftest extract-code-blocks-bold-path-test
+(deftest ^{:stratum 0} extract-code-blocks-bold-path-test
   (testing "extracts path from bold markdown"
     (let [text "**src/util.clj**\n```clojure\n(ns util)\n```"
           result (impl/extract-code-blocks text)]
       (is (= 1 (count result)))
       (is (= "src/util.clj" (:path (first result)))))))
 
-(deftest extract-code-blocks-file-label-test
+(deftest ^{:stratum 0} extract-code-blocks-file-label-test
   (testing "extracts path from 'File:' label"
     (let [text "File: src/handler.clj\n```clojure\n(ns handler)\n```"
           result (impl/extract-code-blocks text)]
       (is (= 1 (count result)))
       (is (= "src/handler.clj" (:path (first result)))))))
 
-(deftest extract-code-blocks-no-blocks-test
+(deftest ^{:stratum 0} extract-code-blocks-no-blocks-test
   (testing "returns nil when no code blocks found"
     (is (nil? (impl/extract-code-blocks "Just plain text, no code blocks.")))
     (is (nil? (impl/extract-code-blocks "")))))
 
-(deftest extract-code-blocks-pathless-block-test
+(deftest ^{:stratum 0} extract-code-blocks-pathless-block-test
   (testing "rejects pathless fenced code blocks"
     (let [text "Here's some code:\n\n```clojure\n(ns mystery)\n```"
           result (impl/extract-code-blocks text)]
       (is (nil? result)))))
 
-(deftest invoke-with-llm-merges-submit-metadata-with-collected-files-test
+(deftest ^{:stratum 0} invoke-with-llm-merges-submit-metadata-with-collected-files-test
   (testing "summary-only MCP submit does not hide files written by the agent"
     (let [submit-artifact {:code/summary "Updated transit store tests"
                            :code/tests-needed? true}
@@ -171,7 +168,7 @@
                    :action :modify}]
                  (:code/files artifact))))))))
 
-(deftest process-llm-response-rejects-metadata-only-submit-test
+(deftest ^{:stratum 0} process-llm-response-rejects-metadata-only-submit-test
   (testing "MCP submit metadata cannot be replaced by final chat code blocks"
     (let [result (#'impl/process-llm-response
                   {:content "### src/incorrect.clj\n```clojure\n(ns incorrect)\n```"
@@ -190,7 +187,7 @@
       (is (= :metadata-only-submit
              (get-in result [:error :data :reject/reason]))))))
 
-(deftest process-llm-response-rejects-incident-shaped-submit-test
+(deftest ^{:stratum 0} process-llm-response-rejects-incident-shaped-submit-test
   (testing "summary-only submit plus a pathless final command block is rejected"
     (let [result (#'impl/process-llm-response
                   {:content "Run:\n```\nclojure -M:test -n ai.miniforge.artifact.protocols.impl.transit-store-test\n```"
@@ -210,7 +207,7 @@
       (is (= :mcp
              (get-in result [:error :data :artifact-source]))))))
 
-(deftest normalized-artifact-source-is-always-a-keyword-test
+(deftest ^{:stratum 0} normalized-artifact-source-is-always-a-keyword-test
   (testing "valid artifact sources are preserved"
     (is (= :mcp (#'impl/normalized-artifact-source {:artifact-source :mcp}))))
   (testing "absent and malformed artifact sources become :none"
@@ -221,10 +218,8 @@
                         {:artifact-source 42}]]
       (is (= :none (#'impl/normalized-artifact-source normalized))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; extract-language tests
-
-(deftest extract-language-from-files-test
+(deftest ^{:stratum 0} extract-language-from-files-test
   (testing "detects clojure from .clj files"
     (let [files [{:path "src/core.clj" :content "" :action :create}
                  {:path "src/util.clj" :content "" :action :create}]]
@@ -249,67 +244,63 @@
     (let [lang (impl/extract-language [{:path "Makefile" :content ""}] {})]
       (is (nil? lang)))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; validate-code-artifact edge cases
-
-(deftest validate-missing-code-id-test
+(deftest ^{:stratum 0} validate-missing-code-id-test
   (testing "fails validation without :code/id"
     (let [result (impl/validate-code-artifact
                   {:code/files [{:path "a.clj" :content "(ns a)" :action :create}]})]
       (is (not (:valid? result))))))
 
-(deftest validate-empty-files-vector-test
+(deftest ^{:stratum 0} validate-empty-files-vector-test
   (testing "passes validation with empty file vector and valid id"
     (let [result (impl/validate-code-artifact
                   {:code/id (random-uuid) :code/files []})]
       (is (:valid? result)))))
 
-(deftest validate-invalid-action-test
+(deftest ^{:stratum 0} validate-invalid-action-test
   (testing "fails validation with unknown action"
     (let [result (impl/validate-code-artifact
                   {:code/id (random-uuid)
                    :code/files [{:path "a.clj" :content "(ns a)" :action :unknown}]})]
       (is (not (:valid? result))))))
 
-(deftest validate-missing-path-test
+(deftest ^{:stratum 0} validate-missing-path-test
   (testing "fails validation with missing path"
     (let [result (impl/validate-code-artifact
                   {:code/id (random-uuid)
                    :code/files [{:content "(ns a)" :action :create}]})]
       (is (not (:valid? result))))))
 
-(deftest validate-modify-with-content-test
+(deftest ^{:stratum 0} validate-modify-with-content-test
   (testing "passes validation for :modify with non-empty content"
     (let [result (impl/validate-code-artifact
                   {:code/id (random-uuid)
                    :code/files [{:path "a.clj" :content "(ns a)" :action :modify}]})]
       (is (:valid? result)))))
 
-(deftest validate-delete-with-empty-content-test
+(deftest ^{:stratum 0} validate-delete-with-empty-content-test
   (testing "passes validation for :delete with empty content"
     (let [result (impl/validate-code-artifact
                   {:code/id (random-uuid)
                    :code/files [{:path "a.clj" :content "" :action :delete}]})]
       (is (:valid? result)))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; repair-code-artifact tests
-
-(deftest repair-adds-missing-id-test
+(deftest ^{:stratum 0} repair-adds-missing-id-test
   (testing "adds UUID when :code/id is missing"
     (let [artifact {:code/files [{:path "a.clj" :content "(ns a)" :action :create}]}
           result (impl/repair-code-artifact artifact {:code/id "missing"} {})]
       (is (response/success? result))
       (is (uuid? (get-in result [:output :code/id]))))))
 
-(deftest repair-adds-missing-files-vector-test
+(deftest ^{:stratum 0} repair-adds-missing-files-vector-test
   (testing "adds empty files vector when nil"
     (let [artifact {:code/id (random-uuid) :code/files nil}
           result (impl/repair-code-artifact artifact {} {})]
       (is (response/success? result))
       (is (vector? (get-in result [:output :code/files]))))))
 
-(deftest repair-fills-empty-create-content-test
+(deftest ^{:stratum 0} repair-fills-empty-create-content-test
   (testing "fills empty content in :create files so repair returns a valid artifact"
     (let [artifact {:code/id (random-uuid)
                     :code/files [{:path "a.clj" :content "" :action :create}]}
@@ -318,7 +309,7 @@
       (is (seq (get-in result [:output :code/files 0 :content])))
       (is (:valid? (impl/validate-code-artifact (:output result)))))))
 
-(deftest repair-deduplicates-files-test
+(deftest ^{:stratum 0} repair-deduplicates-files-test
   (testing "keeps last occurrence of duplicate paths"
     (let [artifact {:code/id (random-uuid)
                     :code/files [{:path "a.clj" :content "(ns a-v1)" :action :create}
@@ -330,7 +321,7 @@
             paths (map :path files)]
         (is (= (count (distinct paths)) (count paths)))))))
 
-(deftest repair-drops-nil-path-entries-test
+(deftest ^{:stratum 0} repair-drops-nil-path-entries-test
   (testing "filters out file entries with nil path"
     (let [artifact {:code/id (random-uuid)
                     :code/files [{:path "a.clj" :content "(ns a)" :action :create}
@@ -339,7 +330,7 @@
       (is (response/success? result))
       (is (= 1 (count (get-in result [:output :code/files])))))))
 
-(deftest repair-adds-default-action-test
+(deftest ^{:stratum 0} repair-adds-default-action-test
   (testing "adds :create action when missing"
     (let [artifact {:code/id (random-uuid)
                     :code/files [{:path "a.clj" :content "(ns a)"}]}
@@ -347,7 +338,7 @@
       (is (response/success? result))
       (is (= :create (get-in result [:output :code/files 0 :action]))))))
 
-(deftest repair-adds-empty-content-when-nil-test
+(deftest ^{:stratum 0} repair-adds-empty-content-when-nil-test
   (testing "adds empty string content when nil"
     (let [artifact {:code/id (random-uuid)
                     :code/files [{:path "a.clj" :content nil :action :delete}]}
@@ -355,24 +346,22 @@
       (is (response/success? result))
       (is (= "" (get-in result [:output :code/files 0 :content]))))))
 
-(deftest repair-records-repairs-made-test
+(deftest ^{:stratum 0} repair-records-repairs-made-test
   (testing "records original errors when repairs were needed"
     (let [artifact {:code/files [{:path "a.clj" :content "(ns a)" :action :create}]}
           errors {:code/id "missing"}
           result (impl/repair-code-artifact artifact errors {})]
       (is (some? (:repairs-made result))))))
 
-(deftest repair-no-repairs-made-test
+(deftest ^{:stratum 0} repair-no-repairs-made-test
   (testing "no :repairs-made when artifact is already valid"
     (let [artifact {:code/id (random-uuid)
                     :code/files [{:path "a.clj" :content "(ns a)" :action :create}]}
           result (impl/repair-code-artifact artifact {} {})]
       (is (nil? (:repairs-made result))))))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; task->text with prior-attempts
-
-(deftest task->text-prior-attempts-test
+(deftest ^{:stratum 0} task->text-prior-attempts-test
   (testing "includes retry warning with attempt number"
     (let [text (impl/task->text
                 {:task/description "Do the thing"
@@ -393,12 +382,12 @@
       (is (< (str/index-of text "RETRY")
              (str/index-of text "Main task"))))))
 
-(deftest task->text-non-string-non-map-test
+(deftest ^{:stratum 0} task->text-non-string-non-map-test
   (testing "non-string, non-map values are stringified"
     (is (= "42" (impl/task->text 42)))
     (is (= ":keyword" (impl/task->text :keyword)))))
 
-(deftest task->text-map-fallback-keys-test
+(deftest ^{:stratum 0} task->text-map-fallback-keys-test
   (testing "uses :description when :task/description is nil"
     (let [text (impl/task->text {:description "fallback desc"})]
       (is (= "fallback desc" text))))
@@ -407,42 +396,38 @@
     (let [text (impl/task->text {:content "content desc"})]
       (is (= "content desc" text)))))
 
-(deftest task->text-empty-map-test
+(deftest ^{:stratum 0} task->text-empty-map-test
   (testing "empty map is pr-str'd"
     (let [text (impl/task->text {})]
       (is (= "{}" text)))))
 
-;------------------------------------------------------------------------------ Layer 6
 ;; format-repo-map tests
-
-(deftest format-repo-map-nil-test
+(deftest ^{:stratum 0} format-repo-map-nil-test
   (testing "nil returns nil"
     (is (nil? (impl/format-repo-map nil)))))
 
-(deftest format-repo-map-blank-test
+(deftest ^{:stratum 0} format-repo-map-blank-test
   (testing "blank string returns nil"
     (is (nil? (impl/format-repo-map "")))
     (is (nil? (impl/format-repo-map "   ")))))
 
-(deftest format-repo-map-with-content-test
+(deftest ^{:stratum 0} format-repo-map-with-content-test
   (testing "non-blank string returns formatted section with the content"
     (let [result (impl/format-repo-map "src/\n  core.clj\n  util.clj")]
       (is (string? result))
       (is (str/includes? result "src/"))
       (is (str/includes? result "core.clj")))))
 
-;------------------------------------------------------------------------------ Layer 6
 ;; format-existing-files tests
-
-(deftest format-existing-files-nil-test
+(deftest ^{:stratum 0} format-existing-files-nil-test
   (testing "nil returns nil"
     (is (nil? (impl/format-existing-files nil)))))
 
-(deftest format-existing-files-empty-test
+(deftest ^{:stratum 0} format-existing-files-empty-test
   (testing "empty seq returns nil"
     (is (nil? (impl/format-existing-files [])))))
 
-(deftest format-existing-files-with-content-test
+(deftest ^{:stratum 0} format-existing-files-with-content-test
   (testing "formats files as markdown code blocks"
     (let [files [{:path "src/core.clj" :content "(ns core)"}]
           result (impl/format-existing-files files)]
@@ -450,23 +435,21 @@
       (is (str/includes? result "src/core.clj"))
       (is (str/includes? result "(ns core)")))))
 
-(deftest format-existing-files-truncated-test
+(deftest ^{:stratum 0} format-existing-files-truncated-test
   (testing "shows truncated indicator"
     (let [files [{:path "src/big.clj" :content "(ns big)" :truncated? true}]
           result (impl/format-existing-files files)]
       (is (str/includes? result "(truncated)")))))
 
-;------------------------------------------------------------------------------ Layer 7
 ;; code-summary edge cases
-
-(deftest code-summary-empty-files-test
+(deftest ^{:stratum 0} code-summary-empty-files-test
   (testing "handles empty file list"
     (let [summary (impl/code-summary {:code/id (random-uuid)
                                        :code/files []})]
       (is (= 0 (:file-count summary)))
       (is (= {} (:actions summary))))))
 
-(deftest code-summary-nil-optional-fields-test
+(deftest ^{:stratum 0} code-summary-nil-optional-fields-test
   (testing "handles nil optional fields gracefully"
     (let [summary (impl/code-summary {:code/id (random-uuid)
                                        :code/files [{:path "a.clj"
@@ -476,20 +459,18 @@
       (is (nil? (:tests-needed? summary)))
       (is (= 0 (:dependencies-added summary))))))
 
-;------------------------------------------------------------------------------ Layer 7
 ;; total-lines edge cases
-
-(deftest total-lines-empty-files-test
+(deftest ^{:stratum 0} total-lines-empty-files-test
   (testing "zero for no files"
     (is (= 0 (impl/total-lines {:code/files []})))))
 
-(deftest total-lines-single-line-test
+(deftest ^{:stratum 0} total-lines-single-line-test
   (testing "single line file counts as 1"
     (is (= 1 (impl/total-lines {:code/files [{:path "a.clj"
                                                 :content "single"
                                                 :action :create}]})))))
 
-(deftest total-lines-all-deleted-test
+(deftest ^{:stratum 0} total-lines-all-deleted-test
   (testing "all deleted files produce 0 lines"
     (is (= 0 (impl/total-lines {:code/files [{:path "a.clj"
                                                 :content "should\nnot\ncount"
@@ -498,15 +479,13 @@
                                                 :content "also\nnot"
                                                 :action :delete}]})))))
 
-;------------------------------------------------------------------------------ Layer 7
 ;; files-by-action edge cases
-
-(deftest files-by-action-empty-test
+(deftest ^{:stratum 0} files-by-action-empty-test
   (testing "empty files produce empty groups"
     (let [grouped (impl/files-by-action {:code/files []})]
       (is (= {} grouped)))))
 
-(deftest files-by-action-all-actions-test
+(deftest ^{:stratum 0} files-by-action-all-actions-test
   (testing "all three action types grouped correctly"
     (let [artifact {:code/files [{:path "a.clj" :content "" :action :create}
                                  {:path "b.clj" :content "" :action :modify}

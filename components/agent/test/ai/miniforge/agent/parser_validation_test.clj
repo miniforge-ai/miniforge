@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.parser-validation-test
   "Tests for agent response parser validation.
    
@@ -25,7 +24,9 @@
             [ai.miniforge.agent.planner :as planner]
             [ai.miniforge.agent.implementer :as implementer]))
 
-(deftest parse-plan-response-validation-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} parse-plan-response-validation-test
   (testing "parse-plan-response validates result is a map"
     
     (testing "returns nil for Symbol"
@@ -62,7 +63,7 @@
       (let [response "{:invalid edn"]  ; Missing closing brace and value for :invalid
         (is (nil? (planner/parse-plan-response response)))))))
 
-(deftest parse-code-response-validation-test
+(deftest ^{:stratum 0} parse-code-response-validation-test
   (testing "parse-code-response validates result is a map"
     
     (testing "returns nil for Symbol"
