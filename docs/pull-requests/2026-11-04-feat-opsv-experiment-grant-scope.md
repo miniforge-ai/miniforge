@@ -11,7 +11,7 @@
 Implement the grant-scope foundation of approved N7 §5.5 and N10 §1.5.
 API surface class 1: internal EDN, trusted runtime composition.
 Dependent branch from #2385's shared target contract, now merged.
-Integrate current main before full validation and publish against main.
+Integrated main through a033fba25 before full validation; publish against main.
 
 ## Motivation
 
@@ -48,14 +48,27 @@ or cross-class authority. Regress the ordinary grant path and durable commits.
 Run strict kondo, true inferred strata, all affected product contexts, package
 checks, targeted fault injection, and normal signed hooks in the shared slot.
 
-Cheap source checks pass: 33 tests, 308 assertions; strict kondo has no warnings
-or errors. All 12 implementation/test namespaces pass declared and truly inferred strata
-(maximum three). Eight new unit tests contain 123 assertions and each takes
-under 25 ms in the measured run. Eleven deliberate authority faults all cause
-assertion failures with zero errors. Three published-build counterexample tests produce
-eight assertion failures with zero errors, including revoked-grant snapshots;
-no missing-API failures substitute for evidence. Full checks also cover the
-public contract documentation and untagged legacy load-effect refusal.
+Validated source/test/dependency head b53111f87e306714e89ff98374b9ba0e31cdf375.
+Only evidence documentation follows. Strict kondo has zero warnings/errors;
+all 13 changed namespaces pass declared and truly inferred strata (maximum three).
+Workspace validation and both affected bricks pass in all four product contexts.
+New durable integration passes 7 tests/89 assertions. All 22 scoped OPSV/workflow/N6
+integration suites pass 97 tests/1,240 assertions, with no live provider effects.
+
+Fresh package, no production-source overlay: grant/effect regressions pass
+141 tests/857 assertions on the JVM, including SQL date/time conversion.
+Native OPSV regressions pass 308 tests/1,903 assertions on Babashka.
+The initial Babashka package harness could not load `java.sql.Time`.
+The JVM package run retained those tests. Completed product builds were not repeated.
+All eleven deliberate authority faults cause assertion failures with zero errors.
+Eight new unit tests contain 123 assertions. Their longest measured run took 20.461 milliseconds.
+Committed scans find zero violations across 38 grant, 24 effect, and two project files.
+
+Three published-build counterexample tests produce eight assertion failures with
+zero errors, including revoked-grant snapshots. No missing-API failures substitute
+for evidence. All three normal signed commits pass hooks: 147, 182 and 174
+reportable lines; each smoke 375 tests/1,452 assertions and compatibility 17/775.
+Aggregate PR is 491/600 reportable lines; no size or gate exceptions.
 
 ## Deployment Plan
 
@@ -69,5 +82,5 @@ N7 completion; approved contract #2381 and shared target identity #2385.
 ## Checklist
 
 - [x] Implement and adversarially review exact-profile authorization.
-- [ ] Validate source, all affected products, and packaged commits.
+- [x] Validate source, all affected products, and packaged commits.
 - [ ] Settle review, require fresh full review/CI, and owner-merge.
