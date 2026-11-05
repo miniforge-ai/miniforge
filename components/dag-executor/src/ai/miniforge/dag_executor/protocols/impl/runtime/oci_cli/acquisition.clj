@@ -54,6 +54,21 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} removing-unless-ok
+  "(f), the part of an acquire after its container started. Unless it
+   returns an ok result, whether it returns an error or throws (a failed
+   env-file write, an interrupt), (remove!) runs first, with the interrupt
+   flag clear (`without-interrupt`): only an ok result gives the caller an
+   environment id to release the container with."
+  [remove! f]
+  (let [ok? (volatile! false)]
+    (try
+      (let [r (f)]
+        (vreset! ok? (result/ok? r))
+        r)
+      (finally
+        (when-not @ok? (without-interrupt remove!))))))
+
 (defn- ^{:stratum 1} call-acquire-body
   [body-fn]
   (try

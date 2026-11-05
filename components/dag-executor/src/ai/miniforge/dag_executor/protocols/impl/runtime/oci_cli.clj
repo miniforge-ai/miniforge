@@ -41,7 +41,7 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.images :as images]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.acquisition
-    :refer [default-acquisition-timeout-ms with-acquisition-timeout without-interrupt]]
+    :refer [default-acquisition-timeout-ms removing-unless-ok with-acquisition-timeout]]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.capsule-git
     :refer [bootstrap-workspace! recorded-remote remote-credential-env with-git-credentials
             workspace-exec-fn workspace-opts]]
@@ -135,35 +135,38 @@
                                                   network
                                                   :execution-plan launch-plan)]
               (if (result/ok? create-result)
-                ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
-                (let [bootstrap-result (bootstrap-workspace! descriptor container-name workdir env-config)]
-                  (if (result/ok? bootstrap-result)
-                    (let [clone-url (get-in bootstrap-result [:data :clone-url])
-                          bootstrap-metadata (dissoc (:data bootstrap-result) :clone-url)
-                          ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
-                          image-digest (container-image-digest descriptor container-name)
-                          ;; Surface the gate's non-blocking findings (rootless
-                          ;; warning, host-mount review) on the environment record.
-                          gate-warnings (get-in gate-result [:data :security/warnings])
-                          gate-review   (get-in gate-result [:data :security/review])
-                          metadata (cond-> (merge (get create-result :data {})
-                                                   bootstrap-metadata)
-                                     image-digest (assoc :image-digest image-digest)
-                                     (seq gate-warnings) (assoc :security/warnings gate-warnings)
-                                     (seq gate-review)   (assoc :security/review gate-review))
-                          remote   (recorded-remote env-config clone-url)]
-                      (when remote
-                        (some-> git-remotes (swap! assoc container-name remote)))
-                      ;; The record is returned to callers, so it carries the
-                      ;; repo URL without any user:password@ it was given.
-                      (result/ok (proto/create-environment-record
-                                  container-name (descriptor/kind descriptor) task-id workdir
-                                  (cond-> (assoc env-config :metadata metadata)
-                                    remote (assoc :repo-url (:repo-url remote))))))
-                    ;; The caller gets no environment id to release, so
-                    ;; remove the container that started.
-                    (do (without-interrupt #(remove-container descriptor container-name))
-                        bootstrap-result)))
+                ;; Only an ok result gives the caller an environment id to
+                ;; release, so a bootstrap or record step that fails or
+                ;; throws removes the container that started.
+                (removing-unless-ok
+                 #(remove-container descriptor container-name)
+                 (fn []
+                   ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
+                   (let [bootstrap-result (bootstrap-workspace! descriptor container-name workdir env-config)]
+                     (if (result/ok? bootstrap-result)
+                       (let [clone-url (get-in bootstrap-result [:data :clone-url])
+                             bootstrap-metadata (dissoc (:data bootstrap-result) :clone-url)
+                             ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
+                             image-digest (container-image-digest descriptor container-name)
+                             ;; Surface the gate's non-blocking findings (rootless
+                             ;; warning, host-mount review) on the environment record.
+                             gate-warnings (get-in gate-result [:data :security/warnings])
+                             gate-review   (get-in gate-result [:data :security/review])
+                             metadata (cond-> (merge (get create-result :data {})
+                                                      bootstrap-metadata)
+                                        image-digest (assoc :image-digest image-digest)
+                                        (seq gate-warnings) (assoc :security/warnings gate-warnings)
+                                        (seq gate-review)   (assoc :security/review gate-review))
+                             remote   (recorded-remote env-config clone-url)]
+                         (when remote
+                           (some-> git-remotes (swap! assoc container-name remote)))
+                         ;; The record is returned to callers, so it carries the
+                         ;; repo URL without any user:password@ it was given.
+                         (result/ok (proto/create-environment-record
+                                     container-name (descriptor/kind descriptor) task-id workdir
+                                     (cond-> (assoc env-config :metadata metadata)
+                                       remote (assoc :repo-url (:repo-url remote))))))
+                       bootstrap-result))))
                 create-result)))))))
 
   (execute! [_this environment-id command opts]

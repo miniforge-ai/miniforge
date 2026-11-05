@@ -253,6 +253,31 @@
                                                      {:repo-url "https://github.com/o/r.git"})))
         (is (= ["miniforge-task-abcd1234"] @removed))))))
 
+(deftest ^{:stratum 1} acquire-removes-container-when-bootstrap-throws-test
+  (testing "a bootstrap that throws (a failed env-file write), or a record
+            step after it that throws, still removes the container, and
+            acquire returns :acquire-failed"
+    (doseq [[bootstrap digest]
+            [[(fn [& _] (throw (java.io.IOException. "No space left on device"))) (fn [_ _] nil)]
+             [(fn [& _] (result/ok {:base-branch "main"})) (fn [_ _] (throw (RuntimeException. "inspect")))]]]
+      (let [removed  (atom [])
+            executor (oci-cli/map->OciCliExecutor
+                      {:descriptor {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                       :image      "task-runner:latest"})]
+        (with-redefs [oci-img/image-exists?          (fn [_ _] true)
+                      oci-img/resolve-image-digest!  (fn [_ _] valid-digest)
+                      oci-img/image-env              (fn [_ _] {})
+                      oci-img/container-image-digest digest
+                      oci-ctr/create-container       (fn [_d container-name & _]
+                                                       (result/ok {:container-name container-name}))
+                      cap-git/bootstrap-workspace!   bootstrap
+                      oci-ctr/remove-container       (fn [_d id] (swap! removed conj id) (result/ok {}))]
+          (is (= :acquire-failed
+                 (get-in (proto/acquire-environment! executor "abcd1234efgh"
+                                                     {:repo-url "https://github.com/o/r.git"})
+                         [:error :code])))
+          (is (= ["miniforge-task-abcd1234"] @removed)))))))
+
 (deftest ^{:stratum 1} acquire-removes-container-when-interrupted-test
   (testing "a bootstrap cut short by the acquire timeout, which leaves the
             worker interrupted, still removes its container: removal runs
