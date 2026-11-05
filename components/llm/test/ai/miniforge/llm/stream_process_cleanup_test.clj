@@ -28,7 +28,8 @@
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
-   [ai.miniforge.llm.protocols.impl.llm-client.stream-exec :as stream-exec]))
+   [ai.miniforge.llm.protocols.impl.llm-client.stream-exec :as stream-exec]
+   [ai.miniforge.llm.protocols.impl.llm-client.subprocess :as subprocess]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -343,23 +344,32 @@
             exit ends the wait, returns :cancelled and kills the tree"
     (let [pids      (atom {})
           reported  (promise)
+          waiting   (promise)
           cancelled (atom false)
-          {:keys [outcome]} (start-cancellable-stream-thread
-                             cancelled
-                             stdout-closing-shell-cmd
-                             (partial record-pid! pids reported)
-                             {:progress-monitor (pm/create-progress-monitor {})})]
-      (try
-        (is (true? (deref reported pid-report-timeout-ms false))
-            "the shell printed both pids before closing stdout")
-        (reset! cancelled true)
-        (let [{:keys [result]} (deref outcome return-timeout-ms nil)]
-          (is (= :cancelled (get-in result [:timeout :type]))
-              "the post-EOF wait sees the cancel instead of running out"))
-        (is (= [] (survivors (vals @pids)))
-            "no process from the tree is left running")
-        (finally
-          (kill-pids! (vals @pids)))))))
+          wait-fn   subprocess/wait-for-stream-process]
+      ;; The cancel lands only once the stream has ended and the client is
+      ;; in the post-EOF wait, so the stream loop cannot be what sees it.
+      (with-redefs [subprocess/wait-for-stream-process (fn [process timeout-ms]
+                                                         (deliver waiting true)
+                                                         (wait-fn process timeout-ms))]
+        (let [{:keys [outcome]} (start-cancellable-stream-thread
+                                 cancelled
+                                 stdout-closing-shell-cmd
+                                 (partial record-pid! pids reported)
+                                 {:progress-monitor (pm/create-progress-monitor {})})]
+          (try
+            (is (true? (deref reported pid-report-timeout-ms false))
+                "the shell printed both pids before closing stdout")
+            (is (true? (deref waiting pid-report-timeout-ms false))
+                "the client reached the post-EOF wait")
+            (reset! cancelled true)
+            (let [{:keys [result]} (deref outcome return-timeout-ms nil)]
+              (is (= :cancelled (get-in result [:timeout :type]))
+                  "the post-EOF wait sees the cancel instead of running out"))
+            (is (= [] (survivors (vals @pids)))
+                "no process from the tree is left running")
+            (finally
+              (kill-pids! (vals @pids)))))))))
 
 (deftest ^{:stratum 2} non-streaming-call-sees-the-cancel-test
   (testing "a non-streaming CLI call (the capture exec-fn) made under a
