@@ -58,8 +58,21 @@ run:
      not tool calls.
    - `turn.completed` keeps `cache_write_input_tokens` as
      `:cache-write-input-tokens` when Codex reports a number.
+   - A tool signal also carries `:tool-completed true`, because Codex
+     reports the call only once it has finished, and `:tool-error?` from
+     the item's `status`: true for `failed` or `declined`, false for
+     `completed`, absent otherwise.
 2. The docstring lists the current event types and states that a turn is
    one prompt, not one tool call.
+3. `event-stream/interface/callbacks.clj`, `create-streaming-callback`:
+   for a `:tool-completed` call it publishes `:tool/call-completed`
+   right after `:agent/tool-call-started`, with the same call id, the
+   outcome when known, and no duration. It records no start time for
+   such a call. Without this, the observer's alert state kept every
+   native call in `:outstanding-calls` (only `:tool/call-completed`
+   removes one), and a `:tool-call-timeout` rule would later report it
+   as timed out. Claude's `tool_use` / `tool_result` pairing is
+   unchanged.
 
 No change to `stream-with-parser`: it already counts every parsed
 `:tool-name` into `:tools-called`.
@@ -79,13 +92,23 @@ with a transcript written from the serde shapes above:
 
 On main's `cli_output.clj` the new namespace fails 22 of 30 assertions.
 For example, the run reports `["context_read"]` instead of four calls.
-With the fix it passes, together with `ai.miniforge.llm.interface-test`
-(75 tests, 407 assertions), which holds the existing Codex parser cases.
+
+New `components/observer/test/ai/miniforge/observer/completed_tool_call_test.clj`
+feeds completed native calls through `create-streaming-callback` into the
+observer's alert rules. No call stays outstanding and no timeout fires.
+A Claude `tool_use` still waits for its result. Against the first commit's
+`cli_output.clj` and `callbacks.clj`, it and the parser's completion
+assertions fail 9 of 41 assertions.
+
+With both commits, these pass together with `ai.miniforge.llm.interface-test`,
+`ai.miniforge.observer.alerts-test` and `ai.miniforge.event-stream.interface-test`
+(101 tests, 584 assertions).
 
 ## Deployment Plan
 
 No configuration change. Codex responses gain tool names in
-`:tools-called`, and `:agent/tool-call` events for native tools.
+`:tools-called`. Each native call publishes `:agent/tool-call`,
+`:agent/tool-call-started` and `:tool/call-completed`.
 
 ## Related Issues/PRs
 

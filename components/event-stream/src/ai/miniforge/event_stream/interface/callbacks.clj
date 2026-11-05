@@ -60,6 +60,11 @@
      :tool-call-id — provider-supplied id when available
      :tool-args-preview — bounded args preview when the parser can safely
                           expose it; will be digested via digest-content
+     :tool-completed — with :tool-use: the provider reports the call only
+                       once it has finished (Codex item.completed), so no
+                       later tool-result will close it
+     :tool-error?    — with :tool-completed: true when the call failed;
+                       absent when the provider gave no outcome
      :tool-result — boolean, true when the LLM streamed a tool-result
                     block (outcome of a prior tool-use)
      :tool-result-call-id — provider id correlating this result to its
@@ -79,6 +84,8 @@
                                  :tool/name / :tool/call-id /
                                  :tool/args-digest (digest-content of
                                  tool-args-preview when present).
+   With :tool-completed set, it then emits :tool/call-completed for the
+   same call id, with no duration, so the call is not left open.
 
    NOTE: The bare :agent/status :tool-calling emission has been removed.
          :agent/tool-call-started replaces it with richer structured data.
@@ -100,7 +107,8 @@
         tool-start-times (atom {})]
     (fn [{:keys [delta done? tool-use tool-result heartbeat
                  tool-name tool-names tool-call-id tool-args-preview
-                 tool-result-call-id tool-result-content tool-result-is-error]}]
+                 tool-result-call-id tool-result-content tool-result-is-error
+                 tool-completed tool-error?]}]
       (cond
         tool-use
         (do
@@ -108,8 +116,9 @@
           ;; adjustments (NTP step, manual sysclock change) that can
           ;; make a paired currentTimeMillis delta negative or
           ;; implausibly large. Durations published downstream stay
-          ;; non-negative without a clamp guard.
-          (when tool-call-id
+          ;; non-negative without a clamp guard. A completed call has
+          ;; no span to time.
+          (when (and tool-call-id (not tool-completed))
             (swap! tool-start-times assoc tool-call-id (System/nanoTime)))
 
           (when-let [line (and print? (not quiet?)
@@ -147,7 +156,17 @@
                   (seq tool-names) (assoc :tool/names (vec tool-names))
                   (some? tool-args-preview)
                   (assoc :tool/args-digest
-                         (digest/digest-content tool-args-preview)))))))
+                         (digest/digest-content tool-args-preview)))))
+
+            ;; ── A call reported only once finished closes at once, so
+            ;; observers do not keep it outstanding.
+            (when tool-completed
+              (stream/publish!
+                stream-atom
+                (events/tool-call-completed
+                  stream-atom workflow-id
+                  (cond-> {:tool/call-id tool-call-id}
+                    (some? tool-error?) (assoc :tool/success? (not tool-error?))))))))
 
         ;; Tool-result closes the latency span opened by tool-use.
         ;; Emit :tool/call-completed with duration and digested result.

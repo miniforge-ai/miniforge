@@ -108,16 +108,28 @@
       (let [parsed (parse-event {:type "item.completed"
                                  :item (assoc item :id "item_9" :type item-type)})]
         (is (true? (:tool-use parsed)) item-type)
+        (is (true? (:tool-completed parsed)) "no later event closes the call")
         (is (= item-type (:tool-name parsed)))
         (is (= "item_9" (:tool-call-id parsed)))
         (is (= "" (:delta parsed))))))
+  (testing "the item's status gives the outcome; no status gives none"
+    (is (false? (:tool-error? (parse-event (nth hello-run-events 4)))))
+    (is (not (contains? (parse-event {:type "item.completed"
+                                      :item {:id "item_7" :type "web_search"
+                                             :query "clojure"}})
+                        :tool-error?)))
+    (is (not (contains? (parse-event (assoc-in (nth hello-run-events 3)
+                                               [:type] "item.completed"))
+                        :tool-error?))
+        "an item still in_progress when the turn ended has no outcome"))
   (testing "a failed command is still a call the session made"
-    (is (= "command_execution"
-           (:tool-name (parse-event {:type "item.completed"
-                                     :item {:id "item_1" :type "command_execution"
-                                            :command "bash -lc 'exit 2'"
-                                            :aggregated_output "" :exit_code 2
-                                            :status "failed"}})))))
+    (let [parsed (parse-event {:type "item.completed"
+                               :item {:id "item_1" :type "command_execution"
+                                      :command "bash -lc 'exit 2'"
+                                      :aggregated_output "" :exit_code 2
+                                      :status "failed"}})]
+      (is (= "command_execution" (:tool-name parsed)))
+      (is (true? (:tool-error? parsed)))))
   (testing "item.started is not a second call, and a to-do list is not a call"
     (is (nil? (parse-event (nth hello-run-events 3))))
     (is (nil? (parse-event (nth hello-run-events 10))))

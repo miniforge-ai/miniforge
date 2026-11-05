@@ -166,7 +166,10 @@
    item, also for an item still running when the turn ends, and emits a
    file_change only as completed; counting item.started as well would
    count most calls twice. The tool name is the Codex item type, except
-   for mcp_tool_call, which names the MCP tool.
+   for mcp_tool_call, which names the MCP tool. The signal also carries
+   :tool-completed, because no later event closes the call, and
+   :tool-error? from the item's status: true for failed or declined,
+   false for completed, absent otherwise.
 
    Diagnostic fields returned on turn.completed:
    - :stop-reason   — normalized finish_reason (\"end_turn\", \"max_turns\", etc.)
@@ -185,7 +188,22 @@
           ;; Agent message — the actual text output
           "item.completed"
           (let [item (:item data)
-                item-type (:type item)]
+                item-type (:type item)
+                ;; Outcome from the item's status; nil when it gives none
+                ;; (web_search has no status; an item still in_progress
+                ;; when the turn ended has no outcome yet).
+                failed? (case (:status item)
+                          ("failed" "declined") true
+                          "completed" false
+                          nil)
+                ;; A tool item arrives here only once it has finished, so
+                ;; the signal is a use and its completion in one:
+                ;; :tool-completed tells the streaming callback to close
+                ;; the call it opens.
+                completed-call (cond-> {:delta "" :done? false
+                                        :tool-use true :tool-completed true
+                                        :tool-call-id (:id item)}
+                                 (some? failed?) (assoc :tool-error? failed?))]
             (case item-type
               "agent_message"
               {:delta (str (:text item) "\n") :done? false}
@@ -193,22 +211,19 @@
               ;; MCP tool invocation — emit a tool-use signal so the
               ;; callback can publish :agent/tool-call with the real name
               "mcp_tool_call"
-              {:delta "" :done? false :tool-use true
-               :tool-name (or (get-in item [:tool :name])
-                              (:tool item)
-                              (:tool_name item)
-                              (:name item)
-                              item-type)
-               :tool-call-id (:id item)}
+              (assoc completed-call
+                     :tool-name (or (get-in item [:tool :name])
+                                    (:tool item)
+                                    (:tool_name item)
+                                    (:name item)
+                                    item-type))
 
               ;; Native Codex tools: shell commands, patch application,
               ;; sub-agent calls and web searches. Same signal as an MCP
               ;; call, named by the item type, so the run's tool count
               ;; includes the local work the session did.
               ("command_execution" "file_change" "collab_tool_call" "web_search")
-              {:delta "" :done? false :tool-use true
-               :tool-name item-type
-               :tool-call-id (:id item)}
+              (assoc completed-call :tool-name item-type)
 
               ;; Native tool call (pre-MCP) — same treatment
               "tool_call"
