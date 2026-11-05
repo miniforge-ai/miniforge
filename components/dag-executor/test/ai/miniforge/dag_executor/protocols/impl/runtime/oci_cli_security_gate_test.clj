@@ -278,6 +278,36 @@
                          [:error :code])))
           (is (= ["miniforge-task-abcd1234"] @removed)))))))
 
+(deftest ^{:stratum 1} acquire-releases-container-when-it-finishes-after-the-deadline-test
+  (testing "an acquire whose deadline fires during the image-digest read,
+            after bootstrap, returns the timeout while its body still builds
+            an ok record; the container that record names is released, with
+            the interrupt flag clear"
+    (let [removed  (promise)
+          executor (oci-cli/map->OciCliExecutor
+                    {:descriptor {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                     :image      "task-runner:latest"})]
+      (with-redefs [oci-img/image-exists?          (fn [_ _] true)
+                    oci-img/resolve-image-digest!  (fn [_ _] valid-digest)
+                    oci-img/image-env              (fn [_ _] {})
+                    oci-ctr/create-container       (fn [_d container-name & _]
+                                                     (result/ok {:container-name container-name}))
+                    cap-git/bootstrap-workspace!   (fn [& _] (result/ok {:base-branch "main"}))
+                    ;; As a runtime call cut short by the interrupt: nil.
+                    oci-img/container-image-digest (fn [_ _]
+                                                     (try (Thread/sleep 5000) (catch InterruptedException _))
+                                                     nil)
+                    oci-ctr/stop-container         (fn [& _] {:exit 0})
+                    oci-ctr/remove-container       (fn [_d id]
+                                                     (deliver removed [id (.isInterrupted (Thread/currentThread))])
+                                                     (result/ok {:released? true}))]
+        (is (= :timeout
+               (get-in (proto/acquire-environment! executor "abcd1234efgh"
+                                                   {:repo-url "https://github.com/o/r.git"
+                                                    :acquisition-timeout-ms 100})
+                       [:error :code])))
+        (is (= ["miniforge-task-abcd1234" false] (deref removed 5000 :not-removed)))))))
+
 (deftest ^{:stratum 1} acquire-removes-container-when-interrupted-test
   (testing "a bootstrap cut short by the acquire timeout, which leaves the
             worker interrupted, still removes its container: removal runs

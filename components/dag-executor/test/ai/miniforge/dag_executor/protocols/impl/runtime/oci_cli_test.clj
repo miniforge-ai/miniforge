@@ -164,13 +164,14 @@
   (testing "body that returns in time passes its result through unchanged"
     (let [ok-result {:ok? true :data {:environment-id "env-1"}}]
       (is (= ok-result
-             (oci-acq/with-acquisition-timeout 5000 (fn [] ok-result)))))))
+             (oci-acq/with-acquisition-timeout 5000 (fn [] ok-result) (constantly nil)))))))
 
 (deftest ^{:stratum 0} with-acquisition-timeout-fires-on-deadline-test
   (testing "body that exceeds the deadline returns :timeout err"
     (let [result (oci-acq/with-acquisition-timeout
                    50
-                   (fn [] (Thread/sleep 5000) :should-not-see))]
+                   (fn [] (Thread/sleep 5000) :should-not-see)
+                   (constantly nil))]
       (is (= false (:ok? result)))
       (is (= :timeout (:code (:error result)))
           "Uses the standard dag-executor :timeout code, not a bespoke one")
@@ -183,14 +184,15 @@
   (testing "nil / 0 / negative timeout bypasses the deadline check"
     (doseq [t [nil 0 -1]]
       (is (= :body-ran
-             (oci-acq/with-acquisition-timeout t (fn [] :body-ran)))
+             (oci-acq/with-acquisition-timeout t (fn [] :body-ran) (constantly nil)))
           (str "timeout " (pr-str t) " must run the body without the guard")))))
 
 (deftest ^{:stratum 0} with-acquisition-timeout-disabled-body-exception-returns-error-result-test
   (testing "disabled deadline still returns body exceptions as failure data"
     (let [result (oci-acq/with-acquisition-timeout
                    nil
-                   (fn [] (throw (ex-info "boom" {:tag :disabled-timeout}))))]
+                   (fn [] (throw (ex-info "boom" {:tag :disabled-timeout})))
+                   (constantly nil))]
       (is (result/err? result))
       (is (= :acquire-failed (:code (:error result))))
       (is (= :disabled-timeout
@@ -213,7 +215,8 @@
                        :never
                        (catch InterruptedException _
                          (deliver cancelled? true)
-                         :interrupted))))]
+                         :interrupted)))
+                   (constantly nil))]
       (is (= :timeout (:code (:error result))))
       (is (= true (deref cancelled? 2000 :no-interrupt))
           "future-cancel must propagate InterruptedException into the body"))))
@@ -222,7 +225,8 @@
   (testing "exceptions thrown by the body return failure data instead of throwing"
     (let [result (oci-acq/with-acquisition-timeout
                    5000
-                   (fn [] (throw (ex-info "boom" {:tag :original}))))]
+                   (fn [] (throw (ex-info "boom" {:tag :original})))
+                   (constantly nil))]
       (is (false? (:ok? result)))
       (is (= :acquire-failed (:code (:error result))))
       (is (= "boom" (:message (:error result))))
@@ -231,6 +235,23 @@
              (get-in result [:error :data :exception-class])))
       (is (= {:tag :original}
              (get-in result [:error :data :exception-data]))))))
+
+(deftest ^{:stratum 0} with-acquisition-timeout-hands-a-late-result-to-abandon-test
+  (testing "a body that finishes after the deadline, ok, hands its result to
+            abandon! on its own thread with the interrupt flag clear, while
+            the caller gets the timeout; a body that finishes in time is
+            not abandoned"
+    (let [late      {:ok? true :data {:environment-id "late"}}
+          abandoned (promise)
+          r         (oci-acq/with-acquisition-timeout
+                     50
+                     (fn [] (try (Thread/sleep 5000) (catch InterruptedException _)) late)
+                     (fn [x] (deliver abandoned [x (.isInterrupted (Thread/currentThread))])))]
+      (is (= :timeout (get-in r [:error :code])))
+      (is (= [late false] (deref abandoned 2000 :not-abandoned))))
+    (let [abandoned (atom [])]
+      (is (= :done (oci-acq/with-acquisition-timeout 5000 (fn [] :done) #(swap! abandoned conj %))))
+      (is (= [] @abandoned)))))
 
 (deftest ^{:stratum 0} run-runtime-interrupt-destroys-child-process-test
   (testing "interrupting a runtime call does not wait for the child command to finish"

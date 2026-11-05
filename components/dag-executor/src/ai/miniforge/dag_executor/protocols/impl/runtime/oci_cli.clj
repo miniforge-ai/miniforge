@@ -99,7 +99,7 @@
       (catch Exception e
         (result/ok {:available? false :reason (.getMessage e)}))))
 
-  (acquire-environment! [_this task-id env-config]
+  (acquire-environment! [this task-id env-config]
     ;; Wrap in with-acquisition-timeout so a stuck daemon or hung image
     ;; pull fails fast (default 120 s) instead of blocking the workflow
     ;; indefinitely. Per-call override via env-config :acquisition-timeout-ms.
@@ -167,7 +167,11 @@
                                      (cond-> (assoc env-config :metadata metadata)
                                        remote (assoc :repo-url (:repo-url remote))))))
                        bootstrap-result))))
-                create-result)))))))
+                create-result)))))
+      ;; An acquire that finishes after the deadline, ok, holds a container
+      ;; the caller has no id for: release it.
+      #(when (result/ok? %)
+         (proto/release-environment! this (get-in % [:data :environment-id])))))
 
   (execute! [_this environment-id command opts]
     (try

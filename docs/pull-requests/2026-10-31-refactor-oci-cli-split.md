@@ -62,7 +62,7 @@ Tests follow the moved definitions:
 2. stratum-lint on every new file: no findings, and `--fix` leaves each file unchanged.
 3. clj-kondo on dag-executor's src and test: no warnings beyond those already on the base.
 4. dag-executor, release-executor, redaction, task-executor and llm-interface tests, under the
-   shared JVM lock: 990 pass, with every review fix and main at 16bc32489 (#2221) merged in.
+   shared JVM lock: 992 pass, with every review fix and main at 16bc32489 (#2221) merged in.
 
 When the base moves, the split is regenerated from the base's `oci_cli.clj` and test files with
 the same name-to-namespace assignment, the checks above are rerun, and this PR's own commits are
@@ -73,7 +73,7 @@ re-applied on top.
 Capsule stack review fixes that edit `oci_cli.clj` land here, one commit each. Items 5 to 9 come
 from the merge-gate review (rule 720 and the rules review), whose comment on this PR lists the
 traced flow and what was left. Items 10 and 11 are Copilot findings on #2221 whose code lives
-here, and items 12 to 14 are Copilot findings on this PR in code the split moved:
+here, and items 12 to 15 are Copilot findings on this PR in code the split moved:
 
 1. A failed env-file write deletes the temp file (#2143 thread).
 2. Persist and restore of a capsule cloned without an HTTP credential go to the URL it cloned
@@ -121,7 +121,17 @@ here, and items 12 to 14 are Copilot findings on this PR in code the split moved
     still open at the deadline closes and cancels its readers (`settle-drains!` in
     `runtime.process`), destroys the process tree, and returns the timeout result (exit 124),
     not output that may be incomplete, since `image-env` decides which image ENV entries to
-    blank from it.
+    blank from it. A child the CLI left running is re-parented when the CLI exits, so the
+    process-tree kill cannot reach it and it runs on, as it does on main, where the call also
+    blocks until it exits. Killing it needs each runtime call in its own process group, across
+    every `runtime.process` call site; that is a follow-up PR.
+15. An acquire that finishes after its deadline releases its container. The timeout returned
+    `:timeout` while the interrupted body could still finish with an ok record, for example
+    when the deadline fired during the image-digest read, whose interrupted runtime call
+    returns nil; the caller had no id to release that container with.
+    `with-acquisition-timeout` settles the body's finish against the deadline with one
+    compare-and-set, and a body that finishes late hands its result to `abandon!`, which
+    acquire uses to release the environment.
 
 ## Deployment Plan
 

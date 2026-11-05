@@ -84,6 +84,15 @@
    error result (the standard dag-executor code) when the deadline
    fires.
 
+   A body still running at the deadline is cancelled (its thread is
+   interrupted) but may still finish, even with an ok result such as an
+   acquire whose container started, which the caller, already holding
+   the timeout, has no id to release. Whichever of the body's finish and
+   the deadline comes first decides: a body that finishes after the
+   deadline hands its result to `abandon!` (one argument, called on the
+   body's thread with the interrupt flag clear) to release what it
+   acquired.
+
    `timeout-ms` of `nil` or `<= 0` disables the timeout (tests that
    pre-mock the executor wholesale rely on this escape hatch).
 
@@ -97,14 +106,21 @@
    - `future-cancel` only interrupts the worker thread; it does NOT
      interrupt owned child processes now that runtime calls use
      ProcessBuilder directly instead of `clojure.java.shell/sh`."
-  [timeout-ms body-fn]
+  [timeout-ms body-fn abandon!]
   (if (or (nil? timeout-ms) (not (pos? timeout-ms)))
     (call-acquire-body body-fn)
-    (let [fut (future
-                {::ok (call-acquire-body body-fn)})
+    (let [state (atom :running)
+          fut (future
+                (let [r (call-acquire-body body-fn)]
+                  (when-not (compare-and-set! state :running :finished)
+                    (without-interrupt #(abandon! r)))
+                  {::ok r}))
           deref-result (deref fut timeout-ms ::timeout)]
       (cond
-        (= ::timeout deref-result)
+        (not= ::timeout deref-result)
+        (::ok deref-result)
+
+        (compare-and-set! state :running :abandoned)
         (do
           (future-cancel fut)
           (binding [*out* *err*]
@@ -114,5 +130,6 @@
                       {:timeout-ms timeout-ms
                        :surface :acquire-environment!}))
 
+        ;; The body finished as the deadline fired: its result is the caller's.
         :else
-        (::ok deref-result)))))
+        (::ok @fut)))))
