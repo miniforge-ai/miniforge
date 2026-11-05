@@ -19,9 +19,12 @@
   "Eligibility gate for runtime-owned irreversible-effect issuance."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.execution-grant.core :as core]
    [ai.miniforge.execution-grant.eligibility :as eligibility]
    [ai.miniforge.execution-grant.issuance.policy :as policy]
-   [ai.miniforge.execution-grant.messages :as msg]))
+   [ai.miniforge.execution-grant.issuance.selection :as selection]
+   [ai.miniforge.execution-grant.messages :as msg]
+   [ai.miniforge.execution-grant.temporal :as temporal]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -45,8 +48,12 @@
 (defn ^{:stratum 1} prepare
   "Return policy-derived issue options, or refuse before grant issuance."
   [breach-dir request now]
-  (let [options (policy/grant-options request now)]
+  (let [selected (get policy/policies (selection/profile-key request))
+        options (policy/grant-options request now)]
     (cond
+      (not (policy/admissible-request? request selected))
+      (refused :issuance/preflight-refused request)
+
       (not (allow-preflight? request))
       (refused :issuance/preflight-refused request)
 
@@ -57,3 +64,13 @@
       (refused :issuance/ineligible request)
 
       :else options)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} issue [breach-dir request now]
+  (let [options (prepare breach-dir request now)]
+    (if (anomaly/anomaly? options)
+      options
+      (core/issue options (temporal/->instant now)))))
+
+(comment ::one-runtime-issuer-and-one-breach-history-gate)
