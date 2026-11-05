@@ -16,15 +16,19 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.workflow.runner-iteration-control-test
-  "Operator control at the runner's phase boundary: a run paused and then
-   cancelled must leave the pause wait and take the stop path."
+  "Operator control around the runner's phase step: a run paused and then
+   cancelled must leave the pause wait and take the stop path, and the
+   phase's LLM calls see a cancel made while it runs."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
    [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.workflow.context :as ctx]
+   [ai.miniforge.workflow.monitoring :as monitoring]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
-   [ai.miniforge.workflow.runner-defaults :as defaults]))
+   [ai.miniforge.workflow.runner-defaults :as defaults]
+   [ai.miniforge.workflow.runner-phase-step :as phase-step]))
 
 (use-fixtures :each
   phase-test-support/with-workflow-phase-test-support
@@ -74,3 +78,21 @@
             ;; Release a wait that ignored :stopped so no thread outlives the test.
             (swap! control-state assoc :paused false)
             (deref iteration stop-wait-ms nil)))))))
+
+(deftest ^{:stratum 1} phase-llm-calls-see-the-runs-cancel-test
+  (testing "the phase step runs under a cancel check that turns true when
+            the run is cancelled mid-phase"
+    (let [control-state (atom {:paused false :stopped false :adjustments {}})
+          seen          (atom [])]
+      (with-redefs [monitoring/check-workflow-supervision (constantly {:status :ok})
+                    llm/call-with-cancel-signal (fn [cancelled? f]
+                                                  (swap! seen conj (cancelled?))
+                                                  (let [result (f)]
+                                                    (swap! seen conj (cancelled?))
+                                                    result))
+                    phase-step/execute-phase (fn [_ context _]
+                                               (swap! control-state assoc :stopped true)
+                                               context)]
+        (runner/execute-single-iteration [] (test-context) {} 1 control-state)
+        (is (= [false true] @seen)
+            "false while the run is live, true once it is cancelled")))))
