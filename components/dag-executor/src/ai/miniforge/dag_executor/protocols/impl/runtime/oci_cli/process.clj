@@ -66,46 +66,58 @@
   [s]
   (str "'" (str/replace s "'" "'\"'\"'") "'"))
 
+(defn ^{:stratum 0} await-output!
+  "After a runtime process exits: wait for its `drain-stream` handles to
+   finish, until `deadline-ns` when one is given (`settle-drains!`, which
+   stops any still open then), else to end-of-stream."
+  [drains deadline-ns]
+  (if deadline-ns
+    (runtime-process/settle-drains! drains deadline-ns)
+    (doseq [{f :future} drains] @f)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} run-runtime-timed
-  "Execute a runtime CLI command with an optional per-subprocess waitFor
-   deadline.
+  "Execute a runtime CLI command with an optional deadline over the whole
+   call: the process's exit and the reads of its stdout and stderr.
 
    When `timeout-ms` is nil or <= 0 the call is unbounded (identical to the
    pre-fix behaviour). On timeout the process tree is destroyed forcibly and
    {:exit 124 :out \"\" :err <message>} is returned; callers that check
-   `(zero? :exit)` surface this as a command failure without special-casing."
+   `(zero? :exit)` surface this as a command failure without special-casing.
+   A process that exits in time returns its exit code and the output read
+   by the deadline (`await-output!`), so a child it left holding stdout or
+   stderr open cannot hold the call past it."
   [timeout-ms descriptor & args]
   (try
-    (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
-          process (.start pb)
-          stdout-fut (runtime-process/read-stream-future (.getInputStream process))
-          stderr-fut (runtime-process/read-stream-future (.getErrorStream process))]
+    (let [pb       (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
+          timed?   (and timeout-ms (pos? timeout-ms))
+          deadline (when timed? (+ (System/nanoTime) (* timeout-ms 1000000)))
+          process  (.start pb)
+          drains   [(runtime-process/drain-stream (.getInputStream process))
+                    (runtime-process/drain-stream (.getErrorStream process))]
+          [stdout stderr] drains]
       (try
-        (let [timed?     (and timeout-ms (pos? timeout-ms))
-              completed? (if timed?
+        (let [completed? (if timed?
                            (.waitFor process timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)
                            (do (.waitFor process) true))]
           (if-not completed?
             (do
               (runtime-process/destroy-process-tree! process)
-              (future-cancel stdout-fut)
-              (future-cancel stderr-fut)
+              (run! runtime-process/cancel-drain! drains)
               (binding [*out* *err*]
                 (println (messages/t :oci/command-timeout-log {:ms timeout-ms})))
               {:exit 124
                :out  ""
                :err  (messages/t :oci/command-timeout {:ms timeout-ms})})
-            (let [stdout-bytes @stdout-fut
-                  stderr-bytes @stderr-fut]
+            (do
+              (await-output! drains deadline)
               {:exit (.exitValue process)
-               :out  (String. ^bytes stdout-bytes "UTF-8")
-               :err  (String. ^bytes stderr-bytes "UTF-8")})))
+               :out  (runtime-process/drained-text stdout)
+               :err  (runtime-process/drained-text stderr)})))
         (catch InterruptedException e
           (runtime-process/destroy-process-tree! process)
-          (future-cancel stdout-fut)
-          (future-cancel stderr-fut)
+          (run! runtime-process/cancel-drain! drains)
           (.interrupt (Thread/currentThread))
           {:exit 130 :err (or (ex-message e) (messages/t :oci/command-interrupted)) :out ""})))
     (catch Exception e
@@ -113,17 +125,20 @@
 
 (defn ^{:stratum 1} run-runtime-process-timed
   "Execute a runtime CLI command with optional stdin bytes and an optional
-   per-subprocess waitFor deadline.
+   deadline over the whole call, as `run-runtime-timed` does.
 
    When `timeout-ms` is nil or <= 0 the call is unbounded. On timeout the
    process tree is destroyed forcibly and a result with :exit 124 is returned
    so callers that check `(zero? :exit)` surface it as a command failure."
   [timeout-ms descriptor args & {:keys [stdin-bytes]}]
   (try
-    (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
-          process (.start pb)
-          stdout-fut (runtime-process/read-stream-future (.getInputStream process))
-          stderr-fut (runtime-process/read-stream-future (.getErrorStream process))
+    (let [pb       (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
+          timed?   (and timeout-ms (pos? timeout-ms))
+          deadline (when timed? (+ (System/nanoTime) (* timeout-ms 1000000)))
+          process  (.start pb)
+          drains   [(runtime-process/drain-stream (.getInputStream process))
+                    (runtime-process/drain-stream (.getErrorStream process))]
+          [stdout stderr] drains
           stdin-fut  (when stdin-bytes
                        (let [s (.getOutputStream process)]
                          (future
@@ -131,16 +146,14 @@
                              (.write s ^bytes stdin-bytes)
                              (finally (.close s))))))]
       (try
-        (let [timed?     (and timeout-ms (pos? timeout-ms))
-              completed? (if timed?
+        (let [completed? (if timed?
                            (.waitFor process timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)
                            (do (.waitFor process) true))]
           (if-not completed?
             (do
               (when stdin-fut (future-cancel stdin-fut))
               (runtime-process/destroy-process-tree! process)
-              (future-cancel stdout-fut)
-              (future-cancel stderr-fut)
+              (run! runtime-process/cancel-drain! drains)
               (binding [*out* *err*]
                 (println (messages/t :oci/command-timeout-log {:ms timeout-ms})))
               {:exit      124
@@ -148,8 +161,9 @@
                :out-bytes (byte-array 0)
                :err       (messages/t :oci/command-timeout {:ms timeout-ms})
                :err-bytes (byte-array 0)})
-            (let [stdout-bytes @stdout-fut
-                  stderr-bytes @stderr-fut]
+            (let [_            (await-output! drains deadline)
+                  stdout-bytes (runtime-process/drained-bytes stdout)
+                  stderr-bytes (runtime-process/drained-bytes stderr)]
               {:exit      (.exitValue process)
                :out-bytes stdout-bytes
                :err-bytes stderr-bytes
@@ -158,8 +172,7 @@
         (catch InterruptedException e
           (when stdin-fut (future-cancel stdin-fut))
           (runtime-process/destroy-process-tree! process)
-          (future-cancel stdout-fut)
-          (future-cancel stderr-fut)
+          (run! runtime-process/cancel-drain! drains)
           (.interrupt (Thread/currentThread))
           {:exit      130
            :err       (or (ex-message e) (messages/t :oci/command-interrupted))

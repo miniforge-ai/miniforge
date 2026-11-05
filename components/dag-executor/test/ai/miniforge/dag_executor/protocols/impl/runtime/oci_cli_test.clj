@@ -461,6 +461,32 @@
       (is (= 0 (:exit result)))
       (is (clojure.string/includes? (:out result) "hello")))))
 
+(deftest ^{:stratum 0} runtime-runners-return-when-a-child-holds-the-output-open-test
+  (testing "a runtime CLI that exits while a child it started keeps stdout
+            and stderr open returns by the deadline, with its exit code and
+            what it wrote, from both runners"
+    (let [dir    (.toFile (java.nio.file.Files/createTempDirectory
+                           "orphan-runtime" (make-array java.nio.file.attribute.FileAttribute 0)))
+          pids   (java.io.File. dir "pids")
+          script (java.io.File. dir "runtime")
+          desc   {:runtime/executable (str script)}]
+      (try
+        (spit script (str "#!/bin/sh\necho out\necho err >&2\nsleep 15 &\necho $! >> '" pids "'\nexit 3\n"))
+        (.setExecutable script true)
+        (doseq [[label run] [["run-runtime-timed" #((private-fn 'run-runtime-timed) 1500 desc "x")]
+                             ["run-runtime-process-timed"
+                              #((private-fn 'run-runtime-process-timed) 1500 desc ["x"])]]]
+          (let [start (System/nanoTime)
+                r     (run)]
+            (is (< (quot (- (System/nanoTime) start) 1000000) 10000) label)
+            (is (= [3 "out\n" "err\n"] [(:exit r) (:out r) (:err r)]) label)))
+        (finally
+          (doseq [pid (when (.exists pids) (clojure.string/split-lines (slurp pids)))]
+            (some-> (java.lang.ProcessHandle/of (parse-long (clojure.string/trim pid)))
+                    ^java.lang.ProcessHandle (.orElse nil)
+                    (.destroy)))
+          (run! #(.delete ^java.io.File %) (reverse (file-seq dir))))))))
+
 (deftest ^{:stratum 0} execute-git-credentials-test
   (testing ":git-credentials? adds the recorded remote's credential to the
             caller's env; without it the command gets only the caller's env"
