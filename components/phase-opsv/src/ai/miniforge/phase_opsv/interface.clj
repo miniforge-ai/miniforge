@@ -126,9 +126,11 @@
   "Read declared criterion windows, requiring cluster/namespace/service label correlation.
    Configuration supplies :measurement/prometheus, :measurement/target, :measurement/service,
    :measurement/label-names and :measurement/criteria (id, request, reduction).
+   All request budgets must fit the resolved endpoint cap before collection starts.
    Explicit :maximum, :minimum or :last reductions produce :observations by criterion ID;
    :measurement/windows retains declarations and original query/window/labels/samples.
    :measurement/declaration retains the declared target/service/label names, never credentials.
+   Original windows may be sensitive; protect copies before N6 publication.
    An anomaly prevents partial results. Each read is bounded, not an atomic batch.
    No target UID attestation, confidence, artifact IDs, retention, experiments or verification verdict."
   prometheus-criteria/observe!)

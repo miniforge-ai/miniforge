@@ -43,4 +43,11 @@
   (let [request (:measurement/request (criterion "peak" :maximum))]
     (phase/decode-measurement-window request (response))))
 
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} with-endpoint-cap [maximum]
+  (-> (configuration)
+      (assoc-in [:measurement/prometheus :measurement/max-samples] maximum)
+      (assoc-in [:measurement/criteria 1 :measurement/request :measurement/max-samples] 4)))
+
 (comment ::actual-decoded-range-vector-shapes)

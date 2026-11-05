@@ -14,6 +14,11 @@
   (let [identifiers (mapv :criterion/id (:measurement/criteria configuration))]
     (= (count identifiers) (count (set identifiers)))))
 
+(defn ^{:stratum 0} within-endpoint-cap? [configuration settings]
+  (let [maximum (:measurement/max-samples settings)
+        requests (map :measurement/request (:measurement/criteria configuration))]
+    (every? (partial window/within-cap? maximum) requests)))
+
 (defn ^{:stratum 0} expected-labels [configuration]
   (let [target (:measurement/target configuration)
         service (:measurement/service configuration)

@@ -60,7 +60,20 @@
       (is (identical? failure thrown))
       (is (= (instance? InterruptedException failure) flagged?)))))
 
+(deftest ^{:stratum 0} effective-endpoint-cap-does-not-rewrite-declared-request-budgets-test
+  (let [configuration (criteria/with-endpoint-cap 4)
+        [result calls] (fixtures/observe! configuration (fixtures/responses))
+        declared (mapv :measurement/request (:measurement/criteria configuration))]
+    (is (= (criteria/expected-observations) (:observations result)))
+    (is (= 3 (count calls)))
+    (is (= declared (mapv :measurement/request (:measurement/windows result))))
+    (is (= declared (mapv second calls)))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} later-over-endpoint-cap-criterion-starts-no-reads-test
+  (let [configuration (criteria/with-endpoint-cap 3)]
+    (assert-no-reads configuration)))
 
 (deftest ^{:stratum 1} all-criterion-declarations-are-admitted-before-the-first-query-test
   (let [configuration (criteria/configuration)
