@@ -150,16 +150,28 @@
 (defn ^{:stratum 0} parse-codex-stream-line
   "Parse a line from Codex CLI streaming output.
 
-   Codex emits JSONL events:
+   `codex exec --json` emits JSONL events (`ThreadEvent` in
+   codex-rs/exec/src/exec_events.rs):
    - thread.started: session began
    - turn.started: turn began
-   - item.completed: reasoning, agent_message, mcp_tool_call, etc.
-   - turn.completed: carries usage data and optional finish_reason
+   - item.started / item.updated: an item in progress (not parsed)
+   - item.completed: agent_message, reasoning, and the native tool items
+     command_execution, file_change, mcp_tool_call, collab_tool_call and
+     web_search
+   - turn.completed: carries usage data (and finish_reason, when present)
    - turn.failed / error: failure events
+
+   A native tool item parses to one tool-use signal on its item.completed
+   event only. The exec event processor emits item.completed once per
+   item, also for an item still running when the turn ends, and emits a
+   file_change only as completed; counting item.started as well would
+   count most calls twice. The tool name is the Codex item type, except
+   for mcp_tool_call, which names the MCP tool.
 
    Diagnostic fields returned on turn.completed:
    - :stop-reason   — normalized finish_reason (\"end_turn\", \"max_turns\", etc.)
-   - :increment-turns — true, signalling the accumulator to bump its turn counter
+   - :increment-turns — true, signalling the accumulator to bump its turn
+     counter. A turn is one `codex exec` prompt; it is not a tool call.
 
    Arguments:
      line - String line from stream
@@ -185,7 +197,17 @@
                :tool-name (or (get-in item [:tool :name])
                               (:tool item)
                               (:tool_name item)
-                              (:name item))
+                              (:name item)
+                              item-type)
+               :tool-call-id (:id item)}
+
+              ;; Native Codex tools: shell commands, patch application,
+              ;; sub-agent calls and web searches. Same signal as an MCP
+              ;; call, named by the item type, so the run's tool count
+              ;; includes the local work the session did.
+              ("command_execution" "file_change" "collab_tool_call" "web_search")
+              {:delta "" :done? false :tool-use true
+               :tool-name item-type
                :tool-call-id (:id item)}
 
               ;; Native tool call (pre-MCP) — same treatment
@@ -215,8 +237,8 @@
                :tool-output  (:output item)
                :tool-error?  (boolean (:is_error item))}
 
-              ;; reasoning — ignored for content but could be surfaced
-              ;; later as :agent/reasoning events if useful
+              ;; reasoning, todo_list and error items — ignored; reasoning
+              ;; could be surfaced later as :agent/reasoning events
               nil))
 
           ;; Turn completed carries usage and optional finish_reason.
@@ -234,6 +256,9 @@
                                      :output-tokens (:output_tokens usage)}
                               (number? (:cached_input_tokens usage))
                               (assoc :cached-input-tokens (:cached_input_tokens usage))
+                              (number? (:cache_write_input_tokens usage))
+                              (assoc :cache-write-input-tokens
+                                     (:cache_write_input_tokens usage))
                               (number? (:reasoning_output_tokens usage))
                               (assoc :reasoning-output-tokens
                                      (:reasoning_output_tokens usage)))}
