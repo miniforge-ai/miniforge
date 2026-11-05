@@ -165,6 +165,15 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} verify-result
+  "Verify's phase result: success or error by `passed?`, carrying its
+   canonical :output (the test verdict) for the gates."
+  [env-id passed? summary metrics]
+  (let [phase-result (if passed?
+                       (phase/success env-id summary metrics)
+                       (phase/error env-id summary summary metrics))]
+    (assoc phase-result :output (gate-output passed?))))
+
 (defn- ^{:stratum 1} require-environment!
   "Boundary wrapper around the anomaly-returning
    `require-environment-result`; retained for existing exception callers."
@@ -427,10 +436,7 @@
         summary    (if passed?
                      (messages/t :verify/tests-passed {:pass-count pass-count})
                      (output/verify-failure-message test-results raw-fails raw-errors))
-        result     (assoc (if passed?
-                            (phase/success env-id summary metrics)
-                            (phase/error   env-id summary summary metrics))
-                          :output (gate-output passed?))]
+        result     (verify-result env-id passed? summary metrics)]
 
     (phase/enter-context ctx :verify nil gates budget start-time result)))
 

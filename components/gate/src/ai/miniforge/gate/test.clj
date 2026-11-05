@@ -137,9 +137,10 @@
   "Check if tests pass.
 
    Reads, in order: the gated phase's own result (verify's test metrics at
-   [:phase :result :metrics] in the ctx — the production path, where the
-   phase :output is nil), then the legacy artifact-metadata :test-results.
-   With neither present the gate passes with a :no-tests warning.
+   [:phase :result :metrics] in the ctx — the production path; verify's
+   :output is only its pass/fail verdict, with no counts or failures), then
+   the legacy artifact-metadata :test-results. With neither present the gate
+   passes with a :no-tests warning.
 
    Before the phase-result source existed, verify's nil :output meant the
    gate saw no results and passed every run — including runs with failing
