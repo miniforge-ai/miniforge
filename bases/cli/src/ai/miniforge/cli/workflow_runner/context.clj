@@ -117,7 +117,76 @@
           ;; PR → spec mapping).
           :spec/path (:spec/path enriched-spec)}))
 
-(defn ^{:stratum 0} resolve-acting
+(defn ^{:stratum 0} require-operator?
+  "True when config requires every run to act for a configured operator."
+  ([] (require-operator? (config/load-config)))
+  ([cfg] (true? (get-in cfg [:tenancy :require-operator?]))))
+
+(defn- ^{:stratum 0} operator-required
+  [identity]
+  (let [refused (anomaly/anomaly :invalid-input
+                                 (messages/t :workflow-runner/operator-required
+                                             {:reason (:anomaly/message identity)})
+                                 {:config/key [:tenancy :require-operator?]})]
+    (throw+ refused (:anomaly/message refused))))
+
+(defn ^{:stratum 0} create-llm-client
+  "LLM client for the run's backend: the override, else the workflow's or the
+   spec's, else config.edn's. An unknown backend throws an :invalid-input anomaly
+   naming it and the known ones, so the run stops here rather than going on with
+   no client and failing later in the planner.
+
+   With `[:llm :codex :network-access?]` true in config.edn, a codex client
+   lets its agent's commands reach the network; other backends ignore the key.
+   A value other than true, false or nil throws an :invalid-input anomaly
+   naming the key, so a typo stops the run instead of running it without the
+   network it asked for. The setting is for local runs: the runner refuses a
+   governed run whose client has it (`refuse-network-access-when-governed!`
+   here, and again where the workflow acquires its environment)."
+  ([workflow spec quiet] (create-llm-client workflow spec quiet nil))
+  ([workflow spec _quiet backend-override]
+   (let [cfg (config/load-config)
+         llm-backend (config/get-llm-backend
+                      cfg
+                      (or backend-override
+                          (get-in workflow [:workflow/config :llm-backend])
+                          (:spec/llm-backend spec)))
+         network-access (get-in cfg [:llm :codex :network-access?])]
+     (when-not (or (nil? network-access) (boolean? network-access))
+       (let [invalid (anomaly/anomaly :invalid-input
+                                      (messages/t :workflow-runner/codex-network-access-invalid
+                                                  {:value (pr-str network-access)})
+                                      {:config/key [:llm :codex :network-access?]
+                                       :value network-access})]
+         (throw+ invalid (:anomaly/message invalid))))
+     (if (contains? llm/backends llm-backend)
+       (llm/create-client (cond-> {:backend llm-backend}
+                            (and (true? network-access) (= :codex llm-backend))
+                            (assoc :network-access? true)))
+       (let [unknown (anomaly/anomaly :invalid-input
+                                      (messages/t :workflow-runner/unknown-backend
+                                                  {:backend (pr-str llm-backend)
+                                                   :available (str/join ", " (sort (map name (keys llm/backends))))
+                                                   :command (app-config/command-string "config backend <name>")})
+                                      {:backend llm-backend})]
+         (throw+ unknown (:anomaly/message unknown)))))))
+
+(defn ^{:stratum 0} refuse-network-access-when-governed!
+  "Throw an :anomalies/forbidden anomaly when a run in `mode` :governed has
+   an `llm-client` whose Codex agent may reach the network
+   ([:llm :codex :network-access?]). The CLI checks each client right after
+   creating it, before the workflow selection and preflight calls; the
+   workflow runner checks again before it acquires the run's environment."
+  [mode llm-client]
+  (when (and (= :governed mode) (llm/client-network-access? llm-client))
+    (response/throw-anomaly! :anomalies/forbidden
+                             (messages/t :workflow-runner/codex-network-access-governed)
+                             {:config/key [:llm :codex :network-access?]
+                              :execution-mode mode})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} resolve-acting
   "Resolve who this run acts for, or nil when no operator is configured.
 
    `quiet` suppresses the misconfiguration warning, matching every other
@@ -128,12 +197,10 @@
    downstream reads `:execution/acting` off the context rather than
    resolving again — two resolutions are two answers about who acted.
 
-   RETURNS NIL RATHER THAN REFUSING, for now. Nothing configures an
-   operator yet, so requiring one here would fail every run in existence
-   until `[:tenancy :operator-name]` is set. The refusal still belongs
-   in the system, just not at this end of it: Ariadne step 3c stamps
-   owners onto records, and that is where an absent identity has
-   something real to protect and will hard-fail.
+   WITH [:tenancy :require-operator?] SET, an absent or invalid operator
+   throws an `:invalid-input` anomaly and the run never starts. Without
+   it this returns nil rather than refusing, so installations that have
+   not configured an operator keep running.
 
    What this does NOT do is invent one. A default tenant here would be
    indistinguishable later from a real operator, and every record
@@ -141,18 +208,19 @@
    fabricated. Carrying no answer is recoverable; carrying a plausible
    wrong one is not."
   [quiet]
-  (let [identity (tenancy/resolve-operator (config/load-config))]
+  (let [cfg (config/load-config)
+        identity (tenancy/resolve-operator cfg)]
     (cond
       (not (anomaly/anomaly? identity))
       (tenancy/establish-acting identity (java.time.Instant/now))
 
+      (require-operator? cfg)
+      (operator-required identity)
+
       ;; Configured and WRONG is not the same as not configured, and
       ;; swallowing both would make the second undetectable — the run
       ;; would proceed unowned while the operator believed they had set
-      ;; an identity. Not fatal in this slice, because nothing requires
-      ;; acting yet and failing the run over a config typo in a field
-      ;; that governs nothing would be worse than saying so. It becomes
-      ;; fatal in 3c, where records get owners.
+      ;; an identity.
       (= tenancy/invalid-operator-identity (:anomaly/subtype identity))
       (do (when-not quiet
             (println (display/colorize
@@ -161,34 +229,8 @@
                            " — this run will proceed with no owning identity"))))
           nil)
 
-      ;; Nobody has configured an operator. The expected state today, and
-      ;; not worth a warning on every run.
+      ;; Nobody has configured an operator, and nothing requires one.
       :else nil)))
-
-(defn ^{:stratum 0} create-llm-client
-  "LLM client for the run's backend: the override, else the workflow's or the
-   spec's, else config.edn's. An unknown backend throws an :invalid-input anomaly
-   naming it and the known ones, so the run stops here rather than going on with
-   no client and failing later in the planner."
-  ([workflow spec quiet] (create-llm-client workflow spec quiet nil))
-  ([workflow spec _quiet backend-override]
-   (let [cfg (config/load-config)
-         llm-backend (config/get-llm-backend
-                      cfg
-                      (or backend-override
-                          (get-in workflow [:workflow/config :llm-backend])
-                          (:spec/llm-backend spec)))]
-     (if (contains? llm/backends llm-backend)
-       (llm/create-client {:backend llm-backend})
-       (let [unknown (anomaly/anomaly :invalid-input
-                                      (messages/t :workflow-runner/unknown-backend
-                                                  {:backend (pr-str llm-backend)
-                                                   :available (str/join ", " (sort (map name (keys llm/backends))))
-                                                   :command (app-config/command-string "config backend <name>")})
-                                      {:backend llm-backend})]
-         (throw+ unknown (:anomaly/message unknown)))))))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} resolve-input [{:keys [input input-json]}]
   (cond
@@ -214,8 +256,10 @@
                     :iteration iteration}
              parent-task-id (assoc :parent-task-id parent-task-id)))))
 
+;------------------------------------------------------------------------------ Layer 2
+
 ;; Workflow context assembly
-(defn ^{:stratum 1} create-workflow-context [{:keys [callbacks artifact-store event-stream workflow-id
+(defn ^{:stratum 2} create-workflow-context [{:keys [callbacks artifact-store event-stream workflow-id
                                        workflow-type workflow-version llm-client quiet
                                        spec-title control-state skip-lifecycle-events
                                        execution-opts source-dir
@@ -223,6 +267,7 @@
   (let [on-chunk (es/create-streaming-callback event-stream workflow-id :agent
                                                {:print? (not quiet) :quiet? quiet})
         acting (or acting (resolve-acting quiet))
+        operator-required? (require-operator?)
         source-root (source-root-path source-dir)
         git-info (git/get-git-state source-root)
         worktree-path (or (execution-worktree-path execution-opts)
@@ -238,6 +283,11 @@
                                       ;; the routing trigger that fired this workflow.
                                       {:routing/trigger-event-id routing-trigger-event-id}))
     (cond-> callbacks
+      ;; The run id announced above and registered with the operator
+      ;; channel. The pipeline adopts it as :execution/id; without it the
+      ;; pipeline mints its own, so checkpoints and phase events land
+      ;; under an id that a `workflow cancel` cannot reach.
+      workflow-id (assoc :workflow-id workflow-id)
       llm-client (assoc :llm-backend llm-client)
       artifact-store (assoc :artifact-store artifact-store)
       on-chunk (assoc :on-chunk on-chunk)
@@ -253,4 +303,7 @@
       ;; run to whoever resumed it. Absent when no operator is
       ;; configured — see `resolve-acting`.
       acting (assoc :acting acting)
+      ;; The workflow runner re-checks the acting context it is handed
+      ;; and refuses to build an unowned run when this is set.
+      operator-required? (assoc :require-operator? true)
       true (assoc :worktree-path worktree-path))))

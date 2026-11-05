@@ -87,9 +87,11 @@
                        :execution/executor ::capsule
                        :execution/environment-id "env-1"
                        :execution/task-branch "task/x"
-                       ;; The gate decision must be acknowledged for an
-                       ;; allowed phase to advance; an in-memory stream.
-                       :event-stream (events/create-event-stream {:sinks []}))]
+                       ;; The gate decision must be persisted for an allowed
+                       ;; phase to advance; this durable sink stands in for
+                       ;; the file sink.
+                       :event-stream (events/create-event-stream
+                                      {:sinks [(events/durable-sink (fn [_event] nil))]}))]
     (with-redefs [dag/persist-workspace! (fn [_ _ opts] (workspace/git-persist! exec! opts))]
       (phase-step/execute-phase [(writer phase gates artifact)] (merge context extra) {}))
     @cmds)))

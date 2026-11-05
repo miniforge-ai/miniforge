@@ -127,6 +127,7 @@ adapter's real output.
   unblocked-critical, missing-evaluation, and not-applicable tests;
 - accumulator-shape assertion test (table produced by the real reducer);
 - snapshot and registry validated against the workbench-contract Clojure
-  mirror (`ai.miniforge.workbench-contract.schema`), same as the ETL
-  adapter;
+  mirror (`ai.miniforge.workbench-contract.schema`, published in
+  `miniforge-ai/miniforge-app-foundation` under `bindings/clojure`), same as
+  the ETL adapter;
 - Polylith workspace checking and targeted clj-kondo linting.

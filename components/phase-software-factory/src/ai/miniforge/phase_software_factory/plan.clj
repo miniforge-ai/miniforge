@@ -233,8 +233,7 @@
                                                       :tokens toks
                                                       :metrics {:tokens toks}}))))
                    r (validate-dag-readiness invoked)]
-               ;; SPEC §7.4.3 consultation provenance. The planner session does
-               ;; not surface :context-reads yet, so :pin-read? is nil (unknown).
+               ;; SPEC §7.4.3 consultation provenance; :pin-read? comes from the planner's §7.4.2 reads.
                ;; Attached on failures too (:output starts nil on
                ;; response/failure): a failed plan that consulted must not be
                ;; ledgered as one that never did. §7.7.2: the planner result
@@ -243,7 +242,8 @@
                ;; not `r`: validate-dag-readiness rebuilds its failure
                ;; response and would drop the channel keys.
                (codex-pin/attach-consultation
-                 r (codex-pin/consultation-summary codex-outcome nil
+                 r (codex-pin/consultation-summary codex-outcome
+                                                   (:context-reads invoked)
                                                    (:codex-answers invoked)
                                                    (:codex-answer-log invoked))))
      :rules-manifest rules-manifest}))

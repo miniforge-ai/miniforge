@@ -32,6 +32,8 @@
    [ai.miniforge.workflow.interface.registry :as registry]
    [ai.miniforge.workflow.interface.runtime :as runtime]
    [ai.miniforge.workflow.interface.supervision :as supervision]
+   [ai.miniforge.workflow.run-owner-lock :as run-owner-lock]
+   [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.visualize :as visualize]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -282,6 +284,17 @@
    it holds the run, else the root its events announce, else nil. Args:
    [workflow-run-id events-dir]."
   checkpoint-gc/run-checkpoint-root)
+
+(defn ^{:stratum 0} run-owner
+  "The process running a run, from the owner lock run-pipeline holds for
+   the run's lifetime: its record ({:owner/pid :owner/started-at ...}, {}
+   when unreadable), nil when no process runs it, or an :unavailable
+   anomaly on an I/O error. Args: [workflow-run-id] or [workflow-run-id
+   checkpoint-root], nil root meaning the default."
+  ([workflow-run-id] (run-owner workflow-run-id nil))
+  ([workflow-run-id checkpoint-root]
+   (run-owner-lock/owner (or checkpoint-root (checkpoint-paths/resolve-checkpoint-root))
+                         workflow-run-id)))
 
 (def ^{:stratum 0} pin-checkpoint!
   "Pin a run's checkpoint: `:pinned? true` in its manifest, which the

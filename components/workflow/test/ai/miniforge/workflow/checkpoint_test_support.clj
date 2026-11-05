@@ -39,7 +39,9 @@
   (:require
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.context :as context]
+   [ai.miniforge.workflow.boundary.checkpoint-permissions :as permissions]
    [babashka.fs :as fs]
+   [clojure.edn :as edn]
    [slingshot.slingshot :refer [try+]])
   (:import
    (java.nio.file Files)
@@ -48,11 +50,21 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} create-temp-checkpoint-root
-  "A fresh, empty directory under the JVM temp dir, as a path string.
-   Named so a leaked one is attributable to a test run."
+  "A fresh, empty directory under the JVM temp dir, as a real path string
+   (the store records paths under the resolved root, and macOS's temp dir
+   is a link). Named so a leaked one is attributable to a test run."
   []
-  (str (Files/createTempDirectory "mf-checkpoint-test-"
-                                  (make-array FileAttribute 0))))
+  (str (fs/real-path (Files/createTempDirectory "mf-checkpoint-test-"
+                                                (make-array FileAttribute 0)))))
+
+(defn ^{:stratum 0} recorded-paths
+  "Where run `run-id`'s manifest under `root` says its files are: each
+   phase's checkpoint by phase name, and the snapshot under `:snapshot`.
+   Each write puts them in a new generation directory."
+  [root run-id]
+  (let [manifest (edn/read-string (slurp (checkpoint-paths/manifest-path root run-id)))]
+    (assoc (:workflow/phase-checkpoints manifest)
+           :snapshot (:workflow/machine-snapshot-path manifest))))
 
 (defn ^{:stratum 0} delete-checkpoint-root!
   "Remove a temp checkpoint root and everything a run wrote under it.
@@ -100,6 +112,9 @@
       (.setLastModified ^java.io.File f (- (System/currentTimeMillis) (* 90 24 60 60 1000))))
     id))
 
+(defn- ^{:stratum 0} call-in-posix-root [f root]
+  (when (permissions/posix? root) (f root)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} call-with-temp-checkpoint-root
@@ -118,6 +133,9 @@
         (delete-checkpoint-root! root)))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} call-with-posix-checkpoint-root [f]
+  (call-with-temp-checkpoint-root (partial call-in-posix-root f)))
 
 (defn ^{:stratum 2} with-temp-checkpoint-root
   "clojure.test fixture form of `call-with-temp-checkpoint-root`.

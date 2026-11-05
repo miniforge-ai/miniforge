@@ -55,6 +55,14 @@
   :review/not-approved
   "Review not approved (decision={decision})"
 
+  ;; Release-ready gate — readiness absent or false (carries the failed checks)
+  :release/not-ready
+  "Release not ready: the verify and review outcomes it requires did not pass (failed checks={checks})"
+
+  ;; Release-ready gate — the release output records no readiness (a failed prepare, or another producer)
+  :release/no-readiness
+  "Release not ready: the release phase recorded no readiness"
+
   ;; Behavioral gate — registry description
   :behavioral/description
   "Validates harness telemetry event stream against policy packs (phase: observe)"
@@ -138,4 +146,176 @@
   :tests-pass/verify-error "Verify phase reported an error without test counts"
 
   ;; Tests-pass gate — neither a test-bearing phase result nor artifact metadata
-  :tests-pass/no-results "No test results found"}}
+  :tests-pass/no-results "No test results found"
+
+  ;; Format capability — artifact content differs from its formatted form
+  :format/not-formatted
+  "Artifact content is not formatted"
+
+  ;; Mechanical capability — lint registry description
+  :capability/lint-description
+  "Lint Clojure code via the clj-kondo gate"
+
+  ;; Mechanical capability — format registry description
+  :capability/format-description
+  "Detect formatting drift through a pure format check"
+
+  ;; Mechanical capability — syntax registry description
+  :capability/syntax-description
+  "Parse code via the reader/syntax gate"
+
+  ;; Mechanical capability — no-secrets registry description
+  :capability/no-secrets-description
+  "Detect hardcoded secrets via the policy gate"
+
+  ;; Codex consultation gate — registry description
+  :codex-consultation/description
+  "Validates the agent ran with its Thesium Codex consultation (SPEC §7.4.3)"
+
+  ;; Codex consultation gate — codex configured but the consultation failed
+  :codex-consultation/skipped
+  "Codex is configured but this phase's consultation failed — the agent acted without its pinned landings (Codex SPEC §7.4.3)"
+
+  ;; Codex consultation gate — pin prompt-injected but never fetched (informational)
+  :codex-consultation/pin-not-fetched
+  "Pinned landings were prompt-injected but never fetched via context_read; informational while the pin is prompt-delivered"
+
+  ;; Format gate — registry description
+  :format/description
+  "LSP structural formatting of written files"
+
+  ;; Gate interface — repair requested for a gate that has no repair function
+  :gate/no-repair-fn
+  "No repair function for gate"
+
+  ;; Lint gate — repair is not mechanical
+  :lint/repair-requires-llm
+  "Lint repair requires LLM agent"
+
+  ;; Lint gate — policy-pack check returned nothing although packs are configured (fail closed)
+  :lint/policy-check-nil
+  "Policy-pack check returned nil with packs configured"
+
+  ;; Lint gate — registry description
+  :lint/description
+  "Validates code passes linting rules (clj-kondo)"
+
+  ;; Plan gate — no plan in the artifact
+  :plan/no-plan
+  "No plan found in artifact"
+
+  ;; Plan gate — plan has no steps
+  :plan/no-steps
+  "Plan has no steps"
+
+  ;; Policy gates — violation repair is not mechanical
+  :policy/repair-requires-llm
+  "Policy violation repair requires LLM agent"
+
+  ;; Plan gate — registry description
+  :plan/description
+  "Validates plan artifact is complete"
+
+  ;; Review-approved gate — registry description
+  :review/description
+  "Validates review is approved"
+
+  ;; Quality gate — registry description
+  :quality/description
+  "General quality validation"
+
+  ;; Release-ready gate — registry description
+  :release/description
+  "Validates artifact is ready for release"
+
+  ;; Policy gate — registry description
+  :policy-gate/description
+  "Validates code against loaded policy packs by enforcement action"
+
+  ;; Pre-verify lint gate — registry description
+  :pre-verify-lint/description
+  "Run language linters before test execution to catch errors fast"
+
+  ;; Pre-commit discipline gate — violations need a human fix, with the steps
+  :precommit/repair-impossible
+  "Pre-commit discipline violations cannot be automatically repaired.\n\nTo fix:\n1. Review the flagged commits and their documentation\n2. If commit is recent and local, amend with proper documentation\n3. If commit is pushed, add corrective commit with proper practices\n4. Ensure future commits follow pre-commit discipline guidelines\n\nSee .cursor/rules/workflows/pre-commit-discipline.mdc for details."
+
+  ;; Pre-commit discipline — commit bypassed hooks with no reason
+  :precommit/bypass-undocumented
+  "Commit bypassed pre-commit hooks without [BYPASS-HOOKS: reason] documentation"
+
+  ;; Pre-commit discipline — bypassed commit lacks manual validation
+  :precommit/no-manual-validation
+  "Bypassed commit missing manual validation documentation"
+
+  ;; Pre-commit discipline — bypass justification lacks a root cause
+  :precommit/no-root-cause
+  "Bypassed commit should document 'Root cause:' of hook failure"
+
+  ;; Pre-commit discipline — bypass justification lacks the why
+  :precommit/no-why-bypass
+  "Bypassed commit should document 'Why bypass:' was necessary"
+
+  ;; Pre-commit discipline gate — registry description
+  :precommit/description
+  "Validates pre-commit hook discipline and bypass documentation"
+
+  ;; Pre-commit discipline — expected manual-validation format
+  :precommit/manual-validation-help
+  "Expected format: 'Manual validation:\n- Tests passed: ...\n- Linting passed: ...'"
+
+  ;; Registry — fallback for an unregistered gate keyword (fail closed)
+  :registry/unknown-description
+  "Unknown gate (fail-closed)"
+
+  ;; Registry — a gate keyword with no registered implementation
+  :registry/unknown-gate
+  "Unknown gate: {gate} — no registered implementation"
+
+  ;; Registry — the intentional pass-through gate
+  :registry/noop-description
+  "Intentional pass-through (no gate)"
+
+  ;; Syntax gate — repair is not mechanical
+  :syntax/repair-requires-llm
+  "Syntax repair requires LLM agent"
+
+  ;; Syntax gate — registry description
+  :syntax/description
+  "Validates code parses without syntax errors"
+
+  ;; Coverage gate — no coverage data
+  :coverage/no-data
+  "No coverage data found"
+
+  ;; Coverage gate — coverage under the configured threshold
+  :coverage/below-threshold
+  "Coverage {coverage}% below threshold {threshold}%"
+
+  ;; Tests-pass gate — registry description
+  :tests-pass/description
+  "Validates all tests pass"
+
+  ;; Coverage gate — registry description
+  :coverage/description
+  "Validates test coverage meets threshold (default 80%)"
+
+  ;; Mechanical capability — a wrapped gate failed; detail is its first error or the fallback
+  :capability/failed
+  "{capability} capability failed: {detail}"
+
+  ;; Mechanical capability — the wrapped tool failed without an error message
+  :capability/violation-fallback
+  "tool reported a violation"
+
+  ;; Format capability — neither check contract was supplied
+  :capability/format-check-missing
+  "Format capability requires :format-check-fn or :artifact/formatted-content"
+
+  ;; Format gate — how many changed files an LSP formatter can handle
+  :format/formattable-count
+  "{count} file(s) support LSP formatting"
+
+  ;; Mechanical capability — the wrapped gate's check threw; exception is its message
+  :capability/gate-threw
+  "{gate} gate check threw: {exception}"}}

@@ -91,7 +91,11 @@
      (get-in context [:execution/input :spec/path])
      (assoc :spec/path (get-in context [:execution/input :spec/path]))
      (get context :execution/id)
-     (assoc :workflow/parent-id (get context :execution/id)))))
+     (assoc :workflow/parent-id (get context :execution/id))
+     ;; The parent's lineage, which outlives its attempt ids: the task's
+     ;; release branch and PR are keyed on it.
+     (get context :execution/origin-id)
+     (assoc :workflow/origin-id (get context :execution/origin-id)))))
 
 (defn- ^{:stratum 0} resolve-task-base-branch
   "Look up the branch task-def's scratch worktree should be forked from.

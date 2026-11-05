@@ -56,8 +56,9 @@
    execute-fn :mock-executor "env-1" root-path))
 
 (defn ^{:stratum 0} stub-execute-fn
-  "Executor stub: `responses` maps a command prefix (\"git status\",
-   \"cat\") to the result `execute!` returns for it."
+  "Executor stub: `responses` maps a command prefix (\"git status\", or
+   \"if [\" for the capsule reader's guarded cat) to the result `execute!`
+   returns for it."
   [responses]
   (fn [_executor _env-id command _opts]
     (some (fn [[prefix result]]
@@ -160,7 +161,7 @@
     (let [result (scan-capsule (stub-execute-fn {"git status" {:ok? true
                                                                :data {:exit-code 0
                                                                       :stdout "?? src/feature.clj\u0000"}}
-                                                 "cat"        {:ok? true
+                                                 "if ["       {:ok? true
                                                                :data {:exit-code 1
                                                                       :stdout ""
                                                                       :stderr "cat: src/feature.clj: Permission denied"}}})
@@ -180,7 +181,7 @@
     (let [result (scan-capsule (stub-execute-fn {"git status" {:ok? true
                                                                :data {:exit-code 0
                                                                       :stdout "?? src/feature.clj\u0000 D src/old.clj\u0000"}}
-                                                 "cat"        {:ok? true
+                                                 "if ["       {:ok? true
                                                                :data {:exit-code 0
                                                                       :stdout "(ns feature)"}}})
                                "/workspace")]
@@ -215,7 +216,7 @@
     (with-repo-holding names-git-quotes
       (fn [dir]
         (let [seen (atom nil)]
-          (with-redefs [release-executor/execute-release-phase
+          (with-redefs [release-executor/prepare-release
                         (fn [workflow-state _exec-context _opts]
                           (reset! seen workflow-state)
                           {:success? true :artifacts [] :metrics {:files-written 0}})]

@@ -24,15 +24,17 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} call-with-exception-handling [operation file action]
-  (try
-    (action)
-    file
-    (catch InterruptedException _
-      (let [result (failure operation file)]
-        (.interrupt (Thread/currentThread))
-        result))
-    (catch Exception _ (failure operation file))))
+(defn ^{:stratum 2} call-with-exception-handling
+  ([operation file action]
+   (call-with-exception-handling operation file action (constantly file)))
+  ([operation file action completed-value]
+   (try
+     (completed-value (action))
+     (catch InterruptedException _
+       (let [result (failure operation file)]
+         (.interrupt (Thread/currentThread))
+         result))
+     (catch Exception _ (failure operation file)))))
 
 (comment
   (failure :confirm nil))

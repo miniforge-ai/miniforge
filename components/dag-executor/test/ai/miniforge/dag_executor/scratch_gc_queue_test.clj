@@ -34,6 +34,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.edn :as edn]
+   [clojure.string :as str]
    [ai.miniforge.config.interface :as mf-config]
    [ai.miniforge.dag-executor.scratch-gc-queue :as sut]
    [ai.miniforge.dag-executor.scratch-commit :as scratch-commit]
@@ -79,8 +80,8 @@
   (testing "gc-queue-path returns a non-blank string ending in .edn"
     (let [p (sut/gc-queue-path)]
       (is (string? p))
-      (is (not (clojure.string/blank? p)))
-      (is (clojure.string/ends-with? p ".edn")))))
+      (is (not (str/blank? p)))
+      (is (str/ends-with? p ".edn")))))
 
 (deftest ^{:stratum 0} gc-queue-path-creates-miniforge-dir-test
   (testing "Calling gc-queue-path creates the ~/.miniforge directory if absent"

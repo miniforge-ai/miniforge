@@ -17,14 +17,18 @@
 ;; limitations under the License.
 (ns ai.miniforge.workflow.runner
   "Compose workflow setup, bounded execution, lifecycle publication, and cleanup."
-  (:require [ai.miniforge.workflow.boundary.runner-lifetime :as lifetime]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.workflow.boundary.runner-lifetime :as lifetime]
+            [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
+            [ai.miniforge.workflow.run-owner-lock :as owner]
             [ai.miniforge.workflow.runner-callbacks :as callbacks]
             [ai.miniforge.workflow.runner-cleanup :as cleanup]
             [ai.miniforge.workflow.runner-events :as events]
             [ai.miniforge.workflow.runner-iteration :as iteration]
             [ai.miniforge.workflow.runner-outcome :as outcome]
             [ai.miniforge.workflow.runner-preparation :as preparation]
-            [ai.miniforge.workflow.runner-session :as session]))
+            [ai.miniforge.workflow.runner-session :as session]
+            [slingshot.slingshot :refer [throw+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -57,6 +61,19 @@
 
 (def ^{:stratum 0} extract-output outcome/extract-output)
 
+(defn- ^{:stratum 0} effective-run-id
+  "The id the run executes under, settled before it starts so the owner
+   lock and the context share it: a restored snapshot's, else the caller's
+   uuid :workflow-id (same parsing as context/opts-run-id), else a fresh
+   one."
+  [opts]
+  (let [wid (:workflow-id opts)]
+    (or (get-in opts [:resume-machine-snapshot :execution/id])
+        (cond
+          (uuid? wid)   wid
+          (string? wid) (parse-uuid wid))
+        (random-uuid))))
+
 (def ^{:stratum 0} ^:private acquire-environment preparation/acquire-environment)
 
 (def ^{:stratum 0} ^:private wrap-phase-callbacks callbacks/wrap-phase-callbacks)
@@ -73,12 +90,33 @@
   ([workflow input]
    (run-pipeline workflow input {}))
   ([workflow input opts]
-   (let [[acquired-env opts] (acquire-environment workflow input opts)
-         owned (session/create (wrap-phase-callbacks (:event-stream opts) opts)
-                               build-pipeline extract-output)
-         execute (partial session/execute! workflow input opts owned run-pipeline)
-         release (partial lifetime/release! opts workflow acquired-env owned)]
-     (lifetime/protect! owned execute release))))
+   ;; One live process per run id, held for the whole run: a resume or a
+   ;; launcher retry of a run still running is refused (the owner lock's
+   ;; anomaly is thrown) before anything is acquired. The root is the one
+   ;; the run checkpoints under: the snapshot's when the context is
+   ;; restored (snapshot and phase results both given), else the options'.
+   ;; Its physical path is pinned here for the lock, the context and a
+   ;; restored snapshot alike: an alias of the root retargeted mid-run
+   ;; cannot move the checkpoints away from the lock.
+   (let [run-id (effective-run-id opts)
+         restored? (and (:resume-machine-snapshot opts) (:resume-phase-results opts))
+         root (owner/physical-root run-id (checkpoint-paths/resolve-checkpoint-root
+                                           (cond-> opts
+                                             restored? (merge (:resume-machine-snapshot opts)))))
+         _ (when (anomaly/anomaly? root) (throw+ root))
+         ;; Both option keys: root resolution reads :execution/checkpoint-root first.
+         opts (cond-> (assoc opts :checkpoint/root root :execution/checkpoint-root root)
+                restored? (assoc-in [:resume-machine-snapshot :execution/checkpoint-root] root))]
+     (owner/with-run-owner
+      root
+      run-id
+      (fn []
+        (let [[acquired-env opts] (acquire-environment workflow input (assoc opts :workflow-id run-id))
+              owned (session/create (wrap-phase-callbacks (:event-stream opts) opts)
+                                    build-pipeline extract-output)
+              execute (partial session/execute! workflow input opts owned run-pipeline)
+              release (partial lifetime/release! opts workflow acquired-env owned)]
+          (lifetime/protect! owned execute release)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

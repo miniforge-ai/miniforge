@@ -22,6 +22,7 @@
    [ai.miniforge.llm.cost :as cost]
    [ai.miniforge.llm.interface.protocols.llm-client :as p]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+   [ai.miniforge.llm.protocols.impl.llm-client.subprocess :as subprocess]
    [ai.miniforge.llm.protocols.records.llm-client :as records]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.llm.model-registry :as registry]
@@ -76,6 +77,14 @@
    - :model   - Optional model id passed through to the backend
    - :api-key - Optional API key for the direct HTTP providers;
                 falls back to the backend's :api-key-env variable
+   - :isolated? - Optional; true keeps every call off the operator's
+                Claude Code setup (no built-in tools, user settings,
+                hooks, plugins, or skills). For single-turn completions
+                that need no tools; claude backend only. A claude call
+                outside an artifact session is isolated without it.
+   - :network-access? - Optional boolean; true lets the commands the
+                Codex agent runs in its workspace-write sandbox reach
+                the network. codex backend only; anything else throws.
    - :logger  - Optional logger for request/response logging
 
    Example:
@@ -125,6 +134,13 @@
     (-> client
         p/get-config
         :backend)))
+
+(defn ^{:stratum 0} client-network-access?
+  "True when `client` is an LLMClient created with `:network-access? true`
+   (its Codex agent's commands may reach the network); false otherwise."
+  [client]
+  (and (satisfies? p/LLMClient client)
+       (true? (:network-access? (p/get-config client)))))
 
 (defn ^{:stratum 0} client-model
   "Return the model id an LLM client sends, or nil when it names none (the
@@ -393,6 +409,14 @@
   [selection]
   (selector/explain-selection selection))
 
+(defn ^{:stratum 0} agent-env
+  "The environment the llm client gives an agent CLI process: miniforge's
+   own environment filtered by the :agent-env allowlist in
+   llm/client-defaults.edn. For callers that start a backend CLI
+   themselves, such as the backend preflight probe."
+  []
+  (subprocess/agent-env))
+
 ;; Capsule integration
 (def ^{:stratum 0} capsule-exec-fn
   "Build a capsule-aware exec function for LLM clients running inside executors."
@@ -414,6 +438,15 @@
   cost/pricing-for-model)
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} backend-credential-env
+  "Env var names `backend` (a `backends` key) reads its credential from: a
+   CLI backend's :credential-env and an HTTP backend's :api-key-env. A nil
+   or unknown backend has none."
+  [backend]
+  (let [{:keys [credential-env api-key-env]} (get backends backend)]
+    (cond-> (set credential-env)
+      api-key-env (conj api-key-env))))
 
 (defn ^{:stratum 1} backend-serves-model?
   "False when `backend` serves one catalog family (its :catalog-backend in

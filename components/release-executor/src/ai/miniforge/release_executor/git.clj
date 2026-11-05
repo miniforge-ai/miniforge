@@ -31,6 +31,7 @@
   (:require
    [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.release-executor.messages :as msg]
+   [ai.miniforge.release-executor.pr-lookup :as pr-lookup]
    [ai.miniforge.release-executor.push-auth :as push-auth]
    [ai.miniforge.release-executor.result :as result]
    [ai.miniforge.release-executor.shell :as shell]
@@ -259,6 +260,29 @@
   [error]
   (boolean (some-> error str/lower-case (str/includes? "already exists"))))
 
+(defn- ^{:stratum 0} reuse-branch!
+  "Check out `branch-name`, which `git checkout -b` could not create, when it
+   already exists and holds HEAD: a retried or resumed release of the same
+   run, whose branch name is fixed, carries on with the branch it made.
+   Fails when the branch is missing (the create failed for another reason)
+   or does not contain HEAD (it holds other work)."
+  [dir-opts branch-name base-branch create-error]
+  (let [exists?  (zero? (:exit (process/shell dir-opts "git" "rev-parse" "--verify" "--quiet"
+                                              (str "refs/heads/" branch-name))))
+        holds?   (and exists?
+                      (zero? (:exit (process/shell dir-opts "git" "merge-base" "--is-ancestor"
+                                                   "HEAD" branch-name))))
+        checkout (when holds? (process/shell dir-opts "git" "checkout" branch-name))]
+    (cond
+      (not exists?) (result/shell-failure (str "Failed to create branch: " create-error)
+                                          {:branch nil})
+      (not holds?)  (result/shell-failure (msg/t :branch/diverged {:branch branch-name})
+                                          {:branch nil})
+      (zero? (:exit checkout))
+      (result/shell-success {:branch branch-name :base-branch base-branch :reused? true})
+      :else (result/shell-failure (str "Failed to check out branch: " (get checkout :err ""))
+                                  {:branch nil}))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} check-gh-auth!
@@ -295,7 +319,10 @@
 
 (defn ^{:stratum 1} create-branch!
   "Create a new git branch for the release, branching from HEAD so that
-   phase-boundary commits already on the task branch carry forward.
+   phase-boundary commits already on the task branch carry forward. When
+   the branch already exists and contains HEAD, it is checked out instead
+   (see reuse-branch!), never renamed: a renamed branch would get a second
+   PR.
 
    Arguments:
    - worktree-path - Path to git worktree root
@@ -326,12 +353,7 @@
                                     "git" "checkout" "-b" branch-name)]
       (if (zero? (:exit checkout-r))
         (result/shell-success {:branch branch-name :base-branch default-branch})
-        (let [ts-name (str branch-name "-" (System/currentTimeMillis))
-              retry-r (process/shell dir-opts "git" "checkout" "-b" ts-name)]
-          (if (zero? (:exit retry-r))
-            (result/shell-success {:branch ts-name :base-branch default-branch})
-            (result/shell-failure (str "Failed to create branch: " (get retry-r :err ""))
-                                  {:branch nil})))))
+        (reuse-branch! dir-opts branch-name default-branch (get checkout-r :err ""))))
     (catch Exception e
       (result/shell-failure (.getMessage e) {:branch nil})))))
 
@@ -423,6 +445,11 @@
       (if (zero? (:exit r))
         (result/shell-success {:output (get r :out "")})
         (result/shell-failure (get r :err "") (timeout-data r))))
+    ;; Interrupted mid-push, it may have reached origin: :interrupted?
+    ;; marks the outcome unknown, and the flag is set again.
+    (catch InterruptedException e
+      (.interrupt (Thread/currentThread))
+      (result/shell-failure (.getMessage e) {:interrupted? true}))
     (catch Exception e
       (result/shell-failure (.getMessage e)))))
 
@@ -441,7 +468,10 @@
    Shared by push-branch! and force-push!."
   [worktree-path github-token push!]
   (let [result (push! nil)]
-    (if (or (result/succeeded? result) (not github-token))
+    ;; A push stopped at its deadline or interrupted may have reached
+    ;; origin: retrying it would hide that unknown outcome behind the retry's.
+    (if (or (result/succeeded? result) (not github-token)
+            (:timed-out? result) (:interrupted? result))
       result
       (let [lines    (fn [args]
                        (let [r (exec! worktree-path args)]
@@ -535,6 +565,45 @@
                               (merge {:pr-url nil :pr-number nil} (timeout-data r)))))
     (catch Exception e
       (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil}))))
+
+(defn ^{:stratum 1} remote-branch-sha!
+  "The commit origin's `branch` points at, via `git ls-remote` on the host:
+   {:success? true :sha sha-or-nil} (nil: no such branch), or a failure
+   when the remote did not answer."
+  [worktree-path branch github-token]
+  (or
+   (validate-safe-branch-name branch)
+   (let [fetch  (exec! worktree-path ["git" "remote" "get-url" "origin"])
+         pushes (exec! worktree-path ["git" "remote" "get-url" "--push" "--all" "origin"])]
+     ;; ls-remote asks origin's fetch URL; it speaks for the push only when
+     ;; the push goes there and nowhere else.
+     (if-not (and (result/succeeded? fetch) (result/succeeded? pushes)
+                  (= [(:output fetch)] (remove str/blank? (str/split-lines (:output pushes)))))
+       (result/shell-failure (msg/t :push/probe-destination-differs))
+       (try
+         (let [r (shell/run-bounded ["git" "ls-remote" "origin" (str "refs/heads/" branch)]
+                                    (gh-shell-opts worktree-path github-token))]
+           (if (zero? (:exit r))
+             (result/shell-success {:sha (-> (str/trim (get r :out "")) (str/split #"\s+") first not-empty)})
+             (result/shell-failure (get r :err "") (timeout-data r))))
+         (catch Exception e
+           (result/shell-failure (.getMessage e))))))))
+
+(defn ^{:stratum 1} find-pr!
+  "Look up the PR `branch` already has, in any state, via gh on the host
+   (see pr-lookup). Returns {:success? true :pr pr-or-nil}, or a failure
+   carrying gh's error."
+  [worktree-path branch github-token]
+  (or
+   (validate-safe-branch-name branch)
+   (try
+     (let [r (shell/run-bounded (pr-lookup/lookup-argv branch)
+                                (gh-shell-opts worktree-path github-token))]
+       (if (zero? (:exit r))
+         (result/shell-success {:pr (pr-lookup/parse-lookup (get r :out ""))})
+         (result/shell-failure (get r :err "") (timeout-data r))))
+     (catch Exception e
+       (result/shell-failure (.getMessage e))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -634,5 +703,10 @@
             :else
             (result/shell-failure (get result :err "")
                                   (merge {:pr-url nil :pr-number nil} (timeout-data result)))))
+        ;; Interrupted mid-create, the PR may exist: :interrupted? marks the
+        ;; outcome unknown, and the flag is set again.
+        (catch InterruptedException e
+          (.interrupt (Thread/currentThread))
+          (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil :interrupted? true}))
         (catch Exception e
           (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil})))))))
