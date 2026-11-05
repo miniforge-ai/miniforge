@@ -527,7 +527,10 @@
   :workflow-cmd/inspect-not-found "No workflow file found at: {path}"
   :workflow-cmd/inspect-failed "workflow inspect failed: {error}"
   :workflow-cmd/cancel-usage "Usage: {command}"
-  :workflow-cmd/cancel-success "Cancel signal sent to workflow: {id}"
+  :workflow-cmd/cancel-requested "Cancel requested for workflow {id}; waiting up to {seconds}s for the run to apply it."
+  :workflow-cmd/cancel-applied "Cancel applied: workflow {id} has its stop flag set and is stopping."
+  :workflow-cmd/cancel-not-applied "Cancel of workflow {id} was not applied: {reason}"
+  :workflow-cmd/cancel-unconfirmed "Cancel not confirmed: within {seconds}s no process running workflow {id} recorded applying it. The request stays queued; only the process running that workflow, under the same MINIFORGE_HOME, applies it."
   :workflow-cmd/cancel-failed "Failed to cancel workflow: {error}"
   :workflow-cmd/gc-scratch-no-repo "gc-scratch: not inside a git repository (no .git found)"
   :workflow-cmd/gc-scratch-success "Scratch-ref GC: pruned {pruned} queue entries, deleted {deleted} git refs, {remaining} queue entries remain."
@@ -826,7 +829,7 @@
   :workflow-runner.help/workflow-inspect-summary
   "Print a Mermaid stateDiagram-v2 of the compiled FSM for a workflow EDN file."
   :workflow-runner.help/workflow-cancel-summary
-  "Cancel a running workflow by ID."
+  "Cancel a running workflow by ID and wait for the run to apply it."
   :workflow-runner.help/workflow-gc-scratch-summary
   "Garbage-collect stale workflow scratch git refs from the deferred GC queue."
   :workflow-runner.help/workflow-gc-checkpoints-summary
