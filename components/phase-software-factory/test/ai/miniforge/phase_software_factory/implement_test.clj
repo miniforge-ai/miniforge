@@ -1187,6 +1187,15 @@
       (let [result (enter mock-curator-success)]
         (is (not= :run-stopped (get-in result [:phase :result :error :data :code])))))))
 
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (try
+      (binding [loader/phase-loader-config-resource phase-test-config-resource]
+        (f))
+      (finally
+        (phase/reset-phase-loader!)))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.phase-software-factory.implement-test)
