@@ -6,29 +6,32 @@
   (:require [ai.miniforge.artifact.boundary.codec :as boundary]
             [ai.miniforge.artifact.publication-shape :as shape]
             [ai.miniforge.artifact.publication-types :as types]
-            [ai.miniforge.utf8.interface :as utf8]
             [cognitect.transit :as transit]
             [cheshire.core :as json]
             [clojure.java.io :as io])
-  (:import [java.io ByteArrayInputStream ByteArrayOutputStream StringReader]))
+  (:import [java.io ByteArrayInputStream ByteArrayOutputStream InputStreamReader]
+           [java.nio.charset CodingErrorAction StandardCharsets]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} maximum-bytes (* 16 1024 1024))
 
-(defn ^{:stratum 0} decode
-  "The artifact `bytes` hold, or nil unless they are well-formed UTF-8
-   carrying exactly one JSON document."
-  [bytes]
-  (when-let [text (utf8/decode-strict bytes)]
-    (with-open [json-input (io/reader (StringReader. text))
-                transit-input (ByteArrayInputStream. bytes)]
-      (when (= 1 (count (take 2 (json/parsed-seq json-input))))
-        (transit/read (transit/reader transit-input :json types/read-options))))))
+(defn- ^{:stratum 0} utf8-decoder []
+  (doto (.newDecoder StandardCharsets/UTF_8)
+    (.onMalformedInput CodingErrorAction/REPORT)
+    (.onUnmappableCharacter CodingErrorAction/REPORT)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} encode [artifact]
+(defn ^{:stratum 1} decode [bytes]
+  (with-open [json-input (io/reader (InputStreamReader. (ByteArrayInputStream. bytes) (utf8-decoder)))
+              transit-input (ByteArrayInputStream. bytes)]
+    (when (= 1 (count (take 2 (json/parsed-seq json-input))))
+      (transit/read (transit/reader transit-input :json types/read-options)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} encode [artifact]
   (when (shape/bounded-data? artifact maximum-bytes)
     (with-open [output (ByteArrayOutputStream.)]
       (transit/write (transit/writer (boundary/bounded-output output maximum-bytes) :json types/write-options) artifact)

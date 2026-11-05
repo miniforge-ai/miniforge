@@ -4,8 +4,9 @@
 (ns ai.miniforge.evidence-bundle.edn-file
   "Size-bounded UTF-8 file input for the canonical EDN codec."
   (:require [ai.miniforge.evidence-bundle.edn-codec :as codec]
-            [ai.miniforge.utf8.interface :as utf8]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io])
+  (:import [java.nio ByteBuffer]
+           [java.nio.charset StandardCharsets]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -13,7 +14,7 @@
   (with-open [stream (io/input-stream (io/file file))]
     (let [bytes (.readNBytes stream (inc codec/maximum-bytes))]
       (when (<= (alength bytes) codec/maximum-bytes)
-        (utf8/decode-strict bytes)))))
+        (str (.decode (.newDecoder StandardCharsets/UTF_8) (ByteBuffer/wrap bytes)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

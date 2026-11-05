@@ -5,10 +5,10 @@
   "Fail-closed file reads: reject symlinks, trailing data and invalid authority."
   (:require [ai.miniforge.execution-grant.store-codec :as codec]
             [ai.miniforge.execution-grant.store-path :as path]
-            [ai.miniforge.utf8.interface :as utf8]
             [clojure.edn :as edn]
             [malli.core :as m])
-  (:import [java.io File InputStream PushbackReader StringReader]
+  (:import [java.io File InputStreamReader PushbackReader StringReader]
+           [java.nio.charset CodingErrorAction StandardCharsets]
            [java.nio.file Files LinkOption NoSuchFileException OpenOption StandardOpenOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -22,25 +22,31 @@
       (when (identical? eof tail)
         (codec/<-wire value)))))
 
+(defn- ^{:stratum 0} utf8-decoder
+  []
+  (doto (.newDecoder StandardCharsets/UTF_8)
+    (.onMalformedInput CodingErrorAction/REPORT)
+    (.onUnmappableCharacter CodingErrorAction/REPORT)))
+
 (defn- ^{:stratum 0} absent?
   [^File file]
   (Files/notExists (.toPath file) (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])))
-
-(defn- ^{:stratum 0} read-text
-  "The file's text, or nil when it is not well-formed UTF-8."
-  [^File file]
-  (let [options (into-array OpenOption [StandardOpenOption/READ LinkOption/NOFOLLOW_LINKS])]
-    (with-open [^InputStream stream (Files/newInputStream (.toPath file) options)]
-      (utf8/decode-strict (.readAllBytes stream)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} checked-record
   [encoded id record-schema on-error]
-  (let [value (some-> encoded decode-record)]
+  (let [value (decode-record encoded)]
     (if (and (m/validate record-schema value) (= id (:grant/id value)))
       value
       (on-error))))
+
+(defn- ^{:stratum 1} read-text
+  [^File file]
+  (let [options (into-array OpenOption [StandardOpenOption/READ LinkOption/NOFOLLOW_LINKS])]
+    (with-open [stream (Files/newInputStream (.toPath file) options)
+                reader (InputStreamReader. stream (utf8-decoder))]
+      (slurp reader))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

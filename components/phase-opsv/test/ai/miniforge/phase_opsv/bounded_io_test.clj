@@ -7,7 +7,7 @@
             [ai.miniforge.resource-cleanup.interface :as cleanup]
             [clojure.test :refer [deftest is]])
   (:import [java.io ByteArrayInputStream]
-           [java.nio.charset StandardCharsets]
+           [java.nio.charset CharacterCodingException StandardCharsets]
            [java.util.concurrent TimeoutException]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -41,7 +41,7 @@
 
 (deftest ^{:stratum 1} text-decoding-never-replaces-invalid-utf8-silently
   (is (= "μ" (io/utf8-text (.getBytes "μ" StandardCharsets/UTF_8))))
-  (is (thrown? IllegalArgumentException (io/utf8-text malformed-utf8))))
+  (is (thrown? CharacterCodingException (io/utf8-text malformed-utf8))))
 
 (deftest ^{:stratum 1} response-reading-stops-after-the-limit-sentinel-byte
   (with-open [stream (body "abcdef")]
