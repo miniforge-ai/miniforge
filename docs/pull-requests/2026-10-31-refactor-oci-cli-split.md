@@ -62,7 +62,7 @@ Tests follow the moved definitions:
 2. stratum-lint on every new file: no findings, and `--fix` leaves each file unchanged.
 3. clj-kondo on dag-executor's src and test: no warnings beyond those already on the base.
 4. dag-executor, release-executor, redaction, task-executor and llm-interface tests, under the
-   shared JVM lock: 987 pass, with every review fix and main at 16bc32489 (#2221) merged in.
+   shared JVM lock: 990 pass, with every review fix and main at 16bc32489 (#2221) merged in.
 
 When the base moves, the split is regenerated from the base's `oci_cli.clj` and test files with
 the same name-to-namespace assignment, the checks above are rerun, and this PR's own commits are
@@ -73,7 +73,7 @@ re-applied on top.
 Capsule stack review fixes that edit `oci_cli.clj` land here, one commit each. Items 5 to 9 come
 from the merge-gate review (rule 720 and the rules review), whose comment on this PR lists the
 traced flow and what was left. Items 10 and 11 are Copilot findings on #2221 whose code lives
-here:
+here, and items 12 to 14 are Copilot findings on this PR in code the split moved:
 
 1. A failed env-file write deletes the temp file (#2143 thread).
 2. Persist and restore of a capsule cloned without an HTTP credential go to the URL it cloned
@@ -104,6 +104,18 @@ here:
     (the launch plan's normalizer, renamed), which replaces `string-keys`. A numeric
     `GIT_CONFIG_COUNT` now reads as the `"1"` the env file writes, rather than failing the
     command with `:exec-failed`.
+12. The git provider comes from the repository URL's host alone. `infer-host-kind` matched
+    `github.com` or `gitlab` anywhere in the URL, so `https://github.com.attacker.example/o/r.git`
+    was `:github` and bootstrap sent the GitHub token to that host. Only `github.com` and
+    `gitlab.com` name a provider now; every other host is `:generic`. A self-hosted GitLab needs
+    env-config's `:host-kind :gitlab` to get `GITLAB_TOKEN`.
+13. A bootstrap that throws removes its container. Acquire removed it only for a returned error,
+    so a throw (a failed env-file write) left a running container whose id the caller never got.
+    Everything after container creation runs under `removing-unless-ok`.
+14. Runtime output reads are bounded by the call's deadline. After the runtime CLI exited, both
+    runners read stdout and stderr to end-of-stream, so a child holding either open outlasted the
+    exec, copy and release timeouts. They now wait until the deadline, then close and cancel
+    unfinished readers (`settle-drains!` in `runtime.process`).
 
 ## Deployment Plan
 
