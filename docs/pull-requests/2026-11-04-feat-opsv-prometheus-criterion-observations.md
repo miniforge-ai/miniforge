@@ -46,21 +46,21 @@ Simulated transport only. Test declared reductions, label binding, no partial
 results, bounded admission, invalid grids, interruption and provenance. Serialize
 all local JVM/build/hook runs; preserve every review and merge gate.
 
-Verified at `29587c3f4e1300c01cd67adb2a6ac9765312efeb`:
+Verified at `eac321a7f13d3da92a996f69bb7b5238495ec1be`:
 
 - Strict kondo: zero errors/warnings; all 12 changed Clojure namespaces pass
   inferred strata and poly check; both phase-OPSV product contexts pass.
-- All 20 scoped OPSV/workflow/N6 integration namespaces: 88 tests, 1,142 assertions.
+- All 20 scoped OPSV/workflow/N6 integration namespaces: 88 tests, 1,143 assertions.
 - Fresh CLI, isolated native regression package: 267 tests, 1,582 assertions;
-  isolated criterion suites: 12 tests, 111 assertions; existing client: 15 tests,
+  isolated criterion suites: 12 tests, 112 assertions; existing client: 15 tests,
   49 assertions.
-- Source suites including existing discovery/client regressions: 34 tests, 205 assertions.
-- Eleven new fault injections detected, zero test errors, plus all 11 preparation,
+- Source suites including existing discovery/client regressions: 34 tests, 206 assertions.
+- Twelve new fault injections detected, zero test errors, plus all 11 preparation,
   14 producer-privacy and 19 native-reporting fault injections detected.
 - Five unit cases/32 assertions all below 100 ms. Committed scans: zero
   violations/312 component files and zero/18 project OPSV files.
-- PR: 344 reportable lines; signed implementation/test/fix commits of 168, 141
-  and 41; no size exceptions.
+- PR: 354 reportable lines; signed implementation/test/fix/fixture commits of
+  168, 141, 41 and 24; no size exceptions.
 
 The effective-cap regression failed against the published implementation: 12
 tests, 111 assertions, one failure and zero errors (an earlier HTTP read occurred).
@@ -68,6 +68,11 @@ The fix rejects a later over-cap request before any read; the positive endpoint
 cap case preserves the distinct declared budgets. The new preflight-bypass fault
 is detected independently. One shared cap predicate serves batch and existing
 single-window admission without changing the latter's behavior.
+
+Credential coverage uses the supported HTTPS bearer-token option and complete
+records from the actual decoded-window and record producers. The real-client
+positive case excludes that token from results. A targeted bearer-token leak
+fault is detected alongside whole-endpoint copying.
 
 Factories use actual decoded ranges and new HTTP bodies for every acquisition.
 All HTTP is simulated. Existing discovery regressions remain unchanged. No tests
