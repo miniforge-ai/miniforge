@@ -20,7 +20,8 @@
    wall-clock timeout and keeps its bounded cleanup from being interrupted."
   (:require
    [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
-   [ai.miniforge.dag-executor.result :as result]))
+   [ai.miniforge.dag-executor.result :as result]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -35,14 +36,25 @@
   120000)
 
 (defn ^{:stratum 0} without-interrupt
-  "Call (f) with the thread's interrupt flag clear, then set it again if it
-   was set. A timed-out acquire's worker is interrupted; its bounded cleanup
-   must still finish, and an interrupt would end the cleanup's own wait and
-   kill the runtime command doing it."
+  "Call (f) where no interrupt of this thread can reach it, and return its
+   value or throw what it threw. A timed-out acquire's worker is interrupted
+   (`future-cancel`), and the interrupt can land after the worker has begun
+   cleaning up; the bounded cleanup must still finish, and an interrupt
+   would end its wait and kill the runtime command doing it. So (f) runs on
+   a thread of its own while this one waits, and an interrupt this thread
+   had pending or gets meanwhile is set on it again afterwards."
   [f]
-  (let [interrupted? (Thread/interrupted)]
-    (try (f)
-         (finally (when interrupted? (.interrupt (Thread/currentThread)))))))
+  (let [task (future (try+ {::value (f)}
+                           (catch Object _ {::thrown (:throwable &throw-context)})))]
+    (loop [interrupted? (Boolean/valueOf (Thread/interrupted))]
+      (let [r (try+ (deref task)
+                    (catch InterruptedException _ ::interrupted))]
+        (if (= ::interrupted r)
+          (recur true)
+          (do (when interrupted? (.interrupt (Thread/currentThread)))
+              (if-let [thrown (::thrown r)]
+                (throw thrown)
+                (::value r))))))))
 
 (defn- ^{:stratum 0} acquire-failed-result
   [throwable]
@@ -57,8 +69,8 @@
 (defn ^{:stratum 1} removing-unless-ok
   "(f), the part of an acquire after its container started. Unless it
    returns an ok result, whether it returns an error or throws (a failed
-   env-file write, an interrupt), (remove!) runs first, with the interrupt
-   flag clear (`without-interrupt`): only an ok result gives the caller an
+   env-file write, an interrupt), (remove!) runs first, out of reach of an
+   interrupt (`without-interrupt`): only an ok result gives the caller an
    environment id to release the container with."
   [remove! f]
   (let [ok? (volatile! false)]
@@ -89,9 +101,9 @@
    acquire whose container started, which the caller, already holding
    the timeout, has no id to release. Whichever of the body's finish and
    the deadline comes first decides: a body that finishes after the
-   deadline hands its result to `abandon!` (one argument, called on the
-   body's thread with the interrupt flag clear) to release what it
-   acquired.
+   deadline hands its result to `abandon!` (one argument, run out of reach
+   of the cancelling interrupt, which can still land after the body
+   returns: `without-interrupt`) to release what it acquired.
 
    `timeout-ms` of `nil` or `<= 0` disables the timeout (tests that
    pre-mock the executor wholesale rely on this escape hatch).

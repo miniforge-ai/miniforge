@@ -62,7 +62,7 @@ Tests follow the moved definitions:
 2. stratum-lint on every new file: no findings, and `--fix` leaves each file unchanged.
 3. clj-kondo on dag-executor's src and test: no warnings beyond those already on the base.
 4. dag-executor, release-executor, redaction, task-executor and llm-interface tests, under the
-   shared JVM lock: 992 pass, with every review fix and main at 16bc32489 (#2221) merged in.
+   shared JVM lock: 994 pass, with every review fix and main at 16bc32489 (#2221) merged in.
 
 When the base moves, the split is regenerated from the base's `oci_cli.clj` and test files with
 the same name-to-namespace assignment, the checks above are rerun, and this PR's own commits are
@@ -73,7 +73,7 @@ re-applied on top.
 Capsule stack review fixes that edit `oci_cli.clj` land here, one commit each. Items 5 to 9 come
 from the merge-gate review (rule 720 and the rules review), whose comment on this PR lists the
 traced flow and what was left. Items 10 and 11 are Copilot findings on #2221 whose code lives
-here, and items 12 to 15 are Copilot findings on this PR in code the split moved:
+here, and items 12 to 16 are Copilot findings on this PR in code the split moved:
 
 1. A failed env-file write deletes the temp file (#2143 thread).
 2. Persist and restore of a capsule cloned without an HTTP credential go to the URL it cloned
@@ -132,6 +132,12 @@ here, and items 12 to 15 are Copilot findings on this PR in code the split moved
     `with-acquisition-timeout` settles the body's finish against the deadline with one
     compare-and-set, and a body that finishes late hands its result to `abandon!`, which
     acquire uses to release the environment.
+16. Cleanup is out of reach of the cancelling interrupt. The timeout marks the acquire abandoned,
+    then interrupts it; a body that returned in between was already cleaning up (`abandon!`, or
+    `removing-unless-ok`'s removal) when the interrupt landed, and `without-interrupt` cleared
+    the flag only on entry, so the interrupt could kill the removal. `without-interrupt` now
+    runs the cleanup on a thread of its own and waits for it, then sets a pending or new
+    interrupt on the waiting thread again.
 
 ## Deployment Plan
 

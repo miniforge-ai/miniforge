@@ -253,6 +253,44 @@
       (is (= :done (oci-acq/with-acquisition-timeout 5000 (fn [] :done) #(swap! abandoned conj %))))
       (is (= [] @abandoned)))))
 
+(deftest ^{:stratum 0} without-interrupt-returns-or-throws-what-f-did-test
+  (testing "the value (f) returns, or the exception it threw, unwrapped; (f)
+            does not see this thread's pending interrupt, which is set again
+            after"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"boom"
+                          (oci-acq/without-interrupt #(throw (ex-info "boom" {})))))
+    (.interrupt (Thread/currentThread))
+    ;; Read before `is`, which clears a pending interrupt.
+    (let [seen (oci-acq/without-interrupt #(.isInterrupted (Thread/currentThread)))
+          flag (Thread/interrupted)]
+      (is (false? seen))
+      (is (true? flag)))))
+
+(deftest ^{:stratum 0} with-acquisition-timeout-cleanup-survives-a-late-cancel-test
+  (testing "a body that returns between the abandonment and the cancelling
+            interrupt has abandon! running when the interrupt lands, and
+            abandon! still finishes: the interrupt does not reach it"
+    (let [go         (promise)
+          in-cleanup (promise)
+          finished   (promise)
+          cancel     future-cancel]
+      ;; Abandoned, not yet cancelled: let the body return and abandon!
+      ;; begin, then deliver the interrupt.
+      (with-redefs [future-cancel (fn [f]
+                                    (deliver go true)
+                                    (deref in-cleanup 2000 nil)
+                                    (cancel f))]
+        (let [r (oci-acq/with-acquisition-timeout
+                 50
+                 (fn [] @go {:ok? true :data {:environment-id "late"}})
+                 (fn [_]
+                   (deliver in-cleanup true)
+                   (deliver finished (try (Thread/sleep 300)
+                                          :finished
+                                          (catch InterruptedException _ :interrupted)))))]
+          (is (= :timeout (get-in r [:error :code])))
+          (is (= :finished (deref finished 2000 :not-finished))))))))
+
 (deftest ^{:stratum 0} run-runtime-interrupt-destroys-child-process-test
   (testing "interrupting a runtime call does not wait for the child command to finish"
     (let [descriptor {:runtime/executable "/bin/sleep"}
