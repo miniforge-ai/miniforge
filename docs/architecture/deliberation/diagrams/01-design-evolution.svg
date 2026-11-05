@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1120" role="img" aria-labelledby="title desc" font-family="Helvetica, Arial, sans-serif">
+<title id="title">Shared Deliberation — 1. What changes from the original N14</title><desc id="desc">The shared reasoning objective stays. Identity, information flow, and execution authority move to trusted runtime boundaries.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker></defs>
+<rect width="1920" height="1120" fill="white"/>
+<rect width="1920" height="65" fill="#1e5f96"/>
+<text x="24" y="30" font-size="23" fill="white" font-weight="bold">Shared Deliberation — 1. What changes from the original N14</text>
+<text x="24" y="52" font-size="15" fill="#cfe2f3">The shared reasoning objective stays. Identity, information flow, and execution authority move to trusted runtime boundaries.</text>
+<rect x="24" y="84" width="600" height="882" rx="8" fill="#fcfcfa" stroke="#b8b8b0"/>
+<text x="42" y="113" font-size="18" fill="#1e5f96" font-weight="bold">ORIGINAL CONTRACT / IMPLEMENTATION</text>
+<rect x="48" y="140" width="552" height="166" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+<text x="64" y="168" font-size="19" fill="#333" font-weight="bold">One graph, role-specific activations</text>
+<text x="64" y="194" font-size="16" fill="#333" font-weight="normal">Goals, claims, evidence, alternatives and decisions replace</text>
+<text x="64" y="217" font-size="16" fill="#333" font-weight="normal">transcript relay.</text>
+<rect x="48" y="338" width="552" height="166" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+<text x="64" y="366" font-size="19" fill="#333" font-weight="bold">Roles carry special operations</text>
+<text x="64" y="392" font-size="16" fill="#333" font-weight="normal">A synthesizer may adopt decisions; a verifier may record</text>
+<text x="64" y="415" font-size="16" fill="#333" font-weight="normal">experiments. Role names were trusted in model output.</text>
+<rect x="48" y="536" width="552" height="166" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+<text x="64" y="564" font-size="19" fill="#333" font-weight="bold">Whole-board context by default</text>
+<text x="64" y="590" font-size="16" fill="#333" font-weight="normal">The board is shared; projection and cross-visibility switch</text>
+<text x="64" y="613" font-size="16" fill="#333" font-weight="normal">shape what an activation sees.</text>
+<rect x="48" y="734" width="552" height="166" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+<text x="64" y="762" font-size="19" fill="#333" font-weight="bold">Prototype loop and promotion gates</text>
+<text x="64" y="788" font-size="16" fill="#333" font-weight="normal">In-memory state; no runtime caller. The spec still claimed</text>
+<text x="64" y="811" font-size="16" fill="#333" font-weight="normal">the component did not exist.</text>
+<rect x="656" y="84" width="600" height="882" rx="8" fill="#fcfcfa" stroke="#b8b8b0"/>
+<text x="674" y="113" font-size="18" fill="#1e5f96" font-weight="bold">REVISED EXPERIMENTAL CORE</text>
+<rect x="680" y="140" width="552" height="166" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+<text x="696" y="168" font-size="19" fill="#333" font-weight="bold">Runtime-bound work turns</text>
+<text x="696" y="194" font-size="16" fill="#333" font-weight="normal">The runtime stamps participant, responsibility, activation</text>
+<text x="696" y="217" font-size="16" fill="#333" font-weight="normal">and basis. Closed operation schemas reject forged</text>
+<text x="696" y="240" font-size="16" fill="#333" font-weight="normal">provenance.</text>
+<rect x="680" y="338" width="552" height="166" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+<text x="696" y="366" font-size="19" fill="#333" font-weight="bold">Decisions remain revisable</text>
+<text x="696" y="392" font-size="16" fill="#333" font-weight="normal">Adopted decisions retain their record when challenged.</text>
+<text x="696" y="415" font-size="16" fill="#333" font-weight="normal">Supersession names a replacement; resolved conflicts stay in</text>
+<text x="696" y="438" font-size="16" fill="#333" font-weight="normal">history.</text>
+<rect x="680" y="536" width="552" height="166" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+<text x="696" y="564" font-size="19" fill="#333" font-weight="bold">Isolated development comparisons</text>
+<text x="696" y="590" font-size="16" fill="#333" font-weight="normal">Synthetic fixtures only. Fixed schedules; separate blind</text>
+<text x="696" y="613" font-size="16" fill="#333" font-weight="normal">boards. No private workspace or global version reaches the</text>
+<text x="696" y="636" font-size="16" fill="#333" font-weight="normal">model.</text>
+<rect x="680" y="734" width="552" height="166" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+<text x="696" y="762" font-size="19" fill="#333" font-weight="bold">Runnable lab with replay</text>
+<text x="696" y="788" font-size="16" fill="#333" font-weight="normal">Five development conditions, two tiers, replicates, metering</text>
+<text x="696" y="811" font-size="16" fill="#333" font-weight="normal">and immutable journal. G0 remains NOT EVALUATED.</text>
+<rect x="1288" y="84" width="600" height="882" rx="8" fill="#fcfcfa" stroke="#b8b8b0"/>
+<text x="1306" y="113" font-size="18" fill="#1e5f96" font-weight="bold">ARIADNE TARGET / NOT YET GENERAL</text>
+<rect x="1312" y="140" width="552" height="166" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+<text x="1328" y="168" font-size="19" fill="#333" font-weight="bold">Principal and delegation</text>
+<text x="1328" y="194" font-size="16" fill="#333" font-weight="normal">Use the established acting context and grants. The</text>
+<text x="1328" y="217" font-size="16" fill="#333" font-weight="normal">responsibility is a task assignment, not a credential.</text>
+<rect x="1312" y="338" width="552" height="166" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+<text x="1328" y="366" font-size="19" fill="#333" font-weight="bold">Object-level policy and provider gates</text>
+<text x="1328" y="392" font-size="16" fill="#333" font-weight="normal">Authorize selected labeled inputs before each provider call.</text>
+<text x="1328" y="415" font-size="16" fill="#333" font-weight="normal">Runtime computes output clauses from delivered inputs.</text>
+<rect x="1312" y="536" width="552" height="166" rx="8" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.5"/>
+<text x="1328" y="564" font-size="19" fill="#333" font-weight="bold">Adoption is not permission</text>
+<text x="1328" y="590" font-size="16" fill="#333" font-weight="normal">A board decision can justify an effect proposal. Only the</text>
+<text x="1328" y="613" font-size="16" fill="#333" font-weight="normal">effect coordinator can authorize, commit and reconcile it.</text>
+<rect x="1312" y="734" width="552" height="166" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+<text x="1328" y="762" font-size="19" fill="#333" font-weight="bold">Production promotion still gated</text>
+<text x="1328" y="788" font-size="16" fill="#333" font-weight="normal">General policy enforcement, calibrated long-horizon fixtures</text>
+<text x="1328" y="811" font-size="16" fill="#333" font-weight="normal">and full N15 controls precede adoption.</text>
+<path d="M602,223 L678,223" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M1234,223 L1310,223" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M602,421 L678,421" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M1234,421 L1310,421" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M602,619 L678,619" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M1234,619 L1310,619" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M602,817 L678,817" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M1234,817 L1310,817" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="26" y="990" width="22" height="18" fill="#dae8fc" stroke="#6c8ebf"/>
+<text x="58" y="1005" font-size="15" fill="#333" font-weight="normal">data</text>
+<rect x="241" y="990" width="22" height="18" fill="#fff2cc" stroke="#d6b656"/>
+<text x="273" y="1005" font-size="15" fill="#333" font-weight="normal">agent</text>
+<rect x="456" y="990" width="22" height="18" fill="#e1d5e7" stroke="#9673a6"/>
+<text x="488" y="1005" font-size="15" fill="#333" font-weight="normal">authority</text>
+<rect x="671" y="990" width="22" height="18" fill="#d5e8d4" stroke="#82b366"/>
+<text x="703" y="1005" font-size="15" fill="#333" font-weight="normal">runtime</text>
+<rect x="886" y="990" width="22" height="18" fill="#ffe6cc" stroke="#d79b00"/>
+<text x="918" y="1005" font-size="15" fill="#333" font-weight="normal">external</text>
+<rect x="1101" y="990" width="22" height="18" fill="#f8cecc" stroke="#b85450"/>
+<text x="1133" y="1005" font-size="15" fill="#333" font-weight="normal">risk</text>
+<text x="26" y="1046" font-size="16" fill="#333" font-weight="normal">Read left to right for the design delta; read top to bottom within each column. Green is implemented for the synthetic lab; purple describes the Ariadne boundary, not a claim that its</text>
+<text x="26" y="1069" font-size="16" fill="#333" font-weight="normal">complete policy plane already exists.</text>
+<text x="26" y="1102" font-size="13" fill="#666" font-weight="normal">Miniforge • N14 / N15 revision • Ariadne v1.6.1 • Copyright 2025–2026 Christopher Lester • Apache 2.0</text>
+</svg>

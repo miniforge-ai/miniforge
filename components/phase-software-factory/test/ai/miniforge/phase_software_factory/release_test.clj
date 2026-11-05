@@ -637,6 +637,24 @@
               (is (= stub-addendum (:task/behavior-addendum @captured-context))
                   ":task/behavior-addendum from phase/load-and-filter-behaviors must reach the executor context"))))))))
 
+(deftest ^{:stratum 3} release-filters-rules-by-the-files-it-releases-test
+  (testing "release hands load-and-filter-behaviors the paths of the files it
+            releases, so glob-scoped rules reach the releaser"
+    (with-test-worktree
+      (fn [worktree]
+        (let [filter-context (atom nil)]
+          (with-redefs [phase/load-and-filter-behaviors
+                        (fn [phase-kw context]
+                          (when (= :release phase-kw) (reset! filter-context context))
+                          nil)
+                        release-executor/prepare-release
+                        (fn [_ws _ec _opts]
+                          {:success? true :artifacts [] :metrics {:files-written 0}})]
+            ((:enter (phase/get-phase-interceptor {:phase :release}))
+             (assoc (create-base-context worktree) :phase-config {:phase :release}))
+            (is (= (set (map :path (:code/files mock-code-artifact)))
+                   (set (get-in @filter-context [:artifact :artifact/paths]))))))))))
+
 (deftest ^{:stratum 3} release-omits-behavior-addendum-when-filter-returns-nil-test
   (testing "no addendum key on executor context when phase/load-and-filter-behaviors returns nil"
     (with-test-worktree

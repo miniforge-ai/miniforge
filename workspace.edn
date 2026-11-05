@@ -16,6 +16,15 @@
  ;; See tools/poly-test-runner/src/ai/miniforge/poly_test_runner/core.clj.
  :test {:create-test-runner ai.miniforge.poly-test-runner.core/create}
  :projects {"development"    {:alias "dev"}
+            ;; The bricks CI must test through this project, whether or not the
+            ;; base requires them directly (file-durability it reaches only
+            ;; through the harness).
+            "deliberation-lab" {:alias "dlab"
+                                :necessary ["anomaly" "deliberation-harness" "deliberation-workspace"
+                                            "file-durability" "messages"]
+                                ;; llm's own tests require agent, a test-only dependency this
+                                ;; project does not contain; projects that do test llm.
+                                :test {:exclude ["llm"]}}
             "data-foundry"   {:alias "df"}
             "miniforge-core" {:alias "core"
                               ;; Runtime-loaded via phase/namespaces.edn resource discovery

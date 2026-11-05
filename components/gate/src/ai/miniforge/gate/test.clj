@@ -57,7 +57,7 @@
       (nil? coverage)
       {:passed? true
        :warnings [{:type :no-coverage
-                   :message "No coverage data found"}]}
+                   :message (messages/t :coverage/no-data)}]}
 
       (>= coverage threshold)
       {:passed? true
@@ -67,7 +67,7 @@
       :else
       {:passed? false
        :errors [{:type :coverage-below-threshold
-                 :message (str "Coverage " coverage "% below threshold " threshold "%")
+                 :message (messages/t :coverage/below-threshold {:coverage coverage :threshold threshold})
                  :coverage coverage
                  :threshold threshold}]})))
 
@@ -154,14 +154,14 @@
 (defmethod ^{:stratum 2} registry/get-gate :tests-pass
   [_]
   {:name :tests-pass
-   :description "Validates all tests pass"
+   :description (messages/t :tests-pass/description)
    :check check-tests-pass
    :repair nil})
 
 (defmethod ^{:stratum 2} registry/get-gate :coverage
   [_]
   {:name :coverage
-   :description "Validates test coverage meets threshold (default 80%)"
+   :description (messages/t :coverage/description)
    :check check-coverage
    :repair nil})
 

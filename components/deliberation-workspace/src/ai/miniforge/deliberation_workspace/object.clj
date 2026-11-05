@@ -38,6 +38,8 @@
   #{:execution :retrieval :user :agent-analysis})
 
 (def ^{:stratum 0} ^:private deliberative-statuses
+  "Statuses shared by the deliberated record types (claim, hypothesis, plan,
+   decision) in N14 §2.3."
   #{:open :contested :accepted :rejected :superseded})
 
 (def ^{:stratum 0} terminal-statuses
@@ -62,6 +64,13 @@
   "The set of object ids `object` points at along `link-type`."
   [object link-type]
   (get-in object [:object/links link-type] #{}))
+
+(defn ^{:stratum 0} covers-goal?
+  "True when `decision` is adopted and depends on `goal-id` (N14 §2.3, §7.1)."
+  [decision goal-id]
+  (and (= :decision (:object/type decision))
+       (= :accepted (:object/status decision))
+       (contains? (set (get-in decision [:object/links :depends-on])) goal-id)))
 
 (defn ^{:stratum 0} hard-constraint?
   "True when `object` is a constraint the workspace must never let an agent
