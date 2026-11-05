@@ -45,9 +45,12 @@
 (def ^{:stratum 0} analyze-rules-on-files
   "Batched changed-files judge: ONE LLM call per file across MANY rules.
    Args: llm-client, complete-fn, rules (vector of rule maps), files (vector of
-   {:path :content}). Sends the rule pack once per file (not per rule×file).
+   {:path :content}), optional opts {:deadline-ms int}. Sends the rule pack
+   once per file (not per rule×file). A failed or unparseable judge call, and
+   every file left when the deadline passes, yields judge-failure violations
+   (`:semantic/judge-failure`), never an empty result.
    Returns {:by-rule {rule-id [violation...]} :files-analyzed int :calls int
-   :duration-ms int :status keyword}."
+   :duration-ms int :status :completed|:deadline-exceeded}."
   changed-files/analyze-rules-on-files)
 
 (def ^{:stratum 0} analyze-rules-parallel

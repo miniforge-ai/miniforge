@@ -10,13 +10,15 @@
    and the batched form of one call per file across many rules
    (`analyze-rules-on-files`).
 
-   Layer 0: one rule over the changed files; one file against its applicable rules
+   Layer 0: one rule over the changed files; the rules that apply to one
+     file; deadline failures for a file; one judge call within the budget
    Layer 1: the batched per-file fold across all rules (over Layer 0)"
   (:require
    [ai.miniforge.semantic-analyzer.judge :as judge]
    [ai.miniforge.semantic-analyzer.limits :as limits]
    [ai.miniforge.semantic-analyzer.parsing :as parsing]
-   [ai.miniforge.semantic-analyzer.selection :as selection]))
+   [ai.miniforge.semantic-analyzer.selection :as selection]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -47,18 +49,38 @@
      :duration-ms    (- end-ms start-ms)
      :status         :completed}))
 
-(defn- ^{:stratum 0} file-rule-violations
-  "Judge ONE changed file against the rules whose globs match it. Returns the
-   vector of canonical violations (possibly empty) when a judge call was made, or
-   `nil` when the file is skipped — bad shape, or no rule applies — so no LLM
-   call is spent on it."
-  [llm-client complete-fn rules {:keys [path content] :as file}]
+(defn- ^{:stratum 0} applicable-rules
+  "The rules whose globs match ONE changed file, or nil when the file is
+   skipped — bad shape, or no rule applies — so no LLM call is spent on it."
+  [rules {:keys [path] :as file}]
   (when (selection/judgeable-file? file)
-    (let [applicable (filterv #(selection/file-matches-globs?
-                                path (get-in % [:rule/applies-to :file-globs] ["**/*"]))
-                              rules)]
-      (when (seq applicable)
-        (judge/analyze-file-batched llm-client complete-fn applicable path content)))))
+    (not-empty (filterv #(selection/file-matches-globs?
+                          path (get-in % [:rule/applies-to :file-globs] ["**/*"]))
+                        rules))))
+
+(defn- ^{:stratum 0} deadline-violations
+  "Judge failures for a file reached after the deadline: one per applicable
+   rule, so the unjudged file blocks instead of being skipped."
+  [applicable path deadline-ms]
+  (mapv #(parsing/judge-failure-violation % path :deadline-exceeded deadline-ms)
+        applicable))
+
+(defn- ^{:stratum 0} judge-within
+  "(judge-fn) bounded by `remaining-ms`: its result, or ::deadline when the
+   call is still running then, after cancelling it. An exception judge-fn
+   throws is rethrown as itself; an interrupt of the waiting thread
+   cancels the call too."
+  [remaining-ms judge-fn]
+  (let [call (future (judge-fn))]
+    (try+
+     (let [result (deref call (max 0 remaining-ms) ::deadline)]
+       (when (= ::deadline result) (future-cancel call))
+       result)
+     (catch java.util.concurrent.ExecutionException e
+       (throw (or (.getCause e) e)))
+     (catch InterruptedException e
+       (future-cancel call)
+       (throw e)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -67,24 +89,51 @@
    globs match that file (and that are under the size limit). `files` is a vector
    of {:path :content}, `rules` a vector of rule maps. Returns
    {:by-rule {rule-id [violation...]} :files-analyzed int :calls int
-    :duration-ms int :status :completed}.
+    :duration-ms int :status :completed|:deadline-exceeded}.
 
    This collapses the per-rule-per-file judge (analyze-rule-on-files run once per
    rule) into one call per file: the rule pack is sent once per file, not once
-   per (rule, file)."
-  [llm-client complete-fn rules files]
-  (let [start-ms (System/currentTimeMillis)]
-    (loop [fs (seq files), by-rule {}, analyzed 0, calls 0]
-      (if-let [file (first fs)]
-        (let [viols (file-rule-violations llm-client complete-fn rules file)]
-          (cond
-            ;; skipped (bad shape or no applicable rule) — no call spent
-            (nil? viols) (recur (next fs) by-rule analyzed calls)
-            ;; judged — one call made; fold its violations (possibly none)
-            :else        (recur (next fs) (parsing/index-by-rule by-rule viols)
-                                (inc analyzed) (inc calls))))
-        {:by-rule        by-rule
-         :files-analyzed analyzed
-         :calls          calls
-         :duration-ms    (- (System/currentTimeMillis) start-ms)
-         :status         :completed}))))
+   per (rule, file).
+
+   Bounded by `:deadline-ms` (default `limits/judge-deadline-ms`): each judge
+   call runs within what is left of it, and a call still running when it
+   passes is cancelled. That file and every file still unjudged get
+   judge-failure violations for their applicable rules, and the status is
+   :deadline-exceeded. Nothing is skipped."
+  ([llm-client complete-fn rules files]
+   (analyze-rules-on-files llm-client complete-fn rules files {}))
+  ([llm-client complete-fn rules files {:keys [deadline-ms]
+                                        :or   {deadline-ms limits/judge-deadline-ms}}]
+   (let [start-ms (System/currentTimeMillis)]
+     (loop [fs (seq files), by-rule {}, analyzed 0, calls 0, late? false]
+       (if-let [{:keys [path content] :as file} (first fs)]
+         (let [applicable (applicable-rules rules file)
+               now-late?  (or late?
+                              (>= (- (System/currentTimeMillis) start-ms) deadline-ms))]
+           (cond
+             ;; skipped (bad shape or no applicable rule) — no call spent
+             (nil? applicable) (recur (next fs) by-rule analyzed calls now-late?)
+             ;; past the deadline — fail closed on this file, no call spent
+             now-late?         (recur (next fs)
+                                      (parsing/index-by-rule
+                                       by-rule (deadline-violations applicable path deadline-ms))
+                                      analyzed calls true)
+             :else
+             (let [remaining (- deadline-ms (- (System/currentTimeMillis) start-ms))
+                   judged    (judge-within remaining
+                                           #(judge/analyze-file-batched
+                                             llm-client complete-fn applicable path content))]
+               (if (= ::deadline judged)
+                 ;; the call outlasted the deadline — fail closed on this file
+                 (recur (next fs)
+                        (parsing/index-by-rule
+                         by-rule (deadline-violations applicable path deadline-ms))
+                        analyzed (inc calls) true)
+                 ;; judged — one call made; fold its violations (possibly none)
+                 (recur (next fs) (parsing/index-by-rule by-rule judged)
+                        (inc analyzed) (inc calls) false)))))
+         {:by-rule        by-rule
+          :files-analyzed analyzed
+          :calls          calls
+          :duration-ms    (- (System/currentTimeMillis) start-ms)
+          :status         (if late? :deadline-exceeded :completed)})))))

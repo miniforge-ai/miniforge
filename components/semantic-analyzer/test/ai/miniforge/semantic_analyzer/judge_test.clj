@@ -35,11 +35,37 @@
           result     (sut/analyze-file nil mock-complete rule "src/ok.clj" "(defn ok [] :ok)")]
       (is (= [] result)))))
 
-(deftest ^{:stratum 0} analyze-file-llm-error-test
-  (testing "returns empty violations when LLM returns non-EDN"
-    (let [rule       {:rule/id :std/test :rule/title "T" :rule/category "001"
-                      :rule/severity :info :rule/knowledge-content "K"}
-          mock-complete (fn [_client _request]
+(def ^{:stratum 0} ^:private rule-t
+  {:rule/id :std/test :rule/title "T" :rule/category "001"
+   :rule/severity :info :rule/knowledge-content "K"})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} analyze-file-unparseable-answer-fails-closed-test
+  (testing "an answer that does not parse is a judge failure on the file, not
+            a clean result"
+    (let [mock-complete (fn [_client _request]
                           {:success true :content "Sorry, I can't analyze this."})
-          result     (sut/analyze-file nil mock-complete rule "f.clj" "code")]
-      (is (= [] result)))))
+          [v & more]    (sut/analyze-file nil mock-complete rule-t "f.clj" "code")]
+      (is (nil? more))
+      (is (= :std/test (:rule/id v)))
+      (is (= "f.clj" (:file v)))
+      (is (= :unparseable (:semantic/judge-failure v))))))
+
+(deftest ^{:stratum 1} analyze-file-failed-call-fails-closed-test
+  (testing "a failed judge call (:success false) is a judge failure carrying
+            the error message"
+    (let [mock-complete (fn [_client _request]
+                          {:success false :error {:type "timeout" :message "judge timed out"}})
+          [v & more]    (sut/analyze-file nil mock-complete rule-t "f.clj" "code")]
+      (is (nil? more))
+      (is (= :call-failed (:semantic/judge-failure v)))
+      (is (re-find #"judge timed out" (:rationale v))))))
+
+(deftest ^{:stratum 1} analyze-file-batched-failure-blocks-every-rule-test
+  (testing "a failed batched call is a judge failure for every rule in the batch"
+    (let [rule-b        (assoc rule-t :rule/id :std/b)
+          mock-complete (fn [_client _request] {:success false :error {:message "down"}})
+          result        (sut/analyze-file-batched nil mock-complete [rule-t rule-b] "f.clj" "code")]
+      (is (= #{:std/test :std/b} (set (map :rule/id result))))
+      (is (every? #(= :call-failed (:semantic/judge-failure %)) result)))))

@@ -5,7 +5,8 @@
   "Operational limits for semantic analysis, read from EDN at load time.
 
    One home for the analyzer's budgets: `selection` enforces the size and
-   count caps, `core` enforces the per-rule timeout.
+   count caps, `core` enforces the per-rule timeout, `changed-files` the
+   batched judge's deadline, and `judge` the answer excerpt length.
 
    Layer 0: the raw limits map
    Layer 1: the individual limits with their defaults (over Layer 0)"
@@ -27,6 +28,16 @@
   "Maximum number of files to analyze per rule.
    Kept low to stay within per-rule timeout when using CLI backends."
   (get limits :max-files-per-rule 5))
+
+(def ^{:stratum 1} judge-deadline-ms
+  "Wall-clock budget for one batched changed-files judgement. Files still
+   unjudged when it passes become judge failures, so the gate fails closed
+   instead of waiting without bound."
+  (get limits :judge-deadline-ms 1200000))
+
+(def ^{:stratum 1} judge-answer-excerpt-chars
+  "How much of an unparseable judge answer a judge-failure message quotes."
+  (get limits :judge-answer-excerpt-chars 200))
 
 (def ^{:stratum 1} default-rule-timeout-ms
   "Maximum time to spend analyzing one rule before giving up.
