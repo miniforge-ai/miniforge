@@ -49,11 +49,14 @@
       (:task/verify-failures input)))
 
 (defn- ^{:stratum 0} unverified-already-implemented-response
-  "Reject an :already-implemented claim when there is no artifact evidence on a repair attempt."
-  [input tokens]
+  "Reject an :already-implemented claim when there is no artifact evidence on a repair attempt.
+   The rejected turn's tokens and cost stay on the response; a nil cost is
+   dropped by the response builder."
+  [input tokens cost-usd]
   (response/error
    (messages/t :error/unverified-already-implemented)
    {:tokens tokens
+    :metrics {:cost-usd cost-usd}
     :data {:code :implementer/unverified-already-implemented
            :review-feedback? (boolean (:task/review-feedback input))
            :verify-failures? (boolean (:task/verify-failures input))}}))
@@ -151,7 +154,7 @@
         (do (log-implementer-rejection
              logger :unverified-already-implemented
              input artifact-source content tools)
-            (unverified-already-implemented-response input tokens))
+            (unverified-already-implemented-response input tokens cost-usd))
         (build-already-implemented-response parsed tokens cost-usd))
 
       metadata-only?
@@ -161,6 +164,7 @@
          input artifact-source content tools)
         (response/error (messages/t :error/parse-failed)
                         {:tokens tokens
+                         :metrics {:cost-usd cost-usd}
                          :data {:reject/reason :metadata-only-submit
                                 :artifact-source artifact-source}}))
 
@@ -182,6 +186,7 @@
              input artifact-source content tools)
             (response/error (messages/t :error/parse-failed)
                             {:tokens tokens
+                             :metrics {:cost-usd cost-usd}
                              :data   (cond-> {:reject/reason reject-reason}
                                        artifact-source
                                        (assoc :artifact-source artifact-source))})))))))

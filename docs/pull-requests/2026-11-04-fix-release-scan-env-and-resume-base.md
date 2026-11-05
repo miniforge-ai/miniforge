@@ -72,7 +72,7 @@ No migration. Takes effect with the next CLI build.
 
 ## Related Issues/PRs
 
-Stacked on #2396 (the release.clj split). Answers the #2264 Copilot threads
+Builds on #2396 (the release.clj split, merged as 453eecc6f). Answers the #2264 Copilot threads
 PRRT_kwDOQ8eOgc6x2sTk (host probes inherit GIT_DIR / GIT_WORK_TREE) and
 PRRT_kwDOQ8eOgc6x3EXj (a resume with no recorded task base scans from the
 checkpoint). #2264's own probe, which those threads were on, is superseded
