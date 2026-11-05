@@ -20,8 +20,23 @@
            :execution/response-chain (response/create :gate-decision-test)}
     stream (assoc :event-stream stream)))
 
-(defn ^{:stratum 0} legacy-stream []
+(defn ^{:stratum 0} legacy-stream
+  "A legacy stream whose one durable sink stands in for the file sink and
+   always writes, so a gate decision published to it is acknowledged."
+  []
+  (events/create-event-stream {:sinks [(events/durable-sink (fn [_event] nil))]}))
+
+(defn ^{:stratum 0} sinkless-legacy-stream
+  "A legacy stream with no durable sink: it cannot acknowledge a decision."
+  []
   (events/create-event-stream {:sinks []}))
+
+(defn ^{:stratum 0} failing-legacy-stream
+  "A legacy stream whose durable sink fails every write, as the file sink
+   does when the disk is full."
+  []
+  (events/create-event-stream
+   {:sinks [(events/durable-sink (fn [_event] (throw (ex-info "disk full" {}))))]}))
 
 (defn ^{:stratum 0} decisions [stream]
   (filterv #(= :gate/decision (:event/type %)) (events/get-events stream)))

@@ -20,6 +20,13 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defprotocol ^{:stratum 0} VerificationPreparationAdapter
+  (prepare-verification
+    [adapter request]
+    "Acquire a fresh target observation before candidate mutation or load.
+     This operation is read-only and returns a correlated preparation receipt
+     or an anomaly. It grants no authority and does not establish admission."))
+
 (defprotocol ^{:stratum 0} VerificationAdapter
   (run-verification
     [adapter request]

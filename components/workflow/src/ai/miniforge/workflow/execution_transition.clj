@@ -41,6 +41,17 @@
   (or (phase/already-done? phase-result)
       (phase/already-done? (:result phase-result))))
 
+(defn ^{:stratum 0} gate-warnings
+  "A check-gates result's warnings as [{:gate kw :warnings [..]}], one entry
+   per gate that warned, in gate order; nil when no gate warned."
+  [gate-result]
+  (not-empty
+   (into []
+         (keep (fn [{:keys [gate warnings]}]
+                 (when (seq warnings)
+                   {:gate gate :warnings (vec warnings)})))
+         (:results gate-result))))
+
 (defn- ^{:stratum 0} phase-transition-event-message
   [event]
   (messages/t :status/invalid-phase-transition-event {:event event}))
@@ -167,6 +178,7 @@
       (if (seq gate-keywords)
         (let [gate-result (gate/check-gates gate-keywords artifact ctx)
               minted (gate/gates->envelope gate-result (nil? artifact))
+              warnings (gate-warnings gate-result)
               ;; envelope minting can itself anomaly; fail closed on that too
               envelope (when (:envelope/id minted) minted)
               receipt (exec-events/emit-phase-decision! ctx phase-result envelope)]
@@ -192,6 +204,8 @@
                                                (remove gate/passed?)
                                                (mapv #(-> (select-keys % [:gate :errors])
                                                           (update :errors (fnil vec [])))))))
+            ;; Warnings never change the decision, so the envelope cannot carry them.
+            warnings (assoc :phase/gate-warnings warnings)
             ;; Projected before :leave runs, the same way as a denial, so leave
             ;; handlers finalize a failed phase instead of publishing success.
             (anomaly/any-anomaly? receipt)

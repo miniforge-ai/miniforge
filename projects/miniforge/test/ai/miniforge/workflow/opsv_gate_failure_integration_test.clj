@@ -12,6 +12,7 @@
             [ai.miniforge.phase-opsv.interface :as opsv]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.workflow.checkpoint-root-support :as checkpoint]
+            [ai.miniforge.workflow.durable-stream-support :as durable]
             [ai.miniforge.workflow.interface :as workflow]
             [ai.miniforge.workflow.isolation-support :as isolation]
             [ai.miniforge.workflow.opsv-lifecycle-support :as support]
@@ -105,7 +106,9 @@
   "Run the shipped OPSV workflow with a denying gate on `gated-phase`."
   [root gated-phase {:keys [evidence? failing-kinds oversize? extra-input on-fail]}]
   (let [workflow-id (random-uuid)
-        stream (events/create-event-stream {:sinks []})
+        ;; A denial counts only once it is persisted, so the stream needs a
+        ;; durable sink for the gate failure to be recorded.
+        stream (durable/durable-event-stream)
         options (cond-> (assoc (support/workflow-options stream root)
                                :workflow-id workflow-id
                                :workflow/intent declared-intent)
@@ -252,6 +255,8 @@
            "recovery never seals a success for the failed actuation")))))
 
 (use-fixtures :once isolation/with-isolated-host)
+
+(use-fixtures :each durable/with-event-dir-cleanup)
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.workflow.opsv-gate-failure-integration-test))

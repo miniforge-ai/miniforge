@@ -80,6 +80,14 @@
       (when (seq files)
         (assoc outer-artifact :code/files files)))))
 
+(defn- ^{:stratum 0} changed-file-paths
+  "The distinct paths of the files implement changed: those `:code/files`
+   carries and those `:code/file-paths` records (a rehydrated artifact has
+   both). Review filters its rules by them."
+  [artifact]
+  (into [] (distinct) (concat (keep :path (:code/files artifact))
+                              (:code/file-paths artifact))))
+
 (defn- ^{:stratum 0} build-verify-review-input
   "Build a stable verify summary for the reviewer prompt from the full verify phase result."
   [verify-phase-result]
@@ -325,7 +333,8 @@
    implement does — produced by `phase/load-and-filter-behaviors`
    from rules that target `:review` AND carry `:rule/agent-behavior`
    or `:rule/knowledge-content` (rules with neither field, or whose
-   context filter excludes the current task, are not appended). This
+   context filter excludes the current task, are not appended). Rules are
+   filtered by the changed files' paths, so glob-scoped rules apply. This
    closes the gap where reviewer was applying generic 'is this good?'
    judgment instead of checking against the rules the standards pack
    surfaces for review-phase consumers.
@@ -343,8 +352,10 @@
         ;; reviewer IS a quality signal deciding whether to trust itself.
         codex-outcome (codex-pin/landings-outcome :review (get-in ctx [:execution/logger]))
         codex-landings (:text codex-outcome)
+        changed-paths (changed-file-paths artifact)
         behavior-addendum (phase/load-and-filter-behaviors
-                            :review {:task {:task/intent (:intent input)}})
+                            :review {:task     {:task/intent (:intent input)}
+                                     :artifact {:artifact/paths changed-paths}})
         task (cond-> {:task/id (random-uuid)
                       :task/type :review
                       :task/description (:description input)
@@ -477,9 +488,8 @@
         ;; Emit agent-completed telemetry event
         _ (phase/emit-agent-completed! agent-ctx :review :reviewer result)
 
-        ;; SPEC §7.4.3 consultation provenance, prompt-section flavor. The
-        ;; reviewer session surfaces no reads log, so :pin-read? is nil
-        ;; (unknown). Attached before enter-context stores the result so
+        ;; SPEC §7.4.3 provenance. nil reads: landings arrive in the prompt, so no pin file exists to read.
+        ;; Attached before enter-context stores the result so
         ;; gates and the gap ledger can see it — on FAILURES too (:output
         ;; starts nil on response/failure): the consultation happened in
         ;; build-review-task whatever the reviewer did next, and §7.7.2.1
