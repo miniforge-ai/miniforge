@@ -84,12 +84,16 @@
    When a reset time is known, also emits :dag/resume-hint with
    :reset-at so external schedulers can auto-resume — flagged
    auto-resumable for medium waits (30min-2hrs), manual-resume-only for
-   long waits (>2hrs)."
+   long waits (>2hrs). A run cancelled by then (its context's
+   :control-state stopped) gets neither event: there is nothing to
+   resume. The decision is returned as is, and the caller ends the run
+   as cancelled."
   [context rate-limited-ids new-completed failed-ids all-results batch-results
    event-stream workflow-id logger]
   (let [decision (resilience/handle-rate-limited-batch
                   context rate-limited-ids new-completed logger batch-results)]
-    (if (= :continue (:action decision))
+    (if (or (= :continue (:action decision))
+            (some-> (:control-state context) deref :stopped))
       decision
       (let [;; `all-results` only holds PRIOR batches — the caller merges
             ;; the current batch in only on the :continue recur, which we

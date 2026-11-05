@@ -84,14 +84,15 @@
                  (resilience/rate-limit-in-text? s)))))
 
 (defn- ^{:stratum 1} apply-backoff-if-retrying!
-  "Sleep with exponential backoff when a phase is being retried."
-  [phase-ctx _context]
+  "Sleep with exponential backoff when a phase is being retried. A cancel
+   before or during the backoff ends it at once (`stop-signal/sleep!`)."
+  [phase-ctx control-state]
   (let [current-phase (:execution/current-phase phase-ctx)
         retrying? (phase/retrying?
                    (get-in phase-ctx [:execution/phase-results current-phase]))
         retry-count (get-in phase-ctx [:phase :iterations] 1)]
     (when (and retrying? (> retry-count 1))
-      (Thread/sleep (backoff-ms retry-count)))))
+      (stop-signal/sleep! control-state (backoff-ms retry-count)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -103,21 +104,22 @@
    (a blocking phase callback, outside the interceptor's error handler)
    leaves the context as it came in, for the runner to record the stop.
    Workspace persistence and the retry and health policy after it run
-   uninterrupted, and a stopped run skips the retry backoff."
+   outside that scope; a cancel before or during the retry backoff ends
+   the backoff at once."
   ([pipeline context callbacks]
    (execute-phase pipeline context callbacks nil))
   ([pipeline context callbacks control-state]
-   (let [phase-context (-> (run-phase-step pipeline context callbacks control-state)
-                           (monitoring/clear-transient-state))
-         _ (env/persist-workspace-at-phase-boundary! context phase-context)
+   (let [stepped (-> (run-phase-step pipeline context callbacks control-state)
+                     (monitoring/clear-transient-state))
+         phase-context (->> (env/persist-workspace-at-phase-boundary! context stepped)
+                            (env/track-unpersisted context stepped))
          error-message (get-in phase-context
                                [:execution/phase-results
                                 (:execution/current-phase phase-context)
                                 :error :message] "")]
      (if (rate-limited? error-message)
        (apply-rate-limit-failure phase-context error-message)
-       (do (when-not (some-> control-state deref :stopped)
-             (apply-backoff-if-retrying! phase-context context))
+       (do (apply-backoff-if-retrying! phase-context control-state)
            (apply-health-switch phase-context))))))
 
 (comment ::phase-boundary-policy)

@@ -12,6 +12,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} populated? [directory]
+  (boolean (and (fs/directory? directory) (seq (fs/list-dir directory)))))
+
 (defn- ^{:stratum 0} existing-ancestor [directory]
   (loop [path (fs/absolutize directory) segments ()]
     (if (fs/exists? path)

@@ -20,8 +20,10 @@
    config/agent/tool-policy.edn lists for it, and a missing or unknown role
    gets none."
   (:require
+   [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.agent.implementer :as implementer]
    [ai.miniforge.agent.planner :as planner]
@@ -105,6 +107,39 @@
                                "path keys not keywords"   (assoc-in shipped [:tool/path-keys "Read"] ["file_path"])
                                "missing managed paths"    (dissoc shipped :tool/managed-config-paths)}]
         (is (thrown? clojure.lang.ExceptionInfo (policy/read-tool-policy (pr-str broken))) defect)))))
+
+(deftest ^{:stratum 0} opencode-permission-gives-each-role-its-tools-test
+  (let [shipped @sut/tool-policy
+        perm    (partial policy/opencode-permission shipped)]
+    (testing "everything is denied first, so OpenCode's last-match rule lets the allows below win"
+      (doseq [role [:planner :implementer :tester :reviewer :releaser :unlisted]]
+        (is (= ["*" "deny"] (first (perm role))) (str role))
+        (is (= "deny" (get (perm role) "external_directory")) (str role))))
+    (testing "the reviewer reads through OpenCode's own tools and cannot edit or run commands"
+      (is (= "allow" (get (perm :reviewer) "read")))
+      (is (= "allow" (get (perm :reviewer) "grep")))
+      (is (not-any? (set (keys (perm :reviewer))) ["edit" "bash" "webfetch"])))
+    (testing "the implementer edits and runs bash, with agent config and remote commands denied after the allow"
+      (let [edit (get (perm :implementer) "edit")
+            bash (get (perm :implementer) "bash")]
+        (is (= ["*" "allow"] (first edit)))
+        (is (= "deny" (get edit ".claude/settings.json")))
+        (is (= "deny" (get edit ".git/*")))
+        (is (= ["*" "allow"] (first bash)))
+        (is (= "deny" (get bash "git push*")))
+        (is (= "deny" (get bash "curl *")))))
+    (testing "the .git pointer file and nested .git directories are not editable"
+      (doseq [path [".git" ".git/*" "*/.git" "*/.git/*"]]
+        (is (= "deny" (get-in (perm :implementer) ["edit" path])) path)))
+    (testing "rule order survives serialization at the size the implementer's block has"
+      (let [json (json/generate-string (perm :implementer))]
+        (is (str/starts-with? json "{\"*\":\"deny\",\"external_directory\":\"deny\","))
+        (is (str/includes? json "\"edit\":{\"*\":\"allow\",\".git\":\"deny\","))
+        (is (str/includes? json "\"bash\":{\"*\":\"allow\",\"curl *\":\"deny\","))))
+    (testing "only the planner gets web access, and an unlisted role gets nothing"
+      (is (= "allow" (get (perm :planner) "webfetch")))
+      (is (nil? (get (perm :implementer) "webfetch")))
+      (is (= 2 (count (perm :unlisted)))))))
 
 (deftest ^{:stratum 0} every-protected-path-is-a-managed-path-test
   (testing "each protected pattern matches a managed config path, so a link to it is followed"

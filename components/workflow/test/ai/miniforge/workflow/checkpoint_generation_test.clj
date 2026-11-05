@@ -8,6 +8,8 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.boundary.checkpoint-file :as checkpoint-file]
             [ai.miniforge.workflow.checkpoint-store :as store]
+            [ai.miniforge.workflow.checkpoint-store-gc :as gc]
+            [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
             [ai.miniforge.workflow.checkpoint-store-paths :as paths]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.interface :as workflow]
@@ -57,6 +59,23 @@
       (is (every? #(< % manifest-fill) generation-syncs))
       (is (= [:sync run-dir] (last @events))))))
 
+(defn- ^{:stratum 0} verify-write-before-delete [root]
+  (fs/with-temp-dir [events-dir {:prefix "generation-events-"}]
+    (let [ctx (fixture/plan-completed-context root {})
+          id (:execution/id ctx)
+          old (- (System/currentTimeMillis) (* 90 24 60 60 1000))
+          delete-run! @#'gc/delete-run!
+          _ (store/persist-execution-state! ctx)
+          _ (doseq [f (reverse (file-seq (fs/file root (str id))))]
+              (.setLastModified ^java.io.File f old))
+          ;; The GC has classified the run as expired; a write lands first.
+          result (with-redefs-fn {#'gc/delete-run! (fn [& args]
+                                                     (store/persist-execution-state! ctx)
+                                                     (apply delete-run! args))}
+                   #(workflow/gc-checkpoints! {:checkpoint/root root :events-dir (fs/file events-dir)}))]
+      (is (= [id] (get-in result [:kept :recent])))
+      (is (map? (workflow/load-checkpoint-data id {:checkpoint/root root}))))))
+
 (defn- ^{:stratum 0} verify-pending-interrupt [root]
   (let [written (do (.interrupt (Thread/currentThread))
                     (store/persist-execution-state! (fixture/plan-completed-context root {})))
@@ -64,6 +83,19 @@
         restored? (Thread/interrupted)]
     (is (not (anomaly/anomaly? written)) "a pending interrupt does not fail the write")
     (is restored? "and is still pending after it")))
+
+(defn- ^{:stratum 0} verify-spec-path-waits-for-the-lock [root]
+  (let [ctx (fixture/plan-completed-context root {})
+        id (:execution/id ctx)
+        entered (promise)
+        release (promise)]
+    (store/persist-execution-state! ctx)
+    (future (checkpoint-lock/with-run-lock root id (fn [] (deliver entered true) @release)))
+    (deref entered 5000 nil)
+    (let [recording (future (store/record-spec-path! id "/specs/done/spec.md" {:checkpoint/root root}))]
+      (is (= ::waiting (deref recording 200 ::waiting)))
+      (deliver release true)
+      (is (string? (deref recording 5000 nil))))))
 
 (defn- ^{:stratum 0} verify-unsynced-run-dir-prunes-nothing [root]
   (let [ctx (fixture/plan-completed-context root {})
@@ -77,6 +109,97 @@
                  (store/persist-execution-state! (assoc ctx :execution/redirect-count 2)))]
     (is (anomaly/anomaly? failed))
     (is (= before (set (map str (fs/list-dir generations)))) "nothing pruned, nothing new")))
+
+(defn- ^{:stratum 0} verify-lock-wait-interrupt-kept [root]
+  (let [written (with-redefs [checkpoint-lock/with-run-lock
+                              (fn [& _] (anomaly/exception-anomaly :unavailable "interrupted while waiting"
+                                                                   (InterruptedException.)))]
+                  (store/persist-execution-state! (fixture/plan-completed-context root {})))
+        interrupted? (Thread/interrupted)]
+    (is (anomaly/anomaly? written))
+    (is interrupted? "the interrupt the lock wait consumed is set again")))
+
+(deftest ^{:stratum 0} recording-the-spec-path-holds-off-a-pending-interrupt
+  (fixture/call-with-temp-checkpoint-root
+   (fn [root]
+     (let [ctx (fixture/plan-completed-context root {})
+           _ (store/persist-execution-state! ctx)
+           recorded (do (.interrupt (Thread/currentThread))
+                        (try (store/record-spec-path! (:execution/id ctx) "/specs/done/spec.md"
+                                                      {:checkpoint/root root})
+                             (catch InterruptedException e e)))
+           restored? (Thread/interrupted)]
+       (is (string? recorded) "the lock wait does not fail on it")
+       (is restored? "and it is still pending after")))))
+
+(deftest ^{:stratum 0} recording-the-spec-path-keeps-the-root-it-locked
+  ;; The root's alias is retargeted while the recorder waits for the lock:
+  ;; the manifest it updates is under the root it locked.
+  (fixture/call-with-posix-checkpoint-root
+   (fn [root]
+     (let [first-root (fs/create-dirs (fs/path root "first"))
+           second-root (fs/create-dirs (fs/path root "second"))
+           alias (fs/create-sym-link (fs/path root "alias") first-root)
+           ctx (fixture/plan-completed-context (str first-root) {})
+           id (:execution/id ctx)
+           _ (store/persist-execution-state! ctx)
+           _ (fs/copy-tree (fs/path first-root (str id)) (fs/path second-root (str id)))
+           entered (promise)
+           release (promise)
+           locking (promise)
+           with-run-lock checkpoint-lock/with-run-lock
+           spec-of #(:workflow/spec-path (edn/read-string (slurp (paths/manifest-path % id))))]
+       (future (with-run-lock (str (fs/real-path first-root)) id
+                 (fn [] (deliver entered true) @release)))
+       (deref entered 5000 nil)
+       ;; The alias is retargeted once the recorder has resolved its root and
+       ;; asked for the lock, which the holder above keeps it waiting for.
+       (with-redefs [checkpoint-lock/with-run-lock (fn [lock-root run-id f]
+                                                     (deliver locking lock-root)
+                                                     (with-run-lock lock-root run-id f))]
+         (let [recording (future (store/record-spec-path! id "/specs/done/spec.md" {:checkpoint/root (str alias)}))]
+           (is (= (str (fs/real-path first-root)) (deref locking 5000 nil)))
+           (fs/delete alias)
+           (fs/create-sym-link alias second-root)
+           (deliver release true)
+           (deref recording 5000 nil)))
+       (is (= "/specs/done/spec.md" (spec-of (str first-root))))
+       (is (not= "/specs/done/spec.md" (spec-of (str second-root))))))))
+
+(deftest ^{:stratum 0} recording-the-spec-path-checks-the-root-as-given
+  ;; An alias in a directory others can write is refused, as a checkpoint
+  ;; write refuses it, though the directory it points to is private.
+  (fixture/call-with-posix-checkpoint-root
+   (fn [root]
+     (let [target (fs/create-dirs (fs/path root "private"))
+           shared (fs/create-dirs (fs/path root "shared"))
+           alias (fs/create-sym-link (fs/path shared "alias") target)
+           ctx (fixture/plan-completed-context (str target) {})
+           id (:execution/id ctx)]
+       (store/persist-execution-state! ctx)
+       (fs/set-posix-file-permissions shared "rwxrwxrwx")
+       (is (anomaly/anomaly? (store/record-spec-path! id "/specs/done/spec.md" {:checkpoint/root (str alias)})))
+       (is (not= "/specs/done/spec.md"
+                 (:workflow/spec-path (edn/read-string (slurp (paths/manifest-path (str target) id))))))))))
+
+(deftest ^{:stratum 0} recording-the-spec-path-reports-lock-failures
+  (fixture/call-with-temp-checkpoint-root
+   (fn [root]
+     (let [ctx (fixture/plan-completed-context root {})
+           id (:execution/id ctx)
+           record! #(store/record-spec-path! id "/specs/done/spec.md" {:checkpoint/root root})]
+       (store/persist-execution-state! ctx)
+       (testing "a lock that stays busy is an anomaly, not a silent skip"
+         (with-redefs [checkpoint-lock/with-run-lock (fn [& _] (anomaly/anomaly :unavailable "busy" {}))]
+           (is (anomaly/anomaly? (record!)))))
+       (testing "an interrupt the lock wait consumed is set again"
+         (let [recorded (with-redefs [checkpoint-lock/with-run-lock
+                                      (fn [& _] (anomaly/exception-anomaly :unavailable "interrupted"
+                                                                           (InterruptedException.)))]
+                          (record!))
+               interrupted? (Thread/interrupted)]
+           (is (anomaly/anomaly? recorded))
+           (is interrupted?)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -147,8 +270,14 @@
         (is (= {:status :completed :attempt 2}
                (get-in (workflow/load-checkpoint-data id {:checkpoint/root root}) [:phase-results :plan])))))))
 
+(deftest ^{:stratum 1} a-write-between-gc-classification-and-delete-keeps-the-run
+  (fixture/call-with-temp-checkpoint-root verify-write-before-delete))
+
 (deftest ^{:stratum 1} a-pending-interrupt-is-held-off-and-restored
   (fixture/call-with-temp-checkpoint-root verify-pending-interrupt))
+
+(deftest ^{:stratum 1} recording-the-spec-path-waits-for-the-run-lock
+  (fixture/call-with-temp-checkpoint-root verify-spec-path-waits-for-the-lock))
 
 (defn- ^{:stratum 1} verify-unloadable-phase-rewritten [root]
   (let [planned (fixture/plan-completed-context root {})
@@ -164,6 +293,9 @@
 
 (deftest ^{:stratum 1} an-unforced-run-directory-stops-the-write-before-pruning
   (fixture/call-with-temp-checkpoint-root verify-unsynced-run-dir-prunes-nothing))
+
+(deftest ^{:stratum 1} an-interrupt-the-lock-wait-consumed-is-kept
+  (fixture/call-with-temp-checkpoint-root verify-lock-wait-interrupt-kept))
 
 ;------------------------------------------------------------------------------ Layer 2
 

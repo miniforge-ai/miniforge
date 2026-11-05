@@ -8,6 +8,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} find-cause
+  "Find the first cause satisfying predicate; tolerate cycles and nil. Args: [predicate throwable]."
+  critical/find-cause)
+
 (def ^{:stratum 0} fatal-cause
   "Find Error or InterruptedException in a cause chain; tolerate cycles and nil."
   critical/cause)
