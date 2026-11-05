@@ -39,6 +39,30 @@
    (SHA-256 repositories). A branch name, a range or any other ref fails it."
   #"[0-9a-f]{7,64}")
 
+(def ^{:stratum 0} ^:private resume-range-pattern
+  "A range `X...HEAD`, which implement records for a resumed workspace that
+   had no recorded task base (`implement/base-ref-candidates`): the task's
+   work is what HEAD holds beyond its merge base with X. Group 1 is X."
+  #"(.+)\.\.\.HEAD")
+
+(defn- ^{:stratum 0} merge-base-sha
+  "The commit a `ref...HEAD` range measures from: `git merge-base ref HEAD`,
+   run with `run` (see release-scan). nil when `ref` names no commit here
+   or shares no history with HEAD, so the next base is tried; a
+   `:release/git-status-failed` anomaly when git fails."
+  [run root-path ref]
+  (let [verified (run ["rev-parse" "--verify" "--quiet" (str ref "^{commit}")])]
+    (cond
+      (release-scan/missing-commit? verified) nil
+      (:failure verified) (release-scan/git-status-failed root-path (:failure verified))
+      :else
+      (let [{:keys [exit out failure]} (run ["merge-base" ref "HEAD"])]
+        (cond
+          ;; exit 1 with no output: the two share no history.
+          (and (= 1 exit) (str/blank? out)) nil
+          failure (release-scan/git-status-failed root-path failure)
+          :else (str/trim out))))))
+
 (defn- ^{:stratum 0} porcelain-scan-entry
   "A release-scan entry for one `git status` [status path] pair: no mode,
    so release-scan reads it as a file unless it was deleted."
@@ -87,21 +111,52 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} release-base-shas
-  "The exact commits the task branch is measured from: the shas among the
-   task base refs implement recorded (checkpointed, so a resumed run
-   restores the first attempt's base, which its own environment's base is
-   already past), then the environment's base commit.
+(defn- ^{:stratum 1} release-bases
+  "Where the task branch is measured from, in order: the task base refs
+   implement recorded (checkpointed, so a resumed run restores the first
+   attempt's), then, on a first attempt, the environment's base commit. A
+   commit sha is used as is, `{:sha s}`; an `X...HEAD` range is its merge
+   base with HEAD, `{:merge-base X}`.
 
-   Commits only, never a branch name, a range, or the commit the CLI
-   started on: `git diff <ref>` compares the working tree with the ref
-   itself, so a ref behind the task's real base would count upstream
-   changes as this run's work."
+   A resumed environment's base commit is the checkpoint it restored,
+   which already holds the run's earlier work, so it is not a base: not
+   as the environment's, and not as the one commit among the refs a
+   resume recorded (they carry `X...HEAD` ranges; that commit is the
+   resumed environment's). Measuring from it would find nothing and skip
+   the release.
+
+   Never a branch name or the commit the CLI started on by itself: `git
+   diff <ref>` compares the working tree with the ref itself, so a ref
+   behind the task's real base would count upstream changes as this run's
+   work."
   [ctx]
-  (into []
-        (comp (filter #(and (string? %) (re-matches commit-sha-pattern %))) (distinct))
-        (concat (task-base/recorded-refs ctx)
-                [(get-in ctx [:execution/environment-metadata :base-sha])])))
+  (let [recorded     (filter string? (task-base/recorded-refs ctx))
+        resumed?     (some? (get-in ctx [:execution/opts :resume-workspace]))
+        base-sha     (get-in ctx [:execution/environment-metadata :base-sha])
+        from-resume? (boolean (some #(re-matches resume-range-pattern %) recorded))]
+    (into []
+          (comp (keep (fn [ref]
+                        (if-let [[_ left] (re-matches resume-range-pattern ref)]
+                          {:merge-base left}
+                          (when (and (not from-resume?) (re-matches commit-sha-pattern ref))
+                            {:sha ref}))))
+                (distinct))
+          (concat recorded (when (and (not resumed?) (string? base-sha)) [base-sha])))))
+
+(defn- ^{:stratum 1} base-shas
+  "The commits `bases` (see release-bases) name in this repository, in
+   order: a sha as is, a merge base looked up with `run`; a base that
+   names no commit here is left out. The first failed lookup's
+   `:release/git-status-failed` anomaly instead when git fails."
+  [run root-path bases]
+  (reduce (fn [shas {:keys [sha merge-base]}]
+            (let [resolved (if merge-base (merge-base-sha run root-path merge-base) sha)]
+              (cond
+                (anomaly/anomaly? resolved) (reduced resolved)
+                (nil? resolved)             shas
+                :else                       (conj shas resolved))))
+          []
+          bases))
 
 (defn- ^{:stratum 1} git-dirty-files
   "Scan git working tree for new/modified/deleted files; return as :code/files entries.
@@ -196,7 +251,10 @@
    governed run (`capsule`, from capsule-target), else on the host."
   [ctx worktree-path capsule]
   (let [{:keys [run read root]} (scan-io worktree-path capsule)
-        entries                 (release-scan/first-base-diff run root (release-base-shas ctx))]
+        shas                    (base-shas run root (release-bases ctx))
+        entries                 (if (anomaly/anomaly? shas)
+                                  shas
+                                  (release-scan/first-base-diff run root shas))]
     (if (anomaly/anomaly? entries)
       entries
       (release-scan/read-entries read root entries))))

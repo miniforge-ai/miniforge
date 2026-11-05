@@ -184,7 +184,7 @@
     \D :delete
     :modify))
 
-(defn- ^{:stratum 0} missing-commit?
+(defn ^{:stratum 0} missing-commit?
   "True when a `rev-parse --verify --quiet` result says the ref names no
    commit here: it exits 1 and prints nothing. An exit 1 that printed
    something (a capsule whose container is gone also exits 1) is a
