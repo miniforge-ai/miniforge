@@ -360,3 +360,25 @@
             "no process from the tree is left running")
         (finally
           (kill-pids! (vals @pids)))))))
+
+(deftest ^{:stratum 2} non-streaming-call-sees-the-cancel-test
+  (testing "a non-streaming CLI call (the capture exec-fn) made under a
+            cancelled run is killed with its tree instead of running out
+            its ten-minute wait"
+    (let [token   (unique-sleep-token)
+          outcome (promise)
+          thread  (Thread. ^Runnable
+                           #(deliver outcome
+                                     (llm/call-with-cancel-signal
+                                      (constantly true)
+                                      (fn [] (impl/default-exec-fn (token-sleep-cmd token))))))]
+      (.setDaemon thread true)
+      (.start thread)
+      (try
+        (let [result (deref outcome return-timeout-ms nil)]
+          (is (some? result) "the call returns instead of waiting out its timeout")
+          (is (= -1 (:exit result))))
+        (is (= [] (token-survivors token))
+            "neither the shell nor its child is left running")
+        (finally
+          (kill-pids! (token-pids token)))))))
