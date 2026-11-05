@@ -19,10 +19,12 @@
   "Application flow for one granted, transacted Kubernetes deployment."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.phase-deployment.deploy-authority :as authority]
    [ai.miniforge.phase-deployment.deploy-outcome :as outcome]
    [ai.miniforge.phase-deployment.deploy-transaction :as transaction]
+   [ai.miniforge.phase-deployment.evidence :as evidence]
    [ai.miniforge.phase-deployment.messages :as msg]
    [ai.miniforge.schema.interface :as schema]
    [clojure.string :as str])
@@ -46,6 +48,15 @@
   [state step]
   (if (:flow/failure state) state (step state)))
 
+(defn- ^{:stratum 0} effect-basis
+  "What fixes this deploy's effect id: run, exact target, and the digest
+   of the rendered manifests, so a changed manifest is a new effect."
+  [state]
+  (let [{:keys [kustomize-dir context namespace deployment-name]} (:target state)]
+    [:effect/deploy (get-in state [:context :execution/id])
+     kustomize-dir context namespace deployment-name
+     (evidence/sha256 (:rendered-yaml state))]))
+
 (def ^{:stratum 0} unclaimed-states
   "Transaction states in which the deploy cannot have reached the cluster."
   #{:proposed :failed})
@@ -65,6 +76,22 @@
     (if (schema/failed? result)
       (fail state :preflight (failure-detail result :deploy/context-unavailable))
       (assoc state :target (:target result)))))
+
+(defn- ^{:stratum 1} open-attempt
+  "Take the next free attempt at this run, target and manifest digest as
+   the effect id. Ids repeat across processes, so two racing for one
+   attempt collide on its record. Re-applying the same manifests is
+   idempotent, so a retry applies again rather than replaying an earlier
+   record. A context with no run gets a fresh id; authority then refuses
+   it."
+  [state]
+  (let [effect-id (if (uuid? (get-in state [:context :execution/id]))
+                    (fx/free-attempt-id (transaction/store-dir (:context state))
+                                        (effect-basis state))
+                    (random-uuid))]
+    (if (anomaly/anomaly? effect-id)
+      (fail state :proposal (:anomaly/message effect-id))
+      (assoc state :effect-id effect-id))))
 
 (defn- ^{:stratum 1} render-manifests
   [state]
@@ -111,7 +138,7 @@
   (let [preflight {:rendered-yaml (:rendered-yaml state)
                    :server-dry-run (:server-dry-run state)
                    :app-label (get-in state [:target :app-label])}
-        prepared (authority/prepare (:context state) (random-uuid)
+        prepared (authority/prepare (:context state) (:effect-id state)
                                     (:target state) preflight (:now state))
         {:grant/keys [id revocation]} (:anomaly/data prepared)]
     (if (anomaly/anomaly? prepared)
@@ -181,8 +208,9 @@
 
 (defn ^{:stratum 2} transact!
   "Resolve, render, check manifest policy, preflight, authorize, persist,
-   commit, and reconcile one deploy. A deploy that ends before it could
-   reach the cluster revokes its grant."
+   commit, and reconcile one deploy under the next free attempt id for its
+   run, target and manifests. A deploy that ends before it could reach
+   the cluster revokes its grant."
   [context deploy-config operations ^Instant now]
   (-> {:context context
        :deploy-config deploy-config
@@ -190,6 +218,7 @@
        :now now}
       (advance resolve-target)
       (advance render-manifests)
+      (advance open-attempt)
       (advance check-manifest-policy)
       (advance server-dry-run)
       (advance prepare-authority)

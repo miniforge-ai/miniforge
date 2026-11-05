@@ -187,16 +187,19 @@
 
 ;; Merge execution
 (defn ^{:stratum 1} read-pr-head
-  "Read the full commit id at the pull request's head from GitHub."
+  "Read the pull request's head commit, state and merge commit from
+   GitHub: `{:pr/head-sha :pr/state :merge/sha}`."
   [worktree-path pr-number]
   (dag/when-let-ok
    [result (run-gh-command
-            ["gh" "pr" "view" (str pr-number) "--json" "headRefOid"
-             "--jq" ".headRefOid"]
+            ["gh" "pr" "view" (str pr-number) "--json" "headRefOid,state,mergeCommit"]
             worktree-path)]
-    (let [sha (:output (:data result))]
+    (let [view (parse-gh-json (:output (:data result)))
+          sha (:headRefOid view)]
       (if (commit-id? sha)
-        (dag/ok {:pr/head-sha sha})
+        (dag/ok {:pr/head-sha sha
+                 :pr/state (:state view)
+                 :merge/sha (get-in view [:mergeCommit :oid])})
         (dag/err :head-unavailable (messages/t :merge/head-unavailable))))))
 
 (defn ^{:stratum 1} merge-pr!

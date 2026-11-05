@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.effect-transaction.interface :as fx]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.pr-lifecycle.merge-authority :as authority]
    [ai.miniforge.pr-lifecycle.merge-transaction :as transaction]
@@ -56,6 +57,18 @@
            (cond-> data
              (anomaly/anomaly? revoked) (assoc :grant/revocation-failure revoked))))
 
+(defn- ^{:stratum 0} attempt-id
+  "This attempt's effect id: the next free attempt at this run and exact
+   target. Ids repeat across processes, so two racing for one attempt
+   collide on its record. A context with no run gets a fresh id;
+   authority then refuses it."
+  [context target]
+  (if (uuid? (:run-id context))
+    (fx/free-attempt-id (transaction/store-dir context)
+                        [:effect/merge (:run-id context) (:pr/repo target)
+                         (:pr/number target) (:pr/head-sha target)])
+    (random-uuid)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} commit-authority!
@@ -88,14 +101,21 @@
 (defn ^{:stratum 2} transact!
   "Prepare and register authority, then durably propose and commit an
    allowed merge of `target` (`:pr/repo`, `:pr/number`, `:pr/head-sha`).
-   Every attempt that ends before a commit revokes its grant."
+   The effect id is the next free attempt at this run and target. Every
+   attempt that ends before a commit revokes its grant."
   [operations worktree-path target readiness policy context ^Instant now]
   (let [pr-number (:pr/number target)
         run-gh (partial provider-command operations worktree-path)
         enable! (partial enable-merge operations worktree-path pr-number policy)
-        prepared (authority/prepare context (random-uuid) target readiness
-                                    (:method policy) now)]
+        effect-id (attempt-id context target)
+        prepared (when-not (anomaly/anomaly? effect-id)
+                   (authority/prepare context effect-id target readiness
+                                      (:method policy) now))]
     (cond
+      (anomaly/anomaly? effect-id)
+      (dag/err :merge-proposal-failed (messages/t :merge/proposal-failed)
+               {:proposal/result effect-id})
+
       (anomaly/anomaly? prepared)
       (dag/err :merge-authority-unavailable
                (messages/t :merge/authority-unavailable)

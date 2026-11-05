@@ -74,6 +74,16 @@
     (outcome/settlement-result operations worktree-path pr-number policy context
                                (:data transaction-result))))
 
+(defn- ^{:stratum 0} settled-pr
+  "GitHub's answer for a PR that can no longer merge (merged, or closed
+   without merging), or nil. Asked before readiness: a PR that already
+   merged no longer reads as ready, and GitHub's state, not an earlier
+   attempt's record, says whether the merge happened."
+  [operations worktree-path pr-number policy context head-result]
+  (when (dag/ok? head-result)
+    (outcome/terminal-result operations worktree-path pr-number policy context
+                             (:data head-result))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} rebase-stale!
@@ -98,13 +108,21 @@
               {:message (messages/system-t :merge/attempting)
                :data {:pr-number pr-number}}))
   (let [head-result ((:read-head operations) worktree-path pr-number)
-        readiness-result ((:evaluate-readiness operations)
-                          worktree-path pr-number policy)
+        prior (settled-pr operations worktree-path pr-number policy context
+                          head-result)
+        readiness-result (when-not prior
+                           ((:evaluate-readiness operations)
+                            worktree-path pr-number policy))
         stale? (some #{:branch-not-up-to-date}
                      (:blocking readiness-result))]
-    (if (:ready? readiness-result)
+    (cond
+      prior prior
+
+      (:ready? readiness-result)
       (merge-ready! operations worktree-path pr-number policy context
                     readiness-result head-result)
+
+      :else
       (let [branch-raw (get-in (:checks readiness-result) [:branch :data :raw])
             conflict-result (when stale?
                               (attempt-conflict-resolution!
