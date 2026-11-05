@@ -29,7 +29,8 @@
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.phase.interface.task-base :as task-base]
             [ai.miniforge.phase-software-factory.messages :as messages]
-            [ai.miniforge.phase-software-factory.release-scan :as release-scan]))
+            [ai.miniforge.phase-software-factory.release-scan :as release-scan]
+            [ai.miniforge.release-executor.interface :as release-executor]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -117,11 +118,16 @@
    wraps a path with a space or non-ASCII bytes in C-style quotes, which
    names no file on disk, and the file was left out of the release.
 
+   Runs git with `release-executor/local-git-env`: a git hook exports
+   GIT_DIR and GIT_WORK_TREE, and a git that inherits them scans the
+   hook's repository instead of `root-path`.
+
    Returns a `:release/git-status-failed` anomaly when the scan cannot
    run, never `[]` (which release would report as zero files)."
   [root-path]
   (try
-    (let [{:keys [exit out err]} (shell/sh "git" "status" "--porcelain" "-uall" "-z" :dir root-path)]
+    (let [{:keys [exit out err]} (shell/sh "git" "status" "--porcelain" "-uall" "-z" :dir root-path
+                                             :env (release-executor/local-git-env))]
       (if-let [failure (release-scan/command-failure "git status --porcelain -uall -z" exit err nil)]
         (release-scan/git-status-failed root-path failure)
         (->> (porcelain-z-entries out)

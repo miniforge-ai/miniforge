@@ -66,7 +66,8 @@
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.phase.interface.boundary-commit :as boundary-commit]
-            [ai.miniforge.phase-software-factory.messages :as messages]))
+            [ai.miniforge.phase-software-factory.messages :as messages]
+            [ai.miniforge.release-executor.interface :as release-executor]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -199,12 +200,17 @@
   (if (re-matches shell-safe-arg arg) arg (agent/shell-quote arg)))
 
 (defn ^{:stratum 1} host-runner
-  "Run git with `args` in `root-path` on the host: {:exit :out :err :failure}."
+  "Run git with `args` in `root-path` on the host: {:exit :out :err :failure}.
+   git runs with `release-executor/local-git-env`: a git hook exports
+   GIT_DIR and GIT_WORK_TREE, and a git that inherits them acts on the
+   hook's repository instead of `root-path`."
   [root-path]
   (fn [args]
     (let [command (str/join " " (cons "git" args))]
       (try
-        (let [{:keys [exit out err]} (apply shell/sh "git" (concat args [:dir root-path]))]
+        (let [{:keys [exit out err]} (apply shell/sh "git"
+                                            (concat args [:dir root-path
+                                                          :env (release-executor/local-git-env)]))]
           {:exit exit :out out :err err :failure (command-failure command exit err nil)})
         (catch Exception e
           {:failure (exception-failure e {:command command})})))))
