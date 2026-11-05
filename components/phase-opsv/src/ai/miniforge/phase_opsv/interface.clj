@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-opsv.interface
-  "Public OPSV application transformations and adapter port."
+  "API surface class 1: internal EDN OPSV application transformations and adapter port."
   (:require
    [ai.miniforge.phase-opsv.actuation :as actuation]
    [ai.miniforge.phase-opsv.boundary.kubernetes-snapshot :as kubernetes-snapshot]

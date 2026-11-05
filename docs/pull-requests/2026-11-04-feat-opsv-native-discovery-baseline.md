@@ -10,6 +10,7 @@
 
 Connect complete native Kubernetes capture and canonical environment projection
 to CPU/backlog discovery without executing experiments or changing clusters.
+API surface class 1: internal EDN, trusted-process composition; no external wire API.
 
 ## Motivation
 
@@ -53,7 +54,12 @@ Verified at `fcb066594bc44924083f5ac3f44b3a2a460497a0`:
 - Eight new fault injections detected with zero test errors; all 14 existing
   producer-privacy and 19 native-reporting fault injections also detected.
 - Committed scans: zero violations/304 component files and zero/15 project
-  OPSV files. PR: 282 reportable lines; no size exception.
+  OPSV files. Original implementation: 282 reportable lines; no size exception.
+
+Final standards review made the internal API class explicit in the shared
+interface namespace and PR description (rule 332). This documentation-only
+source change leaves the validated implementation and test forms unchanged.
+Current-head review and CI must pass again before merge.
 
 Fixtures use actual native capture and decoded metric producers, with simulated
 transport only. Unrelated local executor lifecycle suites can mutate configured
