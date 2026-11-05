@@ -44,7 +44,6 @@
   :release/git-status-failed            "Release could not list changed files in {worktree-path}: {detail}"
   :release/path-outside-worktree        "{path} resolves outside the worktree"
   :release/command-exited               "{command} exited {exit}"
-  :release/git-command-failed           "{command} exited {exit}"
   :release/skipped-already-implemented  "Release skipped — task was already implemented"
   :release/changes-description          "Changes from implementation"
   :release/phase-failed                 "Release phase failed"

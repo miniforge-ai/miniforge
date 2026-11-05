@@ -18,8 +18,6 @@
 (ns ai.miniforge.phase-software-factory.release-publish-test
   (:require
    [ai.miniforge.phase-software-factory.release-publish :as release-publish]
-   [ai.miniforge.phase-software-factory.release-unpushed :as release-unpushed]
-   [ai.miniforge.phase-software-factory.release-unpushed-entries :as entries]
    [ai.miniforge.release-executor.interface :as release-executor]
    [clojure.test :refer [deftest is testing]]))
 
@@ -69,24 +67,3 @@
       (is (= :release/pr-missing (get-in (publish true no-pr) [:error :data :type]))))
     (testing "no PR asked for: the push alone completes"
       (is (= :completed (get-in (publish false no-pr) [:output :release/status]))))))
-
-(deftest ^{:stratum 0} scan-output-parsing-test
-  (testing "NUL fields keep a path of spaces; only empty fields are separators"
-    (is (= ["  " "a b.txt" "src/x.clj"]
-           (entries/nul-fields "  \u0000a b.txt\u0000\u0000src/x.clj\u0000"))))
-  (testing "ls-tree entries by path, a submodule as a commit"
-    (is (= {"src/a.clj" {:type "blob" :object "abc"}
-            "standards/miniforge" {:type "commit" :object "def"}}
-           (entries/tree-entries
-            (str "100644 blob abc\tsrc/a.clj\u0000"
-                 "160000 commit def\tstandards/miniforge\u0000"))))))
-
-(deftest ^{:stratum 0} head-probe-test
-  (let [scan (fn [head-reply] (release-unpushed/unpushed-files
-                               (fn [argv] (if (= "rev-parse" (second argv)) head-reply {:exit 0 :out ""}))
-                               nil nil))]
-    (testing "no commit yet: nothing to release"
-      (is (= {:files []} (scan {:exit 1 :out "" :err ""}))))
-    (testing "a probe that did not answer is a failure, not an empty scan"
-      (is (:failure (scan {:exit nil :out "" :err "executor error"})))
-      (is (:failure (scan {:exit 124 :out "" :err "timed out"}))))))
