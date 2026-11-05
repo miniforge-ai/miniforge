@@ -34,6 +34,8 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-outside :as kubernetes-outside]
    [ai.miniforge.phase-opsv.boundary.kubernetes-controller-configuration :as controller-configuration]
    [ai.miniforge.phase-opsv.boundary.kubernetes-environment-fingerprint :as native-fingerprint]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as native-preparation]
+   [ai.miniforge.phase-opsv.kubernetes-preparation-schema :as native-preparation-schema]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -175,6 +177,18 @@
    Raw values may be sensitive: compare/hash originals before protecting reporting copies for storage.
    This read-only, bounded multi-read is not atomic, a verification verdict or execution authority."
   kubernetes-client/observe-verification!)
+
+(def ^{:stratum 0} KubernetesVerificationPreparationDeclaration
+  "Independent workflow identity and native Deployment target for a preparation callback."
+  native-preparation-schema/Declaration)
+
+(def ^{:stratum 0} prepare-kubernetes-verification!
+  "Correlate the host request and pin before bounded read-only capture and canonical projection.
+   Declaration binds workflow, runtime target and Deployment name.
+   Requires explicit candidate/recovery membership; bounds come from recovery.
+   Returns original sensitive observations for host comparison and protected N6 retention.
+   No storage, candidate/load effects, baseline adoption, health verdict or execution authority."
+  native-preparation/prepare!)
 
 (def ^{:stratum 0} KubernetesVerificationObservation
   "Raw bounded verification-capture shape, not a membership, health or execution proof."
