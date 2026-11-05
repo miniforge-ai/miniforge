@@ -56,10 +56,12 @@
       (release-scan/missing-commit? verified) nil
       (:failure verified) (release-scan/git-status-failed root-path (:failure verified))
       :else
-      (let [{:keys [exit out failure]} (run ["merge-base" ref "HEAD"])]
+      (let [{:keys [out failure] :as based} (run ["merge-base" ref "HEAD"])]
         (cond
-          ;; exit 1 with no output: the two share no history.
-          (and (= 1 exit) (str/blank? out)) nil
+          ;; exit 1 printing nothing, on stdout or stderr: the two share no
+          ;; history. An exit 1 with stderr (a capsule whose container is
+          ;; gone) is a failure, not unrelated history.
+          (release-scan/missing-commit? based) nil
           failure (release-scan/git-status-failed root-path failure)
           :else (str/trim out))))))
 

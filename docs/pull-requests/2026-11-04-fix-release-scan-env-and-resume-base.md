@@ -48,7 +48,11 @@ present on `main`:
    `:release/git-status-failed` anomaly. `committed-since-base` diffs from the
    first that resolves, as before.
 4. `release-scan/missing-commit?` becomes public, so the merge-base lookup
-   reads a missing ref the same way `base-diff` does.
+   reads a missing ref the same way `base-diff` does. It also decides "no
+   shared history" for `git merge-base`: only an exit 1 that printed nothing
+   on stdout or stderr. An exit 1 with stderr (a capsule whose container is
+   gone) is the scan's `:release/git-status-failed` anomaly, not unrelated
+   history, so the release cannot skip committed work on it (Copilot review).
 
 ## Testing Plan
 
@@ -62,7 +66,10 @@ present on `main`:
    checkpoint) holds an earlier attempt's commit; the task base refs are
    `implement/base-ref-candidates`' real output for that resume. The release
    prepares `src/feature.clj` instead of skipping. On the base branch it
-   skips.
+   skips. `merge-base-error-is-a-failure-not-unrelated-history-test` runs
+   `merge-base-sha` with runner results built by `release-scan/command-failure`:
+   exit 1 with nothing printed is nil, exit 1 with stderr is the anomaly. The
+   second case fails on the code before the fix.
 3. The release, file-scan, committed-work and checking-commits tests, and the
    project tests that run the release phase.
 

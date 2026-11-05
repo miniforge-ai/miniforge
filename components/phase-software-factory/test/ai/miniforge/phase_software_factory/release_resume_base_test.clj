@@ -27,6 +27,8 @@
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-software-factory.implement :as implement]
    [ai.miniforge.phase-software-factory.release]
+   [ai.miniforge.phase-software-factory.release-scan :as release-scan]
+   [ai.miniforge.phase-software-factory.release-worktree :as release-worktree]
    [ai.miniforge.release-executor.interface :as release-executor]
    [babashka.fs :as fs]
    [clojure.java.io :as io]
@@ -80,7 +82,31 @@
       ((:enter (phase/get-phase-interceptor {:phase :release})) ctx)
       @seen)))
 
+(defn ^{:stratum 0} merge-base-runner
+  "A scan runner whose `rev-parse --verify` finds the ref and whose
+   `merge-base` exits 1 with `err`, shaped as `release-scan/host-runner`
+   returns it."
+  [err]
+  (fn [[subcommand :as args]]
+    (if (= "rev-parse" subcommand)
+      {:exit 0 :out "0123456789abcdef0123456789abcdef01234567\n" :err "" :failure nil}
+      {:exit    1
+       :out     ""
+       :err     err
+       :failure (release-scan/command-failure (str/join " " (cons "git" args)) 1 err nil)})))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} merge-base-error-is-a-failure-not-unrelated-history-test
+  (let [merge-base-sha #'release-worktree/merge-base-sha]
+    (testing "merge-base exits 1 printing nothing: no shared history, so the
+              next base is tried"
+      (is (nil? (merge-base-sha (merge-base-runner "") "/repo" "origin/main"))))
+    (testing "merge-base exits 1 with stderr (a capsule whose container is
+              gone): the scan fails instead of skipping committed work"
+      (let [result (merge-base-sha (merge-base-runner "Error: No such container: c1")
+                                   "/repo" "origin/main")]
+        (is (= :release/git-status-failed (get-in result [:anomaly/data :type])))))))
 
 (defn ^{:stratum 1} with-resumed-checkpoint
   "Call `f` with a clean worktree on branch task-restored whose HEAD (the
