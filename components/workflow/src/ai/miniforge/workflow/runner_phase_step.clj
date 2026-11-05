@@ -81,12 +81,13 @@
 (defn ^{:stratum 2} execute-phase
   "Execute one phase; persist workspace before applying retry or health policy."
   [pipeline context callbacks]
-  (let [phase-context (-> (exec/execute-phase-step pipeline context callbacks
-                                                 ctx/merge-metrics
-                                                 ctx/transition-to-completed
-                                                 ctx/transition-to-failed)
-                          (monitoring/clear-transient-state))
-        _ (env/persist-workspace-at-phase-boundary! context phase-context)
+  (let [stepped (-> (exec/execute-phase-step pipeline context callbacks
+                                           ctx/merge-metrics
+                                           ctx/transition-to-completed
+                                           ctx/transition-to-failed)
+                    (monitoring/clear-transient-state))
+        phase-context (->> (env/persist-workspace-at-phase-boundary! context stepped)
+                           (env/track-unpersisted context stepped))
         error-message (get-in phase-context
                               [:execution/phase-results
                                (:execution/current-phase phase-context)

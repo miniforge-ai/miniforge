@@ -686,7 +686,7 @@
                  (if host-mode?
                    (git/push-branch! worktree-path branch (:github-token state))
                    (sandbox/push-branch! executor environment-id branch
-                                         (gh-exec-opts state))))
+                                         (assoc (gh-exec-opts state) :git-credentials? true))))
           probe (fn [_]
                   (let [r (if host-mode?
                             (git/remote-branch-sha! worktree-path branch (:github-token state))
@@ -776,7 +776,7 @@
               (sandbox/exec! executor environment-id (str "git add " rel-path))
               (sandbox/exec! executor environment-id "git commit --amend --no-edit --no-verify")
               (sandbox/exec! executor environment-id "git push --force-with-lease"
-                             (gh-exec-opts state)))
+                             (assoc (gh-exec-opts state) :git-credentials? true)))
             (when logger
               (log/warn logger :release-executor :pr-doc-write-failed
                         {:message (:error write-r)}))))
@@ -946,7 +946,7 @@
                                                       "git commit --amend --no-edit --no-verify"))]
                         (if (and commit-r (result/succeeded? commit-r))
                           (sandbox/exec! executor environment-id "git push --force-with-lease"
-                                         (gh-exec-opts state))
+                                         (assoc (gh-exec-opts state) :git-credentials? true))
                           (or commit-r add-r))))]
                 (if (result/succeeded? publish-r)
                   (assoc state :pr-doc-path rel-path :pr-doc-content content)

@@ -35,6 +35,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.coerce.interface :as coerce]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.boundary.checkpoint-directory :as directory]
    [ai.miniforge.workflow.boundary.checkpoint-file :as checkpoint-file]
    [ai.miniforge.workflow.boundary.checkpoint-history :as history]
@@ -123,7 +124,7 @@
    (let [dir (checkpoint-paths/workflow-checkpoint-dir
               (checkpoint-paths/resolve-checkpoint-root opts)
               workflow-run-id)]
-     (boolean (and (fs/directory? dir) (seq (fs/list-dir dir)))))))
+     (directory/populated? dir))))
 
 (defn- ^{:stratum 0} pin-failure [workflow-run-id data e]
   (anomaly/exception-anomaly :unavailable
@@ -201,7 +202,8 @@
                    ;; datum, so a history consumer reads what a checkpoint
                    ;; consumer reads.
                    :phase/gate-errors (:phase/gate-errors phase-result)
-                   :phase/gate-failures (:phase/gate-failures phase-result)}]
+                   :phase/gate-failures (:phase/gate-failures phase-result)
+                   :phase/gate-warnings (:phase/gate-warnings phase-result)}]
         ;; Same instant normalization the checkpoint records get: gate
         ;; errors carry java.time.Instant values (policy-pack violations'
         ;; :timestamp), which pr-str would emit as #object[...] and make
@@ -485,12 +487,14 @@
                                            :workflow/phase-checkpoints (merge existing-paths phase-paths))
                            manifest-path (write-edn-atomically! manifest-path manifest)
                            ;; A failed initial pin must remain a failed checkpoint.
+                           location (es/checkpoint-location checkpoint-root (str run-dir))
                            pin (when (and (true? (get-in ctx [:execution/opts :checkpoint/pin?]))
                                           (not (fs/exists? (fs/path run-dir checkpoint-paths/pin-marker-filename))))
                                  (write-pin-marker! run-dir workflow-run-id))]
                        (if (anomaly/anomaly? pin)
                          pin
                          (cond-> {:checkpoint/root checkpoint-root
+                                  :checkpoint/location location
                                   :checkpoint/machine-snapshot-path snapshot-path
                                   :checkpoint/manifest-path manifest-path}
                            phase-path

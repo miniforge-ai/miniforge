@@ -25,11 +25,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # Public identifier for the read-only Miniforge CI GitHub App; credentials
-  # remain in MINIFORGE_CI_BOT_KEY.
-  MINIFORGE_CI_BOT_APP_ID: "3360143"
-
 jobs:
   structure:
     name: Structure
@@ -170,21 +165,6 @@ jobs:
         # to a full Polylith test sweep rather than failing or under-testing.
         with:
           fetch-depth: 0
-
-      - name: Generate workbench contract token
-        id: workbench-contract-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ env.MINIFORGE_CI_BOT_APP_ID }}
-          private-key: ${{ secrets.MINIFORGE_CI_BOT_KEY }}
-          owner: miniforge-ai
-          repositories: workbench-contract
-
-      - name: Configure workbench contract access
-        env:
-          WORKBENCH_CONTRACT_TOKEN: ${{ steps.workbench-contract-token.outputs.token }}
-        run: |
-          git config --global url."https://x-access-token:${WORKBENCH_CONTRACT_TOKEN}@github.com/miniforge-ai/workbench-contract.git".insteadOf "ssh://git@github.com/miniforge-ai/workbench-contract.git"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -411,21 +391,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Generate workbench contract token
-        id: workbench-contract-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ env.MINIFORGE_CI_BOT_APP_ID }}
-          private-key: ${{ secrets.MINIFORGE_CI_BOT_KEY }}
-          owner: miniforge-ai
-          repositories: workbench-contract
-
-      - name: Configure workbench contract access
-        env:
-          WORKBENCH_CONTRACT_TOKEN: ${{ steps.workbench-contract-token.outputs.token }}
-        run: |
-          git config --global url."https://x-access-token:${WORKBENCH_CONTRACT_TOKEN}@github.com/miniforge-ai/workbench-contract.git".insteadOf "ssh://git@github.com/miniforge-ai/workbench-contract.git"
 
       - name: Set up Java
         uses: actions/setup-java@v4

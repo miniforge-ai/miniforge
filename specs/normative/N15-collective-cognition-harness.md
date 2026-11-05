@@ -6,11 +6,12 @@
 
 # N15 — Collective-Cognition Evaluation Harness
 
-**Version:** 0.2.0-draft
-**Date:** 2026-08-10
+**Version:** 0.3.0-draft
+**Date:** 2026-11-02
 **Status:** Draft
 **Conformance:** MUST (core protocol); workspace-conditional sections per §0.4
 **Class:** Extension spec (N7+)
+
 **Implementation home:** minibench (kernel, adapters, fixtures) and workbench-contract; gates consumed by N14 §11
 
 ---
@@ -19,9 +20,9 @@
 
 ### 0.1 Purpose
 
-This specification defines how multi-agent architecture claims are evaluated in minibench:
-which hypotheses are separable, which conditions are compared, how budgets are matched, and
-which pre-registered gates govern N14 staging. Its premise: most reported multi-agent gains
+This specification defines how multi-agent architecture claims are evaluated in minibench.
+It defines which hypotheses are separable, which conditions are compared, and how budgets are matched.
+It also defines which pre-registered gates govern N14 staging. Its premise: most reported multi-agent gains
 are explained by test-time compute scaling (best-of-N sampling plus synthesis). A new
 architecture earns adoption only by beating matched-budget baselines, not single-condition
 demonstrations.
@@ -47,7 +48,8 @@ demonstrations.
 ### 0.4 Lifecycle coupling to N14
 
 The harness is the instrument, not the hypothesis. Most of this specification is
-architecture-agnostic and remains normative regardless of gate outcomes: the budget
+architecture-agnostic and remains normative regardless of gate outcomes.
+This covers the budget
 protocol (§4), replication/comparability/provenance (§5), the task class (§6), metrics
 (§7), the effect rule and pre-registration (§8.1, §8.3), and regression gating (§8.6).
 Conditions C1–C5 remain the standing control set for any future architecture claim.
@@ -57,6 +59,13 @@ Workspace-conditional content — C6/C7 (§3), the ablation delta (§8.2), and G
 demotes to Informative, these sections MUST be re-marked as an informative annex recording
 the negative result. A later architecture claim MUST re-instantiate its own conditions,
 ablation pairing, and pre-registered gates under the surviving core protocol.
+
+### 0.5 Development comparisons are not gate evidence
+
+A development comparison uses short synthetic fixtures under development conditions.
+It does not establish this spec's control semantics, long-horizon task conformance, calibration or hard cost parity, and
+is not gate evidence. Every such
+report MUST state that G0 is not evaluated. Mock runs prove mechanics only.
 
 ## 1. Terminology
 
@@ -88,8 +97,8 @@ ablation pairing, and pre-registered gates under the surviving core protocol.
 H4 is the claim under test. H1–H3 conditions are controls; without them, any C6 gain is
 attributable to compute scaling. Published external results bearing on H1–H3 (sampling-and-
 voting scaling; equal-budget single-agent parity; single-best-model self-mixture beating
-multi-model mixtures) justify treating H1–H3 as the default explanation — the burden of
-proof sits on H4.
+multi-model mixtures) justify treating H1–H3 as the default explanation.
+The burden of proof sits on H4.
 
 ## 3. Conditions (normative set)
 
@@ -105,13 +114,13 @@ proof sits on H4.
 | C7 | workspace-ablated | C6 with `cross_visibility: none` (N14 §4.4); all else identical |
 
 Requirements: every experiment MUST include C1 and C2 (the compute-scaling controls).
-Experiments evaluating the workspace claim (H4) MUST include C6 and MUST pair C7 with it;
-an experiment evaluating a different candidate architecture substitutes its own condition
+Experiments evaluating the workspace claim (H4) MUST include C6 and MUST pair C7 with it.
+An experiment evaluating a different candidate architecture substitutes its own condition
 under the same control set (§0.4) and MUST define an analogous ablation pairing. C2s is
 REQUIRED in any experiment claiming an H3 result and OPTIONAL otherwise. C5 exists to
 separate "roles + relay" from "shared typed state" — if C6 only matches C5, the graph is
 not earning its overhead. Population pinning: each condition's manifest MUST enumerate
-exact model ids, role bindings, and prompts; C2's model MUST be the strongest single model
+exact model ids, role bindings, and prompts. C2's model MUST be the strongest single model
 available to the candidate condition's population.
 
 Condition envelope: a condition is a complete policy for spending its tier budget.
@@ -119,12 +128,12 @@ Internal iteration — self-review, test-and-repair loops, review-comment resolu
 condition feature, executed inside the run and metered by the budget (§4). Participants
 MAY author and run their own tests and any visible repository suite. The sealed acceptance
 suite (§6) is executed exactly once, after the run terminates, against the exported
-artifact; no condition receives feedback from it at any point.
+artifact. No condition receives feedback from it at any point.
 
 ## 4. Budget protocol
 
-- **Currency**: normalized cost computed from a price table pinned (hashed) in the
-  experiment manifest, plus a wall-clock ceiling. Token counts are recorded but cost is the
+- **Currency**: normalized cost computed from a price table pinned (hashed) in the experiment manifest.
+  A wall-clock ceiling also applies. Token counts are recorded but cost is the
   matching currency (heterogeneous populations make raw tokens incomparable).
 - **Tiers**: every experiment MUST run ≥2 tiers. Results are reported as cost-quality
   points per tier, forming per-condition curves. Claims of superiority MUST cite matched
@@ -143,23 +152,24 @@ artifact; no condition receives feedback from it at any point.
 
 ## 5. Replication, comparability, provenance
 
-- **Replication**: k ≥ 3 replicates per (condition, task, tier). The kernel MUST group
-  replicates by full cell identity — `experiment_id`, task input `source_hashes`, and the
-  entire `variant` value excluding `label`: every populated `variant.*` field
-  (`workflow`, `prompt`, `model`, `method`) plus all `axes` (including `budget_tier` and
-  `ablation`) — treating `run_id` as the sole replicate distinguisher. Model identity
+- **Replication**: k ≥ 3 replicates per (condition, task, tier). The kernel MUST group replicates by full cell identity.
+  That identity comprises `experiment_id`, task input `source_hashes`, and the entire `variant` value excluding `label`.
+  It includes every populated `variant.*` field (`workflow`, `prompt`, `model`, `method`) and all `axes` (including
+  `budget_tier` and `ablation`).
+  The sole replicate distinguisher is `run_id`. Model identity
   lives in exactly one place per condition: single-model conditions MUST populate the
-  contract's `variant.model` field; multi-model conditions leave `model` unset and MUST
+  contract's `variant.model` field. Multi-model conditions leave `model` unset and MUST
   carry their manifest-pinned population id in a `population` axis. `label` is
   display-only and MUST NOT be a grouping key (existing producers use coarse labels such
   as "baseline"). Per cell, aggregate: mean/min–max
   score, majority status, within-cell spread. A row is divergent only when stable across
   replicates.
 - **Concurrent baselines**: baseline conditions are re-run within each experiment at the
-  same (task, tier); historical baseline results MUST NOT substitute (prices, registry,
+  same (task, tier). Historical baseline results MUST NOT substitute (prices, registry,
   and task versions drift, breaking the paired comparison).
-- **Comparability preconditions**: `compare` MUST fail — rejecting the comparison and
-  naming the offending snapshots — on: mixed `experiment_id`, mixed registry version,
+- **Comparability preconditions**: `compare` MUST fail under the conditions below, rejecting the comparison and naming
+  the offending snapshots.
+  Conditions: mixed `experiment_id`, mixed registry version,
   mixed product, duplicate `state_var_id` within a snapshot, or non-replicate label
   collisions. Axes declared as varying in the manifest are exempt. Implementations MAY
   additionally emit warnings, but a warning is never a substitute for the failure.
@@ -167,7 +177,7 @@ artifact; no condition receives feedback from it at any point.
   policy/evaluator version, judge model id + rubric hash, and price-table hash. Uniformity
   within an experiment is a precondition unless the axis is declared as varying.
 - **Absence is divergence**: a condition producing no evaluation for a state variable
-  (crash, timeout, refusal) MUST surface as coverage divergence, scored as failure for that
+  (crash, timeout, refusal) MUST surface as coverage divergence. This is scored as failure for that
   variable — not as a missing cell.
 
 ## 6. Task class
@@ -183,8 +193,8 @@ A conforming task MUST have all of:
 3. **Execution-verifiable success**: hidden acceptance tests runnable in a capsule.
 4. **Evidence-gathering component**: at least one question answerable only by inspecting
    the provided repository/telemetry/fixtures, not by prior knowledge.
-5. **Long horizon**: reference solution requires state exceeding a single context window at
-   the task's lowest budget tier (this is where shared persistent state can matter at all).
+5. **Long horizon**: reference solution requires state exceeding a single context window at the task's lowest budget tier.
+   This is where shared persistent state can matter at all.
 6. **Decision-record deliverable**: the run must output what was decided, against which
    alternatives, and why.
 
@@ -220,9 +230,9 @@ sealed. It MUST contain four test classes:
 4. **Evidence-integration tests**: behavior that is correct only if the run consulted the
    packaged telemetry/fixtures (guards against prior-knowledge shortcuts).
 
-Must-pass designation is pinned with the manifest. For each contradiction the author MUST
-supply at least one **distractor solution** — typically the literal implementation of a
-single stakeholder's demand — and the suite MUST fail every distractor. Solvability
+Must-pass designation is pinned with the manifest. For each contradiction the author MUST supply at least one
+**distractor solution**.
+This typically implements a single stakeholder's demand literally. The suite MUST fail every distractor. Solvability
 (§6.3) plus distractor rejection constitute the suite's validity proof.
 
 ## 7. Metrics and scoring
@@ -231,8 +241,9 @@ Per run, the snapshot MUST record these as state variables (thresholds pinned in
 registry entry):
 
 - **success** — primary; binary; execution-scored. A run MUST export an artifact and a
-  decision record. success = 1 iff the artifact passes every must-pass test in the sealed
-  acceptance suite AND violates zero `:hard` constraints; each must-pass test encodes one
+  decision record. success = 1 iff the artifact passes every must-pass test in the sealed acceptance suite AND violates
+  zero `:hard` constraints.
+  Each must-pass test encodes one
   requirement of the sealed intended resolution (§6.1). The passed fraction is recorded as
   `success_partial` for diagnostics; gates (§8.4–§8.5) read only the binary. A run that
   exports no artifact scores 0.
@@ -244,8 +255,8 @@ registry entry):
 - **cost**, **wall-clock**, **tokens by class**, **activation/attempt count**
 - **overhead fraction** (§4)
 - **hypothesis diversity** — count of live alternatives at budget midpoint (anti-anchoring
-  signal; C4–C7; both members of an ablation pair MUST emit it so blinding's effect on
-  alternative preservation is itself measurable)
+  signal; C4–C7). Both members of an ablation pair MUST emit it so blinding's effect on
+  alternative preservation is itself measurable.
 - **failure category** — closed v1 set, judge-coded with human spot-check: specification
   misread, premature consensus, livelock/loop, lost context, verification skipped,
   coordination overhead exhaustion, other
@@ -254,22 +265,30 @@ registry entry):
 
 ### 8.1 Effect rule
 
-An effect is claimed only when between-condition spread exceeds within-condition
-(replicate) spread on the same (task, tier), consistently across replicates. Otherwise the
+An effect is claimed only when between-condition spread exceeds within-condition (replicate) spread on the same (task, tier).
+This must hold consistently across replicates. Otherwise the
 result is reported as null. The matrix MUST display within-cell spread next to
 between-condition spread.
 
 Replicate counts at this scale support pre-registered decision rules, not significance
-tests. Reported uncertainty MUST use exact (binomial) intervals; a manifest that states a
-p-value or power criterion MUST pin the replicate count that delivers it, and results MUST
+tests. Reported uncertainty MUST use exact (binomial) intervals. A manifest that states a
+p-value or power criterion MUST pin the replicate count that delivers it. Results MUST
 NOT be described with significance language the pinned counts cannot support.
+
+For binary success, the manifest MUST define an explicit paired comparison,
+practical effect margin and uncertainty method. The informal spread criterion
+above MUST NOT be interpreted as a statistical test or require a binary min–max
+range to exceed another binary range. Small development samples MUST NOT be
+reported as significant. All closing, synthesis and selection passes consume the
+same total matched allowance; a reserved closure pass is not extra participant
+compute outside that allowance.
 
 ### 8.2 Ablation delta
 
-For every ablation pair, delta = C6 − C7 per metric per (task, tier). The ablation delta is
-the direct measurement of whether shared state is load-bearing: if C6 beats baselines but
-delta ≈ 0, the win comes from population/roles/budget shape, not the workspace — and MUST
-be reported as such.
+For every ablation pair, delta = C6 − C7 per metric per (task, tier).
+The ablation delta directly measures whether shared state is load-bearing.
+If C6 beats baselines but delta ≈ 0, the win comes from population/roles/budget shape, not the workspace.
+In that case it MUST be reported as such.
 
 ### 8.3 Pre-registration
 
@@ -282,30 +301,37 @@ post-hoc threshold edits void the experiment.
 Run C1, C2, C4, C6, C7 (C6 at N14 Stage 0) on ≥5 conforming tasks × ≥3 replicates × ≥2
 tiers. Promote iff both:
 
-1. C6 beats or ties the best of C1/C2/C4 on **success** at a matched tier on the majority
-   of tasks, under §8.1, with no tier where C6 is dominated across the board; and
+1. C6 beats or ties the best of C1/C2/C4 on **success** at a matched tier on the majority of tasks, under §8.1.
+   There is no tier where C6 is dominated across the board; and
 2. the ablation delta on **success** or **coverage** is positive under §8.1.
 
-Fail → N14 Stage 1 is not built; C2/C3 remain available as ordinary workflows; the
-negative result is recorded in the decision record.
+Fail → the tested N14 protocol, population, task, and budget configuration is not
+promoted. Its negative result is retained and that protocol version is demoted per
+N14 §0.4. A revised protocol is a new version that needs a new preregistration and new
+evidence. C2/C3 remain
+available as ordinary workflows; the negative result is recorded in the decision record.
 
 ### 8.5 Gate G1 — N14 Stage 1 → Stage 2
 
-As G0, plus: C3 and C5 included; C6 MUST beat C5 (§3); overhead fraction MUST be under the
-manifest ceiling; and C6's cost-quality curve MUST NOT be dominated by any baseline curve
+As G0, plus: C3 and C5 included; C6 MUST beat C5 (§3).
+Overhead fraction MUST be under the manifest ceiling.
+C6's cost-quality curve MUST NOT be dominated by any baseline curve
 across the tested tiers.
 
 ### 8.6 Regression gate
 
-Once any condition is adopted as incumbent for a task class, subsequent architecture changes
-run `diff` against the incumbent baseline; a change that worsens success or cost at matched
+Once any condition is adopted as incumbent for a task class, subsequent architecture changes run `diff` against the
+incumbent baseline.
+A change that worsens success or cost at matched
 tier blocks adoption.
 
 ## 9. Reporting
 
-Per experiment: the condition × state-variable matrix (aggregated cells with spread);
-per-condition cost-quality curves; ablation deltas; failure-category distribution; gate
-verdict with the manifest hash it was judged under. Reports are N6-style artifacts:
+Each experiment reports the following outputs.
+Outputs include the condition × state-variable matrix (aggregated cells with spread) and per-condition cost-quality curves.
+They also include ablation deltas, failure-category distribution, and the gate verdict with the manifest hash it was
+judged under.
+Reports are N6-style artifacts:
 inputs, registry, and manifest pinned by digest.
 
 ## 10. Minimal compliant implementation (MCI)
@@ -341,16 +367,22 @@ An MCI MUST:
 
 ## Annex A — Implementation Conformance Status (informative)
 
-This annex is **informative**, recording implementation state as of 2026-08-10.
+This annex is **informative**, recording implementation state as of 2026-11-02.
 
-### A.1 Specified, Not Implemented
+### A.1 Development Harness and Remaining Gate Requirements
 
-No harness component exists. The hypothesis registry (§2), budget protocol
-(§4), replication (§5), and scoring (§7) are unimplemented.
+A synthetic development runner exists: `components/deliberation-harness` with
+`bases/deliberation-lab`, packaged by `projects/deliberation-lab`. It provides
+development comparisons, allowance tiers, replicates, pinned hashes, observed
+metering, recorded failures, deterministic scoring, paired descriptive deltas and
+replay. It is not a conforming gate harness: the hypothesis registry (§2), full
+controls, hard normalized-cost reservation (§4), overhead classification,
+calibrated long-horizon tasks and sealed executable artifact evaluation remain
+unimplemented. G0 has not been evaluated.
 
 `minibench` is the adjacent evaluation substrate in this workspace and is the
-natural host for §4's budget matching and §7's metrics rather than a new
-component.
+natural host for §4's budget matching and §7's metrics.
+No new component is needed for that hosting role.
 
 ### A.2 Why This One Matters First
 
@@ -362,5 +394,9 @@ whose absence blocks another spec's disposition.
 ---
 
 **Version History:**
+
+- 0.3.0-draft (2026-11-02): distinguish development comparisons from gate evidence;
+  clarify paired binary comparisons, closure inside the total allowance, and
+  version-scoped negative results.
 
 - 0.1.0-draft (2026-07-22): Initial collective-cognition evaluation harness specification

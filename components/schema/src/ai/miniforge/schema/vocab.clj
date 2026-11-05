@@ -43,7 +43,8 @@
   [:pending :running :completed :failed :blocked])
 
 (def ^{:stratum 0} artifact-types
-  [:spec :plan :adr :code :test :review :manifest :image :telemetry :incident])
+  [:spec :plan :adr :code :test :review :manifest :image :telemetry :incident
+   :experiment-pack :operational-policy-proposal :opsv-verification-report :opsv-metric-snapshot])
 
 (def ^{:stratum 0} workflow-phases
   [:plan :design :implement :verify :review :release :observe])

@@ -315,7 +315,17 @@
                (:codex-answers result))
             "the primary session's answers survive a torn retry log")
         (is (= :unreadable (:codex-answer-log result))
-            "LOST retry observations must not read as a clean record")))))
+            "LOST retry observations must not read as a clean record")))
+    (testing "§7.4.2: retry context_reads append after the primary's"
+      (let [read-a {:path ".miniforge/codex-pin.md" :source :cache :timestamp "t1"}
+            read-b {:path "src/x.clj" :source :filesystem :timestamp "t2"}
+            result (run-retry {:context-reads [read-a]} {:context-reads [read-b]})]
+        (is (= [read-a read-b] (:context-reads result))
+            "a pin read in either session counts as read")))
+    (testing "neither session surfaced a reads log: no :context-reads key"
+      (let [result (run-retry {} {})]
+        (is (not (contains? result :context-reads))
+            "absent stays absent, so :pin-read? reads nil (unknown)")))))
 
 (deftest ^{:stratum 0} planner-system-prompt-includes-behavior-addendum-test
   ;; Pins the wiring that lets the planner agent see the phase-filtered
