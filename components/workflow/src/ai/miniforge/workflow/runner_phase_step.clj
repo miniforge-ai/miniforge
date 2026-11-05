@@ -107,9 +107,10 @@
   ([pipeline context callbacks]
    (execute-phase pipeline context callbacks nil))
   ([pipeline context callbacks control-state]
-   (let [phase-context (-> (run-phase-step pipeline context callbacks control-state)
-                           (monitoring/clear-transient-state))
-         _ (env/persist-workspace-at-phase-boundary! context phase-context)
+   (let [stepped (-> (run-phase-step pipeline context callbacks control-state)
+                     (monitoring/clear-transient-state))
+         phase-context (->> (env/persist-workspace-at-phase-boundary! context stepped)
+                            (env/track-unpersisted context stepped))
          error-message (get-in phase-context
                                [:execution/phase-results
                                 (:execution/current-phase phase-context)

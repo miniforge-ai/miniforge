@@ -40,7 +40,10 @@
    [:tool/protected-paths [:vector :string]]
    [:tool/managed-config-paths [:vector :string]]
    [:bash/max-command-length [:int {:min 1}]]
-   [:bash/deny-patterns [:vector :string]]])
+   [:bash/deny-patterns [:vector :string]]
+   [:opencode/tool-permissions [:map-of :string [:vector :string]]]
+   [:opencode/edit-deny [:vector :string]]
+   [:opencode/bash-deny [:vector :string]]])
 
 (defn ^{:stratum 0} worktree-relative
   "`path` relative to the worktree `root`, or nil when it cannot be inside
@@ -98,6 +101,29 @@
    patterns match a path java.nio printed with backslashes."
   [rel]
   (some-> rel (str/replace "\\" "/")))
+
+(defn ^{:stratum 0} opencode-permission
+  "OpenCode's permission block for `role` under `policy`: every
+   permission and every path outside the worktree denied, then the
+   OpenCode permissions the role's tools (:common plus its :roles set) map
+   to under :opencode/tool-permissions allowed, edit and bash as rule
+   objects that deny :opencode/edit-deny and :opencode/bash-deny. Built as
+   array maps in that order, because OpenCode applies the last rule that
+   matches. A role the policy does not list gets everything denied."
+  [policy role]
+  (let [tools   (when-let [own (get-in policy [:roles role])]
+                  (into (get policy :common #{}) own))
+        allowed (distinct (mapcat #(get-in policy [:opencode/tool-permissions %]) (sort tools)))
+        rules   (fn [denied] (apply array-map "*" "allow" (mapcat (fn [p] [p "deny"]) denied)))]
+    (apply array-map
+           "*" "deny"
+           "external_directory" "deny"
+           (mapcat (fn [p]
+                     [p (case p
+                          "edit" (rules (:opencode/edit-deny policy))
+                          "bash" (rules (:opencode/bash-deny policy))
+                          "allow")])
+                   allowed))))
 
 (defn ^{:stratum 0} follow-links
   "`rel` (`/`-separated) under `root`, with each symlink on it replaced by

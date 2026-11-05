@@ -37,6 +37,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.messages.interface :as messages]
    [ai.miniforge.operator.interface :as operator]
+   [ai.miniforge.workflow.interface :as workflow]
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -330,9 +331,15 @@
 
 (defn ^{:stratum 2} target-live?
   "The workflow has a live runner: in this process, the runner recorded
-   in its origin (any process on this host), or a live manifest owner."
+   in its origin (any process on this host), a live manifest owner, or a
+   process holding the run's owner lock. An owner lock that cannot be read
+   counts as live: a retry is refused rather than risk two runners."
   [workflow-id]
   (let [origin (origin-record workflow-id)]
     (or (operator/live-runner? workflow-id)
         (process-running? (:pid origin) (:pid-started origin))
-        (manifest-owner-alive? workflow-id))))
+        (manifest-owner-alive? workflow-id)
+        ;; Under the root the run checkpoints in, as the runner locks it.
+        (let [root (workflow/run-checkpoint-root (str workflow-id) (es/default-events-dir))]
+          (or (anomaly/anomaly? root)
+              (some? (workflow/run-owner (str workflow-id) root)))))))

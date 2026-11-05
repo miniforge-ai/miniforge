@@ -20,7 +20,7 @@
    The cleanup archives it once it is finished and idle for the TTL."
   (:require
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.event-stream.sinks :as sinks]
+   [ai.miniforge.event-stream.sinks.cleanup :as cleanup]
    [cheshire.core :as json]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]]))
@@ -75,14 +75,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defmethod ^{:stratum 1} sinks/retention-hold ::checkpoint [_ workflow-id _]
+(defmethod ^{:stratum 1} cleanup/retention-hold ::checkpoint [_ workflow-id _]
   (= workflow-id *held-id*))
 
 (deftest ^{:stratum 1} a-completed-idle-run-moves-to-archived
   (let [dir   (temp-events-dir)
         wf-id (write-run! dir :workflow/started :workflow/completed)]
     (age-tree! (live dir wf-id))
-    (sinks/cleanup-stale-events! {:events-dir dir})
+    (cleanup/cleanup-stale-events! {:events-dir dir})
     (is (not (.exists (live dir wf-id))))
     (is (.isFile (io/file (archived dir wf-id) "archived.marker")))
     (is (= #{:workflow/started :workflow/completed}
@@ -95,7 +95,7 @@
     ;; A cleanup wrote the marker, then stopped before the rename.
     (spit (io/file (live dir wf-id) "archived.marker") "")
     (age-tree! (live dir wf-id))
-    (sinks/cleanup-stale-events! {:events-dir dir})
+    (cleanup/cleanup-stale-events! {:events-dir dir})
     (is (not (.exists (live dir wf-id))))
     (is (.isFile (io/file (archived dir wf-id) "archived.marker")))))
 
@@ -107,7 +107,7 @@
      (.toPath (io/file (live dir wf-id) "archived.marker")) (.toPath outside)
      (make-array java.nio.file.attribute.FileAttribute 0))
     (age-tree! (live dir wf-id))
-    (sinks/cleanup-stale-events! {:events-dir dir})
+    (cleanup/cleanup-stale-events! {:events-dir dir})
     (is (= "keep me" (slurp outside)) "the file outside the events tree is untouched")
     (is (.isDirectory (live dir wf-id)) "the run is skipped, not archived")))
 
@@ -118,7 +118,7 @@
         tied    (apply write-run! dir :workflow/started :workflow/completed notices)]
     (age-in-write-order! (live dir spaced))
     (age-tree! (live dir tied))
-    (sinks/cleanup-stale-events! {:events-dir dir})
+    (cleanup/cleanup-stale-events! {:events-dir dir})
     (testing "60 notifications written after completion, each newer"
       (is (.isDirectory (archived dir spaced))))
     (testing "every file sharing one mtime"
@@ -135,7 +135,7 @@
     ;; The start's file touched after the completion's (restored, say),
     ;; still past the TTL: mtime order and event order disagree.
     (.setLastModified started (- (System/currentTimeMillis) (* 20 24 60 60 1000)))
-    (sinks/cleanup-stale-events! {:events-dir dir})
+    (cleanup/cleanup-stale-events! {:events-dir dir})
     (is (.isDirectory (archived dir wf-id)) "the completion is still the newest event")))
 
 (deftest ^{:stratum 1} a-run-with-a-file-cleanup-cannot-trust-stays
@@ -158,8 +158,8 @@
     (run! #(age-tree! (live dir %)) [linked locked garbled])
     (is (not (.canRead unread)) "precondition: the test does not run as root")
     (binding [*err* err]
-      (sinks/cleanup-stale-events! {:events-dir dir})
-      (sinks/cleanup-stale-events! {:events-dir dir}))
+      (cleanup/cleanup-stale-events! {:events-dir dir})
+      (cleanup/cleanup-stale-events! {:events-dir dir}))
     (testing "a symlinked event file"
       (is (.isDirectory (live dir linked))))
     (testing "an unreadable event file"
@@ -176,7 +176,7 @@
     (doseq [run [no-events (live dir completed)]]
       (spit (doto (io/file run "archived.marker" "notes.txt") io/make-parents) "keep me")
       (age-tree! run))
-    (sinks/cleanup-stale-events! {:events-dir dir})
+    (cleanup/cleanup-stale-events! {:events-dir dir})
     (is (.isFile (io/file no-events "archived.marker" "notes.txt"))
         "a run with no events is not deleted through the directory")
     (is (.isDirectory (live dir completed)) "a completed run is not archived")))
@@ -186,7 +186,7 @@
         failed    (write-run! dir :workflow/started :workflow/failed)
         cancelled (write-run! dir :workflow/started :workflow/cancelled)]
     (run! #(age-tree! (live dir %)) [failed cancelled])
-    (sinks/cleanup-stale-events! {:events-dir dir})
+    (cleanup/cleanup-stale-events! {:events-dir dir})
     (doseq [wf-id [failed cancelled]]
       (is (not (.exists (live dir wf-id))))
       (is (.isFile (io/file (archived dir wf-id) "archived.marker")))
@@ -204,7 +204,7 @@
         jvm-run  (write-run! dir :workflow/started :workflow/completed)]
     (spit (io/file (live dir jvm-run) "manifest.json") "{}")
     (run! #(age-tree! (live dir %)) [running resumed jvm-run])
-    (sinks/cleanup-stale-events! {:events-dir dir})
+    (cleanup/cleanup-stale-events! {:events-dir dir})
     (testing "no terminal event: running, or crashed"
       (is (.isDirectory (live dir running))))
     (testing "completed or failed, but written within the TTL"
@@ -220,7 +220,7 @@
         old   (doto (io/file dir "live" "old-empty") .mkdirs)
         fresh (doto (io/file dir "live" "fresh-empty") .mkdirs)]
     (age-tree! old)
-    (sinks/cleanup-stale-events! {:events-dir dir})
+    (cleanup/cleanup-stale-events! {:events-dir dir})
     (is (not (.exists old)))
     (is (.isDirectory fresh) "a run may be about to write into it")))
 
@@ -228,11 +228,11 @@
   (let [dir   (temp-events-dir)
         wf-id (write-run! dir :workflow/started :workflow/completed)]
     (age-tree! (live dir wf-id))
-    (sinks/cleanup-stale-events! {:events-dir dir})
+    (cleanup/cleanup-stale-events! {:events-dir dir})
     (age-tree! (archived dir wf-id))
     (binding [*held-id* (str wf-id)]
-      (sinks/cleanup-stale-events! {:events-dir dir}))
+      (cleanup/cleanup-stale-events! {:events-dir dir}))
     (is (.isDirectory (archived dir wf-id))
         "a run's checkpoint holds its events past the archived TTL")
-    (sinks/cleanup-stale-events! {:events-dir dir})
+    (cleanup/cleanup-stale-events! {:events-dir dir})
     (is (not (.exists (archived dir wf-id))) "without the hold it goes")))

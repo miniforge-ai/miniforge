@@ -5,6 +5,7 @@
         ai.miniforge/decision-envelope {:local/root "../decision-envelope"}
         ai.miniforge/effect-transaction {:local/root "../effect-transaction"}
         ai.miniforge/failure-classifier {:local/root "../failure-classifier"}
+        ai.miniforge/file-durability {:local/root "../file-durability"}
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/policy-clause {:local/root "../policy-clause"}

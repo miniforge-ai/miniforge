@@ -126,3 +126,26 @@
               6)]
       (is (= ["conflict-claim-1-claim-2"]
              (map :object/id (conflicts-in ws)))))))
+
+(deftest ^{:stratum 1} adopted-claims-still-conflict
+  (let [ws (conflict/derive-conflicts
+            (workspace (obj "claim-a" :claim :status :accepted)
+                       (obj "claim-b" :claim :links {:contradicts #{"claim-a"}}))
+            6)]
+    (is (= ["conflict-claim-a-claim-b"] (mapv :object/id (conflicts-in ws))))))
+
+(deftest ^{:stratum 1} superseding-a-participant-resolves-the-conflict
+  (let [derived (conflict/derive-conflicts
+                 (workspace (obj "claim-a" :claim)
+                            (obj "claim-b" :claim :links {:contradicts #{"claim-a"}}))
+                 6)
+        resolved (conflict/derive-conflicts
+                  (assoc-in derived [:workspace/objects "claim-a" :object/status] :superseded)
+                  7)
+        record (get-in resolved [:workspace/objects "conflict-claim-a-claim-b"])]
+    (testing "the conflict stays in the graph as history"
+      (is (= :resolved (:object/status record)))
+      (is (= 7 (:object/touched-at record))))
+    (testing "a later derivation leaves a resolved conflict alone"
+      (is (= record (get-in (conflict/derive-conflicts resolved 8)
+                            [:workspace/objects "conflict-claim-a-claim-b"]))))))

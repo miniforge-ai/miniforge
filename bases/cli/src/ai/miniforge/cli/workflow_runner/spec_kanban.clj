@@ -24,6 +24,8 @@
   (:require
    [babashka.fs :as fs]
    [clojure.string :as str]
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.workflow.interface :as workflow]))
 
@@ -101,14 +103,21 @@
    manifest at the spec's new place (work/done or work/failed), so a later
    resume still finds it. The manifest is the one the pipeline wrote,
    under the result's `:execution/id` and `:execution/checkpoint-root`;
-   a run that never reached the pipeline has none. Returns the new path, nil when nothing moved."
+   a run that never reached the pipeline has none. Returns the new path, nil when nothing moved.
+   A manifest that could not be updated (an I/O failure, or the run's
+   checkpoint lock staying busy) is warned about on stderr: a later resume
+   would look for the spec at its old place."
   [provenance result]
   (when-let [new-path (move-spec! provenance (if (phase/succeeded? result) :done :failed))]
     (when-let [run-id (:execution/id result)]
       ;; Under the root the run checkpointed to, which a per-execution
       ;; :checkpoint/root moves away from the default.
-      (workflow/record-spec-path! (str run-id) (str (fs/absolutize new-path))
-                                  (if-let [root (:execution/checkpoint-root result)]
-                                    {:checkpoint/root root}
-                                    {})))
+      (let [recorded (workflow/record-spec-path! (str run-id) (str (fs/absolutize new-path))
+                                                 (if-let [root (:execution/checkpoint-root result)]
+                                                   {:checkpoint/root root}
+                                                   {}))]
+        (when (anomaly/anomaly? recorded)
+          (binding [*out* *err*]
+            (println (messages/t :workflow-runner/spec-path-not-recorded
+                                 {:path (str new-path) :error (:anomaly/message recorded)}))))))
     new-path))

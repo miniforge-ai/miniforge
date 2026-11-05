@@ -85,6 +85,7 @@
    :execution/environment-metadata
    :execution/worktree-path
    :execution/task-base-refs
+   :execution/unpersisted-phases
    :execution/mode
    :execution/completed-with-warnings?])
 

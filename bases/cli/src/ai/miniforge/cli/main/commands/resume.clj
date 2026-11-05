@@ -296,6 +296,29 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} refuse-live-run!
+  "Throw when run `workflow-id` is still running (its runner holds the
+   owner lock under its checkpoint root) or when the root or lock cannot be
+   looked up; with `force?`, an unknown root is checked at the default root."
+  [workflow-id force?]
+  (let [run-id (str workflow-id)
+        found  (workflow/run-checkpoint-root run-id events-dir)
+        root   (if (and force? (anomaly/anomaly? found))
+                 (do (display/print-info (messages/t :resume/root-unknown-forced
+                                                     {:run-id run-id :error (:anomaly/message found)}))
+                     nil)
+                 found)
+        _      (resume-anomaly/throw-resume-anomaly! root)
+        owner  (workflow/run-owner run-id root)]
+    (resume-anomaly/throw-resume-anomaly! owner)
+    (when (some? owner)
+      (response/throw-anomaly! :anomalies/conflict
+                               (messages/t :resume/run-live
+                                           {:run-id run-id
+                                            :pid (get owner :owner/pid "?")
+                                            :started-at (get owner :owner/started-at "?")})
+                               {:run-id run-id :run/owner owner}))))
+
 ;; Thin delegations kept for compatibility with existing callers/tests
 (defn ^{:stratum 1} read-event-file
   "Read events for a workflow. Thin wrapper — the actual replay lives
@@ -380,6 +403,7 @@
         _ (when-not quiet
             (display/print-info (messages/t :resume/resuming
                                             {:workflow-id workflow-id})))
+        _ (refuse-live-run! workflow-id (:force opts))
         recorded (wr/reconstruct-context events-dir (str workflow-id))
         _ (resume-anomaly/throw-resume-anomaly! recorded)
         _ (resume-anomaly/throw-resume-anomaly! (unowned-resume-anomaly recorded))
