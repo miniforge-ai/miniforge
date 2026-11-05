@@ -16,12 +16,13 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-opsv.interface
-  "Public OPSV application transformations and adapter port."
+  "API surface class 1: internal EDN OPSV application transformations and adapter port."
   (:require
    [ai.miniforge.phase-opsv.actuation :as actuation]
    [ai.miniforge.phase-opsv.boundary.kubernetes-snapshot :as kubernetes-snapshot]
    [ai.miniforge.phase-opsv.boundary.kubernetes-client :as kubernetes-client]
    [ai.miniforge.phase-opsv.boundary.kubernetes-discovery :as kubernetes-discovery]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-native-discovery :as native-discovery]
    [ai.miniforge.phase-opsv.boundary.kubernetes-membership :as kubernetes-membership]
    [ai.miniforge.phase-opsv.kubernetes-membership-schema :as membership-schema]
    [ai.miniforge.phase-opsv.kubernetes-workload-inventory-schema :as inventory-schema]
@@ -311,6 +312,15 @@
    Queries and label names are operator configuration. Each read is bounded;
    this neither runs load nor verifies a candidate or grants execution authority."
   kubernetes-discovery/discover!)
+
+(def ^{:stratum 0} discover-kubernetes-verification-signals!
+  "Acquire complete native target observations and label-correlated CPU/backlog windows.
+   Extend discovery settings with :discovery/declaration and :discovery/replica-bounds.
+   Return :discovery/kubernetes-verification (canonical projection and original
+   sensitive observations) and :discovery/candidate-drivers, or an anomaly.
+   These originals are not a report-safe copy.
+   No experiment, mutation, baseline retention, verification verdict or execution authority."
+  native-discovery/discover!)
 
 (comment
   (functional-adapter identity identity))
