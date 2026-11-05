@@ -1,4 +1,4 @@
-{:min-bb-version "1.12.204"
+{:min-bb-version "1.12.215"
 
  :deps {io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}
         ai.miniforge/bb-utils {:local/root "projects/bb-utils"}}

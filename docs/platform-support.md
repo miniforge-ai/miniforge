@@ -29,7 +29,11 @@ but isn't yet a release blocker — please report issues.
 
 ## Babashka Version
 
-The CLI needs Babashka 1.12.204 or newer: `:min-bb-version` in `bb.edn`.
+The CLI needs Babashka 1.12.215 or newer: `:min-bb-version` in `bb.edn`.
+An older Babashka prints `WARNING: this project requires babashka 1.12.215 or newer`
+at startup, and the CLI can then fail to load. Upgrade Babashka, or run the CLI on
+the JVM from a checkout: `clojure -M:dev -m ai.miniforge.cli.main --help`.
+
 CI loads every `bb` task's namespaces on that minimum and on the version pinned in
 `.github/tool-versions.json`. On the minimum it also starts `bb miniforge --help`.
 Raise `:min-bb-version` when code starts to need a newer Babashka. Do not leave the

@@ -278,7 +278,7 @@ jobs:
   # The CLI runs on whatever Babashka the operator has. bb.edn declares the
   # oldest one it supports (:min-bb-version), and every other job runs the
   # newest pinned one, so nothing proved the declared minimum: it said 1.3.0
-  # while the CLI needed 1.12.209 to load (#2375). This job installs exactly
+  # while the CLI needed 1.12.215 to load (#2375). This job installs exactly
   # the declared minimum, loads every bb task's namespaces, and starts the CLI.
   babashka-minimum:
     name: Babashka minimum version
