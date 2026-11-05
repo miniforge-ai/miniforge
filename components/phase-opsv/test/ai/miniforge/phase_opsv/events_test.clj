@@ -72,7 +72,7 @@
                    :result {:status :success :output planned-output}}))))
 
 (deftest ^{:stratum 1} test-policy-confidence-degrades-safely
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         refs [(random-uuid)]
         ctx (assoc-in (event-context stream) [:execution/input :opsv/policy-diff-artifact-refs] refs)]
     (events/emit-phase-events!
@@ -85,7 +85,7 @@
     (is (= refs (:opsv/diff-artifact-refs (first (event-stream/get-events stream)))))))
 
 (deftest ^{:stratum 1} test-guardrail-abort-projection
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         abort {:trigger :tail-latency
                :threshold {:milliseconds 500}
                :rollback-action :restore-previous-policy}]
@@ -116,7 +116,7 @@
                (:opsv/rollback-action abort-event)))))))
 
 (deftest ^{:stratum 1} test-invalid-projection-is-not-published
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         result (events/emit-phase-events!
                 (event-context stream) :opsv/plan
                 (dissoc planned-output :opsv/experiment-pack-hash))]
@@ -126,7 +126,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-publication-rejection-fails-the-phase
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         ctx (event-context stream)
         workflow-id (:execution/id ctx)
         _ (event-stream/quiesce! stream {:workflow-id workflow-id})
@@ -139,7 +139,7 @@
                   (get-in completed [:execution :phases-completed])))))
 
 (deftest ^{:stratum 2} test-evidence-accumulation-failure-fails-the-phase
-  (let [stream (event-stream/create-event-stream)
+  (let [stream (event-stream/create-event-stream {:sinks []})
         ctx (assoc (event-context stream)
                    :opsv/evidence-assembly-store
                    (evidence/create-opsv-assembly-store))

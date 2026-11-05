@@ -41,7 +41,8 @@
   "Malli `[:map ...]` schema for raw user spec input in :spec/* format,
    before normalization. Required keys :spec/title and :spec/description;
    all other :spec/* keys plus :workflow/type and :workflow/version are
-   optional. Pass to malli.core fns or `valid-spec-input?`."
+   optional (:spec/workflow-type / :spec/workflow-version win over them).
+   Pass to malli.core fns or `valid-spec-input?`."
   schema/SpecInput)
 
 (def ^{:stratum 0} SpecIntent
@@ -83,9 +84,13 @@
 
    Supported formats: .edn, .json, .md, .yaml/.yml (coming soon)
 
-   Returns normalized spec map ready for workflow engine."
-  [path]
-  (core/parse-spec-file path))
+   Returns normalized spec map ready for workflow engine. With `content`,
+   that text is parsed as the file at `path` and the file is not read (a
+   caller hashing the spec reads it once for both)."
+  ([path]
+   (core/parse-spec-file path))
+  ([path content]
+   (core/parse-spec-file path content)))
 
 (defn ^{:stratum 0} parse-content
   "Parse raw content string using the specified format parser.
@@ -101,7 +106,8 @@
 ;; Normalization
 (defn ^{:stratum 0} normalize-spec
   "Normalize a parsed spec map to canonical :spec/* format.
-   Applies defaults for missing optional fields."
+   Applies defaults for missing optional fields. :spec/workflow-type comes
+   from :spec/workflow-type, then :workflow/type, then :canonical-sdlc."
   [spec]
   (core/normalize-spec spec))
 

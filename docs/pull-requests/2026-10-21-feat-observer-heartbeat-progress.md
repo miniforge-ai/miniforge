@@ -32,7 +32,7 @@ normal-budget and signing gates.
 All three consuming projects passed serially (50 seconds). Fresh CLI:
 39,214,205 bytes. Isolated packaged tests: 14 tests, 66 assertions. Acceptance
 uses the actual alert subscriber with canonical journal publication, not a mocked
-delivery path; repeated heartbeats preserve increasing progress gaps and unknown
+delivery path. Repeated heartbeats preserve increasing progress gaps and unknown
 coverage stays explicit. Legacy subscriber publication remains covered.
 
 Adversarial review checked unsupported-major skip recording and position handling,
@@ -40,7 +40,7 @@ absence of unregistered current alert publication, shared alert factories, bound
 latest-per-rule storage and dependency direction. This is a scoped observer
 integration, not a claim that N7 or workflow progress instrumentation is complete.
 
-Measured canonical-journal acceptance runtime is 163 ms, so it lives in the
-miniforge project integration suite under the Polylith 100 ms test-placement rule,
-not the observer brick's fast unit-test suite. The same packaged test is rerun
+Measured canonical-journal acceptance runtime is 163 ms. The Polylith 100 ms
+test-placement rule puts it in the miniforge project integration suite, not the observer brick.
+The same packaged test is rerun
 after relocation; no production behavior changes with the move.

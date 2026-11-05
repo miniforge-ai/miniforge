@@ -17,6 +17,8 @@
 ;; limitations under the License.
 (ns ai.miniforge.cli.main.commands.monitoring-test
   (:require
+   [babashka.process :as process]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.config :as config]
@@ -49,6 +51,41 @@
         (is (= {:port 9191} @started))
         (is (= 1 @exit-code))))))
 
+(deftest ^{:stratum 0} web-cmd-opens-the-url-the-dashboard-reports-test
+  (testing "--open uses the dashboard's own URL, not a rebuilt localhost one"
+    (let [opened (atom nil)]
+      (binding [sut/*web-available?* true
+                sut/*start-web-dashboard!* (fn [_] {:port 9191 :url "http://192.168.1.5:9191"})]
+        (with-redefs [config/load-config (constantly {:dashboard {:port 9191}})
+                      messages/t (fn ([k] (name k)) ([k _] (name k)))
+                      display/print-info (fn [& _] nil)
+                      process/sh (fn [& args] (reset! opened (vec args)) {:exit 0})
+                      ;; web-cmd parks on @(promise) until interrupted.
+                      promise (fn [] (delay nil))]
+          (binding [*out* (java.io.StringWriter.)]
+            (sut/web-cmd {:open true}))))
+      (is (= ["open" "http://192.168.1.5:9191"] @opened)))))
+
+(defn- ^{:stratum 0} web-cmd-with-stdin
+  "Run `mf web` (no --open) with stdin holding `input`, stdin a terminal
+   or not per `interactive?`, and the dashboard stubbed. Returns the
+   process/sh calls (the browser opener) and stdout."
+  [input interactive?]
+  (let [calls (atom [])
+        out   (java.io.StringWriter.)]
+    (binding [sut/*web-available?* true
+              sut/*start-web-dashboard!* (fn [_] {:port 9191 :url "http://localhost:9191"})]
+      (with-redefs [config/load-config (constantly {:dashboard {:port 9191}})
+                    display/print-info (fn [& _] nil)
+                    sut/interactive? (constantly interactive?)
+                    process/sh (fn [& args] (swap! calls conj (vec args)) {:exit 0})
+                    ;; web-cmd parks on @(promise) until interrupted.
+                    promise (fn [] (delay nil))]
+        (binding [*in*  (java.io.BufferedReader. (java.io.StringReader. input))
+                  *out* out]
+          (sut/web-cmd {}))))
+    {:opened @calls :out (str out)}))
+
 (deftest ^{:stratum 0} tui-cmd-uses-injected-launcher-test
   (testing "TUI startup uses the launcher composed by cli.main"
     (let [started (atom nil)
@@ -69,6 +106,21 @@
         (is (= 0 @exit-code))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} web-cmd-end-of-input-does-not-open-browser-test
+  (testing "a terminal whose stdin ends (Ctrl-D) without Enter: no browser"
+    (is (= [] (:opened (web-cmd-with-stdin "" true))))))
+
+(deftest ^{:stratum 1} web-cmd-enter-opens-browser-test
+  (testing "Enter on a terminal opens the dashboard"
+    (is (= [["open" "http://localhost:9191"]] (:opened (web-cmd-with-stdin "\n" true))))))
+
+(deftest ^{:stratum 1} web-cmd-without-terminal-does-not-prompt-test
+  (testing "stdin not a terminal (a script, an agent): no prompt, no browser, even on Enter"
+    (let [{:keys [opened out]} (web-cmd-with-stdin "\n" false)]
+      (is (= [] opened))
+      (is (not (str/includes? out (messages/t :web/press-enter))))
+      (is (str/includes? out (messages/t :web/press-ctrl-c))))))
 
 (deftest ^{:stratum 1} web-cmd-unavailable-uses-message-catalog-test
   (testing "Web dashboard is unavailable when the composed launcher is missing"

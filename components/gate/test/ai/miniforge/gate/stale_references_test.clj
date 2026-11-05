@@ -158,3 +158,12 @@
                   {:execution/worktree-path dir})]
       (is (false? (:passed? result)))
       (is (= [":skipped"] (mapv :token (:errors result)))))))
+
+(deftest ^{:stratum 1} changed-paths-are-listed-as-named-on-disk
+  (testing "NUL-delimited and untrimmed: names git would quote or trim come back intact"
+    (let [dir (temp-git-repo {"README.md" "x\n"})]
+      (spit (str dir "/café.clj") "(ns cafe)\n")
+      (spit (str dir "/ lead.clj") "(ns lead)\n")
+      (spit (str dir "/README.md") "y\n")
+      (is (= #{"README.md" "café.clj" " lead.clj"}
+             (set (#'stale/worktree-changed-paths dir)))))))

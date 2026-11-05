@@ -25,7 +25,7 @@ rebuilt isolated package verification, signed hooks, fresh review and all CI.
 
 The prior package reproduced six failures / 53 assertions for these unsupported
 profiles. The implementation passed all four event-stream consumers serially
-(1m40s), rebuilt CLI 39,198,541 bytes, and isolated packaged recovery/workflow
+(1m40s). Rebuilt CLI: 39,198,541 bytes. Isolated packaged recovery/workflow
 admission tests: 14 tests / 234 assertions, with test fixtures only.
 Kondo reports no warnings/errors; inferred strata stay within three.
 

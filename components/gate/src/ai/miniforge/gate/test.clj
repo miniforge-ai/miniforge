@@ -57,7 +57,7 @@
       (nil? coverage)
       {:passed? true
        :warnings [{:type :no-coverage
-                   :message "No coverage data found"}]}
+                   :message (messages/t :coverage/no-data)}]}
 
       (>= coverage threshold)
       {:passed? true
@@ -67,7 +67,7 @@
       :else
       {:passed? false
        :errors [{:type :coverage-below-threshold
-                 :message (str "Coverage " coverage "% below threshold " threshold "%")
+                 :message (messages/t :coverage/below-threshold {:coverage coverage :threshold threshold})
                  :coverage coverage
                  :threshold threshold}]})))
 
@@ -137,13 +137,10 @@
   "Check if tests pass.
 
    Reads, in order: the gated phase's own result (verify's test metrics at
-   [:phase :result :metrics] in the ctx — the production path, where the
-   phase :output is nil), then the legacy artifact-metadata :test-results.
-   With neither present the gate passes with a :no-tests warning.
-
-   Before the phase-result source existed, verify's nil :output meant the
-   gate saw no results and passed every run — including runs with failing
-   tests (checkpoint f413dd80, 2026-09-04)."
+   [:phase :result :metrics] in the ctx — the production path; verify's
+   :output is only its pass/fail verdict, with no counts or failures), then
+   the legacy artifact-metadata :test-results. With neither present the gate
+   passes with a :no-tests warning."
   [artifact ctx]
   (if-let [result (phase-test-result ctx)]
     (check-phase-test-result result)
@@ -154,14 +151,14 @@
 (defmethod ^{:stratum 2} registry/get-gate :tests-pass
   [_]
   {:name :tests-pass
-   :description "Validates all tests pass"
+   :description (messages/t :tests-pass/description)
    :check check-tests-pass
    :repair nil})
 
 (defmethod ^{:stratum 2} registry/get-gate :coverage
   [_]
   {:name :coverage
-   :description "Validates test coverage meets threshold (default 80%)"
+   :description (messages/t :coverage/description)
    :check check-coverage
    :repair nil})
 

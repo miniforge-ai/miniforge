@@ -27,6 +27,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.pr-lifecycle.classifier :as classifier]
    [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
    [babashka.process :as process]
@@ -159,11 +160,14 @@
                        {:url url})))
 
 (defn ^{:stratum 1} filter-actionable-comments
-  "Filter review comments to unresolved, non-bot, code-review comments.
-   Returns vector of normalized comment maps."
+  "Filter review comments to unresolved, non-bot, code-review comments
+   from OWNER / MEMBER / COLLABORATOR authors (see
+   `classifier/trusted-author?`); anyone else's text would go into a fix
+   workflow that pushes. Returns vector of normalized comment maps."
   [comments]
   (->> comments
        (remove #(contains? bot-authors (:comment/author %)))
+       (filter #(classifier/trusted-author? % nil))
        (filter #(= :review-comment (:comment/type %)))
        vec))
 

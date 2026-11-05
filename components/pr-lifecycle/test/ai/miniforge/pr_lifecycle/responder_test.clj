@@ -52,6 +52,7 @@
   {:comment/id 123
    :comment/body "Extract this function"
    :comment/author "reviewer"
+   :comment/author-association "MEMBER"
    :comment/path "src/foo.clj"
    :comment/line 42
    :comment/type :review-comment})
@@ -148,7 +149,15 @@
       (is (= 1 (count result)))))
 
   (testing "returns empty for no actionable comments"
-    (is (empty? (responder/filter-actionable-comments [bot-comment issue-comment])))))
+    (is (empty? (responder/filter-actionable-comments [bot-comment issue-comment]))))
+
+  (testing "drops review comments from authors without write-level association"
+    (let [stranger (assoc review-comment :comment/author "mallory"
+                          :comment/author-association "NONE")
+          unknown  (dissoc review-comment :comment/author-association)]
+      (is (= ["reviewer"]
+             (mapv :comment/author
+                   (responder/filter-actionable-comments [stranger review-comment unknown])))))))
 
 ;; Comment grouping
 (def ^{:stratum 1} comment-on-bar

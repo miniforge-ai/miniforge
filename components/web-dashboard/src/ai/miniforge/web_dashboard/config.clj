@@ -22,7 +22,7 @@
 (def ^{:stratum 0} ^:private defaults-resource "config/web-dashboard/defaults.edn")
 
 (def ^{:stratum 0} ^:private required-keys
-  [:port :session-cookie-name :session-ttl-ms :stale-threshold-ms :max-recent-workflows])
+  [:port :host :session-cookie-name :session-ttl-ms :stale-threshold-ms :max-recent-workflows])
 
 ;------------------------------------------------------------------------------ Layer 1
 

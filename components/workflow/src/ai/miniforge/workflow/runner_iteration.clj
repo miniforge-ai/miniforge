@@ -4,11 +4,12 @@
 (ns ai.miniforge.workflow.runner-iteration
   "Apply dashboard control and supervision around one checkpointed phase step."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.llm.interface :as llm]
             [ai.miniforge.logging.interface :as log]
-            [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.messages :as messages]
             [ai.miniforge.workflow.monitoring :as monitoring]
+            [ai.miniforge.workflow.runner-checkpoint :as runner-checkpoint]
             [ai.miniforge.workflow.runner-defaults :as defaults]
             [ai.miniforge.workflow.runner-outcome :as outcome]
             [ai.miniforge.workflow.runner-phase-step :as phase-step]))
@@ -29,23 +30,33 @@
       (ctx/transition-to-failed)))
 
 (defn- ^{:stratum 0} execute-supervised
-  [pipeline context callbacks iteration]
+  "Run one supervised phase step. Its LLM calls see the run's cancel: once
+   CONTROL-STATE is stopped, a streaming agent call in flight kills the
+   agent's process tree and returns, and a later one ends as it starts. The
+   phase then finishes its own flow, boundary persist included, and the
+   next iteration takes the stop path."
+  [pipeline context callbacks iteration control-state]
   (let [state (monitoring/build-supervision-state context iteration)
         result (monitoring/check-workflow-supervision
                  (:execution/supervision-runtime context) state)]
     (if (= :halt (:status result))
       (monitoring/handle-supervision-halt context result ctx/transition-to-failed)
-      (phase-step/execute-phase pipeline context callbacks))))
+      (llm/call-with-cancel-signal #(boolean (:stopped @control-state))
+                                   #(phase-step/execute-phase pipeline context callbacks)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} await-resume!
-  "Block while the control state is paused."
+  "Block while the control state is paused and not stopped. A cancel sets
+   :stopped without clearing :paused, so :stopped is re-read on every poll:
+   a run paused and then cancelled leaves the wait and takes the stop path
+   instead of waiting for a resume that may never come."
   [control-state]
   (when (:paused @control-state)
     (log/debug runner-logger :system :workflow/execution-paused
                {:message (messages/t :status/paused)})
-    (while (:paused @control-state)
+    (while (let [{:keys [paused stopped]} @control-state]
+             (and paused (not stopped)))
       (Thread/sleep (defaults/pause-poll-interval-ms)))))
 
 (defn- ^{:stratum 1} check-stopped
@@ -68,8 +79,10 @@
   (await-resume! control-state)
   (let [result (if-let [stop-anomaly (check-stopped control-state)]
                  (apply-dashboard-stop context stop-anomaly)
-                 (execute-supervised pipeline context callbacks iteration))]
-    (checkpoint-store/persist-execution-state! result)
+                 (execute-supervised pipeline context callbacks iteration control-state))]
+    ;; A failed write is warned about and published, never thrown, so
+    ;; the run goes on without that checkpoint.
+    (runner-checkpoint/checkpoint! result)
     result))
 
 (comment ::supervised-iteration)

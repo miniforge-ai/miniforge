@@ -65,7 +65,7 @@
               persisted (runtime/persist failed)
               restored (runtime/ensure-assembly
                          (assoc (dissoc persisted :opsv/evidence-assembly-store)
-                                :event-stream (events/create-event-stream)))]
+                                :event-stream (events/create-event-stream {:sinks []})))]
           (is (or (nil? (:evidence/event-links original))
                   (= (count before) (get-in original [:evidence/event-links 0 :event-links/event-count]))))
           (is (= (:evidence/event-links original) (:evidence/event-links (base/bundle restored)))))

@@ -8,6 +8,7 @@
             [ai.miniforge.supervisory-state.interface :as supervisory]
             [ai.miniforge.workflow.checkpoint-store :as checkpoints]
             [ai.miniforge.workflow.context :as context]
+            [ai.miniforge.workflow.runner-checkpoint :as runner-checkpoint]
             [ai.miniforge.workflow.runner-events :as events]
             [ai.miniforge.workflow.runner-outcome :as outcome]))
 
@@ -23,8 +24,16 @@
 
 (defn ^{:stratum 1} admit! [stream ctx skip-lifecycle?]
   (when stream (supervisory/ensure-attached! stream))
-  (checkpoints/persist-execution-state! ctx)
-  (let [receipt (when-not skip-lifecycle? (events/publish-workflow-started! stream ctx))]
-    (if (anomaly/any-anomaly? receipt) (refused ctx receipt) ctx)))
+  ;; The start checkpoint is written first and reported after
+  ;; :workflow/started: a failed write is warned about (never thrown), a
+  ;; written one announced, so a run that dies in its first phase still
+  ;; names its checkpoint root in its events. A refused start reports
+  ;; only a failed write.
+  (let [written (checkpoints/persist-execution-state! ctx)
+        receipt (when-not skip-lifecycle? (events/publish-workflow-started! stream ctx))]
+    (if (anomaly/any-anomaly? receipt)
+      (do (when (anomaly/anomaly? written) (runner-checkpoint/report! ctx written))
+          (refused ctx receipt))
+      (do (runner-checkpoint/report! ctx written) ctx))))
 
 (comment ::workflow-start-admission)

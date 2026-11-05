@@ -34,7 +34,7 @@ hooks, adversarial standards pass, exact-head review and full CI remain required
 - All three workflow product consumers: passing, serially (1m46s), after
   integration with main's start admission, evidence and deployment changes.
 - Rebuilt CLI: 39,193,082 bytes. Isolated package, no production source overlay:
-  53 tests, 332 assertions, covering failure publication, diagnostics, native
+  53 tests, 332 assertions. Coverage includes failure publication, diagnostics, native
   handlers, checkpoint storage, context, synthetic DAG completion, start
   admission, evidence references and deployment configuration.
 - Kondo: no warnings/errors. All changed namespaces match inferred strata.
@@ -50,7 +50,7 @@ hooks, adversarial standards pass, exact-head review and full CI remain required
 Canonical exception anomalies store their exception class inside anomaly data.
 The projection now reads that canonical provenance as well as the legacy fields.
 A regression constructs an actual canonical SocketTimeoutException anomaly with
-a message that does not imply timeout, and verifies timeout classification while
+a message that does not imply timeout. It verifies timeout classification while
 preserving the original anomaly and error record.
 
 A subsequent review identified native string-valued errors, used by deployment

@@ -16,37 +16,19 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.web-dashboard.watcher
-  "File-based event watcher for the dashboard.
-
-   Tail-follows ~/.miniforge/events/*.edn and publishes parsed events
-   to the dashboard's internal event stream. Replaces the HTTP event bridge
-   with a zero-network architecture: CLI writes events to files via the
-   default file sink, and this watcher reads them."
+  "Follows the file sink's live/ and archived/ workflow directories and
+   publishes each new event, through event-stream's layout tail, the one
+   the standalone TUI uses too. Runs active at startup are read in full;
+   older files are left to the archive scan and history."
   (:require
-   [clojure.java.io :as io]
-   [clojure.edn :as edn])
-  (:import
-   [java.io RandomAccessFile]))
+   [ai.miniforge.config.interface :as config]
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.web-dashboard.config :as dashboard-config]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; File reading
-(defn ^{:stratum 0} read-new-lines
-  "Read new lines from file starting at byte offset.
-   Returns [new-offset lines] where lines is a vector of strings."
-  [^java.io.File file ^long offset]
-  (let [length (.length file)]
-    (if (<= length offset)
-      [offset []]
-      (let [raf (RandomAccessFile. file "r")]
-        (try
-          (.seek raf offset)
-          (loop [lines (transient [])]
-            (if-let [line (.readLine raf)]
-              (recur (conj! lines line))
-              [(.getFilePointer raf) (persistent! lines)]))
-          (finally
-            (.close raf)))))))
 
 (defn ^{:stratum 0} parse-edn-line
   "Parse a single EDN line, returning nil on parse failure."
@@ -57,77 +39,29 @@
     (catch Exception _
       nil)))
 
-;; Watcher lifecycle
-(defn ^{:stratum 0} initialize-offsets
-  "Scan existing .edn files and set offsets to end-of-file.
-   This skips historical data so the watcher only sees new events."
-  [events-dir]
-  (let [dir (io/file events-dir)]
-    (if (and (.exists dir) (.isDirectory dir))
-      (->> (.listFiles dir)
-           (filter #(.endsWith (.getName ^java.io.File %) ".edn"))
-           (reduce (fn [acc ^java.io.File file]
-                     (assoc acc (.getPath file) (.length file)))
-                   {}))
-      {})))
+(def ^{:stratum 0} active-window-ms
+  "A directory modified within this window is active."
+  (:stale-threshold-ms dashboard-config/defaults))
+
+(defn ^{:stratum 0} tail-logger
+  "A logger for the layout tail's warnings that appends EDN lines to
+   ~/.miniforge/logs/web-dashboard.log."
+  []
+  (let [f (io/file (config/miniforge-home) "logs" "web-dashboard.log")]
+    (log/create-logger
+     {:min-level :warn
+      :output    (fn [entry]
+                   (io/make-parents f)
+                   (spit f (str (pr-str entry) "\n") :append true))})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Polling
-(defn ^{:stratum 1} poll-once!
-  "Scan events dir, read new EDN lines from each .edn file,
-   call publish-fn for each parsed event. Returns updated offsets map."
-  [events-dir offsets publish-fn]
-  (let [dir (io/file events-dir)]
-    (if (and (.exists dir) (.isDirectory dir))
-      (let [edn-files (->> (.listFiles dir)
-                           (filter #(.endsWith (.getName ^java.io.File %) ".edn")))]
-        (reduce
-         (fn [acc ^java.io.File file]
-           (let [path (.getPath file)
-                 current-offset (get acc path 0)
-                 [new-offset lines] (read-new-lines file current-offset)]
-             (doseq [line lines]
-               (when-let [event (parse-edn-line line)]
-                 (try
-                   (publish-fn event)
-                   (catch Exception _ nil))))
-             (assoc acc path new-offset)))
-         offsets
-         edn-files))
-      offsets)))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} start-watcher!
-  "Start a daemon thread that polls events dir every 500ms.
-   Publishes parsed events via publish-fn.
-
-   On startup, seeks to end of all existing files (skips history).
-   Only new bytes appended after startup and new files are published.
-
-   Arguments:
-     events-dir  - Path to ~/.miniforge/events directory
-     publish-fn  - Function (fn [event-map] ...) called for each new event
-
-   Returns: cleanup function that stops the watcher."
+(defn ^{:stratum 1} start-watcher!
+  "Start a daemon thread that follows `events-dir` and calls
+   `publish-fn` with each new event (`es/start-layout-tail!`). Returns a
+   function that stops it."
   [events-dir publish-fn]
-  (let [running (atom true)
-        offsets (atom (initialize-offsets events-dir))
-        thread (Thread.
-                (fn []
-                  (while @running
-                    (try
-                      (swap! offsets poll-once! events-dir publish-fn)
-                      (Thread/sleep 500)
-                      (catch InterruptedException _
-                        (reset! running false))
-                      (catch Exception _
-                        ;; Transient I/O error — retry on next poll
-                        (try (Thread/sleep 1000) (catch InterruptedException _ nil)))))))]
-    (.setDaemon thread true)
-    (.setName thread "miniforge-event-watcher")
-    (.start thread)
-    (fn []
-      (reset! running false)
-      (.interrupt thread))))
+  (es/start-layout-tail! events-dir publish-fn
+                         {:window-ms   active-window-ms
+                          :thread-name "miniforge-event-watcher"
+                          :logger      (tail-logger)}))

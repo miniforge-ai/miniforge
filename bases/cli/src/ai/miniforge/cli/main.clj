@@ -39,7 +39,6 @@
    to fuller JVM code paths when the CLI only needs thin orchestration."
   (:require
    [babashka.cli :as cli]
-   [babashka.fs :as fs]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
@@ -51,12 +50,13 @@
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.main.util :as util]
    [ai.miniforge.cli.main.launchers :as launchers]
+   [ai.miniforge.cli.main.parse-errors :as parse-errors]
    [ai.miniforge.cli.main.status.history :as status-history]
    [ai.miniforge.cli.main.status.presentation :as status-presentation]
    [ai.miniforge.cli.main.status.summary :as status-summary]
    [ai.miniforge.cli.main.version :as version]
+   [ai.miniforge.cli.main.commands.hook-eval :as cmd-hook-eval]
    [ai.miniforge.cli.main.commands.run :as cmd-run]
-   [ai.miniforge.cli.main.commands.resume :as cmd-resume]
    [ai.miniforge.cli.main.commands.shared :as cmd-shared]
    [ai.miniforge.cli.main.commands.monitoring :as cmd-monitoring]
    [ai.miniforge.cli.main.commands.fleet :as cmd-fleet]
@@ -70,6 +70,7 @@
    [ai.miniforge.cli.main.commands.init :as cmd-init]
    [ai.miniforge.cli.main.commands.worktree :as cmd-worktree]
    [ai.miniforge.cli.main.commands.runtime :as cmd-runtime]
+   [ai.miniforge.cli.main.commands.doctor :as cmd-doctor]
    ;; N5 command modules
    [ai.miniforge.cli.main.commands.workflow-commands :as cmd-workflow]
    [ai.miniforge.cli.main.commands.policy :as cmd-policy]
@@ -78,7 +79,6 @@
    [ai.miniforge.cli.main.commands.etl :as cmd-etl]
    ;; GROUP 3b: timeline-based events show
    [ai.miniforge.cli.main.commands.events :as cmd-events]
-   [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
    [ai.miniforge.lsp-mcp-bridge.main :as lsp-bridge]
    [ai.miniforge.lsp-mcp-bridge.tasks :as lsp-tasks]
@@ -101,12 +101,7 @@
 
 (defn ^{:stratum 0} runtime-run-cmd [m] (cmd-runtime/runtime-run-cmd m))
 
-(defn ^{:stratum 0} hook-eval-cmd
-  "Evaluate a tool-use request from a Claude PreToolUse hook.
-
-   Reads JSON from stdin, evaluates against policy, writes decision to stdout."
-  [_m]
-  (System/exit (agent/hook-eval-stdin!)))
+(defn ^{:stratum 0} hook-eval-cmd [m] (cmd-hook-eval/hook-eval-cmd m))
 
 (defn ^{:stratum 0} lsp-mcp-bridge-cmd
   "Run the LSP-to-MCP bridge server (spawned by Claude Code/Desktop/Codex as MCP server).
@@ -149,67 +144,13 @@
                                       (app-config/help-examples)))
                   "\n"))))
 
-(defn- ^{:stratum 0} handle-unknown-command
-  "Print help for an unrecognized CLI command."
-  [{:keys [wrong-input dispatch all-commands]}]
-  (display/print-error (messages/t :main/unknown-command
-                                   {:command (str/join " " (conj (vec dispatch) wrong-input))}))
-  (println)
-  (when (and (= (first dispatch) "fleet")
-             (contains? #{"web" "dashboard" "tui"} wrong-input))
-    (println (messages/t :main/did-you-mean))
-    (println (str "  " (app-config/command-string (if (= wrong-input "dashboard") "web" wrong-input))))
-    (println))
-  (when (seq all-commands)
-    (println (messages/t :main/available-commands
-                         {:scope (if (seq dispatch)
-                                   (str "'" (str/join " " dispatch) "' ")
-                                   "")}))
-    (doseq [cmd all-commands]
-      (println (str "  " (app-config/command-string (str/join " " (conj (vec dispatch) cmd))))))
-    (println))
-  (println (messages/t :main/run-help
-                       {:command (app-config/command-string "help")}))
-  (System/exit 1))
-
 ;; TUI components loaded conditionally (only in JVM/jlink bundled runtime).
 ;; This is an optional composition seam: miniforge-core includes the CLI
 ;; without bundling the JVM TUI component.
 (def ^{:stratum 0} tui-launcher
   (util/optional-composition-var 'ai.miniforge.tui-views.interface 'start-standalone-tui!))
 
-(defn ^{:stratum 0} doctor-cmd
-  [_m]
-  (println "\n" (display/style (app-config/system-check-title) :foreground :cyan :bold true) "\n")
-
-  (let [checks (messages/t :doctor/checks)]
-
-    (doseq [[cmd name desc] checks]
-      (let [available? (util/check-command cmd)
-            status (if available?
-                     (display/style "✓" :foreground :green)
-                     (display/style "✗" :foreground :red))
-            name-styled (if available? name (display/style name :foreground :red))]
-        (println (format "  %s %-12s %s" status name-styled desc))))
-
-    (println)
-
-    ;; Container runtime (N11-delta Phase 3)
-    (println (display/style (messages/t :runtime/doctor-section-title)
-                            :foreground :cyan :bold true))
-    (cmd-runtime/print-doctor-runtime-section)
-    (println)
-
-    ;; Check config
-    (if (fs/exists? config/default-user-config-path)
-      (println (display/style "✓" :foreground :green)
-               (messages/t :doctor/config-exists
-                           {:config-path config/default-user-config-path}))
-      (println (display/style "!" :foreground :yellow)
-               (messages/t :doctor/no-config
-                           {:command (app-config/command-string "config init")})))
-
-    (println)))
+(defn ^{:stratum 0} doctor-cmd [m] (cmd-doctor/doctor-cmd (util/get-opts m)))
 
 ;; Config commands — one-liner delegates
 (defn ^{:stratum 0} config-init-cmd [m] (config/cmd-init (util/get-opts m)))
@@ -232,23 +173,29 @@
 
 ;; Workflow commands
 (defn ^{:stratum 0} workflow-run-cmd
+  "Exits 1 when the workflow id is missing, when the run throws, and when
+   it ends in anything but success (see `cmd-run/finish!`)."
   [m]
   (let [{:keys [workflow-id version input input-json output quiet dashboard-url]} (util/get-opts m)]
     (if-not workflow-id
-      (display/print-error (messages/t :workflow-run/usage
-                                       {:command (app-config/command-string "workflow run <workflow-id> [options]")}))
-      (try
-        (workflow-runner/run-workflow!
-         (keyword (str/replace workflow-id #"^:" ""))
-         {:version (or version "latest")
-          :input input
-          :input-json input-json
-          :output (or output :pretty)
-          :quiet (boolean quiet)
-          :dashboard-url dashboard-url})
-        (catch Exception e
-          (display/print-error (messages/t :workflow-run/failed
-                                           {:error (ex-message e)})))))))
+      (cmd-shared/usage-error! :workflow-run/usage "workflow run <workflow-id> [options]")
+      (cmd-run/finish!
+       (try
+         (workflow-runner/run-workflow!
+          (keyword (str/replace workflow-id #"^:" ""))
+          {:version (or version "latest")
+           :input input
+           :input-json input-json
+           :output (or output :pretty)
+           :quiet (boolean quiet)
+           :dashboard-url dashboard-url})
+         (catch Exception e
+           ;; A throw+ anomaly's ex-message is slingshot's "throw+: {...}"
+           ;; wrapper around the whole map; print the anomaly's message.
+           (display/print-error (messages/t :workflow-run/failed
+                                            {:error (or (:anomaly/message (ex-data e))
+                                                        (ex-message e))}))
+           nil))))))
 
 ;; Workflow subcommands — spec-driven execution and lifecycle (N5)
 (defn ^{:stratum 0} workflow-execute-cmd [m] (cmd-workflow/workflow-execute-cmd (util/get-opts m)))
@@ -263,21 +210,27 @@
 
 ;; Chain commands
 (defn ^{:stratum 0} chain-run-cmd
+  "Exits 1 when the chain id is missing, when the chain throws, and when
+   it ends in anything but success (see `cmd-run/finish!`)."
   [m]
   (let [{:keys [chain-id version spec input-json quiet]} (util/get-opts m)]
     (if-not chain-id
-      (display/print-error (messages/t :chain-run/usage
-                                       {:command (app-config/command-string "chain run <chain-id> [options]")}))
-      (try
-        (workflow-runner/run-chain!
-         (keyword (str/replace chain-id #"^:" ""))
-         {:version (or version "latest")
-          :spec spec
-          :input-json input-json
-          :quiet (boolean quiet)})
-        (catch Exception e
-          (display/print-error (messages/t :chain-run/failed
-                                           {:error (ex-message e)})))))))
+      (cmd-shared/usage-error! :chain-run/usage "chain run <chain-id> [options]")
+      (cmd-run/finish!
+       (try
+         (workflow-runner/run-chain!
+          (keyword (str/replace chain-id #"^:" ""))
+          {:version (or version "latest")
+           :spec spec
+           :input-json input-json
+           :quiet (boolean quiet)})
+         (catch Exception e
+           ;; A throw+ anomaly's ex-message is slingshot's "throw+: {...}"
+           ;; wrapper around the whole map; print the anomaly's message.
+           (display/print-error (messages/t :chain-run/failed
+                                            {:error (or (:anomaly/message (ex-data e))
+                                                        (ex-message e))}))
+           nil))))))
 
 ;; Observability commands
 (defn ^{:stratum 0} logs-tail-cmd [m] (observability/handle-logs (assoc (util/get-opts m) :subcommand "tail")))
@@ -296,7 +249,12 @@
 (defn ^{:stratum 0} resume-cmd
   "First-class `mf resume <workflow-id>` subcommand. The `<workflow-id>`
    can be passed positionally, or via `--workflow-id`/`-w` / the legacy
-   `--resume`/`-r` flag (kept so existing docs keep working)."
+   `--resume`/`-r` flag (kept so existing docs keep working).
+
+   Exits 1 when the id is missing, when the resume throws (reported on
+   stderr, not as a stack trace) and when the resumed run ends in
+   anything but success. resume-workflow returns nil only after reporting
+   the run already complete, a no-op success."
   [m]
   (let [opts (util/get-opts m)
         args (:args m)
@@ -304,8 +262,9 @@
                   (:resume opts)
                   (first args))]
     (if (str/blank? (str wf-id))
-      (display/print-error (messages/t :resume/missing-workflow-id))
-      (cmd-resume/resume-workflow wf-id opts))))
+      (do (display/print-error (messages/t :resume/missing-workflow-id))
+          (cmd-shared/exit! cmd-shared/usage-exit-code))
+      (some-> (cmd-run/resume-reporting-failure wf-id opts) cmd-run/finish!))))
 
 (defn ^{:stratum 0} scan-cmd [m] (cmd-scan/scan-cmd (util/get-opts m)))
 
@@ -412,7 +371,8 @@
     (catch Error fatal (throw fatal))
     (catch Object failure
       (display/print-error (messages/t :status/read-failed
-                            {:message (util/caught-message failure (:throwable &throw-context))})))))
+                            {:message (util/caught-message failure (:throwable &throw-context))}))
+      (cmd-shared/exit! 1))))
 
 (defn ^{:stratum 0} version-cmd [_m] (version/print!))
 
@@ -427,13 +387,19 @@
 ;; CLI dispatch
 (def ^{:stratum 1} dispatch-table
   [{:cmds ["version"] :fn version-cmd}
-   {:cmds ["doctor"]  :fn doctor-cmd}
+   {:cmds ["doctor"]
+    :fn doctor-cmd
+    :restrict true
+    :spec {:backend        {:coerce :keyword :alias :b}
+           :execution-mode {:coerce :keyword :alias :m}}}
    {:cmds ["help"]    :fn help-cmd}
-   {:cmds []          :fn help-cmd}  ; default
+   {:cmds []          :fn (parse-errors/help-unless-unknown help-cmd)}  ; default
 
    ;; Tool-use supervision hook (Claude PreToolUse)
    {:cmds ["hook-eval"]
-    :fn hook-eval-cmd}
+    :fn hook-eval-cmd
+    :spec {:role {:coerce :keyword}
+           :root {}}}
 
    ;; MCP context server (internal — spawned as subprocess by agent)
    {:cmds ["context-server"]
@@ -447,7 +413,6 @@
     :fn lsp-mcp-bridge-cmd}
 
    ;; LSP management commands (user-facing)
-   {:cmds ["lsp"]          :fn help-cmd}
    {:cmds ["lsp" "status"] :fn lsp-status-cmd}
    {:cmds ["lsp" "install"] :fn lsp-install-cmd}
    {:cmds ["lsp" "setup"] :fn lsp-setup-cmd}
@@ -463,7 +428,6 @@
     :spec {:path {:alias :p}}}
 
    ;; Runtime adapter (N11-delta Phase 3) — info / pass-through run
-   {:cmds ["runtime"]      :fn help-cmd}
    {:cmds ["runtime" "info"] :fn runtime-info-cmd}
    {:cmds ["runtime" "run"]  :fn runtime-run-cmd}
 
@@ -471,6 +435,7 @@
    {:cmds ["scan"]
     :fn scan-cmd
     :args->opts [:repo]
+    :restrict true
     :spec {:pack      {:alias :p}
            :rules     {:alias :r}
            :since     {:alias :s}
@@ -480,36 +445,51 @@
            :no-lint   {:coerce :boolean}
            :semantic  {:coerce :boolean}}}
 
-   ;; Run command
+   ;; Run command. The spec declares every option run-cmd or its delegates
+   ;; read: the spec workflow, the plan executor (--quiet) and, with
+   ;; --resume, resume-workflow (--quiet, --run-id, --correlation-id,
+   ;; --from-phase), the same flags `resume` declares.
    {:cmds ["run"]
     :fn run-cmd
     :args->opts [:spec]
+    :restrict true
     :spec {:interactive     {:coerce :boolean :alias :i}
            :worktree        {:alias :w}
            :resume          {:alias :r}
            :backend         {:coerce :keyword :alias :b}
-           :execution-mode  {:coerce :keyword :alias :m}}}
+           :execution-mode  {:coerce :keyword :alias :m}
+           :quiet           {:coerce :boolean :alias :q}
+           :run-id          {}
+           :correlation-id  {}
+           :from-phase      {:coerce :keyword}}}
 
    ;; Resume — first-class subcommand. Reuses `run --resume`'s
    ;; underlying logic through the workflow-resume component.
    {:cmds ["resume"]
     :fn resume-cmd
     :args->opts [:workflow-id]
+    :restrict true
     :spec {:workflow-id {:alias :w}
+           :resume      {:alias :r}
+           :pin         {:coerce :boolean}
            :quiet       {:coerce :boolean :alias :q}
            :run-id      {}
            :correlation-id {}
-           :from-phase  {:coerce :keyword}}}
+           :from-phase  {:coerce :keyword}
+           :force       {:coerce :boolean}}}
 
    ;; Status command
    {:cmds ["status"]
     :fn status-cmd
-    :args->opts [:workflow-id]}
+    :args->opts [:workflow-id]
+    :restrict true}
 
-   ;; Monitoring commands
+   ;; Monitoring commands. `web` --port has no :default: a default here
+   ;; would hide the config's [:dashboard :port] from web-cmd.
    {:cmds ["web"]
     :fn web-cmd
-    :spec {:port {:coerce :int :alias :p :default 7878}
+    :restrict true
+    :spec {:port {:coerce :int :alias :p}
            :open {:coerce :boolean :alias :o}}}
 
    {:cmds ["tui"]
@@ -519,7 +499,8 @@
    ;; Workflow parent — `mf workflow --help` / `mf workflow` lists the
    ;; group's subcommands with their one-line summaries.
    {:cmds ["workflow"]
-    :fn (wr-help/group-handler wr-help-registry/workflow-group-help)}
+    :fn (parse-errors/help-unless-unknown
+         (wr-help/group-handler wr-help-registry/workflow-group-help))}
 
    ;; Workflow commands (each subcommand carries a `--help` / `-h`
    ;; flag wired through `wr-help/handler-with-help`; the spec from
@@ -528,10 +509,12 @@
    {:cmds ["workflow" "run"]
     :fn (wr-help/handler-with-help :workflow-run workflow-run-cmd)
     :args->opts [:workflow-id]
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-run)}
 
    {:cmds ["workflow" "list"]
     :fn (wr-help/handler-with-help :workflow-list workflow-list-cmd)
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-list)}
 
    ;; Workflow subcommands — spec-driven execution and lifecycle (N5)
@@ -543,39 +526,50 @@
    {:cmds ["workflow" "status"]
     :fn (wr-help/handler-with-help :workflow-status workflow-status-cmd)
     :args->opts [:id]
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-status)}
 
    {:cmds ["workflow" "inspect"]
     :fn (wr-help/handler-with-help :workflow-inspect workflow-inspect-cmd)
     :args->opts [:path]
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-inspect)}
 
    {:cmds ["workflow" "cancel"]
     :fn (wr-help/handler-with-help :workflow-cancel workflow-cancel-cmd)
     :args->opts [:id]
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-cancel)}
 
    {:cmds ["workflow" "gc-scratch"]
     :fn (wr-help/handler-with-help :workflow-gc-scratch workflow-gc-scratch-cmd)
+    :restrict true
     :spec (wr-help-registry/spec-for :workflow-gc-scratch)}
+
+   {:cmds ["workflow" "gc-checkpoints"]
+    :fn (wr-help/handler-with-help :workflow-gc-checkpoints cmd-workflow/workflow-gc-checkpoints-cmd)
+    :restrict true
+    :spec (wr-help-registry/spec-for :workflow-gc-checkpoints)}
 
    ;; Chain parent — `mf chain --help` / `mf chain` lists the group's
    ;; subcommands with their one-line summaries.
    {:cmds ["chain"]
-    :fn (wr-help/group-handler wr-help-registry/chain-group-help)}
+    :fn (parse-errors/help-unless-unknown
+         (wr-help/group-handler wr-help-registry/chain-group-help))}
 
    ;; Chain commands
    {:cmds ["chain" "run"]
     :fn (wr-help/handler-with-help :chain-run chain-run-cmd)
     :args->opts [:chain-id]
+    :restrict true
     :spec (wr-help-registry/spec-for :chain-run)}
 
    {:cmds ["chain" "list"]
     :fn (wr-help/handler-with-help :chain-list chain-list-cmd)
+    :restrict true
     :spec (wr-help-registry/spec-for :chain-list)}
 
    ;; Config subcommands
-   {:cmds ["config"] :fn help-cmd}
    {:cmds ["config" "init"] :fn config-init-cmd}
    {:cmds ["config" "list"] :fn config-list-cmd}
    {:cmds ["config" "get"]  :fn config-get-cmd  :args->opts [:key]}
@@ -590,6 +584,7 @@
    {:cmds ["logs" "tail"]
     :fn logs-tail-cmd
     :args->opts [:workflow-id]
+    :restrict true
     :spec {:file {:alias :f}
            :lines {:coerce :int :alias :n :default 10}
            :follow {:coerce :boolean :default true}
@@ -601,6 +596,7 @@
    {:cmds ["events" "tail"]
     :fn events-tail-cmd
     :args->opts [:workflow-id]
+    :restrict true
     :spec {:file {:alias :f}
            :lines {:coerce :int :alias :n :default 20}
            :follow {:coerce :boolean :default true}
@@ -613,6 +609,7 @@
    {:cmds ["events" "show"]
     :fn events-show-cmd
     :args->opts [:workflow-id]
+    :restrict true
     :spec {:gap-threshold {:coerce :int    :alias :g :default 60}
            :raw           {:coerce :boolean :alias :r :default false}}}
 
@@ -637,15 +634,18 @@
            :out       {:default "table"}
            :post      {:coerce :boolean}
            :pr-number {:coerce :long}}}
-   {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]}
+   {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]
+    :spec {:execution-mode {:coerce :keyword :alias :m}}}
    {:cmds ["pr" "merge"]   :fn pr-merge-cmd   :args->opts [:url]}
-   {:cmds ["pr" "monitor"] :fn pr-monitor-cmd :spec {:author {:alias :a}
-                                                      :poll-interval {:alias :p}
-                                                      :repo {}}}
+   {:cmds ["pr" "monitor"] :fn pr-monitor-cmd :restrict true
+    :spec {:author        {:alias :a}
+           :poll-interval {:alias :p}
+           :repo          {}}}
 
    ;; N13 §2.2 Standards Reviewer auto-trigger (single-pass v0)
    {:cmds ["pr" "review-monitor"]
     :fn pr-review-monitor-cmd
+    :restrict true
     :spec {:repo      {}
            :author    {:alias :a}
            :standards {:default "standards/miniforge"}
@@ -656,6 +656,7 @@
    ;; N13 §2.7 Resume Signal Dispatcher (single-pass v0)
    {:cmds ["pr" "resume-dispatch"]
     :fn pr-resume-dispatcher-cmd
+    :restrict true
     :spec {:repo {}
            :once {:coerce :boolean :default true}}}
 
@@ -669,33 +670,29 @@
    {:cmds ["control-plane" "decisions"] :fn cp-decisions-cmd}
    {:cmds ["control-plane" "resolve"]   :fn cp-resolve-cmd
     :args->opts [:decision-id :resolution]
+    :restrict true
     :spec {:comment {:alias :c}}}
    {:cmds ["control-plane" "terminate"] :fn cp-terminate-cmd
     :args->opts [:agent-id]}
 
    ;; Operator channel — `control-plane` above is the dashboard's HTTP API
-   {:cmds ["operator"]          :fn help-cmd}
    {:cmds ["operator" "serve"] :fn operator-serve-cmd}
 
    ;; Policy pack commands (N5)
-   {:cmds ["policy"]           :fn help-cmd}
    {:cmds ["policy" "list"]    :fn policy-list-cmd}
    {:cmds ["policy" "show"]    :fn policy-show-cmd    :args->opts [:pack-id]}
    {:cmds ["policy" "install"] :fn policy-install-cmd :args->opts [:path]}
 
    ;; Evidence bundle commands (N5)
-   {:cmds ["evidence"]           :fn help-cmd}
    {:cmds ["evidence" "list"]    :fn evidence-list-cmd}
    {:cmds ["evidence" "show"]    :fn evidence-show-cmd   :args->opts [:id]}
    {:cmds ["evidence" "export"]  :fn evidence-export-cmd :args->opts [:id :output-path]}
 
    ;; Artifact commands (N5)
-   {:cmds ["artifact"]              :fn help-cmd}
    {:cmds ["artifact" "list"]       :fn artifact-list-cmd}
    {:cmds ["artifact" "provenance"] :fn artifact-provenance-cmd :args->opts [:id]}
 
    ;; ETL commands (N5)
-   {:cmds ["etl"]             :fn help-cmd}
    {:cmds ["etl" "repo"]      :fn etl-repo-cmd     :args->opts [:url]}
    {:cmds ["etl" "run"]       :fn etl-run-cmd      :args->opts [:pack]}
    {:cmds ["etl" "list"]      :fn etl-list-cmd     :args->opts [:paths]}
@@ -705,13 +702,22 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} -main
-  "CLI entry point."
+  "CLI entry point. A command-line error exits 2: an unknown command lists
+   the available ones, and a bad, unknown or missing option prints that
+   command's usage (see `parse-errors`). A command group named without a
+   subcommand lists its subcommands."
   [& args]
   (try+
-    (cli/dispatch dispatch-table args)
+    (cli/dispatch (mapv parse-errors/guard-entry dispatch-table) args)
     #_{:clj-kondo/ignore [:unresolved-symbol]}
     (catch [:type :org.babashka/cli :cause :no-match] data
-      (handle-unknown-command data))))
+      (parse-errors/handle-unknown-command! data))
+    #_{:clj-kondo/ignore [:unresolved-symbol]}
+    (catch [:type :org.babashka/cli :cause :input-exhausted] data
+      (parse-errors/print-group-usage! data))
+    #_{:clj-kondo/ignore [:unresolved-symbol]}
+    (catch [:type :org.babashka/cli] data
+      (parse-errors/handle-parse-error! data))))
 
 (alter-var-root #'cmd-monitoring/*web-available?* (constantly web-available?))
 

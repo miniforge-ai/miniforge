@@ -24,6 +24,12 @@
    [clojure.edn :as edn]
    [cognitect.transit :as transit]
    [ai.miniforge.event-stream.sinks :as sinks]
+   [ai.miniforge.event-stream.sinks.cleanup :as cleanup]
+   [ai.miniforge.event-stream.sinks.console :as console]
+   [ai.miniforge.event-stream.sinks.factory :as factory]
+   [ai.miniforge.event-stream.sinks.file :as file]
+   [ai.miniforge.event-stream.sinks.fleet :as fleet]
+   [ai.miniforge.file-durability.interface :as disk]
    [ai.miniforge.event-stream.test-helpers.http-mock :as http-mock]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -59,64 +65,91 @@
   (when (.isDirectory dir)
     (vec (.listFiles dir))))
 
-;; create-sink factory
-(deftest ^{:stratum 0} create-sink-keyword-test
-  (testing ":file produces a function"
-    (is (fn? (sinks/create-sink :file))))
+(defn ^{:stratum 0} write-file!
+  "Create `f` and its parent directories with `content`; return `f`."
+  ^java.io.File [^java.io.File f content]
+  (io/make-parents f)
+  (spit f content)
+  f)
 
-  (testing ":stdout produces a function"
-    (is (fn? (sinks/create-sink :stdout))))
-
-  (testing ":stderr produces a function"
-    (is (fn? (sinks/create-sink :stderr)))))
-
-(deftest ^{:stratum 0} create-sink-map-test
-  (testing "map with :type :file produces file sink"
-    (is (fn? (sinks/create-sink {:type :file}))))
-
-  (testing "map with :type :stdout produces stdout sink"
-    (is (fn? (sinks/create-sink {:type :stdout}))))
-
-  (testing "map with :type :stderr and filter produces stderr sink"
-    (is (fn? (sinks/create-sink {:type :stderr :filter (constantly true)}))))
-
-  (testing "map with unknown type throws"
-    (is (thrown? Exception (sinks/create-sink {:type :unknown})))))
+(defn ^{:stratum 0} age!
+  "Set the mtime of each of `files` to `days` days ago."
+  [days & files]
+  (let [t (- (System/currentTimeMillis) (* days 24 60 60 1000))]
+    (doseq [^java.io.File f files]
+      (.setLastModified f t))))
 
 (deftest ^{:stratum 0} create-sink-vector-test
   (testing "vector creates multi-sink"
     (let [_received-1 (atom [])
           _received-2 (atom [])
           ;; Use a vector of keyword sinks but verify via multi-sink behavior
-          sink (sinks/create-sink [:stdout :stdout])]
+          sink (factory/create-sink [:stdout :stdout])]
       ;; Should be a function
       (is (fn? sink)))))
 
 (deftest ^{:stratum 0} create-sink-invalid-test
   (testing "invalid config throws"
-    (is (thrown? Exception (sinks/create-sink 42)))
-    (is (thrown? Exception (sinks/create-sink "invalid")))))
+    (is (thrown? Exception (factory/create-sink 42)))
+    (is (thrown? Exception (factory/create-sink "invalid")))))
 
-;; create-sinks-from-config
-(deftest ^{:stratum 0} create-sinks-from-config-test
-  (testing "defaults to file sink when no config"
-    (let [created-sinks (sinks/create-sinks-from-config {})]
-      (is (= 1 (count created-sinks)))
-      (is (fn? (first created-sinks)))))
-
-  (testing "creates sinks from :observability :event-sinks"
-    (let [created-sinks (sinks/create-sinks-from-config
-                         {:observability {:event-sinks [:stdout]}})]
-      (is (= 1 (count created-sinks)))
-      (is (fn? (first created-sinks)))))
-
-  (testing "multiple sinks from config"
-    (let [created-sinks (sinks/create-sinks-from-config
-                         {:observability {:event-sinks [:file :stdout]}})]
-      (is (= 2 (count created-sinks)))
-      (is (every? fn? created-sinks)))))
+(deftest ^{:stratum 0} safe-ids-keep-their-directory-names-test
+  (testing "UUIDs and keyword names are used as is, so existing event directories stay put"
+    (let [id (random-uuid)]
+      (is (= (str id) (.getName (sinks/live-workflow-dir "/base" id))))
+      (is (= "canonical-sdlc" (.getName (sinks/live-workflow-dir "/base" :canonical-sdlc))))
+      (is (= (.getName (sinks/live-workflow-dir "/base" "../x"))
+             (.getName (sinks/live-workflow-dir "/base" "../x")))
+          "an encoded id maps to the same directory every time"))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} file-sink-keeps-the-dir-it-was-created-with-test
+  ;; The sink is made while the default points at `dir`. The background
+  ;; cleanup is held until the default has moved on to `other`, then
+  ;; released, and an event is written then too: both must still use
+  ;; `dir`. Deletion is stubbed: the stub only records what it was given.
+  (with-temp-dir
+    (fn [dir]
+      (with-temp-dir
+        (fn [other]
+          (let [release (java.util.concurrent.CountDownLatch. 1)
+                seen (promise)
+                wf (random-uuid)]
+            (with-redefs [cleanup/cleanup-stale-events! (fn [opts]
+                                                          (.await release 10 java.util.concurrent.TimeUnit/SECONDS)
+                                                          (deliver seen opts)
+                                                          0)]
+              (let [sink (with-redefs [sinks/default-events-dir (constantly dir)]
+                           (file/file-sink))]
+                (with-redefs [sinks/default-events-dir (constantly other)]
+                  (.countDown release)
+                  (sink (sample-event {:workflow/id wf}))
+                  (is (= (str dir) (str (:events-dir (deref seen 10000 ::never))))
+                      "cleanup runs on the creation-time dir")
+                  (is (seq (list-files (io/file dir "live" (str wf))))
+                      "writes go to the creation-time dir")
+                  (is (empty? (list-files (io/file other "live" (str wf))))))))))))))
+
+(deftest ^{:stratum 1} file-sink-with-an-explicit-nil-dir-uses-the-default-test
+  (with-temp-dir
+    (fn [dir]
+      (with-redefs [sinks/default-events-dir (constantly dir)]
+        (let [sink (file/file-sink {:base-dir nil})
+              wf (random-uuid)]
+          (sink (sample-event {:workflow/id wf}))
+          (is (seq (list-files (io/file dir "live" (str wf))))
+              "written under the default dir, not a relative live/"))))))
+
+(defn ^{:stratum 1} with-temp-default-events-dir
+  "Run `f` with the default events dir pointed at a temp dir, so a file
+   sink made without :base-dir neither writes nor prunes under the user's
+   ~/.miniforge/events."
+  [f]
+  (with-temp-dir
+    (fn [dir]
+      (with-redefs [sinks/default-events-dir (constantly dir)]
+        (f)))))
 
 ;; `mock-http-client` lives in the shared
 ;; `ai.miniforge.event-stream.test-helpers.http-mock` namespace so other
@@ -131,9 +164,9 @@
   ;; uses `name` for keywords; UUIDs/strings pass through `str`.
   (with-temp-dir
     (fn [dir]
-      (let [kw-path     (sinks/workflow-dir dir :canonical-sdlc)
-            uuid-path   (sinks/workflow-dir dir (random-uuid))
-            string-path (sinks/workflow-dir dir "wf-abc")]
+      (let [kw-path     (file/workflow-dir dir :canonical-sdlc)
+            uuid-path   (file/workflow-dir dir (random-uuid))
+            string-path (file/workflow-dir dir "wf-abc")]
         (is (= "canonical-sdlc" (.getName kw-path))
             "keyword id strips the colon — uses (name kw)")
         (is (re-matches #"[0-9a-f-]{36}" (.getName uuid-path))
@@ -148,7 +181,7 @@
     (fn [dir]
       (let [wf-kw :auth-flow
             event (sample-event {:workflow/id wf-kw})
-            path  (sinks/event-file-path dir wf-kw event)
+            path  (file/event-file-path dir wf-kw event)
             parent (.getParentFile path)]
         (is (= "auth-flow" (.getName parent))
             "event-file-path's parent dir uses the same keyword
@@ -161,7 +194,7 @@
       (fn [dir]
         (let [wf-id (random-uuid)
               event (sample-event {:workflow/id wf-id})
-              path (sinks/event-file-path dir wf-id event)]
+              path (file/event-file-path dir wf-id event)]
           (is (instance? java.io.File path))
           (is (str/includes? (.getPath path) (.getPath dir)))
           (is (str/ends-with? (.getName path) ".json"))))))
@@ -171,7 +204,7 @@
       (fn [dir]
         (let [wf-id (random-uuid)
               event (sample-event {:workflow/id wf-id})
-              path (sinks/event-file-path dir wf-id event)
+              path (file/event-file-path dir wf-id event)
               parent (.getParentFile path)]
           (is (.isDirectory parent))
           (is (str/ends-with? (.getName parent) (str wf-id)))))))
@@ -185,7 +218,7 @@
               event (sample-event {:workflow/id wf-id
                                    :event/id snowflake-uuid
                                    :event/sequence-number 12345})
-              path (sinks/event-file-path dir wf-id event)
+              path (file/event-file-path dir wf-id event)
               filename (.getName path)]
           (is (str/ends-with? filename ".transit.json"))
           (is (str/starts-with? filename "018f3a9c8e4b12d0__"))
@@ -196,7 +229,7 @@
       (fn [dir]
         (let [wf-id (random-uuid)
               event (sample-event {:workflow/id wf-id})
-              path (sinks/event-file-path dir wf-id event)
+              path (file/event-file-path dir wf-id event)
               filename (.getName path)]
           ;; Legacy pattern: 20YYMMDDTHHMMSSsss-{uuid}.json
           (is (re-matches #"\d{8}T\d{9}Z-[0-9a-f-]+\.json" filename)
@@ -207,7 +240,7 @@
   (testing "writes event to per-workflow file as Transit-JSON"
     (with-temp-dir
       (fn [dir]
-        (let [sink (sinks/file-sink {:base-dir dir})
+        (let [sink (file/file-sink {:base-dir dir})
               wf-id (random-uuid)
               event (sample-event {:workflow/id wf-id})]
           (sink event)
@@ -218,10 +251,49 @@
               (is (= :workflow/started (:event/type parsed)))
               (is (= wf-id (:workflow/id parsed)))))))))
 
+  (testing "leaves only the final event file, no temp file, in the workflow directory"
+    (with-temp-dir
+      (fn [dir]
+        (let [sink (file/file-sink {:base-dir dir})
+              wf-id (random-uuid)]
+          (dotimes [_ 3] (sink (sample-event {:workflow/id wf-id})))
+          (let [names (map #(.getName ^java.io.File %)
+                           (list-files (io/file dir "live" (str wf-id))))]
+            (is (= 3 (count names)))
+            (is (every? #(str/ends-with? % ".json") names)
+                "every file is a finished event; none is a .transit.tmp"))))))
+
+  (testing "no finished event file is visible while its content is being written"
+    ;; Look at the workflow directory once the bytes are written and
+    ;; forced, just before the rename publishes them. The old sink spat
+    ;; straight to the final .json path, so that file existed (and was
+    ;; readable part-written) during the write; now only the temp file
+    ;; does, until the rename.
+    (with-temp-dir
+      (fn [dir]
+        (let [sink (file/file-sink {:base-dir dir})
+              wf-id (random-uuid)
+              wf-dir (io/file dir "live" (str wf-id))
+              visible-mid-write (atom nil)
+              publish-bytes! disk/publish-bytes!]
+          (with-redefs [disk/publish-bytes!
+                        (fn [tmp bytes publish!]
+                          (publish-bytes! tmp bytes
+                                          (fn []
+                                            (reset! visible-mid-write
+                                                    (->> (list-files wf-dir)
+                                                         (map #(.getName ^java.io.File %))
+                                                         (filter #(str/ends-with? % ".json"))
+                                                         vec))
+                                            (publish!))))]
+            (sink (sample-event {:workflow/id wf-id})))
+          (is (= [] @visible-mid-write))
+          (is (= 1 (count (list-files wf-dir))) "the event lands once the write completes")))))
+
   (testing "writes one file per event in the workflow subdirectory"
     (with-temp-dir
       (fn [dir]
-        (let [sink (sinks/file-sink {:base-dir dir})
+        (let [sink (file/file-sink {:base-dir dir})
               wf-id (random-uuid)]
           (sink (sample-event {:workflow/id wf-id}))
           (sink (sample-event {:workflow/id wf-id :event/type :workflow/completed}))
@@ -235,7 +307,7 @@
   (testing "writes events with nil workflow-id to operator subdirectory"
     (with-temp-dir
       (fn [dir]
-        (let [sink (sinks/file-sink {:base-dir dir})
+        (let [sink (file/file-sink {:base-dir dir})
               unique-type (keyword (str "test/op-" (random-uuid)))
               event (sample-event {:workflow/id nil :event/type unique-type})]
           (sink event)
@@ -248,7 +320,7 @@
   (testing "output files are valid Transit-JSON readable by cognitect/transit-clj reader"
     (with-temp-dir
       (fn [dir]
-        (let [sink (sinks/file-sink {:base-dir dir})
+        (let [sink (file/file-sink {:base-dir dir})
               wf-id (random-uuid)
               event (sample-event {:workflow/id wf-id})]
           (sink event)
@@ -261,7 +333,7 @@
   (testing "events with java.time.Instant values serialize without error"
     (with-temp-dir
       (fn [dir]
-        (let [sink (sinks/file-sink {:base-dir dir})
+        (let [sink (file/file-sink {:base-dir dir})
               wf-id (random-uuid)
               event (sample-event {:workflow/id wf-id
                                    :execution/started-at (java.time.Instant/now)
@@ -277,11 +349,11 @@
   (testing "recreates missing parent directories at write time"
     (with-temp-dir
       (fn [dir]
-        (let [sink (sinks/file-sink {:base-dir dir})
+        (let [sink (file/file-sink {:base-dir dir})
               wf-id (random-uuid)
               event (sample-event {:workflow/id wf-id})]
-          (with-redefs [sinks/event-file-path (fn [_ _ _]
-                                                (io/file dir "nested" "workflow" "event.json"))]
+          (with-redefs [file/event-file-path (fn [_ _ _]
+                                              (io/file dir "nested" "workflow" "event.json"))]
             (sink event))
           (let [event-file (io/file dir "nested" "workflow" "event.json")]
             (is (.exists event-file))
@@ -291,7 +363,7 @@
 ;; stdout-sink
 (deftest ^{:stratum 1} stdout-sink-test
   (testing "prints event to stdout in edn format"
-    (let [sink (sinks/stdout-sink {:compact true})
+    (let [sink (console/stdout-sink {:compact true})
           event (sample-event)
           output (with-out-str (sink event))]
       (is (not (str/blank? output)))
@@ -300,7 +372,7 @@
         (is (= :workflow/started (:event/type parsed))))))
 
   (testing "compact mode produces single-line output"
-    (let [sink (sinks/stdout-sink {:compact true})
+    (let [sink (console/stdout-sink {:compact true})
           event (sample-event)
           output (str/trim (with-out-str (sink event)))]
       ;; Compact EDN should be a single line (no internal newlines before the closing brace)
@@ -310,7 +382,7 @@
 (deftest ^{:stratum 1} stderr-sink-test
   (testing "only passes events matching filter"
     (let [_passed (atom [])
-          sink (sinks/stderr-sink {:filter (fn [e] (= :workflow/failed (:event/type e)))})]
+          sink (console/stderr-sink {:filter (fn [e] (= :workflow/failed (:event/type e)))})]
       ;; Redirect stderr to capture output
       (binding [*err* (java.io.StringWriter.)]
         (sink (sample-event {:event/type :workflow/started}))
@@ -325,7 +397,7 @@
         ))
 
   (testing "default filter passes all events"
-    (let [sink (sinks/stderr-sink)
+    (let [sink (console/stderr-sink)
           output (let [w (java.io.StringWriter.)]
                    (binding [*err* (java.io.PrintWriter. w)]
                      (sink (sample-event)))
@@ -339,7 +411,7 @@
           received-2 (atom [])
           sink-1 (fn [e] (swap! received-1 conj e))
           sink-2 (fn [e] (swap! received-2 conj e))
-          multi (sinks/multi-sink [sink-1 sink-2])
+          multi (factory/multi-sink [sink-1 sink-2])
           event (sample-event)]
       (multi event)
       (is (= 1 (count @received-1)))
@@ -350,27 +422,27 @@
     (let [received (atom [])
           failing-sink (fn [_] (throw (Exception. "sink failure")))
           ok-sink (fn [e] (swap! received conj e))
-          multi (sinks/multi-sink [failing-sink ok-sink])]
+          multi (factory/multi-sink [failing-sink ok-sink])]
       (multi (sample-event))
       (is (= 1 (count @received)))))
 
   (testing "empty sinks vector produces no-op"
-    (let [multi (sinks/multi-sink [])]
+    (let [multi (factory/multi-sink [])]
       ;; Should not throw
       (is (nil? (multi (sample-event)))))))
 
 ;; fleet-sink
 (deftest ^{:stratum 1} fleet-sink-test
   (testing "requires :url option"
-    (is (thrown? Exception (sinks/fleet-sink {}))))
+    (is (thrown? Exception (fleet/fleet-sink {}))))
 
   (testing "requires :api-key option"
     (is (thrown? Exception
-                 (sinks/fleet-sink {:url "https://fleet.example.com"}))
+                 (fleet/fleet-sink {:url "https://fleet.example.com"}))
         "missing :api-key must fail loud at construction so misconfiguration doesn't produce 401 noise at flush time"))
 
   (testing "creates a function when url and api-key are provided"
-    (is (fn? (sinks/fleet-sink {:url "https://fleet.example.com"
+    (is (fn? (fleet/fleet-sink {:url "https://fleet.example.com"
                                 :api-key "test-key"}))))
 
   (testing "batches events and POSTs on flush"
@@ -380,7 +452,7 @@
                          (reset! posted true)
                          (reify java.net.http.HttpResponse
                            (statusCode [_] 200))))
-          sink (sinks/fleet-sink {:url              "https://fleet.example.com"
+          sink (fleet/fleet-sink {:url              "https://fleet.example.com"
                                   :api-key           "test-key"
                                   :batch-size        3
                                   :flush-interval-ms 999999
@@ -392,7 +464,7 @@
 
 ;; file-sink error reporting
 (deftest ^{:stratum 1} file-sink-reports-write-errors-to-stderr-test
-  (testing "file-sink logs write failures to stderr instead of swallowing"
+  (testing "file-sink warns on stderr and rethrows a failed write, so the stream records it as not persisted"
     (with-temp-dir
       (fn [dir]
         ;; Create a regular file at {dir}/live/{wf-id} so that when the
@@ -404,22 +476,22 @@
               _     (.mkdirs (io/file dir "live"))
               collision (io/file dir "live" (str wf-id))]
           (spit (str collision) "not a dir")
-          (let [sink (sinks/file-sink {:base-dir dir})
+          (let [sink (file/file-sink {:base-dir dir})
                 event (sample-event {:workflow/id wf-id})
-                stderr-output (let [w (java.io.StringWriter.)]
-                                (binding [*err* (java.io.PrintWriter. w)]
-                                  (sink event))
-                                (str w))]
-            (is (str/includes? stderr-output "WARNING"))))))))
+                w     (java.io.StringWriter.)]
+            (is (thrown? Exception
+                         (binding [*err* (java.io.PrintWriter. w)]
+                           (sink event))))
+            (is (str/includes? (str w) "WARNING"))))))))
 
 ;; cleanup-stale-events!
 (deftest ^{:stratum 1} cleanup-stale-events-test
   (testing "returns 0 when events directory is empty"
     (with-temp-dir
       (fn [dir]
-        (is (= 0 (sinks/cleanup-stale-events! {:ttl-ms 0 :events-dir dir}))))))
+        (is (= 0 (cleanup/cleanup-stale-events! {:ttl-ms 0 :events-dir dir}))))))
 
-  (testing "deletes old event files and preserves recent ones"
+  (testing "removes a legacy workflow directory untouched for the TTL and keeps a recent one"
     (with-temp-dir
       (fn [dir]
         (let [old-dir (io/file dir "workflow-old")
@@ -431,11 +503,261 @@
             (spit (str old-file) "{}")
             (spit (str new-file) "{}")
             (.setLastModified old-file (- (System/currentTimeMillis) (* 8 24 60 60 1000)))
-            (let [deleted (sinks/cleanup-stale-events! {:events-dir dir})]
+            (.setLastModified old-dir (- (System/currentTimeMillis) (* 8 24 60 60 1000)))
+            (let [deleted (cleanup/cleanup-stale-events! {:events-dir dir})]
               (is (= 1 deleted))
-              (is (not (.exists old-file)))
+              (is (not (.exists old-dir)) "the directory goes with its files")
               (is (.exists new-file))))))))
 
+  (testing "removes temp files a killed writer left behind, once they are stale"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf-dir (io/file dir "live" "wf-1")
+              orphan (io/file wf-dir ".es-123.transit.tmp")
+              fresh (io/file wf-dir ".es-456.transit.tmp")]
+          (.mkdirs wf-dir)
+          (spit orphan "{")
+          (spit fresh "{")
+          (.setLastModified orphan (- (System/currentTimeMillis) (* 8 24 60 60 1000)))
+          (is (= 1 (cleanup/cleanup-stale-events! {:events-dir dir})))
+          (is (not (.exists orphan)))
+          (is (.exists fresh) "a temp file young enough to be mid-write is left alone")))))
+
   (testing "returns 0 when directory does not exist"
-    (is (= 0 (sinks/cleanup-stale-events!
+    (is (= 0 (cleanup/cleanup-stale-events!
               {:events-dir (io/file "/tmp/nonexistent-miniforge-test-dir")})))))
+
+(deftest ^{:stratum 1} cleanup-keeps-live-workflows-test
+  (testing "a paused live workflow keeps its events and manifest however old they are"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "live" "wf-paused")
+              started (write-file! (io/file wf "0000000000000001__000000000000.transit.json") "{}")
+              legacy-name (write-file! (io/file wf "20200101T000000Z-abc.json") "{}")
+              manifest (write-file! (io/file wf "manifest.json") "{}")]
+          (age! 30 started legacy-name manifest wf)
+          (is (= 0 (cleanup/cleanup-stale-events! {:events-dir dir})))
+          (is (.exists started) "resume replays :workflow/started from here")
+          (is (.exists legacy-name))
+          (is (.exists manifest)))))))
+
+(deftest ^{:stratum 1} cleanup-prunes-archives-by-archive-time-test
+  (testing "an archive older than the TTL goes whole: events, manifest, marker, directory"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "archived" "wf-old")
+              ev (write-file! (io/file wf "0000000000000001__000000000000.transit.json") "{}")
+              manifest (write-file! (io/file wf "manifest.json") "{}")
+              marker (write-file! (io/file wf "archived.marker") "")]
+          (age! 8 ev manifest marker)
+          (is (= 3 (cleanup/cleanup-stale-events! {:events-dir dir})))
+          (is (not (.exists wf)))
+          (is (.isDirectory (io/file dir "archived")) "only the workflow's directory goes")))))
+
+  (testing "a recent archive keeps event files older than the TTL"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "archived" "wf-recent")
+              ev (write-file! (io/file wf "0000000000000001__000000000000.transit.json") "{}")
+              manifest (write-file! (io/file wf "manifest.json") "{}")]
+          (write-file! (io/file wf "archived.marker") "")
+          (age! 30 ev manifest)
+          (is (= 0 (cleanup/cleanup-stale-events! {:events-dir dir})))
+          (is (.exists ev))
+          (is (.exists manifest))))))
+
+  (testing "an archive still missing its marker is left for archive recovery"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "archived" "wf-half")
+              ev (write-file! (io/file wf "0000000000000001__000000000000.transit.json") "{}")
+              manifest (write-file! (io/file wf "manifest.json") "{}")]
+          (age! 30 ev manifest wf)
+          (is (= 0 (cleanup/cleanup-stale-events! {:events-dir dir})))
+          (is (.exists ev))
+          (is (.exists manifest))))))
+
+  (testing ":ttl-ms sets how long an archive is kept"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "archived" "wf-2d")]
+          (write-file! (io/file wf "0000000000000001__000000000000.transit.json") "{}")
+          (age! 2 (write-file! (io/file wf "archived.marker") ""))
+          (is (= 0 (cleanup/cleanup-stale-events! {:events-dir dir})) "kept under the 7-day default")
+          (is (.exists wf))
+          (is (= 2 (cleanup/cleanup-stale-events! {:events-dir dir :ttl-ms (* 24 60 60 1000)})))
+          (is (not (.exists wf)))))))
+
+  (testing "removing an archive does not follow a symlink out of it"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "archived" "wf-linked")
+              target (io/file dir "live" "wf-other")
+              kept (write-file! (io/file target "0000000000000002__000000000000.transit.json") "{}")]
+          (age! 8 (write-file! (io/file wf "archived.marker") ""))
+          (java.nio.file.Files/createSymbolicLink
+           (.toPath (io/file wf "events"))
+           (.toPath target)
+           (into-array java.nio.file.attribute.FileAttribute []))
+          (cleanup/cleanup-stale-events! {:events-dir dir})
+          (is (not (.exists wf)))
+          (is (.exists kept) "the link goes, not what it points at")))))
+
+  (testing "an events directory that is itself a symlink is still swept"
+    (with-temp-dir
+      (fn [dir]
+        (let [real (io/file dir "real-events")
+              orphan (write-file! (io/file real "live" "wf-1" ".es-1.transit.tmp") "{")
+              link (io/file dir "events-link")]
+          (age! 8 orphan)
+          (java.nio.file.Files/createSymbolicLink
+           (.toPath link)
+           (.toPath real)
+           (into-array java.nio.file.attribute.FileAttribute []))
+          (age! 8 (write-file! (io/file real "archived" "wf-old" "archived.marker") ""))
+          (is (= 2 (cleanup/cleanup-stale-events! {:events-dir link})))
+          (is (not (.exists orphan)))
+          (is (not (.exists (io/file real "archived" "wf-old"))))))))
+
+  (testing "a symlinked archived/ or operator/ is not followed out of the events tree"
+    (with-temp-dir
+      (fn [dir]
+        (let [events (io/file dir "events")
+              outside (io/file dir "outside")
+              notes (write-file! (io/file outside "wf-x" "notes.txt") "keep")
+              marker (write-file! (io/file outside "wf-x" "archived.marker") "")
+              op-file (write-file! (io/file outside "20200101T000000Z-abc.json") "{}")]
+          (.mkdirs events)
+          (age! 8 marker op-file)
+          (doseq [sub ["archived" "operator"]]
+            (java.nio.file.Files/createSymbolicLink
+             (.toPath (io/file events sub))
+             (.toPath outside)
+             (into-array java.nio.file.attribute.FileAttribute [])))
+          (is (= 0 (cleanup/cleanup-stale-events! {:events-dir events})))
+          (is (.exists notes))
+          (is (.exists marker))
+          (is (.exists op-file)))))))
+
+(deftest ^{:stratum 1} cleanup-legacy-and-operator-files-test
+  (testing "a legacy directory with one recent file keeps its old files too"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf (io/file dir "wf-legacy")
+              old (write-file! (io/file wf "20200101T000000Z-abc.json") "{}")]
+          (write-file! (io/file wf "20260411T000000Z-def.json") "{}")
+          (age! 30 old wf)
+          (is (= 0 (cleanup/cleanup-stale-events! {:events-dir dir})))
+          (is (.exists old) "a workflow's history is pruned whole or not at all")))))
+
+  (testing "an empty legacy directory left by earlier cleanup goes once old"
+    (with-temp-dir
+      (fn [dir]
+        (let [empty-dir (io/file dir "wf-emptied")]
+          (.mkdirs empty-dir)
+          (age! 30 empty-dir)
+          (cleanup/cleanup-stale-events! {:events-dir dir})
+          (is (not (.exists empty-dir)))))))
+
+  (testing "directories holding anything but event files, or hidden ones, are left alone"
+    (with-temp-dir
+      (fn [dir]
+        (let [tui (io/file dir "archive")
+              tui-file (write-file! (io/file tui "wf.edn") "{}")
+              workers (io/file dir ".workers")
+              lease (write-file! (io/file workers "0.lease") "{}")]
+          (age! 30 tui-file tui lease workers)
+          (is (= 0 (cleanup/cleanup-stale-events! {:events-dir dir})))
+          (is (.exists tui-file))
+          (is (.exists lease))))))
+
+  (testing "operator events still go one file at a time"
+    (with-temp-dir
+      (fn [dir]
+        (let [op (io/file dir "operator")
+              old (write-file! (io/file op "20200101T000000Z-abc.json") "{}")
+              fresh (write-file! (io/file op "20260411T000000Z-def.json") "{}")]
+          (age! 8 old)
+          (is (= 1 (cleanup/cleanup-stale-events! {:events-dir dir})))
+          (is (not (.exists old)))
+          (is (.exists fresh)))))))
+
+(deftest ^{:stratum 1} file-sink-keeps-hostile-ids-inside-the-events-dir-test
+  (testing "a workflow id with .. or separators cannot place files outside base-dir"
+    (with-temp-dir
+      (fn [root]
+        (let [base (io/file root "events")
+              sink (file/file-sink {:base-dir base})]
+          (.mkdirs base)
+          (sink (sample-event {:workflow/id "../../escaped"}))
+          (sink (sample-event {:workflow/id "/tmp/absolute-escape"}))
+          (sink (sample-event {:workflow/id ".."}))
+          (let [outside (remove #(str/starts-with? (.getCanonicalPath ^java.io.File %)
+                                                   (str (.getCanonicalPath base) "/"))
+                                (filter #(.isFile ^java.io.File %) (file-seq root)))]
+            (is (empty? outside) "every file the sink wrote is under base-dir"))
+          (is (not (.exists (io/file root "escaped"))))
+          (is (= 3 (count (filter #(.isFile ^java.io.File %)
+                                  (file-seq (io/file base "live")))))
+              "all three events were still written, under encoded directory names")))))
+
+  (testing "a non-snowflake event id cannot add directories to the file name"
+    (with-temp-dir
+      (fn [root]
+        (let [sink (file/file-sink {:base-dir root})
+              wf-id (random-uuid)]
+          (sink (sample-event {:workflow/id wf-id :event/id "../../../x"}))
+          (let [files (list-files (io/file root "live" (str wf-id)))]
+            (is (= 1 (count files)))
+            (is (not (str/includes? (.getName ^java.io.File (first files)) "..")))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; create-sink factory
+(deftest ^{:stratum 2} create-sink-keyword-test
+  (with-temp-default-events-dir
+   (fn []
+    (testing ":file produces a function"
+      (is (fn? (factory/create-sink :file))))
+
+    (testing ":stdout produces a function"
+      (is (fn? (factory/create-sink :stdout))))
+
+    (testing ":stderr produces a function"
+      (is (fn? (factory/create-sink :stderr)))))))
+
+(deftest ^{:stratum 2} create-sink-map-test
+  (with-temp-default-events-dir
+   (fn []
+    (testing "map with :type :file produces file sink"
+      (is (fn? (factory/create-sink {:type :file}))))
+
+    (testing "map with :type :stdout produces stdout sink"
+      (is (fn? (factory/create-sink {:type :stdout}))))
+
+    (testing "map with :type :stderr and filter produces stderr sink"
+      (is (fn? (factory/create-sink {:type :stderr :filter (constantly true)}))))
+
+    (testing "map with unknown type throws"
+      (is (thrown? Exception (factory/create-sink {:type :unknown})))))))
+
+;; create-sinks-from-config
+(deftest ^{:stratum 2} create-sinks-from-config-test
+  (with-temp-default-events-dir
+   (fn []
+    (testing "defaults to file sink when no config"
+      (let [created-sinks (factory/create-sinks-from-config {})]
+        (is (= 1 (count created-sinks)))
+        (is (fn? (first created-sinks)))))
+
+    (testing "creates sinks from :observability :event-sinks"
+      (let [created-sinks (factory/create-sinks-from-config
+                           {:observability {:event-sinks [:stdout]}})]
+        (is (= 1 (count created-sinks)))
+        (is (fn? (first created-sinks)))))
+
+    (testing "multiple sinks from config"
+      (let [created-sinks (factory/create-sinks-from-config
+                           {:observability {:event-sinks [:file :stdout]}})]
+        (is (= 2 (count created-sinks)))
+        (is (every? fn? created-sinks)))))))

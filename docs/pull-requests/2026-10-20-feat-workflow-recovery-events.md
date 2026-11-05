@@ -22,8 +22,9 @@ Exercise all public constructors against real current journals, exact payloads,
 message interpolation, sequence-free drafts, durable receipts, replay and duplicate
 publication. Check legacy envelope compatibility and allocation-anomaly propagation.
 Register all constructors for the existing event-type audit. Run all four consuming
-projects serially, rebuild the CLI, run isolated packaged tests, normal signed
-hooks, inferred strata, actual-base standards scan, exact-head review and all CI.
+projects serially, rebuild the CLI, and run isolated packaged tests.
+Require normal signed hooks, inferred strata, actual-base standards scan,
+exact-head review and all CI.
 
 ## Verified implementation
 

@@ -26,6 +26,10 @@
   "A scope binding that cannot silently collapse to an empty value."
   [:and :string [:fn (complement str/blank?)]])
 
+(def ^{:stratum 0} GitObjectId
+  "A full SHA-1 or SHA-256 commit id; abbreviated ids can match many commits."
+  [:re #"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z"])
+
 (defn- ^{:stratum 0} request-schema
   "Build one closed request without duplicating authority or basis fields."
   [effect-class preflight-type target-fields]
@@ -43,12 +47,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} MergeRequest
-  "Closed request for one exact pull-request merge."
+  "Closed request for one exact pull-request merge at one head commit."
   (request-schema
    :effect/merge
    :preflight/merge-readiness
    [[:pr/repo NonBlankString]
-    [:pr/number pos-int?]]))
+    [:pr/number pos-int?]
+    [:pr/head-sha GitObjectId]]))
 
 (def ^{:stratum 1} PrCreateRequest
   "Closed request binding one PR's target, revision and serialized payload."
@@ -58,9 +63,43 @@
    [[:pr/repo NonBlankString]
     [:pr/base NonBlankString]
     [:pr/branch NonBlankString]
-    [:pr/head-sha [:re #"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z"]]
+    [:pr/head-sha GitObjectId]
     [:pr/payload-hash [:re #"\A[0-9a-f]{64}\z"]]
     [:pr/governance-hash [:re #"\A[0-9a-f]{64}\z"]]]))
+
+(def ^{:stratum 1} PushRequest
+  "Closed request for one push of one commit to one branch of one remote.
+   The remote is its push URL, not a name a later config change could
+   repoint."
+  (request-schema
+   :effect/push
+   :preflight/push-readiness
+   [[:git/remote-url NonBlankString]
+    [:git/branch NonBlankString]
+    [:git/sha GitObjectId]
+    [:git/force? :boolean]]))
+
+(def ^{:stratum 1} CommentRequest
+  "Closed request for one write to a pull request's conversation: a
+   comment, a reply, a resolved thread, a review, an approval or a change
+   request, bound to the hash of exactly what is written."
+  (request-schema
+   :effect/comment
+   :preflight/comment-readiness
+   [[:pr/repo NonBlankString]
+    [:pr/number pos-int?]
+    [:github/action [:enum :comment :reply :resolve-thread :review
+                     :approve :request-changes]]
+    [:github/payload-hash [:re #"\A[0-9a-f]{64}\z"]]]))
+
+(def ^{:stratum 1} ProvisionRequest
+  "Closed request for one `pulumi up` of one saved plan on one stack."
+  (request-schema
+   :effect/provision
+   :preflight/provision-plan
+   [[:pulumi/stack NonBlankString]
+    [:pulumi/stack-dir NonBlankString]
+    [:pulumi/plan-hash [:re #"\A[0-9a-f]{64}\z"]]]))
 
 (def ^{:stratum 1} DeployRequest
   "Closed request for one exact Kubernetes deployment.
@@ -84,5 +123,8 @@
    [:multi {:dispatch :effect/class}
     [:effect/merge MergeRequest]
     [:effect/pr-create PrCreateRequest]
+    [:effect/push PushRequest]
+    [:effect/comment CommentRequest]
+    [:effect/provision ProvisionRequest]
     [:effect/deploy DeployRequest]]
    inst?])

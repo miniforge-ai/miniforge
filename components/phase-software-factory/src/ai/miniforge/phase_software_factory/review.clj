@@ -24,6 +24,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.interface.gate :as phase-gate]
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
    [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
@@ -78,6 +79,14 @@
                   (catch Exception _ nil))]
       (when (seq files)
         (assoc outer-artifact :code/files files)))))
+
+(defn- ^{:stratum 0} changed-file-paths
+  "The distinct paths of the files implement changed: those `:code/files`
+   carries and those `:code/file-paths` records (a rehydrated artifact has
+   both). Review filters its rules by them."
+  [artifact]
+  (into [] (distinct) (concat (keep :path (:code/files artifact))
+                              (:code/file-paths artifact))))
 
 (defn- ^{:stratum 0} build-verify-review-input
   "Build a stable verify summary for the reviewer prompt from the full verify phase result."
@@ -245,10 +254,12 @@
 (defn- ^{:stratum 1} apply-verdict
   "Carry out the side-effects implied by a verdict — attach anomalies
    for terminal verdicts, attach handoff feedback for repair-requested,
-   mark completed for approved and accept-with-warnings. The FSM drives
+   mark completed for approved and accept-with-warnings unless the phase's
+   gates failed (a denial or an unacknowledged decision outranks review
+   acceptance; the phase stays :failed and is not counted). The FSM drives
    the actual phase transition; this fn only enriches the ctx with
    payload data that evidence-bundle / downstream phases consume."
-  [verdict updated-ctx feedback fingerprint-history review-cycle-count]
+  [verdict updated-ctx feedback fingerprint-history review-cycle-count gate-failed?]
   (case verdict
     :stagnated
     (attach-stagnated-anomaly updated-ctx fingerprint-history)
@@ -266,17 +277,19 @@
     (attach-backend-timeout-anomaly updated-ctx)
 
     :accept-with-warnings
-    (let [review-artifact (get-in updated-ctx [:phase :result :output])
-          warnings        (get review-artifact :review/warnings [])]
-      ;; Override :phase :status from :failed (set by accumulate-base-ctx because
-      ;; reviewer-blocked? was true) back to :completed — the phase succeeds despite
-      ;; the warning-only rejection; the PR proceeds with warnings surfaced.
-      (-> (mark-completed updated-ctx)
-          (assoc-in [:phase :status] :completed)
-          (assoc-in [:phase :unresolved-warnings] warnings)))
+    (if gate-failed?
+      updated-ctx
+      (let [review-artifact (get-in updated-ctx [:phase :result :output])
+            warnings        (get review-artifact :review/warnings [])]
+        ;; Override :phase :status from :failed (set by accumulate-base-ctx because
+        ;; reviewer-blocked? was true) back to :completed — the phase succeeds despite
+        ;; the warning-only rejection; the PR proceeds with warnings surfaced.
+        (-> (mark-completed updated-ctx)
+            (assoc-in [:phase :status] :completed)
+            (assoc-in [:phase :unresolved-warnings] warnings))))
 
     :approved
-    (mark-completed updated-ctx)))
+    (cond-> updated-ctx (not gate-failed?) mark-completed)))
 
 (defn- ^{:stratum 1} accumulate-base-ctx
   "Apply the always-on context updates: phase metadata, metrics,
@@ -320,7 +333,8 @@
    implement does — produced by `phase/load-and-filter-behaviors`
    from rules that target `:review` AND carry `:rule/agent-behavior`
    or `:rule/knowledge-content` (rules with neither field, or whose
-   context filter excludes the current task, are not appended). This
+   context filter excludes the current task, are not appended). Rules are
+   filtered by the changed files' paths, so glob-scoped rules apply. This
    closes the gap where reviewer was applying generic 'is this good?'
    judgment instead of checking against the rules the standards pack
    surfaces for review-phase consumers.
@@ -338,8 +352,10 @@
         ;; reviewer IS a quality signal deciding whether to trust itself.
         codex-outcome (codex-pin/landings-outcome :review (get-in ctx [:execution/logger]))
         codex-landings (:text codex-outcome)
+        changed-paths (changed-file-paths artifact)
         behavior-addendum (phase/load-and-filter-behaviors
-                            :review {:task {:task/intent (:intent input)}})
+                            :review {:task     {:task/intent (:intent input)}
+                                     :artifact {:artifact/paths changed-paths}})
         task (cond-> {:task/id (random-uuid)
                       :task/type :review
                       :task/description (:description input)
@@ -395,6 +411,7 @@
         metrics     (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
                         (assoc :duration-ms duration-ms))
         iterations  (get-in ctx [:phase :iterations] 1)
+        gate-failed? (phase-gate/gate-failed? (:phase ctx))
         ;; All convergence decision logic is pure in review-convergence; this
         ;; interceptor gathers the ctx inputs, then applies the decision.
         decision (conv/compute-review-decision
@@ -404,7 +421,7 @@
                    :prior-fingerprints       (get-in ctx [:execution :review-fingerprints] [])
                    :prior-blocking-counts    (get-in ctx [:execution :review-blocking-counts] [])
                    :prior-warning-only-count (get-in ctx [:execution :review-warning-only-cycles] 0)
-                   :gate-failed?             (= :failed (:phase/status (get-in ctx [:phase])))
+                   :gate-failed?             gate-failed?
                    :within-budget?           (< iterations
                                                 (get-in ctx [:phase :budget :iterations]
                                                         (get-in default-config [:budget :iterations])))
@@ -426,7 +443,8 @@
                                 (attach-verdict verdict))
                       reviewer-blocked? (record-warning-cycle-count warning-only-count))
         next-ctx (apply-verdict verdict updated-ctx feedback
-                                (conj prior-history current-fp) review-cycle-count)]
+                                (conj prior-history current-fp) review-cycle-count
+                                gate-failed?)]
     (when (= :repair-requested verdict)
       (knowledge/capture-feedback-learning!
        (:knowledge-store ctx) :reviewer
@@ -470,9 +488,8 @@
         ;; Emit agent-completed telemetry event
         _ (phase/emit-agent-completed! agent-ctx :review :reviewer result)
 
-        ;; SPEC §7.4.3 consultation provenance, prompt-section flavor. The
-        ;; reviewer session surfaces no reads log, so :pin-read? is nil
-        ;; (unknown). Attached before enter-context stores the result so
+        ;; SPEC §7.4.3 provenance. nil reads: landings arrive in the prompt, so no pin file exists to read.
+        ;; Attached before enter-context stores the result so
         ;; gates and the gap ledger can see it — on FAILURES too (:output
         ;; starts nil on response/failure): the consultation happened in
         ;; build-review-task whatever the reviewer did next, and §7.7.2.1

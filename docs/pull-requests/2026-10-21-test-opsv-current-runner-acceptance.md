@@ -26,7 +26,7 @@ This proves runner compatibility, not completion of the public CLI host switch.
 ## Verification
 
 Workflow brick tests pass across all three consuming projects (1m27s). Those
-brick-only runs do not select this project integration suite; four OPSV project
+brick-only runs do not select this project integration suite. Four OPSV project
 suites were therefore run explicitly and pass nine tests/167 assertions on the
 JVM. The rebuilt CLI (39,230,939 bytes) passes the same nine tests/167 assertions
 from an isolated working directory with test sources only, no production overlays.

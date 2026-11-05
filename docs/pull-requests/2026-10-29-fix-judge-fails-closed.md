@@ -75,13 +75,14 @@ No migration. Takes effect with the next CLI build.
 
 ## Related Issues/PRs
 
-Stacked on #2093 (the `core.clj` split into seven namespaces). #2093 must merge
-first; this PR then retargets to `main`. `main` has not changed
-`components/semantic-analyzer` since #2093 branched.
+Builds on #2093 (the `core.clj` split into seven namespaces, merged as
+adccc8537). This branch merged `main` after that squash; the merge took this
+branch's side for the semantic-analyzer files, since `main` had not changed
+them apart from #2093, and dropped #2093's pre-rename PR doc.
 
 ## Checklist
 
 - [x] Regression tests fail without the fix
 - [x] Adversarial review and pinned-standards review
-- [ ] #2093 merged and this PR retargeted to `main`
+- [x] #2093 merged and this PR retargeted to `main`
 - [ ] CI green, Copilot comments resolved

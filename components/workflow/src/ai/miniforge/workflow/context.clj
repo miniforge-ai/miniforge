@@ -65,6 +65,8 @@
    :execution/current-phase    — Derived projection of the active machine state
    :execution/phase-index      — Derived projection of the active machine state
    :execution/redirect-count   — Derived from machine context
+   :execution/unpersisted-phases — Phases whose boundary persist committed
+                                 nothing; the next boundary commit names them
 
    ### Phase Result Schema
    Entries in :execution/phase-results follow the shape:
@@ -120,7 +122,9 @@
    :llm-backend    — LLM backend configuration
    :artifact-store — Artifact persistence store
    :knowledge-store — Knowledge base store
-   :event-stream   — Event stream for telemetry"
+   :event-stream   — Event stream for telemetry and gate decisions
+   :policy-packs   — Policy packs the pack gates evaluate
+   (the full list is execution-passthrough-option-keys)"
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.response.interface :as response]
@@ -139,6 +143,10 @@
    :executor :environment-id :sandbox-workdir
    :on-chunk :event-stream :worktree-path
    :source-root
+   ;; An embedder's policy packs. The pack gates read ctx :policy-packs, and
+   ;; :policy-verify / :policy-review fall back to the shipped standards
+   ;; pack only when it is absent, so it must reach the context.
+   :policy-packs
    ;; Threaded by run-chain so every step of one ETL invocation shares
    ;; it; lifecycle events read it from the context (see runner-events).
    :workflow-run/correlation-id])
@@ -217,13 +225,35 @@
       (string? wid) (parse-uuid wid)
       :else         nil)))
 
+(defn- ^{:stratum 0} opts-origin-id
+  "The run this one continues, from opts :origin-id (a resume attempt under
+   a new run id passes the original run's). A uuid or uuid-shaped string;
+   anything else is nil."
+  [opts]
+  (let [origin (:origin-id opts)]
+    (cond
+      (uuid? origin)   origin
+      (string? origin) (parse-uuid origin)
+      :else            nil)))
+
 (defn ^{:stratum 0} merge-metrics
   "Merge phase metrics into execution metrics.
-   Nil-safe: treats nil values as 0 to prevent NPE from merge-with +."
+   Nil-safe: treats nil values as 0 to prevent NPE from merge-with +.
+
+   A phase that spent tokens without a `:cost-usd`, or that carries
+   `:cost-unavailable?` itself (a rolled-up DAG run), marks the total
+   `:cost-unavailable? true`. The summed `:cost-usd` then covers only the
+   priced part of the run, and summaries must not show it as the run's
+   measured cost."
   [exec-metrics phase-metrics]
-  (merge-with (fn [a b] (+ (or a 0) (or b 0)))
-              exec-metrics
-              (select-keys phase-metrics [:tokens :cost-usd :duration-ms])))
+  (let [tokens (:tokens phase-metrics)
+        unpriced? (or (true? (:cost-unavailable? phase-metrics))
+                      (and (number? tokens) (pos? tokens)
+                           (nil? (:cost-usd phase-metrics))))]
+    (cond-> (merge-with (fn [a b] (+ (or a 0) (or b 0)))
+                        exec-metrics
+                        (select-keys phase-metrics [:tokens :cost-usd :duration-ms]))
+      unpriced? (assoc :cost-unavailable? true))))
 
 (defn- ^{:stratum 0} ->epoch-millis
   "Coerce a :execution/started-at / :execution/ended-at value to a
@@ -346,10 +376,14 @@
   (let [execution-machine (fsm/compile-execution-machine workflow)
         fsm-state (let [initial-state (fsm/initialize-execution execution-machine)]
                     (fsm/start-execution execution-machine initial-state))
-        checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)]
+        checkpoint-root (checkpoint-paths/resolve-checkpoint-root opts)
+        run-id (or (opts-run-id opts) (random-uuid))]
     (sync-machine-projections
      (merge
-      {:execution/id (or (opts-run-id opts) (random-uuid))
+      {:execution/id run-id
+       ;; The run's lineage: its own id, or the run a resume attempt
+       ;; continues. Effects keyed on it outlive attempt ids.
+       :execution/origin-id (or (opts-origin-id opts) run-id)
        :execution/workflow workflow
        :execution/workflow-id (:workflow/id workflow)
        :execution/workflow-version (:workflow/version workflow)
@@ -402,6 +436,9 @@
        :execution/fsm-machine execution-machine
        :execution/fsm-state fsm-state
        :execution/input (get machine-snapshot :execution/input input)
+       :execution/origin-id (or (:execution/origin-id machine-snapshot)
+                                (opts-origin-id opts)
+                                (:execution/id machine-snapshot))
        :execution/phase-results phase-results
        ;; From the SNAPSHOT, never from `opts`. A resumed run is still
        ;; acting under the authority it was started with; taking this

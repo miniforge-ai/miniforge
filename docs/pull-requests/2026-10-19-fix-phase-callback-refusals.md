@@ -43,7 +43,7 @@ remain required before pushing.
 Deploy with the normal CLI build; no configuration or data migration is required.
 Reverting this PR restores observer-only callback semantics. Review the selection
 precedence and refusal ordering, not just formatting: the start boundary precedes
-all phase effects; the completion boundary follows result processing but precedes
+all phase effects. The completion boundary follows result processing but precedes
 DAG activation and transitions. No exception is requested for commit or PR size.
 
 - [x] Source consumer and isolated package acceptance

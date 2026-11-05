@@ -243,7 +243,9 @@
   (testing "System can select from multiple providers"
     (let [;; Create tasks that might favor different providers
           tasks [{:phase :plan :title "Complex reasoning"}
-                 {:phase :implement :context-tokens 1500000 :title "Large codebase"}
+                 ;; 900k: the catalog's largest windows are about 1M, and a
+                 ;; context no model holds is an anomaly, not a smaller model.
+                 {:phase :implement :context-tokens 900000 :title "Large codebase"}
                  {:phase :implement :privacy-required true :title "Private code"}]
 
           selections (map (fn [task]

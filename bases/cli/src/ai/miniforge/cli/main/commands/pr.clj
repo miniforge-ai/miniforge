@@ -18,17 +18,20 @@
 (ns ai.miniforge.cli.main.commands.pr
   "PR operations using GitHub CLI."
   (:require
+   [babashka.fs :as fs]
    [babashka.process :as process]
    [cheshire.core :as json]
    [clojure.string :as str]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.config.interface :as config-interface]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.commands.pr-monitor :as pr-monitor]
    [ai.miniforge.cli.main.commands.pr-review :as pr-review]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
+   [ai.miniforge.cli.workflow-runner.execution-mode :as execution-mode]
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -38,47 +41,42 @@
   (apply process/sh args))
 
 ;; PR commands
-(defn ^{:stratum 0} pr-list-cmd
-  "List PRs using GitHub CLI."
-  [opts load-config-fn]
-  (let [{:keys [repo config]} opts
-        cfg (load-config-fn config)
-        repos (if repo [repo] (get-in cfg [:fleet :repos] []))]
-
-    (if (empty? repos)
-      (do
-        (display/print-error (messages/t :pr/no-repos))
-        (println (messages/t :pr/no-repos-hint {:command (app-config/command-string "fleet add")})))
-      (doseq [r repos]
-        (println)
-        (println (display/style (messages/t :pr/header {:repo r}) :foreground :cyan :bold true))
-        (let [result (process/sh "gh" "pr" "list" "--repo" r "--json" "number,title,state,author,createdAt" "--limit" "10")]
-          (if (zero? (:exit result))
-            (try
-              (let [prs (json/parse-string (:out result) true)]
-                (if (empty? prs)
-                  (println (messages/t :pr/no-open))
-                  (doseq [{:keys [number title state author]} prs]
-                    (let [status-style (case state
-                                         "OPEN" :green
-                                         "MERGED" :magenta
-                                         "CLOSED" :red
-                                         :white)
-                          state-badge (display/style
-                                       (messages/t :pr/list-state-badge {:state state})
-                                       :foreground status-style)]
-                      (println (messages/t :pr/list-row
-                                           {:number      number
-                                            :state-badge state-badge
-                                            :title       title
-                                            :author      (:login author
-                                                                 (messages/t :pr/list-author-unknown))}))))))
-              (catch Exception _
-                (let [result2 (process/sh "gh" "pr" "list" "--repo" r "--limit" "10")]
-                  (if (zero? (:exit result2))
-                    (println (:out result2))
-                    (display/print-error (messages/t :pr/list-failed {:error (:err result2)}))))))
-            (display/print-error (messages/t :pr/query-failed {:error (:err result)}))))))))
+(defn- ^{:stratum 0} print-repo-prs!
+  "Print up to 10 PRs of `r` under a header. Returns true when gh listed
+   them, false after printing gh's error to stderr."
+  [r]
+  (println)
+  (println (display/style (messages/t :pr/header {:repo r}) :foreground :cyan :bold true))
+  (let [result (process/sh "gh" "pr" "list" "--repo" r "--json" "number,title,state,author,createdAt" "--limit" "10")]
+    (if (zero? (:exit result))
+      (try
+        (let [prs (json/parse-string (:out result) true)]
+          (if (empty? prs)
+            (println (messages/t :pr/no-open))
+            (doseq [{:keys [number title state author]} prs]
+              (let [status-style (case state
+                                   "OPEN" :green
+                                   "MERGED" :magenta
+                                   "CLOSED" :red
+                                   :white)
+                    state-badge (display/style
+                                 (messages/t :pr/list-state-badge {:state state})
+                                 :foreground status-style)]
+                (println (messages/t :pr/list-row
+                                     {:number      number
+                                      :state-badge state-badge
+                                      :title       title
+                                      :author      (:login author
+                                                           (messages/t :pr/list-author-unknown))})))))
+          true)
+        (catch Exception _
+          (let [result2 (process/sh "gh" "pr" "list" "--repo" r "--limit" "10")]
+            (if (zero? (:exit result2))
+              (do (println (:out result2)) true)
+              (do (display/print-error (messages/t :pr/list-failed {:error (:err result2)}))
+                  false)))))
+      (do (display/print-error (messages/t :pr/query-failed {:error (:err result)}))
+          false))))
 
 (defn ^{:stratum 0} pr-merge-cmd
   [opts]
@@ -100,6 +98,29 @@
   (pr-monitor/pr-monitor-cmd opts))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} pr-list-cmd
+  "List PRs using GitHub CLI. Exits 1 when gh is not on PATH, and when gh
+   could not list a repo's PRs (after listing the other repos)."
+  [opts load-config-fn]
+  (let [{:keys [repo config]} opts
+        cfg (load-config-fn config)
+        repos (if repo [repo] (get-in cfg [:fleet :repos] []))]
+
+    (cond
+      (empty? repos)
+      (do
+        (display/print-error (messages/t :pr/no-repos))
+        (println (messages/t :pr/no-repos-hint {:command (app-config/command-string "fleet add")})))
+
+      (nil? (fs/which "gh"))
+      (do
+        (display/print-error (messages/t :pr/gh-missing))
+        (shared/exit! 1))
+
+      ;; mapv, not every?: one failed repo does not stop the others listing.
+      (not (every? true? (mapv print-repo-prs! repos)))
+      (shared/exit! 1))))
 
 (defn- ^{:stratum 1} checkout-pr! [pr-number]
   (let [r (sh! "gh" "pr" "checkout" (str pr-number))]
@@ -184,10 +205,27 @@
                    {:command (app-config/command-string "pr review <pr-url>")})))))
 
 (defn ^{:stratum 2} pr-respond-cmd
+  "Check out the PR at `url`, fix its review comments in this checkout, and
+   push. Runs local only: refused, before anything is checked out, when
+   `--execution-mode` or the config asks for governed execution, since the
+   governed flow does not push to the PR branch yet."
   [opts]
-  (let [{:keys [url]} opts]
-    (if-not url
+  (let [{:keys [url]} opts
+        mode (execution-mode/resolve-mode opts (config-interface/user-config-requires-governed?))]
+    (cond
+      (not url)
       (display/print-error (messages/t :pr/respond-usage {:command (app-config/command-string "pr respond <pr-url>")}))
+
+      (contains? mode :unknown)
+      (do (display/print-error (messages/t :workflow-runner/unknown-execution-mode
+                                           {:mode (pr-str (:unknown mode))}))
+          (shared/exit! 1))
+
+      (not= {:execution-mode :local} mode)
+      (do (display/print-error (messages/t :pr/respond-governed-unsupported))
+          (shared/exit! 1))
+
+      :else
       (let [{:keys [number]} (pr-lifecycle/parse-pr-url url)]
         (when-not number
           (display/print-error (messages/t :pr/respond-bad-url))

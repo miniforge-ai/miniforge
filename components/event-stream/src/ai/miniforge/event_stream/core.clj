@@ -28,7 +28,10 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.redaction.interface :as redaction]
    [ai.miniforge.response.interface :as response]
-   [ai.miniforge.event-stream.sinks :as sinks]))
+   [ai.miniforge.event-stream.retention :as retention]
+   [ai.miniforge.event-stream.sink-durability :as durability]
+   [ai.miniforge.event-stream.sinks.factory :as factory]
+   [ai.miniforge.event-stream.sinks.file :as file]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -57,6 +60,16 @@
                             `:event/id` falls back to `random-uuid`
                             and the file sink uses the legacy
                             `{timestamp}-{uuid}.json` filename.
+     :retention           - Optional bound on the in-memory history that
+                            `get-events` reads. A map over
+                            `retention/bounded-policy`
+                            (:max-workflows, :max-events-per-workflow,
+                            :lifecycle-types,
+                            :latest-per-dependency-types). Absent = keep
+                            every event, which suits one-shot CLI runs;
+                            a stream that lives for days should pass
+                            one. Sinks and subscribers still see every
+                            event.
 
    Returns: Event stream atom
 
@@ -65,19 +78,22 @@
      (create-event-stream)
 
      ;; Custom sinks
-     (create-event-stream {:sinks [(sinks/file-sink) (sinks/stdout-sink)]})
+     (create-event-stream {:sinks [(file/file-sink) (factory/create-sink :stdout)]})
 
      ;; From config
      (create-event-stream {:config user-config})
 
      ;; With a Snowflake event-id generator (BD-2b)
-     (create-event-stream {:snowflake-generator generator})"
+     (create-event-stream {:snowflake-generator generator})
+
+     ;; Long-lived process: bounded in-memory history
+     (create-event-stream {:retention retention/bounded-policy})"
   [& [opts]]
   (let [;; Create sinks from config or use provided sinks or default
         event-sinks (cond
                       (:sinks opts) (:sinks opts)
-                      (:config opts) (sinks/create-sinks-from-config (:config opts))
-                      :else [(sinks/file-sink)])] ;; Default to file sink
+                      (:config opts) (factory/create-sinks-from-config (:config opts))
+                      :else [(file/file-sink)])] ;; Default to file sink
     (atom {:events []
            :subscribers {}
            :filters {}
@@ -96,25 +112,40 @@
            ;; BD-2b: optional Snowflake event-id generator. When present,
            ;; `create-envelope` calls it for `:event/id` so events sort
            ;; lexically by creation order. nil = random-uuid fallback.
-           :snowflake-generator (:snowflake-generator opts)})))
+           :snowflake-generator (:snowflake-generator opts)
+           ;; nil = unbounded history (one-shot runs). See retention ns.
+           :retention (retention/init (:retention opts))})))
 
 (defn- ^{:stratum 0} record-event!
-  "Append `event` to the in-memory event log."
+  "Append `event` to the in-memory event log, bounded by the stream's
+   retention policy when it has one."
   [stream event]
-  (swap! stream update :events conj event))
+  (swap! stream retention/record event))
+
+(def ^{:stratum 0 :dynamic true} *replaying*
+  "The streams `replay!` is delivering to on this thread (nested replays
+   add to it). A publish to one of them meanwhile derives from a stored
+   event, which its own process derives and stores, so it skips the sinks;
+   a publish to any other stream keeps them."
+  #{})
 
 (defn- ^{:stratum 0} deliver-to-sink!
   "Invoke `sink` with `event`, swallowing exceptions and logging them.
-   A failing sink must not break others or the publish path."
+   A failing sink must not break others or the publish path. Returns the
+   sink's outcome, {:sink/durable? :sink/persisted?}: a durable sink
+   persisted the event when it returned without throwing."
   [sink event logger]
-  (try
-    (sink event)
-    (catch Exception e
-      (when logger
-        (log/warn logger :event-stream :sink-error
-                  {:message "Event sink failed"
-                   :data    {:event-type (:event/type event)
-                             :anomaly    (response/from-exception e)}})))))
+  (let [durable? (durability/durable-sink? sink)]
+    (try
+      (sink event)
+      {:sink/durable? durable? :sink/persisted? durable?}
+      (catch Exception e
+        (when logger
+          (log/warn logger :event-stream :sink-error
+                    {:message "Event sink failed"
+                     :data    {:event-type (:event/type event)
+                               :anomaly    (response/from-exception e)}}))
+        {:sink/durable? durable? :sink/persisted? false}))))
 
 (defn- ^{:stratum 0} deliver-to-subscriber!
   "Invoke `callback` for `event` when `filter-fn` accepts it,
@@ -245,10 +276,9 @@
 
 (defn- ^{:stratum 1} deliver-to-sinks!
   "Fan `event` out to every configured sink. Each sink runs in
-   isolation via `deliver-to-sink!`."
+   isolation via `deliver-to-sink!`. Returns the sink outcomes in order."
   [sinks event logger]
-  (doseq [sink sinks]
-    (deliver-to-sink! sink event logger)))
+  (mapv #(deliver-to-sink! % event logger) sinks))
 
 (defn- ^{:stratum 1} deliver-to-subscribers!
   "Fan `event` out to every subscriber that accepts it via its filter."
@@ -377,7 +407,10 @@
    When the event's workflow has been quiesced (BD-2a), short-circuits
    with a structured `{:rejected? true ...}` map and runs no sinks or
    subscribers. Otherwise: fan out to sinks, append to the in-memory
-   log, fan out to subscribers, log, and return `event`.
+   log, fan out to subscribers, log, and return `event`. The returned
+   event carries the sink outcomes as metadata under
+   `sink-durability/outcomes-key`; a sink failure is logged, not raised,
+   so only those outcomes show whether the event was persisted.
 
    In-flight publishes are tracked so `quiesce!` / `drain!` can wait
    for the stream to settle before reporting at-rest.
@@ -401,12 +434,14 @@
       (or (fence/rejection-if-quiesced stream event)
           (let [result (fence/with-in-flight stream event
                          (fn []
-                           (let [{:keys [sinks subscribers filters logger]} @stream]
-                             (deliver-to-sinks! sinks event logger)
+                           (let [{:keys [sinks subscribers filters logger]} @stream
+                                 outcomes (if (contains? *replaying* stream)
+                                            []
+                                            (deliver-to-sinks! sinks event logger))]
                              (record-event! stream event)
                              (deliver-to-subscribers! subscribers filters event logger)
                              (log-published! logger event)
-                             event)))]
+                             (vary-meta event assoc durability/outcomes-key outcomes))))]
             ;; with-in-flight returns quiesced-sentinel when the workflow was
             ;; fenced during the atomic acquire (the TOCTOU window). Convert
             ;; to the canonical rejection shape so callers see a consistent
@@ -414,6 +449,27 @@
             (if (= result fence/quiesced-sentinel)
               (fence/reject! stream event)
               result))))))
+
+(defn ^{:stratum 2} replay!
+  "Deliver `event`, already stored by the process that published it, to
+   this legacy stream's log and subscribers without its sinks, which would
+   store a second copy. Subscribers' publishes to this stream meanwhile
+   skip its sinks too (`*replaying*`). Returns the redacted event; a
+   current-profile stream returns an :unsupported anomaly."
+  [stream event]
+  (cond
+    (current/active? stream)
+    (anomaly/anomaly :unsupported (messages/system :delivery/replay-unsupported) {})
+
+    (response/anomaly-map? event) event
+
+    :else
+    (let [event (redaction/redact event)
+          {:keys [subscribers filters logger]} @stream]
+      (binding [*replaying* (conj *replaying* stream)]
+        (record-event! stream event)
+        (deliver-to-subscribers! subscribers filters event logger))
+      event)))
 
 ;; Event constructors (N3 compliant)
 (defn ^{:stratum 2} workflow-started

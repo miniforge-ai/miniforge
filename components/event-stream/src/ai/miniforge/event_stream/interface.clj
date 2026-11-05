@@ -30,9 +30,15 @@
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.digest :as digest]
    [ai.miniforge.event-stream.boundary.heartbeat :as heartbeat]
+   [ai.miniforge.event-stream.layout-reader :as layout-reader]
+   [ai.miniforge.event-stream.layout-tail :as layout-tail]
    [ai.miniforge.event-stream.operator-requests :as operator-requests]
    [ai.miniforge.event-stream.reader :as reader]
+   [ai.miniforge.event-stream.recovery-location-spec :as recovery-location]
    [ai.miniforge.event-stream.sinks :as sinks]
+   [ai.miniforge.event-stream.sinks.cleanup :as cleanup]
+   [ai.miniforge.event-stream.sinks.file :as file]
+   [ai.miniforge.event-stream.sinks.naming :as naming]
    [ai.miniforge.event-stream.workflow-discovery :as discovery]
    [ai.miniforge.event-stream.timeline :as timeline]))
 
@@ -95,8 +101,24 @@
    quiesce fence, in-flight counter, optional snowflake generator).
    Optional opts map: :logger, :sinks (vector of sink fns), :config
    (builds sinks from config), :snowflake-generator (BD-2b event-id
-   generator for lexically-sortable ids)."
+   generator for lexically-sortable ids), :retention (bound on the
+   in-memory history, e.g. `bounded-retention`; absent = unbounded)."
   stream/create-event-stream)
+
+(def ^{:stratum 0} bounded-retention
+  "Retention policy for a stream that lives for days (the web dashboard):
+   per workflow, every lifecycle event, the newest health event per
+   dependency and the newest 500 others, for the 100 most recently active
+   workflows. Pass as `:retention` to
+   `create-event-stream`; merge over it to change a limit."
+  stream/bounded-retention)
+
+(def ^{:stratum 0} compact-events
+  "`(compact-events events policy)`: the events of `events` (a vector in
+   publish order) that a retention policy such as `bounded-retention`
+   keeps, still in publish order. For a reader that bounds history it
+   loads from disk the way a bounded stream bounds its own. Pure."
+  stream/compact-events)
 
 (def ^{:stratum 0} prepare-current-publication
   "Prepare a supported current-write draft as [scope redacted-draft] or an anomaly.
@@ -128,6 +150,26 @@
    :workflow-quiesced :workflow-id ... :event-type ...} map without
    running sinks or subscribers."
   stream/publish!)
+
+(def ^{:stratum 0} publish-persisted!
+  "Like publish!, but returns the result only when the event was persisted.
+   A current stream's receipt passes through. On a legacy stream an anomaly or
+   rejection passes through, and the event passes only when the stream has a
+   durable sink (the file sink) and every durable sink wrote it; otherwise an
+   :unavailable anomaly with :publication/reason :no-durable-sink or
+   :sink-write-failed."
+  stream/publish-persisted!)
+
+(def ^{:stratum 0} durable-sink
+  "Mark a legacy-stream sink as persisting each event it returns from without
+   throwing, so publish-persisted! can count it."
+  stream/durable-sink)
+
+(def ^{:stratum 0} replay!
+  "Deliver an event another process already stored to a legacy stream's
+   log and subscribers without its sinks (also for publishes to this
+   stream meanwhile). A current stream returns an :unsupported anomaly."
+  stream/replay!)
 
 (def ^{:stratum 0} subscribe!
   "Register a callback for events. 3-arg form subscribes to all events;
@@ -161,7 +203,22 @@
    reference this path so archival's live → archived rename moves them
    together. Arities: (workflow-id) defaults base-dir to
    ~/.miniforge/events; (base-dir workflow-id)."
-  sinks/workflow-dir)
+  file/workflow-dir)
+
+(def ^{:stratum 0} retention-hold
+  "Multimethod `(retention-hold hold-key workflow-id events-dir)`: register
+   a method under your own hold key to keep a workflow's archived events
+   past their TTL while your store still needs them (the event cleanup
+   asks every registered hold). Workflow id is the events directory name;
+   events-dir is the events root being cleaned."
+  cleanup/retention-hold)
+
+(def ^{:stratum 0} cleanup-stale-events!
+  "`(cleanup-stale-events! {:events-dir dir :ttl-ms ms})`: run the event
+   retention pass now, as the file sink does in the background when it is
+   created (which runs are archived or pruned: see the sinks namespace).
+   Returns the number of files removed."
+  cleanup/cleanup-stale-events!)
 
 (def ^{:stratum 0} default-events-dir
   "The default events root (`~/.miniforge/events`) as a java.io.File —
@@ -177,6 +234,21 @@
    side: the operator-event consumer (Phase D D-2). Arities: () defaults
    base-dir to ~/.miniforge/events; (base-dir)."
   sinks/operator-dir)
+
+(def ^{:stratum 0} live-dir
+  "`{base-dir}/live/`, one directory per in-flight workflow. Arities:
+   () for ~/.miniforge/events; (base-dir)."
+  sinks/live-dir)
+
+(def ^{:stratum 0} archived-dir
+  "`{base-dir}/archived/`, where the archive moves a terminal workflow's
+   directory. Arities: () for ~/.miniforge/events; (base-dir)."
+  sinks/archived-dir)
+
+(def ^{:stratum 0} event-file-ms
+  "`(event-file-ms file-name)`: the epoch ms an event file name records,
+   in any grammar the sink has used; nil for any other name."
+  naming/event-file-ms)
 
 (def ^{:stratum 0} serialize-event
   "Serialize an event map to the canonical Transit-JSON wire string —
@@ -284,8 +356,17 @@
   "Construct an N3 governed OPSV effect disposition event."
   opsv/actuation-disposition)
 
+(def ^{:stratum 0} CheckpointLocation
+  "Paired nonempty root/run-directory strings; producers supply validated canonical paths."
+  recovery-location/Location)
+
+(def ^{:stratum 0} checkpoint-location
+  "Construct paired canonical root and physical run-directory metadata from validated paths; no I/O."
+  events/checkpoint-location)
+
 (def ^{:stratum 0} checkpoint-written
-  "Construct a checkpoint write fact: stream, workflow UUID, phase, path, byte size."
+  "Construct a checkpoint write fact: stream, workflow UUID, phase, path, byte size,
+   optional location record (1.1.0) or legacy root string (1.0.0)."
   events/checkpoint-written)
 
 (def ^{:stratum 0} checkpoint-write-failed
@@ -293,7 +374,8 @@
   events/checkpoint-write-failed)
 
 (def ^{:stratum 0} machine-snapshot-written
-  "Construct a snapshot write fact: stream, workflow UUID, state, path, byte size."
+  "Construct a snapshot write fact: stream, workflow UUID, state, path, byte size,
+   optional location record (1.1.0) or legacy root string (1.0.0)."
   events/machine-snapshot-written)
 
 (def ^{:stratum 0} machine-snapshot-write-failed
@@ -1011,7 +1093,8 @@
    timestamp-prefixed filename, parsed as transit-JSON and de-prefixed.
    Arg `dir` is a java.io.File or String path. Returns a vector of
    parsed event maps, or nil when the directory does not exist.
-   Unparseable files are silently dropped."
+   Unreadable files are skipped; their paths are in the vector's
+   metadata under `:event-stream/unreadable-files`."
   reader/read-workflow-events)
 
 (def ^{:stratum 0} stored-workflow-ids
@@ -1023,13 +1106,36 @@
    archived → live → legacy directories of a workflow, or nil."
   reader/workflow-events-dir)
 
+(def ^{:stratum 0} event-order-key
+  "`(event-order-key event)`: [timestamp-ms sequence-number], the order to
+   sort read events by before taking the newest; file names order them
+   only to their recorded time."
+  reader/event-order-key)
+
 (def ^{:stratum 0} read-workflow-events-by-id
   "Read events for a workflow id under a base events dir, probing the
    archived → live → legacy layouts and reading the first that exists.
    Args: base-dir, workflow-id (UUID, keyword, or string). Returns a
    vector of parsed event maps, or nil when no layout contains the
-   workflow."
+   workflow. Unreadable files are skipped; their paths are in the
+   vector's metadata under `:event-stream/unreadable-files`."
   reader/read-workflow-events-by-id)
+
+(def ^{:stratum 0} start-layout-tail!
+  "`(start-layout-tail! events-dir on-event & [opts])`: follow the runs
+   other processes write under `events-dir` (live/ and archived/
+   workflow directories) on a daemon thread, calling `on-event` with each
+   new event in creation order, with UUID ids. Runs active at start are
+   read in full; older history is skipped. Opts: :poll-ms (500),
+   :window-ms (600000, how recently a directory was written to count as
+   active), :thread-name. Returns a function that stops it."
+  layout-tail/start!)
+
+(def ^{:stratum 0} read-layout-start-event
+  "`(read-layout-start-event events-dir workflow-id)`: the run's
+   :workflow/started event from its archived/ or live/ directory under
+   `events-dir`, ids as UUIDs; nil when there is none."
+  layout-reader/start-event)
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event timeline renderer

@@ -29,5 +29,12 @@
                                (case k
                                  :classified-error/error-prefix (str "CAT:" (:message params))
                                  (str "UNEXPECTED:" k)))]
-      (let [output (with-out-str (sut/print-error "boom"))]
+      (let [output (with-out-str (binding [*err* *out*] (sut/print-error "boom")))]
         (is (.contains output "CAT:boom"))))))
+
+(deftest ^{:stratum 0} print-error-writes-to-stderr-test
+  (testing "errors go to stderr, so stdout carries only a command's output (-o json, pipes)"
+    (let [err (java.io.StringWriter.)
+          out (with-out-str (binding [*err* err] (sut/print-error "boom")))]
+      (is (.contains (str err) "boom"))
+      (is (= "" out)))))
