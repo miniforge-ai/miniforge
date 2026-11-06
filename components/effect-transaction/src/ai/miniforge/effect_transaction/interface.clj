@@ -19,6 +19,7 @@
   "API surface class 1: internal EDN durable effect transactions and commit-time authority."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.effect-transaction.boundary.provider-dispatch :as dispatch]
    [ai.miniforge.effect-transaction.core :as core]
    [ai.miniforge.effect-transaction.current-commit :as current]
    [ai.miniforge.effect-transaction.current-schema :as current-schema]
@@ -44,6 +45,21 @@
 (def ^{:stratum 0} EffectTransaction
   "Closed Malli schema for a transaction record."
   schema/EffectTransaction)
+
+(def ^{:stratum 0} provider-dispatch-diagnostics
+  "Construct closed provider diagnostics from localized unconfirmed and invalid-input messages,
+   or return an invalid-input anomaly. Providers need not duplicate the message-map shape."
+  dispatch/diagnostics)
+
+(def ^{:stratum 0} call-with-provider-dispatch!
+  "Run a trusted unary synchronous dispatch callback around at most one provider attempt.
+   Accept dispatch and operation, optionally closed provider-owned localized diagnostics.
+   The two-argument form uses this component's system catalog; providers may preserve their own.
+   Operation returns its provider report or anomaly; a confirmed report cannot be replaced.
+   Reject repeated, cross-thread and escaped thunk attempts; close admission on return.
+   Exceptions without confirmation yield failed-before-attempt or unknown-after-attempt data.
+   Preserve interruption. This does not establish N4/N8 admission, grant validity or durability."
+  dispatch/call)
 
 (def ^{:stratum 0} read-record
   "Read one persisted record by UUID, nil, or an input/storage anomaly."
