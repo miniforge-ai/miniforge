@@ -5,34 +5,15 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.phase-opsv.kubernetes-preparation :as preparation]
-            [ai.miniforge.phase-opsv.kubernetes-read-plan :as reads]
+            [ai.miniforge.phase-opsv.kubernetes-replica-payload :as wire]
             [ai.miniforge.phase-opsv.kubernetes-resource :as resource]
             [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} ^:private media-type "RFC 6902, not strategic merge or server-side apply." "application/json-patch+json")
+(def ^{:stratum 0} ^:private resource-reference wire/resource-reference)
 
-(def ^{:stratum 0} ^:private uid-path "Fence replacement objects even when a name is reused." "/metadata/uid")
-
-(def ^{:stratum 0} ^:private revision-path "Fence changes made since the fresh capture." "/metadata/resourceVersion")
-
-(def ^{:stratum 0} ^:private replicas-path "The only mutable field supported by this request builder." "/spec/replicas")
-
-(defn- ^{:stratum 0} patch-operation [operation path value]
-  {"op" operation
-   "path" path
-   "value" value})
-
-(defn- ^{:stratum 0} resource-reference [deployment]
-  (let [namespace (resource/namespace-of deployment)
-        name (resource/name-of deployment)
-        uid (resource/uid deployment)]
-    {:api-version "apps/v1"
-     :kind "Deployment"
-     :namespace namespace
-     :name name
-     :uid uid}))
+(def ^{:stratum 0} ^:private payload wire/prepare)
 
 (defn- ^{:stratum 0} target-bound? [declaration capture]
   (let [target (:runtime/target declaration)
@@ -77,20 +58,6 @@
        (target-bound? declaration (get-in baseline [:environment/raw-observations :kubernetes/verification :kubernetes/source]))
        (target-bound? declaration current)))
 
-(defn- ^{:stratum 1} payload [declaration deployment desired]
-  (let [namespace (resource/namespace-of deployment)
-        name (:kubernetes/deployment-name declaration)
-        path (first (reads/request "Deployment" namespace false name))
-        uid (resource/uid deployment)
-        revision (get-in deployment ["metadata" "resourceVersion"])
-        body [(patch-operation "test" uid-path uid)
-              (patch-operation "test" revision-path revision)
-              (patch-operation "replace" replicas-path desired)]]
-    {:method :patch
-     :path path
-     :media-type media-type
-     :body body}))
-
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} prepare [declaration request baseline current parameters]
@@ -99,7 +66,7 @@
         deployment (get-in current [:kubernetes/inventory :kubernetes/deployment])
         operation (:opsv/operation parameters)
         desired (desired-count original parameters)
-        payload (payload declaration deployment desired)
+        payload (payload deployment desired)
         digest (hash/content-hash payload)
         resources [(resource-reference deployment)]
         target (:runtime/target declaration)]
