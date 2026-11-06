@@ -52,7 +52,7 @@ summary prints as `Cost: unavailable`.
    cost for an agent that reported none. They now expect no phase cost and `0.0` added to the
    execution total.
 4. `http_providers_test.clj`: an Anthropic response on `claude-sonnet-4-6` gets the table
-   estimate; one on an unpriced model, or with no token counts, gets no `:cost-usd`; an empty
+   estimate. One on an unpriced model, or with no token counts, gets no `:cost-usd`. An empty
    answer keeps its 18 tokens and their estimate.
 5. On main the new and changed assertions fail. With the fix they pass, together
    with `interface-test`, `cost-test` and the workflow's `cost-unavailable-metrics-test`.
