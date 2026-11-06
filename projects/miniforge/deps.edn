@@ -136,6 +136,7 @@
 
  :aliases
  {:test {:extra-paths ["../../components/event-stream/test"
+                       "../../components/execution-grant/test"
                        "../../components/phase-opsv/test"
                        "../../components/workflow/test"
                        "../../components/phase-opsv/test-resources"]}

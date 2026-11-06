@@ -54,7 +54,8 @@
   (testing "default config has correct structure"
     (is (nil? (:agent verify/default-config))
         "Verify phase has no agent — runs tests directly")
-    (is (= [:pre-verify-lint :tests-pass :coverage :policy-verify] (:gates verify/default-config)))
+    (is (= [:pre-verify-lint :tests-pass :policy-verify] (:gates verify/default-config))
+        ":coverage stays out until something measures coverage; it fails without data")
     (is (map? (:budget verify/default-config)))
     (is (= 3 (get-in verify/default-config [:budget :iterations])))))
 
@@ -64,7 +65,7 @@
       (is (some? defaults))
       (is (nil? (:agent defaults))
           "Verify has no agent in the new environment model")
-      (is (= [:pre-verify-lint :tests-pass :coverage :policy-verify] (:gates defaults))))))
+      (is (= [:pre-verify-lint :tests-pass :policy-verify] (:gates defaults))))))
 
 ;------------------------------------------------------------------------------ Verify-stall coverage
 ;;
@@ -242,6 +243,19 @@
                 (str ":spec/test-timeout-ms must flow into run-tests! — "
                      "the spec is the user-facing budget surface for the verify deadline"))))))))
 
+(deftest ^{:stratum 1} enter-verify-carries-nothing-to-test-into-metrics-test
+  (testing "the runner's own \"nothing to test\" claim reaches the metrics
+            :tests-pass reads, so it is told apart from a run that counted
+            no tests"
+    (with-redefs-fn
+      {run-tests-var (fn [_ & _opts]
+                       {:passed? true :test-count 0 :fail-count 0 :error-count 0
+                        :no-tests? true :output "No changed bricks"})}
+      (fn []
+        (let [ctx (verify/enter-verify (assoc (create-base-context)
+                                              :phase-config {:phase :verify}))]
+          (is (true? (get-in ctx [:phase :result :metrics :no-tests?]))))))))
+
 (deftest ^{:stratum 1} enter-verify-uses-default-timeout-when-no-override-test
   (testing "enter-verify falls back to default-test-timeout-ms when neither spec nor config sets one"
     (let [captured-opts (atom nil)]
@@ -308,7 +322,7 @@
             (is (= :verify (get-in result [:phase :name])))
             (is (nil? (get-in result [:phase :agent]))
                 "No agent in new environment model")
-            (is (= [:pre-verify-lint :tests-pass :coverage :policy-verify] (get-in result [:phase :gates])))
+            (is (= [:pre-verify-lint :tests-pass :policy-verify] (get-in result [:phase :gates])))
             (is (= :running (get-in result [:phase :status])))
             (is (number? (get-in result [:phase :started-at]))))
 

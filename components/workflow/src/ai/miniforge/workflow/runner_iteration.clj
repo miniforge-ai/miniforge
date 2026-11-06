@@ -4,6 +4,7 @@
 (ns ai.miniforge.workflow.runner-iteration
   "Apply dashboard control and supervision around one checkpointed phase step."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.llm.interface :as llm]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.messages :as messages]
@@ -29,13 +30,21 @@
       (ctx/transition-to-failed)))
 
 (defn- ^{:stratum 0} execute-supervised
+  "Run one supervised phase step. Its LLM calls see the run's cancel: once
+   CONTROL-STATE is stopped, a streaming agent call in flight kills the
+   agent's process tree and returns, and a later one ends as it starts.
+   `phase-step/execute-phase` also interrupts the step itself on a cancel;
+   workspace persistence still runs after it, and the caller records the
+   stop."
   [pipeline context callbacks iteration control-state]
   (let [state (monitoring/build-supervision-state context iteration)
         result (monitoring/check-workflow-supervision
                  (:execution/supervision-runtime context) state)]
     (if (= :halt (:status result))
       (monitoring/handle-supervision-halt context result ctx/transition-to-failed)
-      (phase-step/execute-phase pipeline context callbacks control-state))))
+      (llm/call-with-cancel-signal #(boolean (:stopped @control-state))
+                                   #(phase-step/execute-phase pipeline context callbacks
+                                                              control-state)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

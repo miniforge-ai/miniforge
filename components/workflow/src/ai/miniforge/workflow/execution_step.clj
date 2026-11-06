@@ -89,7 +89,14 @@
         unacknowledged (:phase/decision-unacknowledged lifecycle-result)
         result (recorded-result lifecycle-result)
         phase (:execution/current-phase context)
-        processed (lifecycle/process-phase-result updated phase result (:merge-metrics ports))
+        ;; The runner adds a phase's [:phase :metrics] to :execution/metrics.
+        ;; The software-factory :leave fns add the same spend themselves, so
+        ;; merging on top of their total counted it twice. Merge onto the
+        ;; total the phase started from; a :leave changes only tokens, cost
+        ;; and duration there, and the wall-clock stamp replaces duration.
+        processed (lifecycle/process-phase-result
+                   (assoc updated :execution/metrics (:execution/metrics entered))
+                   phase result (:merge-metrics ports))
         receipt (invoke (:on-phase-complete callbacks) processed interceptor result)]
     (cond
       unacknowledged (refused processed :gate-decision unacknowledged (:fail ports))

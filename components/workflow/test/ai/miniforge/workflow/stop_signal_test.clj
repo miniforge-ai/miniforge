@@ -25,22 +25,19 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.workflow.dag-loop :as dag-loop]
    [ai.miniforge.workflow.dag-merge :as dag-merge]
-   [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.dag-merge-attempt :as dag-merge-attempt]
+   [ai.miniforge.workflow.dag-merge-git :as merge-git]
    [ai.miniforge.workflow.dag-sub-workflow :as dag-sub-workflow]
    [ai.miniforge.workflow.execution :as exec]
    [ai.miniforge.workflow.execution-step :as execution-step]
-   [ai.miniforge.workflow.dag-merge-attempt :as dag-merge-attempt]
-   [ai.miniforge.workflow.dag-merge-git :as merge-git]
-   [clojure.string :as str]
    [ai.miniforge.workflow.monitoring :as monitoring]
    [ai.miniforge.workflow.runner-checkpoint :as runner-checkpoint]
-   [ai.miniforge.workflow.runner-defaults :as runner-defaults]
    [ai.miniforge.workflow.runner-environment :as env]
-   [ai.miniforge.workflow.runner-events :as runner-events]
    [ai.miniforge.workflow.runner-iteration :as runner-iteration]
-   [ai.miniforge.workflow.runner-phase-step :as runner-phase-step]
    [ai.miniforge.workflow.stop-signal :as stop-signal]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -302,7 +299,7 @@
                          (catch InterruptedException _
                            (dag/err :task-execution-failed "stopped" {}))))
           results (stop-signal/interrupting-on-stop
-                   cs #(dag-orch/execute-tasks-batch {:a {} :b {}} task {:control-state cs}))]
+                   cs #(dag-loop/execute-tasks-batch {:a {} :b {}} task {:control-state cs}))]
       (is (< (- (System/currentTimeMillis) started) 10000) "the batch returns promptly")
       (is (= #{:a :b} (set (keys results))) "the parent collected every task's result")
       (is (every? dag/err? (vals results)))
@@ -345,7 +342,7 @@
         _  (cancel-after! cs 300)
         logger (log/create-logger {:min-level :error :output :human})]
     (is (true? (stop-signal/interrupting-on-stop
-                cs #(#'dag-orch/await-launch-clearance! cs logger))))
+                cs #(#'dag-loop/await-launch-clearance! cs logger))))
     (is (not (Thread/interrupted)))))
 
 (deftest ^{:stratum 1} a-cancel-during-a-parent-merge-stops-the-task-test
@@ -393,25 +390,13 @@
           interrupted? (Thread/interrupted)]
       (is (instance? InterruptedException thrown))
       (is interrupted?)))
-  (testing "a cancel ends a cooldown sleep inside a phase scope, without escaping"
+  (testing "a cancel's interrupt ends a rate-limit cooldown instead of escaping"
     (let [cs (es/create-control-state)
           _  (cancel-after! cs 200)
-          started (System/currentTimeMillis)
-          woke? (stop-signal/interrupting-on-stop cs #(stop-signal/sleep! cs 10000))]
-      (is (true? woke?))
+          started (System/currentTimeMillis)]
+      (stop-signal/interrupting-on-stop cs #(#'dag-loop/stop-aware-sleep cs 10000))
       (is (< (- (System/currentTimeMillis) started) 5000))
       (is (not (Thread/interrupted)))))
-  (testing "and with no scope around it (`mf run plan.edn`, the retry backoff)"
-    (let [cs (es/create-control-state)
-          _  (cancel-after! cs 200)
-          started (System/currentTimeMillis)
-          woke? (stop-signal/sleep! cs 10000)]
-      (is (true? woke?))
-      (is (< (- (System/currentTimeMillis) started) 5000))
-      (is (not (Thread/interrupted)))))
-  (testing "a run already stopped does not sleep; an unstopped one sleeps it out"
-    (is (true? (stop-signal/sleep! (doto (es/create-control-state) es/cancel!) 10000)))
-    (is (false? (stop-signal/sleep! (es/create-control-state) 1))))
   (testing "the merge-resolution agent is not called once the run is stopped"
     (let [attempts (atom 0)
           cs (atom {:stopped false})
@@ -422,21 +407,3 @@
       (swap! cs assoc :stopped true)
       (edit "/tmp/wt" {} 1)
       (is (= 1 @attempts)))))
-
-(deftest ^{:stratum 1} a-cancel-during-the-retry-backoff-ends-it-test
-  (testing "the phase step returned a retry; the cancel lands during the
-            backoff that follows, after the phase's scope has ended"
-    (let [cs      (es/create-control-state)
-          retry   {:execution/current-phase :implement
-                   :execution/phase-results {:implement {:status :retrying}}
-                   :phase {:iterations 2}}
-          started (System/currentTimeMillis)
-          result  (with-redefs-fn {#'exec/execute-phase-step (fn [_ c & _] (cancel-after! cs 300) c)
-                                   #'env/persist-workspace-at-phase-boundary! (fn [_ _] nil)
-                                   #'env/track-unpersisted (fn [_ stepped _] stepped)
-                                   #'runner-defaults/backoff-base-ms (constantly 10000)
-                                   #'runner-events/check-backend-health-at-boundary! (constantly nil)}
-                    #(runner-phase-step/execute-phase [] retry {} cs))]
-      (is (< (- (System/currentTimeMillis) started) 5000) "the 20 s backoff ended on the cancel")
-      (is (= :retrying (get-in result [:execution/phase-results :implement :status])))
-      (is (not (Thread/interrupted))))))

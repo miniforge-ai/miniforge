@@ -1,5 +1,7 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/policy-pack {:local/root "../policy-pack"}
-        ai.miniforge/compliance-scanner {:local/root "../compliance-scanner"}}
+        ai.miniforge/compliance-scanner {:local/root "../compliance-scanner"}
+        slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases {:test {:extra-paths ["test"]}}}

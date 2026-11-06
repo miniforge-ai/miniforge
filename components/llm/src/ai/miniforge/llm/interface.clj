@@ -19,6 +19,7 @@
   "Public API for LLM client using CLI backends.
    Supports claude CLI, cursor CLI, and mock backends."
   (:require
+   [ai.miniforge.llm.cancellation :as cancellation]
    [ai.miniforge.llm.cost :as cost]
    [ai.miniforge.llm.interface.protocols.llm-client :as p]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
@@ -34,6 +35,14 @@
 (def ^{:stratum 0} backends
   "Available CLI backends."
   impl/backends)
+
+(def ^{:stratum 0} call-with-cancel-signal
+  "Call f with `cancelled?` (a zero-argument function) as the cancel check
+   for the LLM calls it makes: once it returns true, a streaming call in
+   flight kills the agent's process tree and returns a `:cancelled`
+   timeout, and a later call does so as soon as it starts.
+   (call-with-cancel-signal cancelled? f)"
+  cancellation/call-with-cancel-signal)
 
 (defn ^{:stratum 0} backend-prompt-via
   "Given a backend entry from `backends`, return how its CLI expects the
@@ -206,6 +215,10 @@
    Returns: Same format as complete (final result)
 
    Note: Falls back to non-streaming for backends that don't support it.
+   A CLI stream that exits successfully with no content, tool calls or
+   usage is retried once through the non-streaming path, unless the
+   request sets `:empty-stream-fallback? false`; then it is returned as
+   it is, with no second provider call.
 
    Example:
      (complete-stream client
