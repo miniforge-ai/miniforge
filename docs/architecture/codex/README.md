@@ -30,7 +30,7 @@ and solid / dashed / dotted strokes for built / partial / spec-only.
 | Parse, walk and render the node graph | `components/codex/` (`node`, `graph`, `pegs`, `core`, `render`) |
 | Phase routing, the pin, the consultation summary | `components/phase-software-factory/src/.../codex_pin.clj` |
 | Pull tools `consider_situation`, `answer_peg` | `bases/mcp-context-server/` (`codex_tool.clj`, `tool-registry.edn`) |
-| The `:codex-consultation` gate | `components/gate/src/.../codex_consultation.clj` |
+| The `:codex-consultation` gate (plan and implement defaults) | `components/gate/src/.../codex_consultation.clj` |
 | Miss ledger, buckets, report, telemetry, retrodiction | `components/codex-gap/`, recorded at phase leave by `gap_wiring.clj`; `bb codex-gap-report`, `bb codex-gap-peg-telemetry`, `bb codex-gap-retrodict` |
 
 The codex itself is not in this repository. It is a directory of markdown nodes,

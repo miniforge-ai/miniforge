@@ -33,7 +33,8 @@ the vault and the Codex specs, outside this repository.
   pull; and the `:codex/consultation` record, including tri-state
   `:pin-read?`.
 - `diagrams/03-gate-and-gaps.svg`: covers the `:codex-consultation` gate
-  verdicts, warnings kept in gate history, the first-leak-wins buckets, the
+  verdicts on plan and implement, warnings kept in gate history, the
+  first-leak-wins buckets, the
   ledger files, and the three `bb codex-gap-*` read-outs.
 - `diagrams/04-curation.svg`: shows harvest, borrowed scars, the admission
   test, horizons and boards, dedup, promotion (§5.6) and retirement (§4.4).
