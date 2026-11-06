@@ -48,8 +48,8 @@ DAG batch. A phase waiting on the agent CLI kept running, and spending, until it
 ## Follow-ups stacked on this PR
 
 1. #2294: a multi-parent task's merge and its resolution agent stop on a cancel.
-2. A follow-up PR stacked on this one: the retry backoff and the DAG waits wake on a cancel
-   outside a phase scope (`stop-signal/sleep!`). A cancel also wins over a rate-limit failover or pause decision. These
+2. #2405: the retry backoff and the DAG waits wake on a cancel outside a phase scope
+   (`stop-signal/sleep!`). A cancel also wins over a rate-limit failover or pause decision. These
    were Copilot findings on this PR, moved to their own PR to keep this one under the size limit.
 
 ## Testing Plan
