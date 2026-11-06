@@ -59,13 +59,16 @@ Full local validation passes after integrating current main:
 - Native packaged OPSV regressions: 308 tests, 1,903 assertions on Babashka.
 - All task entrypoints load; the CLI builds from current sources.
 - Fourteen authority faults are detected by assertion failures, each with zero errors.
-- Seven pure tests retain 93 assertions; the slowest measured run is 0.813 milliseconds.
+- Seven pure tests retain 93 assertions; the slowest measured run is 0.831 milliseconds.
 - Committed scans find no violations across 44 grant, 24 effect, and four project files.
 
 Current-main hooks exposed one unused test import, which is removed.
 Its strict lint and inferred strata pass; its scoped regression passes two tests and seven assertions.
 The issuer's 13 namespaces also pass strict lint and true inferred strata, with no layer waivers.
 The final standards pass adds the missing rationale to the test ceiling constant.
+Incoming DAG tests shared a namespace across the component and project suites.
+The project suite now has a unique integration namespace; every test body and assertion is unchanged.
+Paired lint and true inferred strata pass; both complete DAG suites pass 84 tests and 224 assertions.
 The PR remains within the 600-line reportable limit, without exceptions.
 Incoming prose findings are fixed without weakening the hook.
 
