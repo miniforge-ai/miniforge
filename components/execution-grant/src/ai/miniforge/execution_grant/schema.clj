@@ -41,6 +41,7 @@
    :effect/push
    :effect/pr-create
    :effect/comment
+   :effect/load-test
    :effect/provision])
 
 (def ^{:stratum 0} constraint-axes

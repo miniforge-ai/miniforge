@@ -21,6 +21,7 @@
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.gate.policy-pack :as sut]
+   [ai.miniforge.gate.policy-pack.checks :as checks]
    [ai.miniforge.gate.registry :as registry]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing use-fixtures]]
@@ -291,7 +292,7 @@
   (testing "an applicable non-acting semantic rule is classified :guidance, not
             :passed — the judge was skipped, so evidence must not imply it ran"
     (let [r-guid     (semantic-rule :id :r/guid :phases #{:verify} :action :warn)
-          classified (#'sut/classify-rules [(pack r-guid)] :verify
+          classified (checks/classify-rules [(pack r-guid)] :verify
                                            dirty-code-artifact {} [])
           by-id      (into {} (map (juxt :rule-id :status)) classified)]
       (is (= :guidance (by-id :r/guid))))))
@@ -387,7 +388,7 @@
           r-na   (glob-scoped-rule :r/na #{:verify} "**/*.py")
           packs      [(pack r-fail r-pass r-skip r-na)]
           violations [{:rule r-fail :violation {:message "boom"}}]
-          classified (#'sut/classify-rules packs :verify dirty-artifact {} violations)
+          classified (checks/classify-rules packs :verify dirty-artifact {} violations)
           by-id      (into {} (map (juxt :rule-id :status)) classified)]
       (is (= :failed (by-id :r/fail)))
       (is (= :passed (by-id :r/pass)))

@@ -140,7 +140,8 @@
   "A `call` for `run-cell`: one isolated completion per request, through
    the streaming path, which parses the provider's usage, with the
    manifest's per-call dollar cap as the provider budget guard. A failed
-   call is never retried."
+   call is never retried, and the llm client's buffered retry of an empty
+   stream is turned off, so every provider call is the journaled one."
   [{:keys [model adapter]}]
   (let [client (llm/create-client {:backend :claude :model model :isolated? true})
         prompt (system-prompt)]
@@ -148,5 +149,6 @@
       (call-result (complete! client
                               {:system prompt
                                :budget-usd (double (:call-cap-usd adapter))
+                               :empty-stream-fallback? false
                                :messages [{:role "user"
                                            :content (json/generate-string request)}]})))))

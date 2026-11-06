@@ -39,12 +39,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Gate implementation
-(defn- ^{:stratum 0} no-policy-packs-warning
+(defn- ^{:stratum 0} no-policy-packs-error
   []
   {:type :no-policy-packs
    :message (msg/t :behavioral/no-policy-packs)})
 
-(defn- ^{:stratum 0} behavioral-check-error-warning
+(defn- ^{:stratum 0} behavioral-check-error
   [message]
   {:type :behavioral-check-error
    :message (str (msg/t :behavioral/check-error-prefix) message)})
@@ -81,6 +81,10 @@
                                    {:passed? :blocking :require-approval
                                     :warnings :audits}.
 
+   Fails closed: with no policy packs loaded, or when the policy check
+   throws, the artifact was not checked, so the gate fails rather than
+   passing with a warning.
+
    Returns:
      {:passed? bool
       :errors  [{:code … :severity … :message … …}]
@@ -88,9 +92,9 @@
   [artifact ctx]
   ;; Programmer-error guard runs OUTSIDE the try/catch on purpose.
   ;; A non-nil non-callable :check-fn is a misconfiguration the caller
-  ;; needs to see, not a runtime failure to be silently demoted to a
-  ;; :behavioral-check-error warning. The outer catch below covers
-  ;; runtime failures only (soft-dep unavailable, policy-pack throws).
+  ;; needs to see as a throw, not a :behavioral-check-error gate failure.
+  ;; The outer catch below covers runtime failures only (soft-dep
+  ;; unavailable, policy-pack throws).
   (let [provided (:check-fn ctx)]
     (when (and (some? provided) (not (ifn? provided)))
       (throw (IllegalArgumentException.
@@ -103,16 +107,16 @@
           check-fn (if (nil? provided) default-check-fn provided)
           packs    (get ctx :policy-packs [])]
       (if (empty? packs)
-        {:passed?  true
-         :warnings [(no-policy-packs-warning)]}
+        {:passed? false
+         :errors  [(no-policy-packs-error)]}
         (let [{:keys [passed? blocking require-approval warnings audits]}
               (check-fn packs artifact {:phase :observe :task-type :modify})]
           {:passed?  (and passed? (empty? require-approval))
            :errors   (vec (concat blocking require-approval))
            :warnings (vec (concat warnings audits))})))
     (catch Exception e
-      {:passed?  true
-       :warnings [(behavioral-check-error-warning (ex-message e))]})))
+      {:passed? false
+       :errors  [(behavioral-check-error (ex-message e))]})))
 
 (defn ^{:stratum 1} repair-behavioral
   "Behavioral violations cannot be fixed in-place.

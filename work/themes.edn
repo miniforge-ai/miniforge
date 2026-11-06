@@ -321,4 +321,24 @@
    "a DRY / dead-code / unwired-command violation fails a dogfood run before the PR opens (regression guard for PR #979)"
    "every run emits per-rule-id applied/passed/failed evidence; a human can see which policies gated a given workflow"]
   :theme/status :planned
+  :theme/owner :christopher}
+
+ :codex-gap
+ {:theme/id :codex-gap
+  :theme/title "Codex gap measurement"
+  :theme/description
+  "Measure how far the codex runs actually get falls short of the ideal
+   one. Every in-run failure becomes a miss-ledger entry, classified at the
+   first rung that leaked (coverage, routing, anchoring, delivery,
+   attention, learning), and the gap report shows each rung beside its
+   member misses. The ledger, classifier, phase wiring and report are on
+   main; two report slots are not yet measured."
+  :theme/informative-spec "work/done/codex-gap-instrument.spec.edn"
+  :theme/normative-refs
+  [{:doc "Thesium Codex SPEC T2 (SPEC-GAP.md)"
+    :section "§3 miss buckets; §4 the gap vector"
+    :relation :primary}]
+  :theme/completion-criteria
+  ["Every slot of the gap report carries a measured value beside its member list; none reads :not-instrumented"]
+  :theme/status :in-flight
   :theme/owner :christopher}}
