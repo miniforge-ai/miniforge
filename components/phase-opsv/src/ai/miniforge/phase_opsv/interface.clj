@@ -38,6 +38,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as native-preparation]
    [ai.miniforge.phase-opsv.kubernetes-preparation-schema :as native-preparation-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-request :as native-replica-request]
+   [ai.miniforge.phase-opsv.boundary.experiment-preflight :as experiment-preflight]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -206,6 +207,14 @@
    UID/revision tests and declared bounds constrain the data, not execution authority.
    No provider call, retention/ownership proof, N4/N8 admission or verified recovery."
   native-replica-request/prepare)
+
+(def ^{:stratum 0} evaluate-experiment-preflight
+  "Evaluate temporary staging N4 gates from trusted runtime opt-in and prepared baseline.
+   Accept a workflow context, canonical native preparation request and correlated receipt.
+   Return experiment-specific checks, envelope and comparison binding, or an anomaly.
+   Does not verify retention/ownership, issue grants, check N8, or authorize a provider;
+   the runtime must compose those obligations and reevaluate at each commit."
+  experiment-preflight/evaluate)
 
 (def ^{:stratum 0} prepare-kubernetes-verification!
   "Correlate the host request and pin before bounded read-only capture and canonical projection.
