@@ -37,6 +37,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-environment-fingerprint :as native-fingerprint]
    [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as native-preparation]
    [ai.miniforge.phase-opsv.kubernetes-preparation-schema :as native-preparation-schema]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-replica-request :as native-replica-request]
    [ai.miniforge.phase-opsv.boundary.experiment-preflight :as experiment-preflight]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
@@ -197,6 +198,15 @@
 (def ^{:stratum 0} KubernetesVerificationPreparationDeclaration
   "Independent workflow identity and native Deployment target for a preparation callback."
   native-preparation-schema/Declaration)
+
+(def ^{:stratum 0} prepare-kubernetes-replica-request
+  "Prepare a Deployment-only JSON Patch from declaration, native preparation request,
+   original baseline receipt, fresh native capture and closed trial/restoration parameters.
+   Trials supply :replicas/count; restoration derives the original desired count.
+   Return canonical request, payload hash and exact resource reference, or an anomaly.
+   UID/revision tests and declared bounds constrain the data, not execution authority.
+   No provider call, retention/ownership proof, N4/N8 admission or verified recovery."
+  native-replica-request/prepare)
 
 (def ^{:stratum 0} evaluate-experiment-preflight
   "Evaluate temporary staging N4 gates from trusted runtime opt-in and prepared baseline.
