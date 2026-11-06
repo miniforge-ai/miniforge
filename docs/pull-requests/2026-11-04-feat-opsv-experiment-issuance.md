@@ -65,7 +65,8 @@ Full local validation passes after integrating current main:
 Current-main hooks exposed one unused test import, which is removed.
 Its strict lint and inferred strata pass; its scoped regression passes two tests and seven assertions.
 The issuer's 13 namespaces also pass strict lint and true inferred strata, with no layer waivers.
-The PR uses 383 of 600 reportable lines, without exceptions.
+The final standards pass adds the missing rationale to the test ceiling constant.
+The PR uses 385 of 600 reportable lines, without exceptions.
 Incoming prose findings are fixed in #2402 without weakening the hook.
 
 ## Deployment Plan

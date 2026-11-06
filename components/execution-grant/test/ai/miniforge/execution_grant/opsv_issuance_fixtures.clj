@@ -6,7 +6,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} maximum-duration-ms (* 30 60 1000))
+(def ^{:stratum 0} maximum-duration-ms
+  "The existing thirty-minute runtime ceiling, pinned independently for boundary tests."
+  (* 30 60 1000))
 
 (defn ^{:stratum 0} preflight []
   {:preflight/type :preflight/opsv-staging-experiment
