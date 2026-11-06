@@ -8,8 +8,8 @@
 
 ## Overview
 
-`agents.md` now states the PR merge gate the operator set: PRs open ready for
-review, and a PR merges once four gates pass on its current head. The gates
+`agents.md` now states the PR merge gate the operator set. PRs open ready for
+review and merge once four gates pass on their current head. The gates
 are adversarial review (dewey 720), rules review against the applicable
 standards, green CI, and a Copilot review of the current head. The owning
 session then squash-merges it without waiting for the operator, unless gate 1
@@ -33,12 +33,12 @@ loads `agents.md` into a Claude Code session on its own.
 
 ## Changes in Detail
 
-1. `agents.md`: a "PR Merge Gate" section. It covers: no drafts; the four gates
-   on the current head; gates 1 and 2 before the PR opens and before every
-   later push; re-requesting Copilot after a push, and stopping if Copilot
-   posts no review; the owning session squash-merges; stopping to ask the
-   operator when gate 1 or 2 cannot be completed (dewey 720); subagent reviews
-   as an extra pass only; scope for trivial and documentation-only PRs.
+1. `agents.md`: a "PR Merge Gate" section covers non-draft PRs and four
+   current-head gates. Gates 1 and 2 run before opening and before later pushes.
+   Request Copilot after each push; stop if no review appears.
+   The owning session squash-merges, unless gate 1 or 2 cannot be completed.
+   In that case, ask the operator, per dewey 720. Subagent reviews are extra
+   passes only. The section also covers trivial and documentation-only PRs.
 2. `.claude/CLAUDE.md`: new; imports `agents.md` with `@../agents.md`. It sits
    in a different directory from `claude.md`, so the two do not collide on a
    case-insensitive filesystem, and `agents.md` stays the single source.

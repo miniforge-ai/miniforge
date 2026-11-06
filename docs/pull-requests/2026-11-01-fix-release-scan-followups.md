@@ -9,40 +9,38 @@
 ## Overview
 
 Follow-up to #2305, from its post-merge adversarial and rules reviews (#2305
-merged without them). In a governed run, release's git scans now run in the
-capsule's own checkout instead of the host worktree path, which does not exist
-inside the capsule. The rest of the PR fixes what the reviews found in the
+merged without them). Governed release scans now run in the capsule's own
+checkout. The host worktree path does not exist inside the capsule.
+The rest of the PR fixes what the reviews found in the
 release scan code.
 
 ## Motivation
 
 The reviews found:
 
-- **High (governed runs):** the capsule scans, both the committed scan #2305
-  added and the existing `git-dirty-files-capsule`, passed the host worktree
-  path (`:execution/worktree-path`) as the capsule workdir. Inside the capsule
+- **High (governed runs):** capsule scans passed `:execution/worktree-path` as
+  their workdir. This affected the committed scan and `git-dirty-files-capsule`.
+  Inside the capsule
   the checkout is `:execution/capsule-workdir` (#2240 moved implement, persist
   and the `:no-secrets` gate to it). The scan could not run there, so a
   governed `:already-implemented` release never found its committed work.
 - **Must-fix (dewey 050):** "resolves outside the worktree" and
   "<command> exited <n>" were inline user-facing strings.
-- **Should-fix (moved code, dewey 720 obligation 6):** the dirty scan, which
-  this PR moves onto `release-scan`'s readers, followed symlinks: the capsule
-  `cat` and the host `.isFile` + `slurp` read a symlink's target, possibly
-  outside the worktree, into the PR metadata.
-- **Low:** `skip-probe` threw a failed scan even when implement's recorded
-  files would carry the release; the branch's commits ship either way, and the
-  files feed only PR metadata. Throwing there also goes against dewey 005
+- **Should-fix (moved code, dewey 720 obligation 6):** the dirty scan followed
+  symlinks. The capsule `cat` and host `.isFile` + `slurp` read the target into
+  PR metadata, even outside the worktree. The scan now uses `release-scan`'s readers.
+- **Low:** `skip-probe` threw failed scans even when recorded files could carry
+  the release. The branch's commits ship either way; files feed PR metadata.
+  Throwing there also goes against dewey 005
   (throw only at boundaries).
-- **Low:** SHA-256 repositories (64-hex shas) fell back to the old skip; a
-  capsule `rev-parse` exiting 1 with an error (container gone) read as "commit
-  not here" and skipped.
-- **Should-fix:** private alias shims in `release.clj` (dewey 008); a second
-  capsule git runner, three copies of the governed-mode check, and four
-  hand-built exception-to-failure maps (dewey 002, 003); `release_scan.clj`
-  over the 3-layer budget (dewey 210); undocumented defs and a stale
-  `build-workflow-state` docstring (dewey 006, 009); `(or (get-in ..) "")`
-  instead of a `get-in` default (dewey 210).
+- **Low:** SHA-256 repositories (64-hex shas) fell back to the old skip.
+  A capsule `rev-parse` exit 1 could mean an execution error, such as a missing
+  container. The scan treated it as an absent commit and skipped.
+- **Should-fix:** `release.clj` had private alias shims (dewey 008).
+  It duplicated the capsule runner, governed-mode checks and exception-to-failure
+  maps (dewey 002, 003). `release_scan.clj` exceeded three layers (dewey 210).
+  Undocumented defs and a stale `build-workflow-state` docstring violated dewey
+  006 and 009. A `get-in` fallback also needed its default argument (dewey 210).
 - #2305's PR doc lacked Deployment Plan and Related Issues/PRs and had stale
   statements (dewey 721).
 
@@ -56,9 +54,9 @@ The reviews found:
      `skip-probe` and `build-workflow-state` both use it.
    - `git-dirty-files-capsule` uses `release-scan`'s capsule runner and
      reader; `porcelain-scan-entry` maps a `git status` pair to a scan entry.
-   - `git-dirty-files` (host) keeps a symlink's path and action with empty
-     content (never its target, and never dropping the path, which can be
-     the only change), and uses `release-scan/exception-failure`.
+   - `git-dirty-files` preserves a symlink's path and action with empty content,
+     never reading its target. That path can be the only change.
+     Failures use `release-scan/exception-failure`.
    - `committed-since-base` composes `release-scan/first-base-diff` and
      `read-entries` through `scan-io`.
    - `skip-probe` returns a failed scan as its anomaly again;
@@ -74,10 +72,9 @@ The reviews found:
    - `exception-failure`: one factory for a thrown exception's failure.
    - `capsule-runner` quotes only arguments that are not shell-safe, so plain
      git commands reach `sh -c` unchanged.
-   - `capsule-reader` skips a symlink, and a path that exists but is not a
-     regular file (`if [ -L p ] || { [ -e p ] && [ ! -f p ]; }; then :; else
-     cat p; fi`), which reads as empty; anything else is `cat`, so a missing
-     or inaccessible path fails and is retried.
+   - `capsule-reader` returns empty content for symlinks and existing nonregular
+     paths. It reads other paths with `cat`; missing or inaccessible paths fail
+     and are retried.
    - `missing-commit?`: exit 1 with no output; an exit 1 that printed an
      error is a failure.
    - `read-entry`: an entry with no mode (from `git status`) is passed to the
@@ -91,10 +88,10 @@ The reviews found:
 
 ## Testing Plan
 
-Not run locally: this cloud session cannot fetch the Clojars dependencies the
-suite needs, so CI is the run. Every edited file was checked with the Clojure
-reader, and the capsule reader's shell guard was run under a real `sh` against
-a regular file, a symlink and a directory.
+The authoring cloud session could not fetch Clojars dependencies, so it relied
+on CI. Every edited file was checked with the Clojure reader.
+The capsule reader's shell guard was tested under real `sh` against regular
+files, symlinks and directories.
 
 `release_committed_work_test.clj`:
 
@@ -108,13 +105,13 @@ a regular file, a symlink and a directory.
 4. The host reader refuses `../outside.clj`.
 5. A governed release with implement `:success` lists its dirty files in the
    capsule checkout (the `build-workflow-state` path).
-6. An untracked symlink to a secret outside the worktree, the only change,
-   is released by path with empty content, on the host and through the
-   capsule reader under a real `sh -c`; the secret never enters the release.
+6. An untracked symlink outside the worktree is released by path with empty
+   content, even as the sole change. Host and real `sh -c` capsule cases verify
+   that its secret target never enters the release.
 
-The existing capsule tests in `release_file_scan_test.clj` cover the rewritten
-`git-dirty-files-capsule`: an executor error, a non-zero exit, a failed `cat`,
-a thrown executor, listed files, and paths a shell would mangle. Their stub key
+Existing capsule tests cover the rewritten `git-dirty-files-capsule` in
+`release_file_scan_test.clj`. Cases include executor errors, nonzero exits,
+failed reads, listed files and shell-sensitive paths. Their stub key
 for the reader moves from `"cat"` to `"if ["`, the guarded command's prefix.
 
 ## Deployment Plan
@@ -123,12 +120,12 @@ No configuration or migration.
 
 ## Related Issues/PRs
 
-- #2305 (the change this follows up), #2240 (capsule workdir)
+This follows #2305 and uses the capsule workdir introduced in #2240.
 
 ## Not in this PR
 
-- A phase boundary commits everything after each phase, so files verify or
-  review leave behind now count as committed work and can stop an
+- A phase boundary commits everything after each phase. Files left by verify
+  or review now count as committed work and can prevent an
   `:already-implemented` release from skipping. Whether release should skip
   those is a product decision, raised with the operator.
 - `error-release` reads `[:phase :iterations]`, which `begin-phase-attempt`
@@ -137,13 +134,13 @@ No configuration or migration.
 - Moving the tests that create real git repositories to a project test
   directory (dewey 310): sibling release tests already do the same in the
   component.
-- Result factories for the runners' and readers' `{:failure ...}` /
-  `{:content ...}` maps, and reading executor results through dag-executor's
-  result helpers (dewey 003). The shapes came with #2305; changing them
+- Runner and reader result factories remain outside this PR (dewey 003).
+  Their `{:failure ...}` / `{:content ...}` maps and executor-result access
+  need shared helpers. The shapes came with #2305; changing them
   touches every scan.
-- The pre-commit hooks are not installed in the cloud session that wrote
-  this, so `bb commit-budget` (200 lines per commit) did not run on its
-  commits; the PR stays within the 600-line `bb pr-budget` CI gate.
+- The authoring cloud session had no pre-commit hooks. Its commits did not
+  run `bb commit-budget` (200 lines per commit). The PR remained within the
+  600-line `bb pr-budget` CI gate.
 
 ## Checklist
 

@@ -6,8 +6,8 @@
 
 # N10 — Governed Tool Execution
 
-**Version:** 0.4.0-draft
-**Date:** 2026-08-06
+**Version:** 0.5.0-draft
+**Date:** 2026-11-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -39,9 +39,9 @@ NOT implement a parallel capability broker. Sections that retain the older
 intent/OIR/capability vocabulary describe design inputs only; where they conflict
 with this profile, this profile governs.
 
-The following legacy material is explicitly informative: §2 and §6 in full;
-the Intent-, Operational-IR-, Capability-, and Capability-Broker-dependent
-clauses in §§3–5, §§7–10, §12, and §§13.2–13.4; and their architecture and
+Legacy material is explicitly informative in §2 and §6 in full.
+This also covers Intent-, Operational-IR-, Capability-, and Capability-Broker-dependent
+clauses in §§3–5, §§7–10, §12, and §§13.2–13.4, including their architecture and
 glossary references in §§14–17. Within that material, every `REQUIRED` or
 `OPTIONAL` field annotation and every `MUST` or `MUST NOT` statement has no
 independent conformance force. Implementations MUST express the underlying
@@ -94,6 +94,46 @@ A parallel caller-supplied scope MUST NOT override the durable proposal.
 5. **Capsule isolation** — every tool execution runs in a bounded, destroyable context
 6. **Evidence everywhere** — every action produces audit evidence linked to N6 bundles
 
+### 1.5 OPSV temporary staging effects
+
+N7 §5.5 MUST specialize the adopted Ariadne execution path, not introduce a
+parallel broker or treat actuation intent as authority. Temporary candidate
+configuration MUST use `:effect/deploy` with an OPSV-specific exact scope.
+Load generation and its owned-resource lifecycle MUST use the distinct
+`:effect/load-test` class. Existing generic deployment grants MUST NOT acquire
+trial, load, or recovery authority implicitly.
+
+Each grant and durable proposal MUST bind the workflow, verification attempt,
+candidate hash, Experiment Pack hash, and retained comparison-contract reference.
+They MUST also bind the staging environment, exact runtime target, operation,
+and canonical payload hash.
+Scope MUST include affected resources, traffic destinations, effect duration,
+and applicable load/count limits. Wildcards and caller-supplied assertions of
+staging identity or ownership MUST NOT establish authority.
+
+The commit path MUST compare that scope against the durable proposal, using
+current authority and fresh N8 fencing. Payload changes MUST invalidate prior
+approval. Grants MUST be time-bounded, revocable, non-delegable, and limited to
+the declared effect count. Retries MUST retain idempotency and reconcile unknown
+outcomes before risking duplicate effects. A deployment grant MUST NOT authorize
+load generation; a load grant MUST NOT authorize arbitrary deployment or commands.
+
+Cleanup and baseline restoration MUST use separately scoped allowing decisions,
+grants, and durable transactions. Recovery authority MUST remain independent of
+revoked or expired forward grants and MUST NOT permit new trials. Cleanup MUST
+bind proven resource identity and provider preconditions; a reused resource name
+MUST NOT authorize deletion of a different resource.
+
+The runtime MUST verify recovery postconditions against N7 §6.3's original
+baseline and recovery bounds. Missing authority or uncertain recovery MUST fail
+closed for new forward effects and require retained disposition evidence.
+The runtime MUST use registered N3 §3.14 dispositions and N6 §2.8 artifacts;
+this profile MUST NOT introduce an unregistered event or artifact type.
+
+This profile MUST NOT authorize production experiments or relax final PR/apply
+gates. Candidate verification success MUST remain required for permanent apply,
+not for an otherwise admitted temporary trial intended to obtain that result.
+
 ---
 
 ## 2. Operational Intent (Informative Legacy Design Input)
@@ -125,7 +165,7 @@ the orchestrator) compiles intent into a verified action graph.
 ### 2.2 Operational IR
 
 Verified intent is compiled into **Operational IR** — the canonical representation
-of what will actually execute.
+of what will execute.
 
 ```clojure
 {:oir/id               uuid
@@ -274,6 +314,9 @@ and operational visibility.
    in the operator console (N5).
 4. When safe-mode is active (N8 §3.4), all circuit breakers for Class B+ tools MUST be
    forced to `:open`.
+
+N7 staging-trial compensation MUST use the separately authorized recovery path
+in §1.5 and N8 §3.4.2, not reopen these general-purpose mutation circuits.
 
 ---
 
@@ -459,9 +502,8 @@ See I-VALIDATION-STRATEGIES for guidance on:
 ```
 
 These adapters are registered as tools in the tool registry with type `:external`
-or `:mcp`. This is the mechanism for plugging in third-party platforms like Shipyard
-— they are tools that provide validation capabilities, registered and invoked through
-the standard tool contract.
+or `:mcp`. Third-party platforms like Shipyard provide validation capabilities
+through tools registered and invoked under the standard tool contract.
 
 ### 5.4 Validation Artifacts
 
@@ -780,10 +822,9 @@ tool registry (N1 §2.3). This includes:
 
 ### 11.2 MCP and SaaS Platform Integration
 
-Third-party platforms that provide capabilities beyond simple tool invocation — such
-as ephemeral environment provisioning (Shipyard), synthetic data generation (Tonic),
-or full SaaS workflows — integrate through the tool registry as `:mcp` or `:external`
-tool types.
+Third-party platforms integrate through the tool registry as `:mcp` or `:external`
+tool types. Their capabilities can extend beyond simple invocation, including
+ephemeral environments (Shipyard), synthetic data generation (Tonic), and SaaS workflows.
 
 ```clojure
 ;; Example: Shipyard as an external validation tool
@@ -855,9 +896,9 @@ the conformant path explicitly:
 - Governed execution is observed today through the DecisionEnvelope,
   ExecutionGrant, and EffectTransaction identifiers carried on registered
   event types, correlated per §12.2.
-- Adding any row below to the emitted surface is an **N3 amendment first**: the
-  type must appear in N3 §6's registry, with a schema in N3 §3 and an emission
-  point in N3 §4.1, before an implementation emits it (N3 §6.1).
+- Adding any row below to the emitted surface requires an **N3 amendment first**.
+  Before emission, the type needs an N3 §6 registry entry, N3 §3 schema, and
+  N3 §4.1 emission point (N3 §6.1).
 
 The previous framing — "MUST emit events" immediately above a note saying
 implementations MUST NOT emit them — could not be satisfied either way.
@@ -884,16 +925,15 @@ _Informative. Not an emission list; see above._
 
 ### 12.2 Evidence Bundle Integration
 
-Governed execution MUST be recorded in the workflow's evidence bundle. What it
-records today is the correlation set — `:effect-id`, `:grant-id`,
-`:envelope-id` — carried on the evidence N6 already defines, which is what
-makes a governed execution traceable from its bundle.
+Governed execution MUST be recorded in the workflow's evidence bundle. The
+correlation set — `:effect-id`, `:grant-id`, `:envelope-id` — uses N6's existing
+evidence, making execution traceable from its bundle.
 
 The richer artifact below is **not yet producible**. N6 §3.1.1 enumerates
 artifact types and `:governed-execution` is absent from it, so emitting it
-would be non-conformant. Registering it in N6 §3.1.1 is a prerequisite, on the
-same principle as §12.1: N6 owns the evidence schema, so a new artifact type is
-an N6 amendment first. The shape is retained as the proposed content of that
+would be non-conformant. Registering it in N6 §3.1.1 is a prerequisite, as in
+§12.1. N6 owns the evidence schema; a new artifact type requires an N6 amendment
+first. The shape is retained as the proposed content of that
 amendment, not as a requirement of this spec.
 
 Redaction of any credential-bearing field follows N3 §8 as inherited by N6
@@ -993,6 +1033,18 @@ _Proposed N6 §3.1.1 artifact type. Not emittable until registered there._
 | N10.TV.2 | MUST | Responses failing validation MUST NOT be injected into agent context. |
 | N10.TV.3 | MUST | Response validation failures MUST emit events and record boundary crossing records (N1 §5.7.3). |
 
+### 13.10 OPSV Temporary Staging Authority
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N10.OT.1 | MUST | Enforce exact trial and dedicated load-test scopes against durable proposals at commit (§1.5). |
+| N10.OT.2 | MUST | Use independent cleanup/recovery authority and verify original-baseline recovery (§1.5). |
+
+Tests MUST reject missing, expired, revoked, foreign-attempt, changed-target,
+changed-payload, and cross-class grants before provider mutation (N10.OT.1).
+Tests MUST distinguish confirmed, failed, and unknown outcomes, including resource
+name reuse and recovery after forward-grant revocation (N10.OT.2).
+
 ---
 
 ## 14. Trust Level Progression
@@ -1077,16 +1129,15 @@ diverges from the contract above, as of 2026-08-06.
 
 ### A.1 Implemented
 
-- **ExecutionGrant** — `components/execution-grant` exists and carries the
-  grant identity §12.2 correlates on.
+**ExecutionGrant** — `components/execution-grant` exists and carries the
+grant identity §12.2 correlates on.
 
 ### A.2 Specified, Not Implemented
 
 - **Execution capsules (§7).** No capsule component exists. SI-8 (no execution
   beyond capability TTL), SI-9 (no credential persistence beyond capsule
   lifetime), and SI-10 (revocation terminates execution within 5 seconds) have
-  no enforcement point, and SI-10 is the invariant most likely to be assumed
-  true by an operator.
+  no enforcement point. Operators are especially likely to assume SI-10 holds.
 - **Crown jewel protection (§8).** No component.
 - **Postcondition monitoring (§9).** No component, so `:postcondition/*`
   observation points have neither an emitter nor a registered event type.
@@ -1098,11 +1149,11 @@ diverges from the contract above, as of 2026-08-06.
 
 ### A.3 Structural
 
-- **Safety invariants are unenforced.** §10 requires violation of any invariant
-  to halt execution immediately. With no capsule, no postcondition monitor, and
-  no crown-jewel component, SI-1 through SI-10 are stated but not checked
-  anywhere. This is the widest gap in the spec set: the invariants read as
-  guarantees and are currently assertions.
+**Safety invariants are unenforced.** §10 requires violation of any invariant
+to halt execution immediately. With no capsule, no postcondition monitor, and
+no crown-jewel component, SI-1 through SI-10 are stated but not checked
+anywhere. This is the widest gap in the spec set: the invariants read as
+guarantees and are currently assertions.
 
 ---
 
@@ -1132,10 +1183,12 @@ diverges from the contract above, as of 2026-08-06.
 
 **Version History:**
 
-- 0.4.0-draft (2026-08-06): Spec-completion pass. §12.1 said governed execution
-  MUST emit events to N3 directly above a note saying implementations MUST NOT
-  emit them, because none of the fifteen types is registered in N3 §6 — a
-  requirement satisfiable in neither direction. Reframed: the table is
+- 0.5.0-draft (2026-11-04): Added the operator-approved OPSV staging profile:
+  exact temporary deployment and dedicated load-test authority, independent
+  cleanup/recovery transactions, and verified original-baseline restoration.
+- 0.4.0-draft (2026-08-06): Spec-completion pass. §12.1 required governed
+  execution events while forbidding their emission: none of the fifteen types
+  was registered in N3 §6. Reframed: the table is
   informative, the conformant path is correlation identifiers on registered
   types, and adding a row is an N3 amendment first (N3 §6.1). §12.2's
   `:governed-execution` evidence shape is likewise not an N6 §3.1.1 artifact
@@ -1149,10 +1202,9 @@ diverges from the contract above, as of 2026-08-06.
 - 0.3.0-draft (2026-08-06): Applied the accepted Ariadne adoption profile;
   DecisionEnvelope, ExecutionGrant, and EffectTransaction supersede the
   parallel intent/OIR/capability execution objects
-- 0.2.0-draft (2026-03-08): Reliability Nines amendments — Operational Semantics with
-  timeout/retry/circuit-breaker/concurrency/fallback (§3.4), Tool Health Tracking (§3.5),
-  Tool Response Validation (§7.4), unified autonomy model back-reference (§14),
-  conformance (§13.8, §13.9)
+- 0.2.0-draft (2026-03-08): Reliability Nines amendments added operational
+  semantics (§3.4), tool health (§3.5), and response validation (§7.4).
+  Added the autonomy back-reference (§14) and conformance (§13.8, §13.9).
 - 0.1.0-draft (2026-03-06): Initial specification consolidating governed execution,
   capability model, execution capsules, validation, crown jewel protection, and
   external system integration

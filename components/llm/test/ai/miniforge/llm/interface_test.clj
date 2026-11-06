@@ -347,10 +347,12 @@
                     {:message (msg/t :cli-output.system/codex-error-unknown)})
              (:delta parsed)))))
 
-  (testing "thread.started is ignored"
+  (testing "thread.started is a heartbeat naming the invocation"
     (let [line (json/generate-string {:type "thread.started" :thread_id "abc"})
           parsed (impl/parse-codex-stream-line line)]
-      (is (nil? parsed)))))
+      (is (true? (:heartbeat parsed)))
+      (is (= "abc" (:invocation-id parsed)))
+      (is (= "" (:delta parsed))))))
 
 (deftest ^{:stratum 0} parse-codex-stream-line-finish-reason-test
   (testing "turn.completed always sets :increment-turns true"

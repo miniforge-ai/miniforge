@@ -19,6 +19,7 @@
   "Public API for LLM client using CLI backends.
    Supports claude CLI, cursor CLI, and mock backends."
   (:require
+   [ai.miniforge.llm.cancellation :as cancellation]
    [ai.miniforge.llm.cost :as cost]
    [ai.miniforge.llm.interface.protocols.llm-client :as p]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
@@ -34,6 +35,14 @@
 (def ^{:stratum 0} backends
   "Available CLI backends."
   impl/backends)
+
+(def ^{:stratum 0} call-with-cancel-signal
+  "Call f with `cancelled?` (a zero-argument function) as the cancel check
+   for the LLM calls it makes: once it returns true, a streaming call in
+   flight kills the agent's process tree and returns a `:cancelled`
+   timeout, and a later call does so as soon as it starts.
+   (call-with-cancel-signal cancelled? f)"
+  cancellation/call-with-cancel-signal)
 
 (defn ^{:stratum 0} backend-prompt-via
   "Given a backend entry from `backends`, return how its CLI expects the
@@ -82,6 +91,9 @@
                 hooks, plugins, or skills). For single-turn completions
                 that need no tools; claude backend only. A claude call
                 outside an artifact session is isolated without it.
+   - :network-access? - Optional boolean; true lets the commands the
+                Codex agent runs in its workspace-write sandbox reach
+                the network. codex backend only; anything else throws.
    - :logger  - Optional logger for request/response logging
 
    Example:
@@ -131,6 +143,13 @@
     (-> client
         p/get-config
         :backend)))
+
+(defn ^{:stratum 0} client-network-access?
+  "True when `client` is an LLMClient created with `:network-access? true`
+   (its Codex agent's commands may reach the network); false otherwise."
+  [client]
+  (and (satisfies? p/LLMClient client)
+       (true? (:network-access? (p/get-config client)))))
 
 (defn ^{:stratum 0} client-model
   "Return the model id an LLM client sends, or nil when it names none (the

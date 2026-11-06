@@ -15,7 +15,7 @@ glob check, so they agree on what an artifact looks like.
 
 ## Motivation
 
-#2296 merged on green CI and a clean Copilot review, without the adversarial
+PR #2296 merged on green CI and a clean Copilot review, without the adversarial
 and rules reviews the PR process requires. Those reviews, run after merge,
 found:
 
@@ -26,9 +26,8 @@ found:
   phase) never reached the releaser.
 - `registry.support/rule-applies?` still read only `:artifact/path`, so the two
   applicability predicates disagreed on the artifact shape (dewey 002).
-- Review computed its paths inline in a map literal and listed every path twice
-  on the common rehydrated route; the `:code/file-paths` half had no test
-  (dewey 210, 716).
+- Review computed its paths inline in a map literal. The common rehydrated route
+  listed every path twice. The `:code/file-paths` half had no test (dewey 210, 716).
 - The public `filter-applicable-rules` docstrings did not mention
   `:artifact/paths` (dewey 009); a test namespace docstring carried history
   (dewey 600).
@@ -67,7 +66,7 @@ No configuration or migration. The releaser's prompt grows by the glob-scoped
 
 ## Related Issues/PRs
 
-- #2296 (the review fix this follows up)
+This follows the review fix in #2296.
 
 ## Not in this PR
 

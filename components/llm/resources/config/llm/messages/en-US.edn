@@ -4,6 +4,9 @@
   :streaming-error.system/no-output
   "Process failed with no output"
 
+  :stream.system/run-cancelled
+  "Run cancelled; agent process stopped"
+
   ;; System-locale diagnostics for a CLI run that exited 0.
   :cli-output.system/empty-success-output
   "CLI backend exited successfully but produced no output"
@@ -55,6 +58,9 @@
 
   :backend.system/request-failed
   "LLM backend request failed"
+
+  :client/network-access-invalid
+  ":network-access? takes true or false, and true only on the codex backend; got {value} on {backend}"
 
   :http-provider.system/parse-failed
   "Failed to parse response: {reason}"

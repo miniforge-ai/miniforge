@@ -38,6 +38,7 @@
    [ai.miniforge.dag-executor.protocols.impl.host-guarded :as host-guarded]
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.image :as oci-img]
    [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes :as k8s]
    [ai.miniforge.dag-executor.protocols.impl.unavailable :as unavailable]
@@ -147,7 +148,7 @@
 (def ^{:stratum 0} task-runner-images
   "Pre-defined task runner images that can be built from bundled Dockerfiles.
    Keys: :minimal (Alpine), :clojure (full tooling)"
-  oci-cli/task-runner-images)
+  oci-img/task-runner-images)
 
 (def ^{:stratum 0} image-exists?
   "Check if a container image exists locally.
@@ -157,18 +158,18 @@
    protocols.impl.runtime.descriptor/make-descriptor. nil falls back to
    the default Docker executable name (preserving the pre-N11-delta call
    sites that pass nil)."
-  oci-cli/image-exists?)
+  oci-img/image-exists?)
 
 (def ^{:stratum 0} build-image!
   "Build a container image from a Dockerfile resource.
    (build-image! descriptor image-name dockerfile-resource-path) -> Result"
-  oci-cli/build-image!)
+  oci-img/build-image!)
 
 (def ^{:stratum 0} ensure-image!
   "Ensure a task runner image exists, building if necessary.
    (ensure-image! descriptor :minimal) -> Result
    (ensure-image! descriptor :clojure :force? true) -> Result"
-  oci-cli/ensure-image!)
+  oci-img/ensure-image!)
 
 (def ^{:stratum 0} ensure-all-images!
   "Ensure all task runner images are available.
@@ -371,7 +372,7 @@
     (let [depth-args (when (:depth opts) ["--depth" (str (:depth opts))])
           ;; Use a vector (no shell) + "--" end-of-options separator so git
           ;; cannot interpret a leading-dash repo-url as an option flag.
-          ;; Matches the pattern in protocols/impl/runtime/oci_cli.clj:826.
+          ;; Matches the clone in oci_cli/capsule_git.clj's bootstrap-workspace!.
           clone-cmd (into ["git" "clone"] (concat (or depth-args []) ["--" repo-url "."]))
           clone-result (execute! executor environment-id clone-cmd
                                  {:timeout-ms 300000})]
