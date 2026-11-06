@@ -22,10 +22,9 @@ back to its flat per-token estimate (`tokens × 0.000015`) for that turn.
 
 ## Changes in Detail
 
-1. `implementer/response.clj`: the parse-failed and metadata-only
-   `response/error` calls pass `:metrics {:cost-usd cost-usd}`.
-   `unverified-already-implemented-response` takes `cost-usd` and does
-   the same.
+In `implementer/response.clj`, the parse-failed and metadata-only
+`response/error` calls pass `:metrics {:cost-usd cost-usd}`.
+`unverified-already-implemented-response` takes `cost-usd` and does the same.
 
 ## Testing Plan
 

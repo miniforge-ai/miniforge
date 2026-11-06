@@ -11,14 +11,16 @@
 `phase_software_factory/release.clj` used 6 stratum layers and
 `release_test.clj` 5, against the rule 210 budget of 3. Any commit that staged
 either file failed the pre-commit SL003 gate. This PR moves their definitions,
-unchanged, into namespaces of at most 3 layers each, so the release fixes that
+unchanged, into namespaces of at most 3 layers each. The release fixes that
 need these files can land without a stratum override.
 
 ## Motivation
 
-Two Copilot findings on #2264 apply to `main`: the host git probes inherit
-`GIT_DIR` / `GIT_WORK_TREE` from a git hook, and a resume with no recorded task
-base measures from the checkpoint and skips unpublished work. Both fixes edit
+Two Copilot findings on #2264 apply to `main`.
+The host git probes inherit `GIT_DIR` / `GIT_WORK_TREE` from a git hook.
+A resume with no recorded task
+base measures from the checkpoint and skips unpublished work.
+Both fixes edit
 the release scan in `release.clj`, and rescoping #2264 edits
 `release_test.clj`. stratum-lint on `main`:
 
@@ -68,10 +70,10 @@ release_test.clj:936:1: SL003 file uses 5 distinct layers (max 3); split the nam
 
 ## Movement check
 
-`split-compare` (the script used for the oci_cli and implementer splits)
-compares every top-level `def` form's body in `main`'s `release.clj`,
-`release_test.clj` and `release_file_scan_test.clj` with the new files, with
-metadata stripped and aliases into the `release*` namespaces normalized:
+`split-compare` is the script used for the oci_cli and implementer splits.
+It compares every top-level `def` form's body in `main`'s `release.clj`,
+`release_test.clj` and `release_file_scan_test.clj` with the new files.
+Metadata is stripped, and aliases into the `release*` namespaces are normalized:
 
 ```text
 base defs 110 | new defs 110 | identical 110 | changed 0 | removed 0 | added 0
@@ -82,11 +84,12 @@ no findings for the six files; clj-kondo reports 0 errors and 0 warnings.
 
 ## Testing Plan
 
-The phase-software-factory release tests (release, file scan, publish,
-committed work, checking commits, artifact persistence), the phase `done`
-test, the project tests that run the release phase (gate before publish,
-runner integration, handoff, artifact persistence), and the CLI config-schema
-source scan: 110 tests, 6 failures, all in
+The validation ran 110 tests with 6 failures, all in the CLI config-schema
+source scan. It covered phase-software-factory release tests: release, file scan,
+publish, committed work, checking commits, and artifact persistence.
+It also covered the phase `done` test and project release-phase tests:
+gate before publish, runner integration, handoff, and artifact persistence.
+All failures are in
 `schema-covers-every-user-config-access-in-src-test`. They name accesses in
 `review.clj`, `verify.clj`, `phase/done.clj` and `release_publish.clj`, none
 of which this PR changes, so they fail the same way on `main`. None of the

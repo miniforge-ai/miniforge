@@ -11,7 +11,7 @@ Part of #2378. When a phase spends tokens with no known cost, the
 workflow's `:execution/metrics` now carries `:cost-unavailable? true`.
 The flag survives DAG roll-ups. The CLI summary then prints
 `Cost: unavailable`, or `Cost: at least $X` when part of the run was
-priced, instead of a summed `$0.0000` that reads as a measured cost.
+priced. It no longer presents a summed `$0.0000` as a measured cost.
 
 ## Motivation
 
@@ -47,10 +47,10 @@ measurement.
 - The planner returns no `:cost-usd` at all, so a run with a plan
   phase that spent tokens now reads `at least $X`. That is accurate: the
   plan's cost was never in the total.
-- A native Codex implement phase still reports a cost today: the LLM
-  client estimates `0.0` for an unpriced model, and the implement phase
-  falls back to a flat per-token rate. A follow-up PR removes both
-  sources, so that phase's metrics carry no cost and this flag applies.
+- A native Codex implement phase still reports a cost today.
+  The LLM client estimates `0.0` for an unpriced model.
+  The implement phase falls back to a flat per-token rate. A follow-up PR removes both
+  sources. That phase's metrics will then carry no cost, and this flag applies.
 
 ## Testing Plan
 
