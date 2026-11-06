@@ -71,7 +71,7 @@ Cancellation also uses a controlled post-preparation budget, so CPU pauses canno
 
 Full validation passes against the actual merged dependencies:
 
-- Workspace composition and phase-opsv tests in all four product contexts.
+- Workspace composition and phase-opsv tests in both consuming product contexts.
 - All 25 safe OPSV/workflow/N6 JVM integration suites: 128 tests, 1,449 assertions.
 - All task entrypoints load, and a fresh CLI artifact builds.
 - Isolated Babashka artifact, test paths only: 61 tests, 370 assertions.

@@ -3,9 +3,14 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.environment-comparison-bindings
   (:require [ai.miniforge.phase-opsv.environment-expectation :as expectation]
+            [ai.miniforge.phase-opsv.verification-schema :as verification]
             [clojure.set :as set]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} comparison-binding [workflow-id target request]
+  (assoc (select-keys request verification/correlation-keys)
+         :workflow/id workflow-id :runtime/target target))
 
 (defn ^{:stratum 0} same-cluster? [plan]
   (= (get-in plan [:comparison/baseline :cluster])
