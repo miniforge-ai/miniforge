@@ -32,6 +32,32 @@ Regress the real GitHub creation path and add focused shared-boundary tests.
 Trace defaults, each refusal, callback errors, thread ownership and result retention.
 Run strict lint, true inferred strata, affected products, package and signed hooks.
 
+Current-main validation passes:
+
+- Strict lint across both complete components: zero warnings or errors.
+- All seven changed namespaces infer to at most three strata, with no findings.
+- Workspace composition and effect-transaction tests pass in all four products.
+- GitHub provider component tests pass, including the real creation and command-timeout paths.
+- Shared-boundary and unchanged GitHub creation regressions: 20 tests, 93 assertions.
+- All 24 safe OPSV/workflow/N6 JVM integration suites: 113 tests, 1,340 assertions.
+- All task entrypoints load, and a fresh CLI artifact builds.
+- Isolated Babashka artifact, test paths only: 20 tests, 93 assertions.
+- Native packaged compatibility regressions: 308 tests, 1,903 assertions.
+- Five deliberately broken guards cause assertion failures, each with zero errors.
+
+The first full run hit a sandbox denial in an existing process-termination test.
+The serialized unrestricted rerun passes the same test without code changes or skips.
+An interrupt test now captures the flag before assertions, which may themselves clear it.
+A direct probe confirmed the shared boundary already restored the flag correctly.
+
+The owner traced the whole diff against the pinned Miniforge standards.
+One diagnostics factory replaces duplicated message-map shapes.
+The dependency remains one-way from provider to effect layer, with no new dependencies.
+Repeated, escaped and cross-thread thunks cannot issue another provider attempt.
+Callback fabrication cannot establish success, and a confirmed operation report survives later callback errors.
+This preserves existing GitHub behavior rather than introducing a different exception policy.
+No source overlay, live network effects, signing exception or hook bypass is used.
+
 ## Deployment Plan
 
 No live effects, new permissions or default activation. Keep every normal merge gate.
@@ -42,6 +68,6 @@ N7 completion; native request #2415, preflight #2412 and issuance #2407.
 
 ## Checklist
 
-- [ ] Implement the shared boundary and owner adversarial standards pass.
-- [ ] Verify GitHub compatibility and packaged composition.
+- [x] Implement the shared boundary and owner adversarial standards pass.
+- [x] Verify GitHub compatibility and packaged composition.
 - [ ] Settle full current-head review, CI and owner merge gates.
