@@ -206,6 +206,10 @@
    Returns: Same format as complete (final result)
 
    Note: Falls back to non-streaming for backends that don't support it.
+   A CLI stream that exits successfully with no content, tool calls or
+   usage is retried once through the non-streaming path, unless the
+   request sets `:empty-stream-fallback? false`; then it is returned as
+   it is, with no second provider call.
 
    Example:
      (complete-stream client

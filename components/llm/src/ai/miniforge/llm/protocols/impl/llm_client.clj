@@ -389,10 +389,14 @@
           tool-call-count (count tools)
           final-message-preview (cli-output/message-preview diagnostic-content)
           usage @accumulated-usage
-          fallback-response (when (cli-output/blank-streaming-success? exit-code
-                                                            final-content
-                                                            tool-call-count
-                                                            usage)
+          ;; A caller that journals every provider call sets
+          ;; `:empty-stream-fallback? false`, so an empty stream is
+          ;; returned as it is instead of retried unjournaled.
+          fallback-response (when (and (not (false? (:empty-stream-fallback? request)))
+                                       (cli-output/blank-streaming-success? exit-code
+                                                                            final-content
+                                                                            tool-call-count
+                                                                            usage))
                               (complete-impl client request))]
       (if fallback-response
         (do
