@@ -41,6 +41,19 @@
        (not (get-in state [:payload :invalid?]))
        (not (str/blank? (get-in state [:payload :rationale])))))
 
+(defn- ^{:stratum 0} board-for
+  "The board `board-id` acts on. The independent condition's closing
+   selector starts from a fresh board holding every observation its
+   candidates' boards attest, admitted by the fixture reader. It sees the
+   evidence they gathered without sharing their boards, and the allowance is
+   unchanged."
+  [state task condition board-id final?]
+  (if (and final? (= :independent condition))
+    (reduce #(turn/attach-observation %1 task %2)
+            (turn/initial-workspace task)
+            (sort (into #{} (mapcat #(turn/observed-experiments task %)) (vals (:boards state)))))
+    (get-in state [:boards board-id] (turn/initial-workspace task))))
+
 (defn- ^{:stratum 0} advance
   "The cell state after a recorded turn."
   [state manifest board-id next-board response participant]
@@ -89,7 +102,7 @@
   (let [final? (= (:turn state) (dec (:activations tier)))
         participant (turn/actor condition (:turn state) final?)
         board-id (turn/board-key condition participant)
-        workspace (get-in state [:boards board-id] (turn/initial-workspace task))
+        workspace (board-for state task condition board-id final?)
         request (turn/turn-request task condition state participant final? workspace)
         turn-id {:task (:id task) :condition condition :tier (:id tier)
                   :replicate replicate :turn (:turn state) :participant participant}
