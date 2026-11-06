@@ -3,7 +3,8 @@
 ;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 
 {:effect-transaction/messages
- {:dispatch/invalid-input "Provider dispatch requires runtime functions and localized diagnostic messages"
+ {:commit/issued-grant-mismatch "Stored effect authority differs from the runtime-issued grant"
+  :dispatch/invalid-input "Provider dispatch requires runtime functions and localized diagnostic messages"
   :dispatch/unconfirmed "Provider dispatch did not confirm a synchronous effect outcome"
   :grant/id-mismatch "Grant does not match the one recorded on the proposal"
   :grant/effect-class-mismatch "Grant effect class does not match the proposed effect"

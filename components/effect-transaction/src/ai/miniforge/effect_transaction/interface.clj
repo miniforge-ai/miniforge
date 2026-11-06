@@ -18,15 +18,11 @@
 (ns ai.miniforge.effect-transaction.interface
   "API surface class 1: internal EDN durable effect transactions and commit-time authority."
   (:require
-   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.boundary.provider-dispatch :as dispatch]
+   [ai.miniforge.effect-transaction.boundary.current-commit :as current]
    [ai.miniforge.effect-transaction.core :as core]
-   [ai.miniforge.effect-transaction.current-commit :as current]
-   [ai.miniforge.effect-transaction.current-schema :as current-schema]
-   [ai.miniforge.effect-transaction.messages :as msg]
    [ai.miniforge.effect-transaction.schema :as schema]
-   [ai.miniforge.effect-transaction.store :as store]
-   [malli.core :as m]))
+   [ai.miniforge.effect-transaction.store :as store]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -90,7 +86,7 @@
    and record the answer, mismatch included."
   core/reconcile!)
 
-(defn ^{:stratum 0} commit-current!
+(def ^{:stratum 0} commit-current!
   "API surface class 1: trusted-process runtime commit, returning EDN or anomaly.
    Load by UUID, resolve its named grant, then read the clock and authorize.
    lookup-grant (UUID -> current grant) and clock (() -> Instant) are runtime
@@ -98,9 +94,9 @@
    effect-fn receives the exact :committing record after its durable claim.
    Unavailable authority leaves the proposal intact. Denied authority records
    failure. No unenforced-authority path exists. Delegated grants fail closed.
+   The six-argument form inserts an independently runtime-retained issued grant UUID
+   before lookup-grant. Refuse a different recorded grant before lookup, clock or claim,
+   even if both grants would authorize identical scope. Never derive the pin from the
+   reloaded transaction. The five-argument form retains its existing behavior.
    This recheck does not lock the grant store against subsequent revocation."
-  [dir id lookup-grant clock effect-fn]
-  (let [arguments [dir id lookup-grant clock effect-fn]]
-    (if (m/validate current-schema/CommitArguments arguments)
-      (current/commit! dir id lookup-grant clock effect-fn)
-      (anomaly/anomaly :invalid-input (msg/t :commit/invalid-input) {}))))
+  current/commit!)
