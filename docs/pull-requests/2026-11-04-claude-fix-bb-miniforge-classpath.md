@@ -15,8 +15,8 @@ first phase:
 Could not locate ai/miniforge/opsv_actuation/interface.bb, ai/miniforge/opsv_actuation/interface.clj or ai/miniforge/opsv_actuation/interface.cljc on classpath.
 ```
 
-This PR adds the missing bricks and dependency to the `miniforge` task and a
-test that fails when that list drifts from the CLI project again.
+This PR adds the missing bricks and dependency to the `miniforge` task.
+A new test fails when that list drifts from the CLI project again.
 
 ## Motivation
 
@@ -36,11 +36,11 @@ from an earlier gap.
 ## Changes in Detail
 
 1. `bb.edn` `miniforge` task: add the src and resources dirs of the nine
-   bricks `projects/miniforge/deps.edn` depends on that the list lacked
-   (`governance-provenance`, `knowledge-pack`, `kubernetes-target`,
+   bricks `projects/miniforge/deps.edn` depends on that the list lacked.
+   These are `governance-provenance`, `knowledge-pack`, `kubernetes-target`,
    `opsv-actuation`, `opsv-adapter-simulated`, `opsv-provider-github`,
-   `pr-label-watcher`, `workbench-orchestration-adapter`, `workflow-opsv`),
-   and `org.clojure/data.json` 2.4.0, the version `phase-opsv` declares.
+   `pr-label-watcher`, `workbench-orchestration-adapter`, and `workflow-opsv`.
+   Also add `org.clojure/data.json` 2.4.0, the version `phase-opsv` declares.
 2. `development/test/bb_miniforge_classpath_test.clj` (new):
    1. `miniforge-task-lists-every-project-brick-test`: every existing src
       and resources dir of every brick in `projects/miniforge/deps.edn` is

@@ -69,8 +69,12 @@
  :spec/intent
  {:type :feature
   :scope ["components/phase/src"
+          "components/phase/test"
+          "components/phase/resources/config"
           "components/phase-software-factory/src"
-          "components/phase/resources/config"]}
+          "components/phase-software-factory/test"
+          "components/workflow/src/ai/miniforge/workflow/fsm.clj"
+          "bb.edn"]}
 
  :spec/constraints
  ["Derive edges from the ACTUAL transition source (pipeline sequence + workflow/fsm.clj redirect/on-fail compilation + budget handling), NOT from assumed :next/:on-failure/:on-budget-exhausted keys in the phase EDN (those keys do not exist today) — see Task 0 in the description"
