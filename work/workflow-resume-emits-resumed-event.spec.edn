@@ -14,13 +14,19 @@
   publishes one `:workflow/resumed` event on the run's event stream after it
   has reconstructed the checkpoint, applied any `--from-phase` rewind
   (`apply-from-phase`), and before the pipeline runs. The event names the
-  phase the run actually resumes at and the phases it skips. Both come from
-  the reconstructed context after the rewind, not from which phases have a
-  checkpointed result: `reconstruct-context` keeps only completed phases in
-  `:completed-phases`, so a failed or retrying phase with a checkpoint is
-  run again. A resume that the command refuses (spec drift without --force,
-  non-resumable status, an unknown or refused --from-phase) publishes
-  nothing."
+  phase the run actually resumes at and the phases it skips.
+
+  The resume phase is the one the command already prints as `Resuming from
+  phase` (`resume-print-phase`): the FSM snapshot's current phase, or, on a
+  snapshot-less or failed-checkpoint resume, the first phase of the pipeline
+  `wr/trim-pipeline` leaves. The skipped phases are the pipeline phases
+  before it. Neither is read off which phases have a checkpointed result:
+  `reconstruct-context` counts only completed phases, so a failed or
+  retrying phase with a checkpoint runs again, and `trim-pipeline` drops
+  only the leading completed phases, so a completed phase after the first
+  incomplete one also runs again. A resume that the command refuses (spec
+  drift without --force, non-resumable status, an unknown or refused
+  --from-phase) publishes nothing."
 
  :spec/intent
  {:type :bugfix
@@ -34,10 +40,11 @@
   "Tests use an in-memory event stream; no real checkpoint directory under ~/.miniforge"]
 
  :spec/acceptance-criteria
- ["An accepted resume publishes one :workflow/resumed event whose resume phase is the first pipeline phase not in the reconstructed context's :completed-phases"
-  "The event's skipped phases are exactly the reconstructed context's :completed-phases"
+ ["An accepted resume publishes one :workflow/resumed event whose resume phase is the phase resume-print-phase reports"
+  "The event's skipped phases are the pipeline phases before the resume phase, in pipeline order"
+  "With no snapshot and completed phases [:explore :plan :verify] in a pipeline explore, plan, implement, verify, release, the resume phase is :implement and the skipped phases are [:explore :plan]"
   "A phase whose checkpointed result failed is the resume phase, not a skipped phase"
-  "With --from-phase, the resume phase is the requested phase and the skipped phases are the ones the rewind keeps"
+  "With --from-phase, the resume phase is the requested phase and the skipped phases are the pipeline phases before it"
   "The event validates against the :workflow/resumed schema in recovery_draft_spec.clj"
   "A resume refused for spec drift without --force publishes no :workflow/resumed event"]
 
