@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1120" role="img" aria-labelledby="title desc" font-family="Helvetica, Arial, sans-serif">
+<title id="title">Thesium Codex — 2. How a phase gets its warnings</title><desc id="desc">The orchestrator supplies the situation and the codex supplies the worries. Delivery is pushed at phase start and can also be pulled.</desc>
+<defs><marker id="a-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker><marker id="a-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b85450"/></marker><marker id="a-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker><marker id="a-grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#888888"/></marker></defs>
+<rect width="1920" height="1120" fill="white"/>
+<rect width="1920" height="65" fill="#1e5f96"/>
+<text x="24" y="30" font-size="23" fill="white" font-weight="bold">Thesium Codex — 2. How a phase gets its warnings</text>
+<text x="24" y="52" font-size="15" fill="#cfe2f3">The orchestrator supplies the situation and the codex supplies the worries. Delivery is pushed at phase start and can also be pulled.</text>
+<rect x="24" y="84" width="600" height="940" rx="8" fill="#fcfcfa" stroke="#b8b8b0"/>
+<text x="42" y="113" font-size="18" fill="#1e5f96" font-weight="bold">ROUTING · codex-pin/phase-&gt;situation</text>
+<rect x="48" y="140" width="552" height="162" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+<text x="64" y="168" font-size="19" fill="#333" font-weight="bold">plan</text>
+<text x="64" y="194" font-size="16" fill="#333">enters at: about-to-commit-consequential</text>
+<text x="64" y="217" font-size="16" fill="#333">delivered as: pinned file</text>
+<rect x="48" y="316" width="552" height="162" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+<text x="64" y="344" font-size="19" fill="#333" font-weight="bold">implement</text>
+<text x="64" y="370" font-size="16" fill="#333">enters at: changing-one-side-of-a-boundary, plus submitting-work-to-</text>
+<text x="64" y="393" font-size="16" fill="#333">enforced-gates</text>
+<text x="64" y="416" font-size="16" fill="#333">delivered as: pinned file</text>
+<rect x="48" y="492" width="552" height="162" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+<text x="64" y="520" font-size="19" fill="#333" font-weight="bold">review</text>
+<text x="64" y="546" font-size="16" fill="#333">enters at: quality-signal-might-be-lying</text>
+<text x="64" y="569" font-size="16" fill="#333">delivered as: prompt section</text>
+<rect x="48" y="668" width="552" height="162" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+<text x="64" y="696" font-size="19" fill="#333" font-weight="bold">release</text>
+<text x="64" y="722" font-size="16" fill="#333">enters at: about-to-commit-consequential</text>
+<text x="64" y="745" font-size="16" fill="#333">delivered as: behavior addendum</text>
+<rect x="48" y="844" width="552" height="162" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.5"/>
+<text x="64" y="872" font-size="19" fill="#333" font-weight="bold">verify</text>
+<text x="64" y="898" font-size="16" fill="#333">enters at: submitting-work-to-enforced-gates</text>
+<text x="64" y="921" font-size="16" fill="#333">delivered as: no agent: mapped for the gap instrument only</text>
+<rect x="648" y="84" width="600" height="940" rx="8" fill="#fcfcfa" stroke="#b8b8b0"/>
+<text x="666" y="113" font-size="18" fill="#1e5f96" font-weight="bold">DELIVERY · push and pull</text>
+<rect x="672" y="140" width="552" height="228" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+<text x="688" y="168" font-size="19" fill="#333" font-weight="bold">Push: the pin</text>
+<text x="688" y="194" font-size="16" fill="#333">For plan and implement, the rendered consultation is placed in the</text>
+<text x="688" y="217" font-size="16" fill="#333">agent&#x27;s context cache at .miniforge/codex-consider.md. The path is</text>
+<text x="688" y="240" font-size="16" fill="#333">virtual and never on disk, which keeps it stable in the cache.</text>
+<text x="688" y="263" font-size="16" fill="#333">Implement&#x27;s secondary situation appends to the same pin.</text>
+<rect x="672" y="386" width="552" height="176" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+<text x="688" y="414" font-size="19" fill="#333" font-weight="bold">Push: in the prompt</text>
+<text x="688" y="440" font-size="16" fill="#333">Review and release have no existing-files channel, so they receive the</text>
+<text x="688" y="463" font-size="16" fill="#333">same rendered text as a prompt section or behavior addendum.</text>
+<rect x="672" y="580" width="552" height="176" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+<text x="688" y="608" font-size="19" fill="#333" font-weight="bold">Pull: consider_situation</text>
+<text x="688" y="634" font-size="16" fill="#333">An MCP tool. Any agent can consult the codex mid-task by naming its</text>
+<text x="688" y="657" font-size="16" fill="#333">situation. It uses the same renderer as the push.</text>
+<rect x="672" y="774" width="552" height="226" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+<text x="688" y="802" font-size="19" fill="#333" font-weight="bold">What the agent does</text>
+<text x="688" y="828" font-size="16" fill="#333">Reads with context_read; each read is logged with its source: cache,</text>
+<text x="688" y="851" font-size="16" fill="#333">filesystem, refresh or absent. Answers pegs with answer_peg, which</text>
+<text x="688" y="874" font-size="16" fill="#333">writes answers.edn. Answers are read back before cleanup in every</text>
+<text x="688" y="897" font-size="16" fill="#333">session; reads are read back for plan and implement.</text>
+<path d="M600,221 L672,221" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#a-blue)"/>
+<path d="M600,397 L672,300" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#a-blue)"/>
+<path d="M600,573 L672,450" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#a-blue)"/>
+<path d="M600,749 L672,520" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#a-blue)"/>
+<path d="M1224,887 L1272,887" fill="none" stroke="#3a76b8" stroke-width="2" marker-end="url(#a-blue)"/>
+<rect x="1272" y="84" width="624" height="940" rx="8" fill="#fcfcfa" stroke="#b8b8b0"/>
+<text x="1290" y="113" font-size="18" fill="#1e5f96" font-weight="bold">PROVENANCE · [:output :codex/consultation]</text>
+<rect x="1296" y="140" width="576" height="176" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+<text x="1312" y="168" font-size="19" fill="#333" font-weight="bold">Consultation summary</text>
+<text x="1312" y="194" font-size="16" fill="#333">Attached to the phase result on success and on failure, because a failed</text>
+<text x="1312" y="217" font-size="16" fill="#333">phase that consulted is a different record from one that never did. One</text>
+<text x="1312" y="240" font-size="16" fill="#333">:consultation-id per phase entry.</text>
+<rect x="1296" y="334" width="576" height="150" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+<text x="1312" y="362" font-size="19" fill="#333" font-weight="bold">:status and :anomaly</text>
+<text x="1312" y="388" font-size="16" fill="#333">pinned, skipped (a configured codex failed to answer), unconfigured or</text>
+<text x="1312" y="411" font-size="16" fill="#333">unmapped.</text>
+<rect x="1296" y="502" width="576" height="232" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+<text x="1312" y="530" font-size="19" fill="#333" font-weight="bold">:pin-read?, tri-state</text>
+<text x="1312" y="556" font-size="16" fill="#333">true when the pin path was read with content. false when the session</text>
+<text x="1312" y="579" font-size="16" fill="#333">logged reads but none fetched the pin; an :absent lookup does not count.</text>
+<text x="1312" y="602" font-size="16" fill="#333">nil when no reads log exists, and for review, whose landings arrive in the</text>
+<text x="1312" y="625" font-size="16" fill="#333">prompt.</text>
+<rect x="1296" y="752" width="576" height="248" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+<text x="1312" y="780" font-size="19" fill="#333" font-weight="bold">:pegs and :answer-log</text>
+<text x="1312" y="806" font-size="16" fill="#333">One row per presented peg: its id, the recorded answer, and the landings</text>
+<text x="1312" y="829" font-size="16" fill="#333">behind each branch; the last recorded answer wins. The answer log is</text>
+<text x="1312" y="852" font-size="16" fill="#333">absent, recorded or unreadable, so a torn log reads as lost observations,</text>
+<text x="1312" y="875" font-size="16" fill="#333">not as declined answers.</text>
+<rect x="24" y="1040" width="1872" height="60" rx="6" fill="#f7f9fb" stroke="#d2dbe4"/>
+<rect x="44" y="1058" width="44" height="24" rx="4" fill="white" stroke="#555" stroke-width="1.5"/>
+<text x="98" y="1076" font-size="15" fill="#333">built: code in this repo</text>
+<rect x="374" y="1058" width="44" height="24" rx="4" fill="white" stroke="#555" stroke-width="1.5" stroke-dasharray="10 6"/>
+<text x="428" y="1076" font-size="15" fill="#333">partial</text>
+<rect x="704" y="1058" width="44" height="24" rx="4" fill="white" stroke="#555" stroke-width="1.5" stroke-dasharray="2 5"/>
+<text x="758" y="1076" font-size="15" fill="#333">spec or vault only: not in this repo</text>
+<rect x="1034" y="1058" width="24" height="24" rx="4" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
+<text x="1066" y="1076" font-size="15" fill="#333">data at rest</text>
+<rect x="1204" y="1058" width="24" height="24" rx="4" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+<text x="1236" y="1076" font-size="15" fill="#333">runtime step</text>
+<rect x="1374" y="1058" width="24" height="24" rx="4" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+<text x="1406" y="1076" font-size="15" fill="#333">agent-facing</text>
+<rect x="1544" y="1058" width="24" height="24" rx="4" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+<text x="1576" y="1076" font-size="15" fill="#333">fail-closed check</text>
+<rect x="1714" y="1058" width="24" height="24" rx="4" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+<text x="1746" y="1076" font-size="15" fill="#333">record / read-out</text>
+</svg>
