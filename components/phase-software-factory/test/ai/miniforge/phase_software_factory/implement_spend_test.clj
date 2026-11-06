@@ -72,13 +72,16 @@
 (deftest ^{:stratum 1} empty-diff-failure-keeps-the-implementer-spend-test
   (testing "a turn that wrote no files still reports what it consumed"
     (let [impl-result (response/error "parse failed"
-                                      {:tokens 900 :metrics {:cost-usd 0.0135}})
+                                      {:tokens 900 :metrics {:cost-usd 0.0421}})
           out (run-implement impl-result curator-no-files)]
       (is (= :failed (get-in out [:phase :status])))
       (is (= :implement/empty-diff (get-in out [:phase :verdict])))
       (is (= 900 (get-in out [:phase :metrics :tokens])))
-      (is (= 0.0135 (get-in out [:phase :metrics :cost-usd])))
-      (is (= 900 (get-in out [:execution/metrics :tokens]))))))
+      ;; 0.0421 is not the flat-rate estimate (900 x 0.000015), so a lost
+      ;; reported cost cannot pass as that estimate.
+      (is (= 0.0421 (get-in out [:phase :metrics :cost-usd])))
+      (is (= 900 (get-in out [:execution/metrics :tokens])))
+      (is (= 0.0421 (get-in out [:execution/metrics :cost-usd]))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -86,14 +89,15 @@
   (testing "files the curator collected do not zero the implementer's tokens"
     (let [impl-result (response/success code-artifact
                                         {:tokens 1500
-                                         :metrics {:tokens 1500 :cost-usd 0.0225}})
+                                         :metrics {:tokens 1500 :cost-usd 0.0377}})
           out (run-implement impl-result curator-collected-files)]
       (is (= :completed (get-in out [:phase :status])))
       (is (= 1500 (get-in out [:phase :metrics :tokens])))
-      (is (= 0.0225 (get-in out [:phase :metrics :cost-usd])))
+      (is (= 0.0377 (get-in out [:phase :metrics :cost-usd])))
       (is (= 1 (get-in out [:phase :metrics :files-total]))
           "the curator's file counts are still merged")
-      (is (= 1500 (get-in out [:execution/metrics :tokens]))))))
+      (is (= 1500 (get-in out [:execution/metrics :tokens])))
+      (is (= 0.0377 (get-in out [:execution/metrics :cost-usd]))))))
 
 ;------------------------------------------------------------------------------ Fixtures
 (use-fixtures :each
