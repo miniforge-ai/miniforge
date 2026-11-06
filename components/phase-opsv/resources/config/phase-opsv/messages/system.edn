@@ -1,5 +1,8 @@
 {:phase-opsv/system
- {:verification/unsupported-report "Verification reporting contains unsupported or excessive values."
+ {:experiment/invalid-preflight "Temporary experiment preflight inputs or runtime settings are invalid."
+  :experiment/disabled "Temporary staging experiment execution is not enabled by the trusted runtime."
+  :experiment/target-mismatch "Temporary experiment preflight does not match its declared target, baseline or attempt."
+  :verification/unsupported-report "Verification reporting contains unsupported or excessive values."
   :kubernetes/incomplete-environment-fingerprint "Captured runtime cannot establish a complete homogeneous native environment fingerprint."
   :verification/invalid-environment-contract "Invalid predeclared verification environment contract"
   :verification/environment-contract-mismatch "The verification environment does not match its retained contract, attempt or expected state"

@@ -63,9 +63,9 @@ the derived conflict while retaining the conflict record.
 ## Running development experiments
 
 The standalone project avoids changing the canonical software-factory workflow.
-The workspace, harness and lab tests run with `poly test` through this project,
-for example `clojure -M:poly test project:dlab :all` from the repository root
-(without `:all`, `poly test` runs only bricks changed since the stable tag). From
+The workspace, harness and lab tests run with `poly test` through this project.
+For example, run `clojure -M:poly test project:dlab :all` from the repository root.
+Without `:all`, `poly test` runs only bricks changed since the stable tag. From
 `projects/deliberation-lab`:
 
 ```sh
@@ -82,8 +82,8 @@ clojure -M:run run resources/deliberation-lab/development.edn /tmp/deliberation-
 Output parent directories must already exist; output directories must not exist.
 A run never overwrites an earlier experiment. Its directory holds `journal/`,
 which contains journal records only, and `report.md`. The journal holds an
-experiment-opened record, a durable record of each call before it is made,
-activation outcomes with board snapshots, cell results and a final report record.
+experiment-opened record and a durable record of each call before it is made.
+It also holds activation outcomes with board snapshots, cell results and a final report record.
 `report.md` is a derived convenience copy; the journal is authoritative. An
 interrupted run is incomplete, not silently resumable. A failed call is recorded
 with unknown usage, and the lab never retries it. The adapter also turns off the
@@ -134,14 +134,14 @@ query or filesystem access in this profile.
 The two fixtures are explicitly synthetic: payment retry semantics and a
 permission-cache design. A participant may inspect only each fixture's named
 observations. A trusted fixture reader, acting as the verifier, records each
-observation as receipt-backed execution evidence that supports its experiment,
-through the same admission boundary as every other transaction. A model cannot
+observation as receipt-backed execution evidence that supports its experiment.
+It uses the same admission boundary as every other transaction. A model cannot
 invent an observation by supplying an evidence class. An observation counts
-toward evidence completeness only when the closing turn's board showed it, so
+toward evidence completeness only when the closing turn's board showed it. Thus
 a condition whose closing turn never sees an observation cannot earn credit for
 it. In the `independent` condition, the trusted reader attaches every
 observation the candidates gathered to the selector's fresh board before its
-closing turn, so the selection sees the same evidence without the candidates
+closing turn. The selection sees the same evidence without the candidates
 sharing a board, and the allowance is unchanged. Sealed expected
 choices are not included in the request. Reference choices pass, and supplied
 distractors fail, the deterministic scoring rules. These short tasks are useful
@@ -183,10 +183,12 @@ adapter as a complete security implementation.
 
 ## Promotion beyond development
 
-Before claiming G0, implement the full N15 controls and allowance semantics; add
+Before claiming G0, implement the full N15 controls and allowance semantics.
+Add
 calibrated, long-horizon seeded repository tasks with sealed executable acceptance
-suites and decision-record evaluation; measure coordination overhead; pin complete
-model populations, scoring versions and provenance; and preregister paired
+suites and decision-record evaluation. Measure coordination overhead.
+Pin complete model populations, scoring versions and provenance.
+Preregister paired
 success effects, practical margins and uncertainty methods. Failed, refused,
 missing and timed-out outcomes remain failures, with unknown spend distinguished.
 

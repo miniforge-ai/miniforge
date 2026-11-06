@@ -11,7 +11,7 @@
 `execute!` (the compliance scanner's fix-and-PR step) ran
 `git config commit.gpgsign false` in the repository it was given, then
 committed. That write persists. The scanner runs in the user's own
-checkout, whose config file every linked worktree shares, so every later
+checkout, whose config file every linked worktree shares. Every later
 commit in that checkout and its worktrees went out unsigned.
 
 The commit now passes `-c commit.gpgsign=false` instead. Signing is off
@@ -22,7 +22,7 @@ for the scanner's own commit and nowhere else.
 The developer checkout's shared `.git/config` was found carrying
 `commit.gpgsign = false`, next to the `Isolation Test` identity that the
 workflow isolation fixture wrote (fixed in #2005 and #2013). The scanner
-is the other writer of that key, and the only non-test code in the
+is the other writer of that key. It is the only non-test code in the
 repository that writes a persistent git setting into a repository it did
 not create. The checkout holds scanner branches from 2026-05-01 and
 2026-07-18 (`fix/compliance-210-…`, `fix/compliance-810-…`), so it has run
@@ -40,7 +40,7 @@ next `mf scan --execute`.
    (new): drives `execute!` through the component interface against a
    throwaway repository with a bare origin.
    - Every git command, the scanner's included, runs with a HOME and global
-     config under the temp root and no other `GIT_*` variable, so nothing
+     config under the temp root and no other `GIT_*` variable. Nothing
      reaches the developer's checkout even under a git hook.
    - `gh` is stubbed.
    - The global config demands signing through `gpg.program = false`, so
@@ -50,11 +50,10 @@ next `mf scan --execute`.
 
 ## Testing Plan
 
-1. New test: 1 test, 3 assertions, passing. Asserts the patched file
-   reaches origin on the scanner's branch, the stubbed PR URL comes back,
-   and the repository's config settings (all but `branch.*`, which
-   `git checkout -b <branch> origin/main` writes for upstream tracking)
-   are the same after the run as before.
+1. New test: 1 test, 3 assertions, passing. The patched file reaches origin
+   on the scanner's branch, and the stubbed PR URL comes back.
+   The repository's config settings are the same after the run as before,
+   except `branch.*`, written by `git checkout -b <branch> origin/main` for upstream tracking.
 2. Against the old `execute.clj`: the config assertion fails, showing
    `commit.gpgsign=false` added to the repository's config.
 3. `execute-test` (existing): passing.

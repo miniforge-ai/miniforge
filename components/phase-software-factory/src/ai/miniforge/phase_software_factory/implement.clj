@@ -501,7 +501,8 @@
                               :raw-agent-status (:status impl-result)
                               :raw-error (:error impl-result)))
                      (dissoc :error)
-                     (update :metrics merge (:metrics curator-result)))
+                     (update :metrics merge (:metrics curator-result))
+                     (implement-result/with-implementer-spend impl-result))
                  ;; A verified no-op is legitimate implement success-by-prior-work.
                  ;; The curator only sees an empty diff, so its terminal
                  ;; :curator/no-files-written verdict cannot distinguish
@@ -515,7 +516,7 @@
                  ;; implementer error — the implementer's error is the symptom,
                  ;; the empty diff is the root cause the phase runner needs.
                  curator-terminal?
-                 curator-result
+                 (implement-result/with-implementer-spend curator-result impl-result)
                  ;; Implementer errored for a non-curator reason (rate-limit,
                  ;; exception, etc.). Propagate — the phase runner classifies
                  ;; those via rate-limited? / existing branches.
@@ -525,7 +526,7 @@
                  ;; something non-success (shouldn't happen outside no-files;
                  ;; defensive fallback).
                  :else
-                 curator-result)
+                 (implement-result/with-implementer-spend curator-result impl-result))
         ;; SPEC §7.4.3: mark the result with consultation provenance BEFORE
         ;; enter-context stores it — gates run between enter and leave and
         ;; read [:result :output]. Reads come from the agent result's
