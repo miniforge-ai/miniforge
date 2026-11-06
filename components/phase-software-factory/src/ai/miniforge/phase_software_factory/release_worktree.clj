@@ -41,7 +41,7 @@
 
 (def ^{:stratum 0} ^:private resume-range-pattern
   "A range `X...HEAD`, which implement records for a resumed workspace that
-   had no recorded task base (`implement/base-ref-candidates`): the task's
+   had no recorded task base (`implement-context/base-ref-candidates`): the task's
    work is what HEAD holds beyond its merge base with X. Group 1 is X."
   #"(.+)\.\.\.HEAD")
 

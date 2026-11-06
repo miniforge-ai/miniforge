@@ -24,6 +24,8 @@
    [clojure.string :as str]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase-software-factory.implement :as implement]
+   [ai.miniforge.phase-software-factory.implement-context :as impl-context]
+   [ai.miniforge.phase-software-factory.implement-result :as implement-result]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.agent.interface :as agent]
@@ -67,7 +69,7 @@
 
 (deftest ^{:stratum 0} resolve-worktree-path-result-returns-anomaly-test
   (testing "missing implement worktree is available as anomaly data"
-    (let [result (#'implement/resolve-worktree-path-result {:execution/id :test})]
+    (let [result (#'impl-context/resolve-worktree-path-result {:execution/id :test})]
       (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
       (is (= :anomalies.phase/enter-failed (:anomaly/subtype result)))
@@ -95,12 +97,12 @@
 (deftest ^{:stratum 0} implement-re-entry-keeps-the-recorded-task-base-test
   (testing "a resumed implement recovers the base its earlier attempt recorded, not the restored HEAD"
     (is (= ["task-base"]
-           (#'implement/task-base-refs
+           (#'impl-context/task-base-refs
             {:execution/environment-metadata {:base-sha "restored-head"}
              :execution/phase-results {:implement {:artifact {:code/base-refs ["task-base"]}}}}))))
   (testing "with nothing recorded it computes fresh candidates"
     (is (= ["restored-head"]
-           (#'implement/task-base-refs {:execution/environment-metadata {:base-sha "restored-head"}})))))
+           (#'impl-context/task-base-refs {:execution/environment-metadata {:base-sha "restored-head"}})))))
 
 (deftest ^{:stratum 0} capsule-file-reads-use-the-capsule-checkout-test
   (testing "scope files are read from the capsule's checkout, not the host worktree path"
@@ -111,7 +113,7 @@
                 :execution/executor ::capsule
                 :execution/environment-id "env-1"
                 :execution/capsule-workdir "/workspace"}]
-      (#'implement/resolve-existing-files ctx {} "/host/worktrees/task-1" ["src/a.clj"])
+      (#'impl-context/resolve-existing-files ctx {} "/host/worktrees/task-1" ["src/a.clj"])
       (is (= ["/workspace"] (distinct @seen))))))
 
 (deftest ^{:stratum 0} phase-defaults-registration-test
@@ -123,7 +125,7 @@
 
 (deftest ^{:stratum 0} base-ref-candidates-include-resume-merge-base-ranges-test
   (testing "resumed workspaces diff from the original spec base to restored HEAD"
-    (let [candidates (#'implement/base-ref-candidates
+    (let [candidates (#'impl-context/base-ref-candidates
                       {:execution/environment-metadata {:base-sha "task-sha"
                                                         :base-branch "task-restored"}
                        :execution/opts {:resume-workspace {:branch "task-restored"}}
@@ -175,7 +177,7 @@
 
                          :else
                          {:data {:stdout "" :exit-code 1}}))
-          result (#'implement/load-files-from-capsule
+          result (#'impl-context/load-files-from-capsule
                   execute-fn :mock-executor :mock-env-id "/workspace"
                   ["src/core.clj" "src/util.clj"])]
       (is (= 2 (count result)))
@@ -189,7 +191,7 @@
                        (if (= cmd "cat '/workspace/src/exists.clj'")
                          {:data {:stdout "(ns exists)" :exit-code 0}}
                          {:data {:stdout "" :exit-code 1}}))
-          result (#'implement/load-files-from-capsule
+          result (#'impl-context/load-files-from-capsule
                   execute-fn :mock-executor :mock-env-id "/workspace"
                   ["src/exists.clj" "src/missing.clj"])]
       (is (= 1 (count result)))
@@ -197,7 +199,7 @@
 
 (deftest ^{:stratum 0} load-files-from-capsule-returns-nil-for-empty-scope-test
   (testing "load-files-from-capsule returns nil when no files in scope"
-    (is (nil? (#'implement/load-files-from-capsule
+    (is (nil? (#'impl-context/load-files-from-capsule
                (fn [& _] nil) :x :y "/w" [])))))
 
 (deftest ^{:stratum 0} load-files-from-capsule-shell-metacharacters-test
@@ -206,7 +208,7 @@
           execute-fn (fn [_executor _env-id cmd _opts]
                        (swap! captured-cmds conj cmd)
                        {:data {:stdout "content" :exit-code 0}})
-          _ (#'implement/load-files-from-capsule
+          _ (#'impl-context/load-files-from-capsule
              execute-fn :mock-executor :mock-env-id "/w"
              ["src/my file.clj" "src/$var.clj" "src/it's.clj"])]
       (is (= "cat '/w/src/my file.clj'" (nth @captured-cmds 0)))
@@ -222,25 +224,25 @@
           ctx {:execution/execute-fn execute-fn
                :execution/executor :mock
                :execution/environment-id :mock-env}
-          result (#'implement/resolve-existing-files
+          result (#'impl-context/resolve-existing-files
                   ctx nil "/workspace" ["src/a.clj"])]
       (is @capsule-called "Should have called execute-fn")
       (is (= 1 (count result))))))
 
 ;------------------------------------------------------------------------------ Rate-limit classifier (2026-04-17 widening)
-;; Tests for `rate-limit-in-result?` — it's private so we access via #'.
+;; Tests for `implement-result/rate-limit-in-result?`.
 (defn- ^{:stratum 0} rate-limit? [result]
-  (#'implement/rate-limit-in-result? result))
+  (implement-result/rate-limit-in-result? result))
 
 ;------------------------------------------------------------------------------ Network-drop classifier (PR-C of network-resilience stack)
-;; Tests for `network-drop-in-result?` — private, accessed via #'. PR-B's
+;; Tests for `implement-result/network-drop-in-result?`. PR-B's
 ;; network-monitor emits the verdict in three locations the classifier
 ;; matches against: the canonical agent result shape produced by
 ;; `result-boundary/error-response` (`[:error :data :timeout :type]`),
 ;; the raw exec-result shape (`[:timeout :type]`) for test harnesses,
 ;; and the formatted-error-message channel.
 (defn- ^{:stratum 0} network-drop? [result]
-  (#'implement/network-drop-in-result? result))
+  (implement-result/network-drop-in-result? result))
 
 ;------------------------------------------------------------------------------ Backend-timeout classifier (PR-C of phase-timeout stack)
 ;; Companion to the network-drop classifier — same three-location path
@@ -249,14 +251,14 @@
 ;; exclusive on `:timeout :type` so they never both fire on the same
 ;; result.
 (defn- ^{:stratum 0} backend-timeout? [result]
-  (#'implement/backend-timeout-in-result? result))
+  (implement-result/backend-timeout-in-result? result))
 
 (deftest ^{:stratum 0} preserve-consultation-no-consultation-unchanged-test
   (testing "no consultation on the full result -> lightweight result
             untouched (no empty :output key invented)"
     (let [lightweight {:status :success :environment-id :env}]
       (is (identical? lightweight
-                      (implement/preserve-consultation
+                      (implement-result/preserve-consultation
                        lightweight {:output {:code/summary "done"}}))))))
 
 ;------------------------------------------------------------------------------ Layer 1
