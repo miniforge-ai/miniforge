@@ -13,6 +13,11 @@
 (defn ^{:stratum 0} messages []
   (effect/provider-dispatch-diagnostics (msg/t :dispatch/unconfirmed) (msg/t :dispatch/invalid-input)))
 
+(defn ^{:stratum 0} provider-messages
+  "Distinct localized fixture values expose accidental replacement with dispatch defaults."
+  []
+  (effect/provider-dispatch-diagnostics (msg/t :grant/id-mismatch) (msg/t :grant/effect-class-mismatch)))
+
 (defn ^{:stratum 0} refusal []
   (anomaly/anomaly :unauthorized (msg/t :grant/effect-class-mismatch) {}))
 
