@@ -34,9 +34,29 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.workflow.dag-merge :as dag-merge]
    [ai.miniforge.workflow.dag-merge-anomaly :as merge-anomaly]
-   [ai.miniforge.workflow.dag-plan :as dag-plan]))
+   [ai.miniforge.workflow.dag-plan :as dag-plan]
+   [ai.miniforge.workflow.stop-signal :as stop-signal]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} merge-parents
+  "merge-parent-branches! for a multi-parent task, in its own interrupting
+   scope: it runs before the task's sub-workflow installs a stop hook. The
+   merge code can turn an interrupt into an ordinary merge failure, so any
+   result under a stopped run, or an interruption that escapes, is the
+   task's stop."
+  [context task-def]
+  (let [control-state (:control-state context)
+        stopped (merge-anomaly/merge-stopped-anomaly (:task/id task-def))
+        merged (try+
+                 (stop-signal/interrupting-on-stop
+                  control-state #(dag-merge/merge-parent-branches! context task-def))
+                 (catch Exception e
+                   (if (stop-signal/stop-caused? control-state e) stopped (throw e))))]
+    (if (some-> control-state deref :stopped)
+      stopped
+      merged)))
 
 (defn ^{:stratum 0} task-sub-workflow
   "Build a sub-workflow config for a single DAG task.
@@ -181,7 +201,7 @@
                        nil
 
                        (dag/multi-parent? deps)
-                       (dag-merge/merge-parent-branches! context task-def)
+                       (merge-parents context task-def)
 
                        :else
                        ;; v1 single-parent path returns a branch string for
