@@ -41,6 +41,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-provider :as native-replica-provider]
    [ai.miniforge.phase-opsv.boundary.experiment-preflight :as experiment-preflight]
    [ai.miniforge.phase-opsv.boundary.retained-preparation :as retained-preparation]
+   [ai.miniforge.phase-opsv.boundary.governed-replica-proposal :as governed-replica-proposal]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -91,6 +92,13 @@
   retained-preparation/read!)
 
 (def ^{:stratum 0} verification-receipt verification-run/receipt)
+
+(def ^{:stratum 0} prepare-governed-kubernetes-replica-proposal!
+  "Build deployment-effect proposal data from retained original preparation and fresh capture.
+   Input: declaration, request, comparison artifact UUID, current capture, parameters and limits.
+   Runtime limits explicitly supply effect UUID, Kubernetes context, destinations, duration and load bounds.
+   No caller-supplied baseline, admission, grant, provider execution, activation or recovery proof."
+  governed-replica-proposal/prepare!)
 
 (def ^{:stratum 0} VerificationEnvironmentDeclaration
   "Opt-in :opsv/verification-environment execution option: exact candidate/pack hashes,
