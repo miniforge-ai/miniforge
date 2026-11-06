@@ -29,7 +29,7 @@ The namespaces, all under `ai.miniforge.phase-software-factory`:
    `default-config`, `error-implement`, `build-implement-task`,
    `leave-implement`, `enter-implement`, the
    `phase/get-phase-interceptor-method :implement` method and the
-   `register-phase-defaults!` call. 6 definitions plus 11 re-exports.
+   `register-phase-defaults!` call. 6 definitions, no re-exports.
 2. `implement-context` (new, 17 definitions) reads the phase's inputs from
    the execution context. That covers the worktree path, files in scope
    and their contents, the context pack and the task base refs. It also
@@ -48,31 +48,31 @@ The only edits outside a plain move:
 
 1. Calls that now cross a namespace gained an alias:
    `impl-context/`, `impl-result/` or `verify-output/`.
-2. 26 private definitions became public because another namespace now
-   calls or re-exports them. Definitions used only inside their own
-   namespace stay private.
+2. 23 private definitions became public because another namespace now
+   calls them. Definitions used only inside their own namespace stay
+   private, including the three that tests reach through `#'`.
 3. `^{:stratum N}` values and `Layer N` headings were recomputed.
    `stratum-lint --fix` makes no further change to any of the four files.
 4. `ns` forms: the three new files have their own, with docstrings.
    `implement` adds the two new siblings it calls. It drops the requires
    it no longer uses: `anomaly`, `task-base`, `messaging`, `repo-index`,
    `schema` and `clojure.string`.
-5. `implement` re-exports 11 moved vars so existing references resolve:
-   `create-streaming-callback`, `collect-peer-advice` and
-   `preserve-consultation` stay public. The other 8 stay private and exist
-   for tests that reach them through `#'implement/...`. Three of those
-   carry a clj-kondo `unused-private-var` ignore. kondo counts a qualified
-   call such as `(impl-result/rate-limit-in-result? ...)` as a use of the
-   same-named private var, so the other five need none.
+5. No re-exports (rule 008). Nothing outside tests reached a moved var
+   through `implement`, so the tests call the new namespaces instead:
+   `implement_test.clj` (14 references) and `release_resume_base_test.clj`
+   (1). `create-streaming-callback`, `collect-peer-advice` and
+   `preserve-consultation`, public before, stay public in their new
+   namespaces.
+6. `release_worktree.clj`'s docstring names
+   `implement-context/base-ref-candidates`.
 
-No test changes. No `with-redefs` target in the repo points at a moved
-var, and the one `::` keyword (`::implement`) stays in `implement`.
+No `with-redefs` target in the repo points at a moved var, and the one
+`::` keyword (`::implement`) stays in `implement`.
 
 Proof of a pure move: the scratchpad `split-compare.clj` compared every
 top-level `def*` form of main's `implement.clj` with the four new files.
 Its `split-prefix` was `ai.miniforge.phase-software-factory`. It strips
-metadata, normalizes sibling-alias references, and reports the
-re-exports separately:
+metadata and normalizes sibling-alias references:
 
 ```text
 base defs 43 | new defs 43 | identical 43 | changed 0 | removed 0 | added 0
@@ -110,5 +110,5 @@ No configuration or behaviour change. Nothing to deploy beyond the merge.
 
 1. Every definition moved with its body unchanged.
 2. Every resulting file is within 3 stratum layers.
-3. Existing `implement/<name>` and `#'implement/<name>` references resolve.
+3. Every reference to a moved var points at its new namespace.
 4. Tests, kondo and stratum-lint pass.

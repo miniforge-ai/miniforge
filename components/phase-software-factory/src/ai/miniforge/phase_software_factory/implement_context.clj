@@ -58,7 +58,7 @@
     (catch Exception _e
       nil)))
 
-(defn ^{:stratum 0} resolve-worktree-path-result
+(defn- ^{:stratum 0} resolve-worktree-path-result
   "Resolve the worktree path from execution context, returning a path or a
    canonical anomaly. Do not fall back to the host filesystem when no
    environment has been acquired."
@@ -75,7 +75,7 @@
   (or (get-in input [:context :files-in-scope])
       (get-in input [:intent :scope])))
 
-(defn ^{:stratum 0} load-files-from-capsule
+(defn- ^{:stratum 0} load-files-from-capsule
   "Read scope files from inside a task capsule via execute-fn.
    Returns seq of {:path :content} maps, same shape as phase/load-files-in-scope."
   [execute-fn executor env-id worktree-path files-in-scope]
@@ -182,7 +182,7 @@
                       (:anomaly/data result)))
       result)))
 
-(defn ^{:stratum 1} base-ref-candidates
+(defn- ^{:stratum 1} base-ref-candidates
   "Return candidate refs for collecting the promoted task artifact."
   [ctx]
   (letfn [(present-string? [value]

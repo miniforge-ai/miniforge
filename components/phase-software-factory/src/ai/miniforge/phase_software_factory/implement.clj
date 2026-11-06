@@ -45,39 +45,6 @@
   "Phase defaults loaded from config/phase/defaults.edn."
   (phase-config/defaults-for :implement))
 
-;; Compatibility re-exports
-;; Moved to implement-context / implement-result; re-exported here so
-;; existing `implement/<name>` and `#'implement/<name>` references keep
-;; resolving. The private ones exist for tests that reach them through
-;; `#'`. clj-kondo counts a qualified call such as
-;; `(impl-result/rate-limit-in-result? ...)` below as a use of the
-;; same-named private var, so only the re-exports with no such call
-;; need the unused-private-var ignore.
-(def ^{:stratum 0} create-streaming-callback impl-context/create-streaming-callback)
-
-(def ^{:stratum 0} collect-peer-advice impl-context/collect-peer-advice)
-
-(def ^{:stratum 0} preserve-consultation impl-result/preserve-consultation)
-
-#_{:clj-kondo/ignore [:unused-private-var]}
-(def ^{:stratum 0} ^:private resolve-worktree-path-result impl-context/resolve-worktree-path-result)
-
-#_{:clj-kondo/ignore [:unused-private-var]}
-(def ^{:stratum 0} ^:private load-files-from-capsule impl-context/load-files-from-capsule)
-
-#_{:clj-kondo/ignore [:unused-private-var]}
-(def ^{:stratum 0} ^:private base-ref-candidates impl-context/base-ref-candidates)
-
-(def ^{:stratum 0} ^:private resolve-existing-files impl-context/resolve-existing-files)
-
-(def ^{:stratum 0} ^:private task-base-refs impl-context/task-base-refs)
-
-(def ^{:stratum 0} ^:private network-drop-in-result? impl-result/network-drop-in-result?)
-
-(def ^{:stratum 0} ^:private backend-timeout-in-result? impl-result/backend-timeout-in-result?)
-
-(def ^{:stratum 0} ^:private rate-limit-in-result? impl-result/rate-limit-in-result?)
-
 ;; Interceptor implementation
 (defn ^{:stratum 0} error-implement
   "Handle implementation phase errors. Attempts repair via inner loop
