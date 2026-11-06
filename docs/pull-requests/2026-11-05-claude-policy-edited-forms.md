@@ -37,7 +37,8 @@ touch added lines.
    in `.clj`, `.cljc`, `.cljs`, `.bb` and `.edn` files: a form is edited when
    it holds an added line, or when the base file has no top-level form with
    the same text left for it (base forms vouch only for forms without added
-   lines, one each). That covers an edited body, a removed `^:private` or
+   lines, and for none of them when they outnumber the base copies of their
+   text). That covers an edited body, a removed `^:private` or
    `#_` prefix, an unwrapped `(comment ...)` and a pasted copy, even one
    inserted above its original; a moved form counts as edited. Added lines
    outside every form are edited too. In other files the added lines are the

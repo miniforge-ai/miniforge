@@ -22,7 +22,8 @@
    A top-level form is edited whole when it holds a line the change added,
    or when the file at the task base has no top-level form with the same
    source text left for it: base forms vouch only for forms without added
-   lines, one each. Matching text covers the changes that add no line in
+   lines, and only when those forms do not outnumber the base copies of
+   their text. Matching text covers the changes that add no line in
    the form: a removed `^:private` or `#_` prefix, an unwrapped
    `(comment ...)`, a deleted body line. Holding an added line covers a
    pasted copy, even one inserted above its original. An added line
@@ -87,15 +88,13 @@
   (boolean (some #(<= start % end) added)))
 
 (defn- ^{:stratum 0} unmatched-forms
-  "FORMS whose :text matches no form of BASE-FORMS, each base form matching
-   at most one of FORMS, in order."
+  "FORMS the base cannot vouch for: every form whose :text more FORMS share
+   than BASE-FORMS hold. Which of such copies is the new one cannot be told
+   apart, so none is vouched for."
   [forms base-forms]
-  (first (reduce (fn [[out counts] {:keys [text] :as form}]
-                   (if (pos? (get counts text 0))
-                     [out (update counts text dec)]
-                     [(conj out form) counts]))
-                 [[] (frequencies (map :text base-forms))]
-                 forms)))
+  (let [base  (frequencies (map :text base-forms))
+        found (frequencies (map :text forms))]
+    (filterv #(> (get found (:text %) 0) (get base (:text %) 0)) forms)))
 
 ;------------------------------------------------------------------------------ Layer 1
 

@@ -104,6 +104,11 @@
   (is (= #{2} (edited-forms/edited-lines path "(ns demo.core)\n(def b 2)\n(def a 1)\n(def b 2)\n"
                                          "(ns demo.core)\n(def a 1)\n(def b 2)\n" #{2}))))
 
+(deftest ^{:stratum 1} copies-the-base-cannot-tell-apart-are-all-edited-test
+  (is (= #{2 3} (edited-forms/edited-lines path "(ns demo.core)\n(def a (f))\n(def a (f))\n"
+                                           "(ns demo.core)\n#_\n(def a (f))\n(def a (f))\n" #{}))
+      "removing a #_ line activates a second copy without adding a line"))
+
 (deftest ^{:stratum 1} lines-outside-forms-count-only-when-added-test
   (is (= #{6} (edited-forms/edited-lines path source source #{6}))
       "an added comment line between forms")
