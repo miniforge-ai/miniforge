@@ -1,5 +1,7 @@
 {:phase-opsv/system
- {:verification/unsupported-report "Verification reporting contains unsupported or excessive values."
+ {:replicas/invalid-request "Native replica request inputs are invalid or incomplete."
+  :replicas/request-mismatch "Native replica request does not match the declared target, original baseline or replica bounds."
+  :verification/unsupported-report "Verification reporting contains unsupported or excessive values."
   :kubernetes/incomplete-environment-fingerprint "Captured runtime cannot establish a complete homogeneous native environment fingerprint."
   :verification/invalid-environment-contract "Invalid predeclared verification environment contract"
   :verification/environment-contract-mismatch "The verification environment does not match its retained contract, attempt or expected state"
