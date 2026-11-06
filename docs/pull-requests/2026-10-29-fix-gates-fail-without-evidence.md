@@ -10,9 +10,8 @@
 
 Three gates passed, with a warning, when they had nothing to check. Each
 reported a pass for something it never checked. This PR makes each of them fail
-without evidence, keeps the one zero-test pass a change-aware runner reports,
-and fixes the Cargo summary parse that would otherwise read a Rust workspace as
-zero tests.
+without evidence. It keeps the one zero-test pass a change-aware runner reports.
+It also fixes the Cargo summary parse that would otherwise read a Rust workspace as zero tests.
 
 ## Motivation
 
@@ -24,14 +23,14 @@ zero tests.
    check threw.
 4. `parse-cargo` read only the first `test result:` line. `cargo test --workspace`
    prints one per test binary, and the first is often a library with no unit
-   tests, so a workspace with passing integration tests counted 0 tests.
+   tests. A workspace with passing integration tests therefore counted 0 tests.
 
 ## Changes in Detail
 
 1. `gate.test/check-tests-pass` fails with `:no-tests` (no results) or
    `:no-tests-ran` (a success that counted no tests). The one zero-test pass left
    is a change-aware runner that says there is nothing to test ("No changed
-   bricks", "nothing to test"); the gate passes it with a `:nothing-to-test`
+   bricks", "nothing to test"). The gate passes it with a `:nothing-to-test`
    warning.
 2. Verify carries the runner's `:no-tests?` into
    `[:phase :result :metrics]`, where `:tests-pass` reads it.
@@ -56,9 +55,9 @@ with no policy packs or when the check throws.
 
 ## Testing Plan
 
-1. `tests_pass_test.clj`: no results fails; zero counted tests fails;
-   runner-reported nothing-to-test passes with the warning; coverage without
-   data fails; an explicit nil threshold uses the default; above and below the
+1. `tests_pass_test.clj`: no results fails; zero counted tests fails.
+   Runner-reported nothing-to-test passes with the warning; coverage without
+   data fails. An explicit nil threshold uses the default; above and below the
    threshold are unchanged.
 2. `behavioral_test.clj`: no packs (empty and absent key) fails; a throwing
    check fails, on both the injected and default check paths.
@@ -67,11 +66,10 @@ with no policy packs or when the check throws.
 4. `verify_failure_modes_test.clj`: a three-binary Cargo workspace output
    counts 9 tests, and a failure in a later binary is counted.
 5. After merging `main` (which moved every gate message into the catalog,
-   #2307, and added `gate.result`, #2382): every gate component test, the
-   verify and implement tests, the phase registry test, the workflow
-   environment-promotion and metrics-accumulation tests, and the project
-   handoff, configurable-integration and runner-integration tests pass
-   (364 tests, 0 failures).
+   #2307, and added `gate.result`, #2382), all 364 tests pass.
+   These cover every gate component, verify, implement, and the phase registry.
+   They also cover workflow environment-promotion and metrics-accumulation,
+   plus project handoff, configurable-integration and runner-integration.
 6. Against `main`'s versions of the changed sources, the new and changed
    tests in `tests_pass_test`, `behavioral_test`, `verify_test` and
    `verify_failure_modes_test` fail (23 failures, 1 error).

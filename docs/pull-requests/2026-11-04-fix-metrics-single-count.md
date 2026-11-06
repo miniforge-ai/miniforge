@@ -9,9 +9,9 @@
 
 Part of #2378. The workflow runner now adds a phase's `[:phase :metrics]`
 to `:execution/metrics` on top of the total the phase started from. The
-software-factory phases add that spend themselves in `:leave`, so the
-runner's merge counted every plan, implement, review, verify and release
-phase's tokens and cost twice.
+software-factory phases add that spend themselves in `:leave`.
+The runner's merge therefore counted every plan, implement, review, verify and
+release phase's tokens and cost twice.
 
 ## Motivation
 
@@ -28,10 +28,9 @@ figure for every software-factory phase that reported spend.
 
 ## Changes in Detail
 
-1. `execution_step.clj`, `execute-entered`: `process-phase-result` gets
-   the post-`:leave` context with `:execution/metrics` set back to the
-   value the phase was entered with, so the runner's merge is the only
-   addition.
+In `execution_step.clj`, `execute-entered` passes the post-`:leave` context to
+`process-phase-result`. It first restores `:execution/metrics` to the value
+the phase was entered with, so the runner's merge is the only addition.
 
 Why the runner and not the phases: the fix stays in one file within the
 SL003 layer budget. `plan.clj` (4 layers) and `implement.clj` (7) are over
@@ -53,8 +52,8 @@ wall-clock duration (`stamp-wall-clock-duration`).
   - a pipeline with one of each.
 - Against main's `execution_step.clj` it fails 4 of 6 assertions:
   `200` instead of `100`, `0.5` instead of `0.25`, and `300` instead of
-  `200`. With the fix it passes, together with the workflow and CLI tests
-  that read `:execution/metrics`: `metrics-accumulation`, `state`,
+  `200`. With the fix it passes. The workflow and CLI tests that read
+  `:execution/metrics` also pass. These include `metrics-accumulation`, `state`,
   `run7-regression`, `runner-extended`, `runner-cleanup`,
   `terminal-receipt`, `runner-done-facts`, `runner-events`,
   `context-duration`, `dag-success-next-phase`, `runner`,

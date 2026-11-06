@@ -10,16 +10,16 @@
 
 `mf workflow cancel` (and the dashboard and TUI stop) sets `:stopped` on the
 run's control state. The runner read it only between phases, and the DAG
-orchestrator between batches, so a cancelled run kept going until the
-current phase finished: the agent CLI, its MCP servers and its Bash
-children ran on, possibly for many minutes, editing the worktree and
-spending tokens after the operator said stop.
+orchestrator between batches. A cancelled run kept going until the
+current phase finished. The agent CLI, its MCP servers and its Bash
+children ran on, possibly for many minutes. They edited the worktree and
+spent tokens after the operator said stop.
 
 The runner now gives every LLM call a phase makes a cancel check. The
 streaming client reads it in its stream loop (every
-`:stream :poll-interval-ms`, 250 ms by default): once the run is cancelled
-it destroys the agent's process tree and returns a `:cancelled` timeout,
-and a call made after the cancel returns the same way as soon as it
+`:stream :poll-interval-ms`, 250 ms by default). Once the run is cancelled,
+it destroys the agent's process tree and returns a `:cancelled` timeout.
+A call made after the cancel returns the same way as soon as it
 starts. Nothing is interrupted, so the phase finishes its own flow,
 executor cleanup and boundary persist included, and the next iteration
 takes the existing stop path.
@@ -46,12 +46,12 @@ avoids all of them.
    progress monitor's timeouts on every poll. A cancelled stream ends like
    any other adaptive timeout: the process tree is destroyed and the call
    returns a timeout result.
-3. `subprocess/wait-for-stream-process`, the wait every agent CLI call
-   ends in (the streaming client after its stream closes, and the
-   non-streaming capture client), now waits in poll-interval slices and
-   checks the cancel between them: a CLI that closed stdout but did not
+3. `subprocess/wait-for-stream-process` now waits in poll-interval slices.
+   Every agent CLI call ends in this wait: the streaming client after its stream closes,
+   and the non-streaming capture client.
+   It checks the cancel between them. A CLI that closed stdout but did not
    exit, or a non-streaming call, is killed with its tree when the run is
-   cancelled, and the result carries the `:cancelled` reason.
+   cancelled. The result carries the `:cancelled` reason.
 4. `runner-iteration/execute-supervised`: runs the phase step under a
    cancel check that reads the run's control state. DAG sub-workflows run
    their own iterations against the parent's control state, so their calls
@@ -60,7 +60,7 @@ avoids all of them.
 
 `:cancelled` is not one of the infra-timeout types the agents retry
 (`:stream-idle`, `:stagnation`, `:hard-limit`) or auto-resume
-(`:network-drop`), so a cancelled call reads as a failed call; the phase
+(`:network-drop`). A cancelled call reads as a failed call; the phase
 ends and the run stops at the next iteration.
 
 Scope: this stops LLM subprocesses. Non-LLM work a phase is doing when the
@@ -92,4 +92,4 @@ stream poll; the phase then finishes and the run stops.
 
 ## Related Issues/PRs
 
-- Readiness R1–R3: #2287, #2273, #2255, #2261, #2305, #2320, #2333.
+Readiness R1–R3: #2287, #2273, #2255, #2261, #2305, #2320, #2333.

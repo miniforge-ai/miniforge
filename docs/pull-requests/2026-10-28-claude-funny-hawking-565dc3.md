@@ -15,8 +15,8 @@ reduced `core.clj`, each within rule 210's 3-layer budget. No behaviour change;
 **Type:** pure movement — no behaviour change
 
 MINIFORGE_PR_BUDGET_OVERRIDE: Mechanical namespace split mandated by rule 210.
-All 33 definitions move byte-identically (verified by normalized form-by-form
-comparison against `origin/main`); the only edits are namespace-alias
+All 33 definitions move byte-identically, verified by normalized form-by-form
+comparison against `origin/main`. The only edits are namespace-alias
 qualification, visibility on the definitions that now cross a namespace
 boundary, and one local rebinding. core.clj cannot be committed in pieces —
 see "Why this is one commit" below.
@@ -25,8 +25,8 @@ see "Why this is one commit" below.
 
 `components/semantic-analyzer/src/ai/miniforge/semantic_analyzer/core.clj` ran
 8 distinct call-graph layers against the rule 210 budget of 3. It carried no
-`^{:stratum n}` annotations, which is the only reason `bb lint:stratum` passed:
-the linter skips files without `Layer N` headings, and core.clj's three headings
+`^{:stratum n}` annotations. That is the only reason `bb lint:stratum` passed.
+The linter skips files without `Layer N` headings. Core.clj's three headings
 were decorative — they did not match the real graph.
 
 So the first edit to the file triggered `stratum-lint --fix`, which annotated it
@@ -46,9 +46,9 @@ copy from `origin/main`:
 ```
 
 This blocked real work. Two changes were implemented and then reverted out of
-PR #2025 (`feat/pack-exclude-globs`) solely because of it — honouring
-`:rule/applies-to :exclude-globs` at the three file-selection sites, and routing
-this component's path scope through the shared matcher. Both land in a follow-up
+PR #2025 (`feat/pack-exclude-globs`) solely because of it.
+One honoured `:rule/applies-to :exclude-globs` at the three file-selection sites.
+The other routed this component's path scope through the shared matcher. Both land in a follow-up
 on top of this split.
 
 ### The layer assignment that forced the split
@@ -67,8 +67,7 @@ on top of this split.
 | 7 | `analyze-rules-parallel` |
 
 The groups in the split were chosen from that graph, not from the heading
-comments, and each resulting file was re-checked with the linter rather than by
-hand.
+comments. Each resulting file was re-checked with the linter rather than by hand.
 
 ## Changes in Detail
 
@@ -105,14 +104,14 @@ component through `.interface` only; both still load.
 Keeping `judge-prompt-resource` and `judge-templates` alongside the four
 construction functions gives `prompts` four layers
 (`judge-prompt-resource` → `judge-templates` → `batched-rules-block` →
-`build-batched-prompt`). Inlining the resource path would have fitted, but
-rule 006 names "file paths embedded in code" as a magic literal, so the constant
+`build-batched-prompt`). Inlining the resource path would have fitted.
+However, rule 006 names "file paths embedded in code" as a magic literal, so the constant
 stays and the resource boundary becomes its own namespace.
 
 ### Visibility changes
 
 Sixteen definitions that were `defn-`/`^:private` now cross a namespace boundary
-and are plain `defn`/`def`: `judge-templates`, `build-batched-prompt`,
+and are plain `defn`/`def`. These are `judge-templates`, `build-batched-prompt`,
 `raw->violation`, `->rule-kw`, `index-by-rule`, `parse-judge-response`,
 `judge-response->violations`, the three `limits` values, `relativize`,
 `file-under-size-limit?`, `file-matches-globs?`, `judgeable-file?`,
@@ -171,8 +170,8 @@ cli/main/commands/scan.clj                loads
 ```
 
 Movement check: every one of the 33 definitions was extracted from
-`origin/main:core.clj` and from the new files with a paren-aware splitter, then
-compared after normalizing away the deliberate edits (alias qualification,
+`origin/main:core.clj` and from the new files with a paren-aware splitter.
+They were then compared after normalizing away the deliberate edits (alias qualification,
 `^{:stratum n}` metadata, `defn-` → `defn`, the `tpl` rebinding). Result:
 33 definitions on both sides, none missing from either, zero differing bodies.
 
@@ -216,16 +215,16 @@ On top of this split, in a small PR stacked on #2025:
    `selection/select-files-for-rule`, `changed-files/analyze-rule-on-files`, and
    `changed-files/file-rule-violations`. All three read `:file-globs` directly
    today. The gate path is the sharp one: `gate/policy_pack.clj`'s
-   `acting-semantic-rules` admits a rule when any artifact matches, then
-   `batched-semantic-analyzer` hands every acting rule and every changed file to
-   `analyze-rules-on-files`, which assigns rules per file on `:file-globs`
-   alone — so in a mixed change an excluded path can still produce a blocking
+   `acting-semantic-rules` admits a rule when any artifact matches.
+   Then `batched-semantic-analyzer` hands every acting rule and every changed file to
+   `analyze-rules-on-files`. That assigns rules per file on `:file-globs`
+   alone. In a mixed change an excluded path can still produce a blocking
    semantic violation.
 2. Replace `selection/file-matches-globs?` (and `glob-matcher`) with
    `policy-pack/path-in-scope?`. This component is the last place a rule's path
-   scope is decided by a different implementation: `java.nio`'s `PathMatcher`
-   reads `**/` as one-or-more segments, while the shared matcher reads it as
-   zero-or-more, so `glob:**/*.clj` does not match a root-level `build.clj` and
+   scope is decided by a different implementation. `java.nio`'s `PathMatcher`
+   reads `**/` as one-or-more segments; the shared matcher reads it as
+   zero-or-more. Thus `glob:**/*.clj` does not match a root-level `build.clj` and
    `src/**/*.ts` does not match `src/a.ts`. Routing through the shared matcher
    gets the exclusion and the agreement in one move.
 

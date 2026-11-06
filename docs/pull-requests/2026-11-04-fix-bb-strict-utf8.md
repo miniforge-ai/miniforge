@@ -41,7 +41,7 @@ require a supported runtime and document the JVM path.
 ## How the minimum was found
 
 1. The first push declared 1.12.204, the version from the issue, together with a
-   Babashka-portable strict UTF-8 decoder in place of the four `CharsetDecoder`
+   Babashka-portable strict UTF-8 decoder. It replaced the four `CharsetDecoder`
    uses on the CLI's classpath.
 2. The new job then failed on 1.12.204 in a second place:
    `Could not resolve symbol: rt/indexing-push-back-reader` in
