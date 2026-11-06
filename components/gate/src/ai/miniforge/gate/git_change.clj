@@ -82,29 +82,6 @@
       (and n (str/starts-with? line " ")) (recur more (inc n) acc)
       :else (recur more n acc))))
 
-(defn ^{:stratum 0} removals
-  "{:after P :replaced? bool :lines [text ...]} for each hunk of a
-   zero-context unified diff that removes lines. :lines are the removed
-   lines' text. P is the line of the new version the removal is placed
-   after: for a pure removal, the line it follows (0 at the start); for a
-   replacement (:replaced? true), the last line put in its place."
-  [diff]
-  (let [close (fn [acc hunk] (cond-> acc (seq (:lines hunk)) (conj hunk)))]
-    (loop [[line & more] (str/split-lines (str diff)) hunk nil acc []]
-      (cond
-        (nil? line) (close acc hunk)
-        (str/starts-with? line "@@")
-        (let [[_ start added] (re-find #"^@@ -\S+ \+(\d+)(?:,(\d+))? @@" line)
-              start (parse-long start)
-              added (if added (parse-long added) 1)]
-          (recur more
-                 {:after     (if (zero? added) start (+ start added -1))
-                  :replaced? (pos? added)
-                  :lines     []}
-                 (close acc hunk)))
-        (and hunk (str/starts-with? line "-")) (recur more (update hunk :lines conj (subs line 1)) acc)
-        :else (recur more hunk acc)))))
-
 (defn ^{:stratum 0} scratch-dir
   "A fresh temp directory named from PREFIX that only its owner can enter,
    created with that mode in one step: the base and artifact copies
@@ -137,13 +114,22 @@
                     not-empty)))
         (filter #(and (string? %) (not (str/blank? %))) candidates)))
 
-(defn ^{:stratum 1} version-diff
+(defn ^{:stratum 1} base-text
+  "PATH's content at BASE, or nil when BASE has no blob at PATH or git
+   cannot read it."
+  [ctx base path]
+  (when (and base path)
+    (run ctx (git-argv "cat-file" "blob" (str base ":" path)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} version-diff
   "The zero-context diff of TEXT, the artifact's version of PATH, against
    PATH's blob at BASE (against nothing when there is no base blob), or
    nil when git cannot diff them. Both versions are written under DIR as
    NAME and NAME-base and diffed on the host."
   [ctx base path text dir name]
-  (let [shown (when (and base path) (run ctx (git-argv "cat-file" "blob" (str base ":" path))))
+  (let [shown (base-text ctx base path)
         old   (if shown (doto (io/file dir (str name "-base")) (spit shown)) (io/file "/dev/null"))
         new   (doto (io/file dir name) (spit text))]
     (run {} (git-argv "diff" "--no-index" "-U0" "--" (str old) (str new)) #{0 1})))

@@ -19,11 +19,12 @@
   "The lines of a file a change edits, widened to whole top-level forms in
    Clojure source and EDN.
 
-   A change edits a top-level form when the form holds a line the change
-   added, or lines it purely removed from between two of the form's lines.
-   It also edits the form directly below removed lines that start with `^`
-   or `#_`: removing a reader prefix such as `^:private` changes the form
-   that follows. An added line outside every form is edited on its own.
+   A top-level form is unedited when the file at the task base has a
+   top-level form with the same source text, each base form vouching for
+   one form only; every other form is edited whole. Matching text rather
+   than diff positions covers every way a form can change: an edited body,
+   a removed `^:private` or `#_` prefix, an unwrapped `(comment ...)`, or a
+   pasted copy. An added line outside every form is edited on its own.
    Other files are edited exactly on their added lines.
 
    Forms are located with edamame, which reads past aliases, reader
@@ -32,6 +33,7 @@
    anomaly: nothing in it can be placed inside or outside an edit."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.gate.messages :as msg]
+            [clojure.string :as str]
             [edamame.core :as edamame]
             [slingshot.slingshot :refer [try+]]))
 
@@ -55,16 +57,38 @@
   [tag]
   (partial tagged-literal tag))
 
+(defn- ^{:stratum 0} span-text
+  "The source text LINES hold between an edamame location's start and end
+   (1-based columns, the end column exclusive)."
+  [lines {:keys [row col end-row end-col]}]
+  (let [rows (subvec lines (dec row) (min end-row (count lines)))
+        final (dec (count rows))]
+    (str/join "\n" (map-indexed (fn [i line]
+                                  (subs line
+                                        (if (zero? i) (min (dec col) (count line)) 0)
+                                        (if (= i final) (min (dec end-col) (count line)) (count line))))
+                                rows))))
+
 (defn- ^{:stratum 0} span-lines
-  "Every line number from START to END, inclusive."
-  [[start end]]
+  "Every line number of FORM, from its :start to its :end."
+  [{:keys [start end]}]
   (range start (inc end)))
 
-(defn- ^{:stratum 0} reader-prefix?
-  "True when removed line TEXT starts with a reader prefix (`^` metadata or
-   a `#_` discard), which applies to the form that follows it."
-  [text]
-  (boolean (re-find #"^\s*(\^|#_)" text)))
+(defn- ^{:stratum 0} within-form?
+  "True when LINE lies inside one of FORMS."
+  [forms line]
+  (boolean (some (fn [{:keys [start end]}] (<= start line end)) forms)))
+
+(defn- ^{:stratum 0} unmatched-forms
+  "FORMS whose :text matches no form of BASE-FORMS, each base form matching
+   at most one of FORMS, in order."
+  [forms base-forms]
+  (first (reduce (fn [[out counts] {:keys [text] :as form}]
+                   (if (pos? (get counts text 0))
+                     [out (update counts text dec)]
+                     [(conj out form) counts]))
+                 [[] (frequencies (map :text base-forms))]
+                 forms)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -73,32 +97,23 @@
   [path]
   (contains? form-extensions (second (re-find #"\.([^./]+)$" (str path)))))
 
-(defn- ^{:stratum 1} edited-span?
-  "True when the form spanning START..END holds an ADDED line, or one of
-   REMOVALS (`git-change/removals`) is a pure removal placed inside it, or
-   removed a reader prefix placed directly before it."
-  [added removals [start end]]
-  (boolean (or (some #(<= start % end) added)
-               (some (fn [{:keys [after replaced? lines]}]
-                       (or (and (not replaced?) (<= start after) (< after end))
-                           (and (= after (dec start)) (some reader-prefix? lines))))
-                     removals))))
-
 (defn ^{:stratum 1} form-spans
-  "[first-line last-line] of each top-level form in CONTENT, in order, or
-   an :invalid-input anomaly when edamame cannot read CONTENT. Every syntax
-   is enabled, aliases stay unresolved but distinct, and reader
-   conditionals are kept whole. CONTENT is read once with its values and
-   tagged literals kept whole, so an invalid literal such as a duplicate
-   map key is refused, then again with each form read as its location:
-   locations alone would hide duplicates."
+  "{:start :end :text} for each top-level form in CONTENT, in order: its
+   first and last line and its source text. An :invalid-input anomaly when
+   edamame cannot read CONTENT. Every syntax is enabled, aliases stay
+   unresolved but distinct, and reader conditionals are kept whole.
+   CONTENT is read once with its values and tagged literals kept whole, so
+   an invalid literal such as a duplicate map key is refused, then again
+   with each form read as its location: locations alone would hide
+   duplicates."
   [content]
   (try+
-    (let [opts {:all          true
-                :read-cond    :preserve
-                :auto-resolve alias-namespace}]
+    (let [opts  {:all          true
+                 :read-cond    :preserve
+                 :auto-resolve alias-namespace}
+          lines (vec (str/split-lines content))]
       (edamame/parse-string-all content (assoc opts :readers tagged-reader))
-      (mapv (juxt :row :end-row)
+      (mapv (fn [loc] {:start (:row loc) :end (:end-row loc) :text (span-text lines loc)})
             (edamame/parse-string-all content (assoc opts
                                                      :readers     (constantly identity)
                                                      :postprocess :loc))))
@@ -109,17 +124,20 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} edited-lines
-  "The set of CONTENT's line numbers a change edits, given the set of lines
-   it ADDED and its REMOVALS (`git-change/removals`). In a form file every
-   top-level form the change edits (see the namespace docstring) is edited
-   whole; an anomaly when that content cannot be read."
-  [path content added removals]
+  "The set of CONTENT's line numbers a change edits, given BASE (PATH's
+   content at the task base, nil when the file is new) and the set of
+   lines the change ADDED. In a form file, the lines of every form BASE has
+   no matching form for (see the namespace docstring) plus the added lines
+   outside every form; an anomaly when CONTENT or BASE cannot be read. In
+   any other file, the added lines."
+  [path content base added]
   (if-not (form-file? path)
     (set added)
-    (let [spans (form-spans content)]
-      (if (anomaly/anomaly? spans)
-        spans
-        (into (set added)
-              (comp (filter #(edited-span? added removals %))
-                    (mapcat span-lines))
-              spans)))))
+    (let [forms      (form-spans content)
+          base-forms (if base (form-spans base) [])]
+      (cond
+        (anomaly/anomaly? forms)      forms
+        (anomaly/anomaly? base-forms) base-forms
+        :else (into (set (remove #(within-form? forms %) added))
+                    (mapcat span-lines)
+                    (unmatched-forms forms base-forms))))))

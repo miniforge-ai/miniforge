@@ -126,7 +126,7 @@
   (let [content (str/replace base-content "\n\n(defn b" "\n;; added\n\n(defn b")]
     (is (not (:passed? (check (base-worktree base-content) {:content content} 7))))))
 
-(deftest ^{:stratum 2} deletion-inside-a-form-edits-that-form-test
+(deftest ^{:stratum 2} removing-lines-inside-a-form-edits-that-form-test
   (let [content (str/replace base-content "  ;; tmp\n" "")]
     (is (not (:passed? (check (base-worktree base-content) {:content content} 4))))
     (is (:passed? (check (base-worktree base-content) {:content content} 8)))))
@@ -145,6 +145,11 @@
   (let [base    "(ns demo.core)\n(def a 1)\n(defn b\n  []\n  2)\n"
         content "(ns demo.core)\n(def a 2)\n(defn b\n  []\n  2)\n"]
     (is (:passed? (check (base-worktree base) {:content content} 4)))))
+
+(deftest ^{:stratum 2} unwrapping-a-comment-form-edits-the-function-inside-test
+  (let [base    "(ns demo.core)\n(comment\n  (defn f\n    []\n    1)\n  )\n"
+        content "(ns demo.core)\n  (defn f\n    []\n    1)\n"]
+    (is (not (:passed? (check (base-worktree base) {:content content} 3))))))
 
 (deftest ^{:stratum 2} duplicate-literal-content-blocks-test
   (let [content (str/replace edit-a "  10)" "  {:k 1 :k 2})")]
