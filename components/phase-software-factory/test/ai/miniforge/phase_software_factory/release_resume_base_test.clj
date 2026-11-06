@@ -25,7 +25,7 @@
    was skipped (#2264 review)."
   (:require
    [ai.miniforge.phase.interface :as phase]
-   [ai.miniforge.phase-software-factory.implement :as implement]
+   [ai.miniforge.phase-software-factory.implement-context :as impl-context]
    [ai.miniforge.phase-software-factory.release]
    [ai.miniforge.phase-software-factory.release-scan :as release-scan]
    [ai.miniforge.phase-software-factory.release-worktree :as release-worktree]
@@ -68,7 +68,7 @@
              :execution/opts                 {:resume-workspace {:branch "task-restored"}}
              :worktree-path                  worktree
              :phase-config                   {:phase :release}}]
-    (assoc ctx :execution/task-base-refs (#'implement/base-ref-candidates ctx))))
+    (assoc ctx :execution/task-base-refs (#'impl-context/base-ref-candidates ctx))))
 
 (defn ^{:stratum 0} enter-release
   "Run release's :enter on `ctx` with prepare-release stubbed; return the

@@ -23,6 +23,8 @@
 ;;       execution-environment!` swallows the failure, returns nil for the
 ;;       env, and run-pipeline proceeds with no executor. Phase interceptors
 ;;       then fail silently and run-pipeline returns :running.
+;;       Split out into workflow-resume-restore-failure-escalates.spec.edn;
+;;       not in this spec's scope.
 ;;
 ;;   (b) Checkpoint shape drift. Snapshots written by an older miniforge
 ;;       commit may not round-trip cleanly into a newer fsm/restore-context.
@@ -47,15 +49,12 @@
      status. The synthetic test in runner-test already covers the happy
      path; the missing coverage is real-checkpoint-shape.
 
-  2. Investigate the three candidate causes (a)/(b)/(c) above. (a) is the
-     most likely — restore-local-workspace-checkpoint! logs but doesn't
-     escalate, and acquire-execution-environment! treats nil env as
-     'continue without one' for :local mode.
+  2. Investigate candidate causes (b) and (c) above. Cause (a), the
+     swallowed workspace-restore failure, is split out into
+     `workflow-resume-restore-failure-escalates.spec.edn`, which must land
+     first so a restore failure can no longer mask (b) or (c).
 
   3. Fix the root cause. Likely shapes:
-     - acquire-execution-environment! escalates workspace-restore failure
-       to a thrown anomaly so the CLI sees a real error instead of
-       :running.
      - restore-context detects an fsm-state that points at no state in
        the rebuilt machine and falls back to pipeline-trim resume.
      - DAG-mid-resume gets its own snapshot shape and code path.
@@ -73,13 +72,11 @@
 
  :spec/constraints
  ["Production checkpoint must round-trip through resume to a terminal status"
-  "Workspace-restore failures must propagate as a thrown error, not a silent log + nil-env continue"
   "Backwards-compatible — existing successful resumes (synthetic + production) still complete"
   "Regression test must load a real checkpoint EDN file, not just build snapshots in-process"]
 
  :spec/acceptance-criteria
  ["bb miniforge resume on a known-good production checkpoint reaches :completed or :failed (terminal)"
-  "bb miniforge resume on a checkpoint with workspace-restore-failed produces a clear error before run-pipeline"
   "New replay test in components/workflow/test loads a fixture checkpoint and asserts terminal status"
   "Existing run-pipeline-resume-* tests in runner-test still pass"]
 
@@ -89,6 +86,6 @@
   :theme :dogfood-resilience
   :rationale "PR #896 makes resume fail loud, but resume still doesn't work — every dogfood loss still costs the full plan/explore/verify token spend on re-run. This spec makes resume actually save tokens, which is the dogfood-resilience theme's primary goal."
   :blocks []
-  :blocked-by []}
+  :blocked-by ["workflow-resume-restore-failure-escalates.spec.edn"]}
 
  :spec/workflow-type :canonical-sdlc}

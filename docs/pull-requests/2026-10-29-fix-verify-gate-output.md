@@ -72,7 +72,7 @@ No migration. The change takes effect on the next run.
    linters from `:code/files`, which implement's curated artifact replaces
    with `:code/file-paths`. Feeding it the paths makes `clj-kondo --lint src`
    run over the whole `src` tree and fail verify on findings the change did
-   not introduce, so it needs changed-files scoping first.
+   not introduce. It needs changed-files scoping first.
 
 ## Checklist
 

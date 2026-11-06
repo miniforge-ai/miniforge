@@ -86,11 +86,11 @@ experiment-opened record, a durable record of each call before it is made,
 activation outcomes with board snapshots, cell results and a final report record.
 `report.md` is a derived convenience copy; the journal is authoritative. An
 interrupted run is incomplete, not silently resumable. A failed call is recorded
-with unknown usage, and the lab never retries it. The journal and that policy
-cover each adapter call: when a stream exits cleanly with no content, tool call
-or usage, the `llm` client itself retries once through its buffered path, and
-that second backend call has no journal record of its own. The lab records such
-an activation as failed with unknown usage.
+with unknown usage, and the lab never retries it. The adapter also turns off the
+`llm` client's own retry of an empty stream (`:empty-stream-fallback? false`), so
+each provider call is the one the journal recorded. A stream that exits cleanly
+with no content, tool call or usage is recorded as a failed activation with
+unknown usage.
 
 The live adapter calls the model through the `llm` component's isolated Claude
 client (`:backend :claude :isolated? true`) and needs that backend's normal
@@ -120,7 +120,7 @@ can leave provider spend unsettled.
 | Development condition | State and communication |
 |---|---|
 | `single` | One participant repeatedly works over its own typed state; not a conforming continuous-session N15 C1 |
-| `independent` | Fresh private candidate boards; metered final selector sees submitted solutions and rationales |
+| `independent` | Fresh private candidate boards; metered final selector sees submitted solutions and rationales, on a fresh board holding the observations the candidates gathered |
 | `relay` | Private participant boards plus a sequential handoff of solutions and rationales |
 | `workspace` | One shared typed graph; fixed proposer/skeptic/synthesizer schedule |
 | `workspace-ablated` | Same schedule and budget, but separate participant graphs and no peer handoff |
@@ -139,9 +139,10 @@ through the same admission boundary as every other transaction. A model cannot
 invent an observation by supplying an evidence class. An observation counts
 toward evidence completeness only when the closing turn's board showed it, so
 a condition whose closing turn never sees an observation cannot earn credit for
-it. In the `independent` condition, the selector starts from a fresh board and
-receives only solutions and rationales, so that condition currently earns no
-evidence credit. Sealed expected
+it. In the `independent` condition, the trusted reader attaches every
+observation the candidates gathered to the selector's fresh board before its
+closing turn, so the selection sees the same evidence without the candidates
+sharing a board, and the allowance is unchanged. Sealed expected
 choices are not included in the request. Reference choices pass, and supplied
 distractors fail, the deterministic scoring rules. These short tasks are useful
 for plumbing and exploratory behavior; they are **not calibrated long-horizon

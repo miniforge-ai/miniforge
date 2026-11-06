@@ -53,7 +53,7 @@ temp events directory:
 1. The run applies the cancel: the run's stop flag is set, the output says
    "Cancel applied", and there is no exit call.
 2. An id no running workflow owns: "Cancel outcome unknown", exit 1.
-3. Applying throws after the stop flag is set: the flag reads back set, and the
+3. Applying throws after the stop flag is set. The flag reads back set, and the
    command says it "could not apply or verify" the cancel, exit 1.
 
 All three fail against main's command (run with only the wait-time override
@@ -73,8 +73,8 @@ applied cancel interrupt the running phase and the agent CLI's process tree.
 
 ## Notes
 
-A run whose event stream has no file sink records no lifecycle on disk; the
-command then reports the cancel as not confirmed even if it was applied.
+A run whose event stream has no file sink records no lifecycle on disk.
+The command then reports the cancel as not confirmed even if it was applied.
 
 ## Checklist
 
