@@ -47,7 +47,7 @@ The namespaces, all under `ai.miniforge.phase-software-factory`:
 The only edits outside a plain move:
 
 1. Calls that now cross a namespace gained an alias:
-   `impl-context/`, `impl-result/` or `verify-output/`.
+   `impl-context/`, `implement-result/` or `verify-output/`.
 2. 23 private definitions became public because another namespace now
    calls them. Definitions used only inside their own namespace stay
    private, including the three that tests reach through `#'`.
