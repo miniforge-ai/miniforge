@@ -171,8 +171,7 @@
    lightweight success result. The gap instrument (T2 s3.2) and the gap
    report read consultation provenance from the durable phase record;
    replacing the result wholesale at leave destroyed it, leaving
-   successful DAG-task implements with no evidence delivery happened.
-   Public for tests."
+   successful DAG-task implements with no evidence delivery happened."
   [lightweight result]
   (if-let [consultation (get-in result [:output :codex/consultation])]
     (assoc-in lightweight [:output :codex/consultation] consultation)
@@ -182,7 +181,7 @@
   "Phase-input boundary validation for the agent result's `:metrics`. The
    response builders guarantee non-nil numeric `:tokens`/`:duration-ms`, but a
    producer that bypasses them (or a future regression) could send a nil that
-   then throws a message-less NPE in the cost/accumulation arithmetic below.
+   then throws a message-less NPE in `implement`'s cost/accumulation arithmetic.
    Validate against `schema/Metrics`; on violation, log loudly and coerce to a
    valid shape (telemetry must not crash the phase) rather than fail silently."
   [metrics logger]

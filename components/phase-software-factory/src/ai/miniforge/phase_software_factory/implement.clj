@@ -30,7 +30,7 @@
    [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
    [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
    [ai.miniforge.phase-software-factory.implement-context :as impl-context]
-   [ai.miniforge.phase-software-factory.implement-result :as impl-result]
+   [ai.miniforge.phase-software-factory.implement-result :as implement-result]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.context-pack.interface :as context-pack]
    [ai.miniforge.knowledge.interface :as knowledge]
@@ -136,7 +136,7 @@
         logger (get-in ctx [:execution/logger])
         result (get-in ctx [:phase :result])
         agent-status (:status result)
-        rate-limited? (and (= :error agent-status) (impl-result/rate-limit-in-result? result))
+        rate-limited? (and (= :error agent-status) (implement-result/rate-limit-in-result? result))
         ;; PR-C of network-resilience stack: PR-B's network-monitor
         ;; flagged a sustained provider outage. Recovery is the
         ;; opposite of rate-limited — burn an iteration to retry from
@@ -144,7 +144,7 @@
         ;; subprocess is already dead and the LLM call's state was
         ;; mid-stream when the drop hit.
         network-dropped? (and (= :error agent-status)
-                              (impl-result/network-drop-in-result? result))
+                              (implement-result/network-drop-in-result? result))
         ;; PR-C of phase-timeout stack: companion to network-dropped?.
         ;; Stream-idle / stagnation / hard-limit timeouts from the
         ;; implementer LLM call. Retriable from the persisted
@@ -154,7 +154,7 @@
         ;; Two arms never both fire on the same result — the
         ;; underlying `:timeout :type` is mutually exclusive.
         backend-timeout? (and (= :error agent-status)
-                              (impl-result/backend-timeout-in-result? result))
+                              (implement-result/backend-timeout-in-result? result))
         gate-failed? (phase-gate/gate-failed? (:phase ctx))
         ;; Curator's empty-diff verdict: the implementer wrote no files to the
         ;; environment. Retrying with the same prompt won't change that — the
@@ -176,7 +176,7 @@
         ;; the executor environment. A nil output is NOT an error — code is in
         ;; the environment, not serialized in the result.
         effective-status agent-status
-        invalid-already-implemented? (impl-result/unverified-already-implemented? ctx result)
+        invalid-already-implemented? (implement-result/unverified-already-implemented? ctx result)
         phase-status (cond
                        ;; Stream watchdog stall — retriable. Route through the
                        ;; normal status determination so the phase retries on
@@ -209,7 +209,7 @@
                        curator-empty-diff? :failed
                        :else (phase/determine-phase-status
                                effective-status iterations max-iterations))
-        metrics (impl-result/ensure-valid-metrics
+        metrics (implement-result/ensure-valid-metrics
                   (get result :metrics {:tokens 0 :duration-ms duration-ms})
                   logger)
         cost-usd (get result :cost-usd
@@ -217,11 +217,11 @@
                      (* (get metrics :tokens 0) 0.000015)))
         metrics (assoc metrics :cost-usd cost-usd :duration-ms duration-ms)
         env-id (get ctx :execution/environment-id)
-        curated-artifact (impl-result/successful-curated-artifact result)
+        curated-artifact (implement-result/successful-curated-artifact result)
         degraded-handoff? (true? (:degraded-handoff? result))
         raw-agent-status (or (:raw-agent-status result) agent-status)
         summary (or (get-in result [:output :code/summary])
-                    (impl-result/raw-agent-output result)
+                    (implement-result/raw-agent-output result)
                     (messages/t :implement/summary-default))
         on-fail (get-in ctx [:phase-config :on-fail])
         ;; Phase 3c verdict — only meaningful for terminal phase
@@ -299,9 +299,9 @@
             ;; On success: store lightweight result — code is in the environment, not here
             (= :completed phase-status)
             (-> (assoc-in [:phase :result]
-                          (impl-result/preserve-consultation (phase/success env-id summary) result))
+                          (implement-result/preserve-consultation (phase/success env-id summary) result))
                 (assoc-in [:phase :artifact]
-                          (cond-> (impl-result/lightweight-curated-artifact curated-artifact)
+                          (cond-> (implement-result/lightweight-curated-artifact curated-artifact)
                             degraded-handoff?
                             (assoc :code/degraded-handoff? true
                                    :code/raw-agent-status raw-agent-status
@@ -309,13 +309,13 @@
             (phase/retrying? (:phase updated-ctx))
             (-> (update-in [:phase :iterations] (fnil inc 1))
                 (assoc-in [:phase :last-error]
-                          (impl-result/extract-error-message result (messages/t :implement/agent-error))))
+                          (implement-result/extract-error-message result (messages/t :implement/agent-error))))
 
             (= :failed phase-status)
             (assoc-in [:phase :error]
                       (if invalid-already-implemented?
-                        (impl-result/build-unverified-already-implemented-error ctx result iterations)
-                        (impl-result/build-phase-error result agent-status rate-limited? iterations)))
+                        (implement-result/build-unverified-already-implemented-error ctx result iterations)
+                        (implement-result/build-phase-error result agent-status rate-limited? iterations)))
 
             (and (= :already-implemented agent-status)
                  (not invalid-already-implemented?))

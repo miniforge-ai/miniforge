@@ -25,7 +25,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase-software-factory.implement :as implement]
    [ai.miniforge.phase-software-factory.implement-context :as impl-context]
-   [ai.miniforge.phase-software-factory.implement-result :as impl-result]
+   [ai.miniforge.phase-software-factory.implement-result :as implement-result]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.agent.interface :as agent]
@@ -230,19 +230,19 @@
       (is (= 1 (count result))))))
 
 ;------------------------------------------------------------------------------ Rate-limit classifier (2026-04-17 widening)
-;; Tests for `rate-limit-in-result?` — it's private so we access via #'.
+;; Tests for `implement-result/rate-limit-in-result?`.
 (defn- ^{:stratum 0} rate-limit? [result]
-  (#'impl-result/rate-limit-in-result? result))
+  (implement-result/rate-limit-in-result? result))
 
 ;------------------------------------------------------------------------------ Network-drop classifier (PR-C of network-resilience stack)
-;; Tests for `network-drop-in-result?` — private, accessed via #'. PR-B's
+;; Tests for `implement-result/network-drop-in-result?`. PR-B's
 ;; network-monitor emits the verdict in three locations the classifier
 ;; matches against: the canonical agent result shape produced by
 ;; `result-boundary/error-response` (`[:error :data :timeout :type]`),
 ;; the raw exec-result shape (`[:timeout :type]`) for test harnesses,
 ;; and the formatted-error-message channel.
 (defn- ^{:stratum 0} network-drop? [result]
-  (#'impl-result/network-drop-in-result? result))
+  (implement-result/network-drop-in-result? result))
 
 ;------------------------------------------------------------------------------ Backend-timeout classifier (PR-C of phase-timeout stack)
 ;; Companion to the network-drop classifier — same three-location path
@@ -251,14 +251,14 @@
 ;; exclusive on `:timeout :type` so they never both fire on the same
 ;; result.
 (defn- ^{:stratum 0} backend-timeout? [result]
-  (#'impl-result/backend-timeout-in-result? result))
+  (implement-result/backend-timeout-in-result? result))
 
 (deftest ^{:stratum 0} preserve-consultation-no-consultation-unchanged-test
   (testing "no consultation on the full result -> lightweight result
             untouched (no empty :output key invented)"
     (let [lightweight {:status :success :environment-id :env}]
       (is (identical? lightweight
-                      (impl-result/preserve-consultation
+                      (implement-result/preserve-consultation
                        lightweight {:output {:code/summary "done"}}))))))
 
 ;------------------------------------------------------------------------------ Layer 1
