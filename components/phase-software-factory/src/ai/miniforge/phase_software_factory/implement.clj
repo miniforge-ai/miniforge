@@ -22,25 +22,21 @@
    Agent: :implementer
   Default gates: [:syntax :lint]"
   (:require
-   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.interface.gate :as phase-gate]
-   [ai.miniforge.phase.interface.task-base :as task-base]
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
    [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
    [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
    [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
+   [ai.miniforge.phase-software-factory.implement-context :as impl-context]
+   [ai.miniforge.phase-software-factory.implement-result :as impl-result]
    [ai.miniforge.agent.interface :as agent]
-   [ai.miniforge.agent.interface.protocols.messaging :as messaging]
    [ai.miniforge.context-pack.interface :as context-pack]
    [ai.miniforge.knowledge.interface :as knowledge]
-   [ai.miniforge.repo-index.interface :as repo-index]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
-   [ai.miniforge.schema.interface :as schema]
-   [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
-   [clojure.string :as str]))
+   [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -49,288 +45,40 @@
   "Phase defaults loaded from config/phase/defaults.edn."
   (phase-config/defaults-for :implement))
 
+;; Compatibility re-exports
+;; Moved to implement-context / implement-result; re-exported here so
+;; existing `implement/<name>` and `#'implement/<name>` references keep
+;; resolving. The private ones exist for tests that reach them through
+;; `#'`. clj-kondo counts a qualified call such as
+;; `(impl-result/rate-limit-in-result? ...)` below as a use of the
+;; same-named private var, so only the re-exports with no such call
+;; need the unused-private-var ignore.
+(def ^{:stratum 0} create-streaming-callback impl-context/create-streaming-callback)
+
+(def ^{:stratum 0} collect-peer-advice impl-context/collect-peer-advice)
+
+(def ^{:stratum 0} preserve-consultation impl-result/preserve-consultation)
+
+#_{:clj-kondo/ignore [:unused-private-var]}
+(def ^{:stratum 0} ^:private resolve-worktree-path-result impl-context/resolve-worktree-path-result)
+
+#_{:clj-kondo/ignore [:unused-private-var]}
+(def ^{:stratum 0} ^:private load-files-from-capsule impl-context/load-files-from-capsule)
+
+#_{:clj-kondo/ignore [:unused-private-var]}
+(def ^{:stratum 0} ^:private base-ref-candidates impl-context/base-ref-candidates)
+
+(def ^{:stratum 0} ^:private resolve-existing-files impl-context/resolve-existing-files)
+
+(def ^{:stratum 0} ^:private task-base-refs impl-context/task-base-refs)
+
+(def ^{:stratum 0} ^:private network-drop-in-result? impl-result/network-drop-in-result?)
+
+(def ^{:stratum 0} ^:private backend-timeout-in-result? impl-result/backend-timeout-in-result?)
+
+(def ^{:stratum 0} ^:private rate-limit-in-result? impl-result/rate-limit-in-result?)
+
 ;; Interceptor implementation
-(def ^{:stratum 0} ^:private max-test-output-lines
-  "Cap raw test output sent to implementer to avoid token waste.
-   Failure summaries are typically in the first/last 30 lines."
-  60)
-
-(def ^{:stratum 0} ^:private current-head-ref
-  "Git ref for the currently acquired promoted workspace."
-  "HEAD")
-
-(defn- ^{:stratum 0} build-context-pack
-  "Build a context pack for the implement phase, falling back gracefully."
-  [worktree-path files-in-scope]
-  (try
-    (when-let [index (repo-index/build-index worktree-path)]
-      (let [search-index (try (repo-index/build-search-index index)
-                              (catch Exception _ nil))
-            pack (context-pack/build-pack :implement index
-                   {:files-in-scope files-in-scope
-                    :search-index search-index
-                    :search-query (when (seq files-in-scope)
-                                    (first files-in-scope))})]
-        (context-pack/->pack-context index pack)))
-    (catch Exception _e
-      nil)))
-
-(defn- ^{:stratum 0} resolve-worktree-path-result
-  "Resolve the worktree path from execution context, returning a path or a
-   canonical anomaly. Do not fall back to the host filesystem when no
-   environment has been acquired."
-  [ctx]
-  (or (get ctx :execution/worktree-path)
-      (anomaly/sub-anomaly :invalid-input
-                           :anomalies.phase/enter-failed
-                           (messages/t :implement/no-worktree)
-                           {:ctx-keys (vec (keys ctx))})))
-
-(defn- ^{:stratum 0} resolve-files-in-scope
-  "Resolve files-in-scope from input, checking context and intent."
-  [input]
-  (or (get-in input [:context :files-in-scope])
-      (get-in input [:intent :scope])))
-
-(defn- ^{:stratum 0} load-files-from-capsule
-  "Read scope files from inside a task capsule via execute-fn.
-   Returns seq of {:path :content} maps, same shape as phase/load-files-in-scope."
-  [execute-fn executor env-id worktree-path files-in-scope]
-  (when (seq files-in-scope)
-    (->> files-in-scope
-         (keep (fn [path]
-                 (try
-                   (let [full-path (str worktree-path "/" path)
-                         result (execute-fn executor env-id (str "cat " (agent/shell-quote full-path))
-                                           {:workdir worktree-path})
-                         content (get-in result [:data :stdout])]
-                     (when (and content (zero? (get-in result [:data :exit-code] 1)))
-                       {:path path :content content}))
-                   (catch Exception _ nil))))
-         vec)))
-
-(defn- ^{:stratum 0} resolve-review-feedback
-  "Extract review feedback from phase results."
-  [ctx]
-  (or (get-in ctx [:execution/phase-results :review :result :output :review/feedback])
-      (get-in ctx [:execution/phase-results :review :result :output :review/issues])))
-
-(defn- ^{:stratum 0} resolve-phase-handoff
-  "Resolve the current review repair handoff targeting implement."
-  [ctx]
-  (get-in ctx [:execution/phase-results :review :phase/handoff]))
-
-(defn- ^{:stratum 0} assoc-optional-task-fields
-  "Conditionally assoc repo-map, repo-index, context-pack, and knowledge-context onto a task."
-  [task pack-ctx kb-context]
-  (cond-> task
-    (:repo-map-text pack-ctx)
-    (assoc :task/repo-map (:repo-map-text pack-ctx))
-    (:repo-index pack-ctx)
-    (assoc :task/repo-index (:repo-index pack-ctx))
-    (:context-pack pack-ctx)
-    (assoc :task/context-pack (:context-pack pack-ctx))
-    kb-context
-    (assoc :task/knowledge-context kb-context)))
-
-(defn ^{:stratum 0} create-streaming-callback
-  "Create a streaming callback for agent output if event-stream is available."
-  [ctx]
-  (phase/create-streaming-callback ctx :implement))
-
-(defn ^{:stratum 0} collect-peer-advice
-  "Collect peer messages for the implementer agent if a message router is available."
-  [ctx]
-  (when-let [msg-router (:message-router ctx)]
-    (try
-      (let [msgs (messaging/get-messages-for-agent msg-router :implementer (:execution/id ctx))]
-        (when (seq msgs)
-          {:peer-messages (vec msgs)}))
-      (catch Exception _e nil))))
-
-(defn- ^{:stratum 0} resolve-backend-keyword
-  "Best-effort resolution of the configured LLM backend keyword from ctx.
-
-   The live llm-backend client carries the keyword on its config at
-   `[:llm-backend :config :backend]` — the canonical location elsewhere in
-   the codebase (see agent/core) — so that wins. Falls back to the various
-   user/self-healing config :llm maps, then :unknown."
-  [ctx]
-  (or (get-in ctx [:llm-backend :config :backend])
-      (get-in ctx [:execution/opts :llm-backend :config :backend])
-      (get-in ctx [:user-config :llm :backend])
-      (get-in ctx [:config :llm :backend])
-      (get-in ctx [:llm :backend])
-      :unknown))
-
-(def ^{:stratum 0} ^:private rate-limit-pattern
-  "Lightweight rate limit / infra-transient detection for the phase level.
-   Avoids a dependency on workflow/dag-resilience.
-
-   Widened 2026-04-17 after a dogfood failure where the LLM backend
-   returned near-empty content in ~4s (quota-exhausted-adjacent infra
-   failure) that the prior narrow regex missed. Added: HTTP 503, 'too
-   many requests', 'overloaded', 'try again', 'capacity', 'throttled',
-   and a broader apostrophe class for 'you've'."
-  #"(?i)you['\u2019]ve hit your (usage |)limit|rate.?limit|429|503|quota.?exceeded|resets? \d+[ap]m|too many requests|overloaded|try again (?:later|in)|at capacity|throttled")
-
-(def ^{:stratum 0} ^:private suspicious-short-duration-ms
-  "Threshold below which an implement phase is too fast to have done real
-   work. A legitimate implementer LLM call takes minutes; anything under
-   30s that ALSO failed to produce files is almost always an infra
-   failure (auth, quota, transient backend error) rather than a real
-   task failure. Routing these through the rate-limit branch lets the
-   workflow pause and resume rather than terminating permanently."
-  30000)
-
-(defn- ^{:stratum 0} network-drop-in-result?
-  "True when the agent result carries a network-drop signal from
-   PR-B's `network-monitor`. Three locations may carry it:
-
-   1. `[:error :data :timeout :type]` — the canonical agent result
-      shape. `streaming-error-response` builds an llm-error map with
-      `:timeout` on the `:error`; `result-boundary/error-response`
-      then merges that map into `[:error :data]` via `response/error`.
-      This is the path the implement phase actually sees from a
-      production network-drop.
-   2. `[:timeout :type]` — back-compat for raw exec-result maps that
-      bypass the result-boundary wrapping (test harnesses, direct
-      stream-exec-fn captures).
-   3. `[:error :message]` text containing the formatted
-      `Adaptive timeout: ... (type: network-drop, ...)` produced by
-      `format-timeout-error` — defensive fallback for paths that
-      surface the timeout via the error channel as a plain string.
-
-   The message-channel regex anchors on the explicit `type:
-   network-drop` marker emitted by `format-timeout-error` so an
-   unrelated message that happens to mention 'network drop' in prose
-   does not trip the predicate.
-
-   Distinct from `rate-limit-in-result?` — the network monitor detects
-   raw TCP/TLS reachability loss (no provider response at all), while
-   rate-limit detection keys off provider-emitted 429/quota messages.
-   The two anomalies want different recovery strategies: rate-limit
-   pauses + waits; network-drop retries from the last persisted
-   checkpoint (PR-C of the network-resilience stack)."
-  [result]
-  (or (= :network-drop (get-in result [:error :data :timeout :type]))
-      (= :network-drop (get-in result [:timeout :type]))
-      (let [msg (get-in result [:error :message])]
-        (and (string? msg)
-             (re-find #"(?i)type:\s*network-drop" msg)))))
-
-(defn- ^{:stratum 0} backend-timeout-in-result?
-  "True when the agent result carries an adaptive-timeout signal that
-   is NOT `:network-drop` — i.e. the LLM call hit a stream-idle,
-   stagnation, or hard-limit timeout. Mirrors
-   `network-drop-in-result?`'s three-location path priority so the
-   two timeout families stay symmetrically shaped (matching the
-   2026-06-06 phase-timeout PR-A primitives in result-boundary).
-
-   The 2026-06-05 dogfood (`adhoc-944448986`) revealed the gap: the
-   reviewer LLM stream-idle'd at 360s and the workflow had no
-   per-phase verdict to distinguish that infra timeout from a real
-   defect. PR-A/B fixed the review-phase side; this is the implement-
-   phase parity.
-
-   Distinct from `network-drop-in-result?` — the network monitor
-   detects TCP/TLS reachability loss; this catches the cases where
-   the provider stayed connected but stopped producing output (or
-   ran past a hard wall-clock cutoff). The two arms never both fire
-   on the same result because the `:type` is mutually exclusive.
-
-   Distinct from `rate-limit-in-result?` — that keys off provider-
-   emitted 429/quota messages; this keys off the LLM client's own
-   adaptive-timeout taxonomy."
-  [result]
-  (let [timeout-types #{:stream-idle :stagnation :hard-limit}
-        boundary-type (or (get-in result [:error :data :timeout :type])
-                          (get-in result [:timeout :type]))]
-    (or (contains? timeout-types boundary-type)
-        (let [msg (get-in result [:error :message])]
-          (and (string? msg)
-               (re-find #"(?i)type:\s*(stream-idle|stagnation|hard-limit)" msg))))))
-
-(defn- ^{:stratum 0} extract-error-message
-  "Extract the most relevant error message from an agent result."
-  [result default-msg]
-  (or (not-empty (get-in result [:error :message]))
-      (not-empty (get-in result [:output :error]))
-      default-msg))
-
-(defn- ^{:stratum 0} prior-verify-failure?
-  "Return true when the previous verify phase recorded a failure."
-  [ctx]
-  (let [verify-phase (get-in ctx [:execution/phase-results :verify])]
-    (contains? #{:failed :failure :error}
-               (or (:status verify-phase)
-                   (get-in verify-phase [:result :status])))))
-
-(defn- ^{:stratum 0} successful-curated-artifact
-  "Extract the curated artifact from a successful implement phase result."
-  [result]
-  (or (:artifact result)
-      (:output result)))
-
-(defn- ^{:stratum 0} raw-agent-output
-  "The agent's scalar output text, whether it still sits at :output or
-   was preserved under [:output :agent/raw-output] when
-   codex-pin/attach-consultation normalized a scalar into a map. Every
-   classifier that reads the raw text (rate-limit detection, error
-   message, summary fallback) must go through this accessor or it goes
-   blind after normalization."
-  [result]
-  (let [out (:output result)]
-    (cond
-      (string? out) out
-      (map? out) (let [raw (:agent/raw-output out)]
-                   (when (string? raw) raw)))))
-
-(defn- ^{:stratum 0} lightweight-curated-artifact
-  "Persist only lightweight curated metadata in phase results.
-   Serialized code stays in the worktree and can be rehydrated later."
-  [artifact]
-  (when artifact
-    (let [files (:code/files artifact)]
-      (cond-> (dissoc artifact :code/files)
-        (seq files)
-        (assoc :code/file-paths (mapv :path files)
-               :code/file-actions (mapv :action files)
-               :code/file-count (count files))))))
-
-(defn ^{:stratum 0} preserve-consultation
-  "Carry :codex/consultation from the full phase result onto the
-   lightweight success result. The gap instrument (T2 s3.2) and the gap
-   report read consultation provenance from the durable phase record;
-   replacing the result wholesale at leave destroyed it, leaving
-   successful DAG-task implements with no evidence delivery happened.
-   Public for tests."
-  [lightweight result]
-  (if-let [consultation (get-in result [:output :codex/consultation])]
-    (assoc-in lightweight [:output :codex/consultation] consultation)
-    lightweight))
-
-(defn- ^{:stratum 0} ensure-valid-metrics
-  "Phase-input boundary validation for the agent result's `:metrics`. The
-   response builders guarantee non-nil numeric `:tokens`/`:duration-ms`, but a
-   producer that bypasses them (or a future regression) could send a nil that
-   then throws a message-less NPE in the cost/accumulation arithmetic below.
-   Validate against `schema/Metrics`; on violation, log loudly and coerce to a
-   valid shape (telemetry must not crash the phase) rather than fail silently."
-  [metrics logger]
-  (if (schema/valid? schema/Metrics metrics)
-    metrics
-    ;; Resilient to ANY invalid shape — a non-map :metrics (string/vector) must
-    ;; coerce too, not throw before we can log/recover.
-    (let [base    (if (map? metrics) metrics {})
-          coerced (-> base
-                      (update :tokens #(if (nat-int? %) % 0))
-                      (update :duration-ms #(if (nat-int? %) % 0)))]
-      (when logger
-        (log/warn logger :implement :metrics/boundary-invalid
-                  {:data {:received metrics :coerced coerced}}))
-      coerced)))
-
 (defn ^{:stratum 0} error-implement
   "Handle implementation phase errors. Attempts repair via inner loop
    within budget; on exhaustion redirects via `:on-fail` when set,
@@ -339,187 +87,75 @@
   [ctx ex]
   (phase/handle-error ctx ex 5))
 
-(defn- ^{:stratum 0} render-failure-block
-  "One parsed failure back in clojure.test's own shape, so the implementer
-   reads it exactly as a local run would print it."
-  [{:keys [kind test location detail]}]
-  (str (if (= :fail kind) "FAIL" "ERROR") " in (" test ")"
-       (when location (str " (" location ")"))
-       (when-not (str/blank? detail) (str "\n" detail))))
-
-(defn- ^{:stratum 0} prior-gate-failures
-  "Structured gate errors from the prior denied attempts that redirected
-   here, implement's own first, then verify's. Verify's gates (:tests-pass,
-   :policy-verify) deny on the verify result and redirect to implement, and
-   their errors travel the same [:phase/gate-failures] channel — so the
-   failing tests reach the implementer as a denial, not only as test output.
-   nil when no prior denial exists."
+(defn ^{:stratum 0} build-implement-task
+  "Build the task map for the implementer agent from execution context.
+   Returns {:task task-map :rules-manifest manifest-or-nil}."
   [ctx]
-  (seq (mapcat (fn [phase-name]
-                 (get-in ctx [:execution/phase-results phase-name :phase/gate-failures]))
-               [:implement :verify])))
+  (let [input (get-in ctx [:execution/input])
+        plan-result (get-in ctx [:execution/phase-results :plan :result :output])
+        verify-failure (get-in ctx [:execution/phase-results :verify])
+        worktree-path (impl-context/resolve-worktree-path ctx)
+        files-in-scope (impl-context/resolve-files-in-scope input)
+        pack-ctx (or (get-in ctx [:execution/pack-context])
+                     (impl-context/build-context-pack worktree-path files-in-scope))
+        existing-files (impl-context/resolve-existing-files ctx pack-ctx worktree-path files-in-scope)
+        ;; Thesium Codex blackboard pin (SPEC §7.4): pinned FIRST so the
+        ;; worries render before the content they apply to. Retry iterations
+        ;; reuse :execution/cached-files which already contains the previous
+        ;; pin — drop it so the fresh consultation replaces it instead of
+        ;; rendering twice.
+        codex-outcome (codex-pin/pin-outcome :implement (get-in ctx [:execution/logger]))
+        existing-files (vec (remove #(= codex-pin/pin-path (:path %))
+                                    (or existing-files [])))
+        existing-files (if-let [pin (:entry codex-outcome)]
+                         (into [pin] existing-files)
+                         existing-files)
+        behavior-addendum (phase/load-guidance-addendum
+                            :implement {:task {:task/intent (:intent input)}})
+        review-feedback (impl-context/resolve-review-feedback ctx)
+        phase-handoff (impl-context/resolve-phase-handoff ctx)
+        ;; A prior implement attempt DENIED by gates: its structured gate
+        ;; errors ride :execution/phase-results (the [:phase ...] channel
+        ;; is cleared before every step). This is what turns a gate from
+        ;; a wall into a repair instruction — deny, retry with the
+        ;; evidence, fix, pass.
+        gate-failures (impl-context/prior-gate-failures ctx)
+        {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
+                                       (:knowledge-store ctx) :implementer (get input :tags []))
+        base-task (impl-context/assoc-optional-task-fields
+                    {:task/id (random-uuid)
+                     :task/type :implement
+                     :task/description (:description input)
+                     :task/title (:title input)
+                     :task/intent (:intent input)
+                     :task/constraints (:constraints input)
+                     :task/plan plan-result
+                     :task/existing-files existing-files
+                     :task/behavior-addendum behavior-addendum}
+                    pack-ctx formatted)
+        iteration (get-in ctx [:phase :iterations] 0)
+        last-error (get-in ctx [:phase :last-error])
+        task (cond-> base-task
+               verify-failure
+               (assoc :task/verify-failures (impl-context/build-verify-failures verify-failure))
+               gate-failures
+               (assoc :task/gate-failures (vec gate-failures))
+               review-feedback
+               (assoc :task/review-feedback review-feedback)
+               phase-handoff
+               (assoc :task/phase-handoff phase-handoff)
+               (pos? iteration)
+               (assoc :task/prior-attempts
+                      {:attempt-number (inc iteration)
+                       :prior-error    (or last-error (messages/t :implement/prior-error-default))
+                       :instruction    (messages/t :implement/retry-instruction)}))]
+    {:task task
+     :rules-manifest manifest
+     :codex-outcome codex-outcome}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} truncate-test-output
-  "Truncate test output to max-test-output-lines, keeping head and tail."
-  [output]
-  (when (string? output)
-    (let [lines (str/split-lines output)
-          n (count lines)]
-      (if (<= n max-test-output-lines)
-        output
-        (let [head-n 30
-              tail-n 25
-              head (take head-n lines)
-              tail (take-last tail-n lines)
-              skipped (- n head-n tail-n)]
-          (str/join "\n"
-            (concat head
-                    [(str "\n... [" skipped " lines omitted] ...\n")]
-                    tail)))))))
-
-(defn- ^{:stratum 1} resolve-worktree-path
-  "Boundary wrapper around the anomaly-returning
-   `resolve-worktree-path-result`; retained for existing exception callers."
-  [ctx]
-  (let [result (resolve-worktree-path-result ctx)]
-    (if (anomaly/anomaly? result)
-      (throw (ex-info (:anomaly/message result)
-                      (:anomaly/data result)))
-      result)))
-
-(defn- ^{:stratum 1} base-ref-candidates
-  "Return candidate refs for collecting the promoted task artifact."
-  [ctx]
-  (letfn [(present-string? [value]
-            (and (string? value) (not (str/blank? value))))
-          (branch-refs [branch]
-            (when (present-string? branch)
-              [(str "refs/remotes/origin/" branch)
-               (str "origin/" branch)
-               (str "refs/heads/" branch)]))]
-    (let [base-sha (get-in ctx [:execution/environment-metadata :base-sha])
-          base-branch (or (get-in ctx [:execution/environment-metadata :base-branch])
-                          (get-in ctx [:execution/opts :branch])
-                          (get-in ctx [:execution/input :branch]))
-          resume-workspace (get-in ctx [:execution/opts :resume-workspace])
-          original-commit (get-in ctx [:execution/input :context :git-commit])
-          original-branch (get-in ctx [:execution/input :context :git-branch])
-          original-refs (concat (when (present-string? original-commit)
-                                  [original-commit])
-                                (branch-refs original-branch))
-          resume-ranges (when resume-workspace
-                          (map #(str % "..." current-head-ref) original-refs))]
-      (into []
-            (comp (filter present-string?) (distinct))
-            (concat resume-ranges
-                    [base-sha]
-                    (branch-refs base-branch))))))
-
-(defn- ^{:stratum 1} resolve-existing-files
-  "Load existing files from cache, context pack, capsule, or disk."
-  [ctx pack-ctx worktree-path files-in-scope]
-  (or (get-in ctx [:execution/cached-files])
-      (:existing-files pack-ctx)
-      ;; In governed mode, read files from inside the capsule
-      (when-let [execute-fn (get ctx :execution/execute-fn)]
-        (load-files-from-capsule execute-fn
-                                 (get ctx :execution/executor)
-                                 (get ctx :execution/environment-id)
-                                 (or (get ctx :execution/capsule-workdir) worktree-path)
-                                 files-in-scope))
-      (phase/load-files-in-scope worktree-path files-in-scope)))
-
-(defn- ^{:stratum 1} suspicious-short-termination?
-  "Heuristic: implement phase completed in <30s AND produced no files.
-   Observed 2026-04-17 dogfood pattern — LLM stream returned immediately
-   with empty content; agent-status :error but no rate-limit keywords in
-   the error message. Almost certainly an infra failure that masqueraded
-   as a task failure."
-  [result]
-  (let [duration (get-in result [:metrics :duration-ms] 0)
-        error-code (get-in result [:error :data :code])
-        no-files? (= :curator/no-files-written error-code)]
-    (and no-files?
-         (pos? duration)
-         (< duration suspicious-short-duration-ms))))
-
-(defn- ^{:stratum 1} unverified-already-implemented?
-  "Return true when implement claims :already-implemented while responding to
-   known review or verify failures."
-  [ctx result]
-  (and (= :already-implemented (:status result))
-       (or (resolve-review-feedback ctx)
-           (prior-verify-failure? ctx))))
-
-(defn- ^{:stratum 1} build-unverified-already-implemented-error
-  "Build a structured error for an unsupported :already-implemented repair outcome."
-  [ctx result iterations]
-  {:message (messages/t :implement/unverified-already-implemented)
-   :agent-status (:status result)
-   :rate-limited? false
-   :iterations iterations
-   :review-feedback? (boolean (resolve-review-feedback ctx))
-   :verify-failure? (prior-verify-failure? ctx)})
-
-(defn- ^{:stratum 1} build-phase-error
-  "Build a structured phase error map from an agent result."
-  [result agent-status rate-limited? iterations]
-  {:message (or (extract-error-message result nil)
-                (not-empty (raw-agent-output result))
-                (messages/t :implement/exhausted-retries))
-   :agent-status agent-status
-   :rate-limited? (boolean rate-limited?)
-   :iterations iterations})
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} task-base-refs
-  "The task base refs to carry: the ones a previous implement attempt
-   recorded (a resumed run restores them), else fresh candidates."
-  [ctx]
-  (or (task-base/recorded-refs ctx) (base-ref-candidates ctx)))
-
-(defn- ^{:stratum 2} failure-focused-output
-  "The failure blocks first, verbatim, then the head/tail excerpt. Head and
-   tail alone lost every failure of a 6,000-line run (series 8, 2026-09-04):
-   the first namespace's clean summary was the head, the runner's epilogue
-   the tail, and the three FAIL blocks sat in the omitted middle."
-  [failures output]
-  (let [excerpt (truncate-test-output output)]
-    (if (seq failures)
-      (str (str/join "\n\n" (map render-failure-block failures)) "\n\n" excerpt)
-      excerpt)))
-
-(defn- ^{:stratum 2} rate-limit-in-result?
-  "Check if an agent result indicates an infrastructure failure that
-   should pause/resume rather than terminate. Two signals:
-     1. Known rate-limit / quota / transient-backend keywords in error text.
-     2. Suspiciously short termination with no files produced (observed
-        symptom of LLM-backend failure that returned empty content fast)."
-  [result]
-  (or (some (fn [text]
-              (and (string? text) (re-find rate-limit-pattern text)))
-            [(get-in result [:error :message])
-             (raw-agent-output result)])
-      (suspicious-short-termination? result)))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn- ^{:stratum 3} build-verify-failures
-  "Extract lean verify-failure data from phase results.
-   In the environment model, test metrics are in :result :metrics."
-  [verify-result]
-  (let [metrics  (get-in verify-result [:result :metrics])
-        failures (get metrics :failures [])]
-    {:test-results (cond-> {:pass-count (get metrics :pass-count 0)
-                            :fail-count (get metrics :fail-count 0)
-                            :summary    (get-in verify-result [:result :summary])}
-                     (seq failures) (assoc :failing-tests (mapv :test failures)))
-     :test-output (failure-focused-output failures (get metrics :test-output))}))
-
-(defn ^{:stratum 3} leave-implement
+(defn ^{:stratum 1} leave-implement
   "Post-processing for implementation phase.
 
    Records metrics, captures code artifacts."
@@ -533,7 +169,7 @@
         logger (get-in ctx [:execution/logger])
         result (get-in ctx [:phase :result])
         agent-status (:status result)
-        rate-limited? (and (= :error agent-status) (rate-limit-in-result? result))
+        rate-limited? (and (= :error agent-status) (impl-result/rate-limit-in-result? result))
         ;; PR-C of network-resilience stack: PR-B's network-monitor
         ;; flagged a sustained provider outage. Recovery is the
         ;; opposite of rate-limited — burn an iteration to retry from
@@ -541,7 +177,7 @@
         ;; subprocess is already dead and the LLM call's state was
         ;; mid-stream when the drop hit.
         network-dropped? (and (= :error agent-status)
-                              (network-drop-in-result? result))
+                              (impl-result/network-drop-in-result? result))
         ;; PR-C of phase-timeout stack: companion to network-dropped?.
         ;; Stream-idle / stagnation / hard-limit timeouts from the
         ;; implementer LLM call. Retriable from the persisted
@@ -551,7 +187,7 @@
         ;; Two arms never both fire on the same result — the
         ;; underlying `:timeout :type` is mutually exclusive.
         backend-timeout? (and (= :error agent-status)
-                              (backend-timeout-in-result? result))
+                              (impl-result/backend-timeout-in-result? result))
         gate-failed? (phase-gate/gate-failed? (:phase ctx))
         ;; Curator's empty-diff verdict: the implementer wrote no files to the
         ;; environment. Retrying with the same prompt won't change that — the
@@ -573,7 +209,7 @@
         ;; the executor environment. A nil output is NOT an error — code is in
         ;; the environment, not serialized in the result.
         effective-status agent-status
-        invalid-already-implemented? (unverified-already-implemented? ctx result)
+        invalid-already-implemented? (impl-result/unverified-already-implemented? ctx result)
         phase-status (cond
                        ;; Stream watchdog stall — retriable. Route through the
                        ;; normal status determination so the phase retries on
@@ -606,7 +242,7 @@
                        curator-empty-diff? :failed
                        :else (phase/determine-phase-status
                                effective-status iterations max-iterations))
-        metrics (ensure-valid-metrics
+        metrics (impl-result/ensure-valid-metrics
                   (get result :metrics {:tokens 0 :duration-ms duration-ms})
                   logger)
         cost-usd (get result :cost-usd
@@ -614,11 +250,11 @@
                      (* (get metrics :tokens 0) 0.000015)))
         metrics (assoc metrics :cost-usd cost-usd :duration-ms duration-ms)
         env-id (get ctx :execution/environment-id)
-        curated-artifact (successful-curated-artifact result)
+        curated-artifact (impl-result/successful-curated-artifact result)
         degraded-handoff? (true? (:degraded-handoff? result))
         raw-agent-status (or (:raw-agent-status result) agent-status)
         summary (or (get-in result [:output :code/summary])
-                    (raw-agent-output result)
+                    (impl-result/raw-agent-output result)
                     (messages/t :implement/summary-default))
         on-fail (get-in ctx [:phase-config :on-fail])
         ;; Phase 3c verdict — only meaningful for terminal phase
@@ -696,9 +332,9 @@
             ;; On success: store lightweight result — code is in the environment, not here
             (= :completed phase-status)
             (-> (assoc-in [:phase :result]
-                          (preserve-consultation (phase/success env-id summary) result))
+                          (impl-result/preserve-consultation (phase/success env-id summary) result))
                 (assoc-in [:phase :artifact]
-                          (cond-> (lightweight-curated-artifact curated-artifact)
+                          (cond-> (impl-result/lightweight-curated-artifact curated-artifact)
                             degraded-handoff?
                             (assoc :code/degraded-handoff? true
                                    :code/raw-agent-status raw-agent-status
@@ -706,13 +342,13 @@
             (phase/retrying? (:phase updated-ctx))
             (-> (update-in [:phase :iterations] (fnil inc 1))
                 (assoc-in [:phase :last-error]
-                          (extract-error-message result (messages/t :implement/agent-error))))
+                          (impl-result/extract-error-message result (messages/t :implement/agent-error))))
 
             (= :failed phase-status)
             (assoc-in [:phase :error]
                       (if invalid-already-implemented?
-                        (build-unverified-already-implemented-error ctx result iterations)
-                        (build-phase-error result agent-status rate-limited? iterations)))
+                        (impl-result/build-unverified-already-implemented-error ctx result iterations)
+                        (impl-result/build-phase-error result agent-status rate-limited? iterations)))
 
             (and (= :already-implemented agent-status)
                  (not invalid-already-implemented?))
@@ -727,77 +363,7 @@
                  result (merge watchdog-state {:rate-limited? rate-limited?}))))
       final-ctx)))
 
-;------------------------------------------------------------------------------ Layer 4
-
-(defn ^{:stratum 4} build-implement-task
-  "Build the task map for the implementer agent from execution context.
-   Returns {:task task-map :rules-manifest manifest-or-nil}."
-  [ctx]
-  (let [input (get-in ctx [:execution/input])
-        plan-result (get-in ctx [:execution/phase-results :plan :result :output])
-        verify-failure (get-in ctx [:execution/phase-results :verify])
-        worktree-path (resolve-worktree-path ctx)
-        files-in-scope (resolve-files-in-scope input)
-        pack-ctx (or (get-in ctx [:execution/pack-context])
-                     (build-context-pack worktree-path files-in-scope))
-        existing-files (resolve-existing-files ctx pack-ctx worktree-path files-in-scope)
-        ;; Thesium Codex blackboard pin (SPEC §7.4): pinned FIRST so the
-        ;; worries render before the content they apply to. Retry iterations
-        ;; reuse :execution/cached-files which already contains the previous
-        ;; pin — drop it so the fresh consultation replaces it instead of
-        ;; rendering twice.
-        codex-outcome (codex-pin/pin-outcome :implement (get-in ctx [:execution/logger]))
-        existing-files (vec (remove #(= codex-pin/pin-path (:path %))
-                                    (or existing-files [])))
-        existing-files (if-let [pin (:entry codex-outcome)]
-                         (into [pin] existing-files)
-                         existing-files)
-        behavior-addendum (phase/load-guidance-addendum
-                            :implement {:task {:task/intent (:intent input)}})
-        review-feedback (resolve-review-feedback ctx)
-        phase-handoff (resolve-phase-handoff ctx)
-        ;; A prior implement attempt DENIED by gates: its structured gate
-        ;; errors ride :execution/phase-results (the [:phase ...] channel
-        ;; is cleared before every step). This is what turns a gate from
-        ;; a wall into a repair instruction — deny, retry with the
-        ;; evidence, fix, pass.
-        gate-failures (prior-gate-failures ctx)
-        {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
-                                       (:knowledge-store ctx) :implementer (get input :tags []))
-        base-task (assoc-optional-task-fields
-                    {:task/id (random-uuid)
-                     :task/type :implement
-                     :task/description (:description input)
-                     :task/title (:title input)
-                     :task/intent (:intent input)
-                     :task/constraints (:constraints input)
-                     :task/plan plan-result
-                     :task/existing-files existing-files
-                     :task/behavior-addendum behavior-addendum}
-                    pack-ctx formatted)
-        iteration (get-in ctx [:phase :iterations] 0)
-        last-error (get-in ctx [:phase :last-error])
-        task (cond-> base-task
-               verify-failure
-               (assoc :task/verify-failures (build-verify-failures verify-failure))
-               gate-failures
-               (assoc :task/gate-failures (vec gate-failures))
-               review-feedback
-               (assoc :task/review-feedback review-feedback)
-               phase-handoff
-               (assoc :task/phase-handoff phase-handoff)
-               (pos? iteration)
-               (assoc :task/prior-attempts
-                      {:attempt-number (inc iteration)
-                       :prior-error    (or last-error (messages/t :implement/prior-error-default))
-                       :instruction    (messages/t :implement/retry-instruction)}))]
-    {:task task
-     :rules-manifest manifest
-     :codex-outcome codex-outcome}))
-
-;------------------------------------------------------------------------------ Layer 5
-
-(defn ^{:stratum 5} enter-implement
+(defn ^{:stratum 1} enter-implement
   "Execute implementation phase.
 
    Reads plan from context, invokes implementer agent,
@@ -816,7 +382,7 @@
               ;; :no-secrets gate and every later persistence boundary
               ;; measure the change from the same resume-aware base.
               (not (get ctx :execution/task-base-refs))
-              (assoc :execution/task-base-refs (task-base-refs ctx))
+              (assoc :execution/task-base-refs (impl-context/task-base-refs ctx))
               (not (get-in ctx [:execution/cached-files]))
               (assoc-in [:execution/cached-files] (:task/existing-files task))
               (and (:task/context-pack task) (not (get-in ctx [:execution/pack-context])))
@@ -824,8 +390,8 @@
                         (context-pack/->pack-context
                           (:task/repo-index task)
                           (:task/context-pack task))))
-        on-chunk (create-streaming-callback ctx)
-        peer-advice (collect-peer-advice ctx)
+        on-chunk (impl-context/create-streaming-callback ctx)
+        peer-advice (impl-context/collect-peer-advice ctx)
         task (cond-> task
                peer-advice (assoc :task/peer-advice peer-advice))
         ;; Arm the stream watchdog around the synchronous agent invocation.
@@ -835,7 +401,7 @@
         ;; streaming happy path it is observe-only — every chunk pings it and
         ;; it is stopped in a finally. On a silent stall it interrupts the
         ;; phase thread, unwinding the in-flight llm-stream-reader subprocess.
-        backend (resolve-backend-keyword ctx)
+        backend (impl-context/resolve-backend-keyword ctx)
         watchdog-config (or (get-in ctx [:execution/opts :self-healing])
                             (get-in ctx [:user-config :self-healing])
                             {})
@@ -887,7 +453,7 @@
             ;; Capsule collection reads the capsule's checkout, not the host path.
             :worktree-path (or (when (get ctx :execution/execute-fn)
                                  (get ctx :execution/capsule-workdir))
-                               (resolve-worktree-path ctx))
+                               (impl-context/resolve-worktree-path ctx))
             :executor (get ctx :execution/executor)
             :execute-fn (get ctx :execution/execute-fn)
             :pre-session-snapshot (get ctx :execution/pre-session-snapshot)
@@ -1019,10 +585,10 @@
         (assoc-in [:phase :watchdog-state]
                   {:stalled? stalled? :stall/gap-duration-ms gap-ms}))))
 
-;------------------------------------------------------------------------------ Layer 6
+;------------------------------------------------------------------------------ Layer 2
 
 ;; Registry method
-(defmethod ^{:stratum 6} phase/get-phase-interceptor-method :implement
+(defmethod ^{:stratum 2} phase/get-phase-interceptor-method :implement
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name ::implement
