@@ -13,10 +13,21 @@
   deleted, and the next `bb dogfood` refuses to start on a dirty tree.
   Stale copies in `work/in-progress/` accumulated this way.
 
-  Change: when the run throws after `start-spec!` moved the spec,
-  `finish-spec!` (or the move it wraps) still runs and files the spec under
-  `work/failed/`, then the exception propagates unchanged. A run whose spec
-  is not under `work/` is unaffected."
+  `finish-spec!` does two things: it moves the spec, and it points the
+  run's checkpoint manifest at the new place (`workflow/record-spec-path!`,
+  keyed by the result's `:execution/id` and `:execution/checkpoint-root`), so
+  a later resume finds the spec. A thrown run has no result, so both must be
+  done without one.
+
+  Change: when the run throws after `start-spec!` moved the spec, the spec is
+  filed under `work/failed/`, and if the pipeline already wrote a checkpoint
+  manifest, that manifest is pointed at the new path. The run id is the
+  `workflow-id` `run-workflow-from-spec!` passes to the pipeline, which
+  adopts it as `:execution/id`; the checkpoint root is the one the run's
+  options resolve to. Then the exception propagates unchanged. A run that
+  threw before the pipeline wrote a manifest only moves the file
+  (`record-spec-path!` returns nil for a run with no manifest). A run whose
+  spec is not under `work/` is unaffected."
 
  :spec/intent
  {:type :bugfix
@@ -27,10 +38,13 @@
  :spec/constraints
  ["The original exception propagates unchanged; filing the spec must not replace or swallow it"
   "A failure to move the spec is reported on stderr and does not mask the run's exception"
-  "Tests use a temp directory as the working tree; they never move files under the repository's work/"]
+  "Tests use a temp directory as the working tree; they never move files under the repository's work/"
+  "Tests pass an explicit temp checkpoint root; nothing reads or writes under ~/.miniforge"]
 
  :spec/acceptance-criteria
  ["A run that throws after start-spec! leaves its spec in work/failed/, not work/in-progress/"
+  "When a manifest exists for the run's workflow-id under its checkpoint root, a thrown run leaves that manifest's spec path pointing at the work/failed/ file"
+  "A thrown run with no manifest moves the spec and prints no manifest warning"
   "The exception the run threw is the exception the caller receives"
   "A run that returns normally still files its spec under work/done/ or work/failed/ by its result"
   "A spec outside work/ is not moved on either path"]
