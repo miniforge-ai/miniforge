@@ -86,11 +86,11 @@ experiment-opened record, a durable record of each call before it is made,
 activation outcomes with board snapshots, cell results and a final report record.
 `report.md` is a derived convenience copy; the journal is authoritative. An
 interrupted run is incomplete, not silently resumable. A failed call is recorded
-with unknown usage, and the lab never retries it. The journal and that policy
-cover each adapter call: when a stream exits cleanly with no content, tool call
-or usage, the `llm` client itself retries once through its buffered path, and
-that second backend call has no journal record of its own. The lab records such
-an activation as failed with unknown usage.
+with unknown usage, and the lab never retries it. The adapter also turns off the
+`llm` client's own retry of an empty stream (`:empty-stream-fallback? false`), so
+each provider call is the one the journal recorded. A stream that exits cleanly
+with no content, tool call or usage is recorded as a failed activation with
+unknown usage.
 
 The live adapter calls the model through the `llm` component's isolated Claude
 client (`:backend :claude :isolated? true`) and needs that backend's normal
