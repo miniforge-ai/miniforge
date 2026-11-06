@@ -20,9 +20,11 @@
    Clojure source and EDN.
 
    A change edits a top-level form when the form holds a line the change
-   added, or a deletion point between two of its lines (where the change
-   removed lines). An added line outside every form is edited on its own.
-   Other files are edited exactly on their added lines.
+   added, or a deletion point (where the change removed lines) between two
+   of its lines or directly before it: removing a reader prefix on its own
+   line, such as `^:private` or `#_`, changes the form that follows. An
+   added line outside every form is edited on its own. Other files are
+   edited exactly on their added lines.
 
    Forms are located with edamame, which reads past aliases, reader
    conditionals and tagged literals it cannot resolve, so one unknown
@@ -53,10 +55,11 @@
 
 (defn- ^{:stratum 0} edited-span?
   "True when the form spanning START..END holds an ADDED line, or a
-   deletion point P (lines removed between P and P+1) inside it."
+   deletion point P (lines removed between P and P+1) inside it or
+   directly before it (P = START - 1)."
   [added deletion-points [start end]]
   (boolean (or (some #(<= start % end) added)
-               (some #(and (<= start %) (< % end)) deletion-points))))
+               (some #(and (<= (dec start) %) (< % end)) deletion-points))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

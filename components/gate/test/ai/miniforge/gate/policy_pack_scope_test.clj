@@ -131,13 +131,19 @@
     (is (not (:passed? (check (base-worktree base-content) {:content content} 4))))
     (is (:passed? (check (base-worktree base-content) {:content content} 8)))))
 
+(deftest ^{:stratum 2} removing-metadata-above-a-form-edits-that-form-test
+  (let [base    (str/replace base-content "(defn b" "^:private\n(defn b")
+        content base-content]
+    (is (not (:passed? (check (base-worktree base) {:content content} 9))))))
+
 (deftest ^{:stratum 2} new-file-blocks-on-any-line-test
   (is (not (:passed? (check (base-worktree nil) {:content base-content} 9)))))
 
 (deftest ^{:stratum 2} unplaceable-findings-block-test
-  (testing "a finding with no line or line 0"
+  (testing "a finding with no line, line 0, or a line past the file's last"
     (is (not (:passed? (check (base-worktree base-content) {:content edit-a} nil))))
-    (is (not (:passed? (check (base-worktree base-content) {:content edit-a} 0)))))
+    (is (not (:passed? (check (base-worktree base-content) {:content edit-a} 0))))
+    (is (not (:passed? (check (base-worktree base-content) {:content edit-a} 11)))))
   (testing "no worktree to diff against"
     (is (not (:passed? (check (base-worktree base-content) {:content edit-a :worktree? false} 9)))))
   (testing "content that does not parse"

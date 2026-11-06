@@ -17,18 +17,22 @@
   Change:
   1. For each changed file the gate finds the lines the change adds, and the
      points where it deletes lines, by diffing the artifact's content against
-     the base blob of its path. The base comes from the same candidates
-     `:no-secrets` uses: `:code/base-refs`, `:execution/task-base-refs`, the
-     environment's base SHA, then HEAD.
+     the base blob of its path. The base is the first of `:code/base-refs`,
+     `:execution/task-base-refs` and the environment's base SHA that
+     resolves; never HEAD, which holds the change once the implement phase
+     commits.
   2. In a Clojure source or EDN file the edited region is every top-level
-     form that holds an added line or a deletion point, plus each added line
-     outside any form. In any other file it is the added lines.
+     form that holds an added line or a deletion point, or that directly
+     follows a deletion point (removing a `^:private` or `#_` line changes
+     the next form), plus each added line outside any form. In any other
+     file it is the added lines.
   3. A judge finding on a line inside the edited region blocks as today. A
      finding outside it becomes a gate warning that says it lies outside the
      change, and does not block.
-  4. Anything the gate cannot place blocks as today: a finding with no line
-     or line 0, a file with no worktree or base to diff against, content that
-     does not parse, or a git command that fails. A new file has every line
+  4. Anything the gate cannot place blocks as today: a finding with no line,
+     line 0 or a line past the file's last; a file with no worktree or base
+     to diff against; content that does not parse; or a git command that
+     fails. A new file has every line
      added, so all of its findings block."
 
  :spec/intent
@@ -51,7 +55,8 @@
   "A finding on an added line between two top-level forms blocks"
   "A change that only deletes lines inside form A makes a finding in A block"
   "In a file with no base blob, a finding on any line blocks"
-  "A finding with line 0 or no line blocks"
+  "A change that only removes a ^:private line above form B makes a finding in B block"
+  "A finding with line 0, no line, or a line past the file's last blocks"
   "With no worktree path, every finding blocks"
   "A finding in a file whose content does not parse blocks"
   "Top-level form spans are found in a namespace that uses #?(:clj ...), ::alias/kw with an alias the reader cannot resolve, #inst, and an unknown tagged literal"

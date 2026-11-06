@@ -55,5 +55,7 @@
 
 (deftest ^{:stratum 1} a-deletion-point-edits-the-form-around-it-test
   (is (= #{3 4 5} (edited-forms/edited-lines "src/demo/core.clj" source #{} [4])))
+  (is (= #{3 4 5} (edited-forms/edited-lines "src/demo/core.clj" source #{} [2]))
+      "a deletion directly before a form, such as a removed ^:private line, edits it")
   (is (= #{} (edited-forms/edited-lines "src/demo/core.clj" source #{} [5]))
       "a deletion after a form's last line is between forms"))

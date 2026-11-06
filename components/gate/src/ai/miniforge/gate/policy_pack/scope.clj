@@ -48,13 +48,15 @@
   (= :semantic (get-in entry [:violation :type])))
 
 (defn- ^{:stratum 0} outside-change?
-  "True when judge FINDING has a positive line that its file's edited lines
-   in SCOPE leave out. A finding in a file SCOPE does not cover, or with no
-   positive line, cannot be placed and is not outside."
+  "True when judge FINDING has a line of its file that the file's edited
+   lines in SCOPE leave out. A finding in a file SCOPE does not cover, or on
+   no line of the file (none, 0, or past the last), cannot be placed and is
+   not outside."
   [scope finding]
-  (let [edited (get scope (:file finding))
-        line   (:line finding)]
-    (boolean (and edited (pos-int? line) (not (contains? edited line))))))
+  (let [{:keys [edited line-count]} (get scope (:file finding))
+        line (:line finding)]
+    (boolean (and edited (pos-int? line) (<= line line-count)
+                  (not (contains? edited line))))))
 
 (defn- ^{:stratum 0} outside-change-message
   "The warning message for VIOLATION's FINDINGS outside the change."
@@ -63,23 +65,26 @@
          {:message (:message violation)
           :sites   (str/join ", " (map #(str (:file %) ":" (:line %)) findings))}))
 
-(defn- ^{:stratum 0} file-edited-lines
-  "The lines the change edits in changed FILE ({:path :content}), diffed
-   against BASE under DIR as NAME, or nil when they cannot be placed."
+(defn- ^{:stratum 0} file-scope
+  "{:edited lines :line-count n} for changed FILE ({:path :content}): the
+   lines the change edits, diffed against BASE under DIR as NAME, and how
+   many lines the file has. Nil when the edits cannot be placed."
   [ctx base dir name {:keys [path content]}]
   (when (and (string? path) (string? content))
     (when-let [diff (git-change/version-diff ctx base path content dir name)]
       (let [lines (edited-forms/edited-lines path content
                                              (set (map first (git-change/added-lines diff)))
                                              (git-change/deletion-points diff))]
-        (when-not (anomaly/anomaly? lines) lines)))))
+        (when-not (anomaly/anomaly? lines)
+          {:edited lines :line-count (count (str/split-lines content))})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} change-scope
-  "{path edited-lines} for each of ARTIFACT's changed files whose edits can
-   be placed against the task base. A file left out is judged whole: so is
-   every file when there is no checkout or no base resolves."
+  "{path file-scope} (see `file-scope`) for each of ARTIFACT's changed
+   files whose edits can be placed against the task base. A file left out
+   is judged whole: so is every file when there is no checkout or no base
+   resolves."
   [artifact ctx]
   (let [base (when (or (get ctx :execution/execute-fn) (get ctx :execution/worktree-path))
                (git-change/resolve-base ctx (git-change/base-candidates artifact ctx)))]
@@ -89,8 +94,8 @@
         (try
           (into {}
                 (keep-indexed (fn [i file]
-                                (when-let [lines (file-edited-lines ctx base dir (str i) file)]
-                                  [(:path file) lines])))
+                                (when-let [placed (file-scope ctx base dir (str i) file)]
+                                  [(:path file) placed])))
                 (artifact/artifact-changed-files artifact))
           (finally (fs/delete-tree dir)))))))
 
