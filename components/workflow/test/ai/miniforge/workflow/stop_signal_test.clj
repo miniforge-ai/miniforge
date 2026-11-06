@@ -25,7 +25,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.dag-loop :as dag-loop]
    [ai.miniforge.workflow.execution :as exec]
    [ai.miniforge.workflow.execution-step :as execution-step]
    [ai.miniforge.workflow.monitoring :as monitoring]
@@ -180,7 +180,7 @@
                          (catch InterruptedException _
                            (dag/err :task-execution-failed "stopped" {}))))
           results (stop-signal/interrupting-on-stop
-                   cs #(dag-orch/execute-tasks-batch {:a {} :b {}} task {:control-state cs}))]
+                   cs #(dag-loop/execute-tasks-batch {:a {} :b {}} task {:control-state cs}))]
       (is (< (- (System/currentTimeMillis) started) 10000) "the batch returns promptly")
       (is (= #{:a :b} (set (keys results))) "the parent collected every task's result")
       (is (every? dag/err? (vals results)))
@@ -223,7 +223,7 @@
         _  (cancel-after! cs 300)
         logger (log/create-logger {:min-level :error :output :human})]
     (is (true? (stop-signal/interrupting-on-stop
-                cs #(#'dag-orch/await-launch-clearance! cs logger))))
+                cs #(#'dag-loop/await-launch-clearance! cs logger))))
     (is (not (Thread/interrupted)))))
 
 (deftest ^{:stratum 1} cancel-at-callback-cooldown-and-resolution-boundaries-test
