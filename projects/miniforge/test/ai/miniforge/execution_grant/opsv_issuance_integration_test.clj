@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.execution-grant.opsv-issuance-integration-test
   (:require [ai.miniforge.execution-grant.interface :as grant]
+            [ai.miniforge.execution-grant.messages :as msg]
             [ai.miniforge.execution-grant.opsv-commit-fixtures :as commit]
             [ai.miniforge.execution-grant.opsv-issuance-fixtures :as fixtures]
             [ai.miniforge.execution-grant.opsv-scope-fixtures :as scope]
@@ -29,16 +30,20 @@
         (is (= 1 (count calls)))))))
 
 (deftest ^{:stratum 0} denied-or-semantic-refusal-never-mints-authority-test
-  (doseq [change [:preflight :class :bounds]]
+  (doseq [change [:preflight :class :bounds :duration]]
     (fs/with-temp-dir [root {:prefix "opsv-issuer-refusal-"}]
       (let [dir (str (fs/canonicalize root))
             original (fixtures/request :effect/load-test :start-load)
             request (case change
                       :preflight (assoc-in original [:effect/preflight :preflight/result] :deny)
                       :class (assoc original :effect/class :effect/deploy)
-                      :bounds (assoc-in original [:opsv/experiment :opsv/load-limits :load/max-requests] 0))
+                      :bounds (assoc-in original [:opsv/experiment :opsv/load-limits :load/max-requests] 0)
+                      :duration (assoc-in original [:opsv/experiment :opsv/duration-ms]
+                                          (inc fixtures/maximum-duration-ms)))
+            message-key (if (= :preflight change) :issuance/preflight-refused :issuance/policy-refused)
             result (grant/issue-for-effect dir request scope/now)]
         (is (= :unauthorized (:anomaly/type result)))
+        (is (= (msg/t message-key) (:anomaly/message result)))
         (is (nil? (:grant/id result)))))))
 
 (deftest ^{:stratum 0} real-breach-history-still-refuses-experiment-issuance-test

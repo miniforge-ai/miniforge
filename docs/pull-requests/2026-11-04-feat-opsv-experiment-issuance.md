@@ -71,6 +71,9 @@ The project suite now has a unique integration namespace; every test body and as
 Paired lint and true inferred strata pass; both complete DAG suites pass 84 tests and 224 assertions.
 The PR remains within the 600-line reportable limit, without exceptions.
 Incoming prose findings are fixed without weakening the hook.
+The full review found a misleading refusal message after an allowed preflight.
+Profile, resource-bound and duration refusals now have a distinct localized policy message.
+The durable issuer regression distinguishes all three from denied preflight.
 
 ## Deployment Plan
 

@@ -52,7 +52,7 @@
         options (policy/grant-options request now)]
     (cond
       (not (policy/admissible-request? request selected))
-      (refused :issuance/preflight-refused request)
+      (refused :issuance/policy-refused request)
 
       (not (allow-preflight? request))
       (refused :issuance/preflight-refused request)
