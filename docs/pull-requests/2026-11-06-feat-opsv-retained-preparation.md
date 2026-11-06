@@ -21,6 +21,10 @@ Removing it after publication still reached the candidate callback; the regressi
 Read immutable publication without caching and require current evidence-assembly acknowledgement.
 Check producer, workflow, bundle, attempt, candidate, pack, target, pin, digest and original-baseline invariants.
 Reject final reports as original preparation; preserve protected-content validation and exception policy.
+The real artifact layer converts fatal failures to anomalies and interruption to a flagged fault.
+Retain fatal classification, detect interruption before and after file reads, and propagate cancellation.
+Lower-level file-read regressions reproduced four assertion failures with zero errors before this correction.
+Storage-backed tests and fixtures belong in the project integration suite, not the component unit suite.
 Read-only recovery consumers may use finalized assemblies; candidate execution still requires an active assembly.
 Share the existing comparison-binding factory across native preparation, pin creation and retained reads.
 This proves a read at the boundary, not continuing filesystem availability or authenticated storage ownership.
@@ -28,12 +32,12 @@ Protected host-controlled storage, current N4/N8/N10 authority and independent r
 
 ## Testing Plan
 
-- Strict lint: zero warnings/errors; thirteen namespaces infer to at most three strata.
-- Focused source regressions: 17 tests, 230 assertions; six safety faults fail assertions with zero errors.
+- Strict lint: zero warnings/errors; fourteen namespaces infer to at most three strata.
+- Focused source regressions: 20 tests, 258 assertions; eight safety faults fail assertions with zero errors.
 - Both consuming product contexts, workspace composition and all task entrypoints pass.
-- All 25 safe OPSV/workflow/N6 JVM suites: 128 tests, 1,449 assertions.
-- Fresh isolated package, test paths only: 32 tests, 339 assertions; no production-source overlay.
-- Native packaged compatibility: 308 tests, 1,903 assertions; all six faults detected again.
+- All 29 safe OPSV/workflow/N6 JVM suites: 139 tests, 1,590 assertions.
+- Fresh isolated package, test paths only: 35 tests, 367 assertions; no production-source overlay.
+- Native packaged compatibility: 308 tests, 1,903 assertions; all eight faults detected again.
 
 Correct the earlier provider proof wording: phase-opsv has two consuming product test contexts, not four.
 The effect-transaction component separately runs in four contexts. No affected consumer was omitted.
