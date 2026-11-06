@@ -19,9 +19,9 @@
 <text x="64" y="452" font-size="16" fill="#333">consultation-skipped.</text>
 <rect x="48" y="528" width="552" height="168" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
 <text x="64" y="556" font-size="19" fill="#333" font-weight="bold">Pinned, never fetched: pass + warning</text>
-<text x="64" y="582" font-size="16" fill="#333">:codex-pin-not-fetched. Informational while the pin is prompt-</text>
-<text x="64" y="605" font-size="16" fill="#333">delivered, since the agent saw it by construction; it becomes</text>
-<text x="64" y="628" font-size="16" fill="#333">meaningful if the pin ever moves to cache-only delivery.</text>
+<text x="64" y="582" font-size="16" fill="#333">:codex-pin-not-fetched. With the body inlined, the agent saw it</text>
+<text x="64" y="605" font-size="16" fill="#333">anyway. When the planner sheds bodies to a manifest (N12 §6), it means</text>
+<text x="64" y="628" font-size="16" fill="#333">the landings were never seen, and the gate still only warns.</text>
 <rect x="48" y="712" width="552" height="288" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
 <text x="64" y="740" font-size="19" fill="#333" font-weight="bold">Warnings are kept</text>
 <text x="64" y="766" font-size="16" fill="#333">A warning never changes the decision, so the decision envelope cannot</text>
@@ -44,8 +44,9 @@
 <text x="688" y="466" font-size="16" fill="#333">the codex was unconfigured.</text>
 <text x="688" y="489" font-size="16" fill="#333">unheeded: the warning was in front of the agent and the failure</text>
 <text x="688" y="512" font-size="16" fill="#333">matched a delivered landing anyway.</text>
-<text x="688" y="535" font-size="16" fill="#333">Below the attribution threshold, a miss goes to the review queue,</text>
-<text x="688" y="558" font-size="16" fill="#333">outside every rate.</text>
+<text x="688" y="535" font-size="16" fill="#333">A miss below the attribution threshold, or whose landings cannot be</text>
+<text x="688" y="558" font-size="16" fill="#333">read, goes to the review queue: in no bucket, but counted as open</text>
+<text x="688" y="581" font-size="16" fill="#333">learning.</text>
 <rect x="672" y="742" width="552" height="258" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.5"/>
 <text x="688" y="770" font-size="19" fill="#333" font-weight="bold">Files, per run</text>
 <text x="688" y="796" font-size="16" fill="#333">Under &lt;checkpoint-root&gt;/&lt;run-id&gt;/:</text>
