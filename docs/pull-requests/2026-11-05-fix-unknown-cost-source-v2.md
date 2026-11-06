@@ -40,6 +40,9 @@ summary prints as `Cost: unavailable`.
    cost absent.
 4. `http_wire.clj`, `parse-provider-response`: an empty answer (`empty_success_output`) keeps
    the usage and tokens the provider reported, so a reply cut at the output cap is counted.
+5. `http_wire.clj`, `extract-gemini`: Gemini reports thinking tokens (`thoughtsTokenCount`) beside
+   the answer's and bills both as output. `:output-tokens` is now their sum, with the thinking
+   part as `:reasoning-output-tokens`, so a thinking model's tokens and estimate are not low.
 
 ## Testing Plan
 
@@ -53,7 +56,8 @@ summary prints as `Cost: unavailable`.
    execution total.
 4. `http_providers_test.clj`: an Anthropic response on `claude-sonnet-4-6` gets the table
    estimate. One on an unpriced model, or with no token counts, gets no `:cost-usd`. An empty
-   answer keeps its 18 tokens and their estimate.
+   answer keeps its 18 tokens and their estimate. A Gemini response with thinking tokens counts
+   them as output.
 5. On main the new and changed assertions fail. With the fix they pass, together
    with `interface-test`, `cost-test` and the workflow's `cost-unavailable-metrics-test`.
 

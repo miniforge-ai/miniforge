@@ -315,14 +315,22 @@
 (defn ^{:stratum 2} extract-gemini
   "Text + usage from a Gemini generateContent response: join the text
    parts of the first candidate. The finish reason is that candidate's
-   `finishReason`."
+   `finishReason`. Gemini counts thinking tokens (`thoughtsTokenCount`)
+   beside the answer's, not inside them, and bills both as output, so
+   `:output-tokens` is their sum and `:reasoning-output-tokens` the
+   thinking part of it."
   [body]
-  (extraction (->> (get-in body [:candidates 0 :content :parts])
-                   (keep :text)
-                   (str/join))
-              (get-in body [:usageMetadata :promptTokenCount])
-              (get-in body [:usageMetadata :candidatesTokenCount])
-              {:finish-reason (get-in body [:candidates 0 :finishReason])}))
+  (let [{:keys [promptTokenCount candidatesTokenCount thoughtsTokenCount]}
+        (:usageMetadata body)]
+    (extraction (->> (get-in body [:candidates 0 :content :parts])
+                     (keep :text)
+                     (str/join))
+                promptTokenCount
+                (when (or (number? candidatesTokenCount) (number? thoughtsTokenCount))
+                  (+ (if (number? candidatesTokenCount) candidatesTokenCount 0)
+                     (if (number? thoughtsTokenCount) thoughtsTokenCount 0)))
+                {:usage-extras {:reasoning-output-tokens thoughtsTokenCount}
+                 :finish-reason (get-in body [:candidates 0 :finishReason])})))
 
 (defn ^{:stratum 2} openrouter-request-body
   "Build an OpenRouter request body: the OpenAI Chat Completions shape,

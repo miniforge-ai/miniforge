@@ -338,6 +338,23 @@
       (is (= "max_tokens" (:stop-reason completed)))
       (is (= "max_tokens" (:stop-reason streamed))))))
 
+(deftest ^{:stratum 1} gemini-thinking-tokens-count-as-output-test
+  (testing "thinking tokens, which Gemini reports beside the answer's and
+            bills as output, are in :output-tokens and in the estimate"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:candidates [{:content {:parts [{:text "answer"}]}}]
+                                   :usageMetadata {:promptTokenCount 10
+                                                   :candidatesTokenCount 5
+                                                   :thoughtsTokenCount 20}})
+                        #(impl/http-complete (backend-config :gemini-api)
+                                             {:prompt "q" :model "gemini-2.5-pro"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (= {:input-tokens 10 :output-tokens 25 :reasoning-output-tokens 20} (:usage result)))
+      (is (= 35 (:tokens result)))
+      (is (= (llm/estimate-cost {:input-tokens 10 :output-tokens 25} "gemini-2.5-pro")
+             (:cost-usd result))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 ;; http-complete: headers, endpoints, parsing, key resolution
