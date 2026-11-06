@@ -37,7 +37,11 @@
        "(def g 2)\n"))
 
 (deftest ^{:stratum 0} form-spans-of-unreadable-content-is-an-anomaly-test
-  (is (anomaly/anomaly? (edited-forms/form-spans "(defn f\n  [x]\n"))))
+  (is (anomaly/anomaly? (edited-forms/form-spans "(defn f\n  [x]\n")))
+  (is (anomaly/anomaly? (edited-forms/form-spans "(def m {:a 1 :a 2})\n"))
+      "a duplicate map key")
+  (is (anomaly/anomaly? (edited-forms/form-spans "(def s #{1 1})\n"))
+      "a duplicate set element"))
 
 (deftest ^{:stratum 0} other-files-are-edited-on-their-added-lines-test
   (is (= #{2} (edited-forms/edited-lines "docs/notes.md" "# a\nb\nc\n" #{2} [1]))))

@@ -53,6 +53,8 @@
 (deftest ^{:stratum 1} added-lines-follows-hunk-headers-test
   (is (= [[3 "x"] [4 "+y"] [9 "z"]] (git-change/added-lines diff-text))))
 
-(deftest ^{:stratum 1} deletion-points-names-only-pure-deletions-test
-  (is (= [8] (git-change/deletion-points diff-text)))
-  (is (= [0] (git-change/deletion-points "@@ -1,2 +0,0 @@\n-a\n-b\n"))))
+(deftest ^{:stratum 1} deletion-points-mark-every-hunk-that-removes-lines-test
+  (is (= [8 8 9] (git-change/deletion-points diff-text))
+      "a pure addition has none; a pure removal its line; a replacement both edges")
+  (is (= [0] (git-change/deletion-points "@@ -1,2 +0,0 @@\n-a\n-b\n")))
+  (is (= [1 2] (git-change/deletion-points "@@ -2,2 +2 @@\n-(def a 1)\n-^:private\n+(def a 2)\n"))))

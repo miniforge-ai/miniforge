@@ -83,11 +83,23 @@
       :else (recur more n acc))))
 
 (defn ^{:stratum 0} deletion-points
-  "For each hunk of a zero-context unified diff that only removes lines,
-   the line of the new version the removal follows (0 at the start)."
+  "For each hunk of a zero-context unified diff that removes lines, the
+   points of the new version (after line P) where removed lines may have
+   been: for a pure removal, the line it follows (0 at the start); for a
+   replacement, both edges of the lines put in their place, since the hunk
+   does not say where among them the removed lines were."
   [diff]
-  (keep #(some-> (re-find #"^@@ -\d+(?:,\d+)? \+(\d+),0 @@" %) second parse-long)
-        (str/split-lines (str diff))))
+  (mapcat (fn [line]
+            (when-let [[_ removed start added]
+                       (re-find #"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@" line)]
+              (let [removed (if removed (parse-long removed) 1)
+                    start   (parse-long start)
+                    added   (if added (parse-long added) 1)]
+                (cond
+                  (zero? removed) []
+                  (zero? added)   [start]
+                  :else           [(dec start) (+ start added -1)]))))
+          (str/split-lines (str diff))))
 
 (defn ^{:stratum 0} scratch-dir
   "A fresh temp directory named from PREFIX that only its owner can enter,

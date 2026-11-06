@@ -71,16 +71,19 @@
 (defn ^{:stratum 1} form-spans
   "[first-line last-line] of each top-level form in CONTENT, in order, or
    an :invalid-input anomaly when edamame cannot read CONTENT. Every syntax
-   is enabled, aliases and tags stay unresolved, reader conditionals are
-   kept whole, and each form is read as its location."
+   is enabled, aliases and tags stay unresolved, and reader conditionals
+   are kept whole. CONTENT is read once with its values, so an invalid
+   literal such as a duplicate map key is refused, then again with each
+   form read as its location: locations alone would hide such duplicates."
   [content]
   (try+
-    (mapv (juxt :row :end-row)
-          (edamame/parse-string-all content {:all          true
-                                             :read-cond    :preserve
-                                             :auto-resolve alias-namespace
-                                             :readers      (constantly identity)
-                                             :postprocess  :loc}))
+    (let [opts {:all          true
+                :read-cond    :preserve
+                :auto-resolve alias-namespace
+                :readers      (constantly identity)}]
+      (edamame/parse-string-all content opts)
+      (mapv (juxt :row :end-row)
+            (edamame/parse-string-all content (assoc opts :postprocess :loc))))
     (catch [:type :edamame/error] _
       (anomaly/exception-anomaly :invalid-input (msg/t :edited-forms/unreadable)
                                  (:throwable &throw-context)))))

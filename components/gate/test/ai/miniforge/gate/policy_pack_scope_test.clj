@@ -136,6 +136,15 @@
         content base-content]
     (is (not (:passed? (check (base-worktree base) {:content content} 9))))))
 
+(deftest ^{:stratum 2} replacing-a-line-and-removing-the-next-prefix-edits-both-forms-test
+  (let [base    "(ns demo.core)\n(def a 1)\n^:private\n(defn b\n  []\n  2)\n"
+        content "(ns demo.core)\n(def a 2)\n(defn b\n  []\n  2)\n"]
+    (is (not (:passed? (check (base-worktree base) {:content content} 4))))))
+
+(deftest ^{:stratum 2} duplicate-literal-content-blocks-test
+  (let [content (str/replace edit-a "  10)" "  {:k 1 :k 2})")]
+    (is (not (:passed? (check (base-worktree base-content) {:content content} 9))))))
+
 (deftest ^{:stratum 2} new-file-blocks-on-any-line-test
   (is (not (:passed? (check (base-worktree nil) {:content base-content} 9)))))
 
