@@ -47,8 +47,11 @@ summary prints as `Cost: unavailable`.
    part as `:reasoning-output-tokens`, so a thinking model's tokens and estimate are not low.
 6. `cost-table.edn`: `claude-haiku-4-5-20251001` was priced at $0.25/$1.25 per million tokens
    and is $1/$5; `gemini-2.5-pro` was $3.50/$10.50 and is $1.25/$10 for prompts up to 200k
-   tokens. The HTTP estimate makes these figures visible as costs. The rest of the table is left
-   for a refresh of its own.
+   tokens. That row now carries `:max-input-tokens 200000`. The HTTP estimate makes these
+   figures visible as costs. The rest of the table is left for a refresh of its own.
+7. `llm.cost-estimate` (new): `known-estimate` holds the rules items 1 and 3 share. It needs
+   numeric input and output counts and no prompt-cache tokens. The model must be priced, with the
+   prompt within the row's `:max-input-tokens`. Otherwise it returns nil.
 
 ## Testing Plan
 
@@ -65,7 +68,9 @@ summary prints as `Cost: unavailable`.
    estimate. One on an unpriced model, or with no token counts, gets no `:cost-usd`. An empty
    answer keeps its 18 tokens and their estimate. A Gemini response with thinking tokens counts
    them as output.
-5. On main the new and changed assertions fail. With the fix they pass, together
+5. New `cost_estimate_test.clj` covers each rule of `known-estimate`, with Gemini 2.5 Pro
+   estimated at 200,000 prompt tokens and not at 200,001.
+6. On main the new and changed assertions fail. With the fix they pass, together
    with `interface-test`, `cost-test` and the workflow's `cost-unavailable-metrics-test`.
 
 ## Deployment Plan
@@ -90,6 +95,8 @@ records 0 tokens. The workflow marks a phase unpriced only when its tokens are a
 1. The non-streaming retry after an empty CLI stream (`complete-impl`) is not estimated here.
    The HTTP Anthropic path sends no `cache_control`, so it reports no cache tokens to leave out.
    A Codex turn whose usage lacks an input count still fails in `llm-success`, as it did before.
+   `scripts/refresh-cost-table.bb` rewrites each row from upstream and would drop
+   `:max-input-tokens`; the table refresh should keep it.
 2. `estimate-cost` bills cached input tokens at the full input rate, so an estimate for a run
    with a large prompt cache is high. That is existing behaviour, not changed here.
 3. A Claude CLI run cut before its result frame counts only its last call's input tokens

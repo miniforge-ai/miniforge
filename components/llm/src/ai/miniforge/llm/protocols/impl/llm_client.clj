@@ -31,7 +31,7 @@
    aliases in Layer 0 keep the moved definitions' names here for callers."
   (:require
    [clojure.string :as str]
-   [ai.miniforge.llm.cost :as cost]
+   [ai.miniforge.llm.cost-estimate :as cost-estimate]
    [ai.miniforge.llm.messages :as msg]
    [ai.miniforge.llm.model-registry :as model-registry]
    [ai.miniforge.llm.progress-monitor :as pm]
@@ -435,24 +435,14 @@
           ;; Cost fallback: some backends (e.g. older Claude Code
           ;; CLI versions, the codex stream parser) don't surface
           ;; total_cost_usd in the result frame, so
-          ;; @accumulated-cost stays nil. When usage reports both input
-          ;; and output token counts, no prompt-cache tokens, and the
-          ;; effective model has a price in the cost table, estimate
-          ;; from them. Otherwise the cost is unknown and stays nil:
-          ;; cost/estimate-cost counts a missing count as 0, prices only
-          ;; input and output (the Claude CLI counts cache reads and
-          ;; writes beside input), and returns 0.0 for an unpriced
-          ;; model, and each would read downstream as a measured cost
-          ;; (#2378).
+          ;; @accumulated-cost stays nil. Then the cost is the table
+          ;; estimate for the effective model where it can be known
+          ;; (`cost-estimate/known-estimate`), else unknown: a partial,
+          ;; cached, unpriced or out-of-range estimate would read
+          ;; downstream as a measured cost (#2378).
           (let [effective-model (:model request-with-model)
-                cached? (some #(let [n (get usage %)] (and (number? n) (pos? n)))
-                              [:cache-creation-input-tokens :cache-read-input-tokens])
                 resolved-cost (or @accumulated-cost
-                                  (when (and (number? (:input-tokens usage))
-                                             (number? (:output-tokens usage))
-                                             (not cached?)
-                                             (cost/pricing-for-model effective-model))
-                                    (cost/estimate-cost usage effective-model)))]
+                                  (cost-estimate/known-estimate usage effective-model))]
             (if (zero? exit-code)
               (cond-> (streaming-success-response final-content exit-code
                                                   usage resolved-cost

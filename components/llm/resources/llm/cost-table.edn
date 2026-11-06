@@ -35,7 +35,9 @@
   "gpt-5.2"                   {:input-per-1m  3.00  :output-per-1m  15.00}
 
   ;; Google Gemini
-  ;; Prompts up to 200k tokens; longer prompts are billed higher.
-  "gemini-2.5-pro"            {:input-per-1m  1.25  :output-per-1m  10.00}
+  ;; Prompts up to 200k tokens; longer prompts are billed higher, so
+  ;; past :max-input-tokens there is no estimate (llm.cost-estimate).
+  "gemini-2.5-pro"            {:input-per-1m  1.25  :output-per-1m  10.00
+                               :max-input-tokens 200000}
   "gemini-2.5-flash"          {:input-per-1m  0.30  :output-per-1m   2.50}
   "gemini-2.5-flash-lite"     {:input-per-1m  0.10  :output-per-1m   0.40}}}
