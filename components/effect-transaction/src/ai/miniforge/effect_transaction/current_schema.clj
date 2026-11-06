@@ -20,3 +20,6 @@
 
 (def ^{:stratum 1} CommitArguments
   [:tuple StoreDirectory :uuid fn? fn? fn?])
+
+(def ^{:stratum 1} IssuedCommitArguments
+  [:tuple StoreDirectory :uuid :uuid fn? fn? fn?])
