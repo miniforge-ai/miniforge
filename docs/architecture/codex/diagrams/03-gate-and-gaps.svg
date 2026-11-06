@@ -1,17 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1120" role="img" aria-labelledby="title desc" font-family="Helvetica, Arial, sans-serif">
-<title id="title">Thesium Codex — 3. Holding agents to it, and measuring the gaps</title><desc id="desc">On plan and implement, a gate refuses work done without a configured consultation. A per-run ledger classifies every miss by the first rung that leaked.</desc>
+<title id="title">Thesium Codex — 3. Holding agents to it, and measuring the gaps</title><desc id="desc">On plan and implement, a gate fails a phase whose configured consultation was skipped. A per-run ledger classifies every miss by the first rung that leaked.</desc>
 <defs><marker id="a-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker><marker id="a-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b85450"/></marker><marker id="a-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker><marker id="a-grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#888888"/></marker></defs>
 <rect width="1920" height="1120" fill="white"/>
 <rect width="1920" height="65" fill="#1e5f96"/>
 <text x="24" y="30" font-size="23" fill="white" font-weight="bold">Thesium Codex — 3. Holding agents to it, and measuring the gaps</text>
-<text x="24" y="52" font-size="15" fill="#cfe2f3">On plan and implement, a gate refuses work done without a configured consultation. A per-run ledger classifies every miss by the first rung that leaked.</text>
+<text x="24" y="52" font-size="15" fill="#cfe2f3">On plan and implement, a gate fails a phase whose configured consultation was skipped. A per-run ledger classifies every miss by the first rung that leaked.</text>
 <rect x="24" y="84" width="600" height="940" rx="8" fill="#fcfcfa" stroke="#b8b8b0"/>
 <text x="42" y="113" font-size="18" fill="#1e5f96" font-weight="bold">GATE · :codex-consultation (§7.4.3) · plan, implement</text>
 <rect x="48" y="140" width="552" height="196" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.5"/>
-<text x="64" y="168" font-size="19" fill="#333" font-weight="bold">Off, or no situation: pass clean</text>
-<text x="64" y="194" font-size="16" fill="#333">Status unconfigured or unmapped. A gate that nags about an optional</text>
-<text x="64" y="217" font-size="16" fill="#333">capability trains people to ignore gates. Governance set: a workflow</text>
-<text x="64" y="240" font-size="16" fill="#333">override cannot drop it.</text>
+<text x="64" y="168" font-size="19" fill="#333" font-weight="bold">Off, no situation, no record: pass clean</text>
+<text x="64" y="194" font-size="16" fill="#333">Status unconfigured or unmapped, or no consultation record at all. A</text>
+<text x="64" y="217" font-size="16" fill="#333">gate that nags about an optional capability trains people to ignore</text>
+<text x="64" y="240" font-size="16" fill="#333">gates. Governance set: a workflow override cannot drop it.</text>
 <rect x="48" y="352" width="552" height="160" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
 <text x="64" y="380" font-size="19" fill="#333" font-weight="bold">Configured but skipped: FAIL</text>
 <text x="64" y="406" font-size="16" fill="#333">The operator asked for codex governance, and the phase ran without it.</text>
