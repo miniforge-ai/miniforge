@@ -67,6 +67,7 @@ Materialize request options before checking the interrupt flag and remaining dea
 Refuse before submission with a failed report and zero HTTP calls, preserving interruption.
 Only the remaining budget may become the HTTP timeout; preparation time cannot be reused.
 The budget regressions use controlled time readings, not sleeps or sub-second success deadlines.
+Cancellation also uses a controlled post-preparation budget, so CPU pauses cannot change the path under test.
 
 Full validation passes against the actual merged dependencies:
 

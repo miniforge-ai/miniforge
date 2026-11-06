@@ -133,8 +133,8 @@
 (deftest ^{:stratum 0} deadline-cancels-the-original-http-future-without-retrying-test
   (let [input (fixtures/input)
         pending (CompletableFuture.)
-        runtime (assoc (:runtime input) :kubernetes/timeout-ms 5)
-        [result calls] (fixtures/apply! runtime (:record input) pending fixtures/dispatch!)]
+        operation (partial fixtures/apply! (:runtime input) (:record input) pending fixtures/dispatch!)
+        [result calls] (fixtures/with-preparation-budget 1 operation)]
     (is (= :unknown-outcome (:effect/outcome result)))
     (is (.isCancelled pending))
     (is (= 1 (count calls)))))
