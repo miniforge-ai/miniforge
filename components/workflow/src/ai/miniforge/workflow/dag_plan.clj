@@ -24,7 +24,8 @@
    (workflow-success/-failure, dag-execution-result/-error/-paused),
    level-traversal / parallelism analysis over a plan's task graph, and
    converting a plan's tasks into validated DAG tasks (dependency
-   normalization, phantom-dep dropping, stratum auto-wiring)."
+   normalization, phantom-dep dropping, stratum auto-wiring), and the
+   plan-shape logs the orchestrator emits before a run."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]

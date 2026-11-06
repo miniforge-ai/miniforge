@@ -37,10 +37,11 @@
    lines with a non-monotonic layer stack. The batch-scheduling loop
    followed into `dag-loop` and the plan-shape logging into `dag-plan`.
    This namespace keeps the plan-level entry points (`execute-plan-as-dag`,
-   `maybe-parallelize-plan`) and re-exports the handful of relocated vars
-   that existing callers/tests reference through this namespace so the
-   public interface is unchanged."
+   `maybe-parallelize-plan`) and re-exports the relocated vars that
+   callers and tests still reference through it; helpers nothing called
+   through it now live only in `dag-loop` or `dag-plan`."
   (:require
+   [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.workflow.dag-finalize :as dag-finalize]
    [ai.miniforge.workflow.dag-loop :as dag-loop]
@@ -52,9 +53,9 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Compatibility Re-exports
-;; Moved to dag-plan / dag-sub-workflow / dag-task-execution / dag-merge /
-;; dag-loop; re-exported here so existing `:require [... :as dag-orch]`
-;; call sites (production and test) keep resolving without modification.
+;; Moved to dag-plan / dag-sub-workflow / dag-task-execution / dag-merge;
+;; re-exported here so existing `:require [... :as dag-orch]` call sites
+;; (production and test) keep resolving without modification.
 (def ^{:stratum 0} zero-metrics dag-plan/zero-metrics)
 
 (def ^{:stratum 0} parallelizable-plan? dag-plan/parallelizable-plan?)
@@ -85,13 +86,21 @@
 
 (def ^{:stratum 0} propagate-failures dag-finalize/propagate-failures)
 
-(def ^{:stratum 0} compute-ready-tasks dag-loop/compute-ready-tasks)
-
-(def ^{:stratum 0} select-non-conflicting-batch dag-loop/select-non-conflicting-batch)
-
-(def ^{:stratum 0} partition-results dag-loop/partition-results)
-
-(def ^{:stratum 0} emit-batch-events! dag-loop/emit-batch-events!)
+(defn ^{:stratum 0} emit-batch-events!
+  "Emit checkpointing + diagnostic events for a completed batch.
+   Successful results get :dag/task-completed; failed results get
+   :dag/task-failed. Both paths emit so dogfood and TUI can see the
+   full task disposition without grepping trace logs.
+   Returns nil to keep event emission side-effect only."
+  [results event-stream workflow-id]
+  (let [grouped (group-by (fn [[_task-id result]]
+                            (if (dag/ok? result) :completed :failed))
+                          results)
+        completed-task-ids (map first (:completed grouped))
+        failed-task-ids    (map first (:failed grouped))]
+    (dag-loop/emit-completed-checkpoints! completed-task-ids results event-stream workflow-id)
+    (dag-loop/emit-failed-checkpoints! failed-task-ids results event-stream workflow-id)
+    nil))
 
 ;------------------------------------------------------------------------------ Layer 1
 

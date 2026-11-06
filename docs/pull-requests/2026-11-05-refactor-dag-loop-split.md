@@ -33,7 +33,7 @@ change.
       `partition-results`, `emit-completed-checkpoints!`,
       `emit-failed-checkpoints!`, `register-batch-branches!`,
       `run-control-state`, `await-launch-clearance!`, `cancelled-dag-result`;
-   2. layer 1: `emit-batch-events!` and `execute-dag-loop`.
+   2. layer 1: `execute-dag-loop`.
 2. `execute-dag-loop` takes a fourth argument, `execute-fn`, the function that
    runs one task, and gains a docstring. Its only other edit is
    `execute-single-task` becoming `execute-fn` in the one call that launches a
@@ -47,13 +47,25 @@ change.
    `maybe-parallelize-plan` (now layer 2). `execute-plan-as-dag` calls the three
    moved functions through their new namespaces and passes
    `#'execute-single-task` to `dag-loop/execute-dag-loop`. Passing the var, not
-   its value, means each task launch reads the var's current binding, exactly
-   as the old in-file call did.
-5. `dag-orchestrator` re-exports `compute-ready-tasks`,
-   `select-non-conflicting-batch`, `partition-results` and `emit-batch-events!`,
-   the four moved functions that tests call through it. `execute-dag-loop` is
-   not re-exported: nothing outside the file called it.
-6. The ns docstring no longer carries the 4-layer caveat.
+   its value, means each task reads the var's binding when it starts. The old
+   in-file call read it once per batch; both reads happen inside a test's
+   `with-redefs` scope, because the batch joins every task before returning.
+5. `emit-batch-events!` stays in `dag-orchestrator`, now at layer 0, calling
+   the two checkpoint emitters through `dag-loop`. The loop never called it;
+   only tests do.
+6. No new re-exports (rule 008): the two `dag_orchestrator_test.clj` files call
+   `compute-ready-tasks`, `select-non-conflicting-batch` and
+   `partition-results` through `dag-loop`. `execute-dag-loop` had no caller
+   outside the file.
+7. Seven public vars of `dag-orchestrator` are gone: `execute-dag-loop` and
+   the loop helpers that moved to `dag-loop`. Nothing in this repo or its
+   sibling repos referenced them through `dag-orchestrator`.
+8. The ns docstring no longer carries the 4-layer caveat.
+
+Left out: `dag-executor/branch_registry.clj`'s docstring still says
+`register-batch-branches!` is in `dag-orchestrator`. That file has layer
+headings but no stratum metadata. Its first edit triggers a whole-file
+stratum autofix, so it belongs in a mechanical PR of its own.
 
 ## Testing Plan
 
@@ -86,8 +98,8 @@ behavior.
 
 ## Checklist
 
-1. [x] Movement only, apart from the `execute-fn` argument and the visibility
-   change listed above.
+1. [x] Movement only, apart from the `execute-fn` argument, the visibility
+   change and the test call sites listed above.
 2. [x] Every resulting file is within 3 layers.
 3. [x] Tests that redefine `dag-orchestrator/execute-single-task` still pass.
 4. [x] PR doc added (rule 721).

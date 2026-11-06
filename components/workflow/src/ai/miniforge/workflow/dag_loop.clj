@@ -182,27 +182,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} emit-batch-events!
-  "Emit checkpointing + diagnostic events for a completed batch.
-   Successful results get :dag/task-completed; failed results get
-   :dag/task-failed. Both paths emit so dogfood and TUI can see the
-   full task disposition without grepping trace logs.
-   Returns nil to keep event emission side-effect only."
-  [results event-stream workflow-id]
-  (let [grouped (group-by (fn [[_task-id result]]
-                            (if (dag/ok? result) :completed :failed))
-                          results)
-        completed-task-ids (map first (:completed grouped))
-        failed-task-ids    (map first (:failed grouped))]
-    (emit-completed-checkpoints! completed-task-ids results event-stream workflow-id)
-    (emit-failed-checkpoints! failed-task-ids results event-stream workflow-id)
-    nil))
-
 (defn ^{:stratum 1} execute-dag-loop
-  "Run `tasks-map` batch by batch until every task is done, failed,
-   unreached or cancelled. `execute-fn` runs one task: the caller passes
-   `#'dag-orchestrator/execute-single-task`, so tests that `with-redefs`
-   that var still intercept every task launch."
+  "Run `tasks-map` batch by batch until it finishes, is cancelled, pauses
+   for a rate limit, or hits the iteration cap. `execute-fn` runs one task:
+   the caller passes `#'dag-orchestrator/execute-single-task`, so tests
+   that `with-redefs` that var still intercept every task launch."
   [tasks-map context logger execute-fn]
   (let [{:keys [on-task-start on-task-complete]} context
         max-parallel (get context :max-parallel 4)
