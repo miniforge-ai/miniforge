@@ -52,7 +52,7 @@ No activation or live effects. This slice does not complete N7 runtime, load lif
 
 ## Related Issues/PRs
 
-N7 §5.5/§6.3, N10 §1.5; merged #2417/#2418 and pending #2419.
+N7 §5.5/§6.3, N10 §1.5; merged #2417, #2418 and #2419.
 
 ## Checklist
 
