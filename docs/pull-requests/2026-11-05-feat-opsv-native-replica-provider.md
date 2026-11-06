@@ -52,8 +52,8 @@ Source validation passes:
 
 - Strict entire source and project-test lint: zero warnings or errors.
 - All eleven changed namespaces infer to at most three strata, with zero findings.
-- Native provider and existing request regressions: 20 tests, 154 assertions.
-- Eight deliberate safety faults cause assertion failures, each with zero errors.
+- Native provider and existing request regressions: 23 tests, 162 assertions.
+- Ten deliberate safety faults cause assertion failures, each with zero errors.
 
 Faults bypass proposal binding, repeat admission, response confirmation, cancellation,
 response byte limits, UID/revision wire tests or declared-duration enforcement.
@@ -61,20 +61,28 @@ Wire-fault setup is independently checked before counting any test result.
 An initial lazy-sequence fault-helper error was caught and corrected, not counted as evidence.
 The owner also separated ingress admission from dispatch and required a valid native Deployment name.
 
+The fresh full review found missing interruption and deadline checks before HTTP submission.
+Three regressions reproduced five assertion failures with zero errors before the fix.
+Materialize request options before checking the interrupt flag and remaining deadline.
+Refuse before submission with a failed report and zero HTTP calls, preserving interruption.
+Only the remaining budget may become the HTTP timeout; preparation time cannot be reused.
+The budget regressions use controlled time readings, not sleeps or sub-second success deadlines.
+
 Full validation passes against the actual merged dependencies:
 
 - Workspace composition and phase-opsv tests in all four product contexts.
-- All 25 safe OPSV/workflow/N6 JVM integration suites: 125 tests, 1,441 assertions.
+- All 25 safe OPSV/workflow/N6 JVM integration suites: 128 tests, 1,449 assertions.
 - All task entrypoints load, and a fresh CLI artifact builds.
-- Isolated Babashka artifact, test paths only: 58 tests, 362 assertions.
+- Isolated Babashka artifact, test paths only: 61 tests, 370 assertions.
 - Native packaged compatibility regressions: 308 tests, 1,903 assertions.
-- All seven request, seven shared-dispatch and eight native-provider faults are detected with zero errors.
+- All seven request, seven shared-dispatch and ten native-provider faults are detected with zero errors.
 
 The isolated artifact exercises governance, preflight, request construction, native execution and GitHub compatibility.
 No production-source overlay is used. The project test alias explicitly exposes the shared effect fixtures.
 Actual main includes merged #2416, and its integration leaves the fully validated tree byte-identical.
 The three implementation commits are normally signed at 147, 145 and 135 reportable lines.
-The PR is 427 of the normal 600-line limit; no size exception or hook bypass is used.
+The review fix is 74 reportable lines, also under the normal commit limit.
+The PR remains within the normal 600-line limit; no size exception or hook bypass is used.
 Keep exact-head review, all CI, current-main conflict proof and owner merge requirements unchanged.
 
 ## Deployment Plan

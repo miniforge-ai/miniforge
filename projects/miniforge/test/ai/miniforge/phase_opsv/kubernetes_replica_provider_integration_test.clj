@@ -128,7 +128,7 @@
         [result calls] (fixtures/apply! runtime record (fixtures/response input) fixtures/dispatch!)]
     (is (= :unknown-outcome (:effect/outcome result)))
     (is (= 1 (count calls)))
-    (is (= 500 (:timeout (first calls))))))
+    (is (<= 1 (:timeout (first calls)) 500))))
 
 (deftest ^{:stratum 0} deadline-cancels-the-original-http-future-without-retrying-test
   (let [input (fixtures/input)
@@ -137,6 +137,33 @@
         [result calls] (fixtures/apply! runtime (:record input) pending fixtures/dispatch!)]
     (is (= :unknown-outcome (:effect/outcome result)))
     (is (.isCancelled pending))
+    (is (= 1 (count calls)))))
+
+(deftest ^{:stratum 0} already-interrupted-owner-never-submits-the-mutating-request-test
+  (let [input (fixtures/input)]
+    (try
+      (let [[result calls] (fixtures/apply! (:runtime input) (:record input) (fixtures/response input)
+                                           fixtures/interrupting-dispatch!)
+            interrupted? (.isInterrupted (Thread/currentThread))]
+        (is (= :failed (:effect/outcome result)))
+        (is (empty? calls))
+        (is interrupted?))
+      (finally (Thread/interrupted)))))
+
+(deftest ^{:stratum 0} request-preparation-cannot-spend-the-deadline-and-still-submit-test
+  (let [input (fixtures/input)
+        operation (partial fixtures/apply! (:runtime input) (:record input) (fixtures/response input) fixtures/dispatch!)
+        [result calls] (fixtures/with-preparation-budget 0 operation)]
+    (is (= :failed (:effect/outcome result)))
+    (is (empty? calls))))
+
+(deftest ^{:stratum 0} submission-uses-only-the-budget-remaining-after-request-preparation-test
+  (let [input (fixtures/input)
+        remaining 3000
+        operation (partial fixtures/apply! (:runtime input) (:record input) (fixtures/response input) fixtures/dispatch!)
+        [result calls] (fixtures/with-preparation-budget remaining operation)]
+    (is (= :succeeded (:effect/outcome result)))
+    (is (= remaining (:timeout (first calls))))
     (is (= 1 (count calls)))))
 
 (deftest ^{:stratum 0} restoration-sends-the-original-count-with-fresh-native-preconditions-test

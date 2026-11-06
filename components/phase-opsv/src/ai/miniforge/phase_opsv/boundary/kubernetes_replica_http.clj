@@ -25,15 +25,27 @@
         (assoc :method :patch :body (json/generate-string (:body payload)))
         (assoc-in [:headers "Content-Type"] (:media-type payload)))))
 
+(defn- ^{:stratum 0} submission-allowed? [remaining]
+  (and (not (.isInterrupted (Thread/currentThread))) (pos? remaining)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} patch! [settings record]
+(defn- ^{:stratum 1} submit! [settings record until options]
+  (let [remaining (io/remaining-ms until)]
+    (if-not (submission-allowed? remaining)
+      (outcome/refused)
+      (let [pending (http/start! (assoc options :timeout (min remaining (:timeout options))))
+            operation (partial response/observe! settings until pending)
+            deployment (io/owned-result! operation (partial http/release! pending))]
+        (when-not (pos? (io/remaining-ms until)) (throw (TimeoutException.)))
+        (outcome/report record deployment)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} patch! [settings record]
   (let [bounded (bounded-settings settings record)
         until (io/deadline (:kubernetes/timeout-ms bounded))
-        pending (http/start! (request-options bounded record))
-        operation (partial response/observe! bounded until pending)
-        deployment (io/owned-result! operation (partial http/release! pending))]
-    (when-not (pos? (io/remaining-ms until)) (throw (TimeoutException.)))
-    (outcome/report record deployment)))
+        options (request-options bounded record)]
+    (submit! bounded record until options)))
 
 (comment ::shared-owned-future-deadline-byte-limit-strict-json-and-no-redirect-client)

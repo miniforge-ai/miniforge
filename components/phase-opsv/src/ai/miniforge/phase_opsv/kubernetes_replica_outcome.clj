@@ -12,8 +12,8 @@
 
 (def ^{:stratum 0} ^:private valid-deployment? (m/validator replica/Deployment))
 
-(defn ^{:stratum 0} unconfirmed []
-  {:effect/outcome :unknown-outcome :effect/failure (msg/ts :replicas/unconfirmed)})
+(defn- ^{:stratum 0} failure [outcome message]
+  {:effect/outcome outcome :effect/failure (msg/ts message)})
 
 (defn- ^{:stratum 0} observed [deployment]
   {:kubernetes/resource (wire/resource-reference deployment)
@@ -22,7 +22,13 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} report [record deployment]
+(defn ^{:stratum 1} unconfirmed [] (failure :unknown-outcome :replicas/unconfirmed))
+
+(defn ^{:stratum 1} refused [] (failure :failed :replicas/submission-refused))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} report [record deployment]
   (let [desired (get (last (:body (binding/request record))) "value")]
     (if (and (valid-deployment? deployment)
              (= (binding/reference record) (wire/resource-reference deployment))

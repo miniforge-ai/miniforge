@@ -6,6 +6,8 @@
             [ai.miniforge.effect-transaction.provider-dispatch-fixtures :as dispatch]
             [ai.miniforge.execution-grant.opsv-scope-fixtures :as scope]
             [ai.miniforge.phase-opsv.boundary.http-transport :as http]
+            [ai.miniforge.phase-opsv.boundary.bounded-io :as io]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-replica-http :as replica-http]
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.kubernetes-replica-request-fixtures :as request]
             [ai.miniforge.phase-opsv.prometheus-test-support :as wire]
@@ -20,12 +22,16 @@
 
 (defn ^{:stratum 0} refuse! [_operation] (dispatch/report :failed))
 
+(defn ^{:stratum 0} interrupting-dispatch! [operation]
+  (.interrupt (Thread/currentThread))
+  (operation))
+
 (defn ^{:stratum 0} settings []
   {:kubernetes/base-url "https://cluster.invalid"
    :kubernetes/cluster-id "staging-cluster"
    :kubernetes/namespace "staging"
    :kubernetes/context "staging-context"
-   :kubernetes/timeout-ms 1000
+   :kubernetes/timeout-ms 5000
    :kubernetes/max-response-bytes 1048576})
 
 (defn- ^{:stratum 0} record-request! [calls pending options]
@@ -38,6 +44,14 @@
 
 (defn- ^{:stratum 0} apply-record! [runtime dispatch record]
   (phase/apply-kubernetes-replica-request! runtime record dispatch))
+
+(defn- ^{:stratum 0} prepare-with-budget! [prepared original settings record]
+  (let [options (original settings record)]
+    (reset! prepared true)
+    options))
+
+(defn- ^{:stratum 0} remaining-after-preparation [prepared budget original until]
+  (if @prepared budget (original until)))
 
 (defn- ^{:stratum 0} run-current! [directory proposal operation]
   (let [issued (scope/issued :effect/deploy proposal)
@@ -68,6 +82,14 @@
            :opsv/experiment experiment :kubernetes/request (:kubernetes/request prepared))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} with-preparation-budget [budget operation]
+  (let [prepared (atom false)
+        original-options replica-http/request-options
+        original-remaining io/remaining-ms]
+    (with-redefs [replica-http/request-options (partial prepare-with-budget! prepared original-options)
+                  io/remaining-ms (partial remaining-after-preparation prepared budget original-remaining)]
+      (operation))))
 
 (defn ^{:stratum 1} record [proposal]
   (let [captured (atom nil)]

@@ -1,5 +1,6 @@
 {:phase-opsv/system
- {:replicas/invalid-provider "Native replica provider requires an exact committing staging proposal, explicit target and trusted dispatch."
+ {:replicas/submission-refused "Native replica submission was interrupted or its deadline elapsed before the request began."
+  :replicas/invalid-provider "Native replica provider requires an exact committing staging proposal, explicit target and trusted dispatch."
   :replicas/unconfirmed "Native replica provider did not confirm the exact conditional update; reconcile before another attempt."
   :replicas/invalid-request "Native replica request inputs are invalid or incomplete."
   :replicas/request-mismatch "Native replica request does not match the declared target, original baseline or replica bounds."
