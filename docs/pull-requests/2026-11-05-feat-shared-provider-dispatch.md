@@ -38,17 +38,21 @@ Current-main validation passes:
 - All seven changed namespaces infer to at most three strata, with no findings.
 - Workspace composition and effect-transaction tests pass in all four products.
 - GitHub provider component tests pass, including the real creation and command-timeout paths.
-- Shared-boundary and unchanged GitHub creation regressions: 20 tests, 93 assertions.
+- Shared-boundary and unchanged GitHub creation regressions: 21 tests, 101 assertions.
 - All 24 safe OPSV/workflow/N6 JVM integration suites: 113 tests, 1,340 assertions.
 - All task entrypoints load, and a fresh CLI artifact builds.
-- Isolated Babashka artifact, test paths only: 20 tests, 93 assertions.
+- Isolated Babashka artifact, test paths only: 21 tests, 101 assertions.
 - Native packaged compatibility regressions: 308 tests, 1,903 assertions.
-- Five deliberately broken guards cause assertion failures, each with zero errors.
+- Seven deliberately broken guards cause assertion failures, each with zero errors.
 
 The first full run hit a sandbox denial in an existing process-termination test.
 The serialized unrestricted rerun passes the same test without code changes or skips.
 An interrupt test now captures the flag before assertions, which may themselves clear it.
 A direct probe confirmed the shared boundary already restored the flag correctly.
+Review found that the custom-message fixture used the same text as the defaults.
+Distinct localized values now prove both unconfirmed and malformed-callback diagnostics survive.
+Deliberately discarding either provider diagnostic produces assertion failures with zero errors.
+The full validation and fresh packaged tests pass again with this stronger coverage.
 
 The owner traced the whole diff against the pinned Miniforge standards.
 One diagnostics factory replaces duplicated message-map shapes.

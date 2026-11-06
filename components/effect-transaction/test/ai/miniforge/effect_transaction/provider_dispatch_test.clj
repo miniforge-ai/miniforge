@@ -16,13 +16,24 @@
     (is (= 1 @calls))))
 
 (deftest ^{:stratum 0} custom-provider-diagnostics-use-the-shared-factory-test
-  (let [messages (fixtures/messages)
+  (let [messages (fixtures/provider-messages)
         {:keys [calls operation]} (fixtures/probe :succeeded)
         result (effect/call-with-provider-dispatch! (constantly nil) operation messages)]
     (is (= #{:dispatch/unconfirmed-message :dispatch/invalid-message} (set (keys messages))))
+    (is (not= (msg/t :dispatch/unconfirmed) (:dispatch/unconfirmed-message messages)))
+    (is (not= (msg/t :dispatch/invalid-input) (:dispatch/invalid-message messages)))
     (is (= :failed (:effect/outcome result)))
     (is (= (:dispatch/unconfirmed-message messages) (:effect/failure result)))
     (is (zero? @calls))))
+
+(deftest ^{:stratum 0} malformed-callbacks-preserve-provider-diagnostics-test
+  (let [messages (fixtures/provider-messages)]
+    (doseq [dispatch [fixtures/zero-arguments fixtures/two-arguments]]
+      (let [{:keys [calls operation]} (fixtures/probe :succeeded)
+            result (effect/call-with-provider-dispatch! dispatch operation messages)]
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (= (:dispatch/invalid-message messages) (:anomaly/message result)))
+        (is (zero? @calls))))))
 
 (deftest ^{:stratum 0} repeated-callbacks-and-late-errors-cannot-replace-the-provider-report-test
   (doseq [dispatch [fixtures/twice! fixtures/after-result!]]
