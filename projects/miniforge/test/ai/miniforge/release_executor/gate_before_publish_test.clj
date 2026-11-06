@@ -21,7 +21,6 @@
    enter -> gates -> leave lifecycle with the release executor's two halves
    stubbed, and checks which half ran."
   (:require
-   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.phase-software-factory.release]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.release-executor.interface :as release-executor]
