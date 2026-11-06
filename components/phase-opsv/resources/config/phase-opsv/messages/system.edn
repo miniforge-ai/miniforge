@@ -1,5 +1,7 @@
 {:phase-opsv/system
- {:replicas/invalid-request "Native replica request inputs are invalid or incomplete."
+ {:replicas/invalid-provider "Native replica provider requires an exact committing staging proposal, explicit target and trusted dispatch."
+  :replicas/unconfirmed "Native replica provider did not confirm the exact conditional update; reconcile before another attempt."
+  :replicas/invalid-request "Native replica request inputs are invalid or incomplete."
   :replicas/request-mismatch "Native replica request does not match the declared target, original baseline or replica bounds."
   :experiment/invalid-preflight "Temporary experiment preflight inputs or runtime settings are invalid."
   :experiment/disabled "Temporary staging experiment execution is not enabled by the trusted runtime."

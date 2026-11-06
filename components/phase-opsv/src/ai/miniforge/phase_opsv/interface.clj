@@ -38,6 +38,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as native-preparation]
    [ai.miniforge.phase-opsv.kubernetes-preparation-schema :as native-preparation-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-request :as native-replica-request]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-replica-provider :as native-replica-provider]
    [ai.miniforge.phase-opsv.boundary.experiment-preflight :as experiment-preflight]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
@@ -207,6 +208,15 @@
    UID/revision tests and declared bounds constrain the data, not execution authority.
    No provider call, retention/ownership proof, N4/N8 admission or verified recovery."
   native-replica-request/prepare)
+
+(def ^{:stratum 0} apply-kubernetes-replica-request!
+  "Trusted-runtime provider callback: settings, exact committing transaction and required dispatch.
+   Bind the single Deployment replica patch to its complete staging proposal and payload hash.
+   Runtime dispatch must synchronously recheck current N4/N8/grant authority at the mutation boundary.
+   No permissive dispatch default, retries, credential discovery or experiment activation.
+   Report only an exact native API confirmation, otherwise retain uncertainty for reconciliation.
+   Provider confirmation is not rollout readiness or verified original-baseline recovery."
+  native-replica-provider/patch!)
 
 (def ^{:stratum 0} evaluate-experiment-preflight
   "Evaluate temporary staging N4 gates from trusted runtime opt-in and prepared baseline.
