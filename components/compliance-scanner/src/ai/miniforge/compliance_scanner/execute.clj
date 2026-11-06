@@ -61,10 +61,11 @@
           all-files       (conj patched-files pr-doc-path)]
       ;; Stage changed files + PR doc
       (apply git/git! repo-path "add" all-files)
-      ;; Disable GPG/SSH signing — 1Password agent blocks in subprocess contexts
-      (git/git! repo-path "config" "commit.gpgsign" "false")
-      ;; Commit — skip pre-commit hook; changes are mechanically verified by the scanner
-      (git/git! repo-path "commit" "--no-verify" "-m"
+      ;; Commit — skip pre-commit hook; changes are mechanically verified by the scanner.
+      ;; Signing off for this commit only (1Password agent blocks in subprocess
+      ;; contexts). `-c`, not `git config`: a config write lands in the shared
+      ;; config of the user's checkout and turns signing off for every commit there.
+      (git/git! repo-path "-c" "commit.gpgsign=false" "commit" "--no-verify" "-m"
                (str "fix: [" category "] " title " compliance pass ("
                     (count patched-files) " file" (when (> (count patched-files) 1) "s") ")"))
       ;; Push (force-with-lease in case branch already exists from a prior run)
