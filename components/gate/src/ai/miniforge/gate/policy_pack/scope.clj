@@ -68,7 +68,8 @@
 (defn- ^{:stratum 0} file-scope
   "{:edited lines :line-count n} for changed FILE ({:path :content}): the
    lines the change edits, diffed against BASE under DIR as NAME, and how
-   many lines the file has. Nil when the edits cannot be placed."
+   many lines the file has, trailing blank lines included. Nil when the
+   edits cannot be placed."
   [ctx base dir name {:keys [path content]}]
   (when (and (string? path) (string? content))
     (when-let [diff (git-change/version-diff ctx base path content dir name)]
@@ -76,7 +77,9 @@
                                              (git-change/base-text ctx base path)
                                              (set (map first (git-change/added-lines diff))))]
         (when-not (anomaly/anomaly? lines)
-          {:edited lines :line-count (count (str/split-lines content))})))))
+          {:edited     lines
+           :line-count (+ (count (re-seq #"\n" content))
+                          (if (or (= "" content) (str/ends-with? content "\n")) 0 1))})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

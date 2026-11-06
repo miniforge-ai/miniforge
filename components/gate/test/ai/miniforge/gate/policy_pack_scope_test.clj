@@ -157,6 +157,9 @@
     (is (not (:passed? (check (base-worktree base) {:content content} 2))) "the copy")
     (is (:passed? (check (base-worktree base) {:content content} 4)) "the original")))
 
+(deftest ^{:stratum 2} a-finding-on-an-unchanged-trailing-blank-line-warns-test
+  (is (:passed? (check (base-worktree (str base-content "\n\n")) {:content (str edit-a "\n\n")} 12))))
+
 (deftest ^{:stratum 2} duplicate-literal-content-blocks-test
   (let [content (str/replace edit-a "  10)" "  {:k 1 :k 2})")]
     (is (not (:passed? (check (base-worktree base-content) {:content content} 9))))))
