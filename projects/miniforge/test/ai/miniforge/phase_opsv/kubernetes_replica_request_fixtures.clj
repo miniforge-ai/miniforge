@@ -34,10 +34,12 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} input []
-  (let [native (bounded-plan (preparation/input))
-        [baseline _calls] (preparation/observe-transport (:routes native) native)
-        parameters (parameters :trial-apply)]
-    (assoc native :baseline baseline :current (:capture native) :parameters parameters)))
+(defn ^{:stratum 2} input
+  ([] (input (preparation/input)))
+  ([prepared]
+   (let [native (bounded-plan prepared)
+         [baseline _calls] (preparation/observe-transport (:routes native) native)
+         parameters (parameters :trial-apply)]
+     (assoc native :baseline baseline :current (:capture native) :parameters parameters))))
 
 (comment ::real-native-producer-shapes-only-http-transport-is-simulated)

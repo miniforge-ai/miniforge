@@ -26,9 +26,9 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} with-context [f ctx directory]
+(defn- ^{:stratum 1} with-context [produce f ctx directory]
   (let [ctx (storage/step ctx (first support/handlers))
-        native (bind-workflow ctx (native/input))
+        native (bind-workflow ctx (produce))
         content {:comparison/pin (get-in native [:request :comparison/pin])
                  :comparison/preparation (:baseline native)}
         value (retained/record ctx content)
@@ -39,7 +39,8 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} with-input [f]
-  (storage/with-context (partial with-context f)))
+(defn ^{:stratum 2} with-input
+  ([f] (with-input native/input f))
+  ([produce f] (storage/with-context (partial with-context produce f))))
 
 (comment ::real-native-acquisition-publication-and-acknowledgement-no-invented-baseline)

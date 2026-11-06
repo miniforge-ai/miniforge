@@ -29,19 +29,23 @@ Admit only the retained namespace/Deployment identity and count needed by the re
 Do not reconstruct redacted fields or weaken the complete fresh-capture schema.
 The existing public native request API remains unchanged; this boundary reuses its pure planner after admission.
 The first integration run exposed this real reporting/raw-capture mismatch; no setup error was counted as a safety proof.
+Review also exposed inherited raw label/annotation constraints on published Namespace and Deployment metadata.
+A native-acquisition and real-publication regression reproduced four assertion failures with zero errors.
+Dedicated retained identity schemas now ignore protected reporting metadata while preserving exact recovery fields.
+Fresh-capture validation remains unchanged. Acquisition fixtures and assertions are separated to retain three strata.
 
 ## Testing Plan
 
 Use real protected publication, evidence acknowledgement and native preparation producers.
 Exercise malformed, stale, foreign and unavailable original material before proposal construction.
 
-- Strict entire phase/project lint: zero warnings/errors; seven namespaces infer to at most three strata.
-- Native proposal and refusal regressions: seven tests, 73 assertions.
+- Strict entire phase/project lint: zero warnings/errors; eleven namespaces infer to at most three strata.
+- Native proposal, metadata and refusal regressions: eight tests, 88 assertions.
 - Both consuming product contexts, workspace composition, all task entrypoints and fresh CLI build pass.
-- All 31 safe OPSV/workflow/N6 JVM suites: 146 tests, 1,663 assertions.
-- Isolated fresh package, test paths only: 41 tests, 356 assertions; no production-source overlay.
+- All 32 safe OPSV/workflow/N6 JVM suites: 147 tests, 1,678 assertions.
+- Isolated fresh package, test paths only: 42 tests, 371 assertions; no production-source overlay.
 - Native packaged compatibility: 308 tests, 1,903 assertions.
-- Six safety faults cause assertion failures, each with zero errors, in source and packaged checks.
+- Seven safety faults cause assertion failures, each with zero errors, in source and packaged checks.
 
 The positive integration feeds the real proposal into public issuance, durable current commit and the native provider.
 Only HTTP and trusted dispatch are simulated. No cluster is contacted.
