@@ -117,6 +117,7 @@ test run. To give a test run its own config, set `GIT_CONFIG_GLOBAL`.
       `integration`, `development`, `conformance`, `graalvm` and `precommit-smoke` with no environment
       passed. The process entry points only record. Every recorded environment must be the sanitizer's
       output. `development` (`bb test:dev`) came from main's #2197 and was added to the list on merge.
+      Its own strip before `run-stream!` is dropped, as `precommit-smoke`'s is: `run-stream!` strips.
 3. The six tests, run against weakened code swapped in with `with-redefs`. Columns: the installed-git check,
    the older-git name, the keep list, the decoy test, the launcher wiring test.
 

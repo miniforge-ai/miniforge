@@ -260,9 +260,8 @@
                   "(let [r (clojure.test/run-tests" ns-args ")] "
                   "  (shutdown-agents) "
                   "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")
-        env  (bb-test-runner/sanitize-git-worktree-env (into {} (System/getenv)))
         _ (println (format "Running %d development test namespaces" (count nses)))
-        exit (run-stream! {:env env} (proc/clojure-command) "-M:dev:test:build" "-e" expr)]
+        exit (run-stream! (proc/clojure-command) "-M:dev:test:build" "-e" expr)]
     (when-not (zero? exit)
       (println "❌ Development tests failed with exit code:" exit)
       (System/exit exit))))
