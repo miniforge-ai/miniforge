@@ -37,6 +37,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-environment-fingerprint :as native-fingerprint]
    [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as native-preparation]
    [ai.miniforge.phase-opsv.kubernetes-preparation-schema :as native-preparation-schema]
+   [ai.miniforge.phase-opsv.boundary.experiment-preflight :as experiment-preflight]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -196,6 +197,14 @@
 (def ^{:stratum 0} KubernetesVerificationPreparationDeclaration
   "Independent workflow identity and native Deployment target for a preparation callback."
   native-preparation-schema/Declaration)
+
+(def ^{:stratum 0} evaluate-experiment-preflight
+  "Evaluate temporary staging N4 gates from trusted runtime opt-in and prepared baseline.
+   Accept a workflow context, canonical native preparation request and correlated receipt.
+   Return experiment-specific checks, envelope and comparison binding, or an anomaly.
+   Does not verify retention/ownership, issue grants, check N8, or authorize a provider;
+   the runtime must compose those obligations and reevaluate at each commit."
+  experiment-preflight/evaluate)
 
 (def ^{:stratum 0} prepare-kubernetes-verification!
   "Correlate the host request and pin before bounded read-only capture and canonical projection.
