@@ -288,6 +288,67 @@ jobs:
             graalvm-output.log
           retention-days: 7
 
+  # The CLI runs on whatever Babashka the operator has. bb.edn declares the
+  # oldest one it supports (:min-bb-version), and every other job runs the
+  # newest pinned one, so nothing proved the declared minimum: it said 1.3.0
+  # while the CLI needed 1.12.215 to load (#2375). This job installs exactly
+  # the declared minimum, loads every bb task's namespaces, and starts the CLI.
+  babashka-minimum:
+    name: Babashka minimum version
+    runs-on: ubuntu-latest
+    needs: [structure]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      # Exact toolchain versions live in .github/tool-versions.json.
+      - name: Read pinned tool versions
+        id: tools
+        run: jq -r 'to_entries[] | "\(.key)=\(.value)"' .github/tool-versions.json >> "$GITHUB_OUTPUT"
+
+      # bb.edn is the one place the minimum is declared.
+      - name: Read declared minimum Babashka
+        id: minimum
+        run: |
+          set -o pipefail
+          version=$(sed -n 's/^{:min-bb-version "\([0-9.]*\)".*/\1/p' bb.edn)
+          test -n "${version}"
+          echo "babashka=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Clojure and the minimum Babashka
+        uses: DeLaGuardo/setup-clojure@12.5
+        with:
+          cli: ${{ steps.tools.outputs.clojure-cli }}
+          bb: ${{ steps.minimum.outputs.babashka }}
+
+      - name: Load every bb task's namespaces
+        run: |
+          set -o pipefail
+          bb --version
+          bb check:bb-classpaths 2>&1 | tee bb-minimum-classpaths.log
+
+      - name: Start the CLI
+        run: |
+          set -o pipefail
+          home=$(mktemp -d)
+          MINIFORGE_HOME="${home}" bb miniforge --help 2>&1 | tee bb-minimum-cli.log
+
+      - name: Upload Babashka minimum logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bb-minimum-logs-${{ github.sha }}
+          path: |
+            bb-minimum-classpaths.log
+            bb-minimum-cli.log
+          retention-days: 7
+
   # Windows fidelity job. Validates the bb-platform / bb-proc unit tests
   # on real Windows, which is what the Windows fidelity pass introduces.
   # The broader integration suite is deferred until known Windows-specific
@@ -476,7 +537,7 @@ jobs:
   main-status:
     name: Alert on main status
     runs-on: ubuntu-latest
-    needs: [structure, lint, test, test-windows, build]
+    needs: [structure, lint, test, test-windows, babashka-minimum, build]
     # Push-to-main only: PR failures are already visible on the PR itself.
     # `!cancelled()` keeps a manual cancellation from being reported as
     # breakage. Green runs are included so the tracking issue gets closed.

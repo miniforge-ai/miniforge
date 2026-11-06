@@ -60,10 +60,15 @@
   (assoc (result/summary (zero? exit-code) 0 0 0 (if (zero? exit-code) 0 1) output)
          :no-tests? true))
 
-(defn- ^{:stratum 0} parse-cargo [output exit-code]
-  (let [[_ _ passed-text failed-text] (re-find #"test result: (\w+)\. (\d+) passed; (\d+) failed" output)
-        passed (if passed-text (parse-long passed-text) 0)
-        failed (if failed-text (parse-long failed-text) 0)
+(defn- ^{:stratum 0} parse-cargo
+  "Sum every test binary's `test result:` summary; `cargo test --workspace`
+   prints one per binary, and the first is often a library with no unit tests."
+  [output exit-code]
+  (let [counts (for [[_ _ passed-text failed-text]
+                     (re-seq #"test result: (\w+)\. (\d+) passed; (\d+) failed" output)]
+                 [(parse-long passed-text) (parse-long failed-text)])
+        passed (reduce + 0 (map first counts))
+        failed (reduce + 0 (map second counts))
         tests (+ passed failed)]
     (result/summary (zero? exit-code) tests tests failed 0 output)))
 

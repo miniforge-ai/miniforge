@@ -274,18 +274,27 @@
    timeout-ms]
   (try+
     (let [initial-result (wait-for-stream-process process timeout-ms)
-          timed-out? (= -1 (:exit initial-result))
-          result (if timed-out?
+          result (cond
+                   ;; The run was cancelled: the wait destroyed the tree.
+                   ;; Wait again only to reap it, keeping the cancellation.
+                   (:timeout initial-result)
+                   (do (wait-for-stream-process process (post-kill-join-timeout-ms))
+                       initial-result)
+
+                   (= -1 (:exit initial-result))
                    (do
                      (subprocess/destroy-process-tree! process)
                      (wait-for-stream-process process (post-kill-join-timeout-ms)))
+
+                   :else
                    initial-result)]
       (doseq [thread [stdin-thread stdout-thread stderr-thread]
               :when thread]
         (.join ^Thread thread subprocess/stream-reader-join-timeout-ms))
-      {:out (or @stdout "")
-       :err (or (not-empty (:err result)) @stderr "")
-       :exit (:exit result)})
+      (cond-> {:out (or @stdout "")
+               :err (or (not-empty (:err result)) @stderr "")
+               :exit (:exit result)}
+        (:timeout result) (assoc :timeout (:timeout result))))
     (catch InterruptedException _
       (subprocess/destroy-process-tree! process)
       (.interrupt (Thread/currentThread))
@@ -389,10 +398,14 @@
           tool-call-count (count tools)
           final-message-preview (cli-output/message-preview diagnostic-content)
           usage @accumulated-usage
-          fallback-response (when (cli-output/blank-streaming-success? exit-code
-                                                            final-content
-                                                            tool-call-count
-                                                            usage)
+          ;; A caller that journals every provider call sets
+          ;; `:empty-stream-fallback? false`, so an empty stream is
+          ;; returned as it is instead of retried unjournaled.
+          fallback-response (when (and (not (false? (:empty-stream-fallback? request)))
+                                       (cli-output/blank-streaming-success? exit-code
+                                                                            final-content
+                                                                            tool-call-count
+                                                                            usage))
                               (complete-impl client request))]
       (if fallback-response
         (do

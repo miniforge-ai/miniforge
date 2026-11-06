@@ -57,165 +57,18 @@
    `gate.interface/check-gate` (mirrors the reviewer fix in #977) — never a
    silent pass."
   (:require
-   [ai.miniforge.event-stream.interface :as event-stream]
    ;; Registers mechanical capability checks before compiled pack evaluation.
    [ai.miniforge.gate.capabilities]
-   [ai.miniforge.gate.messages :as msg]
-   [ai.miniforge.gate.registry :as registry]
-   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.decision-envelope.interface]
-   [ai.miniforge.gate.decide :as decide]
-   [ai.miniforge.policy-pack.interface :as policy-pack]
-   [ai.miniforge.semantic-analyzer.interface :as semantic]
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]
-   [clojure.string :as str]))
+   [ai.miniforge.gate.messages :as msg]
+   [ai.miniforge.gate.policy-pack.artifact :as artifact]
+   [ai.miniforge.gate.policy-pack.checks :as checks]
+   [ai.miniforge.gate.policy-pack.evaluation :as evaluation]
+   [ai.miniforge.gate.policy-pack.judge :as judge]
+   [ai.miniforge.gate.policy-pack.rules :as rules]
+   [ai.miniforge.gate.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; Pack source
-(def ^{:stratum 0} ^:private standards-pack-resource
-  "Classpath location of the compiled standards pack (emitted by
-   `bb standards:pack`, placed on the classpath at build time)."
-  "packs/miniforge-standards.pack.edn")
-
-;; Context wiring
-(defn- ^{:stratum 0} artifact-changed-files
-  "The changed files [{:path :content}] this gate evaluates, taken from the
-   resolved policy artifact (its code files, or a single content artifact).
-   This is the changed-files scope handed to the judge."
-  [artifact]
-  (cond
-    (seq (:code/files artifact))
-    (mapv (fn [f] {:path    (or (:path f) (:artifact/path f))
-                   :content (or (:content f) (:artifact/content f))})
-          (:code/files artifact))
-
-    (or (:artifact/path artifact) (:path artifact))
-    [{:path    (or (:artifact/path artifact) (:path artifact))
-      :content (or (:artifact/content artifact) (:content artifact))}]
-
-    :else []))
-
-(defn- ^{:stratum 0} batched-semantic-analyzer
-  "An `analyze-rule`-shaped fn (repo-path ignored) backed by ONE batched judge
-   call per changed file across ALL `acting-rules`. Memoizes the batch in a
-   per-evaluation atom, so the N per-rule semantic check-fn invocations in a
-   single gate run share one set of LLM calls; each call returns its own rule's
-   slice. Collapses the per-rule-per-file judge into one call per file."
-  [acting-rules files]
-  (let [cache (atom nil)]
-    (fn [llm-client complete-fn _repo-path rule]
-      (let [result (or @cache
-                       (reset! cache (semantic/analyze-rules-on-files
-                                      llm-client complete-fn acting-rules files)))]
-        {:rule/id    (:rule/id rule)
-         :violations (get-in result [:by-rule (:rule/id rule)] [])
-         :status     (:status result)}))))
-
-(defn- ^{:stratum 0} no-policy-packs-warning
-  []
-  {:type :no-policy-packs
-   :message (msg/t :policy-pack/no-policy-packs)})
-
-(defn- ^{:stratum 0} artifact-has-code?
-  [artifact]
-  (and (map? artifact)
-       (or (seq (:code/files artifact))
-           (contains? artifact :artifact/content)
-           (contains? artifact :content))))
-
-(defn- ^{:stratum 0} implement-artifact
-  [ctx]
-  (get-in ctx [:execution/phase-results :implement :artifact]))
-
-(defn- ^{:stratum 0} path-inside-worktree?
-  [worktree file]
-  (let [root-path (str (.getPath worktree) java.io.File/separator)
-        file-path (.getPath file)]
-    (or (= file-path (.getPath worktree))
-        (str/starts-with? file-path root-path))))
-
-;------------------------------------------------------------------------------ Layer 1.5
-;; Compiled policy evaluation and per-rule application evidence
-(defn- ^{:stratum 0} compile-anomaly?
-  [result]
-  (contains? result :anomaly/type))
-
-(defn- ^{:stratum 0} compile-anomaly-message
-  [anomaly]
-  (or (:anomaly/message anomaly)
-      (:message anomaly)
-      (name (:anomaly/type anomaly))))
-
-(defn- ^{:stratum 0} compile-pack-results
-  [packs]
-  (mapv policy-pack/compile-pack-checks packs))
-
-(defn- ^{:stratum 0} compiled-rules
-  [compile-results]
-  (mapcat :compiled-rules compile-results))
-
-(defn- ^{:stratum 0} phase-compiled-rule?
-  [phase compiled]
-  (policy-pack/rule-applies-to-phase? (:rule compiled) phase))
-
-(defn- ^{:stratum 0} file-entry->artifact
-  [file-entry]
-  (let [path    (or (:artifact/path file-entry) (:path file-entry))
-        content (or (:artifact/content file-entry) (:content file-entry))]
-    (cond-> file-entry
-      path    (assoc :artifact/path path)
-      content (assoc :artifact/content content))))
-
-(defn- ^{:stratum 0} rule-applicable-to-artifact?
-  [rule phase context artifact]
-  (seq (policy-pack/filter-applicable-rules
-        [rule]
-        (assoc context :phase phase :artifact artifact))))
-
-(defn- ^{:stratum 0} violation-entry
-  [compiled violation]
-  {:rule (:rule compiled)
-   :violation violation
-   :timestamp (java.time.Instant/now)})
-
-(def ^{:stratum 0} ^:private judge-acting-actions
-  "Enforcement actions for which the LLM judge actually runs. A semantic rule
-   that only warns/audits is guidance — surfaced via behavior injection, not
-   evaluated by the judge — so the run never pays for an LLM call that could
-   only produce a non-blocking finding."
-  #{:hard-halt :require-approval})
-
-(defn- ^{:stratum 0} violation-summary
-  "Non-sensitive summary of a violation for an evidence event. Drops :matches
-   — which can carry source lines or secret material (e.g. a no-secrets rule's
-   matched token) and must never reach a stored event. Keeps the message, the
-   artifact path, and a match count."
-  [violation]
-  (when violation
-    {:message       (:message violation)
-     :artifact-path (:artifact-path violation)
-     :match-count   (count (:matches violation))}))
-
-(defn- ^{:stratum 0} emit-rule-evidence!
-  "Publish one :gate/rule-applied event per classified rule. No-op when the
-   run carries no event stream. Fail-safe: evidence emission must never break
-   enforcement, so a publish error is swallowed (the gate verdict still
-   stands)."
-  [ctx phase classified envelope-id]
-  (when-let [stream (:event-stream ctx)]
-    (try
-      (let [wid (:workflow/id ctx)]
-        (doseq [{:keys [rule-id status severity enforcement violation]} classified]
-          (event-stream/publish!
-           stream
-           (event-stream/gate-rule-applied stream wid phase rule-id status
-                                           {:severity    severity
-                                            :enforcement enforcement
-                                            :violation   violation
-                                            :envelope-id envelope-id}))))
-      (catch Exception _ nil))))
 
 (defn ^{:stratum 0} repair-policy-pack
   "Policy violations cannot be fixed in-place; the workflow must redirect to
@@ -227,273 +80,8 @@
    :errors   errors
    :message  (msg/t :policy-pack/repair-required)})
 
-(defn- ^{:stratum 0} pack-pins
-  "Revision pins for the envelope: the pack ids+versions evaluated."
-  [packs]
-  {:pins/pack-revision (clojure.string/join ","
-                        (map #(str (name (or (:pack/id %) :unknown)) "@"
-                                   (or (:pack/version %) "?")) packs))
-   :pins/rule-ids (vec (keep :rule/id (mapcat :pack/rules packs)))
-   :pins/event-watermark nil})
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} read-standards-pack
-  "Read the shipped standards pack manifest from the classpath.
-
-   Returns nil ONLY when the resource is absent (a repo legitimately without a
-   compiled pack). A present-but-malformed/unreadable pack THROWS — so
-   `gate.interface/check-gate` converts it into a failed gate (fail-closed),
-   rather than letting a corrupt pack masquerade as 'no pack' and silently
-   skip enforcement."
-  []
-  (when-let [res (io/resource standards-pack-resource)]
-    (edn/read-string (slurp res))))
-
-(defn- ^{:stratum 1} with-semantic-wiring
-  "Inject the LLM-judge seam the policy-pack semantic detector needs. Derives
-   `:llm-client` from the run's `:llm-backend` when absent, sets `:complete-fn`
-   to `llm/complete`, and injects a `:semantic-analyze-fn` that runs the batched
-   judge (one call per changed file across `acting-rules`) over `artifact`'s
-   changed files. Also normalizes `:repo-path` (falling back to the execution
-   worktree). When the run carries no LLM backend, the seam stays unwired so
-   compiled semantic checks fail loud according to pack enforcement
-   (fail-closed)."
-  [ctx artifact acting-rules]
-  (let [ctx (assoc ctx :repo-path (or (:repo-path ctx)
-                                      (:execution/worktree-path ctx)
-                                      "."))
-        ctx (cond-> ctx
-              (and (not (:llm-client ctx)) (:llm-backend ctx))
-              (assoc :llm-client (:llm-backend ctx))
-
-              (not (:complete-fn ctx))
-              (assoc :complete-fn llm/complete))]
-    (if (and (:llm-client ctx)
-             (:complete-fn ctx)
-             (not (:semantic-analyze-fn ctx)))
-      (assoc ctx :semantic-analyze-fn (batched-semantic-analyzer
-                                       acting-rules (artifact-changed-files artifact)))
-      ctx)))
-
-(defn- ^{:stratum 1} safe-worktree-file
-  [worktree-path file-path]
-  (let [worktree (.getCanonicalFile (io/file worktree-path))
-        file     (.getCanonicalFile (io/file worktree file-path))]
-    (when (path-inside-worktree? worktree file)
-      file)))
-
-(defn- ^{:stratum 1} compile-anomaly-result
-  [anomaly]
-  {:passed?  false
-   :compiled? false
-   :blocking [{:code    :policy-pack/compile-failed
-               :message (msg/t :policy-pack/compile-error
-                               {:message (compile-anomaly-message anomaly)})
-               :data    (:anomaly/data anomaly)}]
-   :warnings []})
-
-(defn- ^{:stratum 1} phase-compiled-rules
-  [compile-results phase]
-  (filterv #(phase-compiled-rule? phase %) (compiled-rules compile-results)))
-
-(defn- ^{:stratum 1} artifact-inputs
-  [artifact]
-  (if-let [files (seq (:code/files artifact))]
-    (mapv file-entry->artifact files)
-    [(file-entry->artifact artifact)]))
-
-(defn- ^{:stratum 1} semantic-judge-applies?
-  "True unless this is a semantic-detector rule whose enforcement action is
-   non-acting. Non-semantic detectors (content-scan, diff, etc.) always run —
-   they are cheap and deterministic."
-  [compiled]
-  (or (not= :semantic (:detector compiled))
-      (contains? judge-acting-actions
-                 (get-in compiled [:rule :rule/enforcement :action]))))
-
-(defn- ^{:stratum 1} guidance-only-semantic?
-  "A semantic-detector rule with a non-acting enforcement action — surfaced as
-   guidance (behavior injection), never evaluated by the judge (see
-   `semantic-judge-applies?`). Evidence marks these `:guidance`, not `:passed`,
-   so the event log never claims the judge cleared a rule it skipped."
-  [rule]
-  (and (= :semantic (policy-pack/resolve-detector rule))
-       (not (contains? judge-acting-actions
-                       (get-in rule [:rule/enforcement :action])))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(def ^{:stratum 2} ^:private standards-pack
-  "Memoized shipped pack — read once per JVM (the classpath is stable for a
-   process). A read failure is cached as a thrown deref, keeping enforcement
-   fail-closed on every evaluation."
-  (delay (read-standards-pack)))
-
-(defn- ^{:stratum 2} code-file-entry
-  [worktree-path file-path action]
-  (let [file    (safe-worktree-file worktree-path file-path)
-        content (cond
-                  (= :delete action) ""
-                  (and file (.isFile file)) (slurp file))]
-    (cond-> {:path file-path}
-      content (assoc :content content)
-      action  (assoc :action action))))
-
-(defn- ^{:stratum 2} applicable-artifacts
-  [rule phase artifact context]
-  (filterv #(rule-applicable-to-artifact? rule phase context %)
-           (artifact-inputs artifact)))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn- ^{:stratum 3} packs-for-gate
-  "Packs to evaluate. When ctx carries an explicit `:policy-packs` key, that
-   value is authoritative — even an empty vector (a run that disabled all
-   packs is respected, not silently re-seeded). When the key is absent (the
-   normal SDLC path), the shipped standards pack is used so the gate actually
-   evaluates. Empty when no pack resource is present."
-  [ctx]
-  (if (contains? ctx :policy-packs)
-    (vec (:policy-packs ctx))
-    (if-let [pack @standards-pack] [pack] [])))
-
-(defn- ^{:stratum 3} rehydrate-code-files
-  [artifact worktree-path]
-  (when-let [paths (seq (:code/file-paths artifact))]
-    (let [actions (get artifact :code/file-actions [])
-          files   (mapv (fn [idx path]
-                          (code-file-entry worktree-path path
-                                           (or (nth actions idx nil) :modify)))
-                        (range)
-                        paths)]
-      (assoc artifact :code/files files))))
-
-(defn- ^{:stratum 3} acting-semantic-rules
-  "The enabled rules that resolve to the semantic judge AND carry an acting
-   enforcement action AND are applicable to this run's `artifact` — exactly the
-   rules the batched judge evaluates together. Applicability uses the same
-   `applicable-artifacts` predicate the compiled per-rule path uses (phase +
-   file-glob + artifact/task constraints), so the batched prompt never includes
-   a rule that compiled evaluation would skip for this run."
-  [packs phase artifact ctx]
-  (->> (policy-pack/resolve-rules (mapcat :pack/rules packs))
-       (filterv policy-pack/rule-enabled?)
-       (filterv #(policy-pack/rule-applies-to-phase? % phase))
-       (filterv #(= :semantic (policy-pack/resolve-detector %)))
-       (filterv #(contains? judge-acting-actions
-                            (get-in % [:rule/enforcement :action])))
-       (filterv #(seq (applicable-artifacts % phase artifact ctx)))))
-
-(defn- ^{:stratum 3} run-compiled-rule
-  [artifact context compiled]
-  (if-not (semantic-judge-applies? compiled)
-    []
-    (let [rule   (:rule compiled)
-          phase  (:phase context)
-          inputs (applicable-artifacts rule phase artifact context)
-          result ((:check-fn compiled) inputs context)]
-      (mapv #(violation-entry compiled %) (:violations result)))))
-
-(defn- ^{:stratum 3} classify-rules
-  "Per-rule evidence: classify every enabled rule across `packs` for `phase`.
-   `violations` are the {:rule :violation} maps from compiled check results.
-
-     :skipped-by-phase — the rule's :applies-to {:phases} excludes `phase`
-     :not-applicable   — phase matches but file-glob/task-type excludes it
-     :failed           — considered and violated (carries a violation summary)
-     :guidance         — applicable semantic rule the judge skips (non-acting
-                         action): surfaced as guidance, not gated. NOT `:passed`
-                         — the judge never ran, so evidence must not imply it did
-     :passed           — considered and clean
-
-   Rules are resolved first, so override-by-id is honored: evidence is 1:1
-   with the rules actually evaluated and reports the effective merged
-   :severity/:enforcement, not pre-merge values.
-
-   Emitting all four statuses (not just failures) makes the applied policy set
-   for a run reconstructable from the event log."
-  [packs phase artifact context violations]
-  (let [enabled        (filterv policy-pack/rule-enabled?
-                                (policy-pack/resolve-rules (mapcat :pack/rules packs)))
-        considered-ids (set (map :rule/id
-                                 (filter #(seq (applicable-artifacts
-                                                % phase artifact context))
-                                         enabled)))
-        violated       (into {} (map (fn [{:keys [rule violation]}]
-                                       [(:rule/id rule) violation]))
-                             violations)]
-    (mapv (fn [rule]
-            (let [id (:rule/id rule)]
-              {:rule-id     id
-               :status      (cond
-                              (not (policy-pack/rule-applies-to-phase? rule phase)) :skipped-by-phase
-                              (contains? violated id)                               :failed
-                              (and (contains? considered-ids id)
-                                   (guidance-only-semantic? rule))                 :guidance
-                              (contains? considered-ids id)                         :passed
-                              :else                                                 :not-applicable)
-               :severity    (:rule/severity rule)
-               :enforcement (get-in rule [:rule/enforcement :action])
-               :violation   (violation-summary (get violated id))}))
-          enabled)))
-
-;------------------------------------------------------------------------------ Layer 4
-
-(defn- ^{:stratum 4} policy-artifact
-  "Resolve the artifact that pack-derived policy should evaluate.
-
-   Verify emits test metadata and review emits a verdict, but policy rules
-   target the code-under-review. Prefer an explicit code artifact when present;
-   otherwise use the implement phase artifact, rehydrating paths-only metadata
-   from the execution worktree when available."
-  [artifact ctx]
-  (let [impl-artifact (implement-artifact ctx)
-        worktree-path (:execution/worktree-path ctx)]
-    (cond
-      (artifact-has-code? artifact)
-      artifact
-
-      (and worktree-path (seq (:code/file-paths impl-artifact)))
-      (rehydrate-code-files impl-artifact worktree-path)
-
-      (artifact-has-code? impl-artifact)
-      impl-artifact
-
-      :else
-      artifact)))
-
-(defn- ^{:stratum 4} run-compiled-rules
-  [compiled-rules artifact context]
-  (mapcat #(run-compiled-rule artifact context %) compiled-rules))
-
-;------------------------------------------------------------------------------ Layer 5
-
-(defn- ^{:stratum 5} compiled-check-result
-  [packs phase artifact context]
-  (let [compile-results (compile-pack-results packs)]
-    (if-let [anomaly (first (filter compile-anomaly? compile-results))]
-      (compile-anomaly-result anomaly)
-      (let [violations (vec (run-compiled-rules
-                             (phase-compiled-rules compile-results phase)
-                             artifact
-                             context))
-            classified (policy-pack/classify-violations violations)
-            {:keys [blocking require-approval warnings audits unknown]} classified
-            envelope   (decide/decide classified (pack-pins packs))]
-        {:passed?          (decide/allowed? envelope)
-         :compiled?        true
-         :envelope         envelope
-         :violations       violations
-         :blocking         (mapv policy-pack/violation->error (concat blocking unknown))
-         :require-approval (mapv policy-pack/violation->error require-approval)
-         :warnings         (mapv policy-pack/violation->warning warnings)
-         :audits           (mapv policy-pack/violation->warning audits)}))))
-
-;------------------------------------------------------------------------------ Layer 6
-
 ;; Phase-scoped check
-(defn ^{:stratum 6} check-policy-pack-for-phase
+(defn ^{:stratum 0} check-policy-pack-for-phase
   "Evaluate the pack against `artifact` for `phase`.
 
    Selects the enabled rules whose `:applies-to {:phases}` includes `phase`
@@ -509,16 +97,16 @@
    When no pack is available, passes with a no-packs warning (no regression on
    repos without a standards pack)."
   [phase artifact ctx]
-  (let [packs (packs-for-gate ctx)]
+  (let [packs (evaluation/packs-for-gate ctx)]
     (if (empty? packs)
-      {:passed? true :warnings [(no-policy-packs-warning)]}
-      (let [artifact (policy-artifact artifact ctx)
-            acting   (acting-semantic-rules packs phase artifact ctx)
-            context  (-> (with-semantic-wiring ctx artifact acting) (assoc :phase phase))
-            result   (compiled-check-result packs phase artifact context)]
+      {:passed? true :warnings [(evaluation/no-policy-packs-warning)]}
+      (let [artifact (artifact/policy-artifact artifact ctx)
+            acting   (rules/acting-semantic-rules packs phase artifact ctx)
+            context  (-> (judge/with-semantic-wiring ctx artifact acting) (assoc :phase phase))
+            result   (evaluation/compiled-check-result packs phase artifact context)]
         (when (:compiled? result)
-          (emit-rule-evidence! ctx phase
-                               (classify-rules packs phase artifact context
+          (checks/emit-rule-evidence! ctx phase
+                               (checks/classify-rules packs phase artifact context
                                                (:violations result))
                                (get-in result [:envelope :envelope/id])))
         (cond-> {:passed?  (:passed? result)
@@ -528,28 +116,28 @@
                                         (:audits result)))}
           (:envelope result) (assoc :envelope (:envelope result)))))))
 
-;------------------------------------------------------------------------------ Layer 7
+;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 7} check-policy-verify
+(defn ^{:stratum 1} check-policy-verify
   "Pack gate for the verify phase."
   [artifact ctx]
   (check-policy-pack-for-phase :verify artifact ctx))
 
-(defn ^{:stratum 7} check-policy-review
+(defn ^{:stratum 1} check-policy-review
   "Pack gate for the review phase."
   [artifact ctx]
   (check-policy-pack-for-phase :review artifact ctx))
 
-;------------------------------------------------------------------------------ Layer 8
+;------------------------------------------------------------------------------ Layer 2
 
-(defmethod ^{:stratum 8} registry/get-gate :policy-verify
+(defmethod ^{:stratum 2} registry/get-gate :policy-verify
   [_]
   {:name        :policy-verify
    :description (msg/t :policy-pack/description-verify)
    :check       check-policy-verify
    :repair      repair-policy-pack})
 
-(defmethod ^{:stratum 8} registry/get-gate :policy-review
+(defmethod ^{:stratum 2} registry/get-gate :policy-review
   [_]
   {:name        :policy-review
    :description (msg/t :policy-pack/description-review)

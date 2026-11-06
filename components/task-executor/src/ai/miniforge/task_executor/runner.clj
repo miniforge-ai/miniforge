@@ -86,10 +86,12 @@
                "Failed to acquire worktree"
                {:task-id task-id
                 :error (:error worktree-result)})
-      ;; Acquire environment from executor
+      ;; Acquire environment from executor. :env-passthrough names the :env
+      ;; entries an untrusted capsule may keep beyond its allowlist.
       (let [env-config {:repo-url (:repo-url config)
                         :branch (:branch config "main")
                         :env (:env config {})
+                        :env-passthrough (:env-passthrough config [])
                         :resources (:resources config {})}
             env-result (dag/acquire-environment! executor task-id env-config)]
         (if (dag/err? env-result)
