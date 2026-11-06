@@ -22,7 +22,7 @@
   "claude-sonnet-4-6"         {:input-per-1m  3.00  :output-per-1m  15.00}
   "claude-sonnet-4-5-20250929" {:input-per-1m 3.00  :output-per-1m  15.00}
   "claude-sonnet-4"           {:input-per-1m  3.00  :output-per-1m  15.00}
-  "claude-haiku-4-5-20251001" {:input-per-1m  0.25  :output-per-1m   1.25}
+  "claude-haiku-4-5-20251001" {:input-per-1m  1.00  :output-per-1m   5.00}
   "claude-haiku"              {:input-per-1m  0.25  :output-per-1m   1.25}
 
   ;; OpenAI GPT-5 family. Codex CLI doesn't currently surface
@@ -35,6 +35,7 @@
   "gpt-5.2"                   {:input-per-1m  3.00  :output-per-1m  15.00}
 
   ;; Google Gemini
-  "gemini-2.5-pro"            {:input-per-1m  3.50  :output-per-1m  10.50}
+  ;; Prompts up to 200k tokens; longer prompts are billed higher.
+  "gemini-2.5-pro"            {:input-per-1m  1.25  :output-per-1m  10.00}
   "gemini-2.5-flash"          {:input-per-1m  0.30  :output-per-1m   2.50}
   "gemini-2.5-flash-lite"     {:input-per-1m  0.10  :output-per-1m   0.40}}}

@@ -45,6 +45,10 @@ summary prints as `Cost: unavailable`.
 5. `http_wire.clj`, `extract-gemini`: Gemini reports thinking tokens (`thoughtsTokenCount`) beside
    the answer's and bills both as output. `:output-tokens` is now their sum, with the thinking
    part as `:reasoning-output-tokens`, so a thinking model's tokens and estimate are not low.
+6. `cost-table.edn`: `claude-haiku-4-5-20251001` was priced at $0.25/$1.25 per million tokens
+   and is $1/$5; `gemini-2.5-pro` was $3.50/$10.50 and is $1.25/$10 for prompts up to 200k
+   tokens. The HTTP estimate makes these figures visible as costs. The rest of the table is left
+   for a refresh of its own.
 
 ## Testing Plan
 
@@ -88,6 +92,9 @@ records 0 tokens. The workflow marks a phase unpriced only when its tokens are a
    A Codex turn whose usage lacks an input count still fails in `llm-success`, as it did before.
 2. `estimate-cost` bills cached input tokens at the full input rate, so an estimate for a run
    with a large prompt cache is high. That is existing behaviour, not changed here.
+3. A Claude CLI run cut before its result frame counts only its last call's input tokens
+   (`fold-message-usage`), so with caching off its estimate is low. With caching on, the cache
+   rule above leaves it unknown.
 
 ## Checklist
 
