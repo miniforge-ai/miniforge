@@ -20,15 +20,14 @@
    Clojure source and EDN.
 
    A top-level form is edited whole when it holds a line the change added,
-   or when the file at the task base has no top-level form with the same
-   source text left for it: base forms vouch only for forms without added
-   lines, and only when those forms do not outnumber the base copies of
-   their text. Matching text covers the changes that add no line in
-   the form: a removed `^:private` or `#_` prefix, an unwrapped
-   `(comment ...)`, a deleted body line. Holding an added line covers a
-   pasted copy, even one inserted above its original. An added line
-   outside every form is edited on its own. Other files are edited exactly
-   on their added lines.
+   or when the file at the task base cannot vouch for it. A base top-level
+   form vouches for the forms with its source text that hold no added line,
+   and only when they do not outnumber the base copies of that text.
+   Matching text covers the changes that add no line in the form: a removed
+   `^:private` or `#_` prefix, an unwrapped `(comment ...)`, a deleted body
+   line. Holding an added line covers a pasted copy, even one inserted
+   above its original. An added line outside every form is edited on its
+   own. Other files are edited exactly on their added lines.
 
    Forms are located with edamame, which reads past aliases, reader
    conditionals and tagged literals it cannot resolve, so one unknown

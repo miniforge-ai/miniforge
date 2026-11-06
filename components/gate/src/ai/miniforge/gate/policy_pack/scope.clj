@@ -22,9 +22,9 @@
 
    Each finding names its file under `:file` and its line under `:line`, as
    `semantic-analyzer` reports them. A finding the gate cannot place blocks
-   as before: one with no positive line, or in a file whose edits cannot be
-   found because there is no checkout, no base resolves, git fails, or the
-   content does not parse."
+   as before: one with no positive line or a line past the file's last, or
+   in a file whose edits cannot be found because there is no checkout, no
+   base resolves, git fails, or the content or its base cannot be read."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.gate.edited-forms :as edited-forms]
