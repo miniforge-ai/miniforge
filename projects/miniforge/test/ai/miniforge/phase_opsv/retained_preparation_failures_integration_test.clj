@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.retained-preparation-failures-test
+(ns ai.miniforge.phase-opsv.retained-preparation-failures-integration-test
   (:require [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.retained-preparation-fixtures :as fixtures]

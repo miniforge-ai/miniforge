@@ -28,4 +28,4 @@
       (withdraw! directory (:artifact/id published)))
     published))
 
-(comment ::move-only-inside-the-canonical-new-temporary-test-store)
+(comment ::project-integration-moves-only-inside-the-canonical-new-temporary-test-store)

@@ -53,4 +53,4 @@
 (defn ^{:stratum 2} with-retained [f]
   (fixtures/with-context (partial with-context f)))
 
-(comment ::original-producer-publication-and-assembly-are-real-not-simulated)
+(comment ::project-integration-fixtures-use-real-publication-and-assembly)

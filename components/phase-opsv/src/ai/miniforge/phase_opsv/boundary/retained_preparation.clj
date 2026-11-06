@@ -24,13 +24,19 @@
 (defn- ^{:stratum 0} refused [category]
   (anomaly/anomaly category (msg/ts :verification/retained-preparation-required) {}))
 
+(defn- ^{:stratum 0} check-interruption! []
+  (when (.isInterrupted (Thread/currentThread)) (throw (InterruptedException.))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} read-admitted! [ctx request id]
+  (check-interruption!)
   (let [value (artifact/read-published (get-in ctx [:execution/opts :opsv/artifact-directory]) id)
+        _interruption (check-interruption!)
         assembly (evidence/get-opsv-assembly (:opsv/evidence-assembly-store ctx)
                                             (get-in ctx [:execution/input :opsv/evidence-bundle-id]))]
     (cond
+      (= :fatal (:anomaly/type value)) (refused :fatal)
       (or (nil? value) (anomaly/anomaly? value)) (refused :unavailable)
       (and (valid-assembly? assembly) (retained/acknowledged? ctx assembly id)
            (valid-content? (:artifact/content value)) (retained/valid? ctx request id value))
@@ -41,6 +47,7 @@
 
 (defn ^{:stratum 2} read! [ctx request id]
   (try+
+    (check-interruption!)
     (anomaly/let-ok [_bounded (reporting/admit request)]
       (if (valid-arguments? [ctx request id])
         (read-admitted! ctx request id)
