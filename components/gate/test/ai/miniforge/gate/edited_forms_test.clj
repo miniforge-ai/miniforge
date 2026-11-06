@@ -50,7 +50,11 @@
   (is (anomaly/anomaly? (edited-forms/form-spans "(def m {:a 1 :a 2})\n"))
       "a duplicate map key")
   (is (anomaly/anomaly? (edited-forms/form-spans "(def s #{1 1})\n"))
-      "a duplicate set element"))
+      "a duplicate set element")
+  (is (anomaly/anomaly? (edited-forms/form-spans "(def t #inst \"not-a-date\")\n"))
+      "an invalid #inst")
+  (is (anomaly/anomaly? (edited-forms/form-spans "(def u #uuid \"x\")\n"))
+      "an invalid #uuid"))
 
 (deftest ^{:stratum 0} form-spans-keeps-distinct-literals-distinct-test
   (is (= 2 (count (edited-forms/form-spans "(ns demo.core)\n(def m {:user/k 1 ::k 2})\n")))
@@ -58,7 +62,9 @@
   (is (= 1 (count (edited-forms/form-spans "(def m {:u/k 1 ::u/k 2})\n")))
       "::u/k is not :u/k")
   (is (= 1 (count (edited-forms/form-spans "(def s #{#inst \"2026-01-01\" \"2026-01-01\"})\n")))
-      "a tagged literal is not its string"))
+      "a tagged literal is not its string")
+  (is (= 1 (count (edited-forms/form-spans "(def s #{#demo/tag \"x\" \"x\"})\n")))
+      "an unknown tag is not its value"))
 
 (deftest ^{:stratum 0} other-files-are-edited-on-their-added-lines-test
   (is (= #{2} (edited-forms/edited-lines "docs/notes.md" "# a\nb\nc\n" "# a\nc\n" #{2}))))

@@ -55,10 +55,11 @@
   (symbol (str "auto-resolved " alias)))
 
 (defn- ^{:stratum 0} tagged-reader
-  "A reader for TAG that keeps the tag with its value, so `#inst \"x\"` and
-   the string \"x\" stay distinct literals."
+  "A reader for TAG. A built-in tag (`#inst`, `#uuid`) reads as Clojure
+   reads it, so an invalid literal is refused; any other tag keeps itself
+   with its value, so `#demo/tag \"x\"` and the string \"x\" stay distinct."
   [tag]
-  (partial tagged-literal tag))
+  (get default-data-readers tag (partial tagged-literal tag)))
 
 (defn- ^{:stratum 0} span-text
   "The source text LINES hold between an edamame location's start and end
@@ -109,9 +110,9 @@
    edamame cannot read CONTENT. Every syntax is enabled, aliases stay
    unresolved but distinct, and reader conditionals are kept whole.
    CONTENT is read once with its values and tagged literals kept whole, so
-   an invalid literal such as a duplicate map key is refused, then again
-   with each form read as its location: locations alone would hide
-   duplicates."
+   an invalid literal (a duplicate map key, an `#inst` that is no date) is
+   refused, then again with each form read as its location: locations
+   alone would hide duplicates."
   [content]
   (try+
     (let [opts  {:all          true
@@ -125,7 +126,11 @@
                                                      :postprocess :loc))))
     (catch [:type :edamame/error] _
       (anomaly/exception-anomaly :invalid-input (msg/t :edited-forms/unreadable)
-                                 (:throwable &throw-context)))))
+                                 (:throwable &throw-context)))
+    ;; A built-in tag reader refuses an invalid literal with a plain
+    ;; RuntimeException rather than an edamame error.
+    (catch RuntimeException e
+      (anomaly/exception-anomaly :invalid-input (msg/t :edited-forms/unreadable) e))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
