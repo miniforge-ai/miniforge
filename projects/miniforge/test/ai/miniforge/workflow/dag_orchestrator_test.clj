@@ -21,6 +21,7 @@
    [ai.miniforge.workflow.isolation-support :as isolation]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.dag-loop :as dag-loop]
    [ai.miniforge.workflow.dag-plan :as dag-plan]
    [ai.miniforge.workflow.dag-task-runner :as task-runner]
    [ai.miniforge.anomaly.interface :as anomaly]
@@ -141,7 +142,7 @@
     (let [tasks-map {:a {:task/deps #{}}
                      :b {:task/deps #{:a}}}
           ;; :a failed, :b depends on :a => :b should not be ready
-          ready (dag-orch/compute-ready-tasks tasks-map #{} #{:a})]
+          ready (dag-loop/compute-ready-tasks tasks-map #{} #{:a})]
       (is (empty? ready) ":b should not be ready since :a failed"))))
 
 (deftest ^{:stratum 0} test-compute-ready-tasks-returns-roots
@@ -149,7 +150,7 @@
     (let [tasks-map {:a {:task/deps #{}}
                      :b {:task/deps #{}}
                      :c {:task/deps #{:a :b}}}
-          ready (dag-orch/compute-ready-tasks tasks-map #{} #{})]
+          ready (dag-loop/compute-ready-tasks tasks-map #{} #{})]
       (is (= #{:a :b} (set (map first ready)))))))
 
 (deftest ^{:stratum 0} test-compute-ready-tasks-unlocks-dependents
@@ -158,7 +159,7 @@
                      :b {:task/deps #{:a}}
                      :c {:task/deps #{:a :b}}}
           ;; :a completed, :b should be ready, :c still blocked on :b
-          ready (dag-orch/compute-ready-tasks tasks-map #{:a} #{})]
+          ready (dag-loop/compute-ready-tasks tasks-map #{:a} #{})]
       (is (= [:b] (map first ready))))))
 
 ;; partition-results tests
@@ -167,27 +168,27 @@
     (let [results {:a (dag/ok {:done true})
                    :b (dag/err :failed "boom" {})
                    :c (dag/ok {:done true})}
-          {:keys [completed failed]} (dag-orch/partition-results results)]
+          {:keys [completed failed]} (dag-loop/partition-results results)]
       (is (= #{:a :c} (set completed)))
       (is (= #{:b} (set failed))))))
 
 (deftest ^{:stratum 0} test-partition-results-all-ok
   (testing "all ok yields no failures"
     (let [results {:a (dag/ok {}) :b (dag/ok {})}
-          {:keys [completed failed]} (dag-orch/partition-results results)]
+          {:keys [completed failed]} (dag-loop/partition-results results)]
       (is (= 2 (count completed)))
       (is (empty? failed)))))
 
 (deftest ^{:stratum 0} test-partition-results-all-failed
   (testing "all failed yields no completions"
     (let [results {:a (dag/err :f "e1" {}) :b (dag/err :f "e2" {})}
-          {:keys [completed failed]} (dag-orch/partition-results results)]
+          {:keys [completed failed]} (dag-loop/partition-results results)]
       (is (empty? completed))
       (is (= 2 (count failed))))))
 
 (deftest ^{:stratum 0} test-partition-results-empty
   (testing "empty results yield empty partitions"
-    (let [{:keys [completed failed]} (dag-orch/partition-results {})]
+    (let [{:keys [completed failed]} (dag-loop/partition-results {})]
       (is (empty? completed))
       (is (empty? failed)))))
 

@@ -10,8 +10,8 @@
 
 Domain/application grant issuance, API surface class 1, internal EDN.
 Built on #2392's merged exact authority foundation.
-Current main is integrated through `9f378a561`.
-Documentation-only prerequisite #2402 carries incoming prose-hook repairs separately.
+Current main includes merged documentation-only prerequisite #2402.
+Later incoming prose-hook findings are repaired without changing their claims.
 
 ## Motivation
 
@@ -66,12 +66,12 @@ Current-main hooks exposed one unused test import, which is removed.
 Its strict lint and inferred strata pass; its scoped regression passes two tests and seven assertions.
 The issuer's 13 namespaces also pass strict lint and true inferred strata, with no layer waivers.
 The final standards pass adds the missing rationale to the test ceiling constant.
-The PR uses 385 of 600 reportable lines, without exceptions.
-Incoming prose findings are fixed in #2402 without weakening the hook.
+The PR remains within the 600-line reportable limit, without exceptions.
+Incoming prose findings are fixed without weakening the hook.
 
 ## Deployment Plan
 
-No default activation or live effects. Require #2402 and all normal owner merge gates.
+No default activation or live effects. All normal owner merge gates remain required.
 
 ## Related Issues/PRs
 

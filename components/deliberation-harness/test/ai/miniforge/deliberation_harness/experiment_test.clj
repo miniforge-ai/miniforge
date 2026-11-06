@@ -190,3 +190,16 @@
       (is (= :failed (:status result)))
       (is (:usage-unknown? result))
       (is (= :cell-completed (:kind (last @records)))))))
+
+(deftest ^{:stratum 1} the-independent-selector-sees-its-candidates-observations
+  (let [seen (atom [])
+        candidates-inspect #(if (:closing? %) [] (:available-experiments %))
+        result (run :independent (answering (fn [request] (swap! seen conj request) [])
+                                            candidates-inspect))
+        closing (last @seen)
+        evidence (filter #(= :evidence (:object/type %)) (get-in closing [:context :objects]))]
+    (testing "the closing request shows every observation the candidates gathered"
+      (is (= (set (vals (:experiments (task)))) (set (map :object/statement evidence)))))
+    (testing "the cell earns evidence credit for what the selector saw"
+      (is (true? (get-in result [:score :evidence-complete?])))
+      (is (= 1 (get-in result [:score :success]))))))
