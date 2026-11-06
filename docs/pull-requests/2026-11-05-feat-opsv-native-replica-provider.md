@@ -61,7 +61,20 @@ Wire-fault setup is independently checked before counting any test result.
 An initial lazy-sequence fault-helper error was caught and corrected, not counted as evidence.
 The owner also separated ingress admission from dispatch and required a valid native Deployment name.
 
-Run all affected products, safe project integrations, fresh package and normal signed gates before publication.
+Full validation passes against the actual merged dependencies:
+
+- Workspace composition and phase-opsv tests in all four product contexts.
+- All 25 safe OPSV/workflow/N6 JVM integration suites: 125 tests, 1,441 assertions.
+- All task entrypoints load, and a fresh CLI artifact builds.
+- Isolated Babashka artifact, test paths only: 58 tests, 362 assertions.
+- Native packaged compatibility regressions: 308 tests, 1,903 assertions.
+- All seven request, seven shared-dispatch and eight native-provider faults are detected with zero errors.
+
+The isolated artifact exercises governance, preflight, request construction, native execution and GitHub compatibility.
+No production-source overlay is used. The project test alias explicitly exposes the shared effect fixtures.
+Actual main includes merged #2416, and its integration leaves the fully validated tree byte-identical.
+The three implementation commits are normally signed at 147, 145 and 135 reportable lines.
+The PR is 427 of the normal 600-line limit; no size exception or hook bypass is used.
 Keep exact-head review, all CI, current-main conflict proof and owner merge requirements unchanged.
 
 ## Deployment Plan
@@ -76,5 +89,5 @@ N7 completion; #2381, #2392, #2407, #2412, #2415 and #2416.
 
 - [x] Implement the native callback and adversarial source standards pass.
 - [x] Prove native input, actual durable-commit collaboration and bounded refusal paths.
-- [ ] Complete affected products and packaged validation.
+- [x] Complete affected products and packaged validation.
 - [ ] Settle full current-head review, CI and owner merge gates.
