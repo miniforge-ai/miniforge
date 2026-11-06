@@ -43,8 +43,16 @@
   (is (anomaly/anomaly? (edited-forms/form-spans "(def s #{1 1})\n"))
       "a duplicate set element"))
 
+(deftest ^{:stratum 0} form-spans-keeps-distinct-literals-distinct-test
+  (is (= [[1 1] [2 2]] (edited-forms/form-spans "(ns demo.core)\n(def m {:user/k 1 ::k 2})\n"))
+      "::k is not :user/k")
+  (is (= [[1 1]] (edited-forms/form-spans "(def m {:u/k 1 ::u/k 2})\n"))
+      "::u/k is not :u/k")
+  (is (= [[1 1]] (edited-forms/form-spans "(def s #{#inst \"2026-01-01\" \"2026-01-01\"})\n"))
+      "a tagged literal is not its string"))
+
 (deftest ^{:stratum 0} other-files-are-edited-on-their-added-lines-test
-  (is (= #{2} (edited-forms/edited-lines "docs/notes.md" "# a\nb\nc\n" #{2} [1]))))
+  (is (= #{2} (edited-forms/edited-lines "docs/notes.md" "# a\nb\nc\n" #{2} [{:after 1 :replaced? false :lines ["x"]}]))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -57,9 +65,19 @@
 (deftest ^{:stratum 1} an-added-line-between-forms-edits-only-itself-test
   (is (= #{6} (edited-forms/edited-lines "src/demo/core.clj" source #{6} []))))
 
-(deftest ^{:stratum 1} a-deletion-point-edits-the-form-around-it-test
-  (is (= #{3 4 5} (edited-forms/edited-lines "src/demo/core.clj" source #{} [4])))
-  (is (= #{3 4 5} (edited-forms/edited-lines "src/demo/core.clj" source #{} [2]))
-      "a deletion directly before a form, such as a removed ^:private line, edits it")
-  (is (= #{} (edited-forms/edited-lines "src/demo/core.clj" source #{} [5]))
-      "a deletion after a form's last line is between forms"))
+(deftest ^{:stratum 1} removals-edit-the-forms-they-change-test
+  (is (= #{3 4 5} (edited-forms/edited-lines "src/demo/core.clj" source #{}
+                                             [{:after 4 :replaced? false :lines ["  ;; gone"]}]))
+      "a pure removal inside a form edits it")
+  (is (= #{3 4 5} (edited-forms/edited-lines "src/demo/core.clj" source #{}
+                                             [{:after 2 :replaced? false :lines ["^:private"]}]))
+      "a removed ^:private line directly above a form edits it")
+  (is (= #{2 3 4 5} (edited-forms/edited-lines "src/demo/core.clj" source #{2}
+                                               [{:after 2 :replaced? true :lines ["(def a 1)" "#_"]}]))
+      "so does a removed #_ inside a replacement")
+  (is (= #{} (edited-forms/edited-lines "src/demo/core.clj" source #{}
+                                        [{:after 2 :replaced? false :lines ["(def old 1)"]}]))
+      "a removed whole form directly above another does not edit it")
+  (is (= #{} (edited-forms/edited-lines "src/demo/core.clj" source #{}
+                                        [{:after 5 :replaced? false :lines ["  :tail)"]}]))
+      "a removal after a form's last line is between forms"))

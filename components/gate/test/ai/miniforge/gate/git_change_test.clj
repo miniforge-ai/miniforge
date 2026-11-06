@@ -17,7 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.gate.git-change-test
   "The shared git helpers read a zero-context diff into added lines and
-   deletion points, and measure from the task base, never HEAD."
+   removals, and measure from the task base, never HEAD."
   (:require [ai.miniforge.gate.git-change :as git-change]
             [babashka.fs :as fs]
             [clojure.test :refer [deftest is]]))
@@ -53,8 +53,12 @@
 (deftest ^{:stratum 1} added-lines-follows-hunk-headers-test
   (is (= [[3 "x"] [4 "+y"] [9 "z"]] (git-change/added-lines diff-text))))
 
-(deftest ^{:stratum 1} deletion-points-mark-every-hunk-that-removes-lines-test
-  (is (= [8 8 9] (git-change/deletion-points diff-text))
-      "a pure addition has none; a pure removal its line; a replacement both edges")
-  (is (= [0] (git-change/deletion-points "@@ -1,2 +0,0 @@\n-a\n-b\n")))
-  (is (= [1 2] (git-change/deletion-points "@@ -2,2 +2 @@\n-(def a 1)\n-^:private\n+(def a 2)\n"))))
+(deftest ^{:stratum 1} removals-place-each-removing-hunk-test
+  (is (= [{:after 8 :replaced? false :lines ["gone"]}
+          {:after 9 :replaced? true :lines ["old"]}]
+         (git-change/removals diff-text))
+      "a pure addition has none; a removal follows its line; a replacement its last new line")
+  (is (= [{:after 0 :replaced? false :lines ["a" "b"]}]
+         (git-change/removals "@@ -1,2 +0,0 @@\n-a\n-b\n")))
+  (is (= [{:after 2 :replaced? true :lines ["(def a 1)" "^:private"]}]
+         (git-change/removals "@@ -2,2 +2 @@\n-(def a 1)\n-^:private\n+(def a 2)\n"))))

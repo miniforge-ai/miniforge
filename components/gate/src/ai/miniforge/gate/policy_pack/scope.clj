@@ -74,7 +74,7 @@
     (when-let [diff (git-change/version-diff ctx base path content dir name)]
       (let [lines (edited-forms/edited-lines path content
                                              (set (map first (git-change/added-lines diff)))
-                                             (git-change/deletion-points diff))]
+                                             (git-change/removals diff))]
         (when-not (anomaly/anomaly? lines)
           {:edited lines :line-count (count (str/split-lines content))})))))
 

@@ -22,10 +22,10 @@
      resolves; never HEAD, which holds the change once the implement phase
      commits.
   2. In a Clojure source or EDN file the edited region is every top-level
-     form that holds an added line or a deletion point, or that directly
-     follows a deletion point (removing a `^:private` or `#_` line changes
-     the next form), plus each added line outside any form. In any other
-     file it is the added lines.
+     form that holds an added line or a pure removal, or that directly
+     follows removed lines starting with `^` or `#_` (removing a reader
+     prefix such as `^:private` changes the next form), plus each added line
+     outside any form. In any other file it is the added lines.
   3. A judge finding on a line inside the edited region blocks as today. A
      finding outside it becomes a gate warning that says it lies outside the
      change, and does not block.
@@ -56,6 +56,7 @@
   "A change that only deletes lines inside form A makes a finding in A block"
   "In a file with no base blob, a finding on any line blocks"
   "A change that only removes a ^:private line above form B makes a finding in B block"
+  "A change that replaces the line directly above form B, removing no reader prefix, leaves a finding in B a warning"
   "A finding with line 0, no line, or a line past the file's last blocks"
   "With no worktree path, every finding blocks"
   "A finding in a file whose content does not parse blocks"

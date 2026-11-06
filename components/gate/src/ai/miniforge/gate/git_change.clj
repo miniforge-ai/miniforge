@@ -82,24 +82,28 @@
       (and n (str/starts-with? line " ")) (recur more (inc n) acc)
       :else (recur more n acc))))
 
-(defn ^{:stratum 0} deletion-points
-  "For each hunk of a zero-context unified diff that removes lines, the
-   points of the new version (after line P) where removed lines may have
-   been: for a pure removal, the line it follows (0 at the start); for a
-   replacement, both edges of the lines put in their place, since the hunk
-   does not say where among them the removed lines were."
+(defn ^{:stratum 0} removals
+  "{:after P :replaced? bool :lines [text ...]} for each hunk of a
+   zero-context unified diff that removes lines. :lines are the removed
+   lines' text. P is the line of the new version the removal is placed
+   after: for a pure removal, the line it follows (0 at the start); for a
+   replacement (:replaced? true), the last line put in its place."
   [diff]
-  (mapcat (fn [line]
-            (when-let [[_ removed start added]
-                       (re-find #"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@" line)]
-              (let [removed (if removed (parse-long removed) 1)
-                    start   (parse-long start)
-                    added   (if added (parse-long added) 1)]
-                (cond
-                  (zero? removed) []
-                  (zero? added)   [start]
-                  :else           [(dec start) (+ start added -1)]))))
-          (str/split-lines (str diff))))
+  (let [close (fn [acc hunk] (cond-> acc (seq (:lines hunk)) (conj hunk)))]
+    (loop [[line & more] (str/split-lines (str diff)) hunk nil acc []]
+      (cond
+        (nil? line) (close acc hunk)
+        (str/starts-with? line "@@")
+        (let [[_ start added] (re-find #"^@@ -\S+ \+(\d+)(?:,(\d+))? @@" line)
+              start (parse-long start)
+              added (if added (parse-long added) 1)]
+          (recur more
+                 {:after     (if (zero? added) start (+ start added -1))
+                  :replaced? (pos? added)
+                  :lines     []}
+                 (close acc hunk)))
+        (and hunk (str/starts-with? line "-")) (recur more (update hunk :lines conj (subs line 1)) acc)
+        :else (recur more hunk acc)))))
 
 (defn ^{:stratum 0} scratch-dir
   "A fresh temp directory named from PREFIX that only its owner can enter,

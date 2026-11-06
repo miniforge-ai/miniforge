@@ -141,6 +141,11 @@
         content "(ns demo.core)\n(def a 2)\n(defn b\n  []\n  2)\n"]
     (is (not (:passed? (check (base-worktree base) {:content content} 4))))))
 
+(deftest ^{:stratum 2} replacing-the-line-above-a-form-leaves-it-unedited-test
+  (let [base    "(ns demo.core)\n(def a 1)\n(defn b\n  []\n  2)\n"
+        content "(ns demo.core)\n(def a 2)\n(defn b\n  []\n  2)\n"]
+    (is (:passed? (check (base-worktree base) {:content content} 4)))))
+
 (deftest ^{:stratum 2} duplicate-literal-content-blocks-test
   (let [content (str/replace edit-a "  10)" "  {:k 1 :k 2})")]
     (is (not (:passed? (check (base-worktree base-content) {:content content} 9))))))

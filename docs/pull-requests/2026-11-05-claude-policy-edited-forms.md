@@ -30,10 +30,14 @@ touch added lines.
 1. `ai.miniforge.gate.edited-forms` (new): `form-spans` locates each top-level
    form with edamame, which reads past auto-resolved keywords with unknown
    aliases, reader conditionals and unknown tagged literals; content it cannot
-   read is an `:invalid-input` anomaly. `edited-lines` widens a change's added
-   lines and deletion points to whole top-level forms in `.clj`, `.cljc`,
-   `.cljs`, `.bb` and `.edn` files, and keeps them as exact lines in other
-   files.
+   read, or that holds an invalid literal such as a duplicate map key, is an
+   `:invalid-input` anomaly. A first read keeps values (with tags and
+   auto-resolved aliases distinct) to catch invalid literals; a second reads
+   locations. `edited-lines` widens a change to whole top-level forms in
+   `.clj`, `.cljc`, `.cljs`, `.bb` and `.edn` files: a form is edited when it
+   holds an added line or a pure removal, or sits directly below removed
+   lines that start with `^` or `#_` (a removed reader prefix changes it). In
+   other files the added lines are the edit.
 2. `ai.miniforge.gate.policy-pack.scope` (new): `scope-violations` diffs each
    changed file against the task base (the artifact's `:code/base-refs`, the
    context's `:execution/task-base-refs`, then the environment base SHA, never
@@ -43,10 +47,12 @@ touch added lines.
    reported something.
 3. `policy-pack.evaluation/compiled-check-result` passes its violation entries
    through `scope-violations` before classifying them.
-4. `git-change/deletion-points` (new) reads the pure-deletion hunks of a
-   zero-context diff.
-5. A finding blocks as before when it has no positive line, or its file has no
-   checkout or base to diff against, git fails, or the content does not parse.
+4. `git-change/removals` (new) reads each hunk of a zero-context diff that
+   removes lines: where it falls in the new version, whether it replaced
+   lines, and the removed text.
+5. A finding blocks as before when it has no positive line or a line past the
+   file's last, or its file has no checkout or base to diff against, git
+   fails, or the content does not parse.
    A new file has every line added, so all its findings block.
 6. The gate's namespace docstring describes the change scope, and drops two
    references to earlier PRs.
