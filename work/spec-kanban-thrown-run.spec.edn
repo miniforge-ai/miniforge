@@ -1,0 +1,46 @@
+{:spec/title "A work spec whose run throws moves to work/failed instead of staying in work/in-progress"
+
+ :spec/description
+ "When `miniforge run` starts a spec that lives under `work/`,
+  `ai.miniforge.cli.workflow-runner.spec-kanban/start-spec!` moves the file
+  to `work/in-progress/`. When the run returns, `finish-spec!` moves it to
+  `work/done/` or `work/failed/` by the result. Both calls sit in
+  `run-workflow-from-spec!` in `bases/cli/src/ai/miniforge/cli/workflow_runner.clj`,
+  but `finish-spec!` runs only on the normal return of
+  `execution/execute-with-events`. When the run throws (for example a
+  namespace that fails to load, as on 2026-11-05), the spec stays in
+  `work/in-progress/`, the launching checkout is left with a tracked file
+  deleted, and the next `bb dogfood` refuses to start on a dirty tree.
+  Stale copies in `work/in-progress/` accumulated this way.
+
+  Change: when the run throws after `start-spec!` moved the spec,
+  `finish-spec!` (or the move it wraps) still runs and files the spec under
+  `work/failed/`, then the exception propagates unchanged. A run whose spec
+  is not under `work/` is unaffected."
+
+ :spec/intent
+ {:type :bugfix
+  :scope ["bases/cli/src/ai/miniforge/cli/workflow_runner.clj"
+          "bases/cli/src/ai/miniforge/cli/workflow_runner/spec_kanban.clj"
+          "bases/cli/test/ai/miniforge/cli/workflow_runner/kanban_test.clj"]}
+
+ :spec/constraints
+ ["The original exception propagates unchanged; filing the spec must not replace or swallow it"
+  "A failure to move the spec is reported on stderr and does not mask the run's exception"
+  "Tests use a temp directory as the working tree; they never move files under the repository's work/"]
+
+ :spec/acceptance-criteria
+ ["A run that throws after start-spec! leaves its spec in work/failed/, not work/in-progress/"
+  "The exception the run threw is the exception the caller receives"
+  "A run that returns normally still files its spec under work/done/ or work/failed/ by its result"
+  "A spec outside work/ is not moved on either path"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :dogfood-enabler}
+  :theme :dogfood-resilience
+  :rationale "A dogfood run that throws leaves the launching checkout dirty, so the next run refuses to start until someone restores the file by hand."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

@@ -1,0 +1,45 @@
+{:spec/title "Workflow resume — emit :workflow/resumed naming the phase it resumes from and the phases it skips"
+
+ :spec/description
+ "`bb miniforge resume <id>` restarts a checkpointed run, but its event log
+  never says so. The event exists end to end except for its producer:
+  `:workflow/resumed` is in `event-type-registry.edn`, its schema is in
+  `event_stream/recovery_draft_spec.clj`, its message
+  (`\"Workflow resumed at {from-phase}; skipped: {skipping}\"`) is in the
+  event-stream catalog, and `ai.miniforge.event-stream.interface/workflow-resumed`
+  builds it. Nothing in production calls it, so a resumed run's log looks
+  like a run that started mid-pipeline.
+
+  Change: the resume command (`bases/cli/src/ai/miniforge/cli/main/commands/resume.clj`)
+  publishes one `:workflow/resumed` event on the run's event stream after it
+  has reconstructed the checkpoint and before the pipeline runs. The event
+  names the phase the run resumes at and the phases it skips because their
+  checkpointed results are reused. A resume that the command refuses (spec
+  drift without --force, non-resumable status) publishes nothing."
+
+ :spec/intent
+ {:type :bugfix
+  :scope ["bases/cli/src/ai/miniforge/cli/main/commands/resume.clj"
+          "bases/cli/test/ai/miniforge/cli/main/commands/resume_test.clj"]}
+
+ :spec/constraints
+ ["Use the existing `es/workflow-resumed` constructor; add no new event type or schema"
+  "Publish exactly once per accepted resume, before the pipeline starts"
+  "A refused resume publishes no :workflow/resumed event"
+  "Tests use an in-memory event stream; no real checkpoint directory under ~/.miniforge"]
+
+ :spec/acceptance-criteria
+ ["An accepted resume publishes one :workflow/resumed event whose resume phase is the first phase without a checkpointed result"
+  "The event's skipped phases are exactly the phases whose checkpointed results the resume reuses"
+  "The event validates against the :workflow/resumed schema in recovery_draft_spec.clj"
+  "A resume refused for spec drift without --force publishes no :workflow/resumed event"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:observation :dogfood-enabler}
+  :theme :dogfood-resilience
+  :rationale "Without the event, a resumed dogfood run cannot be told apart from a fresh one in the event log or the dashboard."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}
