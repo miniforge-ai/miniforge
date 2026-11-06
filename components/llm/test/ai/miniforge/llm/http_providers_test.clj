@@ -465,6 +465,20 @@
                                              {:api-key test-api-key}))]
       (is (:success result))
       (is (not (contains? result :cost-usd)))))
+  (testing "an Anthropic response that read the prompt cache keeps the cache
+            count and gets no estimate: the cache tokens are counted beside
+            input and the table does not price them"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:content [{:type "text" :text "answer"}]
+                                   :usage {:input_tokens 11
+                                           :output_tokens 7
+                                           :cache_read_input_tokens 5000}})
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-sonnet-4-6"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (= {:input-tokens 11 :output-tokens 7 :cache-read-input-tokens 5000} (:usage result)))
+      (is (not (contains? result :cost-usd)))))
   (testing "a response with no token counts gets no estimate, not 0.0"
     (let [{:keys [result]}
           (capture-http (http-200 {:content [{:type "text" :text "answer"}]})

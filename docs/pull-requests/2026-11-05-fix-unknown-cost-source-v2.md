@@ -42,6 +42,8 @@ summary prints as `Cost: unavailable`.
    cost absent.
 4. `http_wire.clj`, `parse-provider-response`: an empty answer (`empty_success_output`) keeps
    the usage and tokens the provider reported, so a reply cut at the output cap is counted.
+   `extract-anthropic` also keeps Anthropic's prompt-cache reads and writes, under the Claude
+   CLI's key names, so the cache rule sees them on the HTTP path too.
 5. `http_wire.clj`, `extract-gemini`: Gemini reports thinking tokens (`thoughtsTokenCount`) beside
    the answer's and bills both as output. `:output-tokens` is now their sum, with the thinking
    part as `:reasoning-output-tokens`, so a thinking model's tokens and estimate are not low.
@@ -68,6 +70,7 @@ summary prints as `Cost: unavailable`.
    estimate. One on an unpriced model, or with no token counts, gets no `:cost-usd`. An empty
    answer keeps its 18 tokens and their estimate. A Gemini response with thinking tokens counts
    them as output.
+   An Anthropic response that read the prompt cache keeps the count and gets no `:cost-usd`.
 5. New `cost_estimate_test.clj` covers each rule of `known-estimate`, with Gemini 2.5 Pro
    estimated at 200,000 prompt tokens and not at 200,001.
 6. On main the new and changed assertions fail. With the fix they pass, together
@@ -93,7 +96,6 @@ records 0 tokens. The workflow marks a phase unpriced only when its tokens are a
 ## Notes
 
 1. The non-streaming retry after an empty CLI stream (`complete-impl`) is not estimated here.
-   The HTTP Anthropic path sends no `cache_control`, so it reports no cache tokens to leave out.
    A Codex turn whose usage lacks an input count still fails in `llm-success`, as it did before.
    `scripts/refresh-cost-table.bb` rewrites each row from upstream and would drop
    `:max-input-tokens`; the table refresh should keep it.
