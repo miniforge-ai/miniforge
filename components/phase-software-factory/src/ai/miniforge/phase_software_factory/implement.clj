@@ -215,9 +215,10 @@
         ;; The agent's cost, or nil when it is unknown (an unpriced
         ;; model). No flat-rate guess: an unknown cost stays off the
         ;; phase metrics, and the workflow marks its total
-        ;; :cost-unavailable? instead of showing a made-up figure.
+        ;; :cost-unavailable? instead of showing a made-up figure. An
+        ;; agent's `:cost-usd nil` (an unpriced no-op) is dropped, not kept.
         cost-usd (get result :cost-usd (get metrics :cost-usd))
-        metrics (cond-> (assoc metrics :duration-ms duration-ms)
+        metrics (cond-> (-> metrics (dissoc :cost-usd) (assoc :duration-ms duration-ms))
                   (some? cost-usd) (assoc :cost-usd cost-usd))
         env-id (get ctx :execution/environment-id)
         curated-artifact (implement-result/successful-curated-artifact result)

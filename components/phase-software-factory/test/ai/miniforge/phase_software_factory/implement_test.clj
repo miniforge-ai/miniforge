@@ -613,6 +613,24 @@
         (is (not (contains? (get-in final-result [:phase :metrics]) :cost-usd))
             "no agent cost: the phase reports none rather than a guess")))))
 
+(deftest ^{:stratum 2} leave-implement-drops-a-nil-agent-cost-test
+  (testing "an agent result whose metrics carry :cost-usd nil (the
+            implementer's already-implemented response on an unpriced model)
+            leaves no :cost-usd in the phase metrics: schema/Metrics allows
+            the key only as a number"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                (response/success nil {:tokens 10 :duration-ms 100}))
+                  agent/curate-implement-output mock-curator-success]
+      (let [ctx (assoc (create-base-context) :execution/environment-id (random-uuid))
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) (assoc ctx :phase-config {:phase :implement}))
+            nil-cost (assoc-in enter-result [:phase :result :metrics]
+                               {:tokens 10 :duration-ms 100 :cost-usd nil})
+            final-result ((:leave interceptor) nil-cost)]
+        (is (not (contains? (get-in final-result [:phase :metrics]) :cost-usd)))
+        (is (= 10 (get-in final-result [:phase :metrics :tokens])))))))
+
 (deftest ^{:stratum 2} leave-implement-boundary-coerces-raw-invalid-metrics-test
   (testing "metrics that bypass the response builders (raw nil :tokens) are
             caught at the phase-input boundary and coerced, not NPE'd"

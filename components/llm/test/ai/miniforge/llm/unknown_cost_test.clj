@@ -37,16 +37,18 @@
 
 (defn ^{:stratum 0} codex-response
   "Stream `events` from a Codex client (with `model`, when given) that exits
-   with `exit`."
-  [model events exit]
-  (let [client (records/create-client
-                (cond-> {:backend :codex
-                         :stream-exec-fn (fn [_cmd on-line _opts]
-                                           (doseq [event events]
-                                             (on-line (json/generate-string event)))
-                                           {:out "" :err "" :exit exit})}
-                  model (assoc :model model)))]
-    (llm/complete-stream client {:prompt "go"} (fn [_] nil))))
+   with `exit`. `request` is merged into the streamed request."
+  ([model events exit]
+   (codex-response model {} events exit))
+  ([model request events exit]
+   (let [client (records/create-client
+                 (cond-> {:backend :codex
+                          :stream-exec-fn (fn [_cmd on-line _opts]
+                                            (doseq [event events]
+                                              (on-line (json/generate-string event)))
+                                            {:out "" :err "" :exit exit})}
+                   model (assoc :model model)))]
+     (llm/complete-stream client (merge {:prompt "go"} request) (fn [_] nil)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -68,5 +70,9 @@
   (testing "a model in the cost table gets an estimate from its usage"
     (let [resp (codex-response "gpt-5.4" codex-turn 0)]
       (is (:success resp))
+      (is (pos? (:cost-usd resp)))
+      (is (= (llm/estimate-cost (:usage resp) "gpt-5.4") (:cost-usd resp)))))
+  (testing "the request's model is priced when the client names none"
+    (let [resp (codex-response nil {:model "gpt-5.4"} codex-turn 0)]
       (is (pos? (:cost-usd resp)))
       (is (= (llm/estimate-cost (:usage resp) "gpt-5.4") (:cost-usd resp))))))
