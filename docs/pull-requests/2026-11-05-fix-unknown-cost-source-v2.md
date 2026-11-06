@@ -36,6 +36,10 @@ summary prints as `Cost: unavailable`.
    cost-table estimate when the request's model is priced. Every HTTP provider except OpenRouter
    bills nothing on the response. Before this PR the implement phase's flat rate filled that
    gap. Without the estimate, an `:anthropic-api` run on a priced model would show no cost.
+   The estimate needs both input and output token counts; missing or partial counts leave the
+   cost absent.
+4. `http_wire.clj`, `parse-provider-response`: an empty answer (`empty_success_output`) keeps
+   the usage and tokens the provider reported, so a reply cut at the output cap is counted.
 
 ## Testing Plan
 
@@ -48,7 +52,8 @@ summary prints as `Cost: unavailable`.
    cost for an agent that reported none. They now expect no phase cost and `0.0` added to the
    execution total.
 4. `http_providers_test.clj`: an Anthropic response on `claude-sonnet-4-6` gets the table
-   estimate, and one on an unpriced model gets no `:cost-usd`.
+   estimate; one on an unpriced model, or with no token counts, gets no `:cost-usd`; an empty
+   answer keeps its 18 tokens and their estimate.
 5. On main the new and changed assertions fail. With the fix they pass, together
    with `interface-test`, `cost-test` and the workflow's `cost-unavailable-metrics-test`.
 
