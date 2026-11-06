@@ -82,9 +82,8 @@ them; those findings appear in the gate's warnings instead.
 
 ## Related Issues/PRs
 
-1. Depends on #2410 (the `policy_pack.clj` namespace split) and #2411 (the
-   shared `git-change` helpers); this branch merges both and its diff is clean
-   once they land.
+1. Builds on #2410 (the `policy_pack.clj` namespace split) and #2411 (the
+   shared `git-change` helpers), both merged.
 
 ## Checklist
 
