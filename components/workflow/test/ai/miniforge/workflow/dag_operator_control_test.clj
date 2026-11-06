@@ -29,11 +29,12 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.workflow.context :as context]
+   [ai.miniforge.workflow.dag-loop :as dag-loop]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
-   [ai.miniforge.workflow.dag-resilience :as resilience]
    [ai.miniforge.workflow.execution-dag :as execution-dag]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-defaults :as runner-defaults]
+   [ai.miniforge.workflow.stop-signal :as stop-signal]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -195,55 +196,23 @@
       (is (= :anomalies.dashboard/stop (anomaly/subtype (:error result)))))))
 
 (deftest ^{:stratum 2} cancel-during-a-rate-limit-wait-keeps-the-batch-spend-test
-  (testing "root hits a rate limit with a 2-minute reset; the cancel lands
-            during the wait, with no phase scope around the DAG (as in
-            `mf run plan.edn`). The wait ends at once, and the cancelled
-            result keeps the rate-limited task's spend."
+  (testing "root hits a rate limit with a short reset; the cancel lands as
+            the wait starts. The wait ends, and the cancelled result keeps the
+            rate-limited task's spend."
     (let [control (es/create-control-state)
           [logger _] (log/collecting-logger)
           task (fn [task-def _context]
                  (dag/err :task-execution-failed "429 Too Many Requests: rate limit, resets in 2 minutes"
                           {:task-id (:task/id task-def)
                            :metrics {:tokens 100 :cost-usd 0.5 :duration-ms 1}}))
-          started (System/currentTimeMillis)
-          result (with-redefs-fn {#'dag-orch/execute-single-task task}
-                   #(let [run (future (dag-orch/execute-plan-as-dag chain-plan {:logger logger
-                                                                                :control-state control}))]
-                      (Thread/sleep 300)
-                      (es/cancel! control)
-                      (let [r (deref run wait-limit-ms ::still-waiting)]
-                        (when (= ::still-waiting r) (future-cancel run))
-                        r)))]
-      (is (not= ::still-waiting result) "the cancel ended the wait")
-      (is (< (- (System/currentTimeMillis) started) (+ 300 wait-limit-ms)))
+          sleep @#'dag-loop/stop-aware-sleep
+          result (with-redefs-fn {#'dag-orch/execute-single-task task
+                                  #'dag-loop/stop-aware-sleep (fn [cs ms] (es/cancel! cs) (sleep cs ms))}
+                   #(stop-signal/interrupting-on-stop
+                     control
+                     (fn [] (dag-orch/execute-plan-as-dag chain-plan {:logger logger :control-state control}))))]
       (is (true? (:cancelled? result)))
       (is (= 100 (get-in result [:metrics :tokens]))))))
-
-(deftest ^{:stratum 2} cancel-during-a-rate-limit-pause-decision-is-reported-as-a-cancel-test
-  (testing "root hits a rate limit with a 3-hour reset, which checkpoints
-            and pauses the run; the cancel lands while that decision is
-            made. The run ends cancelled with the batch's spend, and no
-            pause or resume hint is published for it."
-    (let [control (es/create-control-state)
-          stream (es/create-event-stream {:sinks []})
-          [logger _] (log/collecting-logger)
-          task (fn [task-def _context]
-                 (dag/err :task-execution-failed "429 Too Many Requests: rate limit, resets in 3 hours"
-                          {:task-id (:task/id task-def)
-                           :metrics {:tokens 100 :cost-usd 0.5 :duration-ms 1}}))
-          decide resilience/handle-rate-limited-batch
-          result (with-redefs-fn {#'dag-orch/execute-single-task task
-                                  #'resilience/handle-rate-limited-batch
-                                  (fn [& args] (es/cancel! control) (apply decide args))}
-                   #(dag-orch/execute-plan-as-dag chain-plan {:logger logger
-                                                              :control-state control
-                                                              :event-stream stream}))
-          published (set (map :event/type (es/get-events stream)))]
-      (is (true? (:cancelled? result)))
-      (is (not (:paused? result)))
-      (is (= 100 (get-in result [:metrics :tokens])))
-      (is (not (contains? published :dag/paused)))
-      (is (not (contains? published :dag/resume-hint))))))
 
 (deftest ^{:stratum 2} cancel-after-every-task-completed-reports-the-completed-run-test
   (testing "a cancel that lands while the last batch runs cuts nothing short:

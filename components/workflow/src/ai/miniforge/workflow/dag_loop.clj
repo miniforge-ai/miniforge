@@ -30,7 +30,8 @@
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-defaults :as runner-defaults]
    [ai.miniforge.workflow.stop-signal :as stop-signal]
-   [clojure.set :as set]))
+   [clojure.set :as set]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -161,11 +162,22 @@
           paused  (do (when-not logged?
                         (log/info logger :dag-orchestrator :dag/paused
                                   {:message (messages/t :status/paused)}))
-                      ;; A cancel ends the wait at once; the loop then
-                      ;; re-reads :stopped and returns the cancelled result.
-                      (stop-signal/sleep! control-state (runner-defaults/pause-poll-interval-ms))
+                      ;; A cancel's interrupt during the wait is the cancel:
+                      ;; the loop re-reads :stopped and returns the usual
+                      ;; cancelled result.
+                      (try+ (Thread/sleep (long (runner-defaults/pause-poll-interval-ms)))
+                            (catch InterruptedException e
+                              (when-not (stop-signal/stop-caused? control-state e) (throw e))))
                       (recur true))
           :else   false)))))
+
+(defn- ^{:stratum 0} stop-aware-sleep
+  "Sleep `ms`; a cancel's interrupt ends the sleep early instead of
+   escaping (another interrupt still throws)."
+  [control-state ms]
+  (try+ (Thread/sleep (long ms))
+        (catch InterruptedException e
+          (when-not (stop-signal/stop-caused? control-state e) (throw e)))))
 
 (defn- ^{:stratum 0} cancelled-dag-result
   "Terminal result for a run the operator stopped between batches. Built by
@@ -292,33 +304,24 @@
                      (inc iteration))
 
               (seq rate-limited-ids)
-              (let [;; A cancel ends a short rate-limit wait at once.
-                    decision (binding [resilience/*sleep!* (partial stop-signal/sleep! control-state)]
+              (let [;; A cancel's interrupt ends a short rate-limit wait;
+                    ;; the loop then sees :stopped and returns the
+                    ;; cancelled result with every result so far.
+                    decision (binding [resilience/*sleep!* (partial stop-aware-sleep control-state)]
                                (dag-rate-limit/handle-rate-limit-in-batch
                                 context rate-limited-ids new-completed new-failed
                                 all-results results event-stream workflow-id logger))]
-                (cond
-                  ;; A cancel that landed during the wait, a failover or
-                  ;; the pause decision wins over that decision: keep this
-                  ;; batch's spend, as the branch above does, and let the
-                  ;; next iteration return the cancelled result.
-                  (some-> control-state deref :stopped)
+                (if (= :continue (:action decision))
                   (recur new-completed
                          new-failed
-                         (merge all-results results)
-                         (into sub-workflow-ids batch-sub-ids)
-                         current-backend
-                         (inc iteration))
-
-                  (= :continue (:action decision))
-                  (recur new-completed
-                         new-failed
-                         (merge all-results (select-keys results completed))
+                         ;; A cancel that ended the wait keeps this batch's
+                         ;; spend, as the branch above does.
+                         (merge all-results (if (some-> control-state deref :stopped)
+                                              results
+                                              (select-keys results completed)))
                          (into sub-workflow-ids batch-sub-ids)
                          (:new-backend decision)
                          (inc iteration))
-
-                  :else
                   (:result decision)))
 
               :else

@@ -84,15 +84,14 @@
                  (resilience/rate-limit-in-text? s)))))
 
 (defn- ^{:stratum 1} apply-backoff-if-retrying!
-  "Sleep with exponential backoff when a phase is being retried. A cancel
-   before or during the backoff ends it at once (`stop-signal/sleep!`)."
-  [phase-ctx control-state]
+  "Sleep with exponential backoff when a phase is being retried."
+  [phase-ctx _context]
   (let [current-phase (:execution/current-phase phase-ctx)
         retrying? (phase/retrying?
                    (get-in phase-ctx [:execution/phase-results current-phase]))
         retry-count (get-in phase-ctx [:phase :iterations] 1)]
     (when (and retrying? (> retry-count 1))
-      (stop-signal/sleep! control-state (backoff-ms retry-count)))))
+      (Thread/sleep (backoff-ms retry-count)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -104,8 +103,7 @@
    (a blocking phase callback, outside the interceptor's error handler)
    leaves the context as it came in, for the runner to record the stop.
    Workspace persistence and the retry and health policy after it run
-   outside that scope; a cancel before or during the retry backoff ends
-   the backoff at once."
+   uninterrupted, and a stopped run skips the retry backoff."
   ([pipeline context callbacks]
    (execute-phase pipeline context callbacks nil))
   ([pipeline context callbacks control-state]
@@ -119,7 +117,8 @@
                                 :error :message] "")]
      (if (rate-limited? error-message)
        (apply-rate-limit-failure phase-context error-message)
-       (do (apply-backoff-if-retrying! phase-context control-state)
+       (do (when-not (some-> control-state deref :stopped)
+             (apply-backoff-if-retrying! phase-context context))
            (apply-health-switch phase-context))))))
 
 (comment ::phase-boundary-policy)

@@ -22,11 +22,7 @@
    it is set: the thread running a phase step is interrupted (both LLM
    paths kill the agent CLI's process tree on interrupt). Work in that
    scope that waits on tasks which stop on their own (a DAG batch) runs in
-   `coordinating`, so it collects their results instead. A wait between
-   steps (a retry backoff, a rate-limit cooldown, a pause poll) uses
-   `sleep!`, which wakes on a cancel with or without an enclosing scope."
-  (:require
-   [slingshot.slingshot :refer [throw+ try+]]))
+   `coordinating`, so it collects their results instead.")
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -124,29 +120,5 @@
                 (when-not (some-> control-state deref :stopped)
                   (reset! armed true))))))
       (f))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} sleep!
-  "Sleep `ms` unless `control-state` is stopped first; a stop before or
-   during the sleep ends it at once. On a thread whose own
-   `interrupting-on-stop` scope is armed (a phase step), that scope's
-   interrupt wakes it. Elsewhere (`mf run plan.edn`'s DAG loop, the
-   runner's retry backoff after the phase scope ended) the sleep runs in
-   a scope of its own, so it wakes there too; a second scope on an armed
-   one would only add a second interrupt that could land after the
-   sleep. Returns true when a stop ended or skipped the sleep. An
-   interrupt from elsewhere propagates."
-  [control-state ms]
-  (let [{:keys [armed thread]} *hook*
-        covered? (and armed @armed (identical? thread (Thread/currentThread)))
-        sleep    #(Thread/sleep (long ms))]
-    (try+
-      (cond
-        (some-> control-state deref :stopped) true
-        covered? (do (sleep) false)
-        :else (do (interrupting-on-stop control-state sleep) false))
-      (catch InterruptedException e
-        (if (stop-caused? control-state e) true (throw+))))))
 
 (comment ::stop-signal)
