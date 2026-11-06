@@ -12,10 +12,10 @@ Two defects in the release skip probe, both raised by Copilot on #2264 and both
 present on `main`:
 
 1. The host git calls of the release scan inherit `GIT_DIR`, `GIT_WORK_TREE`
-   and `GIT_INDEX_FILE` when miniforge runs from a git hook, so they read the
+   and `GIT_INDEX_FILE` when miniforge runs from a git hook. They read the
    hook's repository instead of the task worktree.
 2. A resumed run whose earlier attempt recorded no task base measures its
-   committed work from the checkpoint it restored, finds nothing, and skips
+   committed work from the checkpoint it restored. It finds nothing and skips
    the release, so the earlier attempt's commits are never published.
 
 ## Motivation
@@ -38,18 +38,18 @@ present on `main`:
 2. `release-worktree/release-bases` (replaces `release-base-shas`) returns the
    bases in order: a recorded commit sha as `{:sha s}`, a recorded `X...HEAD`
    range as `{:merge-base X}`. On a resume the environment's `:base-sha` (the
-   checkpoint) is not a base, and when the recorded refs came from a resume
+   checkpoint) is not a base. When the recorded refs came from a resume
    (they carry ranges) their one commit, which is that checkpoint, is not
    either. On a first attempt the environment's base commit still follows the
    recorded refs.
-3. `release-worktree/base-shas` resolves them with the scan's runner: a merge
-   base is `git merge-base X HEAD`; a ref that names no commit here, or shares
-   no history with HEAD, is left out; a git failure is the scan's
+3. `release-worktree/base-shas` resolves them with the scan's runner.
+   A merge base is `git merge-base X HEAD`. A ref that names no commit here, or shares
+   no history with HEAD, is left out. A git failure is the scan's
    `:release/git-status-failed` anomaly. `committed-since-base` diffs from the
    first that resolves, as before. A resume's merge bases collapse to the one
-   nearest HEAD (fewest commits from it to HEAD): the ranges name the CLI's
-   start commit and branch, the task environment can start past that commit,
-   and the task's own commits are on none of those refs, so an older merge
+   nearest HEAD (fewest commits from it to HEAD). The ranges name the CLI's
+   start commit and branch. The task environment can start past that commit,
+   and the task's own commits are on none of those refs. An older merge
    base would count upstream commits as task work (Copilot review). First
    attempts keep "the first commit decides".
 4. `release-scan/missing-commit?` becomes public, so the merge-base lookup
@@ -57,7 +57,7 @@ present on `main`:
    shared history" for `git merge-base`: only an exit 1 that printed nothing
    on stdout or stderr. An exit 1 with stderr (a capsule whose container is
    gone) is the scan's `:release/git-status-failed` anomaly, not unrelated
-   history, so the release cannot skip committed work on it (Copilot review).
+   history. The release therefore cannot skip committed work on it (Copilot review).
 
 ## Testing Plan
 
