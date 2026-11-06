@@ -34,8 +34,12 @@ and solid / dashed / dotted strokes for built / partial / spec-only.
 | Miss ledger, buckets, report, telemetry, retrodiction | `components/codex-gap/`, recorded at phase leave by `gap_wiring.clj`; `bb codex-gap-report`, `bb codex-gap-peg-telemetry`, `bb codex-gap-retrodict` |
 
 The codex itself is not in this repository. It is a directory of markdown nodes,
-read from `MINIFORGE_CODEX_PATH`. With the variable unset the capability is off,
-and every part of the code above treats that as a normal, quiet state.
+read from `MINIFORGE_CODEX_PATH`. With the variable unset, the automatic paths stay
+quiet: phase-start delivery records `:unconfigured`, the consultation gate passes
+clean and the gap ledger writes nothing. Explicitly invoked tools say so instead.
+`consider_situation`, which also accepts a `codex_path` argument, returns an
+unconfigured anomaly. `bb codex-gap-peg-telemetry` and `bb codex-gap-retrodict`
+exit with a diagnostic.
 
 ## What panel 4 does not know
 
