@@ -610,7 +610,8 @@
         (is (= :completed (get-in final-result [:phase :status])))
         (is (number? (get-in final-result [:execution/metrics :tokens]))
             "nil agent tokens accumulate as 0, not a throw")
-        (is (number? (get-in final-result [:phase :metrics :cost-usd])))))))
+        (is (not (contains? (get-in final-result [:phase :metrics]) :cost-usd))
+            "no agent cost: the phase reports none rather than a guess")))))
 
 (deftest ^{:stratum 2} leave-implement-boundary-coerces-raw-invalid-metrics-test
   (testing "metrics that bypass the response builders (raw nil :tokens) are
@@ -630,7 +631,7 @@
             final-result ((:leave interceptor) tampered)]
         (is (number? (get-in final-result [:execution/metrics :tokens]))
             "boundary coerced the invalid metrics; no NPE")
-        (is (number? (get-in final-result [:phase :metrics :cost-usd]))))))
+        (is (number? (get-in final-result [:execution/metrics :cost-usd]))))))
   (testing "a non-map :metrics (wrong shape entirely) is coerced, not thrown"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (fn [_ _ _]
@@ -834,11 +835,11 @@
         (is (= 1500 (get-in final-result [:phase :metrics :tokens]))
             "Token metrics should be recorded")
 
-        (is (= (* 1500 0.000015) (get-in final-result [:phase :metrics :cost-usd]))
-            "Cost-usd should be estimated from token count")
+        (is (not (contains? (get-in final-result [:phase :metrics]) :cost-usd))
+            "an agent that reported no cost gets no made-up cost")
 
-        (is (= (* 1500 0.000015) (get-in final-result [:execution/metrics :cost-usd]))
-            "Cost-usd should be merged into execution metrics")
+        (is (= 0.0 (get-in final-result [:execution/metrics :cost-usd]))
+            "unknown cost adds nothing to the execution total")
 
         (is (= :implement (first (get-in final-result [:execution :phases-completed])))
             "Implement should be added to phases-completed")))))

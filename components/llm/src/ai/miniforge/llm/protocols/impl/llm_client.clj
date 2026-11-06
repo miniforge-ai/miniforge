@@ -433,18 +433,19 @@
                       {:data {:stop-reason stop-reason :num-turns num-turns
                               :content-length (count final-content)}}))
           ;; Cost fallback: some backends (e.g. older Claude Code
-          ;; CLI versions, codex stream parser) don't surface
+          ;; CLI versions, the codex stream parser) don't surface
           ;; total_cost_usd in the result frame, so
-          ;; @accumulated-cost stays nil and the runner banner
-          ;; reports $0.0000 despite real backend costs. When
-          ;; cost is nil but usage carries tokens, compute the
-          ;; fallback estimate from the model + usage via
-          ;; cost/estimate-cost. Models without pricing in the
-          ;; table return 0.0 (no false-positive cost), so this
-          ;; is a non-decreasing fix — never produces a wrong-
-          ;; direction value.
-          (let [resolved-cost (or @accumulated-cost
-                                  (cost/estimate-cost usage model))]
+          ;; @accumulated-cost stays nil. When usage carries tokens
+          ;; and the effective model has a price in the cost table,
+          ;; estimate from them. Otherwise the cost is unknown and
+          ;; stays nil: cost/estimate-cost would return 0.0 for an
+          ;; unpriced model, and a 0.0 here reads downstream as a
+          ;; measured $0.0000 (#2378).
+          (let [effective-model (:model request-with-model)
+                resolved-cost (or @accumulated-cost
+                                  (when (and (some? usage)
+                                             (cost/pricing-for-model effective-model))
+                                    (cost/estimate-cost usage effective-model)))]
             (if (zero? exit-code)
               (cond-> (streaming-success-response final-content exit-code
                                                   usage resolved-cost
@@ -468,9 +469,9 @@
                                                  (:model request-with-model)))
                 (seq tools)   (assoc :tools-called tools)
                 ;; Cost is known when the backend reported one
-                ;; (total_cost_usd) or usage lets us estimate it —
-                ;; same two sources the success branch draws on.
-                (or (some? @accumulated-cost) (some? usage))
+                ;; (total_cost_usd) or usage of a priced model lets
+                ;; us estimate it — same as the success branch.
+                (some? resolved-cost)
                 (assoc :cost-usd resolved-cost)
                 session-id    (assoc :session-id session-id)))))))))
 

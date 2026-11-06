@@ -1559,6 +1559,8 @@
                    :stats {:chunks 2 :unique-chunks 2 :files-written 0 :stagnant-cycles 0}}
           client (ai.miniforge.llm.protocols.records.llm-client/create-client
                   {:backend :claude
+                   ;; A priced model, so the cut run's cost can be estimated.
+                   :model "claude-sonnet-4-6"
                    :logger logger
                    :stream-exec-fn (fn [_cmd on-line _opts]
                                      (on-line (tool-line "mcp__context__context_read"))
