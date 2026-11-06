@@ -32,7 +32,7 @@ run:
 
 - `codex-rs/exec/src/exec_events.rs`: `ThreadEvent` (`thread.started`,
   `turn.started`, `item.started`, `item.updated`, `item.completed`,
-  `turn.completed`, `turn.failed`, `error`), `ThreadItemDetails`
+  `turn.completed`, `turn.failed`, `error`). `ThreadItemDetails`
   has variants `agent_message`, `reasoning`, `command_execution`, `file_change`,
   `mcp_tool_call`, `collab_tool_call`, `web_search`, `todo_list`, and `error`.
   `Usage` has `input_tokens`, `cached_input_tokens`,
