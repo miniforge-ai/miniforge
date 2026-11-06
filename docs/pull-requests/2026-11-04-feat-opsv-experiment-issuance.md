@@ -9,8 +9,9 @@
 ## Overview
 
 Domain/application grant issuance, API surface class 1, internal EDN.
-Dependent branch from #2392's exact authority foundation. Merge #2392 first,
-then integrate current main before final validation and publication.
+Built on #2392's merged exact authority foundation.
+Current main is integrated through `9f378a561`.
+Documentation-only prerequisite #2402 carries incoming prose-hook repairs separately.
 
 ## Motivation
 
@@ -49,9 +50,27 @@ Seven pure unit tests retain 93 assertions; the slowest measured run takes 1.131
 Compile the validator once, matching production, rather than rebuilding it per assertion.
 The existing constructor instrumentation now targets the canonical core factory after decomposition.
 
+Full local validation passes after integrating current main:
+
+- Both affected bricks pass in Miniforge, Core, TUI, and Data Foundry.
+- Durable authority and CLI startup integration: 13 tests, 137 assertions.
+- All 22 scoped OPSV/workflow/N6 integration suites: 97 tests, 1,240 assertions.
+- Fresh isolated JAR, with test paths only: 153 tests, 996 assertions on the JVM.
+- Native packaged OPSV regressions: 308 tests, 1,903 assertions on Babashka.
+- All task entrypoints load; the CLI builds from current sources.
+- Fourteen authority faults are detected by assertion failures, each with zero errors.
+- Seven pure tests retain 93 assertions; the slowest measured run is 0.813 milliseconds.
+- Committed scans find no violations across 44 grant, 24 effect, and four project files.
+
+Current-main hooks exposed one unused test import, which is removed.
+Its strict lint and inferred strata pass; its scoped regression passes two tests and seven assertions.
+The issuer's 13 namespaces also pass strict lint and true inferred strata, with no layer waivers.
+The PR uses 383 of 600 reportable lines, without exceptions.
+Incoming prose findings are fixed in #2402 without weakening the hook.
+
 ## Deployment Plan
 
-No default activation or live effects. Require #2392 and all normal owner merge gates.
+No default activation or live effects. Require #2402 and all normal owner merge gates.
 
 ## Related Issues/PRs
 
@@ -59,6 +78,6 @@ N7 completion; approved authority amendment #2381 and scope foundation #2392.
 
 ## Checklist
 
-- [ ] Implement and adversarially review the existing-issuer extension.
-- [ ] Validate all affected products, package, faults, and compatibility.
+- [x] Implement and adversarially review the existing-issuer extension.
+- [x] Validate all affected products, package, faults, and compatibility.
 - [ ] Settle review, require fresh full review/CI, and owner-merge.
