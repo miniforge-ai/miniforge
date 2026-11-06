@@ -21,13 +21,13 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.attenuation :as attenuation]
    [ai.miniforge.execution-grant.breach :as breach]
+   [ai.miniforge.execution-grant.boundary.issuance :as issuance-boundary]
    [ai.miniforge.execution-grant.boundary.opsv-authorization :as opsv-authorization]
+   [ai.miniforge.execution-grant.boundary.results :as result]
    [ai.miniforge.execution-grant.constraints :as constraints]
    [ai.miniforge.execution-grant.core :as core]
    [ai.miniforge.execution-grant.eligibility :as eligibility]
-   [ai.miniforge.execution-grant.issuance :as issuance]
    [ai.miniforge.execution-grant.issuance.policy :as issuance-policy]
-   [ai.miniforge.execution-grant.issuance.schema :as issuance-schema]
    [ai.miniforge.execution-grant.lineage :as lineage]
    [ai.miniforge.execution-grant.messages :as msg]
    [ai.miniforge.execution-grant.opsv-scope-schema :as opsv-schema]
@@ -35,9 +35,7 @@
    [ai.miniforge.execution-grant.schema :as schema]
    [ai.miniforge.execution-grant.store :as store]
    [ai.miniforge.execution-grant.store-schema :as store-schema]
-   [ai.miniforge.execution-grant.temporal :as temporal]
-   [malli.core :as m]
-   [malli.error :as me])
+   [malli.core :as m])
   (:import
    [java.time Instant]))
 
@@ -72,14 +70,7 @@
   [grant]
   (m/validate schema/ExecutionGrant grant))
 
-(defn- ^{:stratum 0} invalid
-  "Return an invalid-input anomaly with the boundary explanation."
-  [message-key input-schema value]
-  (anomaly/sub-anomaly
-   :invalid-input
-   :anomalies.execution-grant/invalid
-   (msg/t message-key)
-   {:explain (me/humanize (m/explain input-schema value))}))
+(def ^{:stratum 0 :private true} invalid result/invalid)
 
 (defn- ^{:stratum 0} valid-input?
   "True when `value` satisfies its component-boundary schema."
@@ -162,17 +153,15 @@
   eligibility/eligible?)
 
 (def ^{:stratum 0} issuance-policies
-  "Runtime-owned policy catalog for irreversible-effect grant issuance."
+  "Runtime-owned issuance catalog keyed by effect class or explicit profile."
   issuance-policy/policies)
 
-(defn- ^{:stratum 0} invalid-output
-  "Return a fault when the runtime issuer violates its output contract."
-  [value]
-  (anomaly/sub-anomaly
-   :fault
-   :anomalies.execution-grant/invalid
-   (msg/t :issuance/output-invalid)
-   {:explain (me/humanize (m/explain schema/ExecutionGrant value))}))
+(def ^{:stratum 0} issue-for-effect
+  "Issue narrow authority from a runtime-attested canonical request.
+   Runtime composition supplies active workflow, exact effect/target and preflight.
+   Principal, ceilings, expiry and delegation are policy-owned. Staging experiments
+   require their explicit profile; this does not authenticate staging or ownership."
+  issuance-boundary/issue-for-effect)
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -266,25 +255,4 @@
 
        :else (core/revoke grant reason now)))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} issue-for-effect
-  "Issue narrow authority from a runtime-attested canonical effect request.
-
-   This is the production issuer. Call it only after the runtime knows
-   the active workflow run, preallocated effect id, exact target, and
-   effect-specific preflight result. Callers cannot set principal,
-   expiry, constraints, or delegation state; policy derives them all."
-  ([breach-dir request]
-   (issue-for-effect breach-dir request (Instant/now)))
-  ([breach-dir request now]
-   (let [arguments [request now]]
-     (if-not (valid-input? issuance-schema/Arguments arguments)
-       (invalid :issuance/input-invalid issuance-schema/Arguments arguments)
-       (let [options (issuance/prepare breach-dir request now)]
-         (if (anomaly/anomaly? options)
-           options
-           (let [grant (issue options (temporal/->instant now))]
-             (if (valid? grant)
-               grant
-               (invalid-output grant)))))))))
+(comment ::runtime-grants-are-not-authenticated-agent-output)

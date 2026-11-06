@@ -17,6 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.execution-grant.issuance-test
   (:require
+   [ai.miniforge.execution-grant.core :as core]
    [ai.miniforge.execution-grant.eligibility :as eligibility]
    [ai.miniforge.execution-grant.interface :as grant]
    [clojure.test :refer [deftest is testing]])
@@ -191,8 +192,8 @@
 
 (deftest ^{:stratum 2} issuer-calls-root-grant-factory-test
   (let [called (atom nil)
-        issue-root grant/issue]
-    (with-redefs [grant/issue
+        issue-root core/issue]
+    (with-redefs [core/issue
                   (fn [options issued-at]
                     (reset! called [options issued-at])
                     (issue-root options issued-at))]
@@ -209,7 +210,7 @@
             (grant/issue-for-effect dir merge-request now))))))
 
 (deftest ^{:stratum 2} issuer-validates-its-output-test
-  (with-redefs [grant/issue (fn [& _] {:not :a-grant})]
+  (with-redefs [core/issue (fn [& _] {:not :a-grant})]
     (is (= :fault (:anomaly/type (issue merge-request))))))
 
 (deftest ^{:stratum 2} date-issuance-time-produces-an-instant-expiry-test

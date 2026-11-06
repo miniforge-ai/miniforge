@@ -8,8 +8,9 @@
 ## Overview
 
 A Claude CLI stream that exits 0 with no content, no tool calls and no usage
-is retried once through the buffered path (`blank-streaming-success?`, added
-for the 2026-05-02 planner failure). That retry is a second provider call the
+is retried once through the buffered path (`blank-streaming-success?`).
+That fallback was added for the 2026-05-02 planner failure.
+The retry is a second provider call the
 caller never sees. This adds a request option,
 `:empty-stream-fallback? false`, that returns the empty stream as it is.
 
@@ -17,8 +18,8 @@ caller never sees. This adds a request option,
 
 The deliberation lab (#2347) journals every provider call before making it
 and promises never to retry. With the fallback, one journaled activation can
-make two calls, the second unjournaled (recorded as a follow-up in #2347's
-PR doc and the atlas README, #2349). The lab needs to switch the retry off;
+make two calls, the second unjournaled. This was recorded as a follow-up in #2347's
+PR doc and the atlas README, #2349. The lab needs to switch the retry off;
 other callers keep today's behaviour.
 
 ## Changes in Detail
