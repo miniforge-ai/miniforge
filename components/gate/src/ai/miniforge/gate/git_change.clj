@@ -17,8 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.gate.git-change
   "What a change does to a file, read from git: the base and diff helpers
-   of the :no-secrets gate, kept apart so other gates can measure a change
-   the same way.
+   the :no-secrets and policy-pack gates share.
 
    Every git call is built by `git-argv` (--literal-pathspecs, unquoted
    paths, and for diff --no-textconv --no-ext-diff --text --no-color
@@ -82,6 +81,13 @@
       ;; A context line still occupies a line of the new version.
       (and n (str/starts-with? line " ")) (recur more (inc n) acc)
       :else (recur more n acc))))
+
+(defn ^{:stratum 0} deletion-points
+  "For each hunk of a zero-context unified diff that only removes lines,
+   the line of the new version the removal follows (0 at the start)."
+  [diff]
+  (keep #(some-> (re-find #"^@@ -\d+(?:,\d+)? \+(\d+),0 @@" %) second parse-long)
+        (str/split-lines (str diff))))
 
 (defn ^{:stratum 0} scratch-dir
   "A fresh temp directory named from PREFIX that only its owner can enter,

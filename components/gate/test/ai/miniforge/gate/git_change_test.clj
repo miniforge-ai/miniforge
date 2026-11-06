@@ -17,7 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.gate.git-change-test
   "The shared git helpers read a zero-context diff into added lines and
-   measure from the task base, never HEAD."
+   deletion points, and measure from the task base, never HEAD."
   (:require [ai.miniforge.gate.git-change :as git-change]
             [babashka.fs :as fs]
             [clojure.test :refer [deftest is]]))
@@ -52,3 +52,7 @@
 
 (deftest ^{:stratum 1} added-lines-follows-hunk-headers-test
   (is (= [[3 "x"] [4 "+y"] [9 "z"]] (git-change/added-lines diff-text))))
+
+(deftest ^{:stratum 1} deletion-points-names-only-pure-deletions-test
+  (is (= [8] (git-change/deletion-points diff-text)))
+  (is (= [0] (git-change/deletion-points "@@ -1,2 +0,0 @@\n-a\n-b\n"))))

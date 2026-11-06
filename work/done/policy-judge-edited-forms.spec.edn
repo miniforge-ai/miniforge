@@ -1,0 +1,68 @@
+{:spec/title "The policy gate blocks on judge findings in the forms a change edits, not on a touched file's older debt"
+
+ :spec/description
+ "`:policy-verify` and `:policy-review`
+  (`ai.miniforge.gate.policy-pack/check-policy-pack-for-phase`) send each
+  changed file's whole content to the batched LLM judge, and every finding
+  of an acting rule (`:hard-halt` or `:require-approval`) blocks. A file the
+  change touches must therefore reach zero findings in every form, including
+  forms the change never edited. Most source files on main fail that: the
+  judge reports acting findings in each of the ten files sampled on
+  2026-11-05, `policy_pack.clj` and `no_secrets.clj` among them. That day a
+  dogfood run edited one function in `runner_environment.clj`, was blocked by
+  findings elsewhere in the file, and spread into callers and tests, each with
+  findings of their own, until it failed. The `:no-secrets` gate already
+  reports only matches that touch added lines.
+
+  Change:
+  1. For each changed file the gate finds the lines the change adds, and the
+     points where it deletes lines, by diffing the artifact's content against
+     the base blob of its path. The base comes from the same candidates
+     `:no-secrets` uses: `:code/base-refs`, `:execution/task-base-refs`, the
+     environment's base SHA, then HEAD.
+  2. In a Clojure source or EDN file the edited region is every top-level
+     form that holds an added line or a deletion point, plus each added line
+     outside any form. In any other file it is the added lines.
+  3. A judge finding on a line inside the edited region blocks as today. A
+     finding outside it becomes a gate warning that says it lies outside the
+     change, and does not block.
+  4. Anything the gate cannot place blocks as today: a finding with no line
+     or line 0, a file with no worktree or base to diff against, content that
+     does not parse, or a git command that fails. A new file has every line
+     added, so all of its findings block."
+
+ :spec/intent
+ {:type :bugfix
+  :scope ["components/gate/src/ai/miniforge/gate"
+          "components/gate/test/ai/miniforge/gate"
+          "components/gate/resources/config/gate/messages"
+          "components/gate/deps.edn"]}
+
+ :spec/constraints
+ ["Only LLM-judge findings are scoped; deterministic detectors keep evaluating the whole artifact"
+  "The judge still receives the whole file; scoping applies to its findings, not its input"
+  "The base and diff helpers are shared with :no-secrets, not copied"
+  "Rule evidence keeps the N3 statuses: a rule with findings only outside the change is still :failed"
+  "The outside-the-change warning text goes through the gate message catalog"]
+
+ :spec/acceptance-criteria
+ ["Given a base file with forms A and B and a change that edits only A, a judge finding on a line of B passes the gate and appears in its warnings"
+  "In the same change, a judge finding on a line of A fails the gate and appears in its errors"
+  "A finding on an added line between two top-level forms blocks"
+  "A change that only deletes lines inside form A makes a finding in A block"
+  "In a file with no base blob, a finding on any line blocks"
+  "A finding with line 0 or no line blocks"
+  "With no worktree path, every finding blocks"
+  "A finding in a file whose content does not parse blocks"
+  "Top-level form spans are found in a namespace that uses #?(:clj ...), ::alias/kw with an alias the reader cannot resolve, #inst, and an unknown tagged literal"
+  "The existing :no-secrets and policy-pack gate tests pass after the shared helpers move"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:dogfood-enabler :correctness}
+  :theme :policy-enforcement
+  :rationale "Every dogfood run that touches an existing file must first clear that file's older debt, so runs spread past their spec's scope and fail."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}
