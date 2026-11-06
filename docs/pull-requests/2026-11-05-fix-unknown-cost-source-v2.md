@@ -26,9 +26,11 @@ summary prints as `Cost: unavailable`.
 
 ## Changes in Detail
 
-1. `llm_client.clj`, `handle-streaming`: the cost is the CLI-reported one, else an estimate when
-   usage is present and the effective model (`(:model request-with-model)`) has pricing, else
-   nil. Both the success and the error responses carry `:cost-usd` only when it is non-nil.
+1. `llm_client.clj`, `handle-streaming`: the cost is the CLI-reported one, else an estimate, else
+   nil. The estimate needs numeric input and output counts, no prompt-cache tokens, and a priced
+   effective model (`(:model request-with-model)`). The Claude CLI counts cache reads and writes
+   beside input, and `estimate-cost` prices only input and output, so a cached run's estimate
+   would be low. Both the success and the error responses carry `:cost-usd` only when non-nil.
 2. `implement.clj`, `leave-implement`: the cost is the agent's cost or nil. Phase metrics carry
    `:cost-usd` only when it is known; an agent's `:cost-usd nil` is dropped. `:execution/metrics
    :cost-usd` adds `0.0` for an unknown cost.
@@ -48,7 +50,8 @@ summary prints as `Cost: unavailable`.
 
 1. New `components/llm/test/ai/miniforge/llm/unknown_cost_test.clj`. A Codex run on the default
    model reports tokens and no `:cost-usd`, on success and on failure. A run on `gpt-5.4` gets
-   the table estimate.
+   the table estimate, also when only the request names the model. A Claude CLI run with only an
+   output count, or with prompt-cache tokens, gets no `:cost-usd`.
 2. `interface_test.clj`: the cut-run test now names a priced model (`claude-sonnet-4-6`). It
    asserts that a cut run's cost is reported, which now requires a price.
 3. `implement_test.clj`: three assertions expected the flat-rate figure, or any number, as phase
@@ -81,6 +84,8 @@ records 0 tokens. The workflow marks a phase unpriced only when its tokens are a
 ## Notes
 
 1. The non-streaming retry after an empty CLI stream (`complete-impl`) is not estimated here.
+   The HTTP Anthropic path sends no `cache_control`, so it reports no cache tokens to leave out.
+   A Codex turn whose usage lacks an input count still fails in `llm-success`, as it did before.
 2. `estimate-cost` bills cached input tokens at the full input rate, so an estimate for a run
    with a large prompt cache is high. That is existing behaviour, not changed here.
 

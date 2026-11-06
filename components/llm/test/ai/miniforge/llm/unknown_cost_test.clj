@@ -24,6 +24,7 @@
    [clojure.test :refer [deftest testing is]]
    [cheshire.core :as json]
    [ai.miniforge.llm.interface :as llm]
+   [ai.miniforge.llm.protocols.impl.llm-client :as impl]
    [ai.miniforge.llm.protocols.records.llm-client :as records]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -72,6 +73,47 @@
       (is (:success resp))
       (is (pos? (:cost-usd resp)))
       (is (= (llm/estimate-cost (:usage resp) "gpt-5.4") (:cost-usd resp)))))
+  (testing "a Claude CLI run whose usage reports output tokens but no input
+            tokens gets no estimate, not a partial figure"
+    (let [client (records/create-client
+                  {:backend :claude
+                   :model "claude-sonnet-4-6"
+                   :stream-exec-fn (fn [_cmd on-line _opts]
+                                     (on-line (json/generate-string
+                                               {:type "assistant"
+                                                :message {:content [{:type "text" :text "partial"}]
+                                                          :usage {:output_tokens 250}}}))
+                                     (impl/timeout-result [] {:type :hard-limit
+                                                              :message "Hard timeout"
+                                                              :elapsed-ms 600042
+                                                              :max-ms 600000
+                                                              :stats {}}))})
+          resp (llm/complete-stream client {:prompt "go"} (fn [_] nil))]
+      (is (not (:success resp)))
+      (is (pos? (:tokens resp)))
+      (is (not (contains? resp :cost-usd)))))
+  (testing "a Claude CLI run that read or wrote the prompt cache gets no
+            estimate: the cache tokens are counted beside input and the
+            estimate would leave them out"
+    (let [client (records/create-client
+                  {:backend :claude
+                   :model "claude-sonnet-4-6"
+                   :stream-exec-fn (fn [_cmd on-line _opts]
+                                     (on-line (json/generate-string
+                                               {:type "assistant"
+                                                :message {:content [{:type "text" :text "partial"}]
+                                                          :usage {:input_tokens 1000
+                                                                  :output_tokens 250
+                                                                  :cache_read_input_tokens 50000}}}))
+                                     (impl/timeout-result [] {:type :hard-limit
+                                                              :message "Hard timeout"
+                                                              :elapsed-ms 600042
+                                                              :max-ms 600000
+                                                              :stats {}}))})
+          resp (llm/complete-stream client {:prompt "go"} (fn [_] nil))]
+      (is (not (:success resp)))
+      (is (pos? (:tokens resp)))
+      (is (not (contains? resp :cost-usd)))))
   (testing "the request's model is priced when the client names none"
     (let [resp (codex-response nil {:model "gpt-5.4"} codex-turn 0)]
       (is (pos? (:cost-usd resp)))
