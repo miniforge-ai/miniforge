@@ -84,6 +84,14 @@
                                              (str/replace two-forms "(defn b" "#_\n(defn b") #{}))
       "a removed #_"))
 
+(deftest ^{:stratum 1} removing-a-whole-form-above-leaves-the-next-unedited-test
+  (is (= #{} (edited-forms/edited-lines path two-forms
+                                        (str/replace two-forms "(defn b" "#_(def unused 1)\n(defn b") #{}))
+      "a removed discarded form")
+  (is (= #{} (edited-forms/edited-lines path two-forms
+                                        (str/replace two-forms "(defn b" "^:private\n(def x 1)\n(defn b") #{}))
+      "a removed metadata-prefixed form"))
+
 (deftest ^{:stratum 1} an-unwrapped-comment-form-is-edited-test
   (is (= #{2 3 4} (edited-forms/edited-lines path "(ns demo.core)\n(defn f\n  []\n  1)\n"
                                              "(ns demo.core)\n(comment\n(defn f\n  []\n  1)\n)\n" #{}))))
