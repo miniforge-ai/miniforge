@@ -81,13 +81,15 @@
 
 (defn- ^{:stratum 0} with-estimated-cost
   "`response` with a cost-table estimate when the provider billed nothing
-   on it, it carries usage, and `model` has a price. An unpriced model's
-   cost stays absent, not 0.0 (#2378)."
+   on it, it reports both input and output token counts, and `model` has a
+   price. Missing or partial counts, or an unpriced model, leave the cost
+   absent, not 0.0 or a partial figure (#2378)."
   [response model]
-  (let [usage (:usage response)]
+  (let [{:keys [input-tokens output-tokens] :as usage} (:usage response)]
     (cond-> response
       (and (not (contains? response :cost-usd))
-           (some? usage)
+           (number? input-tokens)
+           (number? output-tokens)
            (cost/pricing-for-model model))
       (assoc :cost-usd (cost/estimate-cost usage model)))))
 

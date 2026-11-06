@@ -266,8 +266,13 @@
           ;; token spent on reasoning) and a refusal both arrive as an
           ;; empty 200; the stop reason is what tells them apart.
           (cond-> (if (str/blank? content)
-                    (responses/llm-error :anomalies.agent/llm-error "empty_success_output"
-                               (msg/t :http-provider.system/no-generated-text))
+                    ;; The tokens it consumed stay too, so the call's cost
+                    ;; can be counted.
+                    (cond-> (responses/llm-error :anomalies.agent/llm-error "empty_success_output"
+                                       (msg/t :http-provider.system/no-generated-text))
+                      (seq usage) (assoc :usage usage
+                                         :tokens (+ (get usage :input-tokens 0)
+                                                    (get usage :output-tokens 0))))
                     (responses/llm-success content {:usage usage}))
             (number? cost-usd) (assoc :cost-usd cost-usd)
             stop-reason        (assoc :stop-reason stop-reason)))))))

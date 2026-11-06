@@ -447,7 +447,28 @@
                                              {:prompt "q" :model "claude-unpriced-test-model"}
                                              {:api-key test-api-key}))]
       (is (:success result))
-      (is (not (contains? result :cost-usd))))))
+      (is (not (contains? result :cost-usd)))))
+  (testing "a response with no token counts gets no estimate, not 0.0"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:content [{:type "text" :text "answer"}]})
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-sonnet-4-6"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (not (contains? result :cost-usd)))))
+  (testing "an empty answer keeps the tokens it consumed and their estimated cost"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:content []
+                                   :stop_reason "max_tokens"
+                                   :usage {:input_tokens 11 :output_tokens 7}})
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-sonnet-4-6"}
+                                             {:api-key test-api-key}))]
+      (is (not (:success result)))
+      (is (= "empty_success_output" (get-in result [:error :type])))
+      (is (= 18 (:tokens result)))
+      (is (= (llm/estimate-cost {:input-tokens 11 :output-tokens 7} "claude-sonnet-4-6")
+             (:cost-usd result))))))
 
 (deftest ^{:stratum 2} openrouter-missing-key-fails-closed-test
   (testing "no config key and no OPENROUTER_API_KEY fails before any request"
