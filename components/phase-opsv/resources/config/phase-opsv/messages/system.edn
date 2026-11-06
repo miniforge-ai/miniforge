@@ -67,4 +67,5 @@
   :event/preparation-failed "The OPSV event could not be prepared for publication."
   :event/invalid "The projected OPSV event does not satisfy its N3 schema."
   :event/sequence-unavailable "The recorded OPSV event has no recoverable sequence acknowledgement."
-  :event/publication-failed "The OPSV event stream rejected a domain event."}}
+  :event/publication-failed "The OPSV event stream rejected a domain event."
+  :verification/retained-preparation-required "Verification requires readable, acknowledged original preparation bound to this workflow and comparison."}}

@@ -40,6 +40,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-request :as native-replica-request]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-provider :as native-replica-provider]
    [ai.miniforge.phase-opsv.boundary.experiment-preflight :as experiment-preflight]
+   [ai.miniforge.phase-opsv.boundary.retained-preparation :as retained-preparation]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -83,6 +84,11 @@
   preparation/receipt)
 
 (def ^{:stratum 0} run-verification protocol/run-verification)
+
+(def ^{:stratum 0} read-retained-verification-preparation!
+  "Re-read acknowledged original preparation bound to this workflow, attempt, pin and target.
+   Returns the retained receipt or an anomaly. This read grants no execution authority."
+  retained-preparation/read!)
 
 (def ^{:stratum 0} verification-receipt verification-run/receipt)
 

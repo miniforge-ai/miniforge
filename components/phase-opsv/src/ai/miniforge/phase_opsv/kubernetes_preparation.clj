@@ -3,16 +3,12 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-preparation
   (:require [ai.miniforge.content-hash.interface :as hash]
-            [ai.miniforge.phase-opsv.verification-schema :as verification]))
+            [ai.miniforge.phase-opsv.environment-comparison-bindings :as bindings]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} population-declared? [pin]
   (contains? (:comparison/contract pin) :comparison/replica-contract))
-
-(defn- ^{:stratum 0} request-binding [declaration request]
-  (assoc (select-keys request verification/correlation-keys)
-         :workflow/id (:workflow/id declaration) :runtime/target (:runtime/target declaration)))
 
 (defn- ^{:stratum 0} payloads-match? [request]
   (and (= (:candidate/hash request) (hash/content-hash (:candidate/policy request)))
@@ -38,7 +34,8 @@
   (let [pin (:comparison/pin request)
         contract (:comparison/contract pin)]
     (and (= (:runtime/target request) (:runtime/target declaration))
-         (= (:comparison/binding contract) (request-binding declaration request))
+         (= (:comparison/binding contract)
+            (bindings/comparison-binding (:workflow/id declaration) (:runtime/target declaration) request))
          (= (:comparison/hash pin) (hash/content-hash contract))
          (payloads-match? request))))
 
