@@ -21,7 +21,7 @@
    Runs the test suite directly inside the executor environment.
    No tester agent: the implementer wrote both source and test files;
    this phase validates them by running the test suite.
-   Default gates: [:tests-pass :coverage]"
+   Default gates: [:pre-verify-lint :tests-pass :policy-verify]"
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase.interface.gate :as phase-gate]
@@ -46,6 +46,12 @@
 (def ^{:stratum 0} default-config
   "Phase defaults loaded from config/phase/defaults.edn."
   (phase-config/defaults-for :verify))
+
+(defn- ^{:stratum 0} gate-output
+  "Verify's canonical :output, the artifact its gates validate: the test
+   verdict. The code under test stays in the implement phase's artifact."
+  [passed?]
+  {:verify/tests-passed? (boolean passed?)})
 
 (def ^{:stratum 0} ^:private timeout-message-fragment
   "Substring that marks a non-actionable verify timeout.
@@ -155,6 +161,13 @@
   (phase/handle-error ctx ex 3))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} verify-result
+  [env-id passed? summary metrics]
+  (let [phase-result (if passed?
+                       (phase/success env-id summary metrics)
+                       (phase/error env-id summary summary metrics))]
+    (assoc phase-result :output (gate-output passed?))))
 
 (defn- ^{:stratum 1} require-environment!
   "Boundary wrapper around the anomaly-returning
@@ -413,14 +426,16 @@
                                                 (get test-results :output ""))
                      (:parse-error? test-results)
                      (assoc :parse-error? true)
+                     ;; The runner's own "nothing to test" claim; :tests-pass
+                     ;; tells it apart from a run that counted no tests.
+                     (:no-tests? test-results)
+                     (assoc :no-tests? true)
                      (seq (:failures test-results))
                      (assoc :failures (:failures test-results)))
         summary    (if passed?
                      (messages/t :verify/tests-passed {:pass-count pass-count})
                      (output/verify-failure-message test-results raw-fails raw-errors))
-        result     (if passed?
-                     (phase/success env-id summary metrics)
-                     (phase/error   env-id summary summary metrics))]
+        result     (verify-result env-id passed? summary metrics)]
 
     (phase/enter-context ctx :verify nil gates budget start-time result)))
 

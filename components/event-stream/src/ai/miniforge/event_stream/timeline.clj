@@ -98,7 +98,9 @@
 
    Status is sourced from `:tool/success?` (per the schema), with
    `:tool/error` presence as the secondary signal for legacy events
-   that omitted the boolean."
+   that omitted the boolean. With neither, the outcome is unknown (a
+   Codex item still in progress when its turn ended) and renders as
+   such, not as success."
   [event tool-names-by-call-id]
   (let [ts       (values/format-hms (values/event-timestamp event))
         phase    (values/event-phase event)
@@ -111,7 +113,7 @@
                    (false? (:tool/success? event)) (messages/t :timeline/status-error)
                    (true?  (:tool/success? event)) (messages/t :timeline/status-success)
                    (some? (:tool/error event))     (messages/t :timeline/status-error)
-                   :else                           (messages/t :timeline/status-success))
+                   :else                           (messages/t :timeline/status-unknown))
         dur-str  (if dur-ms
                    (str "  " (values/format-duration-ms dur-ms) "  " status)
                    (str "  " status))]
