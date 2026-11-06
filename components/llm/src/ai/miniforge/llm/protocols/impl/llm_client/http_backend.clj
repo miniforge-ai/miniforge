@@ -23,6 +23,7 @@
    [cheshire.core :as json]
    [org.httpkit.client :as http]
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.llm.cost :as cost]
    [ai.miniforge.llm.messages :as msg]
    [ai.miniforge.llm.protocols.impl.llm-client.http-wire :as http-wire]
    [ai.miniforge.llm.protocols.impl.llm-client.responses :as responses]
@@ -77,6 +78,18 @@
    server before the client gives up."
   []
   (settings/client-default [:http :idle-timeout-ms]))
+
+(defn- ^{:stratum 0} with-estimated-cost
+  "`response` with a cost-table estimate when the provider billed nothing
+   on it, it carries usage, and `model` has a price. An unpriced model's
+   cost stays absent, not 0.0 (#2378)."
+  [response model]
+  (let [usage (:usage response)]
+    (cond-> response
+      (and (not (contains? response :cost-usd))
+           (some? usage)
+           (cost/pricing-for-model model))
+      (assoc :cost-usd (cost/estimate-cost usage model)))))
 
 (def ^{:stratum 0} ^:private http-providers
   "Wire-shape registry for the HTTP backends: request-body builder +
@@ -204,7 +217,8 @@
                         {:provider provider}))
 
       :else
-      (parse-fn (http-post-request (request-endpoint backend-config request
-                                                     config)
-                                   (provider-headers provider api-key)
-                                   (body-fn request))))))
+      (-> (parse-fn (http-post-request (request-endpoint backend-config request
+                                                         config)
+                                       (provider-headers provider api-key)
+                                       (body-fn request)))
+          (with-estimated-cost (:model request))))))

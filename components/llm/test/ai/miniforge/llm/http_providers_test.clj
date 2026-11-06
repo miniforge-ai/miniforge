@@ -429,6 +429,26 @@
       (is (= "empty_success_output" (get-in result [:error :type])))
       (is (= 0.00125 (:cost-usd result))))))
 
+(deftest ^{:stratum 2} unbilled-response-cost-is-estimated-for-a-priced-model-test
+  (testing "a provider that bills nothing on the response gets the
+            cost-table estimate for a priced model"
+    (let [{:keys [result]}
+          (capture-http (anthropic-200 "answer")
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-sonnet-4-6"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (pos? (:cost-usd result)))
+      (is (= (llm/estimate-cost (:usage result) "claude-sonnet-4-6") (:cost-usd result)))))
+  (testing "an unpriced model's cost stays absent, not 0.0"
+    (let [{:keys [result]}
+          (capture-http (anthropic-200 "answer")
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-unpriced-test-model"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (not (contains? result :cost-usd))))))
+
 (deftest ^{:stratum 2} openrouter-missing-key-fails-closed-test
   (testing "no config key and no OPENROUTER_API_KEY fails before any request"
     (let [{:keys [result captured]}
