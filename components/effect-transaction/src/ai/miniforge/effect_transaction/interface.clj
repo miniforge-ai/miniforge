@@ -16,11 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.effect-transaction.interface
-  "Public API for the effect-transaction component (Ariadne step 2c):
-   an irreversible effect as a durable record.
-
-   Record, durable store, and the propose/commit/reconcile coordinator.
-   2d moves merge and deploy onto this path."
+  "API surface class 1: internal EDN durable effect transactions and commit-time authority."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.core :as core]
@@ -69,7 +65,8 @@
   "Reload the durable proposal, authorize its scope and one-operation count,
    atomically mark :committing, run the effect, and record what it reported.
    Caller usage is ignored. An Exception is :unknown-outcome, never :failed;
-   a JVM Error propagates after the durable claim."
+   a JVM Error propagates after the durable claim. Experiment effects require
+   commit-current!; legacy snapshots and unenforced markers are refused."
   core/commit!)
 
 (def ^{:stratum 0} reconcile!

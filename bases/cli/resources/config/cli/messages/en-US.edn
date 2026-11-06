@@ -234,7 +234,10 @@
   :workflow-runner/default-status "working"
   :workflow-runner/summary-success "✓ Workflow completed"
   :workflow-runner/summary-failure "✗ Workflow failed"
-  :workflow-runner/metrics "Tokens: {tokens} | Cost: ${cost} | Duration: {duration}"
+  :workflow-runner/metrics "Tokens: {tokens} | Cost: {cost} | Duration: {duration}"
+  :workflow-runner/cost "${cost}"
+  :workflow-runner/cost-partial "at least ${cost} (some usage has no price)"
+  :workflow-runner/cost-unavailable "unavailable"
   :workflow-runner/errors "Errors:"
   :workflow-runner/full-result "Full result:"
   :workflow-runner/compact-phase-line     "{symbol} {phase}  {duration}"
@@ -527,7 +530,10 @@
   :workflow-cmd/inspect-not-found "No workflow file found at: {path}"
   :workflow-cmd/inspect-failed "workflow inspect failed: {error}"
   :workflow-cmd/cancel-usage "Usage: {command}"
-  :workflow-cmd/cancel-success "Cancel signal sent to workflow: {id}"
+  :workflow-cmd/cancel-requested "Cancel requested for workflow {id}; waiting up to {seconds}s for the run to apply it."
+  :workflow-cmd/cancel-applied "Cancel applied: workflow {id} has its stop flag set and is stopping."
+  :workflow-cmd/cancel-failed-lifecycle "The run could not apply or verify the cancel of workflow {id}: {reason}. Its stop flag may already be set; check the run before retrying."
+  :workflow-cmd/cancel-outcome-unknown "Cancel outcome unknown: within {seconds}s this command read no applied or failed record for workflow {id}. The request may still be queued, or the run may have applied it without writing an event this command can read. Only the process running that workflow, under the same MINIFORGE_HOME, applies it."
   :workflow-cmd/cancel-failed "Failed to cancel workflow: {error}"
   :workflow-cmd/gc-scratch-no-repo "gc-scratch: not inside a git repository (no .git found)"
   :workflow-cmd/gc-scratch-success "Scratch-ref GC: pruned {pruned} queue entries, deleted {deleted} git refs, {remaining} queue entries remain."
@@ -829,7 +835,7 @@
   :workflow-runner.help/workflow-inspect-summary
   "Print a Mermaid stateDiagram-v2 of the compiled FSM for a workflow EDN file."
   :workflow-runner.help/workflow-cancel-summary
-  "Cancel a running workflow by ID."
+  "Cancel a running workflow by ID and wait for the run to apply it."
   :workflow-runner.help/workflow-gc-scratch-summary
   "Garbage-collect stale workflow scratch git refs from the deferred GC queue."
   :workflow-runner.help/workflow-gc-checkpoints-summary
