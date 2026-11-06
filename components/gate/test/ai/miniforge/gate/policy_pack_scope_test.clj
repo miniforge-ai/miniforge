@@ -151,6 +151,12 @@
         content "(ns demo.core)\n  (defn f\n    []\n    1)\n"]
     (is (not (:passed? (check (base-worktree base) {:content content} 3))))))
 
+(deftest ^{:stratum 2} a-copy-inserted-above-its-original-is-the-one-in-scope-test
+  (let [base    "(ns demo.core)\n(def a 1)\n(def b 2)\n"
+        content "(ns demo.core)\n(def b 2)\n(def a 1)\n(def b 2)\n"]
+    (is (not (:passed? (check (base-worktree base) {:content content} 2))) "the copy")
+    (is (:passed? (check (base-worktree base) {:content content} 4)) "the original")))
+
 (deftest ^{:stratum 2} duplicate-literal-content-blocks-test
   (let [content (str/replace edit-a "  10)" "  {:k 1 :k 2})")]
     (is (not (:passed? (check (base-worktree base-content) {:content content} 9))))))

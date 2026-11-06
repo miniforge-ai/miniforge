@@ -34,12 +34,14 @@ touch added lines.
    `:invalid-input` anomaly. A first read keeps values (with tags and
    auto-resolved aliases distinct) to catch invalid literals; a second reads
    locations and source text. `edited-lines` works on whole top-level forms
-   in `.clj`, `.cljc`, `.cljs`, `.bb` and `.edn` files: a form is unedited
-   only when the base file has a top-level form with the same text, each
-   base form vouching for one form. That one rule covers an edited body, a
-   removed `^:private` or `#_` prefix, an unwrapped `(comment ...)` and a
-   pasted copy. Added lines outside every form are edited too. In other files
-   the added lines are the edit.
+   in `.clj`, `.cljc`, `.cljs`, `.bb` and `.edn` files: a form is edited when
+   it holds an added line, or when the base file has no top-level form with
+   the same text left for it (base forms vouch only for forms without added
+   lines, one each). That covers an edited body, a removed `^:private` or
+   `#_` prefix, an unwrapped `(comment ...)` and a pasted copy, even one
+   inserted above its original; a moved form counts as edited. Added lines
+   outside every form are edited too. In other files the added lines are the
+   edit.
 2. `ai.miniforge.gate.policy-pack.scope` (new): `scope-violations` diffs each
    changed file against the task base (the artifact's `:code/base-refs`, the
    context's `:execution/task-base-refs`, then the environment base SHA, never

@@ -19,13 +19,15 @@
   "The lines of a file a change edits, widened to whole top-level forms in
    Clojure source and EDN.
 
-   A top-level form is unedited when the file at the task base has a
-   top-level form with the same source text, each base form vouching for
-   one form only; every other form is edited whole. Matching text rather
-   than diff positions covers every way a form can change: an edited body,
-   a removed `^:private` or `#_` prefix, an unwrapped `(comment ...)`, or a
-   pasted copy. An added line outside every form is edited on its own.
-   Other files are edited exactly on their added lines.
+   A top-level form is edited whole when it holds a line the change added,
+   or when the file at the task base has no top-level form with the same
+   source text left for it: base forms vouch only for forms without added
+   lines, one each. Matching text covers the changes that add no line in
+   the form: a removed `^:private` or `#_` prefix, an unwrapped
+   `(comment ...)`, a deleted body line. Holding an added line covers a
+   pasted copy, even one inserted above its original. An added line
+   outside every form is edited on its own. Other files are edited exactly
+   on their added lines.
 
    Forms are located with edamame, which reads past aliases, reader
    conditionals and tagged literals it cannot resolve, so one unknown
@@ -79,6 +81,11 @@
   [forms line]
   (boolean (some (fn [{:keys [start end]}] (<= start line end)) forms)))
 
+(defn- ^{:stratum 0} holds-added?
+  "True when FORM holds one of the ADDED lines."
+  [added {:keys [start end]}]
+  (boolean (some #(<= start % end) added)))
+
 (defn- ^{:stratum 0} unmatched-forms
   "FORMS whose :text matches no form of BASE-FORMS, each base form matching
    at most one of FORMS, in order."
@@ -126,10 +133,10 @@
 (defn ^{:stratum 2} edited-lines
   "The set of CONTENT's line numbers a change edits, given BASE (PATH's
    content at the task base, nil when the file is new) and the set of
-   lines the change ADDED. In a form file, the lines of every form BASE has
-   no matching form for (see the namespace docstring) plus the added lines
-   outside every form; an anomaly when CONTENT or BASE cannot be read. In
-   any other file, the added lines."
+   lines the change ADDED. In a form file, the lines of every edited form
+   (see the namespace docstring) plus the added lines outside every form;
+   an anomaly when CONTENT or BASE cannot be read. In any other file, the
+   added lines."
   [path content base added]
   (if-not (form-file? path)
     (set added)
@@ -138,6 +145,7 @@
       (cond
         (anomaly/anomaly? forms)      forms
         (anomaly/anomaly? base-forms) base-forms
-        :else (into (set (remove #(within-form? forms %) added))
-                    (mapcat span-lines)
-                    (unmatched-forms forms base-forms))))))
+        :else (let [{touched true untouched false} (group-by #(holds-added? added %) forms)]
+                (into (set (remove #(within-form? forms %) added))
+                      (mapcat span-lines)
+                      (concat touched (unmatched-forms untouched base-forms))))))))

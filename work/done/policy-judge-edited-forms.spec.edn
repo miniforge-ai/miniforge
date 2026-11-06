@@ -22,11 +22,13 @@
      resolves; never HEAD, which holds the change once the implement phase
      commits.
   2. In a Clojure source or EDN file the edited region is every top-level
-     form whose source text matches no top-level form of the base file
-     (each base form matching one form at most), plus each added line
-     outside any form. Matching text covers an edited body, a removed
-     `^:private` or `#_` prefix, an unwrapped `(comment ...)` and a pasted
-     copy alike. In any other file it is the added lines.
+     form that holds an added line or whose source text matches no
+     top-level form of the base file (base forms vouch only for forms
+     without added lines, one each), plus each added line outside any form.
+     Matching text covers a removed `^:private` or `#_` prefix, an unwrapped
+     `(comment ...)` and a deleted body line; holding an added line covers a
+     pasted copy, even one inserted above its original. In any other file it
+     is the added lines.
   3. A judge finding on a line inside the edited region blocks as today. A
      finding outside it becomes a gate warning that says it lies outside the
      change, and does not block.
