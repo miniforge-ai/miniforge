@@ -25,10 +25,11 @@
 (defn- ^{:stratum 1} bounded-plan [input]
   (let [request (:request input)
         contract (get-in request [:comparison/pin :comparison/contract])
-        contract (-> contract
-                     (assoc-in [:comparison/replica-contract :candidate :replicas/min-count] trial-count)
-                     (assoc-in [:comparison/replica-contract :candidate :replicas/max-count] (inc trial-count)))
-        pin (phase/pin-verification-environment contract)]
+        candidate (get-in contract [:comparison/replica-contract :candidate])
+        maximum (inc trial-count)
+        bounded (assoc candidate :replicas/min-count trial-count :replicas/max-count maximum)
+        planned (assoc-in contract [:comparison/replica-contract :candidate] bounded)
+        pin (phase/pin-verification-environment planned)]
     (assoc input :request (assoc request :comparison/pin pin))))
 
 ;------------------------------------------------------------------------------ Layer 2

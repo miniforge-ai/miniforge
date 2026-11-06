@@ -79,16 +79,16 @@
       (is (= :conflict (:anomaly/type (fixtures/prepare (assoc-in input path value))))))))
 
 (deftest ^{:stratum 0} candidate-population-and-pack-blast-radius-both-constrain-trials-test
-  (let [input (fixtures/input)]
-    (doseq [count [0 fixtures/original-count (inc (inc fixtures/trial-count))]]
+  (let [input (fixtures/input)
+        outside (inc (inc fixtures/trial-count))]
+    (doseq [count [0 fixtures/original-count outside]]
       (is (= :conflict (:anomaly/type (fixtures/prepare (assoc-in input [:parameters :replicas/count] count))))))
     (let [contract (get-in input [:request :comparison/pin :comparison/contract])
-          widened (assoc-in contract [:comparison/replica-contract :candidate :replicas/max-count]
-                             (inc (inc fixtures/trial-count)))
+          widened (assoc-in contract [:comparison/replica-contract :candidate :replicas/max-count] outside)
           pin (phase/pin-verification-environment widened)
           request (assoc (:request input) :comparison/pin pin)
-          changed (assoc input :request request :parameters (assoc (:parameters input) :replicas/count
-                                                                   (inc (inc fixtures/trial-count))))]
+          parameters (assoc (:parameters input) :replicas/count outside)
+          changed (assoc input :request request :parameters parameters)]
       (is (= :conflict (:anomaly/type (fixtures/prepare changed)))))))
 
 (deftest ^{:stratum 0} fresh-revisions-produce-new-payload-hashes-test

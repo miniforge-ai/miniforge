@@ -10,6 +10,7 @@
 
 Native request construction, based on main and the approved N7/N10 temporary staging contract.
 This is a provider-request layer, not runtime admission or a live execution adapter.
+Integrate current main, including merged preflight #2412, before full validation.
 
 ## Motivation
 
@@ -41,6 +42,23 @@ Three regression cases reproduced assertion failures with zero errors before the
 The corrected scoped regression passes 16 tests, 146 assertions.
 All eight changed namespaces pass true inference with at most three strata.
 Seven deliberate request faults cause assertion failures, each with zero errors.
+The main integration preserves both public APIs and their message keys.
+Four incoming prose-hook findings are repaired without changing their historical claims.
+The final test-factory pass names intermediate values instead of nesting map transformations.
+
+Full current-main validation passes:
+
+- Strict entire-brick and project lint: zero warnings or errors.
+- All eight changed namespaces and ten preflight namespaces infer to at most three strata.
+- Workspace composition and phase-opsv tests pass in all four product contexts.
+- All 24 scoped OPSV/workflow/N6 JVM integration suites: 113 tests, 1,340 assertions.
+- Every task entrypoint loads, and the CLI builds from current sources.
+- Fresh isolated Babashka artifact, test paths only: 25 tests, 160 assertions.
+- Native packaged regressions: 308 tests, 1,903 assertions.
+- All seven deliberate request faults are detected with assertion failures and zero errors.
+
+Both public APIs pass their native-input regressions in the same packaged artifact.
+No production-source overlay, live cluster effects, signing exception or hook bypass is used.
 
 ## Deployment Plan
 
@@ -53,5 +71,5 @@ N7 completion; #2381, #2392, merged #2407 and preflight #2412.
 ## Checklist
 
 - [x] Implement request construction and owner adversarial standards pass.
-- [ ] Validate real native inputs and packaged behavior.
+- [x] Validate real native inputs and packaged behavior.
 - [ ] Settle full current-head review, CI and owner merge gates.
