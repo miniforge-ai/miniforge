@@ -36,6 +36,11 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} ^:private scratch-prefix
+  "Name prefix of the temp directory holding the base and changed versions
+   the gate diffs, so one left behind is recognisable as its own."
+  "mf-policy-pack-")
+
 (defn- ^{:stratum 0} judge-entry?
   "True for a violation entry from the LLM judge, whose per-site findings
    sit under `[:violation :violations]`."
@@ -80,7 +85,7 @@
                (git-change/resolve-base ctx (git-change/base-candidates artifact ctx)))]
     (if-not base
       {}
-      (let [dir (git-change/scratch-dir "mf-policy-pack-")]
+      (let [dir (git-change/scratch-dir scratch-prefix)]
         (try
           (into {}
                 (keep-indexed (fn [i file]
