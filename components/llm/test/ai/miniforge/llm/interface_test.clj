@@ -339,7 +339,13 @@
                   :error {:message "Rate limited"}})
           parsed (impl/parse-codex-stream-line line)]
       (is (true? (:done? parsed)))
-      (is (str/includes? (:delta parsed) "Rate limited"))))
+      (is (= (msg/t :cli-output.system/codex-stream-error {:message "Rate limited"}) (:delta parsed)))))
+
+  (testing "an error event without a message says so"
+    (let [parsed (impl/parse-codex-stream-line (json/generate-string {:type "error"}))]
+      (is (= (msg/t :cli-output.system/codex-stream-error
+                    {:message (msg/t :cli-output.system/codex-error-unknown)})
+             (:delta parsed)))))
 
   (testing "thread.started is a heartbeat naming the invocation"
     (let [line (json/generate-string {:type "thread.started" :thread_id "abc"})
@@ -408,7 +414,15 @@
     (let [resp (impl/parse-cli-output "" 0)]
       (is (not (:success resp)))
       (is (= "empty_success_output" (get-in resp [:error :type])))
-      (is (some? (:anomaly resp))))))
+      (is (= (msg/t :cli-output.system/empty-success-output) (get-in resp [:error :message])))
+      (is (some? (:anomaly resp)))))
+
+  (testing "the CLI's limit notice as its whole output is a rate limit that quotes it"
+    (let [resp (impl/parse-cli-output "You've hit your limit · resets 7pm (America/Los_Angeles)" 0)]
+      (is (= "rate_limit" (get-in resp [:error :type])))
+      (is (= (msg/t :cli-output.system/claude-rate-limited
+                    {:notice "You've hit your limit · resets 7pm (America/Los_Angeles)"})
+             (get-in resp [:error :message]))))))
 
 (deftest ^{:stratum 0} mock-client-response-includes-metrics-test
   (testing "mock client success response has :tokens and :usage"
@@ -1695,7 +1709,10 @@
                                    (assistant-frame "<synthetic>" "You've hit your limit · resets 7pm (America/Los_Angeles)")])]
       (is (< 300 (count long-answer)) "the answer alone is longer than any notice")
       (is (not (:success resp)))
-      (is (= "rate_limit" (get-in resp [:error :type])))))
+      (is (= "rate_limit" (get-in resp [:error :type])))
+      (is (= (msg/t :cli-output.system/claude-rate-limited
+                    {:notice "You've hit your limit · resets 7pm (America/Los_Angeles)"})
+             (get-in resp [:error :message])))))
   (testing "a model's short final answer that mentions a limit is not a limit"
     (let [resp (streamed-response [(assistant-frame "claude-opus-5" long-answer)
                                    (assistant-frame "claude-opus-5" "{\"summary\":\"Added handling for too many requests.\"}")])]
