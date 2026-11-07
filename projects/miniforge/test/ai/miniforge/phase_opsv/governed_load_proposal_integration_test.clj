@@ -58,6 +58,18 @@
     (doseq [flag ["-nocatchup=true" "-uniform=true" "-stdclient=true" "-keepalive=false" "-L=false" "-k=false"]]
       (is (some #{flag} (get worker "args"))))))
 
+(defn- ^{:stratum 0} check-literal-destinations [{:keys [ctx input]}]
+  (doseq [[destination wire] [["https://host/a$b" "https://host/a$$b"]
+                              ["https://host/a$$b" "https://host/a$$$$b"]
+                              ["https://host/$(PATH)" "https://host/$$(PATH)"]
+                              ["https://host/?q=$$$(PATH)" "https://host/?q=$$$$$$(PATH)"]]]
+    (let [changed (assoc-in input [:limits :opsv/traffic-destinations] [destination])
+          p (phase/prepare-governed-kubernetes-load-proposal! ctx changed)
+          request (:kubernetes/request p)]
+      (is (= [destination] (get-in p [:opsv/experiment :opsv/traffic-destinations])))
+      (is (= wire (last (get-in request [:body "spec" "containers" 0 "args"]))))
+      (is (= (hash/content-hash request) (get-in p [:opsv/experiment :opsv/payload-hash]))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} check-authority [{:keys [ctx input directory]}]
@@ -81,6 +93,9 @@
 
 (deftest ^{:stratum 1} native-load-proposal-has-fixed-bounded-wire-and-dedicated-scope-test
   (fixtures/with-input check-wire))
+
+(deftest ^{:stratum 1} literal-destinations-are-escaped-for-kubernetes-not-changed-in-scope-test
+  (fixtures/with-input check-literal-destinations))
 
 ;------------------------------------------------------------------------------ Layer 2
 
