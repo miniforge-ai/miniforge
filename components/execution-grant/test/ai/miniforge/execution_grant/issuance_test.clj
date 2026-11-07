@@ -20,7 +20,10 @@
    [ai.miniforge.execution-grant.core :as core]
    [ai.miniforge.execution-grant.eligibility :as eligibility]
    [ai.miniforge.execution-grant.interface :as grant]
-   [clojure.test :refer [deftest is testing]])
+   [ai.miniforge.execution-grant.issuance.schema :as input]
+   [ai.miniforge.execution-grant.opsv-issuance-fixtures :as fixtures]
+   [clojure.test :refer [deftest is testing]]
+   [malli.core :as m])
   (:import
    [java.nio.file Files]
    [java.nio.file.attribute FileAttribute]
@@ -30,6 +33,8 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} now (Instant/parse "2026-08-07T00:00:00Z"))
+
+(def ^{:stratum 0 :private true} valid-arguments? (m/validator input/Arguments))
 
 (def ^{:stratum 0} workflow-run-id
   (UUID/fromString "b4bd9e4f-57ac-40fb-a724-26f4619a47fe"))
@@ -110,6 +115,11 @@
             :pulumi/plan-hash (apply str (repeat 64 "b"))}))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} generic-profiles-never-inherit-stopped-recovery-admission-test
+  (doseq [request [merge-request deploy-request push-request comment-request provision-request]
+          status fixtures/stopped-statuses]
+    (is (false? (valid-arguments? [(assoc request :workflow-run/status status) now])))))
 
 (deftest ^{:stratum 2} issuer-input-is-closed-and-preflight-gated-test
   (testing "callers cannot supply runtime-owned authority fields"

@@ -4,12 +4,17 @@
 (ns ai.miniforge.execution-grant.pr-creation-issuance-test
   (:require
    [ai.miniforge.execution-grant.interface :as grant]
-   [clojure.test :refer [deftest is testing]])
+   [ai.miniforge.execution-grant.issuance.schema :as input]
+   [ai.miniforge.execution-grant.opsv-issuance-fixtures :as fixtures]
+   [clojure.test :refer [deftest is testing]]
+   [malli.core :as m])
   (:import [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} now (Instant/parse "2026-09-23T00:00:00Z"))
+
+(def ^{:stratum 0 :private true} valid-arguments? (m/validator input/Arguments))
 
 (def ^{:stratum 0} expected-ttl-seconds
   "Pin the runtime-owned PR mutation window independently of the policy catalog."
@@ -41,6 +46,10 @@
 (defn- ^{:stratum 1} issue
   [input]
   (grant/issue-for-effect (empty-history-path) input now))
+
+(deftest ^{:stratum 1} pr-creation-never-inherits-stopped-recovery-admission-test
+  (doseq [status fixtures/stopped-statuses]
+    (is (false? (valid-arguments? [(assoc request :workflow-run/status status) now])))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
