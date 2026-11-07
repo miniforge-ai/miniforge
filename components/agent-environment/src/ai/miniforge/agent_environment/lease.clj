@@ -69,9 +69,14 @@
   (get-in entry [:entry/environment :environment/lease]))
 
 (defn ^{:stratum 0} ->instant
-  "An `inst?` value as an Instant, keeping sub-millisecond precision."
+  "Any `inst?` value as an Instant. Instants and Timestamps keep their
+   sub-millisecond precision; other dates (some, like java.sql.Date, refuse
+   `toInstant`) convert through their epoch millisecond."
   ^Instant [t]
-  (if (instance? Instant t) t (.toInstant ^java.util.Date t)))
+  (cond
+    (instance? Instant t) t
+    (instance? java.sql.Timestamp t) (.toInstant ^java.sql.Timestamp t)
+    :else (Instant/ofEpochMilli (inst-ms t))))
 
 (defn ^{:stratum 0} unleased-cleanup?
   "A failed provision whose unconfirmed cleanup never learned a UID: no lease

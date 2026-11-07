@@ -3,9 +3,21 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-preparation
   (:require [ai.miniforge.content-hash.interface :as hash]
-            [ai.miniforge.phase-opsv.environment-comparison-bindings :as bindings]))
+            [ai.miniforge.phase-opsv.environment-comparison-bindings :as bindings]
+            [ai.miniforge.phase-opsv.kubernetes-resource :as resource]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} target-bound? [declaration capture]
+  (let [target (:runtime/target declaration)
+        inventory (:kubernetes/inventory capture)
+        deployment (:kubernetes/deployment inventory)]
+    (and (= target (:runtime/target inventory))
+         (= (:cluster target) (:kubernetes/cluster-id inventory))
+         (= (:namespace-uid target) (resource/uid (:kubernetes/namespace inventory)))
+         (= (:workload-uid target) (resource/uid deployment))
+         (= (:namespace target) (resource/namespace-of deployment))
+         (= (:kubernetes/deployment-name declaration) (resource/name-of deployment)))))
 
 (defn ^{:stratum 0} population-declared? [pin]
   (contains? (:comparison/contract pin) :comparison/replica-contract))
