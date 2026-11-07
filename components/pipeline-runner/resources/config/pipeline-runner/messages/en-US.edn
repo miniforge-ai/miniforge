@@ -9,8 +9,6 @@
   ;; Execution errors (run.clj)
   :run/connector-not-found  "No connector found for ref: {ref}"
   :run/stage-failed         "Stage failed: {name}"
-  :run/processing-unresolved
-  "Stage {name} has no resolved transform or quality pack and does not declare :stage/pass-through? true"
   :run/preflight-failed     "Preflight refused the pipeline before any connector opened: {problems}"
 
   ;; Preflight problems (preflight.clj)
