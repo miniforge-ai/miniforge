@@ -23,5 +23,6 @@
   :preflight/processing-undeclared   "Stage {stage}: a {ref} stage must declare its processing or set :stage/pass-through? true"
   :preflight/pass-through-conflict   "Stage {stage}: declares :stage/pass-through? true and processing at once"
   :preflight/quality-pack-empty      "Stage {stage}: quality pack {ref} has no rules"
+  :preflight/quality-pack-malformed  "Stage {stage}: quality pack {ref} has :pack/rules that is not a list of rules"
   :preflight/quality-rule-unresolved "Stage {stage}: quality rule {ref} has no implementation"
   :preflight/spawn-fn-unresolved     "Stage {stage}: spawn function {ref} is not registered"}}

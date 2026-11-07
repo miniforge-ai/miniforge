@@ -115,6 +115,12 @@
 (defn- ^{:stratum 0} stage-runs [outcome]
   (get-in outcome [:result :pipeline-run :pipeline-run/stage-runs]))
 
+(defmulti ^{:stratum 0} ^:private fixture-multimethod
+  "A multimethod transform: preflight must accept it as callable."
+  (fn [_records _config] :default))
+
+(defmethod ^{:stratum 0} fixture-multimethod :default [records _config] records)
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} child-spawn
@@ -208,17 +214,19 @@
              (problem-summary (:result outcome)))))))
 
 (deftest ^{:stratum 2} test-empty-quality-pack-refused-before-io
-  (testing "given a quality pack with no rules → configuration failure"
-    (let [middle  (middle-stage :validate {:stage/quality-pack {:pack/id :empty-pack :pack/rules []}})
-          outcome (run-fixture (pipeline [(ingest-stage {}) middle publish-stage]) {})]
-      (is (refused-before-io? outcome))
-      (is (= [{:stage/id middle-id :preflight/problem :quality-pack/empty :preflight/ref :empty-pack}]
-             (problem-summary (:result outcome)))))))
+  (testing "given a quality pack with no rules, or :pack/rules that is not a list → configuration failure, no exception"
+    (doseq [[rules kind] [[[] :quality-pack/empty] [42 :quality-pack/malformed]]]
+      (let [middle  (middle-stage :validate {:stage/quality-pack {:pack/id :fixture-pack :pack/rules rules}})
+            outcome (run-fixture (pipeline [(ingest-stage {}) middle publish-stage]) {})]
+        (is (refused-before-io? outcome))
+        (is (= [{:stage/id middle-id :preflight/problem kind :preflight/ref :fixture-pack}]
+               (problem-summary (:result outcome))))))))
 
 (deftest ^{:stratum 2} test-pass-through-with-transform-is-a-conflict
   (testing "given pass-through and a transform on a transform or validate stage → conflict"
-    (doseq [family [:transform :validate]]
-      (let [config  {:stage/pass-through? true :stage/transform {:transform/type :double}}
+    (doseq [family    [:transform :validate]
+            transform [{:transform/type :double} {}]]
+      (let [config  {:stage/pass-through? true :stage/transform transform}
             middle  (middle-stage family config)
             outcome (run-fixture (pipeline [(ingest-stage {}) middle publish-stage]) {:transforms {:double identity}})]
         (is (refused-before-io? outcome))
@@ -275,15 +283,16 @@
         (is (empty? (:sink-calls outcome)) (pr-str config))))))
 
 (deftest ^{:stratum 2} test-preflight-accepts-resolved-pipeline
-  (testing "given every named behavior resolves → preflight succeeds with no problems"
-    (let [middle     (middle-stage :transform {:stage/transform {:transform/type :double}})
-          connectors {source-ref (->RecordingConnector (atom []))
-                      sink-ref   (->RecordingConnector (atom []))}
-          result     (runner/preflight (pipeline [(ingest-stage {}) middle publish-stage])
-                                       connectors
-                                       {:transforms {:double identity}})]
-      (is (:success? result))
-      (is (= [] (get-in result [:preflight :preflight/problems]))))))
+  (testing "given every named behavior resolves, as a fn, a Var or a multimethod → preflight succeeds with no problems"
+    (doseq [transform [identity #'identity fixture-multimethod]]
+      (let [middle     (middle-stage :transform {:stage/transform {:transform/type :double}})
+            connectors {source-ref (->RecordingConnector (atom []))
+                        sink-ref   (->RecordingConnector (atom []))}
+            result     (runner/preflight (pipeline [(ingest-stage {}) middle publish-stage])
+                                         connectors
+                                         {:transforms {:double transform}})]
+        (is (:success? result) (str transform))
+        (is (= [] (get-in result [:preflight :preflight/problems])))))))
 
 (comment
   (clojure.test/run-tests))

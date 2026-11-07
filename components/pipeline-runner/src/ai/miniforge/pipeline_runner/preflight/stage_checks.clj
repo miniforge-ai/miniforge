@@ -38,11 +38,26 @@
    :processing/undeclared   :preflight/processing-undeclared
    :pass-through/conflict   :preflight/pass-through-conflict
    :quality-pack/empty      :preflight/quality-pack-empty
+   :quality-pack/malformed  :preflight/quality-pack-malformed
    :quality-rule/unresolved :preflight/quality-rule-unresolved
    :spawn-fn/unresolved     :preflight/spawn-fn-unresolved})
 
 (defn- ^{:stratum 0} pass-through? [stage]
   (true? (get-in stage [:stage/config :stage/pass-through?])))
+
+(defn- ^{:stratum 0} callable?
+  "What the executor can call: a fn, a Var holding one, or a multimethod."
+  [x]
+  (or (fn? x) (var? x) (instance? clojure.lang.MultiFn x)))
+
+(defn- ^{:stratum 0} transform-declaration [stage]
+  (get-in stage [:stage/config :stage/transform]))
+
+(defn- ^{:stratum 0} malformed-rules?
+  "True when a quality pack's :pack/rules is present but not a list of rules."
+  [pack]
+  (let [rules (:pack/rules pack)]
+    (and (some? rules) (not (sequential? rules)))))
 
 (defn- ^{:stratum 0} transform-type [stage]
   (get-in stage [:stage/config :stage/transform :transform/type]))
@@ -56,16 +71,10 @@
 (defn ^{:stratum 0} validate-family? [stage]
   (= :validate (:stage/family stage)))
 
-(defn- ^{:stratum 0} resolved-rule? [rule]
-  (fn? (:rule/check-fn rule)))
-
 (defn- ^{:stratum 0} rule-ref
   "Name an unresolved rule by its id, or by its type when it has no id."
   [rule]
   (or (:rule/id rule) (:rule/type rule)))
-
-(defn- ^{:stratum 0} registered-fn? [context registry-key k]
-  (fn? (get-in context [registry-key k])))
 
 (defn- ^{:stratum 0} implements-role?
   "A connector serves a family only if it implements the base Connector
@@ -76,11 +85,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} registered-fn? [context registry-key k]
+  (callable? (get-in context [registry-key k])))
+
 (defn- ^{:stratum 1} any-processing?
   "True when the stage declares a quality pack or a transform, whatever its
    family; pass-through beside either is a conflict."
   [stage]
-  (or (some? (quality-pack stage)) (some? (transform-type stage))))
+  (or (some? (quality-pack stage)) (some? (transform-declaration stage))))
 
 ;; Problem values and derived declarations.
 (defn- ^{:stratum 1} problem
@@ -106,7 +118,7 @@
 (defn- ^{:stratum 1} unresolved-rules
   "The rules in a quality pack that carry no check fn."
   [pack]
-  (remove resolved-rule? (get pack :pack/rules [])))
+  (remove #(callable? (:rule/check-fn %)) (get pack :pack/rules [])))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -136,17 +148,6 @@
       (or declared? pass?)                []
       :else                               [(problem stage :processing/undeclared family)])))
 
-(defn ^{:stratum 2} pack-problems
-  "A declared quality pack needs at least one rule, and every rule needs an
-   implementation."
-  [stage]
-  (let [pack (quality-pack stage)]
-    (cond
-      (nil? pack)                  []
-      (empty? (:pack/rules pack))  [(problem stage :quality-pack/empty (:pack/id pack))]
-      :else                        (mapv #(problem stage :quality-rule/unresolved (rule-ref %))
-                                         (unresolved-rules pack)))))
-
 (defn ^{:stratum 2} transform-problems
   "A declared transform type must name a registered function."
   [stage context]
@@ -162,6 +163,18 @@
     (if (or (nil? k) (registered-fn? context :spawn-fns k))
       []
       [(problem stage :spawn-fn/unresolved k)])))
+
+(defn ^{:stratum 2} pack-problems
+  "A declared quality pack needs at least one rule, and every rule needs an
+   implementation."
+  [stage]
+  (let [pack (quality-pack stage)]
+    (cond
+      (nil? pack)                  []
+      (malformed-rules? pack)      [(problem stage :quality-pack/malformed (:pack/id pack))]
+      (empty? (:pack/rules pack))  [(problem stage :quality-pack/empty (:pack/id pack))]
+      :else                        (mapv #(problem stage :quality-rule/unresolved (rule-ref %))
+                                         (unresolved-rules pack)))))
 
 (comment
   (declaration-problems {:stage/id (random-uuid)
