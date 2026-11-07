@@ -10,10 +10,9 @@
 
 (def ^{:stratum 0} millis-per-second "Kubernetes worker deadlines use whole seconds." 1000)
 
-(def ^{:stratum 0} Limits
-  (-> (mu/get grant/OpsvExperimentScope :opsv/experiment)
-      (mu/select-keys [:kubernetes/context :opsv/traffic-destinations :opsv/duration-ms :opsv/load-limits])
-      (mu/assoc :effect/id :uuid)))
+(def ^{:stratum 0} runtime-bound-keys
+  "The explicit operational bounds shared by native proposal construction and provider admission."
+  [:kubernetes/context :opsv/traffic-destinations :opsv/duration-ms :opsv/load-limits])
 
 (def ^{:stratum 0} RetainedBaseline
   [:map [:environment/raw-observations
@@ -21,6 +20,11 @@
                 [:map [:kubernetes/source [:map [:kubernetes/inventory recovery/Inventory]]]]]]]])
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} Limits
+  (-> (mu/get grant/OpsvExperimentScope :opsv/experiment)
+      (mu/select-keys runtime-bound-keys)
+      (mu/assoc :effect/id :uuid)))
 
 (def ^{:stratum 1} maximum-duration-ms
   "Native work cannot exceed the existing temporary-grant lifetime ceiling."
