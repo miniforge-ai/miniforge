@@ -21,7 +21,9 @@
    stage's spawn fn) names something that does not resolve. Every refusal
    leaves both connectors uncalled. A stage spawned mid-run is not
    preflighted, so the executor refuses it when it declares no processing.
-   A declared pass-through leaves a receipt on its stage run."
+   A declared pass-through leaves a receipt on its stage run. A quality rule
+   that throws or returns a malformed verdict fails its stage as an execution
+   error."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector.interface :as conn]
             [ai.miniforge.data-quality.interface :as dq]
@@ -114,6 +116,12 @@
 
 (defn- ^{:stratum 0} stage-runs [outcome]
   (get-in outcome [:result :pipeline-run :pipeline-run/stage-runs]))
+
+(defn- ^{:stratum 0} quality-config-with-check
+  "Stage config for a validate stage whose single rule runs `check-fn`."
+  [check-fn]
+  {:stage/quality-pack {:pack/id :fixture-pack
+                        :pack/rules [(dq/custom-rule :fixture-rule check-fn)]}})
 
 (defmulti ^{:stratum 0} ^:private fixture-multimethod
   "A multimethod transform: preflight must accept it as callable."
@@ -306,6 +314,19 @@
                                          {:transforms {:double transform}})]
         (is (:success? result) (str transform))
         (is (= [] (get-in result [:preflight :preflight/problems])))))))
+
+(deftest ^{:stratum 2} test-broken-quality-rule-fails-the-stage
+  (testing "given a rule that throws or returns a malformed verdict → the validate stage fails as an execution error, nothing publishes"
+    (doseq [[check-fn kind] [[(fn [_] (throw (ex-info "boom" {}))) :rule/threw]
+                             [(fn [_] (assert false "boom"))         :rule/threw]
+                             [(constantly {:valid? "yes"})          :rule/malformed-verdict]]]
+      (let [outcome    (run-fixture (pipeline [(ingest-stage {}) (middle-stage :validate (quality-config-with-check check-fn)) publish-stage]) {})
+            middle-run (stage-run outcome middle-id)]
+        (is (false? (:success? (:result outcome))))
+        (is (= :failed (:status middle-run)))
+        (is (= :execution (:error-kind middle-run)))
+        (is (= #{kind} (set (map :error/kind (:quality/rule-errors middle-run)))))
+        (is (empty? (:sink-calls outcome)))))))
 
 (deftest ^{:stratum 2} test-non-callable-var-refused-before-io
   (testing "given a transform registered as a Var holding data, or as an unbound Var → refused before any connector call"
