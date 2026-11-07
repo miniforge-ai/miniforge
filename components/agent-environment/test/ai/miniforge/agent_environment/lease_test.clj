@@ -101,3 +101,19 @@
     (is (= name (lease/namespace-name (request :environment/template-hash "other"))))
     (is (not= name (lease/namespace-name (request :environment/task-id (random-uuid)))))
     (is (m/validate schema/NamespaceName name))))
+
+(deftest ^{:stratum 2} test-expiry-keeps-sub-millisecond-precision
+  (let [deadline (Instant/parse "2026-11-06T01:00:00.000900Z")
+        req (request :environment/expires-at deadline)]
+    (is (not (lease/expired? req (Instant/parse "2026-11-06T01:00:00.000100Z"))))
+    (is (lease/expired? req deadline))))
+
+(deftest ^{:stratum 2} test-unleased-cleanup-is-retried-by-the-next-acquire
+  (let [uncertain (assoc (entry :state/cleanup-uncertain (request)) :entry/environment nil)]
+    (is (= :new (:decision/kind (lease/acquire-decision uncertain (request)))))
+    (is (= :anomalies.agent-environment/cleanup-uncertain
+           (:decision/reason (lease/acquire-decision (entry :state/cleanup-uncertain (request)) (request)))))))
+
+(deftest ^{:stratum 2} test-names-and-hashes-reject-a-trailing-newline
+  (is (not (m/validate schema/NamespaceName (str (lease/namespace-name (request)) "\n"))))
+  (is (not (m/validate schema/Sha256Hex (str (apply str (repeat 64 "a")) "\n")))))
