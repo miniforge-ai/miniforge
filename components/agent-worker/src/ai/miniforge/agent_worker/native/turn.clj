@@ -50,7 +50,7 @@
 
 (defn ^{:stratum 1} launch!
   "Write the turn's prompt (and settings), start the harness, and return its
-   native references."
+   native references; a launch that printed no pid failed."
   [native handle config attempt turn text native-id]
   (let [workdir (:config/workdir config)
         dir (shell/run-dir workdir attempt turn)
@@ -59,9 +59,10 @@
                   (command/write! handle (shell/turn-file dir "settings.json") (command/settings-json native))
                   prompt)
         script (shell/launch-script workdir dir (command/argv native config dir native-id))
-        launched (if (anomaly/anomaly? written) written (run-script! handle script))]
-    (if (succeeded? launched)
-      {:native/id native-id :native/process-ref (shell/process-ref dir (str/trim (:exec/stdout launched)))}
+        launched (if (anomaly/anomaly? written) written (run-script! handle script))
+        pid (when (succeeded? launched) (re-matches #"\d+" (str/trim (str (:exec/stdout launched)))))]
+    (if pid
+      {:native/id native-id :native/process-ref (shell/process-ref dir pid)}
       (launch-failed launched))))
 
 (defn ^{:stratum 1} read-stream [native handle session]

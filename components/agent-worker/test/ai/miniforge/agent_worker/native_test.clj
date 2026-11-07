@@ -75,6 +75,10 @@
     (is (= :anomalies.agent-worker/steering-unsupported
            (reason (worker/send-input! (:wc w) (:acting w) (:spend w) session "More."))))))
 
+(deftest ^{:stratum 1} test-a-launch-that-prints-no-pid-failed
+  (is (= :anomalies.agent-worker/launch-failed
+         (reason (fx/start! (nf/native-world :worker/claude :pid) (fx/config :worker/claude) 1 prompt)))))
+
 (deftest ^{:stratum 1} test-missing-harness-or-credential-fails-preflight
   (doseq [missing [:cli :credential]]
     (let [w (nf/native-world :worker/claude missing)

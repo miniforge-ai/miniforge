@@ -45,9 +45,11 @@
 (defn ^{:stratum 0} process-ref [dir pid] (str dir "#" pid))
 
 (defn ^{:stratum 0} split-ref
-  "`[dir pid]` from a process reference."
+  "`[dir pid]` from a process reference; the pid follows the last `#`, so a
+   workdir may contain one."
   [ref]
-  (str/split ref #"#" 2))
+  (let [i (str/last-index-of ref "#")]
+    [(subs ref 0 i) (subs ref (inc i))]))
 
 ;------------------------------------------------------------------------------ Layer 1
 

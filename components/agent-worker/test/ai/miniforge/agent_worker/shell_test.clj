@@ -26,6 +26,9 @@
   (is (= "'it'\\''s'" (shell/quote-arg "it's")))
   (is (= "'a b' '$HOME'" (shell/command-line ["a b" "$HOME"]))))
 
+(deftest ^{:stratum 0} test-a-process-ref-splits-at-its-last-hash
+  (is (= ["/work#1/.miniforge/worker/1-1" "4242"] (shell/split-ref (shell/process-ref "/work#1/.miniforge/worker/1-1" "4242")))))
+
 (deftest ^{:stratum 0} test-status-output-maps-to-states
   (testing "given an exit status file → completed, failed, or cancelled by SIGTERM"
     (is (= {:status/state :state/completed :status/exit 0} (shell/status-of "0\n")))
