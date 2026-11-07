@@ -36,7 +36,7 @@
 
 (def ^{:stratum 0} opt-in-bricks
   "Bricks only an opt-in project may contain."
-  #{"components/agent-environment" "components/agent-worker"})
+  #{"components/agent-environment" "components/agent-environment-kubernetes" "components/agent-worker"})
 
 (defn- ^{:stratum 0} local-roots
   "Repo-relative directories `dir`'s deps.edn names as `:local/root`."

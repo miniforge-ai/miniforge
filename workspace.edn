@@ -28,7 +28,8 @@
             ;; Opt-in development-agent environments (#2439). No base yet, so
             ;; every brick is listed; no default project may depend on them.
             "agent-environments" {:alias "ae"
-                                  :necessary ["agent-environment" "agent-worker" "anomaly" "config" "content-hash"
+                                  :necessary ["agent-environment" "agent-environment-kubernetes" "agent-worker"
+                                              "anomaly" "config" "content-hash"
                                               "execution-grant" "file-durability" "kubernetes-target"
                                               "llm" "logging" "messages" "redaction" "response" "tenancy"]
                                   ;; llm's own tests require agent, a test-only dependency this
