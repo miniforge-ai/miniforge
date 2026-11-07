@@ -1,0 +1,10 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/agent-environment {:local/root "../agent-environment"}
+        ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/messages {:local/root "../messages"}
+        babashka/process {:mvn/version "0.5.22"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
+        metosin/malli {:mvn/version "0.16.4"}
+        slingshot/slingshot {:mvn/version "0.12.2"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}

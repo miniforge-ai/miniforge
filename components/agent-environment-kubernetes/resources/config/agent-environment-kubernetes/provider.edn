@@ -1,0 +1,18 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
+;; Defaults for the Kubernetes environment provider. No context is set: an
+;; operator must name the cluster context explicitly. Only the node-default
+;; runtime is offered until an operator maps :isolation/dedicated-kernel to
+;; an installed RuntimeClass and its nodes.
+{:agent-environment-kubernetes/provider
+ {:kubernetes/kubectl "kubectl"
+  :kubernetes/image "docker.io/library/busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
+  :kubernetes/keep-alive ["sh" "-c" "while true; do sleep 3600; done"]
+  :kubernetes/runtimes {:isolation/shared-kernel {:runtime/class nil :runtime/node-selector {}}}
+  :kubernetes/max-limits {:limits/cpu-millicores 4000
+                          :limits/memory-mib 8192
+                          :limits/ephemeral-storage-mib 20480}
+  :kubernetes/command-timeout-ms 120000
+  :kubernetes/delete-timeout-seconds 120}}
