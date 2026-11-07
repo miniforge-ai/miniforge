@@ -20,6 +20,10 @@
 
 (def ^{:stratum 0} revision "Provider revision returned by the successful creation response." "created-load-revision")
 
+(def ^{:stratum 0} one-core-millicpus "One core exercises decimal SI canonicalization, not a production default." 1000)
+
+(def ^{:stratum 0} one-gibibyte-mib "One GiB exercises binary SI canonicalization, not a production default." 1024)
+
 (defn- ^{:stratum 0} capture! [captured record]
   (reset! captured record)
   (dispatch/report :failed))
@@ -36,7 +40,15 @@
     (effect/commit-current! directory (:effect/id proposed) (:grant/id issued)
                             (partial grant/current directory) (constantly clock/now) operation)))
 
+(defn ^{:stratum 0} response-for [body]
+  (wire/completed (wire/response (json/generate-string body) {:status http/created-status})))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} canonicalization-input [input]
+  (-> input
+      (assoc-in [:runtime :load/cpu-millis] one-core-millicpus)
+      (assoc-in [:runtime :load/memory-mib] one-gibibyte-mib)))
 
 (defn ^{:stratum 1} native-response [input]
   (-> (get-in input [:proposal :kubernetes/request :body])
@@ -48,19 +60,22 @@
     (with-redefs [http/start! (partial record-request! calls pending) http/response-fields identity]
       [(operation) @calls])))
 
-(defn ^{:stratum 1} with-input [f]
-  (load/with-input
+(defn ^{:stratum 1} with-input
+  ([f] (with-input identity f))
+  ([transform f]
+   (load/with-input
     (fn [{:keys [ctx input directory] :as fixture}]
-      (let [proposal (phase/prepare-governed-kubernetes-load-proposal! ctx input)
+      (let [input (transform input)
+            proposal (phase/prepare-governed-kubernetes-load-proposal! ctx input)
             captured (atom nil)
             _ (run-current! (str directory "/capture") proposal (partial capture! captured))]
-        (f (assoc fixture :proposal proposal :record @captured :runtime (replica/settings)
-                  :authority-directory (str directory "/commit")))))))
+        (f (assoc fixture :input input :proposal proposal :record @captured :runtime (replica/settings)
+                  :authority-directory (str directory "/commit"))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} response [input]
-  (wire/completed (wire/response (json/generate-string (native-response input)) {:status http/created-status})))
+  (response-for (native-response input)))
 
 (defn ^{:stratum 2} apply! [input record pending dispatch]
   (with-transport pending #(phase/create-kubernetes-load-pod! (:runtime input) record dispatch)))

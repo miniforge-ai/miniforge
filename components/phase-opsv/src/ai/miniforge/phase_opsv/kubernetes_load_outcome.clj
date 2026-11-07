@@ -5,6 +5,7 @@
   "Admit a provider's creation receipt, never load execution or termination proof."
   (:require [ai.miniforge.phase-opsv.kubernetes-effect-binding :as native]
             [ai.miniforge.phase-opsv.kubernetes-load-provider-schema :as schema]
+            [ai.miniforge.phase-opsv.kubernetes-load-resources :as resources]
             [ai.miniforge.phase-opsv.messages :as msg]
             [malli.core :as m]))
 
@@ -41,7 +42,7 @@
 
 (defn- ^{:stratum 1} unchanged? [record pod]
   (let [expected (:body (native/request record))]
-    (and (requested? expected pod)
+    (and (requested? (resources/normalized expected) (resources/normalized pod))
          (= (get-in expected ["spec" "schedulingGates"]) (get-in pod ["spec" "schedulingGates"]))
          (inert? pod))))
 

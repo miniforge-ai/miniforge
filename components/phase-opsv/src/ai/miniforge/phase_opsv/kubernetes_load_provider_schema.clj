@@ -15,11 +15,15 @@
     [:kubernetes/request [:map {:closed true} [:method [:= :post]]
                           [:path schema/NonBlankString] [:media-type [:= "application/json"]] [:body :map]]]]])
 
-(def ^{:stratum 0} Observation
-  [:map ["apiVersion" [:= "v1"]] ["kind" [:= "Pod"]]
-   ["metadata" [:map ["uid" schema/NonBlankString] ["resourceVersion" schema/NonBlankString]]]])
+(def ^{:stratum 0} Quantities [:map ["cpu" :string] ["memory" :string]])
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} Observation
+  [:map ["apiVersion" [:= "v1"]] ["kind" [:= "Pod"]]
+   ["metadata" [:map ["uid" schema/NonBlankString] ["resourceVersion" schema/NonBlankString]]]
+   ["spec" [:map ["containers" [:vector {:min 1}
+                                [:map ["resources" [:map ["requests" Quantities] ["limits" Quantities]]]]]]]]])
 
 (def ^{:stratum 1} Committing
   [:and native/Committing

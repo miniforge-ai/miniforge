@@ -43,6 +43,26 @@
       (is (= outcome (or (:anomaly/type result) (:effect/outcome result))))
       (is (= count (clojure.core/count calls))))))
 
+(defn- ^{:stratum 0} check-canonicalized-quantities [input]
+  (let [quantities {"cpu" "1" "memory" "1Gi"}
+        body (assoc-in (fixtures/native-response input) ["spec" "containers" 0 "resources"]
+                       {"requests" quantities "limits" quantities})
+        [result calls] (fixtures/commit! input (fixtures/response-for body) dispatch/dispatch!)
+        stored (effect/read-record (:authority-directory input) (:effect/id result))]
+    (is (= :succeeded (:effect/state result)))
+    (is (= result stored))
+    (is (= (:proposal input) (:effect/proposal stored)))
+    (is (= fixtures/created-uid (get-in result [:effect/observed :kubernetes/resource :uid])))
+    (is (= fixtures/revision (get-in result [:effect/observed :kubernetes/resource-version])))
+    (is (= 1 (count calls)))
+    (doseq [[path value] [[["spec" "containers" 0 "resources" "limits" "cpu"] "2"]
+                          [["spec" "containers" 0 "resources" "limits" "memory"] "2Gi"]
+                          [["spec" "containers" 0 "args" 2] "100000m"]]]
+      (let [pending (fixtures/response-for (assoc-in body path value))
+            [changed attempts] (fixtures/apply! input (:record input) pending dispatch/dispatch!)]
+        (is (= :unknown-outcome (:effect/outcome changed)))
+        (is (= 1 (count attempts)))))))
+
 (defn- ^{:stratum 0} check-deadline [input]
   (let [pending (CompletableFuture.)
         [result calls] (replica/with-preparation-budget 1
@@ -62,6 +82,9 @@
 
 (deftest ^{:stratum 1} canonical-gated-pod-is-created-once-and-provider-identity-is-retained-test
   (fixtures/with-input check-wire))
+
+(deftest ^{:stratum 1} canonical-resource-units-preserve-identity-but-never-normalize-other-fields-test
+  (fixtures/with-input fixtures/canonicalization-input check-canonicalized-quantities))
 
 (deftest ^{:stratum 1} required-current-dispatch-cannot-run-the-provider-twice-or-on-another-thread-test
   (fixtures/with-input check-dispatch))

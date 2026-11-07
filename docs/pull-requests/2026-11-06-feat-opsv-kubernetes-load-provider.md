@@ -49,15 +49,20 @@ The initial focused run passed 44 tests / 494 assertions after correcting the
 test producer to retain the complete canonical proposal.
 Adversarial extra-argument and extra-worker regressions failed before tightening
 response matching, with two assertion failures and zero errors.
+Review found that Kubernetes canonicalizes resource quantities on creation.
+Compare exact values only for the fixed worker's resource CPU/memory requests and limits;
+all other fields remain literal and the authorized request/hash remain unchanged.
+Use bounded decimal arithmetic, never floating-point comparison, rounding or capping.
+See [Kubernetes Quantity](https://kubernetes.io/docs/reference/kubernetes-api/definitions/quantity-resource/).
 Run strict lint, actual inferred strata, both consuming JVM products, curated
 integration, fresh isolated-package suites and focused fault checks.
 
-Passed strict lint with zero warnings/errors and all 20 changed namespaces at
+Passed strict lint with zero warnings/errors and all 23 changed namespaces at
 three or fewer genuinely inferred strata. Both consuming JVM products and
-Polylith check passed. The curated integration suite passed 160 tests / 1,924 assertions.
-The fresh isolated CLI package passed 44 tests / 496 assertions, and native
+Polylith check passed. The curated integration suite passed 161 tests / 1,939 assertions.
+The fresh isolated CLI package passed 47 tests / 544 assertions, and native
 compatibility passed 308 tests / 1,903 assertions, with no production source overlay.
-All ten injected faults produced assertion failures and zero test errors.
+All twelve injected faults produced assertion failures and zero test errors.
 
 ## Deployment Plan
 
