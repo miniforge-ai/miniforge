@@ -65,13 +65,16 @@ fixed names under `java.io.tmpdir` found none that a test writes.
    (`{:action :continue :new-backend :openai}`) and the calls
    (`[:record :claude false]`, then `[:switch :claude :openai]`). The file had
    layer headings but no `^{:stratum}` metadata, so the pre-commit autofix
-   tagged its forms and regrouped its headings. That rewrite only adds
-   metadata and moves comments.
+   tagged its forms and regrouped its headings. Apart from the four forms
+   this change edits, the rewrite only adds that metadata and moves comments
+   and forms.
 4. `projects/miniforge/test/.../backend_health_test.clj`: the health file
    name carries the JVM's PID. `test-cooldown-expires` writes a switch time
    an hour back, in the Instant-string form `trigger-backend-switch!` stores.
    It checks that a 30-minute cooldown has expired and a 2-hour one has not,
-   and no longer sleeps.
+   and no longer sleeps. The pre-commit autofix gave this file layer headings
+   and `^{:stratum}` metadata and reordered its forms. Its 29 top-level forms
+   are the same as before the autofix, ignoring that metadata.
 
 ## Testing Plan
 
@@ -93,6 +96,7 @@ fixed names under `java.io.tmpdir` found none that a test writes.
    `test:integration` runs passed. No
    `task-*` branch, no miniforge checkpoint and no backend health write
    reached the repository or `~/.miniforge`.
+6. Three `test:integration` runs at the same time with fix 4: all passed.
 
 ## Deployment Plan
 
@@ -110,4 +114,4 @@ None. Test code only.
 
 - [x] Each fix fails on main and passes with the change
 - [x] clj-kondo clean on the changed files
-- [ ] Three side-by-side CI test sequences pass with the fixes
+- [x] Three side-by-side CI test sequences pass with the fixes
