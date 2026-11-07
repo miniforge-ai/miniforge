@@ -18,15 +18,17 @@
 (ns ai.miniforge.cli.main.commands.pr-monitor
   "PR monitor loop — work-list resume and fresh-monitor paths.
 
-   Stratified design (3 layers):
-     Layer 0  constants + shell primitives
-     Layer 1  monitor session (run-monitor!, resume-from-worklist!)
+   Stratified design (3 layers; constants and shell primitives live in
+   pr-monitor-primitives):
+     Layer 0  monitor session (run-monitor!) and its helpers
+     Layer 1  work-list resume (resume-from-worklist!)
      Layer 2  entry point (pr-monitor-cmd)"
   (:require
-   [babashka.process :as process]
    [clojure.string :as str]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.main.commands.pr-monitor-agent :as pr-agent]
+   [ai.miniforge.cli.main.commands.pr-monitor-primitives :as prim]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
@@ -35,41 +37,24 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Constants and shell primitives
-(def ^{:stratum 0} ^:private ms-per-second
-  "Milliseconds in one second.
-   Converts poll-interval-s (config/worklist unit) to poll-interval-ms
-   (pr-lifecycle internal unit). Extracted per rule 006 — used in three sites."
-  1000)
-
-(def ^{:stratum 0} ^:private default-poll-interval-ms
-  "Fallback used in run-monitor! when the monitor atom does not yet carry
-   [:config :poll-interval-ms]. Mirrors the pr-lifecycle monitor default (60 s)."
-  60000)
-
-(defn- ^{:stratum 0} sh! [& args]
-  (apply process/sh args))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} remote-origin-url
+(defn- ^{:stratum 0} remote-origin-url
   "Return the git remote origin URL for `repo-path`, or nil on failure."
   [repo-path]
-  (let [r (sh! "git" "-C" repo-path "remote" "get-url" "origin")]
+  (let [r (prim/sh! "git" "-C" repo-path "remote" "get-url" "origin")]
     (when (zero? (:exit r))
       (str/trim (:out r)))))
 
-(defn- ^{:stratum 1} resolve-author
+(defn- ^{:stratum 0} resolve-author
   "Resolve the GitHub author login from `author-opt` flag, gh CLI, or `default-author`."
   [author-opt default-author]
   (or author-opt
-      (let [result (sh! "gh" "api" "user" "--jq" ".login")]
+      (let [result (prim/sh! "gh" "api" "user" "--jq" ".login")]
         (when (zero? (:exit result))
           (let [login (str/trim (:out result))]
             (when (seq login) login))))
       default-author))
 
-(defn- ^{:stratum 1} parse-poll-interval
+(defn- ^{:stratum 0} parse-poll-interval
   "Parse poll-interval string in seconds, with bounds checking.
    Returns milliseconds, or nil when the value is out-of-range or unparseable."
   [interval-str {:keys [min-poll-interval-s max-poll-interval-s]}]
@@ -77,7 +62,7 @@
     (try
       (let [seconds (Long/parseLong (str interval-str))]
         (if (<= min-poll-interval-s seconds max-poll-interval-s)
-          (* seconds ms-per-second)
+          (* seconds prim/ms-per-second)
           (do (display/print-error
                (messages/t :pr/monitor-interval-bounds
                            {:min min-poll-interval-s :max max-poll-interval-s :value seconds}))
@@ -86,28 +71,30 @@
         (display/print-error (messages/t :pr/monitor-interval-invalid {:value interval-str}))
         nil))))
 
-(defn- ^{:stratum 1} worklist-poll-ms
+(defn- ^{:stratum 0} worklist-poll-ms
   "Derive poll-interval in milliseconds from the PR entries in a worklist.
    Takes the minimum :pr/poll-interval (seconds) across all entries.
    Returns nil when no entries carry that key — caller uses monitor default."
   [prs]
   (some->> (seq (keep :pr/poll-interval prs))
            (apply min)
-           (* ms-per-second)))
+           (* prim/ms-per-second)))
 
-;; Monitor session — compose Layer 0 with pr-lifecycle calls
-(defn- ^{:stratum 1} run-monitor!
-  "Create a PR monitor from `mon-opts`, install a shutdown hook, run the loop.
+;; Monitor session — compose the primitives with pr-lifecycle calls
+(defn- ^{:stratum 0} run-monitor!
+  "Create a PR monitor from `mon-opts` plus the generate-fn and trusted
+   authors built from `cmd-opts`, install a shutdown hook, run the loop.
    Single implementation shared by the fresh-monitor and resume paths."
-  [mon-opts author]
-  (let [monitor (pr-lifecycle/create-pr-monitor mon-opts)
+  [mon-opts author cmd-opts]
+  (let [monitor (pr-lifecycle/create-pr-monitor
+                 (merge mon-opts (pr-agent/monitor-agent-opts cmd-opts)))
         ;; Guard nil: create-pr-monitor may not populate [:config :poll-interval-ms]
         ;; before the atom is first deref'd. Fall back to default-poll-interval-ms.
         eff-ms  (or (get-in @monitor [:config :poll-interval-ms])
-                    default-poll-interval-ms)
+                    prim/default-poll-interval-ms)
         path    (:worktree-path mon-opts)]
     (display/print-info (messages/t :pr/monitor-starting {:author author}))
-    (display/print-info (messages/t :pr/monitor-polling {:seconds (/ eff-ms ms-per-second) :dir path}))
+    (display/print-info (messages/t :pr/monitor-polling {:seconds (/ eff-ms prim/ms-per-second) :dir path}))
     (display/print-info (messages/t :pr/monitor-stop-hint))
     (let [shutdown (fn []
                      (display/print-info (messages/t :pr/monitor-stopping))
@@ -116,9 +103,9 @@
       (let [evidence (pr-lifecycle/run-pr-monitor-loop monitor author)]
         (display/print-info (messages/t :pr/monitor-stopped {:evidence (pr-str evidence)}))))))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 2} resume-from-worklist!
+(defn- ^{:stratum 1} resume-from-worklist!
   "Load persisted worklist for `repo-path`, prune closed PRs, then run monitor.
 
    Scope note: the work-list is used as a resume GATE (only resume when a
@@ -139,7 +126,7 @@
    Exit semantics:
      - returns normally (exit 0 by default) when worklist is empty after pruning
      - shared/exit! 1 on unresolvable remote, missing worklist, prune failure, nil author"
-  [repo-path cli-cfg]
+  [repo-path cli-cfg cmd-opts]
   (let [origin-url (remote-origin-url repo-path)]     ; A
     (when-not origin-url
       (display/print-error (messages/t :pr/monitor-no-remote {:path repo-path}))
@@ -175,15 +162,17 @@
                 (let [poll-ms  (worklist-poll-ms prs)
                       mon-opts (cond-> {:worktree-path repo-path :self-author author}
                                  poll-ms (assoc :poll-interval-ms poll-ms))]    ; H
-                  (run-monitor! mon-opts author))))))))))  ; H G F E D C B A defn
+                  (run-monitor! mon-opts author cmd-opts))))))))))  ; H G F E D C B A defn
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 
 ;; Entry point
-(defn ^{:stratum 3} pr-monitor-cmd
+(defn ^{:stratum 2} pr-monitor-cmd
   "Start the PR monitor loop for autonomous comment resolution.
 
    With --author: creates a fresh monitor polling that author's open PRs.
+   --trusted-authors a,b: logins whose comments are acted on even without
+   an OWNER, MEMBER or COLLABORATOR association.
    Without --author: resumes from a persisted work-list, using --repo (or
    cwd) as the repo path for work-list key derivation.
 
@@ -199,8 +188,8 @@
             poll-ms  (parse-poll-interval poll-interval cli-cfg)
             mon-opts (cond-> {:worktree-path repo-path :self-author resolved}
                        poll-ms (assoc :poll-interval-ms poll-ms))]
-        (run-monitor! mon-opts resolved))
-      (resume-from-worklist! repo-path cli-cfg))))
+        (run-monitor! mon-opts resolved opts))
+      (resume-from-worklist! repo-path cli-cfg opts))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

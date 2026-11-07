@@ -108,9 +108,9 @@
     (let [entries (filter #(= ["pr" "monitor"] (:cmds %)) sut/dispatch-table)]
       (is (= 1 (count entries)) "Exactly one pr monitor entry")
       (is (some? (:fn (first entries))) "Has a handler function")
-      (is (= {:author {:alias :a} :poll-interval {:alias :p} :repo {}}
+      (is (= {:author {:alias :a} :poll-interval {:alias :p} :repo {} :trusted-authors {}}
              (:spec (first entries)))
-          "Spec includes --author, --poll-interval, and --repo"))))
+          "Spec includes --author, --poll-interval, --repo and --trusted-authors"))))
 
 (deftest ^{:stratum 0} reconstruction-failure-preserves-the-human-readable-message
   (let [message (messages/t :status/value-unknown)
