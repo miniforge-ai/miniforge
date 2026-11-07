@@ -45,7 +45,7 @@
 (defn- ^{:stratum 0} pass-through? [stage]
   (true? (get-in stage [:stage/config :stage/pass-through?])))
 
-(defn- ^{:stratum 0} callable?
+(defn ^{:stratum 0} callable?
   "What the executor can call: a fn, a Var holding one, or a multimethod."
   [x]
   (or (fn? x) (var? x) (instance? clojure.lang.MultiFn x)))
