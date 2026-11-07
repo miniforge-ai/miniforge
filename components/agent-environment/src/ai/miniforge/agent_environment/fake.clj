@@ -19,8 +19,9 @@
   "An in-memory provider for contract tests and fake-backed pilots. Options
    inject faults: `:fake/fail-step` stops provisioning at that step after
    the earlier ones apply, `:fake/uncertain-deletes?` leaves deletes
-   unconfirmed, `:fake/probe-failures` fails the live probe, and
-   `:fake/omit-uid?` creates the namespace but never reports its UID."
+   unconfirmed, `:fake/probe-failures` fails the live probe,
+   `:fake/omit-uid?` creates the namespace but never reports its UID, and
+   `:fake/recreated-after-provision?` has an outside actor recreate it at once."
   (:require
    [ai.miniforge.agent-environment.fake.world :as world]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]))
@@ -34,13 +35,14 @@
   (provision! [_ target _request]
     (let [{:keys [applied failed]} (world/walk-steps (:fake/fail-step opts))
           uid (when (seq applied) (str (random-uuid)))]
-      (when uid (swap! state world/provisioned (:target/namespace target) uid applied))
+      (when uid (swap! state world/provisioned (:target/namespace target) uid (:target/generation target) applied))
+      (when (and uid (:fake/recreated-after-provision? opts)) (swap! state world/recreated (:target/namespace target)))
       {:provision/uid (when-not (:fake/omit-uid? opts) uid)
        :provision/steps (cond-> (mapv #(world/step % :outcome/applied) applied)
                           failed (conj (world/step failed :outcome/failed)))}))
   (observe [_ target]
     (let [space (get @state (:target/namespace target))]
-      {:observed/uid (:uid space) :observed/ready? (boolean (:ready? space))}))
+      {:observed/uid (:uid space) :observed/generation (:generation space) :observed/ready? (boolean (:ready? space))}))
   (deprovision! [_ target]
     (let [uncertain? (:fake/uncertain-deletes? opts)
           [before _] (swap-vals! state world/delete target uncertain?)]

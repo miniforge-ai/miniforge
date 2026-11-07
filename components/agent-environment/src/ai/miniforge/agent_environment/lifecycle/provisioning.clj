@@ -18,7 +18,8 @@
 (ns ai.miniforge.agent-environment.lifecycle.provisioning
   "Provisioning a claimed generation: a complete provision becomes the
    key's environment; one that stops part way is receipted, cleaned up at
-   once, and left `cleanup-uncertain` when the cleanup is not confirmed."
+   once, and left `cleanup-uncertain` when the cleanup is not confirmed. An
+   object whose ownership is not shown is never deleted by name."
   (:require
    [ai.miniforge.agent-environment.controller :as controller]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]
@@ -31,10 +32,14 @@
 
 (defn- ^{:stratum 0} recovered-uid
   "A provider that applied steps but reported no UID is asked for it, so the
-   environment still gets a lease; nil when nothing applied or it cannot say."
+   environment still gets a lease. The UID is adopted only from an object
+   carrying this generation, so one recreated under the name is not ours;
+   nil when nothing applied or ownership is not shown."
   [c target steps]
   (when (some #(= :outcome/applied (:step/outcome %)) steps)
-    (:observed/uid (protocol/observe (support/provider c) target))))
+    (let [observed (protocol/observe (support/provider c) target)]
+      (when (= (:target/generation target) (:observed/generation observed))
+        (:observed/uid observed)))))
 
 (defn- ^{:stratum 0} cleanup!
   [c subject target uid]
@@ -50,9 +55,9 @@
         outcome (support/unconfirmed-if-anonymous (receipt/steps-outcome steps) environment)
         acquired (controller/record! c subject :environment/acquire outcome steps
                                      :anomalies.agent-environment/provisioning-failed)
-        cleaned (when (not= :outcome/failed outcome)
+        cleaned (when (and environment (not= :outcome/failed outcome))
                   (cleanup! c subject target (:environment/uid environment)))
-        state (if (contains? #{nil :outcome/applied} (:receipt/outcome cleaned))
+        state (if (or (= :outcome/failed outcome) (= :outcome/applied (:receipt/outcome cleaned)))
                 :state/released
                 :state/cleanup-uncertain)]
     (controller/settle-provision! c request (:target/generation target) state environment)
