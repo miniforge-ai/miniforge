@@ -46,11 +46,31 @@
   "Small enough for any provider's declared ceiling."
   {:limits/cpu-millicores 500 :limits/memory-mib 512 :limits/ephemeral-storage-mib 1024})
 
+(def ^{:stratum 0} exec-timeout-ms
+  "Generous for a no-op command in a freshly provisioned environment."
+  30000)
+
+(def ^{:stratum 0} probe-path
+  "A path writable in any environment image."
+  "/tmp/conformance-probe.txt")
+
+(def ^{:stratum 0} probe-text
+  "Content a write then read must return unchanged."
+  "conformance probe")
+
 (defn ^{:stratum 0} acting-for [tenant-name now]
   (tenancy/establish-acting (tenancy/operator-identity tenant-name now) now))
 
 (defn ^{:stratum 0} subtype? [reason result]
   (and (anomaly/anomaly? result) (= reason (anomaly/subtype result))))
+
+(defn ^{:stratum 0} result [id passed? detail]
+  {:check/id id
+   :check/outcome (if passed? :check/passed :check/failed)
+   :check/detail detail})
+
+(defn ^{:stratum 0} memory-persister [lease path _text]
+  {:artifact/path path :artifact/location (str (:lease/environment-uid lease) ":" path)})
 
 (defn ^{:stratum 0} provision-grant [w acting]
   (let [scope {:environment/tenant-id (:acting/tenant-id acting)
@@ -67,7 +87,15 @@
   (let [wanted (set operations)]
     (mapv :receipt/outcome (filter #(wanted (:receipt/operation %)) @(:receipts w)))))
 
+(def ^{:stratum 0} already-gone
+  "Release refusals meaning the check itself already released that lease."
+  #{:anomalies.agent-environment/environment-released :anomalies.agent-environment/stale-lease})
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} probe-command
+  "A command every environment image can run and exit zero."
+  {:exec/argv ["true"] :exec/timeout-ms exec-timeout-ms})
 
 (defn ^{:stratum 1} world
   "A fresh controller over `provider`, two tenants, and a receipt log."
@@ -76,11 +104,13 @@
         receipts (atom [])
         c (controller/create {:provider provider
                               :clock #(Instant/now)
-                              :emit! #(swap! receipts conj %)})
+                              :emit! #(swap! receipts conj %)
+                              :persist! memory-persister})
         a (acting-for "conformance-tenant-a" now)
         b (acting-for "conformance-tenant-b" now)
         expires-at (.plusSeconds now grant-ttl-seconds)]
     {:c c
+     :leases (atom [])
      :now now
      :expires-at expires-at
      :receipts receipts
@@ -103,5 +133,30 @@
     :environment/limits limits
     :environment/expires-at (:expires-at w)}))
 
-(defn ^{:stratum 1} acquire [w acting req]
-  (lifecycle/acquire! (:c w) acting (provision-grant w acting) req))
+(defn ^{:stratum 1} acquire
+  "Acquire and remember the lease, including the cleanup lease a failed
+   provision returns, so `release-all!` can clean up."
+  [w acting req]
+  (let [env (lifecycle/acquire! (:c w) acting (provision-grant w acting) req)
+        lease (or (:environment/lease env) (get-in env [:anomaly/data :environment/lease]))]
+    (when lease (swap! (:leases w) conj [acting lease]))
+    env))
+
+(defn ^{:stratum 1} cleaned?
+  "True when releasing `lease` confirmed it gone, or it was already gone."
+  [w [acting lease]]
+  (let [released (lifecycle/release! (:c w) acting lease)]
+    (or (= :outcome/applied (:call/outcome released))
+        (contains? already-gone (anomaly/subtype released)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} release-all!
+  "Release every lease `w` acquired; true only when each is confirmed gone
+   and no ledger entry is left anything but released, so a leak with no
+   lease to retry still fails."
+  [w]
+  (let [released (mapv #(cleaned? w %) @(:leases w))
+        entries (vals @(:controller/ledger (:c w)))]
+    (and (every? true? released)
+         (every? #(= :state/released (:entry/state %)) entries))))

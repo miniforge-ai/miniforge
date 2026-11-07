@@ -17,7 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.agent-environment.controller
   "The controller's state and ports: the lease ledger it owns, its clock,
-   and the sink every receipt goes to.
+   the sink every receipt goes to, and the store artifacts persist to.
    A refusal becomes an anomaly only after its receipt is emitted."
   (:require
    [ai.miniforge.agent-environment.lease :as lease]
@@ -28,10 +28,11 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} create
-  [{:keys [provider clock emit!]}]
+  [{:keys [provider clock emit! persist!]}]
   {:controller/provider provider
    :controller/clock clock
    :controller/emit! emit!
+   :controller/persist! persist!
    :controller/ledger (atom {})})
 
 (defn ^{:stratum 0} entry

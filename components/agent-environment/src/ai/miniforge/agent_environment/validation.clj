@@ -49,7 +49,8 @@
   [:map
    [:provider [:fn provider?]]
    [:clock fn?]
-   [:emit! fn?]])
+   [:emit! fn?]
+   [:persist! fn?]])
 
 (defn- ^{:stratum 1} pair-failure
   [[schema value]]

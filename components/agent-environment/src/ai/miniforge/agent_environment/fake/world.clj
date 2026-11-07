@@ -17,7 +17,11 @@
 ;; limitations under the License.
 (ns ai.miniforge.agent-environment.fake.world
   "The fake provider's in-memory world: one map per namespace holding its
-   UID and readiness.")
+   UID, readiness, files, cancellation and the commands run in it."
+  (:require
+   [ai.miniforge.agent-environment.messages :as msg]
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -42,11 +46,43 @@
     (when (and space (= (:target/uid target) (:uid space)))
       space)))
 
+(defn ^{:stratum 0} echo
+  "The default exec: exit zero with the argv joined as stdout."
+  [command]
+  {:exec/exit 0 :exec/stdout (str/join " " (:exec/argv command)) :exec/stderr ""})
+
+(defn ^{:stratum 0} missing
+  [target]
+  (anomaly/anomaly :not-found (msg/t :fake/target-missing) {:target target}))
+
+(defn ^{:stratum 0} file-missing
+  [path]
+  (anomaly/anomaly :not-found (msg/t :fake/file-missing) {:path path}))
+
 (defn ^{:stratum 0} provisioned
   [world namespace uid generation applied]
   (assoc world namespace {:uid uid
                           :generation generation
-                          :ready? (contains? (set applied) :step/workload)}))
+                          :ready? (contains? (set applied) :step/workload)
+                          :files {}
+                          :cancelled? false}))
+
+(defn ^{:stratum 0} cancel-outcome
+  "A fake cannot stop a scripted exec mid-call: with one running, a cancel
+   is unconfirmed; with none, it is applied; with no namespace, it failed."
+  [space]
+  (cond
+    (nil? space) :outcome/failed
+    (pos? (get space :in-flight 0)) :outcome/uncertain
+    :else :outcome/applied))
+
+(defn ^{:stratum 0} counted
+  "`world` with `namespace`'s in-flight count moved by `f`, only while that
+   namespace still has `uid`: a deleted or replaced namespace is left alone."
+  [world namespace uid f]
+  (if (= uid (get-in world [namespace :uid]))
+    (update-in world [namespace :in-flight] (fnil f 0))
+    world))
 
 (defn ^{:stratum 0} recreated
   "`world` after an outside actor recreates `namespace` under its own UID,
@@ -55,6 +91,25 @@
   (update world namespace assoc :uid (str (random-uuid)) :generation nil))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} with-file
+  "`world` with `text` at `path`, only while `target`'s namespace still has
+   its UID."
+  [world target path text]
+  (if (live world target)
+    (assoc-in world [(:target/namespace target) :files path] text)
+    world))
+
+(defn ^{:stratum 1} started
+  "`world` with `command` recorded and counted in flight, only while
+   `target`'s namespace still has its UID."
+  [world target command]
+  (let [namespace (:target/namespace target)]
+    (if (live world target)
+      (-> world
+          (update-in [namespace :commands] (fnil conj []) command)
+          (update-in [namespace :in-flight] (fnil inc 0)))
+      world)))
 
 (defn ^{:stratum 1} walk-steps
   "Applied steps before `fail-step`, then the failed one; later steps are
@@ -70,6 +125,18 @@
   (or (nil? (:target/uid target)) (some? (live world target))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} running!
+  "Check the UID, record `command` and count it in flight in one step, then
+   run `exec-fn` and return its result; a namespace that no longer has
+   `target`'s UID is a missing target and runs nothing."
+  [state target command exec-fn]
+  (let [[before _] (swap-vals! state started target command)]
+    (if (live before target)
+      (try
+        (exec-fn command)
+        (finally (swap! state counted (:target/namespace target) (:target/uid target) dec)))
+      (missing target))))
 
 (defn ^{:stratum 2} delete-outcome
   "What deleting `target` from `world` reports: an absent namespace is
