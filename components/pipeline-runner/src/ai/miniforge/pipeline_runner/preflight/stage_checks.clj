@@ -45,7 +45,7 @@
 (defn- ^{:stratum 0} pass-through? [stage]
   (true? (get-in stage [:stage/config :stage/pass-through?])))
 
-(defn- ^{:stratum 0} callable?
+(defn ^{:stratum 0} callable?
   "What the executor can call: a fn, a multimethod, or a bound Var holding
    one. An unbound Var, or one holding data, is not callable."
   [x]

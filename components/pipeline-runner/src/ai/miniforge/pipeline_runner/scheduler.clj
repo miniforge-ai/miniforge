@@ -53,7 +53,7 @@
     :publish  (execute-publish-stage stage-def connectors
                                      (assoc context :publish/datasets input-datasets)
                                      input-records)
-    :validate (execute-validate-stage stage-def context input-records)
+    :validate (execute-validate-stage stage-def input-records)
     (execute-transform-stage stage-def context input-records)))
 
 ;------------------------------------------------------------------------------ Layer 1
