@@ -49,7 +49,9 @@ fixed names under `java.io.tmpdir` found none that a test writes.
 ## Changes in Detail
 
 1. `worktree_execute_test.clj`: the sentinel command is now
-   `sleep 3600.<JVM pid>`, so the reap check matches only this JVM's sleeper.
+   `sleep 3600.<JVM pid>`, and the reap check runs `pgrep -f -x` with the dot
+   escaped. It matches only this JVM's sleeper: `-x` anchors the whole
+   command line, so PID 123's pattern does not match PID 1234's sleeper.
    `sleep` takes decimal seconds on BSD and GNU. A marker in a shell comment
    would not work: `sh -c` execs `sleep` directly and the comment is not in
    the process's arguments (checked on macOS).
@@ -80,6 +82,9 @@ fixed names under `java.io.tmpdir` found none that a test writes.
 
 1. With a stray `sleep 3607` and another JVM's `sleep 3600.12345` running,
    the main version of `worktree-execute-test` fails and the new one passes.
+   With a neighbor `sleep 3600.<this JVM's pid>9` running, the unanchored
+   pattern fails the test and the anchored one passes. The anchored pattern
+   still finds a live `sleep 3600.<pid>` started through `sh -c`.
 2. On main, the two pipeline namespaces leaked 3 and 1 `task-*` branches and
    as many checkpoint directories; with the fixture they leak none. Both pass.
 3. Run under a temp `MINIFORGE_HOME`, the main version of
