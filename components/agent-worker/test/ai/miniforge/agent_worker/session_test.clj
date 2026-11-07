@@ -70,7 +70,8 @@
     (is (= (session/config-digest config) (:worker/config-digest bound)))
     (is (not= (:worker/config-digest bound)
               (:worker/config-digest (worker/bind acting lease spend (assoc config :config/model "m") 1))))
-    (is (= :anomalies.agent-worker/invalid-input (:anomaly/subtype (worker/bind acting lease spend config 0))))))
+    (is (= :anomalies.agent-worker/invalid-input (:anomaly/subtype (worker/bind acting lease spend config 0))))
+    (is (not (m/validate worker/Binding (update bound :worker/config-digest str "\n"))))))
 
 (deftest ^{:stratum 1} test-usage-never-defaults-to-zero
   (testing "given nothing reported → unknown, every quantity nil"

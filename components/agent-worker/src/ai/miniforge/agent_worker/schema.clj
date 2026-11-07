@@ -40,7 +40,7 @@
 
 (def ^{:stratum 0} NonBlank [:and :string [:fn (complement str/blank?)]])
 
-(def ^{:stratum 0} Sha256Hex [:re #"^[0-9a-f]{64}$"])
+(def ^{:stratum 0} Sha256Hex [:re #"\A[0-9a-f]{64}\z"])
 
 (def ^{:stratum 0} Capabilities
   "What a worker declares. Steering between turns resumes the native
