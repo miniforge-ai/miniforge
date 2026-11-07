@@ -7,7 +7,7 @@
             [ai.miniforge.execution-grant.opsv-scope-fixtures :as scope]
             [ai.miniforge.phase-opsv.boundary.http-transport :as http]
             [ai.miniforge.phase-opsv.boundary.bounded-io :as io]
-            [ai.miniforge.phase-opsv.boundary.kubernetes-replica-http :as replica-http]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-effect-http :as replica-http]
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.kubernetes-replica-request-fixtures :as request]
             [ai.miniforge.phase-opsv.prometheus-test-support :as wire]

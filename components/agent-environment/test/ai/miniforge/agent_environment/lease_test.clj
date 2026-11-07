@@ -106,7 +106,18 @@
   (let [deadline (Instant/parse "2026-11-06T01:00:00.000900Z")
         req (request :environment/expires-at deadline)]
     (is (not (lease/expired? req (Instant/parse "2026-11-06T01:00:00.000100Z"))))
-    (is (lease/expired? req deadline))))
+    (is (lease/expired? req deadline))
+    (testing "given any inst? expiry, java.sql.Date included → a decision, not an exception"
+      (is (lease/expired? (request :environment/expires-at (java.sql.Date. 0)) deadline)))))
+
+(deftest ^{:stratum 2} test-a-cleanup-with-no-uid-keeps-holding-the-key
+  (let [uncertain (assoc (entry :state/cleanup-uncertain (request)) :entry/environment nil)]
+    (is (= :anomalies.agent-environment/cleanup-uncertain
+           (:decision/reason (lease/acquire-decision uncertain (request)))))
+    (is (= :anomalies.agent-environment/conflicting-request
+           (:decision/reason (lease/acquire-decision uncertain (request :environment/template-hash "other")))))
+    (is (= :anomalies.agent-environment/unknown-lease
+           (lease/lease-refusal uncertain :environment/release nil now)))))
 
 (deftest ^{:stratum 2} test-names-and-hashes-reject-a-trailing-newline
   (is (not (m/validate schema/NamespaceName (str (lease/namespace-name (request)) "\n"))))
