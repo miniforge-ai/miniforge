@@ -84,13 +84,6 @@
     ((:controller/emit! controller) emitted)
     emitted))
 
-(defn ^{:stratum 0} clear-unleased!
-  "Mark a confirmed retry of a UID-less cleanup as released; returns nil."
-  [controller request]
-  (swap! (:controller/ledger controller) update (lease/request-key request)
-         #(if (lease/unleased-cleanup? %) (assoc % :entry/state :state/released) %))
-  nil)
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} refuse!

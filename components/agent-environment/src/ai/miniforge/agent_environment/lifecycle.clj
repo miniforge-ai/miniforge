@@ -90,14 +90,12 @@
                     (admission/expiry-refusal request at)
                     (admission/grant-refusal grant acting request at))
         failures (when-not refused (support/preflight-failures c request))
-        retried (when-not (or refused (seq failures)) (provisioning/retry-unleased-cleanup! c acting request))
-        decision (when-not (or refused (seq failures) retried) (controller/claim! c request))]
+        decision (when-not (or refused (seq failures)) (controller/claim! c request))]
     (cond
       refused (controller/refuse! c subject :environment/acquire refused [])
       (seq failures) (controller/refuse! c subject :environment/acquire
                                          :anomalies.agent-environment/preflight-failed
                                          (mapv support/failure-step failures))
-      retried retried
       (= :new (:decision/kind decision)) (provisioning/provision c acting request (:decision/generation decision))
       (= :duplicate (:decision/kind decision)) (duplicate c acting request decision)
       :else (controller/refuse! c subject :environment/acquire (:decision/reason decision) []))))

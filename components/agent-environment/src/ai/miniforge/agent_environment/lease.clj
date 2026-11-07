@@ -73,12 +73,6 @@
   ^Instant [t]
   (if (instance? Instant t) t (.toInstant ^java.util.Date t)))
 
-(defn ^{:stratum 0} unleased-cleanup?
-  "A failed provision whose unconfirmed cleanup never learned a UID: no lease
-   can retry it, so the next acquire's provision retries it by name."
-  [entry]
-  (and (= :state/cleanup-uncertain (:entry/state entry)) (nil? (:entry/environment entry))))
-
 (defn ^{:stratum 0} decision
   ([kind] {:decision/kind kind})
   ([kind reason] {:decision/kind kind :decision/reason reason}))
@@ -115,15 +109,13 @@
     (str namespace-prefix (subs digest 0 namespace-hash-chars))))
 
 (defn ^{:stratum 1} acquire-decision
-  "`:new` when the key has no live entry (or only an unleased cleanup to
-   retry), `:duplicate` when the identical request already holds a
-   provisioned environment, else `:refuse`."
+  "`:new` when the key has no live entry, `:duplicate` when the identical
+   request already holds a provisioned environment, else `:refuse`."
   [entry request]
   (let [state (:entry/state entry)]
     (cond
       (or (nil? entry) (= :state/released state)) (decision :new)
       (not= request (:entry/request entry)) (decision :refuse :anomalies.agent-environment/conflicting-request)
-      (unleased-cleanup? entry) (decision :new)
       (= :state/provisioned state) (decision :duplicate)
       :else (decision :refuse (state->refusal state)))))
 
