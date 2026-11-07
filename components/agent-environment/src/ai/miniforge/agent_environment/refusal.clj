@@ -37,7 +37,7 @@
                :anomalies.agent-environment/environment-cancelled :anomalies.agent-environment/environment-released
                :anomalies.agent-environment/environment-expired :anomalies.agent-environment/cleanup-uncertain
                :anomalies.agent-environment/unknown-lease :anomalies.agent-environment/stale-lease
-               :anomalies.agent-environment/uid-mismatch}})
+               :anomalies.agent-environment/uid-mismatch :anomalies.agent-environment/operation-not-admitted}})
 
 (def ^{:stratum 0} refusal-types
   "Anomaly types a provider result is receipted as refused, not failed."
