@@ -60,8 +60,9 @@
   (anomaly/anomaly :not-found (msg/t :fake/file-missing) {:path path}))
 
 (defn ^{:stratum 0} provisioned
-  [world namespace uid applied]
+  [world namespace uid generation applied]
   (assoc world namespace {:uid uid
+                          :generation generation
                           :ready? (contains? (set applied) :step/workload)
                           :files {}
                           :cancelled? false}))
@@ -82,6 +83,12 @@
   (if (= uid (get-in world [namespace :uid]))
     (update-in world [namespace :in-flight] (fnil f 0))
     world))
+
+(defn ^{:stratum 0} recreated
+  "`world` after an outside actor recreates `namespace` under its own UID,
+   without this controller's generation."
+  [world namespace]
+  (update world namespace assoc :uid (str (random-uuid)) :generation nil))
 
 ;------------------------------------------------------------------------------ Layer 1
 

@@ -138,4 +138,11 @@
           failed (acquire w)
           recovered (get-in failed [:anomaly/data :environment/lease])]
       (is (= :anomalies.agent-environment/provisioning-failed (reason failed)))
-      (is (= :outcome/uncertain (:call/outcome (env/release! (:c w) (:a w) recovered)))))))
+      (is (= :outcome/uncertain (:call/outcome (env/release! (:c w) (:a w) recovered))))))
+  (testing "given the namespace recreated by someone else before it is observed → not adopted, not deleted"
+    (let [w (world {:fake/omit-uid? true :fake/recreated-after-provision? true})
+          failed (acquire w)]
+      (is (= :anomalies.agent-environment/provisioning-failed (reason failed)))
+      (is (nil? (get-in failed [:anomaly/data :environment/lease])))
+      (is (= 1 (count (live w))))
+      (is (empty? (fx/outcomes w :environment/release))))))
