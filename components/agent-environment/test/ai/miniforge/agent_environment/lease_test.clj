@@ -90,6 +90,9 @@
       (is (= :anomalies.agent-environment/environment-expired
              (lease/lease-refusal live :environment/exec current expires-at)))
       (is (nil? (lease/lease-refusal live :environment/release current expires-at))))
+    (testing "given an operation no state admits → refused, never admitted by omission"
+      (is (= :anomalies.agent-environment/operation-not-admitted
+             (lease/lease-refusal live :environment/acquire current now))))
     (testing "given no entry → unknown lease"
       (is (= :anomalies.agent-environment/unknown-lease (lease/lease-refusal nil :environment/exec current now))))))
 
