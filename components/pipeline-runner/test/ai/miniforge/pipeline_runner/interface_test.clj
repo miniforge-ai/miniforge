@@ -332,7 +332,8 @@
      :stage/family :normalize
      :stage/input-datasets [ds-a]
      :stage/output-datasets [ds-b]
-     :stage/dependencies [stage-1-id]}]
+     :stage/dependencies [stage-1-id]
+     :stage/config {:stage/pass-through? true}}]
    :pipeline/mode :full-refresh
    :pipeline/input-datasets []
    :pipeline/output-datasets [ds-b]
@@ -356,7 +357,8 @@
      :stage/family :transform
      :stage/input-datasets [ds-a]
      :stage/output-datasets [ds-b]
-     :stage/dependencies [stage-1-id]}
+     :stage/dependencies [stage-1-id]
+     :stage/config {:stage/pass-through? true}}
     {:stage/id stage-3-id
      :stage/name "Publish"
      :stage/family :publish
@@ -654,10 +656,12 @@
 ;; execute-pipeline — failure paths
 ;; ---------------------------------------------------------------------------
 (deftest ^{:stratum 2} execute-pipeline-missing-connector-test
-  (testing "Pipeline fails when connector missing"
+  (testing "Preflight refuses a pipeline whose source connector is not bound"
     (let [result (runner/execute-pipeline test-pipeline {} {})]
       (is (not (:success? result)))
-      (is (= :failed (get-in result [:pipeline-run :pipeline-run/status]))))))
+      (is (nil? (:pipeline-run result)))
+      (is (= [:connector/missing]
+             (mapv :preflight/problem (:preflight/problems result)))))))
 
 (deftest ^{:stratum 2} execute-pipeline-connector-exception-test
   (testing "Pipeline fails when connector throws exception"
@@ -817,18 +821,18 @@
       (is (= "Ingest" (:stage/name (first stage-runs)))))))
 
 (deftest ^{:stratum 2} execute-pipeline-publish-missing-connector-test
-  (testing "Publish stage fails when sink connector missing"
-    (let [mock-source (->MockSourceConnector nil)
+  (testing "Preflight refuses a missing sink before the source is read"
+    (let [calls       (atom [])
+          mock-source (->InspectableSourceConnector calls (constantly {:records []}))
           ;; Source exists but sink does not
           connectors {conn-src mock-source}
           result (runner/execute-pipeline three-stage-pipeline connectors {})]
       (is (not (:success? result)))
-      (is (= :failed (get-in result [:pipeline-run :pipeline-run/status])))
-      ;; Ingest and transform should succeed, publish should fail
-      (let [stage-runs (get-in result [:pipeline-run :pipeline-run/stage-runs])]
-        (is (= :completed (:status (first stage-runs))))
-        (is (= :completed (:status (second stage-runs))))
-        (is (= :failed (:status (nth stage-runs 2))))))))
+      (is (nil? (:pipeline-run result)))
+      (is (= [{:stage/id stage-3-id :preflight/problem :connector/missing :preflight/ref conn-sink}]
+             (mapv #(select-keys % [:stage/id :preflight/problem :preflight/ref])
+                   (:preflight/problems result))))
+      (is (empty? @calls)))))
 
 (deftest ^{:stratum 2} execute-pipeline-invalid-pipeline-test
   (testing "Invalid pipeline definition returns validation errors"
@@ -873,14 +877,15 @@
           (is (= 1 (get-in validate-run [:quality-report :report/failed]))))))))
 
 (deftest ^{:stratum 2} execute-pipeline-validate-no-pack-test
-  (testing "Validate stage without quality pack is pass-through"
+  (testing "Validate stage without a quality pack is refused unless it declares pass-through"
     (let [pipeline-no-pack
           (assoc-in validate-pipeline
                     [:pipeline/stages 1 :stage/config] {})
           mock-conn (->MockSourceConnector nil)
           result (runner/execute-pipeline pipeline-no-pack {conn-src mock-conn} {})]
-      (is (:success? result))
-      (is (= :completed (get-in result [:pipeline-run :pipeline-run/status]))))))
+      (is (not (:success? result)))
+      (is (= [:processing/undeclared]
+             (mapv :preflight/problem (:preflight/problems result)))))))
 
 (deftest ^{:stratum 2} execute-pipeline-transform-fn-test
   (testing "Transform stage calls registered transform function"
@@ -895,14 +900,16 @@
       (is (:success? result))
       (is (= :completed (get-in result [:pipeline-run :pipeline-run/status]))))))
 
-(deftest ^{:stratum 2} execute-pipeline-transform-passthrough-test
-  (testing "Transform stage without matching fn is pass-through"
+(deftest ^{:stratum 2} execute-pipeline-transform-unregistered-test
+  (testing "Transform stage naming an unregistered fn is refused, not passed through"
     (let [mock-conn (->MockSourceConnector nil)
           result (runner/execute-pipeline
                   transform-pipeline {conn-src mock-conn}
                   {:transforms {}})]
-      (is (:success? result))
-      (is (= :completed (get-in result [:pipeline-run :pipeline-run/status]))))))
+      (is (not (:success? result)))
+      (is (= [{:preflight/problem :transform/unresolved :preflight/ref :test-double}]
+             (mapv #(select-keys % [:preflight/problem :preflight/ref])
+                   (:preflight/problems result)))))))
 
 (deftest ^{:stratum 2} execute-pipeline-spawn-creates-child-stages-test
   (testing "Spawn fn fires for each issue record, child stages run and complete"

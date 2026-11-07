@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.etl.runner-test
   (:require
    [ai.miniforge.etl.runner :as runner]
@@ -23,7 +22,9 @@
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
-(defn- repo-root
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} repo-root
   "Locate the miniforge repo root by walking up from the test's cwd
    until a directory containing `workspace.edn` is found (the unique
    polylith-workspace marker). Lets the tests run no matter the cwd."
@@ -34,7 +35,15 @@
       (.exists (io/file dir "workspace.edn")) (.getAbsolutePath dir)
       :else                                   (recur (.getParentFile (.getAbsoluteFile dir))))))
 
-(deftest validate-pack-resolves-every-shipped-pack
+(deftest ^{:stratum 0} validate-pack-surfaces-missing-files
+  (testing "nonexistent pipeline path returns schema/failure, not an exception"
+    (let [result (runner/validate-pack "/tmp/does-not-exist.edn" "/tmp/nope.edn")]
+      (is (schema/failed? result))
+      (is (string? (:error result))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} validate-pack-resolves-every-shipped-pack
   (testing "the three data-foundry packs in packs/data-foundry all resolve through the runner"
     (let [root (repo-root)]
       (doseq [[pipeline env stages]
@@ -51,9 +60,3 @@
           (is (schema/succeeded? result) (str "pack " pipeline " should validate"))
           (is (= stages (count (:pipeline/stages (:pipeline result))))
               (str "expected " stages " stages in " pipeline)))))))
-
-(deftest validate-pack-surfaces-missing-files
-  (testing "nonexistent pipeline path returns schema/failure, not an exception"
-    (let [result (runner/validate-pack "/tmp/does-not-exist.edn" "/tmp/nope.edn")]
-      (is (schema/failed? result))
-      (is (string? (:error result))))))
