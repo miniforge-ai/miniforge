@@ -111,6 +111,10 @@
 (deftest ^{:stratum 2} test-unleased-cleanup-is-retried-by-the-next-acquire
   (let [uncertain (assoc (entry :state/cleanup-uncertain (request)) :entry/environment nil)]
     (is (= :new (:decision/kind (lease/acquire-decision uncertain (request)))))
+    (is (= :anomalies.agent-environment/conflicting-request
+           (:decision/reason (lease/acquire-decision uncertain (request :environment/template-hash "other")))))
+    (is (= :anomalies.agent-environment/unknown-lease
+           (lease/lease-refusal uncertain :environment/release nil now)))
     (is (= :anomalies.agent-environment/cleanup-uncertain
            (:decision/reason (lease/acquire-decision (entry :state/cleanup-uncertain (request)) (request)))))))
 

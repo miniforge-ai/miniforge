@@ -40,8 +40,11 @@
   (get @(:controller/ledger controller) k))
 
 (defn ^{:stratum 0} target
+  "The provider target an entry names; before an environment exists, its
+   namespace is the one derived from the request."
   [entry]
-  {:target/namespace (get-in entry [:entry/environment :environment/namespace])
+  {:target/namespace (or (get-in entry [:entry/environment :environment/namespace])
+                         (lease/namespace-name (:entry/request entry)))
    :target/uid (get-in entry [:entry/environment :environment/uid])
    :target/generation (:entry/generation entry)})
 
@@ -81,6 +84,13 @@
         emitted (receipt/receipt subject operation outcome steps reason at)]
     ((:controller/emit! controller) emitted)
     emitted))
+
+(defn ^{:stratum 0} clear-unleased!
+  "Mark a confirmed retry of a UID-less cleanup as released; returns nil."
+  [controller request]
+  (swap! (:controller/ledger controller) update (lease/request-key request)
+         #(if (lease/unleased-cleanup? %) (assoc % :entry/state :state/released) %))
+  nil)
 
 ;------------------------------------------------------------------------------ Layer 1
 
