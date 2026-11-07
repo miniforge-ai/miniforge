@@ -145,4 +145,11 @@
       (is (= :anomalies.agent-environment/provisioning-failed (reason failed)))
       (is (nil? (get-in failed [:anomaly/data :environment/lease])))
       (is (= 1 (count (live w))))
-      (is (empty? (fx/outcomes w :environment/release))))))
+      (is (empty? (fx/outcomes w :environment/release)))))
+  (testing "given steps reported only as uncertain → the UID is still recovered and the leftover removed"
+    (let [w (world {:fake/omit-uid? true :fake/uncertain-steps? true})
+          failed (acquire w)]
+      (is (= :anomalies.agent-environment/provisioning-failed (reason failed)))
+      (is (some? (get-in failed [:anomaly/data :environment/lease])))
+      (is (empty? (live w)))
+      (is (= [:outcome/applied] (fx/outcomes w :environment/release))))))

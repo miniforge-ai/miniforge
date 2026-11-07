@@ -30,16 +30,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} recovered-uid
-  "A provider that applied steps but reported no UID is asked for it, so the
-   environment still gets a lease. The UID is adopted only from an object
-   carrying this generation, so one recreated under the name is not ours;
-   nil when nothing applied or ownership is not shown."
-  [c target steps]
-  (when (some #(= :outcome/applied (:step/outcome %)) steps)
-    (let [observed (protocol/observe (support/provider c) target)]
-      (when (= (:target/generation target) (:observed/generation observed))
-        (:observed/uid observed)))))
+(def ^{:stratum 0} maybe-created
+  "Step outcomes after which something may exist to recover."
+  #{:outcome/applied :outcome/uncertain})
 
 (defn- ^{:stratum 0} cleanup!
   [c subject target uid]
@@ -48,6 +41,18 @@
                         :anomalies.agent-environment/provisioning-failed)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} recovered-uid
+  "A provider that applied (or may have applied) steps but reported no UID
+   is asked for it, so the environment still gets a lease. The UID is
+   adopted only from an object carrying this generation, so one recreated
+   under the name is not ours; nil when nothing may exist or ownership is
+   not shown."
+  [c target steps]
+  (when (some #(contains? maybe-created (:step/outcome %)) steps)
+    (let [observed (protocol/observe (support/provider c) target)]
+      (when (= (:target/generation target) (:observed/generation observed))
+        (:observed/uid observed)))))
 
 (defn- ^{:stratum 1} provision-failed
   [c acting request target environment steps]
