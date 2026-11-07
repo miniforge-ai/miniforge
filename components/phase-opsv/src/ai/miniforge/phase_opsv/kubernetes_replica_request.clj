@@ -6,7 +6,6 @@
             [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.phase-opsv.kubernetes-preparation :as preparation]
             [ai.miniforge.phase-opsv.kubernetes-replica-payload :as wire]
-            [ai.miniforge.phase-opsv.kubernetes-resource :as resource]
             [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -15,17 +14,6 @@
 
 (def ^{:stratum 0} ^:private payload wire/prepare)
 
-(defn- ^{:stratum 0} target-bound? [declaration capture]
-  (let [target (:runtime/target declaration)
-        inventory (:kubernetes/inventory capture)
-        deployment (:kubernetes/deployment inventory)]
-    (and (= target (:runtime/target inventory))
-         (= (:cluster target) (:kubernetes/cluster-id inventory))
-         (= (:namespace-uid target) (resource/uid (:kubernetes/namespace inventory)))
-         (= (:workload-uid target) (resource/uid deployment))
-         (= (:namespace target) (resource/namespace-of deployment))
-         (= (:kubernetes/deployment-name declaration) (resource/name-of deployment)))))
-
 (defn- ^{:stratum 0} desired-count [original parameters]
   (if (= :restore-baseline (:opsv/operation parameters))
     (get-in original ["spec" "replicas"])
@@ -33,6 +21,14 @@
 
 (defn- ^{:stratum 0} within? [bounds count]
   (<= (:replicas/min-count bounds) count (:replicas/max-count bounds)))
+
+(defn- ^{:stratum 0} request-bound? [declaration request baseline current]
+  (and (preparation/correlated? declaration request)
+       (= (:runtime/target declaration) (:runtime/target baseline))
+       (= (get-in request [:comparison/pin :comparison/contract :comparison/baseline])
+          (:environment-fingerprint baseline))
+       (preparation/target-bound? declaration (get-in baseline [:environment/raw-observations :kubernetes/verification :kubernetes/source]))
+       (preparation/target-bound? declaration current)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -49,14 +45,6 @@
          (or (within? recovery current-count) (within? (:candidate contract) current-count))
          (<= (abs (- desired current-count)) delta)
          (<= (abs (- desired original-count)) delta))))
-
-(defn- ^{:stratum 1} request-bound? [declaration request baseline current]
-  (and (preparation/correlated? declaration request)
-       (= (:runtime/target declaration) (:runtime/target baseline))
-       (= (get-in request [:comparison/pin :comparison/contract :comparison/baseline])
-          (:environment-fingerprint baseline))
-       (target-bound? declaration (get-in baseline [:environment/raw-observations :kubernetes/verification :kubernetes/source]))
-       (target-bound? declaration current)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

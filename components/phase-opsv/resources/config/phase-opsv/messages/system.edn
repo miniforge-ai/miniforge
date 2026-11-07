@@ -1,5 +1,7 @@
 {:phase-opsv/system
- {:replicas/unusable-original "Retained original preparation lacks usable native recovery identity or replica count."
+ {:load/invalid-request "Native load requests require a retained original, one HTTP destination, digest-pinned image and bounded runtime settings."
+  :load/request-mismatch "Native load request does not match its declared workflow, attempt or original target."
+  :replicas/unusable-original "Retained original preparation lacks usable native recovery identity or replica count."
   :replicas/invalid-proposal "Governed replica proposal requires retained original preparation, exact native input and explicit runtime bounds."
   :replicas/submission-refused "Native replica submission was interrupted or its deadline elapsed before the request began."
   :replicas/invalid-provider "Native replica provider requires an exact committing staging proposal, explicit target and trusted dispatch."
