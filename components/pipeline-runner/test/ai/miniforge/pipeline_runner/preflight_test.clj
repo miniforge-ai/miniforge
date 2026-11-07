@@ -308,6 +308,7 @@
 (deftest ^{:stratum 2} test-broken-quality-rule-fails-the-stage
   (testing "given a rule that throws or returns a malformed verdict → the validate stage fails as an execution error, nothing publishes"
     (doseq [[check-fn kind] [[(fn [_] (throw (ex-info "boom" {}))) :rule/threw]
+                             [(fn [_] (assert false "boom"))         :rule/threw]
                              [(constantly {:valid? "yes"})          :rule/malformed-verdict]]]
       (let [outcome    (run-fixture (pipeline [(ingest-stage {}) (middle-stage :validate (quality-config-with-check check-fn)) publish-stage]) {})
             middle-run (stage-run outcome middle-id)]

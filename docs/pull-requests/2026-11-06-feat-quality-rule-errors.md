@@ -34,6 +34,15 @@ the rule's id. A throw escaped `execute-pipeline` uncaught. A verdict of
    validate stage fails with `:error-kind :execution` and
    `:quality/rule-errors`; otherwise it filters and reports as before.
 
+## Review fixes (Copilot)
+
+1. `filter-passed` keeps out a record whose rule failed to execute,
+   whatever the rule's severity; warning violations still pass.
+2. `generate-report` lists rule errors under `:report/rule-errors`, apart
+   from violations, and counts their records as failed.
+3. The rule boundary also catches `AssertionError`, so a rule's failed
+   `assert` becomes `:rule/threw`; other JVM errors stay fatal.
+
 ## Behavior changes
 
 1. A throwing rule fails its stage with a structured result instead of

@@ -27,11 +27,14 @@
 
 (defn- ^{:stratum 0} check-with-exception-handling
   "Call `check-fn` on `record`. Returns its verdict, or {::thrown e} when it
-   throws. Plain try: data-quality has no slingshot dependency (rule 211)."
+   throws an Exception or an AssertionError (a failed `assert` in the rule).
+   Other JVM errors stay fatal. Plain try: data-quality has no slingshot dependency (rule 211)."
   [check-fn record]
   (try
     (check-fn record)
     (catch Exception e
+      {::thrown e})
+    (catch AssertionError e
       {::thrown e})))
 
 (defn- ^{:stratum 0} thrown? [verdict]

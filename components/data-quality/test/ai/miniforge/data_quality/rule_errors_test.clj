@@ -60,6 +60,29 @@
       (is (empty? (dq/rule-errors evaluation)))
       (is (= [{:id "1"}] (dq/filter-passed evaluation))))))
 
+(deftest ^{:stratum 1} test-assertion-failure-is-a-rule-error
+  (testing "given a check fn whose assert fails → :rule/threw with java.lang.AssertionError, not an escaped error"
+    (let [rule   (dq/custom-rule :asserting-rule (fn [_] (assert false "rule assertion")))
+          errors (dq/rule-errors (dq/evaluate-records [rule] records))]
+      (is (= [:rule/threw :rule/threw] (mapv :error/kind errors)))
+      (is (every? #(= "java.lang.AssertionError" (:error/type %)) errors)))))
+
+(deftest ^{:stratum 1} test-warning-rule-error-blocks-the-record
+  (testing "given a warning-severity rule that throws → the record does not pass the filter"
+    (let [rule (dq/custom-rule :warning-rule (fn [_] (throw (ex-info "boom" {}))) :severity :warning)]
+      (is (empty? (dq/filter-passed (dq/evaluate-records [rule] records)))))))
+
+(deftest ^{:stratum 1} test-report-keeps-rule-errors-apart-from-violations
+  (testing "given one record a rule could not check → the report lists the rule error, no violation, and counts the record failed"
+    (let [rule   (dq/custom-rule :id-1-only #(if (= "1" (:id %))
+                                               {:valid? true}
+                                               (throw (ex-info "cannot check" {}))))
+          report (dq/generate-report :fixture-pack (dq/evaluate-records [rule] records))]
+      (is (= [] (:report/violations report)))
+      (is (= [1] (mapv :record-index (:report/rule-errors report))))
+      (is (= 1 (:report/passed report)))
+      (is (= 1 (:report/failed report))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-malformed-verdicts-are-rule-errors

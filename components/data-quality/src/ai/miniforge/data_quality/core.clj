@@ -22,23 +22,24 @@
          :when error]
      (merge {:record-index record-index :rule/id id} error))))
 
-(defn- ^{:stratum 0} pass-record
-  "Return the record when all its evaluations pass error-severity rules, else nil."
-  [{:keys [record evaluations]}]
-  (let [has-error (some (fn [e]
-                          (and (not (:valid? e))
-                               (= :error (:severity e))))
-                        evaluations)]
-    (when-not has-error record)))
+(defn- ^{:stratum 0} blocking-evaluation?
+  "An evaluation that keeps its record out: a rule that failed to execute,
+   whatever its severity, or an error-severity rule the record failed."
+  [evaluation]
+  (or (some? (:rule/error evaluation))
+      (and (not (:valid? evaluation))
+           (= :error (:severity evaluation)))))
 
 ;; -- Report helpers (decomposed from generate-report) --
 (defn- ^{:stratum 0} collect-violations
-  "Extract violation records from a full evaluation."
+  "Extract violation records from a full evaluation: rules that ran and
+   rejected the record. A rule that failed to execute is not a violation; it
+   is reported under :report/rule-errors."
   [evaluation]
   (vec
    (for [{:keys [record-index evaluations]} evaluation
-         {:keys [valid? rule/id field severity message]} evaluations
-         :when (not valid?)]
+         {:keys [valid? rule/id rule/error field severity message]} evaluations
+         :when (and (not valid?) (nil? error))]
      (result/violation record-index id field severity message))))
 
 (defn- ^{:stratum 0} tally-field-violation
@@ -50,6 +51,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} pass-record
+  "Return the record when none of its evaluations blocks it, else nil."
+  [{:keys [record evaluations]}]
+  (when-not (some blocking-evaluation? evaluations) record))
+
 (defn ^{:stratum 1} evaluate-records
   "Evaluate all records against all rules.
    Returns vector of evaluation-entry maps."
@@ -58,12 +64,6 @@
           (result/evaluation-entry idx record (evaluate-record rules record)))
         (range)
         records))
-
-(defn ^{:stratum 1} filter-passed
-  "Return records that pass all :error-severity rules.
-   Warnings do not cause filtering."
-  [evaluation]
-  (vec (keep pass-record evaluation)))
 
 (defn- ^{:stratum 1} compute-field-summary
   "Compute per-field violation counts and pass rates."
@@ -80,13 +80,23 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} filter-passed
+  "Return records that pass all :error-severity rules and whose rules all ran.
+   Warning violations do not cause filtering; a warning rule that failed to
+   execute does."
+  [evaluation]
+  (vec (keep pass-record evaluation)))
+
 (defn ^{:stratum 2} generate-report
-  "Build a quality report with field-level summary statistics."
+  "Build a quality report with field-level summary statistics. Rules that
+   failed to execute are listed under :report/rule-errors, apart from
+   violations; their records count as failed, never as passed."
   [pack-id evaluation]
   (let [total      (count evaluation)
         violations (collect-violations evaluation)
-        failed     (count (distinct (map :record-index violations)))
-        passed     (- total failed)]
-    (result/quality-report pack-id total passed failed
-                           violations
-                           (compute-field-summary violations total))))
+        errors     (rule-errors evaluation)
+        failed     (count (distinct (map :record-index (concat violations errors))))
+        passed     (- total failed)
+        summary    (compute-field-summary violations total)
+        report     (result/quality-report pack-id total passed failed violations summary)]
+    (assoc report :report/rule-errors errors)))
