@@ -33,11 +33,6 @@
 
 (defn- ^{:stratum 0} worker-for [wc config] (get (:worker/workers wc) (:config/worker config)))
 
-(defn- ^{:stratum 0} digest-refusal
-  [binding config]
-  (when (not= (session/config-digest config) (:worker/config-digest binding))
-    :anomalies.agent-worker/config-digest-mismatch))
-
 (defn- ^{:stratum 0} session-for
   [binding worker-kind native turn]
   {:session/binding binding
@@ -63,7 +58,7 @@
         config (:submission/config submission)
         worker (worker-for wc config)]
     (or (admission/binding-refusal acting lease binding)
-        (digest-refusal binding config)
+        (admission/config-refusal binding config)
         (when (nil? worker) :anomalies.agent-worker/worker-unavailable)
         (admission/grant-refusal grant acting binding config ((:worker/clock wc)))
         (admission/budget-refusal grant config (protocol/capabilities worker)))))

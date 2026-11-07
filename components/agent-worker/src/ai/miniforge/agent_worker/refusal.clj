@@ -26,7 +26,8 @@
 
 (def ^{:stratum 0} reasons-by-type
   "Anomaly type of each reason; unlisted reasons are faults."
-  {:unauthorized #{:anomalies.agent-worker/forged-tenant :anomalies.agent-worker/grant-absent
+  {:unauthorized #{:anomalies.agent-worker/forged-tenant :anomalies.agent-worker/forged-principal
+                   :anomalies.agent-worker/grant-absent
                    :anomalies.agent-worker/grant-inactive :anomalies.agent-worker/grant-scope-mismatch
                    :anomalies.agent-worker/grant-exceeded :anomalies.agent-worker/grant-wrong-effect
                    :anomalies.agent-worker/grant-wrong-principal :anomalies.agent-worker/grant-not-bound

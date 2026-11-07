@@ -5,6 +5,7 @@
 {:agent-worker/messages
  {:anomalies.agent-worker/invalid-input "Agent-worker inputs failed validation"
   :anomalies.agent-worker/forged-tenant "The acting tenant is not the tenant this binding names"
+  :anomalies.agent-worker/forged-principal "The acting principal is not the principal this binding names"
   :anomalies.agent-worker/binding-mismatch "The binding names another run, task or environment than the lease"
   :anomalies.agent-worker/stale-lease "The binding names an older lease generation than the lease"
   :anomalies.agent-worker/config-digest-mismatch "The binding's config digest is not the digest of the submitted config"
