@@ -1,0 +1,68 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.agent-environment.fake
+  "An in-memory provider for contract tests and fake-backed pilots. Options
+   inject faults: `:fake/fail-step` stops provisioning at that step after
+   the earlier ones apply, `:fake/uncertain-deletes?` leaves deletes
+   unconfirmed, and `:fake/probe-failures` fails the live probe."
+  (:require
+   [ai.miniforge.agent-environment.fake.world :as world]
+   [ai.miniforge.agent-environment.interface.protocol :as protocol]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(defrecord ^{:stratum 0} FakeProvider [state opts]
+  protocol/EnvironmentProvider
+  (capabilities [_] (get opts :fake/capabilities world/default-capabilities))
+  (probe [_ _request] (get opts :fake/probe-failures []))
+  (provision! [_ target _request]
+    (let [{:keys [applied failed]} (world/walk-steps (:fake/fail-step opts))
+          uid (when (seq applied) (str (random-uuid)))]
+      (when uid (swap! state world/provisioned (:target/namespace target) uid applied))
+      {:provision/uid uid
+       :provision/steps (cond-> (mapv #(world/step % :outcome/applied) applied)
+                          failed (conj (world/step failed :outcome/failed)))}))
+  (observe [_ target]
+    (let [space (get @state (:target/namespace target))]
+      {:observed/uid (:uid space) :observed/ready? (boolean (:ready? space))}))
+  (deprovision! [_ target]
+    (cond
+      (not (world/deletable? @state target))
+      {:deprovision/steps [(world/step :step/namespace-deleted :outcome/failed)]}
+
+      (:fake/uncertain-deletes? opts)
+      {:deprovision/steps [(world/step :step/namespace-deleted :outcome/uncertain)]}
+
+      :else
+      (do (swap! state dissoc (:target/namespace target))
+          {:deprovision/steps [(world/step :step/namespace-deleted :outcome/applied)]}))))
+
+(defn ^{:stratum 0} replace-uid!
+  "Recreate `namespace` under a new UID, as an outside actor reusing the name would."
+  [provider namespace]
+  (swap! (:state provider) assoc-in [namespace :uid] (str (random-uuid))))
+
+(defn ^{:stratum 0} live-namespaces
+  [provider]
+  (set (keys @(:state provider))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create
+  [opts]
+  (->FakeProvider (atom {}) opts))
