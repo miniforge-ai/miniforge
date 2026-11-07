@@ -19,6 +19,7 @@
   (:require
    [ai.miniforge.etl.runner :as runner]
    [ai.miniforge.schema.interface :as schema]
+   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
@@ -62,9 +63,32 @@
       (is (schema/failed? result))
       (is (string? (:error result))))))
 
+(def ^{:stratum 0} ^:private ratio-input-records
+  "Numerator and denominator for one date, plus a record with no date."
+  [{:date "2024-01" :series_id "NUM" :value "10"}
+   {:date "2024-01" :series_id "DEN" :value "100"}
+   {:date nil :series_id "NUM" :value "5"}])
+
+(defn- ^{:stratum 0} file-env
+  "An env reading `input` and writing `output`, both local EDN files."
+  [input output]
+  {:env/name       "test"
+   :env/connectors {:conn/in  {:connector/type :file}
+                    :conn/out {:connector/type :file}}
+   :env/stages     {"Ingest"  {:file/path input :file/format :edn}
+                    "Publish" {:file/path output :file/format :edn}}})
+
+(defn- ^{:stratum 0} override-ratio
+  "A caller-supplied :derived-ratio that marks its output."
+  [records _config]
+  (conj (vec records) {:date "2024-01" :series_id "OVERRIDE" :value "1"}))
+
+(defn- ^{:stratum 0} series-ids [records]
+  (set (map :series_id records)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- invalid-rule-pipeline
+(defn- ^{:stratum 1} invalid-rule-pipeline
   "A pipeline whose validate stage has one built-in rule descriptor `rule`."
   [rule]
   {:pipeline/name    "Invalid Pattern"
@@ -116,6 +140,25 @@
    :pipeline/input-datasets  []
    :pipeline/output-datasets []})
 
+(def ^{:stratum 1} ^:private ratio-pipeline
+  {:pipeline/name    "Ratio"
+   :pipeline/version "0.1.0"
+   :pipeline/mode    :full-refresh
+   :pipeline/stages
+   [(pack-stage "Ingest" :ingest [] [:ds/raw] [] {:stage/connector-ref :conn/in})
+    (pack-stage "Derive" :transform [:ds/raw] [:ds/derived] ["Ingest"]
+                {:stage/config {:stage/transform {:transform/type               :derived-ratio
+                                                  :transform/numerator-series   "NUM"
+                                                  :transform/denominator-series "DEN"
+                                                  :transform/output-scale       100.0
+                                                  :transform/output-series      "RATIO"}}})
+    (pack-stage "Validate" :validate [:ds/derived] [:ds/checked] ["Derive"]
+                {:stage/config {:stage/quality-pack {:pack/id    :dated
+                                                     :pack/rules [{:rule/type :required :rule/field :date}]}}})
+    (pack-stage "Publish" :publish [:ds/checked] [] ["Validate"] {:stage/connector-ref :conn/out})]
+   :pipeline/input-datasets  []
+   :pipeline/output-datasets []})
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-validate-pack-preflights-resolved-pipeline
@@ -134,5 +177,25 @@
             (is (schema/failed? result))
             (is (= expected
                    (mapv (juxt :preflight/problem :preflight/ref) (:preflight/problems result)))))
+          (finally
+            (run! io/delete-file (reverse (file-seq dir)))))))))
+
+(deftest ^{:stratum 2} test-run-pack-runs-built-in-transforms-and-rules
+  (testing "given a file-to-file pack → the built-in ratio reaches the sink, the rule drops the undated record, and a caller transform overrides the built-in"
+    (doseq [[context present absent] [[{} "RATIO" "OVERRIDE"]
+                                      [{:transforms {:derived-ratio override-ratio}} "OVERRIDE" "RATIO"]]]
+      (let [dir      (.toFile (java.nio.file.Files/createTempDirectory
+                               "etl-run-pack" (make-array java.nio.file.attribute.FileAttribute 0)))
+            input    (write-edn! dir "input.edn" ratio-input-records)
+            output   (.getPath (io/file dir "output.edn"))
+            pipeline (write-edn! dir "pipeline.edn" ratio-pipeline)
+            env      (write-edn! dir "env.edn" (file-env input output))]
+        (try
+          (let [result    (runner/run-pack pipeline env context)
+                published (edn/read-string (slurp output))]
+            (is (schema/succeeded? result) (pr-str (:error result)))
+            (is (contains? (series-ids published) present))
+            (is (not (contains? (series-ids published) absent)))
+            (is (every? :date published)))
           (finally
             (run! io/delete-file (reverse (file-seq dir)))))))))
