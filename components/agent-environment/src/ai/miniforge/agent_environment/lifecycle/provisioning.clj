@@ -29,6 +29,13 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} recovered-uid
+  "A provider that applied steps but reported no UID is asked for it, so the
+   environment still gets a lease; nil when nothing applied or it cannot say."
+  [c target steps]
+  (when (some #(= :outcome/applied (:step/outcome %)) steps)
+    (:observed/uid (protocol/observe (support/provider c) target))))
+
 (defn- ^{:stratum 0} cleanup!
   [c subject target uid]
   (let [steps (:deprovision/steps (protocol/deprovision! (support/provider c) (assoc target :target/uid uid)))]
@@ -53,20 +60,6 @@
                             {:receipt/ids (filterv some? [(:receipt/id acquired) (:receipt/id cleaned)])
                              :environment/lease (:environment/lease environment)})))
 
-(defn ^{:stratum 1} retry-unleased-cleanup!
-  "Before a key whose UID-less cleanup is unconfirmed is provisioned again,
-   retry that cleanup by name and receipt it. Nil when there is nothing to
-   retry or the retry is confirmed; a cleanup-uncertain refusal otherwise."
-  [c acting request]
-  (let [entry (controller/entry c (lease/request-key request))
-        cleaned (when (lease/unleased-cleanup? entry)
-                  (cleanup! c (support/subject-of acting request nil) (controller/target entry) nil))]
-    (cond
-      (nil? cleaned) nil
-      (= :outcome/applied (:receipt/outcome cleaned)) (controller/clear-unleased! c request)
-      :else (refusal/reason-anomaly :anomalies.agent-environment/cleanup-uncertain
-                                    {:receipt/id (:receipt/id cleaned)}))))
-
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} provision
@@ -76,7 +69,7 @@
                 :target/generation generation}
         provisioned (protocol/provision! (support/provider c) target request)
         steps (:provision/steps provisioned)
-        env (support/environment request target (:provision/uid provisioned))]
+        env (support/environment request target (or (:provision/uid provisioned) (recovered-uid c target steps)))]
     (if (and env (= :outcome/applied (receipt/steps-outcome steps)))
       (do (controller/settle-provision! c request generation :state/provisioned env)
           (controller/record! c (support/subject-of acting request env) :environment/acquire :outcome/applied steps nil)
