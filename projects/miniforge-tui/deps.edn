@@ -18,6 +18,7 @@
         ai.miniforge/resource-cleanup {:local/root "../../components/resource-cleanup"}
         ai.miniforge/tenancy {:local/root "../../components/tenancy"}
         ai.miniforge/effect-transaction {:local/root "../../components/effect-transaction"}
+        ai.miniforge/webhook-intake {:local/root "../../components/webhook-intake"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}
         ai.miniforge/clock {:local/root "../../components/clock"}

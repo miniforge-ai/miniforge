@@ -1,0 +1,26 @@
+{
+  "action": "completed",
+  "check_suite": {
+    "app": {
+      "slug": "github-actions"
+    },
+    "conclusion": "failure",
+    "head_branch": "fix/checkpoint-directory-foundation",
+    "head_sha": "7f49767ab926f0c1bfb357182b5e2af8caa79b8c",
+    "id": 111056210235,
+    "pull_requests": [],
+    "status": "completed"
+  },
+  "repository": {
+    "default_branch": "main",
+    "full_name": "miniforge-ai/miniforge",
+    "html_url": "https://github.com/miniforge-ai/miniforge",
+    "id": 1137151617,
+    "name": "miniforge",
+    "private": false
+  },
+  "sender": {
+    "login": "H31MDALLR",
+    "type": "User"
+  }
+}
