@@ -63,8 +63,8 @@ mistakes in calls no test reaches, at lint time: a gate named by string
    the file is replaced with an empty config.
 3. A probe calling `check-gate` with a string, `check-gates` with a keyword,
    and `(inc (passed? ...))` gets three clj-kondo errors; the correct call gets
-   none. The 23 source and test files that use the gate interface lint with no
-   new errors besides the deliberate call above.
+   none. Every source and test file that uses the gate interface lints with no
+   type error; the deliberate call above carries its ignore.
 
 ## Deployment Plan
 
