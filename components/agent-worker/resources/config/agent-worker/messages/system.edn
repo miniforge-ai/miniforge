@@ -24,4 +24,6 @@
   :anomalies.agent-worker/conflicting-submission "This attempt was already submitted with different content"
   :anomalies.agent-worker/unknown-session "This session is not the one recorded for its attempt"
   :anomalies.agent-worker/turn-in-progress "The session's current turn is still running"
-  :anomalies.agent-worker/steering-unsupported "The selected worker cannot take further input"}}
+  :anomalies.agent-worker/steering-unsupported "The selected worker cannot take further input"
+  :anomalies.agent-worker/launch-failed "The native harness did not start in the environment"
+  :anomalies.agent-worker/native-session-unknown "No native session id has been reported to resume"}}

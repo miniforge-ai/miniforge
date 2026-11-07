@@ -26,6 +26,7 @@
    [ai.miniforge.agent-worker.controller :as controller]
    [ai.miniforge.agent-worker.fake :as fake]
    [ai.miniforge.agent-worker.lifecycle :as lifecycle]
+   [ai.miniforge.agent-worker.native :as native]
    [ai.miniforge.agent-worker.schema :as schema]
    [ai.miniforge.agent-worker.session :as session]
    [ai.miniforge.agent-worker.validation :as v]))
@@ -104,3 +105,9 @@
   "An in-memory worker; `ai.miniforge.agent-worker.fake` documents its options."
   ([] (fake/create {}))
   ([opts] (fake/create opts)))
+
+(defn ^{:stratum 0} native-worker
+  "The native worker for `kind` on the llm backend of the same name
+   (`:worker/claude`, `:worker/codex`), or a `worker-unavailable` anomaly."
+  [kind]
+  (native/create kind))
