@@ -72,6 +72,12 @@
     (is (= fx/uid (:provision/uid result)))
     (is (= [:outcome/applied :outcome/failed] (mapv :step/outcome (:provision/steps result))))))
 
+(deftest ^{:stratum 1} test-cancel-is-applied-only-when-nothing-is-left-running
+  (let [cancel-with #(protocol/cancel! (provider (atom []) (into [[["exec"] %]] healthy)) fx/target)]
+    (is (= [:outcome/applied] (mapv :step/outcome (:cancel/steps (cancel-with (fx/result 0 ""))))))
+    (is (= [:outcome/uncertain] (mapv :step/outcome (:cancel/steps (cancel-with (fx/result 3 ""))))))
+    (is (= [:outcome/failed] (mapv :step/outcome (:cancel/steps (cancel-with (fx/result 1 ""))))))))
+
 (deftest ^{:stratum 1} test-observe-reports-the-labelled-generation
   (is (= {:observed/uid fx/uid :observed/generation 1}
          (select-keys (protocol/observe (provider (atom []) healthy) fx/target) [:observed/uid :observed/generation]))))

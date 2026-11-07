@@ -30,10 +30,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} cancel-script
-  "Signal every process in the container except its keep-alive (pid 1) and
-   this shell."
-  "for p in /proc/[0-9]*; do n=${p#/proc/}; [ \"$n\" = 1 ] || [ \"$n\" = $$ ] || kill -TERM \"$n\" 2>/dev/null; done; true")
+(def ^{:stratum 0} still-running-exit
+  "Exit status of `cancel-script` when something besides the keep-alive is
+   still running after the signal."
+  3)
 
 (def ^{:stratum 0} write-script
   "Write stdin to $1, creating its parent directory."
@@ -56,6 +56,22 @@
   (partial runner (cond-> settings timeout-ms (assoc :kubernetes/command-timeout-ms timeout-ms))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} cancel-script
+  "Signal every process in the container except its keep-alive (pid 1) and
+   this shell, wait a second, then exit `still-running-exit` if any is left."
+  (str "for p in /proc/[0-9]*; do n=${p#/proc/}; [ \"$n\" = 1 ] || [ \"$n\" = $$ ] || kill -TERM \"$n\" 2>/dev/null; done; "
+       "sleep 1; for p in /proc/[0-9]*; do n=${p#/proc/}; [ \"$n\" = 1 ] || [ \"$n\" = $$ ] || exit "
+       still-running-exit "; done"))
+
+(defn- ^{:stratum 1} cancel-outcome
+  "Applied only when nothing but the keep-alive is left; uncertain when
+   something still runs after the signal; failed when the check did not run."
+  [result]
+  (cond
+    (cluster/ok? result) :outcome/applied
+    (and (not (anomaly/anomaly? result)) (= still-running-exit (:kubectl/exit result))) :outcome/uncertain
+    :else :outcome/failed))
 
 (defn- ^{:stratum 1} guarded
   "`(f run)` only while the target namespace still carries the target UID."
@@ -130,5 +146,5 @@
   (read-file [this target path] (guarded this target nil (partial read-back target path)))
   (cancel! [this target]
     (let [stopped (guarded this target nil #(cluster/exec % (:target/namespace target) ["sh" "-c" cancel-script] nil))]
-      {:cancel/steps [(step :step/workload-stopped (if (cluster/ok? stopped) :outcome/applied :outcome/failed))]}))
+      {:cancel/steps [(step :step/workload-stopped (cancel-outcome stopped))]}))
   (deprovision! [this target] (deprovision this target)))
