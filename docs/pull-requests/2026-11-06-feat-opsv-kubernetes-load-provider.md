@@ -74,5 +74,5 @@ N7 §5.5 and §6; N10 §1.5; #2443 canonical gated load proposals; #2441 recover
 
 - [x] Complete whole-diff adversarial and applicable standards review.
 - [x] Pass offline source/JVM/package/fault validation.
-- [ ] Pass normal signing and hooks.
+- [x] Pass normal signing and hooks.
 - [ ] Settle current-head review, fresh full review and CI; owner-merge.
