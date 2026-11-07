@@ -73,6 +73,13 @@
     (is (= [:outcome/applied :outcome/applied :outcome/applied]
            (fx/outcomes w :environment/exec :environment/copy)))))
 
+(deftest ^{:stratum 1} test-file-paths-must-be-absolute
+  (let [{:keys [c a lease]} (leased-world)]
+    (doseq [path ["-n" "work/report.txt"]]
+      (is (= :invalid-input (:anomaly/type (env/write-file! c a lease path report-text))))
+      (is (= :invalid-input (:anomaly/type (env/read-file c a lease path))))
+      (is (= :invalid-input (:anomaly/type (env/persist-artifacts! c a lease [path])))))))
+
 (deftest ^{:stratum 1} test-artifacts-persist-through-the-controller-store
   (let [{:keys [c a lease]} (leased-world)]
     (env/write-file! c a lease report-path report-text)

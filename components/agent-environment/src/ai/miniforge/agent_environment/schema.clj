@@ -57,6 +57,11 @@
 (def ^{:stratum 0} NonBlank
   [:and :string [:fn (complement str/blank?)]])
 
+(def ^{:stratum 0} AbsolutePath
+  "A path inside the environment from its root, so a provider's commands
+   never read it as an option."
+  [:re #"\A/[^\x00]*\z"])
+
 (def ^{:stratum 0} Sha256Hex
   "Lowercase hex SHA-256, as `content-hash` produces."
   [:re #"\A[0-9a-f]{64}\z"])
