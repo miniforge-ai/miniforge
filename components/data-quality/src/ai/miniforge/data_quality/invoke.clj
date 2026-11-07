@@ -57,7 +57,15 @@
                       :error/type    (.getName (class e))
                       :error/message (ex-message e)}))
 
-(defn- ^{:stratum 0} malformed-evaluation
+(defn- ^{:stratum 0} runtime-class-name
+  "The verdict's runtime class name, or \"nil\". Uses class, not type: type
+   returns a value's :type metadata, which could carry record contents."
+  [verdict]
+  (if (nil? verdict) "nil" (.getName (class verdict))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} malformed-evaluation
   "The evaluation for a rule whose check fn returned something other than a
    well-formed verdict. Records the verdict's type, not its value, so record
    contents do not leak into the error."
@@ -65,11 +73,11 @@
   (assoc base
          :valid? false
          :rule/error {:error/kind         :rule/malformed-verdict
-                      :error/verdict-type (str (type verdict))}))
+                      :error/verdict-type (runtime-class-name verdict)}))
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 1} evaluate-rule
+(defn ^{:stratum 2} evaluate-rule
   "Evaluate one rule against one record: the verdict merged over
    {:rule/id :field :severity}. When the check fn throws, or returns anything
    but a well-formed verdict, the evaluation has :valid? false and a

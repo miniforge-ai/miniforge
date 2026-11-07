@@ -89,6 +89,15 @@
       (is (empty? (dq/rule-errors evaluation)))
       (is (= records (dq/filter-passed evaluation))))))
 
+(deftest ^{:stratum 1} test-malformed-verdict-reports-runtime-class-only
+  (testing "given a malformed verdict whose :type metadata holds record data → the error names the runtime class, not the metadata"
+    (let [verdict (with-meta {} {:type {:secret "record contents"}})
+          errors  (dq/rule-errors (dq/evaluate-records [(rule-returning verdict)] records))]
+      (is (every? #(= "clojure.lang.PersistentArrayMap" (:error/verdict-type %)) errors))
+      (is (not-any? #(re-find #"record contents" (pr-str %)) errors))
+      (is (= ["nil" "nil"]
+             (mapv :error/verdict-type (dq/rule-errors (dq/evaluate-records [(rule-returning nil)] records))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-malformed-verdicts-are-rule-errors
