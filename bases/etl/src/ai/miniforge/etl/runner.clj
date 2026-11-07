@@ -72,26 +72,17 @@
 (defn- ^{:stratum 0} instantiate+resolve
   "Given the loaded inputs, instantiate live connectors from the env's
    connector-type declarations and resolve the pipeline EDN against the
-   env's stage overrides and the built-in quality rule types. Returns
-   `{:resolved ... :connectors ...}`."
+   env's stage overrides. Returns `{:resolved ... :connectors ...}`."
   [{:keys [pipeline env-config]}]
   (let [env-conn-types (pc/extract-connector-types env-config)
         registry       (registry/build-registry)
         instantiated   (pc/instantiate-connectors registry env-conn-types)
         stage-configs  (pc/extract-stage-configs env-config)
-        rule-registry  (pc/resolve-rules (pc/create-rule-registry))
         res-ctx        (pc/create-resolution-context
                          {:connector-refs (:connector-refs instantiated)
-                          :stage-configs  stage-configs
-                          :rule-registry  rule-registry})]
+                          :stage-configs  stage-configs})]
     {:resolved   (pc/resolve-pipeline pipeline res-ctx)
      :connectors (:connectors instantiated)}))
-
-(defn- ^{:stratum 0} with-built-in-transforms
-  "The runner context with pipeline-runner's built-in transforms registered
-   under :transforms. Transforms the caller supplies take precedence."
-  [context]
-  (update context :transforms #(merge pr-run/built-in-transforms %)))
 
 ;; Pack-level helpers (pipeline discovery + validation)
 (defn ^{:stratum 0} list-pipelines
@@ -101,15 +92,6 @@
   (pc/discover-pipelines search-paths))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} preflighted
-  "Return the resolved pipeline as schema/success when pipeline-runner
-   preflight accepts it, otherwise preflight's schema/failure."
-  [{:keys [resolved connectors]}]
-  (let [checked (pr-run/preflight resolved connectors (with-built-in-transforms {}))]
-    (if (schema/failed? checked)
-      checked
-      (schema/success :pipeline resolved))))
 
 ;; Public entry
 (defn ^{:stratum 1} run-pack
@@ -147,8 +129,7 @@
                primed
                (cursors/persist-cursors!
                 logger pipeline-path resolved
-                (pr-run/execute-pipeline resolved connectors
-                                         (with-built-in-transforms (:context primed))))))))))))
+                (pr-run/execute-pipeline resolved connectors (:context primed)))))))))))
 
 (defn ^{:stratum 1} load-run-configuration
   "Load the concrete pipeline/environment pair that controls one ETL run.
@@ -170,13 +151,9 @@
                           {:pipeline (:pipeline inputs)
                            :environment (:env-config inputs)}))))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} validate-pack
+(defn ^{:stratum 1} validate-pack
   "Load + resolve the pipeline at `pipeline-path` with `env-path` without
-   executing it, then preflight it against its connectors and the built-in
-   transforms and rules. Surfaces any loader, env, resolver or preflight
-   failure."
+   executing it. Surfaces any loader, env, or resolver failure."
   [pipeline-path env-path]
   (let [loaded (load-inputs pipeline-path env-path)]
     (if (schema/failed? loaded)
@@ -185,4 +162,4 @@
             unknown (unsupported-types (pc/extract-connector-types (:env-config inputs)))]
         (if (seq unknown)
           (unsupported-types-failure unknown)
-          (preflighted (instantiate+resolve inputs)))))))
+          (schema/success :pipeline (:resolved (instantiate+resolve inputs))))))))
