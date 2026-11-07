@@ -108,6 +108,18 @@
       (is (= ["nil" "nil"]
              (mapv :error/verdict-type (dq/rule-errors (dq/evaluate-records [(rule-returning nil)] records))))))))
 
+(deftest ^{:stratum 1} test-field-pass-rate-counts-each-failed-record-once
+  (testing "given two rules on one field that both fail the same record (a violation and a rule error) → that record counts once"
+    (let [rejects-2 (assoc (dq/custom-rule :rejects-2 #(hash-map :valid? (not= "2" (:id %))))
+                           :rule/field :id)
+          throws-2  (assoc (dq/custom-rule :throws-2 #(if (= "2" (:id %))
+                                                        (throw (ex-info "cannot check" {}))
+                                                        {:valid? true}))
+                           :rule/field :id)
+          report    (dq/generate-report :fixture-pack (dq/evaluate-records [rejects-2 throws-2] records))]
+      (is (= {"id" {:violations 1 :rule-errors 1 :pass-rate 0.5}}
+             (:report/field-summary report))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-malformed-verdicts-are-rule-errors

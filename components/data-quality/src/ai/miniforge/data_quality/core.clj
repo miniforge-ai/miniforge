@@ -44,21 +44,24 @@
      (result/violation record-index id field severity message))))
 
 (defn- ^{:stratum 0} tally-field
-  "Accumulate a count under `count-key` for an entry's field, skipping nil
-   fields."
-  [count-key acc {:keys [field]}]
+  "Accumulate a count under `count-key` for an entry's field, and the entry's
+   record in the field's failed records, skipping nil fields."
+  [count-key acc {:keys [field record-index]}]
   (if field
-    (update-in acc [field count-key] (fnil inc 0))
+    (-> acc
+        (update-in [field count-key] (fnil inc 0))
+        (update-in [field :failed-records] (fnil conj #{}) record-index))
     acc))
 
 (defn- ^{:stratum 0} field-summary-entry
-  "One field's counts and pass rate: the share of records whose rules on the
-   field ran and passed. A rule that failed to execute counts against the
-   field, like a violation."
-  [total {:keys [violations rule-errors] :or {violations 0 rule-errors 0}}]
+  "One field's evaluation counts and pass rate: the share of records with no
+   violation and no rule error on the field. A record failed by several rules
+   on the field counts once."
+  [total {:keys [violations rule-errors failed-records]
+          :or   {violations 0 rule-errors 0 failed-records #{}}}]
   (let [pass-rate (if (zero? total)
                     1.0
-                    (double (/ (- total violations rule-errors) total)))]
+                    (double (/ (- total (count failed-records)) total)))]
     {:violations  violations
      :rule-errors rule-errors
      :pass-rate   pass-rate}))
