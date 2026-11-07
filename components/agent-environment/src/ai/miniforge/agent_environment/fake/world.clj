@@ -75,17 +75,25 @@
     (pos? (get space :in-flight 0)) :outcome/uncertain
     :else :outcome/applied))
 
-(defn ^{:stratum 0} running!
-  "Record `command`, count it in flight while `exec-fn` runs, and return
-   what `exec-fn` returned."
-  [state namespace command exec-fn]
-  (swap! state update-in [namespace :commands] (fnil conj []) command)
-  (swap! state update-in [namespace :in-flight] (fnil inc 0))
-  (try
-    (exec-fn command)
-    (finally (swap! state update-in [namespace :in-flight] dec))))
+(defn ^{:stratum 0} counted
+  "`world` with `namespace`'s in-flight count moved by `f`, only while that
+   namespace still has `uid`: a deleted or replaced namespace is left alone."
+  [world namespace uid f]
+  (if (= uid (get-in world [namespace :uid]))
+    (update-in world [namespace :in-flight] (fnil f 0))
+    world))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} running!
+  "Record `command`, count it in flight against `uid` while `exec-fn` runs,
+   and return what `exec-fn` returned."
+  [state namespace uid command exec-fn]
+  (swap! state update-in [namespace :commands] (fnil conj []) command)
+  (swap! state counted namespace uid inc)
+  (try
+    (exec-fn command)
+    (finally (swap! state counted namespace uid dec))))
 
 (defn ^{:stratum 1} walk-steps
   "Applied steps before `fail-step`, then the failed one; later steps are

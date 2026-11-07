@@ -110,3 +110,14 @@
     (is (= {:call/outcome :outcome/uncertain} (env/cancel! (:c w) (:a w) lease)))
     (deliver release true)
     (is (= fx-ok @running))))
+
+(deftest ^{:stratum 2} test-an-exec-outliving-its-environment-still-returns
+  (let [entered (promise)
+        release (promise)
+        w (fx/world (env/fake-provider {:fake/exec-fn (blocking-exec entered release)}) :isolation/shared-kernel)
+        lease (:environment/lease (fx/acquire w (:a w) (fx/request w (:a w))))
+        running (future (env/exec! (:c w) (:a w) lease {:exec/argv ["sleep"] :exec/timeout-ms fx/exec-timeout-ms}))]
+    @entered
+    (is (= {:call/outcome :outcome/applied} (env/release! (:c w) (:a w) lease)))
+    (deliver release true)
+    (is (= fx-ok @running))))

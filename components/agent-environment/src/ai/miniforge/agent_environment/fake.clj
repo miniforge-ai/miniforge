@@ -44,7 +44,7 @@
       {:observed/uid (:uid space) :observed/ready? (boolean (:ready? space))}))
   (exec! [_ target command]
     (if (world/live @state target)
-      (world/running! state (:target/namespace target) command (get opts :fake/exec-fn world/echo))
+      (world/running! state (:target/namespace target) (:target/uid target) command (get opts :fake/exec-fn world/echo))
       (world/missing target)))
   (write-file! [_ target path text]
     (if (world/live @state target)

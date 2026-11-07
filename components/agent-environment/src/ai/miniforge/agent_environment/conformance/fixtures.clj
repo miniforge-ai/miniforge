@@ -152,6 +152,11 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} release-all!
-  "Release every lease `w` acquired; true when each is confirmed gone."
+  "Release every lease `w` acquired; true only when each is confirmed gone
+   and no ledger entry is left anything but released, so a leak with no
+   lease to retry still fails."
   [w]
-  (every? true? (mapv #(cleaned? w %) @(:leases w))))
+  (let [released (mapv #(cleaned? w %) @(:leases w))
+        entries (vals @(:controller/ledger (:c w)))]
+    (and (every? true? released)
+         (every? #(= :state/released (:entry/state %)) entries))))

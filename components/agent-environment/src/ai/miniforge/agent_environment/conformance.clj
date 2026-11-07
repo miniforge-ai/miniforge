@@ -89,7 +89,7 @@
         lease (:environment/lease (fx/acquire w a (fx/request w a)))
         ready (await-ready #(lifecycle/readiness c a lease))
         ran (lifecycle/exec! c a lease fx/probe-command)
-        _ (lifecycle/write-file! c a lease fx/probe-path fx/probe-text)
+        written (lifecycle/write-file! c a lease fx/probe-path fx/probe-text)
         read-back (lifecycle/read-file c a lease fx/probe-path)
         artifacts (lifecycle/persist-artifacts! c a lease [fx/probe-path])
         cancelled (lifecycle/cancel! c a lease)
@@ -99,6 +99,8 @@
     (fx/result :check/lifecycle-roundtrip
                (and (:readiness/ready? ready)
                     (= 0 (:exec/exit ran))
+                    (map? written)
+                    (not (anomaly/anomaly? written))
                     (= fx/probe-text read-back)
                     (vector? artifacts)
                     (= 1 (count artifacts))

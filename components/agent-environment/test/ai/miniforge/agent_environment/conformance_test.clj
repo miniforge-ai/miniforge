@@ -59,3 +59,9 @@
         outcomes (outcomes-by-check (env/run-conformance {:make-provider env/fake-provider
                                                           :make-partial-provider leaky}))]
     (is (= :check/failed (:check/cleanup-confirmed outcomes)))))
+
+(deftest ^{:stratum 1} test-a-leak-with-no-lease-still-fails-the-cleanup-check
+  (let [unreported #(env/fake-provider {:fake/fail-step :step/workload :fake/omit-uid? true :fake/uncertain-deletes? true})
+        outcomes (outcomes-by-check (env/run-conformance {:make-provider env/fake-provider
+                                                          :make-partial-provider unreported}))]
+    (is (= :check/failed (:check/cleanup-confirmed outcomes)))))
