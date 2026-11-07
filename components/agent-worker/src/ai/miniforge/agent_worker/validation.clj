@@ -20,6 +20,7 @@
    `:invalid-input` anomaly naming the schema it failed."
   (:require
    [ai.miniforge.agent-environment.interface :as env]
+   [ai.miniforge.agent-worker.interface.protocol :as protocol]
    [ai.miniforge.agent-worker.messages :as msg]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.interface :as grant]
@@ -27,6 +28,8 @@
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} worker? [x] (satisfies? protocol/AgentWorker x))
 
 (defn- ^{:stratum 0} invalid
   [schema value]
@@ -41,7 +44,15 @@
 
 (def ^{:stratum 0} Grant grant/ExecutionGrant)
 
+(def ^{:stratum 0} MaybeGrant [:maybe grant/ExecutionGrant])
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ControllerOptions
+  [:map
+   [:workers [:map-of :keyword [:fn worker?]]]
+   [:environment map?]
+   [:clock fn?]])
 
 (defn- ^{:stratum 1} pair-failure
   [[schema value]]
