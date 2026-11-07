@@ -83,6 +83,16 @@
       (is (= 1 (:report/passed report)))
       (is (= 1 (:report/failed report))))))
 
+(deftest ^{:stratum 1} test-field-summary-counts-rule-errors-against-the-field
+  (testing "given a field whose rule failed to run on one of two records → its pass rate is 0.5, not 1.0"
+    (let [rule   (assoc (dq/custom-rule :id-1-only #(if (= "1" (:id %))
+                                                       {:valid? true}
+                                                       (throw (ex-info "cannot check" {}))))
+                        :rule/field :id)
+          report (dq/generate-report :fixture-pack (dq/evaluate-records [rule] records))]
+      (is (= {"id" {:violations 0 :rule-errors 1 :pass-rate 0.5}}
+             (:report/field-summary report))))))
+
 (deftest ^{:stratum 1} test-verdict-cannot-inject-a-rule-error
   (testing "given a well-formed verdict with its own :rule/error → the rule ran; no rule error is recorded"
     (let [evaluation (dq/evaluate-records [(rule-returning {:valid? true :rule/error true})] records)]

@@ -14,13 +14,14 @@
 
 (defn ^{:stratum 0} rule-errors
   "Every rule evaluation in `evaluation` that failed to execute, as
-   {:record-index :rule/id :error/kind ...}. Empty when every rule ran."
+   {:record-index :rule/id :field :error/kind ...}. :field is the rule's field
+   name as a string, as in violations. Empty when every rule ran."
   [evaluation]
   (vec
    (for [{:keys [record-index evaluations]} evaluation
-         {:keys [rule/error rule/id]} evaluations
+         {:keys [rule/error rule/id field]} evaluations
          :when error]
-     (merge {:record-index record-index :rule/id id} error))))
+     (merge {:record-index record-index :rule/id id :field (when field (name field))} error))))
 
 (defn- ^{:stratum 0} blocking-evaluation?
   "An evaluation that keeps its record out: a rule that failed to execute,
@@ -42,12 +43,25 @@
          :when (and (not valid?) (nil? error))]
      (result/violation record-index id field severity message))))
 
-(defn- ^{:stratum 0} tally-field-violation
-  "Accumulate a violation count for a field, skipping nil fields."
-  [acc {:keys [field]}]
+(defn- ^{:stratum 0} tally-field
+  "Accumulate a count under `count-key` for an entry's field, skipping nil
+   fields."
+  [count-key acc {:keys [field]}]
   (if field
-    (update-in acc [field :violations] (fnil inc 0))
+    (update-in acc [field count-key] (fnil inc 0))
     acc))
+
+(defn- ^{:stratum 0} field-summary-entry
+  "One field's counts and pass rate: the share of records whose rules on the
+   field ran and passed. A rule that failed to execute counts against the
+   field, like a violation."
+  [total {:keys [violations rule-errors] :or {violations 0 rule-errors 0}}]
+  (let [pass-rate (if (zero? total)
+                    1.0
+                    (double (/ (- total violations rule-errors) total)))]
+    {:violations  violations
+     :rule-errors rule-errors
+     :pass-rate   pass-rate}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -66,17 +80,13 @@
         records))
 
 (defn- ^{:stratum 1} compute-field-summary
-  "Compute per-field violation counts and pass rates."
-  [violations total]
-  (let [counts (reduce tally-field-violation {} violations)]
-    (reduce-kv (fn [acc field {:keys [violations]}]
-                 (assoc acc field
-                        {:violations violations
-                         :pass-rate  (if (zero? total)
-                                       1.0
-                                       (double (/ (- total violations) total)))}))
-               {}
-               counts)))
+  "Compute per-field violation and rule-error counts and pass rates. A field
+   whose rule failed to execute is not reported as passing."
+  [violations errors total]
+  (let [counts (as-> {} counts
+                 (reduce (partial tally-field :violations) counts violations)
+                 (reduce (partial tally-field :rule-errors) counts errors))]
+    (update-vals counts #(field-summary-entry total %))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -97,6 +107,6 @@
         errors     (rule-errors evaluation)
         failed     (count (distinct (map :record-index (concat violations errors))))
         passed     (- total failed)
-        summary    (compute-field-summary violations total)
+        summary    (compute-field-summary violations errors total)
         report     (result/quality-report pack-id total passed failed violations summary)]
     (assoc report :report/rule-errors errors)))
