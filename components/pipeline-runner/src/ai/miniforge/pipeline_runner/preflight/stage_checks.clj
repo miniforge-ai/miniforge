@@ -67,7 +67,20 @@
 (defn- ^{:stratum 0} registered-fn? [context registry-key k]
   (fn? (get-in context [registry-key k])))
 
+(defn- ^{:stratum 0} implements-role?
+  "A connector serves a family only if it implements the base Connector
+   protocol (connect/close) as well as the family's protocol."
+  [protocol connector]
+  (and (satisfies? conn/Connector connector)
+       (satisfies? protocol connector)))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} any-processing?
+  "True when the stage declares a quality pack or a transform, whatever its
+   family; pass-through beside either is a conflict."
+  [stage]
+  (or (some? (quality-pack stage)) (some? (transform-type stage))))
 
 ;; Problem values and derived declarations.
 (defn- ^{:stratum 1} problem
@@ -90,12 +103,10 @@
   [stage]
   (if (validate-family? stage) (quality-pack stage) (transform-type stage)))
 
-(defn- ^{:stratum 1} unresolved-rule-refs
-  "Refs of the rules in a quality pack that carry no check fn."
+(defn- ^{:stratum 1} unresolved-rules
+  "The rules in a quality pack that carry no check fn."
   [pack]
-  (->> (get pack :pack/rules [])
-       (remove resolved-rule?)
-       (map rule-ref)))
+  (remove resolved-rule? (get pack :pack/rules [])))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -107,10 +118,10 @@
         ref                     (:stage/connector-ref stage)
         connector               (get connectors ref)]
     (cond
-      (nil? protocol)                       []
-      (nil? connector)                      [(problem stage :connector/missing ref)]
-      (not (satisfies? protocol connector)) [(problem stage :connector/role role)]
-      :else                                 [])))
+      (nil? protocol)                             []
+      (nil? connector)                            [(problem stage :connector/missing ref)]
+      (not (implements-role? protocol connector)) [(problem stage :connector/role role)]
+      :else                                       [])))
 
 (defn ^{:stratum 2} declaration-problems
   "A non-connector stage declares processing or pass-through, not both, not
@@ -120,10 +131,10 @@
         pass?     (pass-through? stage)
         family    (:stage/family stage)]
     (cond
-      (connector-family? stage) []
-      (and declared? pass?)     [(problem stage :pass-through/conflict family)]
-      (or declared? pass?)      []
-      :else                     [(problem stage :processing/undeclared family)])))
+      (connector-family? stage)           []
+      (and pass? (any-processing? stage)) [(problem stage :pass-through/conflict family)]
+      (or declared? pass?)                []
+      :else                               [(problem stage :processing/undeclared family)])))
 
 (defn ^{:stratum 2} pack-problems
   "A declared quality pack needs at least one rule, and every rule needs an
@@ -133,8 +144,8 @@
     (cond
       (nil? pack)                  []
       (empty? (:pack/rules pack))  [(problem stage :quality-pack/empty (:pack/id pack))]
-      :else                        (mapv #(problem stage :quality-rule/unresolved %)
-                                         (unresolved-rule-refs pack)))))
+      :else                        (mapv #(problem stage :quality-rule/unresolved (rule-ref %))
+                                         (unresolved-rules pack)))))
 
 (defn ^{:stratum 2} transform-problems
   "A declared transform type must name a registered function."

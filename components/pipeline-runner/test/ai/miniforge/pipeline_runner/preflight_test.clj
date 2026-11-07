@@ -65,6 +65,12 @@
   (checkpoint [_ _handle _connector-id _cursor-state]
     {:checkpoint/status :committed}))
 
+(defrecord ^{:stratum 0} SinkWithoutConnector [calls]
+  conn/SinkConnector
+  (publish [_ _handle _schema-name records _opts]
+    (swap! calls conj :publish)
+    {:publish/records-written (count records) :publish/records-failed 0}))
+
 (def ^{:stratum 0} ^:private source-ref (random-uuid))
 
 (def ^{:stratum 0} ^:private sink-ref   (random-uuid))
@@ -194,22 +200,24 @@
              (problem-summary (:result outcome)))))))
 
 (deftest ^{:stratum 2} test-pass-through-with-transform-is-a-conflict
-  (testing "given pass-through and a transform on one stage → conflict"
-    (let [config  {:stage/pass-through? true :stage/transform {:transform/type :double}}
-          middle  (middle-stage :transform config)
-          outcome (run-fixture (pipeline [(ingest-stage {}) middle publish-stage]) {:transforms {:double identity}})]
-      (is (refused-before-io? outcome))
-      (is (= [{:stage/id middle-id :preflight/problem :pass-through/conflict :preflight/ref :transform}]
-             (problem-summary (:result outcome)))))))
+  (testing "given pass-through and a transform on a transform or validate stage → conflict"
+    (doseq [family [:transform :validate]]
+      (let [config  {:stage/pass-through? true :stage/transform {:transform/type :double}}
+            middle  (middle-stage family config)
+            outcome (run-fixture (pipeline [(ingest-stage {}) middle publish-stage]) {:transforms {:double identity}})]
+        (is (refused-before-io? outcome))
+        (is (= [{:stage/id middle-id :preflight/problem :pass-through/conflict :preflight/ref family}]
+               (problem-summary (:result outcome))))))))
 
 (deftest ^{:stratum 2} test-sink-without-publish-role-refused-before-io
-  (testing "given a publish stage bound to a source-only connector → role failure"
-    (let [outcome (run-fixture (pipeline [(ingest-stage {}) (middle-stage :normalize pass-through) publish-stage])
-                               {}
-                               ->SourceOnlyConnector)]
-      (is (refused-before-io? outcome))
-      (is (= [{:stage/id publish-id :preflight/problem :connector/role :preflight/ref :connector/sink}]
-             (problem-summary (:result outcome)))))))
+  (testing "given a publish stage bound to a source-only connector, or a sink without the base Connector protocol → role failure"
+    (doseq [sink-ctor [->SourceOnlyConnector ->SinkWithoutConnector]]
+      (let [outcome (run-fixture (pipeline [(ingest-stage {}) (middle-stage :normalize pass-through) publish-stage])
+                                 {}
+                                 sink-ctor)]
+        (is (refused-before-io? outcome))
+        (is (= [{:stage/id publish-id :preflight/problem :connector/role :preflight/ref :connector/sink}]
+               (problem-summary (:result outcome))))))))
 
 (deftest ^{:stratum 2} test-every-preflight-problem-reported
   (testing "given two unresolved stages → both problems reported, not only the first"
