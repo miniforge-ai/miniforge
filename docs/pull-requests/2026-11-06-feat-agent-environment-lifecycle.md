@@ -36,11 +36,16 @@ provider: providers supply compute and report what they did.
       `cleanup-uncertain` and a later release with the same lease retries.
    4. `preflight`: identity plus capability and probe failures, receipted.
 2. `lifecycle.provisioning`: a provision that stops part way is receipted as partial and cleaned
-   up at once; the cleanup is receipted as a release.
+   up at once; the cleanup is receipted as a release. A provider that reported no UID is asked
+   for it (`observe`) when any step applied or is uncertain. The UID is adopted only from an
+   object carrying the reserved lease generation, so a namespace someone else recreated under the
+   name is neither leased nor deleted. Without an adopted UID nothing is deleted by name, and the
+   key stays `cleanup-uncertain`.
 3. `validation` and `interface`: boundary schemas for every call; invalid input returns an
    `:invalid-input` anomaly and emits no receipt.
 4. `fake`: in-memory provider with fault options (failed step, unconfirmed deletes, probe
-   failures, replaced UID).
+   failures, omitted UID, uncertain steps, a namespace recreated right after provisioning, replaced
+   UID). It records the generation it provisions and `observe` reports it.
 5. `conformance.fixtures`: synthetic tenants, grants and requests shared by these tests and, next,
    by the provider conformance suite.
 
@@ -48,8 +53,9 @@ provider: providers supply compute and report what they did.
 
 `lifecycle_test` drives the public interface over the fake: duplicate acquire, conflicting request,
 forged tenant (request and lease), missing grant, stale lease after release and reacquire, partial
-provisioning with cleanup, unconfirmed delete with retry, recreated namespace, missing isolation,
-and invalid input (no receipt). `clj-kondo`, stratum-lint and `poly check` clean.
+provisioning with cleanup, unconfirmed delete with retry, recreated namespace, a provider that
+omits the UID (recovered, or not adopted when the namespace was recreated, or recovered after
+uncertain steps), missing isolation, and invalid input (no receipt). `clj-kondo`, stratum-lint and `poly check` clean.
 
 ## Deployment Plan
 
