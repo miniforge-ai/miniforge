@@ -212,10 +212,14 @@
         metrics (implement-result/ensure-valid-metrics
                   (get result :metrics {:tokens 0 :duration-ms duration-ms})
                   logger)
-        cost-usd (get result :cost-usd
-                   (get metrics :cost-usd
-                     (* (get metrics :tokens 0) 0.000015)))
-        metrics (assoc metrics :cost-usd cost-usd :duration-ms duration-ms)
+        ;; The agent's cost, or nil when it is unknown (an unpriced
+        ;; model). No flat-rate guess: an unknown cost stays off the
+        ;; phase metrics, and the workflow marks its total
+        ;; :cost-unavailable? instead of showing a made-up figure. An
+        ;; agent's `:cost-usd nil` (an unpriced no-op) is dropped, not kept.
+        cost-usd (get result :cost-usd (get metrics :cost-usd))
+        metrics (cond-> (-> metrics (dissoc :cost-usd) (assoc :duration-ms duration-ms))
+                  (some? cost-usd) (assoc :cost-usd cost-usd))
         env-id (get ctx :execution/environment-id)
         curated-artifact (implement-result/successful-curated-artifact result)
         degraded-handoff? (true? (:degraded-handoff? result))
@@ -283,7 +287,7 @@
                         (assoc-in [:metrics :implementation :duration-ms] duration-ms)
                         (assoc-in [:metrics :implementation :repair-cycles] (dec iterations))
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-                        (update-in [:execution/metrics :cost-usd] (fnil + 0.0) cost-usd)
+                        (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (or cost-usd 0.0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Capture inner-loop learning when repair succeeded (iterations > 1, completed)
     (when (= :completed phase-status)
