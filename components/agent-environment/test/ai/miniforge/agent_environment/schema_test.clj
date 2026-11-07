@@ -27,6 +27,12 @@
 
 (def ^{:stratum 0} sample-hash (apply str (repeat 64 "0")))
 
+(deftest ^{:stratum 0} test-command-names-its-executable-and-keeps-empty-arguments
+  (is (m/validate env/Command {:exec/argv ["printf" "%s" "" "  "] :exec/timeout-ms 1}))
+  (is (not (m/validate env/Command {:exec/argv ["" "x"] :exec/timeout-ms 1})))
+  (is (not (m/validate env/Command {:exec/argv [] :exec/timeout-ms 1})))
+  (is (not (m/validate env/Command {:exec/argv '("ls") :exec/timeout-ms 1}))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} request
