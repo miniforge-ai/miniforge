@@ -129,6 +129,14 @@
 
 (defmethod ^{:stratum 0} fixture-multimethod :default [records _config] records)
 
+;; Deliberately unbound: preflight must refuse a transform registered as it.
+#_{:clj-kondo/ignore [:uninitialized-var]}
+(def ^{:stratum 0} ^:private fixture-unbound-var)
+
+(def ^{:stratum 0} ^:private fixture-data-var
+  "A Var holding data, not a function."
+  42)
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} child-spawn
@@ -317,6 +325,16 @@
         (is (= :execution (:error-kind middle-run)))
         (is (= #{kind} (set (map :error/kind (:quality/rule-errors middle-run)))))
         (is (empty? (:sink-calls outcome)))))))
+
+(deftest ^{:stratum 2} test-non-callable-var-refused-before-io
+  (testing "given a transform registered as a Var holding data, or as an unbound Var → refused before any connector call"
+    (doseq [registered [#'fixture-data-var #'fixture-unbound-var]]
+      (let [middle  (middle-stage :transform {:stage/transform {:transform/type :double}})
+            outcome (run-fixture (pipeline [(ingest-stage {}) middle publish-stage])
+                                 {:transforms {:double registered}})]
+        (is (refused-before-io? outcome) (str registered))
+        (is (= [{:stage/id middle-id :preflight/problem :transform/unresolved :preflight/ref :double}]
+               (problem-summary (:result outcome))))))))
 
 (comment
   (clojure.test/run-tests))
