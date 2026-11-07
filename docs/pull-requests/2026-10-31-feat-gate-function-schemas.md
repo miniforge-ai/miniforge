@@ -46,7 +46,7 @@ a component boundary, in tests, without changing runtime behaviour.
    `repair-gate`, `passed?`, `failed?`. Inputs: gate keyword(s), any
    artifact, a map or nil context.
 4. The six gate test namespaces that call the interface use the fixture;
-   their 100 tests pass with every call checked.
+   their tests pass with every call checked.
 5. `gate/deps.edn` declares the schema component, which `gate.interface`
    already required without declaring.
 
