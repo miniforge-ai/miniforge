@@ -49,9 +49,9 @@
 ;------------------------------------------------------------------------------ Status Computation
 (deftest ^{:stratum 0} compute-ci-status-all-passing-test
   (testing "All checks passing yields :success"
-    (let [checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}
-                  {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}
-                  {:name "build" :state "COMPLETED" :conclusion "SUCCESS"}]
+    (let [checks [{:name "tests" :state "SUCCESS" :bucket "pass"}
+                  {:name "lint" :state "SUCCESS" :bucket "pass"}
+                  {:name "build" :state "SUCCESS" :bucket "pass"}]
           result (checks/compute-ci-status checks)]
       (is (response/success? result))
       (is (= 3 (count (:passed result))))
@@ -61,8 +61,8 @@
 
 (deftest ^{:stratum 0} compute-ci-status-with-failure-test
   (testing "Any failure yields :failure even if others pass"
-    (let [checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}
-                  {:name "lint" :state "COMPLETED" :conclusion "FAILURE"}]
+    (let [checks [{:name "tests" :state "SUCCESS" :bucket "pass"}
+                  {:name "lint" :state "FAILURE" :bucket "fail"}]
           result (checks/compute-ci-status checks)]
       (is (= :failure (:status result)))
       (is (= 1 (count (:failed result))))
@@ -70,35 +70,34 @@
 
 (deftest ^{:stratum 0} compute-ci-status-pending-test
   (testing "Queued checks yield :pending status"
-    (let [checks [{:name "tests" :state "QUEUED" :conclusion nil}
-                  {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}]
+    (let [checks [{:name "tests" :state "QUEUED" :bucket "pending"}
+                  {:name "lint" :state "SUCCESS" :bucket "pass"}]
           result (checks/compute-ci-status checks)]
       (is (= :pending (:status result)))
       (is (= 1 (count (:pending result))))))
-  (testing "IN_PROGRESS lowercases to :in_progress (underscore) which is unrecognized"
-    (let [checks [{:name "tests" :state "IN_PROGRESS" :conclusion nil}
-                  {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}]
+  (testing "A running check blocks success"
+    (let [checks [{:name "tests" :state "IN_PROGRESS" :bucket "pending"}
+                  {:name "lint" :state "SUCCESS" :bucket "pass"}]
           result (checks/compute-ci-status checks)]
-      (is (response/success? result)
-          "IN_PROGRESS maps to :in_progress (underscore), not :in-progress (hyphen), so it falls to :unknown"))))
+      (is (= :pending (:status result))))))
 
 (deftest ^{:stratum 0} compute-ci-status-failure-takes-precedence-over-pending-test
   (testing "Failure takes precedence over pending"
-    (let [checks [{:name "tests" :state "COMPLETED" :conclusion "FAILURE"}
-                  {:name "lint" :state "IN_PROGRESS" :conclusion nil}]
+    (let [checks [{:name "tests" :state "FAILURE" :bucket "fail"}
+                  {:name "lint" :state "IN_PROGRESS" :bucket "pending"}]
           result (checks/compute-ci-status checks)]
       (is (= :failure (:status result))))))
 
 (deftest ^{:stratum 0} compute-ci-status-queued-test
   (testing "Queued checks count as pending"
-    (let [checks [{:name "tests" :state "QUEUED" :conclusion nil}]
+    (let [checks [{:name "tests" :state "QUEUED" :bucket "pending"}]
           result (checks/compute-ci-status checks)]
       (is (= :pending (:status result)))
       (is (= 1 (count (:pending result)))))))
 
 (deftest ^{:stratum 0} compute-ci-status-neutral-test
   (testing "Only neutral checks yield :neutral"
-    (let [checks [{:name "optional" :state "COMPLETED" :conclusion "NEUTRAL"}]
+    (let [checks [{:name "optional" :state "NEUTRAL" :bucket "skipping"}]
           result (checks/compute-ci-status checks)]
       (is (= :neutral (:status result)))
       (is (= 1 (count (:neutral result)))))))
@@ -110,36 +109,36 @@
       (is (= 0 (:total result))))))
 
 (deftest ^{:stratum 0} compute-ci-status-cancelled-test
-  (testing "Cancelled checks are grouped correctly"
-    (let [checks [{:name "tests" :state "COMPLETED" :conclusion "CANCELLED"}]
+  (testing "A cancelled check is not a pass"
+    (let [checks [{:name "tests" :state "CANCELLED" :bucket "cancel"}
+                  {:name "lint" :state "SUCCESS" :bucket "pass"}]
           result (checks/compute-ci-status checks)]
-      ;; Cancelled maps to :cancelled in grouping but there's no :cancelled bucket
-      ;; in the final output; it falls through to check other conditions
-      (is (some? (:status result))))))
+      (is (= :cancelled (:status result)))
+      (is (= 1 (count (:cancelled result)))))))
 
 (deftest ^{:stratum 0} compute-ci-status-action-required-test
   (testing "Action required counts as failure"
-    (let [checks [{:name "review" :state "COMPLETED" :conclusion "ACTION_REQUIRED"}]
+    (let [checks [{:name "review" :state "ACTION_REQUIRED" :bucket "fail"}]
           result (checks/compute-ci-status checks)]
       (is (= :failure (:status result))))))
 
 (deftest ^{:stratum 0} compute-ci-status-skipped-test
   (testing "Skipped checks count as neutral"
-    (let [checks [{:name "optional" :state "COMPLETED" :conclusion "SKIPPED"}
-                  {:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]
+    (let [checks [{:name "optional" :state "SKIPPED" :bucket "skipping"}
+                  {:name "tests" :state "SUCCESS" :bucket "pass"}]
           result (checks/compute-ci-status checks)]
       (is (response/success? result)
           "Success should take precedence over neutral"))))
 
 (deftest ^{:stratum 0} compute-ci-status-waiting-test
   (testing "Waiting state counts as pending"
-    (let [checks [{:name "deploy" :state "WAITING" :conclusion nil}]
+    (let [checks [{:name "deploy" :state "WAITING" :bucket "pending"}]
           result (checks/compute-ci-status checks)]
       (is (= :pending (:status result))))))
 
 (deftest ^{:stratum 0} compute-ci-status-nil-state-test
   (testing "Nil state and conclusion handled gracefully"
-    (let [checks [{:name "unknown" :state nil :conclusion nil}]
+    (let [checks [{:name "unknown" :state nil :bucket nil}]
           result (checks/compute-ci-status checks)]
       (is (some? (:status result))))))
 
@@ -229,14 +228,14 @@
         (is (vector? (:checks (:data result))))))))
 
 (deftest ^{:stratum 0} get-pr-checks-unparseable-output-test
-  (testing "get-pr-checks falls back to empty checks on parse error"
+  (testing "get-pr-checks reports unparseable output as an error, not as no checks"
     (with-redefs [checks/run-gh-command
                   (fn [_args _path]
-                    (dag/ok {:output "not valid json at all {{{"}))] 
+                    (dag/ok {:output "not valid json at all {{{"}))]
       (let [result (checks/get-pr-checks "/tmp/repo" 42)]
-        (is (dag/ok? result))
-        (is (= [] (:checks (:data result))))
-        (is (some? (:raw (:data result))))))))
+        (is (dag/err? result))
+        (is (= :gh-output-unparseable (get-in result [:error :code])))
+        (is (some? (get-in result [:error :data :raw])))))))
 
 (deftest ^{:stratum 0} get-pr-checks-failure-propagates-test
   (testing "get-pr-checks propagates error when gh command fails"
@@ -262,8 +261,8 @@
   (testing "poll-ci-status returns :success when all checks pass"
     (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
-                    (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}
-                                      {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
+                    (dag/ok {:checks [{:name "tests" :state "SUCCESS" :bucket "pass"}
+                                      {:name "lint" :state "SUCCESS" :bucket "pass"}]}))]
       (let [monitor (ci/create-ci-monitor
                       (random-uuid) (random-uuid) (random-uuid)
                       42 "/tmp/repo")
@@ -276,8 +275,8 @@
   (testing "poll-ci-status returns :failure when any check fails"
     (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
-                    (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "FAILURE"}
-                                      {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
+                    (dag/ok {:checks [{:name "tests" :state "FAILURE" :bucket "fail"}
+                                      {:name "lint" :state "SUCCESS" :bucket "pass"}]}))]
       (let [monitor (ci/create-ci-monitor
                       (random-uuid) (random-uuid) (random-uuid)
                       42 "/tmp/repo")
@@ -289,8 +288,8 @@
   (testing "poll-ci-status returns :pending when checks are still running"
     (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
-                    (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}
-                                      {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
+                    (dag/ok {:checks [{:name "tests" :state "QUEUED" :bucket "pending"}
+                                      {:name "lint" :state "SUCCESS" :bucket "pass"}]}))]
       (let [monitor (ci/create-ci-monitor
                       (random-uuid) (random-uuid) (random-uuid)
                       42 "/tmp/repo")
@@ -328,7 +327,7 @@
   (testing "Each poll increments the poll counter"
     (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
-                    (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}]}))]
+                    (dag/ok {:checks [{:name "tests" :state "QUEUED" :bucket "pending"}]}))]
       (let [monitor (ci/create-ci-monitor
                       (random-uuid) (random-uuid) (random-uuid)
                       42 "/tmp/repo")]
@@ -341,7 +340,7 @@
   (testing "Poll sets last-poll timestamp"
     (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
-                    (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}]}))]
+                    (dag/ok {:checks [{:name "tests" :state "QUEUED" :bucket "pending"}]}))]
       (let [monitor (ci/create-ci-monitor
                       (random-uuid) (random-uuid) (random-uuid)
                       42 "/tmp/repo")]
@@ -353,7 +352,7 @@
   (testing "Poll updates the monitor atom's :status field"
     (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
-                    (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
+                    (dag/ok {:checks [{:name "tests" :state "SUCCESS" :bucket "pass"}]}))]
       (let [monitor (ci/create-ci-monitor
                       (random-uuid) (random-uuid) (random-uuid)
                       42 "/tmp/repo")]
@@ -366,8 +365,8 @@
   (testing "Transition to :success generates a :pr/ci-passed event"
     (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
-                    (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}
-                                      {:name "build" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
+                    (dag/ok {:checks [{:name "tests" :state "SUCCESS" :bucket "pass"}
+                                      {:name "build" :state "SUCCESS" :bucket "pass"}]}))]
       (let [monitor (ci/create-ci-monitor
                       (random-uuid) (random-uuid) (random-uuid)
                       42 "/tmp/repo")
@@ -381,8 +380,8 @@
   (testing "Transition to :failure generates a :pr/ci-failed event"
     (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
-                    (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "FAILURE"}
-                                      {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
+                    (dag/ok {:checks [{:name "tests" :state "FAILURE" :bucket "fail"}
+                                      {:name "lint" :state "SUCCESS" :bucket "pass"}]}))]
       (let [monitor (ci/create-ci-monitor
                       (random-uuid) (random-uuid) (random-uuid)
                       42 "/tmp/repo")
@@ -397,7 +396,7 @@
   (testing "No event generated when status remains :pending"
     (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
-                    (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}]}))]
+                    (dag/ok {:checks [{:name "tests" :state "QUEUED" :bucket "pending"}]}))]
       (let [monitor (ci/create-ci-monitor
                       (random-uuid) (random-uuid) (random-uuid)
                       42 "/tmp/repo")]
@@ -427,7 +426,7 @@
   (testing "Transition to :neutral (terminal) generates a ci-failed event"
     (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
-                    (dag/ok {:checks [{:name "optional" :state "COMPLETED" :conclusion "NEUTRAL"}]}))]
+                    (dag/ok {:checks [{:name "optional" :state "NEUTRAL" :bucket "skipping"}]}))]
       (let [monitor (ci/create-ci-monitor
                       (random-uuid) (random-uuid) (random-uuid)
                       42 "/tmp/repo")
@@ -441,9 +440,9 @@
   (testing "Failed event logs mention the names of failed checks"
     (with-redefs [checks/get-pr-checks
                   (fn [_path _pr]
-                    (dag/ok {:checks [{:name "unit-tests" :state "COMPLETED" :conclusion "FAILURE"}
-                                      {:name "integration" :state "COMPLETED" :conclusion "FAILURE"}
-                                      {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
+                    (dag/ok {:checks [{:name "unit-tests" :state "FAILURE" :bucket "fail"}
+                                      {:name "integration" :state "FAILURE" :bucket "fail"}
+                                      {:name "lint" :state "SUCCESS" :bucket "pass"}]}))]
       (let [monitor (ci/create-ci-monitor
                       (random-uuid) (random-uuid) (random-uuid)
                       42 "/tmp/repo")
@@ -475,7 +474,7 @@
                           ;; First 2 calls fail (transient)
                           (dag/err :gh-command-failed "connection refused")
                           ;; Third call succeeds with passing checks
-                          (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))))]
+                          (dag/ok {:checks [{:name "tests" :state "SUCCESS" :bucket "pass"}]}))))]
         (let [result (ci/run-ci-monitor monitor nil)]
           (is (response/success? result)
               "Monitor should eventually reach success after retries")
@@ -496,7 +495,7 @@
                           ;; First 2: transient gh errors
                           (dag/err :gh-command-failed "503 Service Unavailable")
                           ;; Third: checks completed with failure
-                          (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "FAILURE"}]}))))]
+                          (dag/ok {:checks [{:name "tests" :state "FAILURE" :bucket "fail"}]}))))]
         (let [result (ci/run-ci-monitor monitor nil)]
           (is (= :failure (:status result))
               "Monitor should stop at genuine CI failure")
@@ -511,7 +510,7 @@
                     :timeout-ms 50)]
       (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
-                      (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}]}))]
+                      (dag/ok {:checks [{:name "tests" :state "QUEUED" :bucket "pending"}]}))]
         (let [result (ci/run-ci-monitor monitor nil)]
           (is (= :timed-out (:status result)))
           (is (true? (:timeout result)))
@@ -539,7 +538,7 @@
                     :timeout-ms 30)]
       (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
-                      (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}]}))]
+                      (dag/ok {:checks [{:name "tests" :state "QUEUED" :bucket "pending"}]}))]
         (ci/run-ci-monitor monitor nil)
         (is (= :timed-out (:status @monitor)))))))
 
@@ -552,7 +551,7 @@
                     :timeout-ms 5000)]
       (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
-                      (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
+                      (dag/ok {:checks [{:name "tests" :state "SUCCESS" :bucket "pass"}]}))]
         (let [result (ci/run-ci-monitor monitor nil)]
           (is (response/success? result))
           (is (false? (:running? @monitor))))))))
@@ -565,7 +564,7 @@
                     :timeout-ms 5000)]
       (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
-                      (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "FAILURE"}]}))]
+                      (dag/ok {:checks [{:name "tests" :state "FAILURE" :bucket "fail"}]}))]
         (let [result (ci/run-ci-monitor monitor nil)]
           (is (= :failure (:status result)))
           (is (false? (:running? @monitor))))))))
@@ -583,8 +582,8 @@
                     (fn [_path _pr]
                       (let [n (swap! call-count inc)]
                         (if (< n 3)
-                          (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}]})
-                          (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))))]
+                          (dag/ok {:checks [{:name "tests" :state "QUEUED" :bucket "pending"}]})
+                          (dag/ok {:checks [{:name "tests" :state "SUCCESS" :bucket "pass"}]}))))]
         (ci/run-ci-monitor monitor nil
                           :on-poll (fn [r] (swap! poll-results conj r)))
         (is (>= (count @poll-results) 3)
@@ -601,7 +600,7 @@
                     :timeout-ms 5000)]
       (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
-                      (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
+                      (dag/ok {:checks [{:name "tests" :state "SUCCESS" :bucket "pass"}]}))]
         (ci/run-ci-monitor monitor nil
                           :on-complete (fn [r] (reset! complete-result r)))
         (is (some? @complete-result))
@@ -618,7 +617,7 @@
                     :event-bus bus)]
       (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
-                      (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
+                      (dag/ok {:checks [{:name "tests" :state "SUCCESS" :bucket "pass"}]}))]
         (ci/run-ci-monitor monitor nil)
         (is (= 1 (count (:events @bus))))
         (is (= :pr/ci-passed (:event/type (first (:events @bus)))))))))
@@ -633,7 +632,7 @@
                     :event-bus bus)]
       (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
-                      (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "FAILURE"}]}))]
+                      (dag/ok {:checks [{:name "tests" :state "FAILURE" :bucket "fail"}]}))]
         (ci/run-ci-monitor monitor nil)
         (is (= 1 (count (:events @bus))))
         (is (= :pr/ci-failed (:event/type (first (:events @bus)))))))))
@@ -648,7 +647,7 @@
                     :event-bus bus)]
       (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
-                      (dag/ok {:checks [{:name "tests" :state "QUEUED" :conclusion nil}]}))]
+                      (dag/ok {:checks [{:name "tests" :state "QUEUED" :bucket "pending"}]}))]
         (ci/run-ci-monitor monitor nil)
         (is (empty? (:events @bus))
             "No events should be published for non-terminal poll results")))))
@@ -663,7 +662,7 @@
       (is (nil? (:started-at @monitor)))
       (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
-                      (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
+                      (dag/ok {:checks [{:name "tests" :state "SUCCESS" :bucket "pass"}]}))]
         (ci/run-ci-monitor monitor nil)
         (is (inst? (:started-at @monitor)))))))
 
@@ -675,17 +674,20 @@
                     :timeout-ms 5000)]
       (with-redefs [checks/get-pr-checks
                     (fn [_path _pr]
-                      (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
+                      (dag/ok {:checks [{:name "tests" :state "SUCCESS" :bucket "pass"}]}))]
         (ci/run-ci-monitor monitor nil)
         (is (false? (:running? @monitor)))))))
 
 ;------------------------------------------------------------------------------ get-check-logs
-(deftest ^{:stratum 0} get-check-logs-returns-nil-logs-test
-  (testing "get-check-logs returns ok with nil logs (stub implementation)"
-    (let [result (checks/get-check-logs "/tmp" 42 "tests")]
-      (is (dag/ok? result))
-      (is (nil? (:logs (:data result))))
-      (is (= "tests" (:check-name (:data result)))))))
+(deftest ^{:stratum 0} get-check-logs-without-actions-run-test
+  (testing "failed checks with no GitHub Actions run link yield no logs and no gh call"
+    (let [calls (atom 0)]
+      (with-redefs [checks/run-gh-command (fn [& _] (swap! calls inc) (dag/ok {:output ""}))]
+        (is (= {:ci/logs nil :ci/log-errors []}
+               (checks/get-check-logs "/tmp" [{:name "tests" :bucket "fail"}
+                                              {:name "deploy" :bucket "fail"
+                                               :link "https://dash.cloudflare.com/x/builds/y"}])))
+        (is (zero? @calls))))))
 
 ;------------------------------------------------------------------------------ get-pr-status
 (deftest ^{:stratum 0} get-pr-status-success-test
@@ -705,3 +707,37 @@
                     (dag/err :gh-command-failed "not found"))]
       (let [result (checks/get-pr-status "/tmp/repo" 999)]
         (is (dag/err? result))))))
+
+;------------------------------------------------------------------------------ Failure while other checks run
+(deftest ^{:stratum 0} failure-waits-for-logs-while-checks-run-test
+  (let [checks [{:name "Structure" :state "FAILURE" :bucket "fail"
+                 :link "https://github.com/o/r/actions/runs/1/job/2"}
+                {:name "Test" :state "IN_PROGRESS" :bucket "pending"
+                 :link "https://github.com/o/r/actions/runs/1/job/3"}]
+        poll (fn [logs]
+               (with-redefs [checks/get-pr-checks (fn [_ _] (dag/ok {:checks checks}))
+                             checks/get-check-logs (fn [_ _] logs)]
+                 (ci/poll-ci-status (ci/create-ci-monitor (random-uuid) (random-uuid) (random-uuid)
+                                                          42 "/tmp/repo")
+                                    nil)))]
+    (testing "gh has no log yet (run still in progress): keep polling"
+      (let [result (poll {:ci/logs nil :ci/log-errors [{:run-id "1" :error {:message "run 1 is still in progress"}}]})]
+        (is (= :pending (:status result)))
+        (is (nil? (:event result)))))
+    (testing "a failed fetch after every check finished: retry next poll"
+      (with-redefs [checks/get-pr-checks (fn [_ _] (dag/ok {:checks [(first checks)]}))
+                    checks/get-check-logs (fn [_ _] {:ci/logs nil
+                                                     :ci/log-errors [{:run-id "1" :error {:message "HTTP 502"}}]})]
+        (is (= :pending (:status (ci/poll-ci-status
+                                  (ci/create-ci-monitor (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo")
+                                  nil))))))
+    (testing "no Actions run to fetch from, nothing pending: terminal at once"
+      (with-redefs [checks/get-pr-checks (fn [_ _] (dag/ok {:checks [(dissoc (first checks) :link)]}))
+                    checks/get-check-logs (fn [_ _] {:ci/logs nil :ci/log-errors []})]
+        (is (= :failure (:status (ci/poll-ci-status
+                                  (ci/create-ci-monitor (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo")
+                                  nil))))))
+    (testing "the log is available: the failure is terminal and carries it"
+      (let [result (poll {:ci/logs "Structure\tcheck\tboom" :ci/log-errors []})]
+        (is (= :failure (:status result)))
+        (is (= "Structure\tcheck\tboom" (:ci/logs result)))))))

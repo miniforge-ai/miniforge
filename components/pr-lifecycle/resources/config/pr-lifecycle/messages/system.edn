@@ -63,4 +63,16 @@
 
   ;; prune-closed-prs — a gh call failed; worklist left unchanged
   :worklist/gh-prune-failed
-  "gh pr view failed during prune — worklist unchanged"}}
+  "gh pr view failed during prune — worklist unchanged"
+
+  ;; ci-checks — `gh pr checks --json` printed something other than a JSON array
+  :ci/checks-not-json
+  "gh pr checks did not return a JSON array"
+
+  ;; ci-checks — heading above one workflow run's failed-job log (read by the CI fixer)
+  :ci/log-section
+  "## gh run view {run-id} --log-failed (failed: {checks})"
+
+  ;; ci-monitor — CI failed but no failed-job log could be fetched
+  :ci/logs-unavailable
+  "No failed-job logs for failing CI checks"}}

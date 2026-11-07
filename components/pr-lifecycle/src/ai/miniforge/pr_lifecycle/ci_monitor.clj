@@ -24,6 +24,7 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.ci-checks :as ci-checks]
    [ai.miniforge.pr-lifecycle.events :as events]
+   [ai.miniforge.pr-lifecycle.messages :as messages]
    [ai.miniforge.logging.interface :as log]
    [clojure.string :as str]))
 
@@ -78,6 +79,16 @@
          :polls 0
          :running? false}))
 
+(defn ^{:stratum 0} warn-logs-unavailable!
+  "Log that CI failed with no failed-job log to show for it."
+  [logger pr-number computed logs]
+  (when logger
+    (log/warn logger :pr-lifecycle :ci/logs-unavailable
+              {:message (messages/system-t :ci/logs-unavailable)
+               :data {:pr-number pr-number
+                      :failed (mapv :name (:failed computed))
+                      :errors (:ci/log-errors logs)}})))
+
 (defn ^{:stratum 0} stop-ci-monitor
   "Stop a running CI monitor."
   [monitor]
@@ -91,6 +102,14 @@
    Arguments:
    - monitor: Monitor state atom
    - logger: Optional logger
+
+   On :failure, also fetches the failed jobs' logs into :ci/logs (nil
+   when none could be fetched) and :ci/log-errors. gh serves a run's
+   failed-job log only once the whole run has finished, and a fetch can
+   fail transiently, so a failure with no log yet polls as :pending while
+   other checks are still pending or a fetch failed, and the log is
+   fetched again next poll (bounded by the monitor timeout). A failure
+   whose checks have no GitHub Actions run is terminal at once.
 
    Returns {:status keyword :checks [...] :event event-or-nil}"
   [monitor logger]
@@ -110,13 +129,22 @@
                             :error (:error checks-result)}}))
         {:status :unknown :error (:error checks-result)})
 
-      (let [checks (:checks (:data checks-result))
-            computed (ci-checks/compute-ci-status checks)
-            status (:status computed)
+      (let [{:keys [checks pending?]} (:data checks-result)
+            computed (cond-> (ci-checks/compute-ci-status checks)
+                       pending? (assoc :status :pending))
+            logs (when (= :failure (:status computed))
+                   (ci-checks/get-check-logs worktree-path (:failed computed)))
+            logs-not-ready? (and logs
+                                 (nil? (:ci/logs logs))
+                                 (or (seq (:pending computed)) (seq (:ci/log-errors logs))))
+            status (if logs-not-ready? :pending (:status computed))
             prev-status (:status @monitor)]
 
         ;; Update monitor state
         (swap! monitor assoc :status status :last-checks computed)
+
+        (when (and (= :failure status) (nil? (:ci/logs logs)))
+          (warn-logs-unavailable! logger pr-number computed logs))
 
         ;; Generate event if status changed to terminal
         (when (and (not= prev-status status)
@@ -128,15 +156,17 @@
                               :from prev-status
                               :to status}})))
 
-        {:status status
-         :checks computed
-         :event (when (contains? terminal-statuses status)
-                  (if (= status :success)
-                    (events/ci-passed dag-id run-id task-id pr-number nil)
-                    (events/ci-failed dag-id run-id task-id pr-number nil
-                                      (str "Failed checks: "
-                                           (str/join ", "
-                                                     (map :name (:failed computed)))))))}))))
+        (cond-> {:status status
+                 :checks computed
+                 :event (when (contains? terminal-statuses status)
+                          (if (= status :success)
+                            (events/ci-passed dag-id run-id task-id pr-number nil)
+                            (events/ci-failed dag-id run-id task-id pr-number nil
+                                              (str "Failed checks: "
+                                                   (str/join ", "
+                                                             (map :name (:failed computed)))))))}
+          (= :failure status)
+          (merge logs))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
