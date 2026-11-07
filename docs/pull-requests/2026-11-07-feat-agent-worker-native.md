@@ -25,13 +25,16 @@ expose real capability differences.
 ## Changes in Detail
 
 1. Command lines come from `llm/backends` (`:cmd`, `:args-fn` in `cli_args.clj`): prompt on stdin,
-   streaming JSON, model and budget from the config, and for Claude a settings file written beside
-   the turn with the tool allowances from `config/agent-worker/native.edn`.
+   streaming JSON, model and budget from the config. For Claude, a settings file with the tool
+   allowances from `config/agent-worker/native.edn` and an MCP config naming no servers are
+   written beside the turn, so the harness loads no user or project MCP servers.
 2. A turn runs in the background inside the environment; its stream, errors and exit status land
    in files under `<workdir>/.miniforge/worker/<attempt>-<turn>/`. Every argument is single-quoted;
-   the prompt never appears on a command line; credential checks print nothing.
+   the prompt never appears on a command line; credential checks print nothing. A launch that
+   prints no pid failed. The workdir must be absolute. A cancel that signals nothing reports false.
 3. The backend's own stream parser reads the native session id and usage. Claude reports tokens and
-   cost; Codex reports tokens only, so its cost stays nil.
+   cost; Codex reports tokens only, so its cost stays nil. A Claude turn cut before its result
+   frame reports the tokens its messages billed, once per message, with cost nil.
 4. Capabilities differ: Claude steers between turns (`--resume`) and observes a budget; Codex does
    neither, so a spend grant with a cost ceiling refuses it.
 5. Preflight checks the CLI and a credential inside the environment; either missing fails the
@@ -40,8 +43,9 @@ expose real capability differences.
 ## Testing Plan
 
 A scripted fake environment answers the worker's shell lines: Claude and Codex command lines,
-prompt and settings files, Claude usage and resume from its stream, Codex tokens without cost and
-no steering, missing CLI or credential. Shell quoting, status mapping and credential-name filtering
+prompt, settings and MCP files, Claude usage and resume from its stream, per-message tokens from a
+cut Claude turn, Codex tokens without cost and no steering, missing CLI or credential, a launch with
+no pid, and a relative workdir. Shell quoting, status mapping and credential-name filtering
 are unit-tested. No real harness runs in CI.
 
 ## Deployment Plan

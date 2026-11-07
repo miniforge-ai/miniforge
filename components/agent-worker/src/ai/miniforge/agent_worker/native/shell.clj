@@ -78,9 +78,10 @@
        "; elif kill -0 " (quote-arg pid) " 2>/dev/null; then echo running; else echo gone; fi"))
 
 (defn ^{:stratum 1} cancel-script
-  "Signal the harness, not the wrapper, so the wrapper records its exit."
+  "Signal the harness, not the wrapper, so the wrapper records its exit.
+   Exits nonzero when nothing was signalled, so the request reports false."
   [pid]
-  (str "pkill -TERM -P " (quote-arg pid) " 2>/dev/null; true"))
+  (str "pkill -TERM -P " (quote-arg pid) " 2>/dev/null"))
 
 (defn ^{:stratum 1} present-script [cmd] (str "command -v " (quote-arg cmd) " > /dev/null"))
 

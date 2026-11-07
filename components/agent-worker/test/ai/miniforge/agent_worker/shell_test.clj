@@ -18,6 +18,7 @@
 (ns ai.miniforge.agent-worker.shell-test
   (:require
    [ai.miniforge.agent-worker.native.shell :as shell]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -25,6 +26,9 @@
 (deftest ^{:stratum 0} test-arguments-are-single-quoted
   (is (= "'it'\\''s'" (shell/quote-arg "it's")))
   (is (= "'a b' '$HOME'" (shell/command-line ["a b" "$HOME"]))))
+
+(deftest ^{:stratum 0} test-a-cancel-that-signals-nothing-is-not-forced-to-succeed
+  (is (not (str/includes? (shell/cancel-script "4242") "true"))))
 
 (deftest ^{:stratum 0} test-a-process-ref-splits-at-its-last-hash
   (is (= ["/work#1/.miniforge/worker/1-1" "4242"] (shell/split-ref (shell/process-ref "/work#1/.miniforge/worker/1-1" "4242")))))

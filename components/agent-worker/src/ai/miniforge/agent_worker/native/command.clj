@@ -35,8 +35,14 @@
   (cond-> {:prompt-via :stdin :streaming? true}
     (:config/model config) (assoc :model (:config/model config))
     (:config/max-budget-usd config) (assoc :budget-usd (:config/max-budget-usd config))
-    (:native/settings-file? settings) (assoc :supervision {:settings-path (shell/turn-file dir "settings.json")})
+    (:native/settings-file? settings) (assoc :supervision {:settings-path (shell/turn-file dir "settings.json")}
+                                             :mcp-config (shell/turn-file dir "mcp.json"))
     native-id (assoc :resume native-id)))
+
+(def ^{:stratum 0} no-mcp-servers
+  "The MCP config a native turn names, so the harness loads exactly these
+   servers (none) and ignores any user or project MCP config."
+  (json/generate-string {:mcpServers {}}))
 
 (defn ^{:stratum 0} settings-json
   [settings]
