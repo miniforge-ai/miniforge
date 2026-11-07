@@ -53,6 +53,7 @@
                        "components/task-executor/resources"
                        "components/decision/src"
                        "components/agent-environment/src"
+                       "components/agent-environment/resources"
                        "components/deliberation-workspace/src"
                        "components/deliberation-workspace/resources"
                        "components/deliberation-harness/src"

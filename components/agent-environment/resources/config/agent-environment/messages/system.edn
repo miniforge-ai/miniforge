@@ -1,0 +1,27 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
+{:agent-environment/messages
+ {:anomalies.agent-environment/invalid-input "Agent-environment inputs failed validation"
+  :anomalies.agent-environment/forged-tenant "The acting tenant is not the tenant this call names"
+  :anomalies.agent-environment/forged-principal "The acting principal is not the principal this request names"
+  :anomalies.agent-environment/grant-absent "No provision grant was presented"
+  :anomalies.agent-environment/grant-inactive "The provision grant is revoked, expired, or has unverifiable ancestry"
+  :anomalies.agent-environment/grant-scope-mismatch "The provision grant does not cover this run and task"
+  :anomalies.agent-environment/grant-exceeded "The provision grant's ceilings are exhausted"
+  :anomalies.agent-environment/grant-wrong-effect "The presented grant does not authorize provisioning"
+  :anomalies.agent-environment/grant-wrong-principal "The provision grant was issued to another principal"
+  :anomalies.agent-environment/grant-denied "The provision grant did not authorize this request"
+  :anomalies.agent-environment/request-expired "The request's expiry has already passed"
+  :anomalies.agent-environment/environment-expired "The environment has expired; only cleanup and audit calls run"
+  :anomalies.agent-environment/preflight-failed "The provider cannot supply this environment"
+  :anomalies.agent-environment/conflicting-request "Another request already holds this run and task"
+  :anomalies.agent-environment/acquire-in-flight "This run and task are already being provisioned"
+  :anomalies.agent-environment/environment-cancelled "The environment is cancelled and admits no new work"
+  :anomalies.agent-environment/environment-released "The environment has been released"
+  :anomalies.agent-environment/cleanup-uncertain "Cleanup of this environment is unconfirmed; release it again"
+  :anomalies.agent-environment/unknown-lease "No environment is recorded for this lease"
+  :anomalies.agent-environment/stale-lease "The lease is not the environment's current lease"
+  :anomalies.agent-environment/uid-mismatch "The namespace now has a different UID than the lease"
+  :anomalies.agent-environment/provisioning-failed "Provisioning stopped before the environment was complete"}}
