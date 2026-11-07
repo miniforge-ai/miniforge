@@ -69,6 +69,12 @@
   (checkpoint [_ _handle _connector-id _cursor-state]
     {:checkpoint/status :committed}))
 
+(defrecord ^{:stratum 0} SinkWithoutConnector [calls]
+  conn/SinkConnector
+  (publish [_ _handle _schema-name records _opts]
+    (swap! calls conj :publish)
+    {:publish/records-written (count records) :publish/records-failed 0}))
+
 (def ^{:stratum 0} ^:private source-ref (random-uuid))
 
 (def ^{:stratum 0} ^:private sink-ref   (random-uuid))
@@ -119,10 +125,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} unprocessed-child-spawn
-  "Spawn fn: one transform-family child that declares no processing."
-  [_records _config]
-  [{:spawn/name unprocessed-child-name :spawn/family :transform}])
+(defn- ^{:stratum 1} child-spawn
+  "Spawn fn factory: one child of `family` with stage config `config`."
+  [family config]
+  (fn [_records _config]
+    [{:spawn/name unprocessed-child-name :spawn/family family :spawn/config config}]))
 
 (defn- ^{:stratum 1} ingest-stage [config]
   {:stage/id ingest-id
@@ -217,22 +224,24 @@
              (problem-summary (:result outcome)))))))
 
 (deftest ^{:stratum 2} test-pass-through-with-transform-is-a-conflict
-  (testing "given pass-through and a transform on one stage → conflict"
-    (let [config  {:stage/pass-through? true :stage/transform {:transform/type :double}}
-          middle  (middle-stage :transform config)
-          outcome (run-fixture (pipeline [(ingest-stage {}) middle publish-stage]) {:transforms {:double identity}})]
-      (is (refused-before-io? outcome))
-      (is (= [{:stage/id middle-id :preflight/problem :pass-through/conflict :preflight/ref :transform}]
-             (problem-summary (:result outcome)))))))
+  (testing "given pass-through and a transform on a transform or validate stage → conflict"
+    (doseq [family [:transform :validate]]
+      (let [config  {:stage/pass-through? true :stage/transform {:transform/type :double}}
+            middle  (middle-stage family config)
+            outcome (run-fixture (pipeline [(ingest-stage {}) middle publish-stage]) {:transforms {:double identity}})]
+        (is (refused-before-io? outcome))
+        (is (= [{:stage/id middle-id :preflight/problem :pass-through/conflict :preflight/ref family}]
+               (problem-summary (:result outcome))))))))
 
 (deftest ^{:stratum 2} test-sink-without-publish-role-refused-before-io
-  (testing "given a publish stage bound to a source-only connector → role failure"
-    (let [outcome (run-fixture (pipeline [(ingest-stage {}) (middle-stage :normalize pass-through) publish-stage])
-                               {}
-                               ->SourceOnlyConnector)]
-      (is (refused-before-io? outcome))
-      (is (= [{:stage/id publish-id :preflight/problem :connector/role :preflight/ref :connector/sink}]
-             (problem-summary (:result outcome)))))))
+  (testing "given a publish stage bound to a source-only connector, or a sink without the base Connector protocol → role failure"
+    (doseq [sink-ctor [->SourceOnlyConnector ->SinkWithoutConnector]]
+      (let [outcome (run-fixture (pipeline [(ingest-stage {}) (middle-stage :normalize pass-through) publish-stage])
+                                 {}
+                                 sink-ctor)]
+        (is (refused-before-io? outcome))
+        (is (= [{:stage/id publish-id :preflight/problem :connector/role :preflight/ref :connector/sink}]
+               (problem-summary (:result outcome))))))))
 
 (deftest ^{:stratum 2} test-every-preflight-problem-reported
   (testing "given two unresolved stages → both problems reported, not only the first"
@@ -256,18 +265,22 @@
         (is (= :completed (:status middle-run)))
         (is (true? (:pass-through? middle-run)) (str family))))))
 
-(deftest ^{:stratum 2} test-spawned-stage-without-processing-fails
-  (testing "given a spawn fn that adds a transform-family child with no processing → the child fails, nothing publishes"
-    (let [ingest    (ingest-stage {:stage/spawn-fn :unprocessed})
-          middle    (middle-stage :normalize pass-through)
-          outcome   (run-fixture (pipeline [ingest middle publish-stage])
-                                 {:spawn-fns {:unprocessed unprocessed-child-spawn}})
-          child-run (first (filter #(= unprocessed-child-name (:stage/name %))
-                                   (stage-runs outcome)))]
-      (is (false? (:success? (:result outcome))))
-      (is (= :failed (:status child-run)))
-      (is (= :configuration (:error-kind child-run)))
-      (is (empty? (:sink-calls outcome))))))
+(deftest ^{:stratum 2} test-spawned-stage-that-cannot-run-fails
+  (testing "given a spawned child with no processing, a missing transform beside pass-through, or an empty pack → the child fails, nothing publishes"
+    (doseq [[family config] [[:transform nil]
+                             [:transform {:stage/pass-through? true
+                                          :stage/transform     {:transform/type :no-such-transform}}]
+                             [:validate {:stage/quality-pack {:pack/id :empty-pack :pack/rules []}}]]]
+      (let [ingest    (ingest-stage {:stage/spawn-fn :child})
+            middle    (middle-stage :normalize pass-through)
+            outcome   (run-fixture (pipeline [ingest middle publish-stage])
+                                   {:spawn-fns {:child (child-spawn family config)}})
+            child-run (first (filter #(= unprocessed-child-name (:stage/name %))
+                                     (stage-runs outcome)))]
+        (is (false? (:success? (:result outcome))) (pr-str config))
+        (is (= :failed (:status child-run)) (pr-str config))
+        (is (= :configuration (:error-kind child-run)) (pr-str config))
+        (is (empty? (:sink-calls outcome)) (pr-str config))))))
 
 (deftest ^{:stratum 2} test-preflight-accepts-resolved-pipeline
   (testing "given every named behavior resolves → preflight succeeds with no problems"

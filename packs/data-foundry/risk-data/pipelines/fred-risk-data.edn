@@ -66,9 +66,7 @@
    :stage/family         :normalize
    :stage/input-datasets  [:ds/fred-latest-raw :ds/buffett-derived :ds/cape-raw :ds/insider-raw]
    :stage/output-datasets [:ds/normalized]
-   :stage/dependencies    ["Ingest FRED Latest" "Derive Buffett Indicator" "Ingest Shiller CAPE" "Ingest Insider Ratio"]
-   ;; Merges the upstream datasets without changing records.
-   :stage/config          {:stage/pass-through? true}}
+   :stage/dependencies    ["Ingest FRED Latest" "Derive Buffett Indicator" "Ingest Shiller CAPE" "Ingest Insider Ratio"]}
 
   {:stage/name           "Validate Quality"
    :stage/family         :validate
