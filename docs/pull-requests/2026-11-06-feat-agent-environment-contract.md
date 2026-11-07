@@ -14,8 +14,9 @@ API surface class 1: in-process EDN. Nothing here provisions anything.
 
 ## Layer
 
-Foundations and domain rules. Later PRs add the controller and lifecycle (D1b), work inside an
-environment (D1c) and the shared provider conformance suite (D1d).
+Foundations and domain rules. Later PRs add receipts, refusals and the ledger controller (D1b),
+the lifecycle over a fake provider (D1c), and exec, file copy, artifact persistence, cancel and the
+shared provider conformance suite (D1d).
 
 ## Motivation
 
