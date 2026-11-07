@@ -73,5 +73,5 @@ N7 §5.5 and §6, N10 §1.5; #2420 governed proposals; #2441 stopped recovery is
 
 - [x] Implement and adversarially review the complete diff against standards.
 - [x] Pass offline validation.
-- [ ] Pass normal signing and hooks.
+- [x] Pass normal signing and hooks.
 - [ ] Settle current-head review, fresh full review and CI; owner-merge.
