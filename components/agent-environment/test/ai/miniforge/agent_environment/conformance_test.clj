@@ -17,6 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.agent-environment.conformance-test
   (:require
+   [ai.miniforge.agent-environment.fake :as fake]
    [ai.miniforge.agent-environment.interface :as env]
    [clojure.test :refer [deftest is]]))
 
@@ -46,3 +47,9 @@
     (is (= :check/failed (:check/duplicate-acquire-returns-one-environment outcomes)))
     (is (= :check/failed (:check/stale-lease-refused outcomes)))
     (is (= :check/failed (:check/lifecycle-roundtrip outcomes)))))
+
+(deftest ^{:stratum 1} test-the-suite-releases-what-it-acquires
+  (let [provider (env/fake-provider)
+        outcomes (outcomes-by-check (env/run-conformance {:make-provider (constantly provider)}))]
+    (is (= :check/passed (:check/cleanup-confirmed outcomes)))
+    (is (empty? (fake/live-namespaces provider)))))

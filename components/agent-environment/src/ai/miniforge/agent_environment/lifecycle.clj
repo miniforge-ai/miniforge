@@ -58,11 +58,20 @@
       (refusal/reason-anomaly :anomalies.agent-environment/uid-mismatch {:observed/uid (:observed/uid seen)}))))
 
 (defn- ^{:stratum 0} persisted
+  "Persist every path; the receipt has one step per path, and the caller
+   gets the references or the first failure."
   [c lease target paths]
   (let [stored (mapv #(support/persist-one c lease target %) paths)]
-    (or (first (filter anomaly/anomaly? stored))
-        {:call/value stored
-         :call/steps (mapv (constantly support/persisted-step) stored)})))
+    {:call/value (or (first (filter anomaly/anomaly? stored)) stored)
+     :call/steps (mapv support/artifact-step stored)}))
+
+(defn- ^{:stratum 0} stopped
+  "Cancel in the ledger first, so no call is admitted while the provider
+   stops running work; the receipt says what the provider confirmed."
+  [c lease target]
+  (controller/settle! c lease #(assoc % :entry/state :state/cancelled))
+  (let [steps (:cancel/steps (protocol/cancel! (support/provider c) target))]
+    {:call/value {:call/outcome (receipt/steps-outcome steps)} :call/steps steps}))
 
 (defn- ^{:stratum 0} settled
   "Move the ledger to `state` whatever the provider confirmed: the ledger
@@ -131,8 +140,7 @@
 
 (defn ^{:stratum 1} cancel!
   [c acting lease]
-  (leased c :environment/cancel acting lease
-          #(settled c lease (:cancel/steps (protocol/cancel! (support/provider c) %)) :state/cancelled)))
+  (leased c :environment/cancel acting lease #(stopped c lease %)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

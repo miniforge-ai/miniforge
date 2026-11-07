@@ -62,7 +62,13 @@
                :artifact/location (str (:lease/environment-uid lease) ":" report-path)}]
              (env/persist-artifacts! c a lease [report-path]))))
     (testing "given a missing file → the provider's anomaly returns, not a partial list"
-      (is (= :not-found (:anomaly/type (env/persist-artifacts! c a lease ["/work/missing.txt"])))))))
+      (is (= :not-found (:anomaly/type (env/persist-artifacts! c a lease [report-path "/work/missing.txt"])))))))
+
+(deftest ^{:stratum 1} test-partial-persist-is-receipted-as-partial
+  (let [{:keys [c a lease] :as w} (leased-world)]
+    (env/write-file! c a lease report-path report-text)
+    (env/persist-artifacts! c a lease [report-path "/work/missing.txt"])
+    (is (= [:outcome/partial] (fx/outcomes w :environment/persist-artifacts)))))
 
 (deftest ^{:stratum 1} test-cancel-stops-new-work-but-keeps-audit-and-cleanup
   (let [{:keys [c a lease]} (leased-world)]

@@ -44,7 +44,9 @@
         refused (fx/acquire w (:a w) changed)
         intact (lifecycle/readiness (:c w) (:a w) (:environment/lease env))]
     (fx/result :check/conflicting-request-refused
-               (and (fx/subtype? :anomalies.agent-environment/conflicting-request refused) (map? intact))
+               (and (fx/subtype? :anomalies.agent-environment/conflicting-request refused)
+                    (map? intact)
+                    (not (anomaly/anomaly? intact)))
                {:refused (anomaly/subtype refused)})))
 
 (defn- ^{:stratum 0} forged-tenant [w]
@@ -66,11 +68,12 @@
                     (fx/subtype? :anomalies.agent-environment/grant-scope-mismatch mismatched))
                {:absent (anomaly/subtype absent) :other-run (anomaly/subtype mismatched)})))
 
-(defn- ^{:stratum 0} stale-lease [w]
+(defn- ^{:stratum 0} stale-lease [w await-ready]
   (let [req (fx/request w (:a w))
         old-env (fx/acquire w (:a w) req)
         _ (lifecycle/release! (:c w) (:a w) (:environment/lease old-env))
         new-env (fx/acquire w (:a w) req)
+        _ (await-ready #(lifecycle/readiness (:c w) (:a w) (:environment/lease new-env)))
         stale (lifecycle/exec! (:c w) (:a w) (:environment/lease old-env) fx/probe-command)
         current (lifecycle/exec! (:c w) (:a w) (:environment/lease new-env) fx/probe-command)]
     (fx/result :check/stale-lease-refused
@@ -89,16 +92,17 @@
         _ (lifecycle/write-file! c a lease fx/probe-path fx/probe-text)
         read-back (lifecycle/read-file c a lease fx/probe-path)
         artifacts (lifecycle/persist-artifacts! c a lease [fx/probe-path])
-        _ (lifecycle/cancel! c a lease)
+        cancelled (lifecycle/cancel! c a lease)
         after-cancel (lifecycle/exec! c a lease fx/probe-command)
         released (lifecycle/release! c a lease)
         after-release (lifecycle/readiness c a lease)]
     (fx/result :check/lifecycle-roundtrip
                (and (:readiness/ready? ready)
-                    (zero? (:exec/exit ran))
+                    (= 0 (:exec/exit ran))
                     (= fx/probe-text read-back)
                     (vector? artifacts)
                     (= 1 (count artifacts))
+                    (= :outcome/applied (:call/outcome cancelled))
                     (fx/subtype? :anomalies.agent-environment/environment-cancelled after-cancel)
                     (= :outcome/applied (:call/outcome released))
                     (fx/subtype? :anomalies.agent-environment/environment-released after-release))
@@ -117,6 +121,9 @@
         bad (remove #(and (m/validate schema/Receipt %) (= :profile/unqualified (:receipt/profile %))) all)]
     (fx/result :check/receipts-valid-and-unqualified (and (seq all) (empty? bad)) {:invalid (count bad)})))
 
+(defn- ^{:stratum 0} cleanup-confirmed [cleaned]
+  (fx/result :check/cleanup-confirmed (every? true? cleaned) {:unconfirmed (count (remove true? cleaned))}))
+
 (defn- ^{:stratum 0} unrun [id]
   {:check/id id :check/outcome :check/unrun :check/detail {}})
 
@@ -126,6 +133,15 @@
 
 (defn- ^{:stratum 0} call-once [f] (f))
 
+(defn- ^{:stratum 0} checked
+  "Run `check` on `w`, then release everything it acquired, also when the
+   check throws; returns the result and whether cleanup was confirmed."
+  [check w]
+  (let [cleaned (volatile! false)
+        result (try (check w)
+                    (finally (vreset! cleaned (fx/release-all! w))))]
+    [result @cleaned]))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} run
@@ -133,15 +149,17 @@
   (let [isolation (get opts :isolation default-isolation)
         await-ready (get opts :await-ready call-once)
         fresh #(fx/world (make-provider) isolation)
-        worlds (zipmap [:duplicate :conflict :forged :grant :stale :roundtrip] (repeatedly fresh))
         partial-world (when make-partial-provider (fx/world (make-partial-provider) isolation))
-        checks [(duplicate-acquire (:duplicate worlds))
-                (conflicting-request (:conflict worlds))
-                (forged-tenant (:forged worlds))
-                (grant-required (:grant worlds))
-                (stale-lease (:stale worlds))
-                (lifecycle-roundtrip (:roundtrip worlds) await-ready)
-                (if partial-world
-                  (partial-provisioning partial-world)
-                  (unrun :check/partial-provisioning-receipts))]]
-    (conj checks (receipts-unqualified (cond-> (vals worlds) partial-world (conj partial-world))))))
+        runs [[duplicate-acquire (fresh)]
+              [conflicting-request (fresh)]
+              [forged-tenant (fresh)]
+              [grant-required (fresh)]
+              [#(stale-lease % await-ready) (fresh)]
+              [#(lifecycle-roundtrip % await-ready) (fresh)]]
+        outcomes (cond-> (mapv (fn [[check w]] (checked check w)) runs)
+                   partial-world (conj (checked partial-provisioning partial-world)))
+        worlds (cond-> (mapv second runs) partial-world (conj partial-world))]
+    (-> (mapv first outcomes)
+        (cond-> (nil? partial-world) (conj (unrun :check/partial-provisioning-receipts)))
+        (conj (receipts-unqualified worlds))
+        (conj (cleanup-confirmed (mapv second outcomes))))))

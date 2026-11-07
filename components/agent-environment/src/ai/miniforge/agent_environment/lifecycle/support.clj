@@ -33,8 +33,10 @@
 
 (defn ^{:stratum 0} failure-step [reason] {:step/name reason :step/outcome :outcome/failed})
 
-(def ^{:stratum 0} persisted-step
-  {:step/name :artifact/persisted :step/outcome :outcome/applied})
+(defn ^{:stratum 0} artifact-step
+  [stored]
+  {:step/name :artifact/persisted
+   :step/outcome (if (anomaly/anomaly? stored) :outcome/failed :outcome/applied)})
 
 (defn ^{:stratum 0} as-call
   [result]

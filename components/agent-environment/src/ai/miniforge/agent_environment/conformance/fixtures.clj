@@ -87,6 +87,10 @@
   (let [wanted (set operations)]
     (mapv :receipt/outcome (filter #(wanted (:receipt/operation %)) @(:receipts w)))))
 
+(def ^{:stratum 0} already-gone
+  "Release refusals meaning the check itself already released that lease."
+  #{:anomalies.agent-environment/environment-released :anomalies.agent-environment/stale-lease})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} probe-command
@@ -106,6 +110,7 @@
         b (acting-for "conformance-tenant-b" now)
         expires-at (.plusSeconds now grant-ttl-seconds)]
     {:c c
+     :leases (atom [])
      :now now
      :expires-at expires-at
      :receipts receipts
@@ -128,5 +133,23 @@
     :environment/limits limits
     :environment/expires-at (:expires-at w)}))
 
-(defn ^{:stratum 1} acquire [w acting req]
-  (lifecycle/acquire! (:c w) acting (provision-grant w acting) req))
+(defn ^{:stratum 1} acquire
+  "Acquire and remember the lease, so `release-all!` can clean up."
+  [w acting req]
+  (let [env (lifecycle/acquire! (:c w) acting (provision-grant w acting) req)]
+    (when (:environment/lease env) (swap! (:leases w) conj [acting (:environment/lease env)]))
+    env))
+
+(defn ^{:stratum 1} cleaned?
+  "True when releasing `lease` confirmed it gone, or it was already gone."
+  [w [acting lease]]
+  (let [released (lifecycle/release! (:c w) acting lease)]
+    (or (= :outcome/applied (:call/outcome released))
+        (contains? already-gone (anomaly/subtype released)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} release-all!
+  "Release every lease `w` acquired; true when each is confirmed gone."
+  [w]
+  (every? #(cleaned? w %) @(:leases w)))
