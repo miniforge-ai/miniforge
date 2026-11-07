@@ -40,6 +40,7 @@
    :quality-pack/empty      :preflight/quality-pack-empty
    :quality-pack/malformed  :preflight/quality-pack-malformed
    :quality-rule/unresolved :preflight/quality-rule-unresolved
+   :quality-rule/invalid    :preflight/quality-rule-invalid
    :spawn-fn/unresolved     :preflight/spawn-fn-unresolved})
 
 (defn- ^{:stratum 0} pass-through? [stage]
@@ -84,6 +85,12 @@
   [protocol connector]
   (and (satisfies? conn/Connector connector)
        (satisfies? protocol connector)))
+
+(defn- ^{:stratum 0} rule-problem-kind
+  "A rule the resolver kept with a :rule/error was configured but could not be
+   built; any other rule without a check fn has no implementation."
+  [rule]
+  (if (:rule/error rule) :quality-rule/invalid :quality-rule/unresolved))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -175,7 +182,7 @@
       (nil? pack)                  []
       (malformed-rules? pack)      [(problem stage :quality-pack/malformed (:pack/id pack))]
       (empty? (:pack/rules pack))  [(problem stage :quality-pack/empty (:pack/id pack))]
-      :else                        (mapv #(problem stage :quality-rule/unresolved (rule-ref %))
+      :else                        (mapv #(problem stage (rule-problem-kind %) (rule-ref %))
                                          (unresolved-rules pack)))))
 
 (comment
