@@ -43,6 +43,7 @@
    [ai.miniforge.phase-opsv.boundary.retained-preparation :as retained-preparation]
    [ai.miniforge.phase-opsv.boundary.governed-replica-proposal :as governed-replica-proposal]
    [ai.miniforge.phase-opsv.boundary.governed-load-proposal :as governed-load-proposal]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-provider :as native-load-provider]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -231,6 +232,13 @@
    Starting traffic needs a separate exact UID/revision-fenced release effect.
    No provider call, execution opt-in, recovery-plan approval, grant issuance or verified termination."
   governed-load-proposal/prepare!)
+
+(def ^{:stratum 0} create-kubernetes-load-pod!
+  "Trusted-runtime callback: explicit settings, exact committing proposal and required current dispatch.
+   Send one canonical, scheduling-gated Pod creation request; never retry uncertain creation.
+   A creation receipt supplies provider-assigned UID/revision, not permission to start traffic.
+   No runtime activation, approved recovery plan, gate release, reconciliation or termination proof."
+  native-load-provider/create!)
 
 (def ^{:stratum 0} apply-kubernetes-replica-request!
   "Trusted-runtime provider callback: settings, exact committing transaction and required dispatch.

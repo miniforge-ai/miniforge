@@ -1,0 +1,15 @@
+;; Opt-in development-agent environments (#2439): the environment contract
+;; and the bricks it needs. No default project depends on these bricks;
+;; development/test/opt_in_profile_test.clj keeps it that way. Polylith
+;; tests a brick only through a project that contains it, so this project
+;; is also how CI tests them.
+{:paths []
+
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        ai.miniforge/agent-environment {:local/root "../../components/agent-environment"}
+        ai.miniforge/anomaly {:local/root "../../components/anomaly"}
+        ai.miniforge/content-hash {:local/root "../../components/content-hash"}
+        ai.miniforge/execution-grant {:local/root "../../components/execution-grant"}
+        ai.miniforge/file-durability {:local/root "../../components/file-durability"}
+        ai.miniforge/kubernetes-target {:local/root "../../components/kubernetes-target"}
+        ai.miniforge/messages {:local/root "../../components/messages"}}}
