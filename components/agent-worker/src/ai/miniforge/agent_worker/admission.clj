@@ -21,6 +21,7 @@
    issued to the acting principal covers the run and bounds the budget.
    Each check returns nil or the refusal reason."
   (:require
+   [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.execution-grant.interface :as grant]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -42,6 +43,9 @@
     (not= (:acting/tenant-id acting) (:worker/tenant-id binding))
     :anomalies.agent-worker/forged-tenant
 
+    (not= (:acting/principal-id acting) (:worker/principal-id binding))
+    :anomalies.agent-worker/forged-principal
+
     (not= [(:lease/tenant-id lease) (:lease/run-id lease) (:lease/task-id lease)]
           [(:worker/tenant-id binding) (:worker/run-id binding) (:worker/task-id binding)])
     :anomalies.agent-worker/binding-mismatch
@@ -51,6 +55,12 @@
 
     (not= (:lease/environment-uid lease) (:worker/environment-uid binding))
     :anomalies.agent-worker/binding-mismatch))
+
+(defn ^{:stratum 0} config-refusal
+  "Nil when `config` is the configuration the binding's digest names."
+  [binding config]
+  (when (not= (content-hash/content-hash config) (:worker/config-digest binding))
+    :anomalies.agent-worker/config-digest-mismatch))
 
 (defn ^{:stratum 0} spend-usage
   "The usage an attempt presents: its run and task, and the configured

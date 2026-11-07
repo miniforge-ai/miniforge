@@ -80,6 +80,10 @@
   (testing "given a zero that was reported → kept, not confused with unknown"
     (is (= :usage/partial (:usage/status (session/normalize-usage {:usage/input-tokens 0}))))
     (is (= 0 (:usage/input-tokens (session/normalize-usage {:usage/input-tokens 0})))))
+  (testing "given a status that contradicts its quantities → invalid Usage"
+    (is (not (m/validate worker/Usage {:usage/status :usage/reported :usage/input-tokens nil
+                                       :usage/output-tokens nil :usage/cost-usd nil})))
+    (is (m/validate worker/Usage (session/normalize-usage {:usage/input-tokens 0}))))
   (testing "given every quantity → reported"
     (is (= :usage/reported (:usage/status (session/normalize-usage {:usage/input-tokens reported-tokens
                                                                     :usage/output-tokens reported-tokens
