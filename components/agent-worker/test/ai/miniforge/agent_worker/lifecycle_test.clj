@@ -31,13 +31,9 @@
 
 (def ^{:stratum 0} prompt "Make the failing test pass.")
 
-(def ^{:stratum 0} budget-usd
-  "A budget under the ceiling below."
-  2)
+(def ^{:stratum 0} budget-usd "A budget under the ceiling below." 2)
 
-(def ^{:stratum 0} ceiling-usd
-  "A spend grant's cost ceiling."
-  5)
+(def ^{:stratum 0} ceiling-usd "A spend grant's cost ceiling." 5)
 
 (def ^{:stratum 0} reported-tokens 1200)
 
@@ -95,7 +91,9 @@
         session (fx/start! w fake-config 1 prompt)]
     (is (= {:usage/status :usage/partial :usage/input-tokens reported-tokens :usage/output-tokens nil
             :usage/cost-usd nil}
-           (worker/usage (:wc w) (:acting w) session)))))
+           (worker/usage (:wc w) (:acting w) session))))
+  (let [w (fresh {:fake/usage (anomaly/anomaly :unavailable "usage unreadable" {})} {})]
+    (is (= :unavailable (:anomaly/type (worker/usage (:wc w) (:acting w) (fx/start! w fake-config 1 prompt)))))))
 
 (deftest ^{:stratum 1} test-steering-cancel-and-artifacts
   (let [w (fresh)
@@ -111,10 +109,13 @@
     (testing "given the session's files → persisted through the environment store"
       (is (= 1 (count (worker/persist-artifacts! (:wc w) (:acting w) steered)))))))
 
-(deftest ^{:stratum 1} test-worker-without-steering-refuses-input
-  (let [w (fresh {:fake/capabilities (assoc fake/default-capabilities :capabilities/steering :steering/none)} {})
+(deftest ^{:stratum 1} test-worker-without-steering-or-cancellation-refuses-input-and-requests-nothing
+  (let [w (fresh {:fake/capabilities (assoc fake/default-capabilities :capabilities/steering :steering/none
+                                            :capabilities/cancellation :cancellation/none)} {})
         session (fx/start! w fake-config 1 prompt)]
-    (is (= :anomalies.agent-worker/steering-unsupported (reason (steer w (:wc w) (:acting w) session))))))
+    (is (= :anomalies.agent-worker/steering-unsupported (reason (steer w (:wc w) (:acting w) session))))
+    (is (= {:cancel/requested? false} (worker/request-cancel! (:wc w) (:acting w) session)))
+    (is (= :state/completed (:status/state (worker/inspect (:wc w) (:acting w) session))))))
 
 (deftest ^{:stratum 1} test-a-retry-reconciles-without-preflight-and-says-when-still-starting
   (let [w (fresh)
@@ -133,7 +134,10 @@
     (is (= :anomalies.agent-worker/grant-inactive (reason (steer w expired-grant (:acting w) session))))
     (is (true? (controller/reserve-turn! (:wc w) session)))
     (is (= :anomalies.agent-worker/turn-in-progress (reason (steer w (:wc w) (:acting w) session))))
-    (is (= 1 (fake/starts (:worker w)))))
+    (is (= 1 (fake/starts (:worker w))))
+    (swap! (:state (:provider w)) assoc-in [(:namespace w) :ready?] false)
+    (is (= :anomalies.agent-worker/environment-not-ready (reason (steer w (:wc w) (:acting w) session))))
+    (is (= :state/completed (:status/state (worker/inspect (:wc w) (:acting w) session)))))
   (let [w (fresh {:fake/final-state :state/unknown} {})
         session (fx/start! w fake-config 1 prompt)]
     (is (= :anomalies.agent-worker/turn-unsettled (reason (steer w (:wc w) (:acting w) session))))))
@@ -162,8 +166,8 @@
            (reason (fx/start! (fresh {} {:constraint/max-cost-usd ceiling-usd})
                               (fx/config :worker/fake :config/max-budget-usd over-ceiling-usd) 1 prompt)))))
   (testing "given a budget under the ceiling → started"
-    (is (map? (fx/start! (fresh {} {:constraint/max-cost-usd ceiling-usd})
-                         (fx/config :worker/fake :config/max-budget-usd budget-usd) 1 prompt))))
+    (is (:session/binding (fx/start! (fresh {} {:constraint/max-cost-usd ceiling-usd})
+                                     (fx/config :worker/fake :config/max-budget-usd budget-usd) 1 prompt))))
   (testing "given a worker that cannot observe spend → refused"
     (is (= :anomalies.agent-worker/budget-unenforceable
            (reason (fx/start! (fresh {:fake/capabilities (assoc fake/default-capabilities :capabilities/budget :budget/none)}

@@ -37,7 +37,8 @@
                :anomalies.agent-worker/config-digest-mismatch :anomalies.agent-worker/conflicting-submission
                :anomalies.agent-worker/unknown-session :anomalies.agent-worker/turn-in-progress
                :anomalies.agent-worker/turn-unsettled :anomalies.agent-worker/start-in-flight}
-   :unavailable #{:anomalies.agent-worker/worker-unavailable :anomalies.agent-worker/worker-preflight-failed}
+   :unavailable #{:anomalies.agent-worker/worker-unavailable :anomalies.agent-worker/worker-preflight-failed
+                  :anomalies.agent-worker/environment-not-ready}
    :unsupported #{:anomalies.agent-worker/steering-unsupported}})
 
 ;------------------------------------------------------------------------------ Layer 1

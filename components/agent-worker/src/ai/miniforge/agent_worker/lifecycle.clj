@@ -54,17 +54,9 @@
     (not= session (:record/result record))
     :anomalies.agent-worker/unknown-session))
 
-(defn- ^{:stratum 0} recorded
-  "A duplicate's recorded result, or a retryable refusal while its launch
-   has not settled."
-  [wc binding]
-  (or (:record/result (controller/record wc binding))
-      (refusal/reason-anomaly :anomalies.agent-worker/start-in-flight {})))
-
 (defn- ^{:stratum 0} turn-refusal
-  "Why `session` cannot start another turn, or nil: the worker steers,
-   inspection shows the turn finished, and the bound spend grant still
-   authorizes the attempt."
+  "Why `session` cannot start another turn, or nil: the worker steers, the
+   turn is shown finished, and the bound spend grant still authorizes it."
   [wc acting grant session worker handle]
   (let [binding (:session/binding session)
         config (get-in (controller/record wc binding) [:record/submission :submission/config])
@@ -103,17 +95,20 @@
     result))
 
 (defn- ^{:stratum 1} with-session
-  "Run `(f worker handle)` for a recorded session; with `ready?`, only while
-   its environment is ready. Artifact collection passes false: the
-   environment allows it after expiry and checks the lease itself."
-  [wc acting session ready? f]
+  "Run `(f worker handle)` for a recorded session. `check` is `:check/ready`
+   (a new turn: the environment must be ready), `:check/lease` (the lease
+   must be current) or `:check/none` (artifacts: the environment allows them
+   after expiry and checks the lease itself)."
+  [wc acting session check f]
   (let [binding (:session/binding session)
         refused (session-refusal acting session (controller/record wc binding))
         handle (controller/env-handle wc acting binding)
-        ready (when (and ready? (not refused)) (env/readiness (:env/controller handle) acting (:env/lease handle)))]
+        ready (when-not (or refused (= :check/none check)) (env/readiness (:env/controller handle) acting (:env/lease handle)))]
     (cond
       refused (refusal/reason-anomaly refused {})
       (anomaly/anomaly? ready) ready
+      (and (= :check/ready check) (not (:readiness/ready? ready)))
+      (refusal/reason-anomaly :anomalies.agent-worker/environment-not-ready {})
       :else (f (get (:worker/workers wc) (:session/worker session)) handle))))
 
 (defn- ^{:stratum 1} next-turn
@@ -149,26 +144,28 @@
       refused (refusal/reason-anomaly refused {})
       (seq failures) (refusal/reason-anomaly :anomalies.agent-worker/worker-preflight-failed {:failures failures})
       (= :new (:decision/kind decision)) (launch wc worker handle submission)
-      (= :duplicate (:decision/kind decision)) (recorded wc binding)
+      (= :duplicate (:decision/kind decision)) (or (:record/result (controller/record wc binding))
+                                                   (refusal/reason-anomaly :anomalies.agent-worker/start-in-flight {}))
       :else (refusal/reason-anomaly (:decision/reason decision) {}))))
 
 (defn ^{:stratum 2} inspect
   [wc acting session]
-  (with-session wc acting session true #(protocol/inspect %1 %2 session)))
+  (with-session wc acting session :check/lease #(protocol/inspect %1 %2 session)))
 
 (defn ^{:stratum 2} send-input!
   [wc acting grant session text]
-  (with-session wc acting session true #(next-turn wc acting grant session %1 %2 text)))
+  (with-session wc acting session :check/ready #(next-turn wc acting grant session %1 %2 text)))
 
 (defn ^{:stratum 2} request-cancel!
   [wc acting session]
-  (with-session wc acting session true #(protocol/request-cancel! %1 %2 session)))
+  (with-session wc acting session :check/lease #(protocol/request-cancel! %1 %2 session)))
 
 (defn ^{:stratum 2} persist-artifacts!
   [wc acting session]
-  (with-session wc acting session false
+  (with-session wc acting session :check/none
     #(env/persist-artifacts! (:env/controller %2) acting (:env/lease %2) (protocol/artifact-paths %1 %2 session))))
 
 (defn ^{:stratum 2} usage
   [wc acting session]
-  (with-session wc acting session true #(session/normalize-usage (protocol/usage %1 %2 session))))
+  (with-session wc acting session :check/lease
+    #(let [reported (protocol/usage %1 %2 session)] (cond-> reported (not (anomaly/anomaly? reported)) session/normalize-usage))))
