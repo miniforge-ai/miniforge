@@ -47,10 +47,13 @@
   10000)
 
 (def ^{:stratum 0} ^:private outlives-deadline-cmd
-  "Sleeps far longer than any deadline used here. The odd duration doubles
-   as a process-table sentinel for the reap check, so a stray `sleep 30`
-   from another test cannot produce a false match."
-  "sleep 3607")
+  "Sleeps far longer than any deadline used here. The duration doubles as
+   the process-table sentinel for the reap check: its fraction is this
+   JVM's PID, so a sleeper from another suite running this test at the
+   same time cannot match. `sleep` takes decimal seconds on BSD and GNU.
+   A marker in a shell comment would not do: `sh -c` may exec `sleep`
+   directly and drop it from the process's arguments."
+  (str "sleep 3600." (.pid (java.lang.ProcessHandle/current))))
 
 (def ^{:stratum 0} ^:private aggressive-timeout-ms
   "Deadline handed to the executor. Short so the test is fast; the contract
