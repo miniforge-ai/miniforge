@@ -42,6 +42,9 @@
       {:observed/uid (:uid space) :observed/ready? (boolean (:ready? space))}))
   (deprovision! [_ target]
     (cond
+      (nil? (get @state (:target/namespace target)))
+      {:deprovision/steps [(world/step :step/namespace-deleted :outcome/applied)]}
+
       (not (world/deletable? @state target))
       {:deprovision/steps [(world/step :step/namespace-deleted :outcome/failed)]}
 
@@ -56,6 +59,11 @@
   "Recreate `namespace` under a new UID, as an outside actor reusing the name would."
   [provider namespace]
   (swap! (:state provider) assoc-in [namespace :uid] (str (random-uuid))))
+
+(defn ^{:stratum 0} forget-namespace!
+  "Delete `namespace` behind the controller's back, as an outside actor would."
+  [provider namespace]
+  (swap! (:state provider) dissoc namespace))
 
 (defn ^{:stratum 0} live-namespaces
   [provider]

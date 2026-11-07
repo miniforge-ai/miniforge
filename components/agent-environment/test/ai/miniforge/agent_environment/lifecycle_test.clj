@@ -122,3 +122,9 @@
            (reason (env/acquire! (:c w) (:a w) nil (dissoc (fx/request w (:a w)) :environment/policy-hash)))))
     (is (= :anomalies.agent-environment/invalid-input (reason (env/create-controller {:provider :not-a-provider}))))
     (is (empty? @(:receipts w)))))
+
+(deftest ^{:stratum 1} test-release-of-an-already-deleted-namespace-is-confirmed
+  (let [w (world)
+        env-value (acquire w)]
+    (fake/forget-namespace! (:controller/provider (:c w)) (:environment/namespace env-value))
+    (is (= {:call/outcome :outcome/applied} (env/release! (:c w) (:a w) (lease-of env-value))))))

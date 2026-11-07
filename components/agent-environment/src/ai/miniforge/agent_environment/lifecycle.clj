@@ -32,8 +32,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} duplicate
-  [c acting request]
-  (let [env (:entry/environment (controller/entry c (lease/request-key request)))]
+  "The environment the claim decision saw; re-reading the ledger could
+   return a later generation of the same key."
+  [c acting request decision]
+  (let [env (:decision/environment decision)]
     (controller/record! c (support/subject-of acting request env) :environment/acquire :outcome/duplicate [] nil)
     env))
 
@@ -95,7 +97,7 @@
                                          :anomalies.agent-environment/preflight-failed
                                          (mapv support/failure-step failures))
       (= :new (:decision/kind decision)) (provisioning/provision c acting request (:decision/generation decision))
-      (= :duplicate (:decision/kind decision)) (duplicate c acting request)
+      (= :duplicate (:decision/kind decision)) (duplicate c acting request decision)
       :else (controller/refuse! c subject :environment/acquire (:decision/reason decision) []))))
 
 (defn ^{:stratum 1} readiness
