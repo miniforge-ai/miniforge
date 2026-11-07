@@ -19,48 +19,80 @@
   "Transform and validate stage executors: stages that process the records
    collected from upstream stages without a connector."
   (:require [ai.miniforge.data-quality.interface :as dq]
+            [ai.miniforge.pipeline-runner.messages :as msg]
             [ai.miniforge.pipeline-runner.stage-result
              :refer [stage-result timestamps exception-context]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} execute-transform-stage
+(defn- ^{:stratum 0} pass-through-declared? [config]
+  (true? (:stage/pass-through? config)))
+
+(defn- ^{:stratum 0} pass-through-result
+  "Completed result for a stage that declared :stage/pass-through? true. The
+   :pass-through? flag stays on the stage run as the receipt that processing
+   was skipped on purpose."
+  [id name input-records]
+  (stage-result id name :completed
+                (assoc (timestamps) :records input-records :pass-through? true)))
+
+(defn- ^{:stratum 0} unresolved-processing-result
+  "Failed result for a stage that reached execution with no resolved
+   processing and no pass-through declaration. Preflight refuses these before
+   a run starts; a spawned stage is created mid-run, so the executor refuses
+   it here."
+  [id name]
+  (stage-result id name :failed
+                {:error-message (msg/t :run/processing-unresolved {:name name})
+                 :error-kind    :configuration}))
+
+(defn- ^{:stratum 0} apply-transform
+  [id name transform-fn config input-records]
+  (try
+    (let [result-records (transform-fn input-records config)]
+      (stage-result id name :completed
+                    (assoc (timestamps) :records result-records)))
+    (catch Exception e
+      (stage-result id name :failed (exception-context e)))))
+
+(defn- ^{:stratum 0} evaluate-quality-pack
+  [id name quality-pack input-records]
+  (let [evaluation (dq/evaluate-records (:pack/rules quality-pack) input-records)
+        passed     (dq/filter-passed evaluation)
+        report     (dq/generate-report (:pack/id quality-pack) evaluation)]
+    (stage-result id name :completed
+                  (merge (timestamps)
+                         {:records passed
+                          :quality-report report}))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} execute-transform-stage
   "Execute a non-connector stage (normalize, transform, aggregate, etc.).
-   If :stage/transform config with :transform/type is present and a matching
-   transform fn exists in context :transforms, calls it with input records.
-   Otherwise passes records through unchanged."
+   Calls the context :transforms function named by :stage/transform
+   :transform/type. A stage that declares :stage/pass-through? true passes
+   its records through; any other stage without a resolved transform fails."
   [{:stage/keys [id name config]} context input-records]
   (let [transform-type (get-in config [:stage/transform :transform/type])
         transform-fn   (when transform-type
                          (get-in context [:transforms transform-type]))]
-    (if transform-fn
-      (try
-        (let [result-records (transform-fn input-records config)]
-          (stage-result id name :completed
-                        (assoc (timestamps) :records result-records)))
-        (catch Exception e
-          (stage-result id name :failed (exception-context e))))
-      (stage-result id name :completed
-                    (assoc (timestamps) :records input-records)))))
-
-;------------------------------------------------------------------------------ Layer 1
+    (cond
+      transform-fn                    (apply-transform id name transform-fn config input-records)
+      (pass-through-declared? config) (pass-through-result id name input-records)
+      :else                           (unresolved-processing-result id name))))
 
 (defn ^{:stratum 1} execute-validate-stage
-  "Execute a validate stage using data-quality rules.
-   If :stage/quality-pack is present in config, evaluates records and filters.
-   Otherwise falls through to transform (pass-through)."
-  [{:stage/keys [id name config]} context input-records]
-  (if-let [quality-pack (:stage/quality-pack config)]
-    (let [evaluation (dq/evaluate-records (:pack/rules quality-pack) input-records)
-          passed     (dq/filter-passed evaluation)
-          report     (dq/generate-report (:pack/id quality-pack) evaluation)]
-      (stage-result id name :completed
-                    (merge (timestamps)
-                           {:records passed
-                            :quality-report report})))
-    (execute-transform-stage {:stage/id id :stage/name name :stage/config config} context input-records)))
+  "Execute a validate stage with its :stage/quality-pack rules. A stage that
+   declares :stage/pass-through? true passes its records through; a stage with
+   neither fails."
+  [{:stage/keys [id name config]} input-records]
+  (let [quality-pack (:stage/quality-pack config)]
+    (cond
+      quality-pack                    (evaluate-quality-pack id name quality-pack input-records)
+      (pass-through-declared? config) (pass-through-result id name input-records)
+      :else                           (unresolved-processing-result id name))))
 
 (comment
-  (execute-transform-stage {:stage/id (random-uuid) :stage/name "Normalize" :stage/config {}}
+  (execute-transform-stage {:stage/id (random-uuid) :stage/name "Normalize" :stage/config {:stage/pass-through? true}}
                            {}
                            [{:id 1}]))

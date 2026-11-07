@@ -19,7 +19,9 @@
   "Preflight rejects unresolved required behavior before any connector opens:
    an ingest → middle → publish pipeline where the middle stage (or the ingest
    stage's spawn fn) names something that does not resolve. Every refusal
-   leaves both connectors uncalled."
+   leaves both connectors uncalled. A stage spawned mid-run is not
+   preflighted, so the executor refuses it when it declares no processing.
+   A declared pass-through leaves a receipt on its stage run."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector.interface :as conn]
             [ai.miniforge.data-quality.interface :as dq]
@@ -102,7 +104,17 @@
    :pipeline/created-at (java.time.Instant/now)
    :pipeline/updated-at (java.time.Instant/now)})
 
+(def ^{:stratum 0} ^:private unprocessed-child-name "Unprocessed child")
+
+(defn- ^{:stratum 0} stage-runs [outcome]
+  (get-in outcome [:result :pipeline-run :pipeline-run/stage-runs]))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} unprocessed-child-spawn
+  "Spawn fn: one transform-family child that declares no processing."
+  [_records _config]
+  [{:spawn/name unprocessed-child-name :spawn/family :transform}])
 
 (defn- ^{:stratum 1} ingest-stage [config]
   {:stage/id ingest-id
@@ -147,6 +159,9 @@
      {:result       result
       :source-calls @source-calls
       :sink-calls   @sink-calls})))
+
+(defn- ^{:stratum 1} stage-run [outcome stage-id]
+  (first (filter #(= stage-id (:stage/id %)) (stage-runs outcome))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -221,12 +236,30 @@
              (set (map :preflight/problem (:preflight/problems (:result outcome))))))
       (is (string? (:error (:result outcome)))))))
 
-(deftest ^{:stratum 2} test-declared-pass-through-runs
-  (testing "given an explicit pass-through → preflight passes and both connectors run"
-    (let [outcome (run-fixture (pipeline [(ingest-stage {}) (middle-stage :normalize pass-through) publish-stage]) {})]
-      (is (:success? (:result outcome)))
-      (is (= [:connect :extract] (:source-calls outcome)))
-      (is (= [:connect :publish] (:sink-calls outcome))))))
+(deftest ^{:stratum 2} test-declared-pass-through-runs-with-receipt
+  (testing "given an explicit pass-through → both connectors run and the stage run records it"
+    (doseq [family [:normalize :validate]]
+      (let [middle     (middle-stage family pass-through)
+            outcome    (run-fixture (pipeline [(ingest-stage {}) middle publish-stage]) {})
+            middle-run (stage-run outcome middle-id)]
+        (is (:success? (:result outcome)) (str family))
+        (is (= [:connect :extract] (:source-calls outcome)))
+        (is (= [:connect :publish] (:sink-calls outcome)))
+        (is (= :completed (:status middle-run)))
+        (is (true? (:pass-through? middle-run)) (str family))))))
+
+(deftest ^{:stratum 2} test-spawned-stage-without-processing-fails
+  (testing "given a spawn fn that adds a transform-family child with no processing → the child fails, nothing publishes"
+    (let [ingest    (ingest-stage {:stage/spawn-fn :unprocessed})
+          middle    (middle-stage :normalize pass-through)
+          outcome   (run-fixture (pipeline [ingest middle publish-stage])
+                                 {:spawn-fns {:unprocessed unprocessed-child-spawn}})
+          child-run (first (filter #(= unprocessed-child-name (:stage/name %))
+                                   (stage-runs outcome)))]
+      (is (false? (:success? (:result outcome))))
+      (is (= :failed (:status child-run)))
+      (is (= :configuration (:error-kind child-run)))
+      (is (empty? (:sink-calls outcome))))))
 
 (deftest ^{:stratum 2} test-preflight-accepts-resolved-pipeline
   (testing "given every named behavior resolves → preflight succeeds with no problems"
