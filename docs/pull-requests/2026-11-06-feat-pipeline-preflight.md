@@ -8,49 +8,37 @@
 
 ## Overview
 
-`execute-pipeline` and `etl validate` now refuse a pipeline that names behavior
-which does not resolve. The check runs before any connector opens or stage
-runs. Part of #2422.
+`execute-pipeline` now refuses a pipeline that names behavior which does not
+resolve. The check runs before any connector opens or stage runs. This is
+part of #2422.
 
 ## Motivation
 
 The runner passed records through when a named transform was missing, and a
-validate stage with no quality pack did the same. The resolver mapped an
-unknown quality rule to nil.
-
-The shipped `risk-data` pack hit all of this. The ETL runner supplied neither
-the built-in transforms nor a rule registry. So `Derive Buffett Indicator`
-passed records through unchanged, and both `Validate Quality` rules resolved to
-nil, which the data-quality evaluator then calls as a function.
-
-A missing sink connector was found only when the publish stage ran, after the
-ingest stages had already read their sources.
+validate stage with no quality pack did the same. A missing sink connector was
+found only when the publish stage ran, after the ingest stages had already
+read their sources.
 
 ## Changes in Detail
 
 1. New `pipeline-runner.preflight/check`, exposed as `pipeline-runner/preflight`.
    It checks, per stage:
-   1. `:ingest` and `:publish`: a bound connector that implements
-      `SourceConnector` or `SinkConnector`.
+   1. `:ingest` and `:publish`: a bound connector that implements the base
+      `Connector` protocol and `SourceConnector` or `SinkConnector`.
    2. `:validate`: a quality pack with at least one rule, each with a
       `:rule/check-fn`.
    3. Every other family: a `:stage/transform` whose `:transform/type` is in
       context `:transforms`.
    4. Any stage: a `:stage/spawn-fn` registered in context `:spawn-fns`.
    5. A non-connector stage that skips processing on purpose declares
-      `:stage/pass-through? true`. Declaring it together with processing is a
-      conflict.
+      `:stage/pass-through? true`. Declaring it together with a transform or
+      a quality pack is a conflict, whatever the family.
 
    Every problem carries the stage id, a `:preflight/problem` kind and the
    missing `:preflight/ref`. All problems are reported, not only the first.
 2. `execute-pipeline` runs preflight after structural validation and before it
    creates the run. A refusal returns schema/failure with
    `:preflight/problems` and no `:pipeline-run`.
-3. ETL runner: `run-pack` registers the built-in transforms and resolves rules
-   against the built-in rule registry. `validate-pack` preflights the resolved
-   pipeline.
-4. `risk-data` pack: `Normalize` declares `:stage/pass-through? true`. It only
-   merges upstream datasets.
 
 ## Behavior changes
 
@@ -59,30 +47,40 @@ ingest stages had already read their sources.
 2. A pipeline whose connector is missing is refused before any stage runs.
    Before, earlier stages ran and the run failed at that stage, with a
    `:pipeline-run`.
-3. In the `risk-data` pack, `Derive Buffett Indicator` now computes its ratio
-   and `Validate Quality` now evaluates its two rules.
+3. The shipped `risk-data` pack is refused by preflight until the stacked ETL
+   PR lands: the ETL runner supplies neither the built-in transforms nor a
+   rule registry. On `main` the same pack already fails at run time, when its
+   validate stage calls the nil rules the resolver produced.
+
+## Review fixes
+
+1. A connector that implements `SinkConnector` or `SourceConnector` without
+   the base `Connector` protocol is refused (it would fail at `connect`).
+2. Pass-through declared beside a transform is a conflict on a validate stage
+   too, not only beside a quality pack.
+3. The ETL wiring (built-in transforms and rules, `validate-pack` preflight,
+   the `risk-data` pass-through declaration) moved to its own PR to keep this
+   one under the PR budget.
 
 ## Not in this PR
 
-Stages spawned mid-run are not preflighted. The executor still passes their
-records through when they declare no processing; the next PR makes it refuse
-them and records a pass-through receipt on the stage run. The resolver still
-maps a rule it cannot resolve to nil; preflight refuses it but cannot name it
-until the resolver keeps the descriptor (next PR). Rule errors (a rule
-that throws or returns a malformed verdict) are also a later PR. The #2422
-gate report waits for the shared qualification harness.
+1. ETL wiring: the stacked ETL PR.
+2. Stages spawned mid-run are not preflighted; the executor change that
+   refuses them and records a pass-through receipt is a later PR, as is naming
+   unresolved rules.
+3. A rule that throws or returns a malformed verdict becoming an execution
+   error, and the #2422 gate report.
 
 ## Testing Plan
 
 1. `preflight_test`: one fixture per problem kind (unresolved transform, spawn
-   fn, quality rule, validator without pack, empty pack, conflict, wrong
-   connector role), each asserting zero source and sink connector calls; all
+   fn, quality rule, validator without pack, empty pack, conflict on transform
+   and validate stages, a source-only connector or a sink without `Connector`
+   bound to publish), each asserting zero source and sink connector calls; all
    problems reported together; declared pass-through runs both connectors.
 2. `interface_test`: fixtures declare pass-through; the tests that asserted
    silent pass-through or a mid-run missing-connector failure now assert the
    preflight refusal.
-3. ETL `runner_test`: all three shipped packs pass `validate-pack` with
-   preflight; a pack naming an unknown transform fails it.
 
 ## Deployment Plan
 
@@ -100,5 +98,5 @@ Part of #2422, under tracker #2421.
 ## Checklist
 
 - [x] Preflight before any connector call, all problems reported.
-- [x] Shipped packs still validate.
-- [ ] Executor refusal and pass-through receipt for spawned stages (next PR).
+- [x] Copilot findings on connector protocols and pass-through conflicts.
+- [ ] ETL wiring (stacked PR).
