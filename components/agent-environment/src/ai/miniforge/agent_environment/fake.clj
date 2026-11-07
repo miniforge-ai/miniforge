@@ -44,8 +44,7 @@
       {:observed/uid (:uid space) :observed/ready? (boolean (:ready? space))}))
   (exec! [_ target command]
     (if (world/live @state target)
-      (do (swap! state update-in [(:target/namespace target) :commands] (fnil conj []) command)
-          ((get opts :fake/exec-fn world/echo) command))
+      (world/running! state (:target/namespace target) command (get opts :fake/exec-fn world/echo))
       (world/missing target)))
   (write-file! [_ target path text]
     (if (world/live @state target)
@@ -56,10 +55,8 @@
       (get-in space [:files path] (world/file-missing path))
       (world/missing target)))
   (cancel! [_ target]
-    (if (world/live @state target)
-      (do (swap! state assoc-in [(:target/namespace target) :cancelled?] true)
-          {:cancel/steps [(world/step :step/workload-stopped :outcome/applied)]})
-      {:cancel/steps [(world/step :step/workload-stopped :outcome/failed)]}))
+    (let [space (world/live @state target)]
+      {:cancel/steps [(world/step :step/workload-stopped (world/cancel-outcome space))]}))
   (deprovision! [_ target]
     (let [uncertain? (:fake/uncertain-deletes? opts)
           [before _] (swap-vals! state world/delete target uncertain?)]

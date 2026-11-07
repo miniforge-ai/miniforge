@@ -53,3 +53,9 @@
         outcomes (outcomes-by-check (env/run-conformance {:make-provider (constantly provider)}))]
     (is (= :check/passed (:check/cleanup-confirmed outcomes)))
     (is (empty? (fake/live-namespaces provider)))))
+
+(deftest ^{:stratum 1} test-unconfirmed-cleanup-of-a-partial-provision-fails-the-cleanup-check
+  (let [leaky #(env/fake-provider {:fake/fail-step :step/workload :fake/uncertain-deletes? true})
+        outcomes (outcomes-by-check (env/run-conformance {:make-provider env/fake-provider
+                                                          :make-partial-provider leaky}))]
+    (is (= :check/failed (:check/cleanup-confirmed outcomes)))))

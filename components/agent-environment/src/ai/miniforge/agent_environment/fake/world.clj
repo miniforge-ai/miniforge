@@ -66,6 +66,25 @@
                           :files {}
                           :cancelled? false}))
 
+(defn ^{:stratum 0} cancel-outcome
+  "A fake cannot stop a scripted exec mid-call: with one running, a cancel
+   is unconfirmed; with none, it is applied; with no namespace, it failed."
+  [space]
+  (cond
+    (nil? space) :outcome/failed
+    (pos? (get space :in-flight 0)) :outcome/uncertain
+    :else :outcome/applied))
+
+(defn ^{:stratum 0} running!
+  "Record `command`, count it in flight while `exec-fn` runs, and return
+   what `exec-fn` returned."
+  [state namespace command exec-fn]
+  (swap! state update-in [namespace :commands] (fnil conj []) command)
+  (swap! state update-in [namespace :in-flight] (fnil inc 0))
+  (try
+    (exec-fn command)
+    (finally (swap! state update-in [namespace :in-flight] dec))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} walk-steps

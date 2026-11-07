@@ -35,11 +35,21 @@
 
 (defn- ^{:stratum 0} reason [result] (anomaly/subtype result))
 
+(def ^{:stratum 0} fx-ok {:exec/exit 0 :exec/stdout "" :exec/stderr ""})
+
 (def ^{:stratum 0} scripted-exit
   "A nonzero exit: a command that ran and failed is still a command that ran."
   3)
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} blocking-exec
+  "An exec that signals `entered`, then waits for `release` before returning."
+  [entered release]
+  (fn [_command]
+    (deliver entered true)
+    @release
+    fx-ok))
 
 (defn- ^{:stratum 1} stdin-echo
   [command]
@@ -89,3 +99,14 @@
            (env/exec! (:c w) (:a w) (:environment/lease env-value) command)))
     (is (= [command] (env/fake-commands (:controller/provider (:c w)) (:environment/namespace env-value))))
     (is (= [:outcome/applied] (fx/outcomes w :environment/exec)))))
+
+(deftest ^{:stratum 2} test-cancel-while-an-exec-runs-is-unconfirmed
+  (let [entered (promise)
+        release (promise)
+        w (fx/world (env/fake-provider {:fake/exec-fn (blocking-exec entered release)}) :isolation/shared-kernel)
+        lease (:environment/lease (fx/acquire w (:a w) (fx/request w (:a w))))
+        running (future (env/exec! (:c w) (:a w) lease {:exec/argv ["sleep"] :exec/timeout-ms fx/exec-timeout-ms}))]
+    @entered
+    (is (= {:call/outcome :outcome/uncertain} (env/cancel! (:c w) (:a w) lease)))
+    (deliver release true)
+    (is (= fx-ok @running))))

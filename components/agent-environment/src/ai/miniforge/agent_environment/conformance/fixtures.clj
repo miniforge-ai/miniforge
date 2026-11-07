@@ -134,10 +134,12 @@
     :environment/expires-at (:expires-at w)}))
 
 (defn ^{:stratum 1} acquire
-  "Acquire and remember the lease, so `release-all!` can clean up."
+  "Acquire and remember the lease, including the cleanup lease a failed
+   provision returns, so `release-all!` can clean up."
   [w acting req]
-  (let [env (lifecycle/acquire! (:c w) acting (provision-grant w acting) req)]
-    (when (:environment/lease env) (swap! (:leases w) conj [acting (:environment/lease env)]))
+  (let [env (lifecycle/acquire! (:c w) acting (provision-grant w acting) req)
+        lease (or (:environment/lease env) (get-in env [:anomaly/data :environment/lease]))]
+    (when lease (swap! (:leases w) conj [acting lease]))
     env))
 
 (defn ^{:stratum 1} cleaned?
@@ -152,4 +154,4 @@
 (defn ^{:stratum 2} release-all!
   "Release every lease `w` acquired; true when each is confirmed gone."
   [w]
-  (every? #(cleaned? w %) @(:leases w)))
+  (every? true? (mapv #(cleaned? w %) @(:leases w))))
