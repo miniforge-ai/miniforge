@@ -3,8 +3,10 @@
         ai.miniforge/anomaly {:local/root "../anomaly"}
         ai.miniforge/content-hash {:local/root "../content-hash"}
         ai.miniforge/execution-grant {:local/root "../execution-grant"}
+        ai.miniforge/llm {:local/root "../llm"}
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/tenancy {:local/root "../tenancy"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
         metosin/malli {:mvn/version "0.16.4"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

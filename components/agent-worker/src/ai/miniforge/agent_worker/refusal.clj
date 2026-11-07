@@ -36,7 +36,8 @@
    :conflict #{:anomalies.agent-worker/binding-mismatch :anomalies.agent-worker/stale-lease
                :anomalies.agent-worker/config-digest-mismatch :anomalies.agent-worker/conflicting-submission
                :anomalies.agent-worker/unknown-session :anomalies.agent-worker/turn-in-progress
-               :anomalies.agent-worker/turn-unsettled :anomalies.agent-worker/start-in-flight}
+               :anomalies.agent-worker/turn-unsettled :anomalies.agent-worker/start-in-flight
+               :anomalies.agent-worker/native-session-unknown}
    :unavailable #{:anomalies.agent-worker/worker-unavailable :anomalies.agent-worker/worker-preflight-failed}
    :unsupported #{:anomalies.agent-worker/steering-unsupported}})
 

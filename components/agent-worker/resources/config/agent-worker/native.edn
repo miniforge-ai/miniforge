@@ -1,0 +1,25 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
+;; Native workers on the llm backends of the same name. A Claude turn
+;; reads its tool allowances from a settings file written beside it;
+;; tools not listed are refused inside the environment.
+{:agent-worker/command-timeout-ms 30000
+ :agent-worker/native
+ {:worker/claude {:native/backend :claude
+                  :native/settings-file? true
+                  :native/allowed-tools ["Bash" "Edit" "Glob" "Grep" "Read" "Write"]
+                  :native/capabilities {:capabilities/worker :worker/claude
+                                        :capabilities/steering :steering/between-turns
+                                        :capabilities/cancellation :cancellation/process-signal
+                                        :capabilities/budget :budget/observed
+                                        :capabilities/usage :usage/at-exit}}
+  :worker/codex {:native/backend :codex
+                 :native/settings-file? false
+                 :native/allowed-tools []
+                 :native/capabilities {:capabilities/worker :worker/codex
+                                       :capabilities/steering :steering/none
+                                       :capabilities/cancellation :cancellation/process-signal
+                                       :capabilities/budget :budget/none
+                                       :capabilities/usage :usage/at-exit}}}}
