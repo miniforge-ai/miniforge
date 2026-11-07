@@ -62,6 +62,15 @@ read their sources.
    the `risk-data` pass-through declaration) moved to its own PR to keep this
    one under the PR budget.
 
+Second round (findings Copilot reported as previously missed):
+
+1. A transform, spawn fn or rule check fn may be a fn, a Var or a multimethod;
+   `fn?` had refused Vars and multimethods the executor can call.
+2. Pass-through beside any `:stage/transform` declaration is a conflict, even
+   one without a `:transform/type`.
+3. A quality pack whose `:pack/rules` is not a list is reported as
+   `:quality-pack/malformed` instead of throwing from `empty?`.
+
 ## Not in this PR
 
 1. ETL wiring: the stacked ETL PR.
