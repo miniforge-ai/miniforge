@@ -117,10 +117,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} unprocessed-child-spawn
-  "Spawn fn: one transform-family child that declares no processing."
-  [_records _config]
-  [{:spawn/name unprocessed-child-name :spawn/family :transform}])
+(defn- ^{:stratum 1} child-spawn
+  "Spawn fn factory: one child of `family` with stage config `config`."
+  [family config]
+  (fn [_records _config]
+    [{:spawn/name unprocessed-child-name :spawn/family family :spawn/config config}]))
 
 (defn- ^{:stratum 1} ingest-stage [config]
   {:stage/id ingest-id
@@ -256,18 +257,22 @@
         (is (= :completed (:status middle-run)))
         (is (true? (:pass-through? middle-run)) (str family))))))
 
-(deftest ^{:stratum 2} test-spawned-stage-without-processing-fails
-  (testing "given a spawn fn that adds a transform-family child with no processing → the child fails, nothing publishes"
-    (let [ingest    (ingest-stage {:stage/spawn-fn :unprocessed})
-          middle    (middle-stage :normalize pass-through)
-          outcome   (run-fixture (pipeline [ingest middle publish-stage])
-                                 {:spawn-fns {:unprocessed unprocessed-child-spawn}})
-          child-run (first (filter #(= unprocessed-child-name (:stage/name %))
-                                   (stage-runs outcome)))]
-      (is (false? (:success? (:result outcome))))
-      (is (= :failed (:status child-run)))
-      (is (= :configuration (:error-kind child-run)))
-      (is (empty? (:sink-calls outcome))))))
+(deftest ^{:stratum 2} test-spawned-stage-that-cannot-run-fails
+  (testing "given a spawned child with no processing, a missing transform beside pass-through, or an empty pack → the child fails, nothing publishes"
+    (doseq [[family config] [[:transform nil]
+                             [:transform {:stage/pass-through? true
+                                          :stage/transform     {:transform/type :no-such-transform}}]
+                             [:validate {:stage/quality-pack {:pack/id :empty-pack :pack/rules []}}]]]
+      (let [ingest    (ingest-stage {:stage/spawn-fn :child})
+            middle    (middle-stage :normalize pass-through)
+            outcome   (run-fixture (pipeline [ingest middle publish-stage])
+                                   {:spawn-fns {:child (child-spawn family config)}})
+            child-run (first (filter #(= unprocessed-child-name (:stage/name %))
+                                     (stage-runs outcome)))]
+        (is (false? (:success? (:result outcome))) (pr-str config))
+        (is (= :failed (:status child-run)) (pr-str config))
+        (is (= :configuration (:error-kind child-run)) (pr-str config))
+        (is (empty? (:sink-calls outcome)) (pr-str config))))))
 
 (deftest ^{:stratum 2} test-preflight-accepts-resolved-pipeline
   (testing "given every named behavior resolves → preflight succeeds with no problems"

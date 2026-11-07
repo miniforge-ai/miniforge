@@ -40,6 +40,14 @@ reported a nil ref, so the operator could not tell which rule was missing.
    require and gets the Apache header; the split keeps both files within three
    strata.
 
+## Review fixes (Copilot)
+
+1. A spawned stage that declares pass-through beside a transform or quality
+   pack fails as a conflict, so a named transform with no registered fn can no
+   longer fall through to pass-through.
+2. A spawned validate stage whose quality pack has no rules fails instead of
+   passing every record.
+
 ## Behavior changes
 
 1. A spawned stage that declares no processing fails instead of passing its

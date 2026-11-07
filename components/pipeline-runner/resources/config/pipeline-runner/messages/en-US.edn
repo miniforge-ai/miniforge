@@ -11,6 +11,9 @@
   :run/stage-failed         "Stage failed: {name}"
   :run/processing-unresolved
   "Stage {name} has no resolved transform or quality pack and does not declare :stage/pass-through? true"
+  :run/pass-through-conflict
+  "Stage {name} declares :stage/pass-through? true beside a transform or quality pack"
+  :run/quality-pack-empty   "Stage {name} has a quality pack with no rules"
   :run/preflight-failed     "Preflight refused the pipeline before any connector opened: {problems}"
 
   ;; Preflight problems (preflight.clj)

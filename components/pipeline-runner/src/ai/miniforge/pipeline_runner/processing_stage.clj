@@ -46,6 +46,20 @@
                 {:error-message (msg/t :run/processing-unresolved {:name name})
                  :error-kind    :configuration}))
 
+(defn- ^{:stratum 0} configuration-failure
+  "Failed result for a stage whose configuration cannot run as declared."
+  [id name message-key]
+  (stage-result id name :failed
+                {:error-message (msg/t message-key {:name name})
+                 :error-kind    :configuration}))
+
+(defn- ^{:stratum 0} declares-processing?
+  "True when the stage config names a transform type or carries a quality
+   pack, whatever the stage's family."
+  [config]
+  (or (some? (get-in config [:stage/transform :transform/type]))
+      (some? (:stage/quality-pack config))))
+
 (defn- ^{:stratum 0} apply-transform
   [id name transform-fn config input-records]
   (try
@@ -67,30 +81,45 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} execute-transform-stage
+(defn- ^{:stratum 1} pass-through-conflict?
+  "Pass-through declared beside a transform or a quality pack. Preflight
+   refuses it for declared stages; a spawned stage reaches the executor
+   unchecked."
+  [config]
+  (and (pass-through-declared? config) (declares-processing? config)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} execute-transform-stage
   "Execute a non-connector stage (normalize, transform, aggregate, etc.).
    Calls the context :transforms function named by :stage/transform
-   :transform/type. A stage that declares :stage/pass-through? true passes
-   its records through; any other stage without a resolved transform fails."
+   :transform/type. A stage that declares :stage/pass-through? true and no
+   processing passes its records through. A named transform with no
+   registered fn fails, pass-through or not; so does a stage declaring
+   neither, or pass-through beside processing."
   [{:stage/keys [id name config]} context input-records]
   (let [transform-type (get-in config [:stage/transform :transform/type])
         transform-fn   (when transform-type
                          (get-in context [:transforms transform-type]))]
     (cond
+      (pass-through-conflict? config) (configuration-failure id name :run/pass-through-conflict)
       transform-fn                    (apply-transform id name transform-fn config input-records)
       (pass-through-declared? config) (pass-through-result id name input-records)
       :else                           (unresolved-processing-result id name))))
 
-(defn ^{:stratum 1} execute-validate-stage
-  "Execute a validate stage with its :stage/quality-pack rules. A stage that
-   declares :stage/pass-through? true passes its records through; a stage with
-   neither fails."
+(defn ^{:stratum 2} execute-validate-stage
+  "Execute a validate stage with its :stage/quality-pack rules. A pack with
+   no rules fails, as does pass-through beside processing. A stage that
+   declares :stage/pass-through? true and no processing passes its records
+   through; a stage with neither fails."
   [{:stage/keys [id name config]} input-records]
   (let [quality-pack (:stage/quality-pack config)]
     (cond
-      quality-pack                    (evaluate-quality-pack id name quality-pack input-records)
-      (pass-through-declared? config) (pass-through-result id name input-records)
-      :else                           (unresolved-processing-result id name))))
+      (pass-through-conflict? config)  (configuration-failure id name :run/pass-through-conflict)
+      (seq (:pack/rules quality-pack)) (evaluate-quality-pack id name quality-pack input-records)
+      quality-pack                     (configuration-failure id name :run/quality-pack-empty)
+      (pass-through-declared? config)  (pass-through-result id name input-records)
+      :else                            (unresolved-processing-result id name))))
 
 (comment
   (execute-transform-stage {:stage/id (random-uuid) :stage/name "Normalize" :stage/config {:stage/pass-through? true}}
