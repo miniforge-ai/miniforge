@@ -94,3 +94,19 @@
     (is (= :not-found (:receipt/reason (last @receipts))))
     (is (= 0 (controller/finish! c subject :environment/exec {:call/value 0 :call/steps []})))
     (is (= :outcome/applied (:receipt/outcome (last @receipts))))))
+
+(deftest ^{:stratum 2} test-a-settled-provision-is-not-settled-again
+  (let [{:keys [c]} (fresh)
+        current (provisioned! c)
+        k (lease/request-key request)]
+    (controller/settle! c current #(assoc % :entry/state :state/released))
+    (controller/settle-provision! c request (:lease/generation current) :state/provisioned {})
+    (is (= :state/released (:entry/state (controller/entry c k))))
+    (testing "given a late result for the released lease → the release stands"
+      (controller/settle! c current #(assoc % :entry/state :state/cleanup-uncertain))
+      (is (= :state/released (:entry/state (controller/entry c k)))))))
+
+(deftest ^{:stratum 2} test-duplicate-claim-carries-the-environment-it-saw
+  (let [{:keys [c]} (fresh)
+        current (provisioned! c)]
+    (is (= current (get-in (controller/claim! c request) [:decision/environment :environment/lease])))))

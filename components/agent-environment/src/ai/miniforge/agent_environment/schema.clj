@@ -59,11 +59,11 @@
 
 (def ^{:stratum 0} Sha256Hex
   "Lowercase hex SHA-256, as `content-hash` produces."
-  [:re #"^[0-9a-f]{64}$"])
+  [:re #"\A[0-9a-f]{64}\z"])
 
 (def ^{:stratum 0} NamespaceName
   "A DNS-1123 label: the strictest naming rule a provider namespace meets."
-  [:re #"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"])
+  [:re #"\A[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\z"])
 
 (def ^{:stratum 0} Limits
   [:map {:closed true}

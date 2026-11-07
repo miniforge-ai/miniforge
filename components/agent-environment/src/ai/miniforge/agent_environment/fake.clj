@@ -61,6 +61,9 @@
       {:cancel/steps [(world/step :step/workload-stopped :outcome/failed)]}))
   (deprovision! [_ target]
     (cond
+      (nil? (get @state (:target/namespace target)))
+      {:deprovision/steps [(world/step :step/namespace-deleted :outcome/applied)]}
+
       (not (world/deletable? @state target))
       {:deprovision/steps [(world/step :step/namespace-deleted :outcome/failed)]}
 
@@ -80,6 +83,11 @@
   "Every command exec'd in `namespace`, in order."
   [provider namespace]
   (get-in @(:state provider) [namespace :commands] []))
+
+(defn ^{:stratum 0} forget-namespace!
+  "Delete `namespace` behind the controller's back, as an outside actor would."
+  [provider namespace]
+  (swap! (:state provider) dissoc namespace))
 
 (defn ^{:stratum 0} live-namespaces
   [provider]
