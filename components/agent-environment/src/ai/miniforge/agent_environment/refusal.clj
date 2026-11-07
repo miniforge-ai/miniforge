@@ -31,7 +31,7 @@
                    :anomalies.agent-environment/grant-scope-mismatch :anomalies.agent-environment/grant-exceeded
                    :anomalies.agent-environment/grant-wrong-effect :anomalies.agent-environment/grant-wrong-principal
                    :anomalies.agent-environment/grant-denied}
-   :invalid-input #{:anomalies.agent-environment/request-expired}
+   :invalid-input #{:anomalies.agent-environment/request-expired :anomalies.agent-environment/invalid-input}
    :unsupported #{:anomalies.agent-environment/preflight-failed}
    :conflict #{:anomalies.agent-environment/conflicting-request :anomalies.agent-environment/acquire-in-flight
                :anomalies.agent-environment/environment-cancelled :anomalies.agent-environment/environment-released

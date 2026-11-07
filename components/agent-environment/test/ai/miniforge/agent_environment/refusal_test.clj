@@ -40,5 +40,6 @@
   (is (= :unauthorized (type-of :anomalies.agent-environment/forged-tenant)))
   (is (= :conflict (type-of :anomalies.agent-environment/stale-lease)))
   (is (= :fault (type-of :anomalies.agent-environment/provisioning-failed)))
+  (is (= :invalid-input (type-of :anomalies.agent-environment/invalid-input)))
   (is (= :anomalies.agent-environment/stale-lease
          (anomaly/subtype (refusal/reason-anomaly :anomalies.agent-environment/stale-lease {})))))
