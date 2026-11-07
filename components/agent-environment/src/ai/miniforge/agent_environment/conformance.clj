@@ -55,6 +55,7 @@
         borrowed (lifecycle/exec! (:c w) (:a w) (:environment/lease env) fx/probe-command)]
     (fx/result :check/forged-tenant-refused
                (and (fx/subtype? :anomalies.agent-environment/forged-tenant forged)
+                    (some? (:environment/lease env))
                     (fx/subtype? :anomalies.agent-environment/forged-tenant borrowed))
                {:acquire (anomaly/subtype forged) :exec (anomaly/subtype borrowed)})))
 

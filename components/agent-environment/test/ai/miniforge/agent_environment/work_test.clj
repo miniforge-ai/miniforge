@@ -18,6 +18,7 @@
 (ns ai.miniforge.agent-environment.work-test
   (:require
    [ai.miniforge.agent-environment.conformance.fixtures :as fx]
+   [ai.miniforge.agent-environment.fake.world :as world]
    [ai.miniforge.agent-environment.interface :as env]
    [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.test :refer [deftest is testing]]))
@@ -42,6 +43,14 @@
   3)
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} test-fake-writes-and-exec-registration-touch-only-their-own-namespace
+  (let [gone {:target/namespace "mf-env-gone" :target/uid "uid-1"}
+        replaced {"mf-env-gone" {:uid "uid-2"}}]
+    (is (= {} (world/with-file {} gone report-path "x")))
+    (is (= {} (world/started {} gone ["true"])))
+    (is (= replaced (world/with-file replaced gone report-path "x")))
+    (is (= replaced (world/started replaced gone ["true"])))))
 
 (defn- ^{:stratum 1} blocking-exec
   "An exec that signals `entered`, then waits for `release` before returning."

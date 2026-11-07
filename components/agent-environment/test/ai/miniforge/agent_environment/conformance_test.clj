@@ -44,6 +44,7 @@
 
 (deftest ^{:stratum 1} test-a-provider-that-cannot-provision-fails-the-suite
   (let [outcomes (outcomes-by-check (env/run-conformance {:make-provider failing-provider}))]
+    (is (= :check/failed (:check/forged-tenant-refused outcomes)))
     (is (= :check/failed (:check/duplicate-acquire-returns-one-environment outcomes)))
     (is (= :check/failed (:check/stale-lease-refused outcomes)))
     (is (= :check/failed (:check/lifecycle-roundtrip outcomes)))))

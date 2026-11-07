@@ -45,13 +45,10 @@
     (let [space (get @state (:target/namespace target))]
       {:observed/uid (:uid space) :observed/generation (:generation space) :observed/ready? (boolean (:ready? space))}))
   (exec! [_ target command]
-    (if (world/live @state target)
-      (world/running! state (:target/namespace target) (:target/uid target) command (get opts :fake/exec-fn world/echo))
-      (world/missing target)))
+    (world/running! state target command (get opts :fake/exec-fn world/echo)))
   (write-file! [_ target path text]
-    (if (world/live @state target)
-      (do (swap! state assoc-in [(:target/namespace target) :files path] text) {:file/path path})
-      (world/missing target)))
+    (let [[before _] (swap-vals! state world/with-file target path text)]
+      (if (world/live before target) {:file/path path} (world/missing target))))
   (read-file [_ target path]
     (if-let [space (world/live @state target)]
       (get-in space [:files path] (world/file-missing path))

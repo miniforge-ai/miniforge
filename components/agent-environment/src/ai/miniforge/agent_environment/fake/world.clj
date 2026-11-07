@@ -92,15 +92,24 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} running!
-  "Record `command`, count it in flight against `uid` while `exec-fn` runs,
-   and return what `exec-fn` returned."
-  [state namespace uid command exec-fn]
-  (swap! state update-in [namespace :commands] (fnil conj []) command)
-  (swap! state counted namespace uid inc)
-  (try
-    (exec-fn command)
-    (finally (swap! state counted namespace uid dec))))
+(defn ^{:stratum 1} with-file
+  "`world` with `text` at `path`, only while `target`'s namespace still has
+   its UID."
+  [world target path text]
+  (if (live world target)
+    (assoc-in world [(:target/namespace target) :files path] text)
+    world))
+
+(defn ^{:stratum 1} started
+  "`world` with `command` recorded and counted in flight, only while
+   `target`'s namespace still has its UID."
+  [world target command]
+  (let [namespace (:target/namespace target)]
+    (if (live world target)
+      (-> world
+          (update-in [namespace :commands] (fnil conj []) command)
+          (update-in [namespace :in-flight] (fnil inc 0)))
+      world)))
 
 (defn ^{:stratum 1} walk-steps
   "Applied steps before `fail-step`, then the failed one; later steps are
@@ -116,6 +125,18 @@
   (or (nil? (:target/uid target)) (some? (live world target))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} running!
+  "Check the UID, record `command` and count it in flight in one step, then
+   run `exec-fn` and return its result; a namespace that no longer has
+   `target`'s UID is a missing target and runs nothing."
+  [state target command exec-fn]
+  (let [[before _] (swap-vals! state started target command)]
+    (if (live before target)
+      (try
+        (exec-fn command)
+        (finally (swap! state counted (:target/namespace target) (:target/uid target) dec)))
+      (missing target))))
 
 (defn ^{:stratum 2} delete-outcome
   "What deleting `target` from `world` reports: an absent namespace is
