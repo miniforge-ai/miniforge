@@ -132,8 +132,9 @@
    neither, or pass-through beside processing."
   [{:stage/keys [id name config]} context input-records]
   (let [transform-type (get-in config [:stage/transform :transform/type])
-        transform-fn   (when transform-type
-                         (get-in context [:transforms transform-type]))]
+        registered     (when transform-type
+                         (get-in context [:transforms transform-type]))
+        transform-fn   (when (callable? registered) registered)]
     (cond
       (pass-through-conflict? config) (configuration-failure id name :run/pass-through-conflict)
       transform-fn                    (apply-transform id name transform-fn config input-records)

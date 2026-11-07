@@ -282,10 +282,11 @@
         (is (true? (:pass-through? middle-run)) (str family))))))
 
 (deftest ^{:stratum 2} test-spawned-stage-that-cannot-run-fails
-  (testing "given a spawned child with no processing, a missing transform beside pass-through, or an empty, malformed or unbuilt pack → the child fails, nothing publishes"
+  (testing "given a spawned child with no processing, a missing transform beside pass-through, a transform registered as data, or an empty, malformed or unbuilt pack → the child fails, nothing publishes"
     (doseq [[family config] [[:transform nil]
                              [:transform {:stage/pass-through? true
                                           :stage/transform     {:transform/type :no-such-transform}}]
+                             [:transform {:stage/transform {:transform/type :not-a-fn}}]
                              [:validate {:stage/quality-pack {:pack/id :empty-pack :pack/rules []}}]
                              [:validate {:stage/quality-pack {:pack/id :bad-pack :pack/rules 42}}]
                              [:validate {:stage/quality-pack {:pack/id :unbuilt-pack
@@ -293,7 +294,8 @@
       (let [ingest    (ingest-stage {:stage/spawn-fn :child})
             middle    (middle-stage :normalize pass-through)
             outcome   (run-fixture (pipeline [ingest middle publish-stage])
-                                   {:spawn-fns {:child (child-spawn family config)}})
+                                   {:spawn-fns  {:child (child-spawn family config)}
+                                    :transforms {:not-a-fn {}}})
             child-run (first (filter #(= unprocessed-child-name (:stage/name %))
                                      (stage-runs outcome)))]
         (is (false? (:success? (:result outcome))) (pr-str config))
