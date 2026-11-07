@@ -39,8 +39,11 @@
   (get @(:controller/ledger controller) k))
 
 (defn ^{:stratum 0} target
+  "The provider target an entry names; before an environment exists, its
+   namespace is the one derived from the request."
   [entry]
-  {:target/namespace (get-in entry [:entry/environment :environment/namespace])
+  {:target/namespace (or (get-in entry [:entry/environment :environment/namespace])
+                         (lease/namespace-name (:entry/request entry)))
    :target/uid (get-in entry [:entry/environment :environment/uid])
    :target/generation (:entry/generation entry)})
 
