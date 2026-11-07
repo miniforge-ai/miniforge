@@ -25,9 +25,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} usage-keys
-  [:usage/input-tokens :usage/output-tokens :usage/cost-usd])
-
 (defn ^{:stratum 0} config-digest [config] (content-hash/content-hash config))
 
 (defn ^{:stratum 0} submission-key
@@ -43,14 +40,14 @@
     (= submission (:record/submission existing)) {:decision/kind :duplicate}
     :else {:decision/kind :refuse :decision/reason :anomalies.agent-worker/conflicting-submission}))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} usage-status
+(defn ^{:stratum 0} usage-status
   [present]
   (cond
     (empty? present) :usage/unknown
-    (= (count usage-keys) (count present)) :usage/reported
+    (= (count schema/usage-quantities) (count present)) :usage/reported
     :else :usage/partial))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} bind
   "The binding for one attempt of `config` in the leased environment under
@@ -67,13 +64,11 @@
    :worker/config-digest (config-digest config)
    :worker/attempt attempt})
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} normalize-usage
+(defn ^{:stratum 1} normalize-usage
   "A Usage from what the worker reported. A missing quantity is nil and the
    status says so; nothing defaults to zero."
   [reported]
-  (let [present (into {} (filter (comp some? val)) (select-keys reported usage-keys))]
-    (merge (zipmap usage-keys (repeat nil))
+  (let [present (into {} (filter (comp some? val)) (select-keys reported schema/usage-quantities))]
+    (merge (zipmap schema/usage-quantities (repeat nil))
            present
            {:usage/status (usage-status present)})))

@@ -69,7 +69,12 @@
     (is (= :anomalies.agent-worker/binding-mismatch
            (admission/binding-refusal acting (assoc lease :lease/environment-uid "uid-2") bound)))
     (is (= :anomalies.agent-worker/forged-tenant
-           (admission/binding-refusal (assoc acting :acting/tenant-id (random-uuid)) lease bound)))))
+           (admission/binding-refusal (assoc acting :acting/tenant-id (random-uuid)) lease bound)))
+    (is (= :anomalies.agent-worker/forged-principal
+           (admission/binding-refusal acting lease (assoc bound :worker/principal-id (random-uuid)))))
+    (is (nil? (admission/config-refusal bound config)))
+    (is (= :anomalies.agent-worker/config-digest-mismatch
+           (admission/config-refusal bound (assoc config :config/model "other-model"))))))
 
 (deftest ^{:stratum 2} test-spend-grant-must-be-the-bound-grant
   (let [granted (spend)

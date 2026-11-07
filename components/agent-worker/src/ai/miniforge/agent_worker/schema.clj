@@ -53,6 +53,8 @@
    [:capabilities/budget [:enum :budget/hard-ceiling :budget/observed :budget/none]]
    [:capabilities/usage [:enum :usage/at-exit :usage/unavailable]]])
 
+(def ^{:stratum 0} usage-quantities [:usage/input-tokens :usage/output-tokens :usage/cost-usd])
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} Config
@@ -64,12 +66,14 @@
    [:config/model {:optional true} NonBlank]
    [:config/max-budget-usd {:optional true} [:and number? pos?]]])
 
-(def ^{:stratum 1} Usage
-  [:map {:closed true}
-   [:usage/status (into [:enum] usage-statuses)]
-   [:usage/input-tokens [:maybe nat-int?]]
-   [:usage/output-tokens [:maybe nat-int?]]
-   [:usage/cost-usd [:maybe number?]]])
+(defn- ^{:stratum 1} status-matches-quantities?
+  "Unknown has no quantity, reported has all three, partial some but not all."
+  [usage]
+  (let [present (count (keep usage usage-quantities))]
+    (case (:usage/status usage)
+      :usage/unknown (zero? present)
+      :usage/reported (= (count usage-quantities) present)
+      :usage/partial (< 0 present (count usage-quantities)))))
 
 (def ^{:stratum 1} Status
   [:map {:closed true}
@@ -94,6 +98,15 @@
    [:worker/attempt pos-int?]])
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} Usage
+  [:and
+   [:map {:closed true}
+    [:usage/status (into [:enum] usage-statuses)]
+    [:usage/input-tokens [:maybe nat-int?]]
+    [:usage/output-tokens [:maybe nat-int?]]
+    [:usage/cost-usd [:maybe number?]]]
+   [:fn status-matches-quantities?]])
 
 (def ^{:stratum 2} Submission
   [:map {:closed true}
