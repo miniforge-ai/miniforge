@@ -9,9 +9,11 @@
         ai.miniforge/agent-environment {:local/root "../../components/agent-environment"}
         ai.miniforge/agent-environment-kubernetes {:local/root "../../components/agent-environment-kubernetes"}
         ai.miniforge/agent-worker {:local/root "../../components/agent-worker"}
+        ai.miniforge/agent-workspace {:local/root "../../components/agent-workspace"}
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/content-hash {:local/root "../../components/content-hash"}
+        ai.miniforge/effect-transaction {:local/root "../../components/effect-transaction"}
         ai.miniforge/execution-grant {:local/root "../../components/execution-grant"}
         ai.miniforge/file-durability {:local/root "../../components/file-durability"}
         ai.miniforge/kubernetes-target {:local/root "../../components/kubernetes-target"}

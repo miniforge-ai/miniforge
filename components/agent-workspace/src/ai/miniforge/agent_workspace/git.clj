@@ -1,0 +1,71 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.agent-workspace.git
+  "The git command lines a workspace runs inside the environment, and the
+   one runner for them. Every argument is a separate argv element, so
+   nothing is shell-interpreted; a nonzero exit is an anomaly."
+  (:require
+   [ai.miniforge.agent-environment.interface :as env]
+   [ai.miniforge.agent-workspace.messages :as msg]
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [clojure.string :as str]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} branch-prefix
+  "Task branches live under this prefix, so they never collide with a
+   repository's own branches."
+  "miniforge/task-")
+
+(defn ^{:stratum 0} repo-path
+  "`root/owner/name`: `/` is in no part of an id, so two ids never share a path."
+  [root repo-id]
+  (str root "/" repo-id))
+
+(defn ^{:stratum 0} repo-url
+  "The one URL a repository id clones from and pushes to."
+  [wc repo-id]
+  (str (:workspace/repo-base-url wc) repo-id ".git"))
+
+(defn ^{:stratum 0} clone-argv [url path] ["git" "clone" "--no-tags" "--quiet" "--" url path])
+
+(defn ^{:stratum 0} branch-argv [path branch base-ref] ["git" "-C" path "checkout" "--quiet" "-B" branch base-ref])
+
+(defn ^{:stratum 0} head-argv [path] ["git" "-C" path "rev-parse" "HEAD"])
+
+(defn ^{:stratum 0} push-argv
+  "Push to the id's URL, not to whatever `origin` now names."
+  [path url branch]
+  ["git" "-C" path "push" "--quiet" url (str branch ":" branch)])
+
+(defn ^{:stratum 0} sha-of [result] (str/trim (str (:exec/stdout result))))
+
+(defn ^{:stratum 0} git!
+  [wc acting lease argv]
+  (let [result (env/exec! (:workspace/environment wc) acting lease
+                          {:exec/argv argv :exec/timeout-ms (:workspace/git-timeout-ms wc)})]
+    (cond
+      (anomaly/anomaly? result) result
+      (zero? (:exec/exit result)) result
+      :else (anomaly/sub-anomaly :fault :anomalies.agent-workspace/git-failed
+                                 (msg/t :anomalies.agent-workspace/git-failed)
+                                 {:git/argv argv :exec/exit (:exec/exit result)}))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} task-branch [task-id] (str branch-prefix task-id))
