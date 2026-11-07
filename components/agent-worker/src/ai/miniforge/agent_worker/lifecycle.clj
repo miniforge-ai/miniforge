@@ -73,16 +73,24 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} admission-refusal
-  [wc acting grant lease submission]
+(defn- ^{:stratum 1} launch-refusal
+  "Why a new submission cannot launch, in order: no such worker, environment
+   not ready, preflight failed, then (current at launch) spend grant or budget."
+  [wc acting grant handle submission]
   (let [binding (:submission/binding submission)
         config (:submission/config submission)
-        worker (worker-for wc config)]
-    (or (admission/binding-refusal acting lease binding)
-        (admission/config-refusal binding config)
-        (when (nil? worker) :anomalies.agent-worker/worker-unavailable)
-        (admission/grant-refusal grant acting binding config ((:worker/clock wc)))
-        (admission/budget-refusal grant config (protocol/capabilities worker)))))
+        worker (worker-for wc config)
+        ready (when worker (env/readiness (:env/controller handle) acting (:env/lease handle)))
+        failures (when (:readiness/ready? ready) (protocol/preflight worker handle))
+        spend (when (and (:readiness/ready? ready) (empty? failures))
+                (or (admission/grant-refusal grant acting binding config ((:worker/clock wc)))
+                    (admission/budget-refusal grant config (protocol/capabilities worker))))]
+    (cond
+      (nil? worker) (refusal/reason-anomaly :anomalies.agent-worker/worker-unavailable {})
+      (anomaly/anomaly? ready) ready
+      (not (:readiness/ready? ready)) (refusal/reason-anomaly :anomalies.agent-worker/environment-not-ready {})
+      (seq failures) (refusal/reason-anomaly :anomalies.agent-worker/worker-preflight-failed {:failures failures})
+      spend (refusal/reason-anomaly spend {}))))
 
 (defn- ^{:stratum 1} launch
   [wc worker handle submission]
@@ -132,18 +140,20 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} start!
+  "A recorded attempt reconciles on identity, binding and config alone; a
+   new one launches only once `launch-refusal` passes."
   [wc acting grant lease submission]
   (let [binding (:submission/binding submission)
-        refused (admission-refusal wc acting grant lease submission)
+        refused (or (admission/binding-refusal acting lease binding)
+                    (admission/config-refusal binding (:submission/config submission)))
         seen (when-not refused (session/submission-decision (controller/record wc binding) submission))
-        worker (worker-for wc (:submission/config submission))
         handle (controller/env-handle wc acting binding)
-        failures (when (= :new (:decision/kind seen)) (protocol/preflight worker handle))
-        decision (if (and (= :new (:decision/kind seen)) (empty? failures)) (controller/claim! wc submission) seen)]
+        blocked (when (= :new (:decision/kind seen)) (launch-refusal wc acting grant handle submission))
+        decision (if (and (= :new (:decision/kind seen)) (nil? blocked)) (controller/claim! wc submission) seen)]
     (cond
       refused (refusal/reason-anomaly refused {})
-      (seq failures) (refusal/reason-anomaly :anomalies.agent-worker/worker-preflight-failed {:failures failures})
-      (= :new (:decision/kind decision)) (launch wc worker handle submission)
+      blocked blocked
+      (= :new (:decision/kind decision)) (launch wc (worker-for wc (:submission/config submission)) handle submission)
       (= :duplicate (:decision/kind decision)) (or (:record/result (controller/record wc binding))
                                                    (refusal/reason-anomaly :anomalies.agent-worker/start-in-flight {}))
       :else (refusal/reason-anomaly (:decision/reason decision) {}))))

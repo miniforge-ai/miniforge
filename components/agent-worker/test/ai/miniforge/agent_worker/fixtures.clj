@@ -102,13 +102,5 @@
         spend (issue acting :effect/spend {:worker/tenant-id (:acting/tenant-id acting) :worker/run-id run-id}
                      spend-constraints now)
         wc (worker/create-controller {:workers workers :environment ec :clock #(Instant/now)})]
-    {:now now
-     :provider provider
-     :acting acting
-     :ec ec
-     :wc wc
-     :request request
-     :provision-scope scope
-     :lease (:environment/lease environment)
-     :namespace (:environment/namespace environment)
-     :spend spend}))
+    {:now now :provider provider :acting acting :ec ec :wc wc :request request :provision-scope scope
+     :lease (:environment/lease environment) :namespace (:environment/namespace environment) :spend spend}))

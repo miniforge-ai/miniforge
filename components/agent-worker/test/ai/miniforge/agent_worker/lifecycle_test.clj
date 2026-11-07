@@ -122,6 +122,9 @@
         session (fx/start! w fake-config 1 prompt)
         failing (assoc-in (:wc w) [:worker/workers :worker/fake] (fake/create {:fake/preflight-failures [:cli-missing]}))]
     (is (= session (worker/start! failing (:acting w) (:spend w) (:lease w) (fx/submission w fake-config 1 prompt))))
+    (is (= session (fx/start! (assoc w :wc (assoc (:wc w) :worker/clock (constantly (after-expiry w)))) fake-config 1 prompt)))
+    (swap! (:state (:provider w)) assoc-in [(:namespace w) :ready?] false)
+    (is (= :anomalies.agent-worker/environment-not-ready (reason (fx/start! w fake-config 3 prompt))))
     (controller/claim! (:wc w) (fx/submission w fake-config 2 prompt))
     (is (= :anomalies.agent-worker/start-in-flight (reason (fx/start! w fake-config 2 prompt))))))
 
