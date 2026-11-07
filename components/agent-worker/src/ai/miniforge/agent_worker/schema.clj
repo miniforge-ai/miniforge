@@ -33,6 +33,10 @@
    tell, never that the session finished."
   [:state/running :state/completed :state/failed :state/cancelled :state/unknown])
 
+(def ^{:stratum 0} finished-states
+  "States that show a turn ended; only then may the next one start."
+  #{:state/completed :state/failed :state/cancelled})
+
 (def ^{:stratum 0} usage-statuses
   "`:usage/unknown` carries no numbers; `:usage/partial` some; never zeros
    standing in for a missing report."

@@ -26,6 +26,7 @@
    [ai.miniforge.agent-worker.controller :as controller]
    [ai.miniforge.agent-worker.interface.protocol :as protocol]
    [ai.miniforge.agent-worker.refusal :as refusal]
+   [ai.miniforge.agent-worker.schema :as schema]
    [ai.miniforge.agent-worker.session :as session]
    [ai.miniforge.anomaly.interface :as anomaly]))
 
@@ -47,8 +48,36 @@
     (not= (:acting/tenant-id acting) (get-in session [:session/binding :worker/tenant-id]))
     :anomalies.agent-worker/forged-tenant
 
+    (not= (:acting/principal-id acting) (get-in session [:session/binding :worker/principal-id]))
+    :anomalies.agent-worker/forged-principal
+
     (not= session (:record/result record))
     :anomalies.agent-worker/unknown-session))
+
+(defn- ^{:stratum 0} recorded
+  "A duplicate's recorded result, or a retryable refusal while its launch
+   has not settled."
+  [wc binding]
+  (or (:record/result (controller/record wc binding))
+      (refusal/reason-anomaly :anomalies.agent-worker/start-in-flight {})))
+
+(defn- ^{:stratum 0} turn-refusal
+  "Why `session` cannot start another turn, or nil: the worker steers,
+   inspection shows the turn finished, and the bound spend grant still
+   authorizes the attempt."
+  [wc acting grant session worker handle]
+  (let [binding (:session/binding session)
+        config (get-in (controller/record wc binding) [:record/submission :submission/config])
+        steers? (= :steering/between-turns (:capabilities/steering (protocol/capabilities worker)))
+        status (when steers? (protocol/inspect worker handle session))
+        state (:status/state status)]
+    (cond
+      (not steers?) (refusal/reason-anomaly :anomalies.agent-worker/steering-unsupported {})
+      (anomaly/anomaly? status) status
+      (= :state/running state) (refusal/reason-anomaly :anomalies.agent-worker/turn-in-progress {})
+      (not (contains? schema/finished-states state)) (refusal/reason-anomaly :anomalies.agent-worker/turn-unsettled {})
+      :else (some-> (admission/grant-refusal grant acting binding config ((:worker/clock wc)))
+                    (refusal/reason-anomaly {})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -74,68 +103,72 @@
     result))
 
 (defn- ^{:stratum 1} with-session
-  "Run `(f worker handle)` for a recorded session whose lease is current."
-  [wc acting session f]
+  "Run `(f worker handle)` for a recorded session; with `ready?`, only while
+   its environment is ready. Artifact collection passes false: the
+   environment allows it after expiry and checks the lease itself."
+  [wc acting session ready? f]
   (let [binding (:session/binding session)
         refused (session-refusal acting session (controller/record wc binding))
         handle (controller/env-handle wc acting binding)
-        ready (when-not refused (env/readiness (:env/controller handle) acting (:env/lease handle)))]
+        ready (when (and ready? (not refused)) (env/readiness (:env/controller handle) acting (:env/lease handle)))]
     (cond
       refused (refusal/reason-anomaly refused {})
       (anomaly/anomaly? ready) ready
       :else (f (get (:worker/workers wc) (:session/worker session)) handle))))
 
 (defn- ^{:stratum 1} next-turn
-  [wc session worker handle text]
-  (let [steering (:capabilities/steering (protocol/capabilities worker))
-        state (:status/state (protocol/inspect worker handle session))
-        submission (:record/submission (controller/record wc (:session/binding session)))
-        native (when (and (= :steering/between-turns steering) (not= :state/running state))
-                 (protocol/send-input! worker handle submission session text))
+  "Start the next turn only for the call that reserved it; a competing call
+   is refused, and a failed turn leaves the recorded session as it was."
+  [wc acting grant session worker handle text]
+  (let [binding (:session/binding session)
+        refused (turn-refusal wc acting grant session worker handle)
+        reserved? (and (nil? refused) (controller/reserve-turn! wc session))
+        submission (:record/submission (controller/record wc binding))
+        native (when reserved? (protocol/send-input! worker handle submission session text))
         steered (when (and native (not (anomaly/anomaly? native)))
-                  (assoc (session-for (:session/binding session) (:session/worker session) native
-                                      (inc (:session/turn session)))
+                  (assoc (session-for binding (:session/worker session) native (inc (:session/turn session)))
                          :session/native-id (or (:native/id native) (:session/native-id session))))]
+    (when reserved? (controller/settle! wc binding #(controller/turn-settled % steered)))
     (cond
-      (= :steering/none steering) (refusal/reason-anomaly :anomalies.agent-worker/steering-unsupported {})
-      (= :state/running state) (refusal/reason-anomaly :anomalies.agent-worker/turn-in-progress {})
-      (anomaly/anomaly? native) native
-      :else (do (controller/settle! wc (:session/binding session) #(assoc % :record/result steered))
-                steered))))
+      refused refused
+      (not reserved?) (refusal/reason-anomaly :anomalies.agent-worker/turn-in-progress {})
+      :else (or steered native))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} start!
   [wc acting grant lease submission]
-  (let [refused (admission-refusal wc acting grant lease submission)
+  (let [binding (:submission/binding submission)
+        refused (admission-refusal wc acting grant lease submission)
+        seen (when-not refused (session/submission-decision (controller/record wc binding) submission))
         worker (worker-for wc (:submission/config submission))
-        handle (controller/env-handle wc acting (:submission/binding submission))
-        failures (when-not refused (protocol/preflight worker handle))
-        decision (when-not (or refused (seq failures)) (controller/claim! wc submission))]
+        handle (controller/env-handle wc acting binding)
+        failures (when (= :new (:decision/kind seen)) (protocol/preflight worker handle))
+        decision (if (and (= :new (:decision/kind seen)) (empty? failures)) (controller/claim! wc submission) seen)]
     (cond
       refused (refusal/reason-anomaly refused {})
       (seq failures) (refusal/reason-anomaly :anomalies.agent-worker/worker-preflight-failed {:failures failures})
       (= :new (:decision/kind decision)) (launch wc worker handle submission)
-      (= :duplicate (:decision/kind decision)) (:record/result (controller/record wc (:submission/binding submission)))
+      (= :duplicate (:decision/kind decision)) (recorded wc binding)
       :else (refusal/reason-anomaly (:decision/reason decision) {}))))
 
 (defn ^{:stratum 2} inspect
   [wc acting session]
-  (with-session wc acting session #(protocol/inspect %1 %2 session)))
+  (with-session wc acting session true #(protocol/inspect %1 %2 session)))
 
 (defn ^{:stratum 2} send-input!
-  [wc acting session text]
-  (with-session wc acting session #(next-turn wc session %1 %2 text)))
+  [wc acting grant session text]
+  (with-session wc acting session true #(next-turn wc acting grant session %1 %2 text)))
 
 (defn ^{:stratum 2} request-cancel!
   [wc acting session]
-  (with-session wc acting session #(protocol/request-cancel! %1 %2 session)))
+  (with-session wc acting session true #(protocol/request-cancel! %1 %2 session)))
 
 (defn ^{:stratum 2} persist-artifacts!
   [wc acting session]
-  (with-session wc acting session
+  (with-session wc acting session false
     #(env/persist-artifacts! (:env/controller %2) acting (:env/lease %2) (protocol/artifact-paths %1 %2 session))))
 
 (defn ^{:stratum 2} usage
   [wc acting session]
-  (with-session wc acting session #(session/normalize-usage (protocol/usage %1 %2 session))))
+  (with-session wc acting session true #(session/normalize-usage (protocol/usage %1 %2 session))))

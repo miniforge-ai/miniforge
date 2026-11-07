@@ -29,10 +29,12 @@ that outlived its lease must not keep acting.
    the environment lifecycle, so a stale lease stops them.
 2. `controller`: the submission ledger, written with `swap-vals!` before the worker starts.
 3. `lifecycle`: `start!` admits, preflights the selected worker (never another), records and
-   starts; an identical resubmission returns the recorded session or start failure. Session calls
-   check the session is the recorded one and that the environment lease is current; steering is
-   refused for workers without it and while a turn runs; cancel is a request that `inspect` confirms;
-   artifacts persist through the environment's store; usage is normalized.
+   starts; an identical resubmission returns the recorded session or start failure without a new
+   preflight, or a retryable `start-in-flight` while the launch has not settled. Session calls check
+   the session is the recorded one, its tenant and principal, and that the environment is ready;
+   artifact collection skips readiness, since the environment allows it after expiry. Steering
+   rechecks the spend grant, needs inspection to show the turn ended, and reserves the turn so one
+   caller starts it. Cancel is a request that `inspect` confirms; usage is normalized.
 4. `fake`: in-memory worker that writes its input into the environment.
 
 ## Testing Plan
@@ -40,7 +42,9 @@ that outlived its lease must not keep acting.
 Over the fake environment and fake worker: reconcile without relaunch, conflicting resubmission,
 no substitution for a missing or failing worker, stale lease for new attempts and old sessions,
 spend-grant budget rules, unknown and partial usage, steering, cancel and artifacts, a worker
-without steering, another tenant's session.
+without steering, another tenant's or principal's session, a retry while starting or after preflight
+starts failing, steering under an expired grant, an unsettled turn or another caller's reservation,
+and artifacts after the environment expires.
 
 ## Deployment Plan
 
