@@ -55,17 +55,37 @@
     (catch Exception e
       (stage-result id name :failed (exception-context e)))))
 
-(defn- ^{:stratum 0} evaluate-quality-pack
-  [id name quality-pack input-records]
-  (let [evaluation (dq/evaluate-records (:pack/rules quality-pack) input-records)
-        passed     (dq/filter-passed evaluation)
-        report     (dq/generate-report (:pack/id quality-pack) evaluation)]
+(defn- ^{:stratum 0} rule-error-result
+  "Failed result for a validate stage whose quality rules did not all run.
+   An execution error, kept apart from records a rule rejected."
+  [id name errors]
+  (let [message (msg/t :run/quality-rule-errors {:name name :count (count errors)})]
+    (stage-result id name :failed
+                  {:error-message      message
+                   :error-kind         :execution
+                   :quality/rule-errors errors})))
+
+(defn- ^{:stratum 0} quality-pack-result
+  [id name quality-pack evaluation]
+  (let [passed (dq/filter-passed evaluation)
+        report (dq/generate-report (:pack/id quality-pack) evaluation)]
     (stage-result id name :completed
                   (merge (timestamps)
                          {:records passed
                           :quality-report report}))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} evaluate-quality-pack
+  "Evaluate the pack's rules over the input records. A rule that threw or
+   returned a malformed verdict fails the stage; otherwise records that fail
+   an error-severity rule are filtered out and reported."
+  [id name quality-pack input-records]
+  (let [evaluation (dq/evaluate-records (:pack/rules quality-pack) input-records)
+        errors     (dq/rule-errors evaluation)]
+    (if (seq errors)
+      (rule-error-result id name errors)
+      (quality-pack-result id name quality-pack evaluation))))
 
 (defn ^{:stratum 1} execute-transform-stage
   "Execute a non-connector stage (normalize, transform, aggregate, etc.).
@@ -81,7 +101,9 @@
       (pass-through-declared? config) (pass-through-result id name input-records)
       :else                           (unresolved-processing-result id name))))
 
-(defn ^{:stratum 1} execute-validate-stage
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} execute-validate-stage
   "Execute a validate stage with its :stage/quality-pack rules. A stage that
    declares :stage/pass-through? true passes its records through; a stage with
    neither fails."
