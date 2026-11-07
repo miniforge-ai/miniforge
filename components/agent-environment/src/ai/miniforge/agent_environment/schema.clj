@@ -79,8 +79,10 @@
    [:step/outcome (into [:enum] step-outcomes)]])
 
 (def ^{:stratum 1} Command
+  "One command. The executable must be named; later arguments may be empty
+   or whitespace, as any process argument may."
   [:map {:closed true}
-   [:exec/argv [:vector {:min 1} NonBlank]]
+   [:exec/argv [:and vector? [:cat NonBlank [:* :string]]]]
    [:exec/timeout-ms pos-int?]])
 
 (def ^{:stratum 1} Request

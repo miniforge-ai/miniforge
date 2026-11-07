@@ -124,7 +124,7 @@
     :anomalies.agent-environment/stale-lease
 
     (not (contains? (admitted-states operation) (:entry/state entry)))
-    (state->refusal (:entry/state entry))
+    (get state->refusal (:entry/state entry) :anomalies.agent-environment/operation-not-admitted)
 
     (and (expired? (:entry/request entry) now) (not (cleanup-operations operation)))
     :anomalies.agent-environment/environment-expired))
