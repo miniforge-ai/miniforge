@@ -46,9 +46,11 @@
   (true? (get-in stage [:stage/config :stage/pass-through?])))
 
 (defn- ^{:stratum 0} callable?
-  "What the executor can call: a fn, a Var holding one, or a multimethod."
+  "What the executor can call: a fn, a multimethod, or a bound Var holding
+   one. An unbound Var, or one holding data, is not callable."
   [x]
-  (or (fn? x) (var? x) (instance? clojure.lang.MultiFn x)))
+  (let [target (if (var? x) (when (bound? x) (var-get x)) x)]
+    (or (fn? target) (instance? clojure.lang.MultiFn target))))
 
 (defn- ^{:stratum 0} transform-declaration [stage]
   (get-in stage [:stage/config :stage/transform]))

@@ -64,8 +64,9 @@ read their sources.
 
 Second round (findings Copilot reported as previously missed):
 
-1. A transform, spawn fn or rule check fn may be a fn, a Var or a multimethod;
-   `fn?` had refused Vars and multimethods the executor can call.
+1. A transform, spawn fn or rule check fn may be a fn, a multimethod, or a
+   bound Var holding one; `fn?` had refused Vars and multimethods the
+   executor can call. An unbound Var, or one holding data, is refused.
 2. Pass-through beside any `:stage/transform` declaration is a conflict, even
    one without a `:transform/type`.
 3. A quality pack whose `:pack/rules` is not a list is reported as
