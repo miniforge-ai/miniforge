@@ -79,9 +79,10 @@
    [:step/outcome (into [:enum] step-outcomes)]])
 
 (def ^{:stratum 1} Command
-  "One command; `:exec/stdin` is piped to it when present."
+  "One command; `:exec/stdin` is piped to it when present. The executable
+   must be named; later arguments may be empty or whitespace."
   [:map {:closed true}
-   [:exec/argv [:vector {:min 1} NonBlank]]
+   [:exec/argv [:and vector? [:cat NonBlank [:* :string]]]]
    [:exec/stdin {:optional true} :string]
    [:exec/timeout-ms pos-int?]])
 
