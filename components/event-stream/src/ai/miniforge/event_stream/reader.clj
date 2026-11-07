@@ -114,9 +114,9 @@
   (let [base     (io/file (str base-dir))
         archived (sinks/archived-workflow-dir base workflow-id)
         live     (sinks/live-workflow-dir base workflow-id)
-        legacy   (io/file base (if (keyword? workflow-id)
-                                 (name workflow-id)
-                                 (str workflow-id)))]
+        ;; The sanitized segment sinks already chose: a raw id such as
+        ;; "../../x" must not climb out of `base` through the legacy layout.
+        legacy   (io/file base (.getName archived))]
     (cond
       (.isDirectory archived) archived
       (.isDirectory live)     live
