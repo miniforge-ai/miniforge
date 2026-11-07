@@ -19,7 +19,8 @@
   "An in-memory provider for contract tests and fake-backed pilots. Options
    inject faults: `:fake/fail-step` stops provisioning at that step after
    the earlier ones apply, `:fake/uncertain-deletes?` leaves deletes
-   unconfirmed, and `:fake/probe-failures` fails the live probe."
+   unconfirmed, `:fake/probe-failures` fails the live probe, and
+   `:fake/exec-fn` scripts exec results."
   (:require
    [ai.miniforge.agent-environment.fake.world :as world]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]))
@@ -40,6 +41,24 @@
   (observe [_ target]
     (let [space (get @state (:target/namespace target))]
       {:observed/uid (:uid space) :observed/ready? (boolean (:ready? space))}))
+  (exec! [_ target command]
+    (if (world/live @state target)
+      (do (swap! state update-in [(:target/namespace target) :commands] (fnil conj []) command)
+          ((get opts :fake/exec-fn world/echo) command))
+      (world/missing target)))
+  (write-file! [_ target path text]
+    (if (world/live @state target)
+      (do (swap! state assoc-in [(:target/namespace target) :files path] text) {:file/path path})
+      (world/missing target)))
+  (read-file [_ target path]
+    (if-let [space (world/live @state target)]
+      (get-in space [:files path] (world/file-missing path))
+      (world/missing target)))
+  (cancel! [_ target]
+    (if (world/live @state target)
+      (do (swap! state assoc-in [(:target/namespace target) :cancelled?] true)
+          {:cancel/steps [(world/step :step/workload-stopped :outcome/applied)]})
+      {:cancel/steps [(world/step :step/workload-stopped :outcome/failed)]}))
   (deprovision! [_ target]
     (cond
       (not (world/deletable? @state target))
@@ -56,6 +75,11 @@
   "Recreate `namespace` under a new UID, as an outside actor reusing the name would."
   [provider namespace]
   (swap! (:state provider) assoc-in [namespace :uid] (str (random-uuid))))
+
+(defn ^{:stratum 0} commands
+  "Every command exec'd in `namespace`, in order."
+  [provider namespace]
+  (get-in @(:state provider) [namespace :commands] []))
 
 (defn ^{:stratum 0} live-namespaces
   [provider]

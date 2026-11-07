@@ -17,7 +17,11 @@
 ;; limitations under the License.
 (ns ai.miniforge.agent-environment.fake.world
   "The fake provider's in-memory world: one map per namespace holding its
-   UID and readiness.")
+   UID, readiness, files, cancellation and the commands run in it."
+  (:require
+   [ai.miniforge.agent-environment.messages :as msg]
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -42,10 +46,25 @@
     (when (and space (= (:target/uid target) (:uid space)))
       space)))
 
+(defn ^{:stratum 0} echo
+  "The default exec: exit zero with the argv joined as stdout."
+  [command]
+  {:exec/exit 0 :exec/stdout (str/join " " (:exec/argv command)) :exec/stderr ""})
+
+(defn ^{:stratum 0} missing
+  [target]
+  (anomaly/anomaly :not-found (msg/t :fake/target-missing) {:target target}))
+
+(defn ^{:stratum 0} file-missing
+  [path]
+  (anomaly/anomaly :not-found (msg/t :fake/file-missing) {:path path}))
+
 (defn ^{:stratum 0} provisioned
   [world namespace uid applied]
   (assoc world namespace {:uid uid
-                          :ready? (contains? (set applied) :step/workload)}))
+                          :ready? (contains? (set applied) :step/workload)
+                          :files {}
+                          :cancelled? false}))
 
 ;------------------------------------------------------------------------------ Layer 1
 

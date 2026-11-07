@@ -79,8 +79,10 @@
    [:step/outcome (into [:enum] step-outcomes)]])
 
 (def ^{:stratum 1} Command
+  "One command; `:exec/stdin` is piped to it when present."
   [:map {:closed true}
    [:exec/argv [:vector {:min 1} NonBlank]]
+   [:exec/stdin {:optional true} :string]
    [:exec/timeout-ms pos-int?]])
 
 (def ^{:stratum 1} Request

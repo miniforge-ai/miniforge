@@ -46,11 +46,18 @@
   "Small enough for any provider's declared ceiling."
   {:limits/cpu-millicores 500 :limits/memory-mib 512 :limits/ephemeral-storage-mib 1024})
 
+(def ^{:stratum 0} exec-timeout-ms
+  "Generous for a no-op command in a freshly provisioned environment."
+  30000)
+
 (defn ^{:stratum 0} acting-for [tenant-name now]
   (tenancy/establish-acting (tenancy/operator-identity tenant-name now) now))
 
 (defn ^{:stratum 0} subtype? [reason result]
   (and (anomaly/anomaly? result) (= reason (anomaly/subtype result))))
+
+(defn ^{:stratum 0} memory-persister [lease path _text]
+  {:artifact/path path :artifact/location (str (:lease/environment-uid lease) ":" path)})
 
 (defn ^{:stratum 0} provision-grant [w acting]
   (let [scope {:environment/tenant-id (:acting/tenant-id acting)
@@ -76,7 +83,8 @@
         receipts (atom [])
         c (controller/create {:provider provider
                               :clock #(Instant/now)
-                              :emit! #(swap! receipts conj %)})
+                              :emit! #(swap! receipts conj %)
+                              :persist! memory-persister})
         a (acting-for "conformance-tenant-a" now)
         b (acting-for "conformance-tenant-b" now)
         expires-at (.plusSeconds now grant-ttl-seconds)]

@@ -27,7 +27,8 @@
    [ai.miniforge.agent-environment.lifecycle.provisioning :as provisioning]
    [ai.miniforge.agent-environment.lifecycle.support :as support]
    [ai.miniforge.agent-environment.receipt :as receipt]
-   [ai.miniforge.agent-environment.refusal :as refusal]))
+   [ai.miniforge.agent-environment.refusal :as refusal]
+   [ai.miniforge.anomaly.interface :as anomaly]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -53,6 +54,13 @@
     (if (= (:lease/environment-uid lease) (:observed/uid seen))
       (support/as-call {:readiness/ready? (:observed/ready? seen)})
       (refusal/reason-anomaly :anomalies.agent-environment/uid-mismatch {:observed/uid (:observed/uid seen)}))))
+
+(defn- ^{:stratum 0} persisted
+  [c lease target paths]
+  (let [stored (mapv #(support/persist-one c lease target %) paths)]
+    (or (first (filter anomaly/anomaly? stored))
+        {:call/value stored
+         :call/steps (mapv (constantly support/persisted-step) stored)})))
 
 (defn- ^{:stratum 0} settled
   "Move the ledger to `state` whatever the provider confirmed: the ledger
@@ -101,6 +109,28 @@
 (defn ^{:stratum 1} readiness
   [c acting lease]
   (leased c :environment/readiness acting lease #(observed c lease %)))
+
+(defn ^{:stratum 1} exec!
+  [c acting lease command]
+  (leased c :environment/exec acting lease #(support/as-call (protocol/exec! (support/provider c) % command))))
+
+(defn ^{:stratum 1} write-file!
+  [c acting lease path text]
+  (leased c :environment/copy acting lease
+          #(support/as-call (protocol/write-file! (support/provider c) % path text))))
+
+(defn ^{:stratum 1} read-file
+  [c acting lease path]
+  (leased c :environment/copy acting lease #(support/as-call (protocol/read-file (support/provider c) % path))))
+
+(defn ^{:stratum 1} persist-artifacts!
+  [c acting lease paths]
+  (leased c :environment/persist-artifacts acting lease #(persisted c lease % paths)))
+
+(defn ^{:stratum 1} cancel!
+  [c acting lease]
+  (leased c :environment/cancel acting lease
+          #(settled c lease (:cancel/steps (protocol/cancel! (support/provider c) %)) :state/cancelled)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

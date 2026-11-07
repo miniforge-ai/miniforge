@@ -24,4 +24,6 @@
   :anomalies.agent-environment/unknown-lease "No environment is recorded for this lease"
   :anomalies.agent-environment/stale-lease "The lease is not the environment's current lease"
   :anomalies.agent-environment/uid-mismatch "The namespace now has a different UID than the lease"
-  :anomalies.agent-environment/provisioning-failed "Provisioning stopped before the environment was complete"}}
+  :anomalies.agent-environment/provisioning-failed "Provisioning stopped before the environment was complete"
+  :fake/target-missing "The fake provider holds no environment with this namespace and UID"
+  :fake/file-missing "The fake environment holds no file at this path"}}

@@ -33,6 +33,9 @@
 
 (defn ^{:stratum 0} failure-step [reason] {:step/name reason :step/outcome :outcome/failed})
 
+(def ^{:stratum 0} persisted-step
+  {:step/name :artifact/persisted :step/outcome :outcome/applied})
+
 (defn ^{:stratum 0} as-call
   [result]
   (if (anomaly/anomaly? result)
@@ -65,3 +68,8 @@
   [c request]
   (let [declared (admission/capability-failures (protocol/capabilities (provider c)) request)]
     (if (seq declared) declared (protocol/probe (provider c) request))))
+
+(defn ^{:stratum 1} persist-one
+  [c lease target path]
+  (anomaly/let-ok [text (protocol/read-file (provider c) target path)]
+    ((:controller/persist! c) lease path text)))
