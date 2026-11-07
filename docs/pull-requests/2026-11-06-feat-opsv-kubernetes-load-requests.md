@@ -52,12 +52,16 @@ integration and isolated fresh-package checks. Serialize JVM/build/hook runs.
 
 Passed: strict lint with zero warnings/errors, all 15 changed namespaces at
 three or fewer inferred strata, Polylith check and both consuming products.
-The curated integration suite passed 152 tests / 1,764 assertions.
-The isolated fresh CLI package passed 32 tests / 368 assertions and the
+The curated integration suite passed 152 tests / 1,767 assertions.
+The isolated fresh CLI package passed 32 tests / 371 assertions and the
 native compatibility suite passed 308 tests / 1,903 assertions, without production source overlays.
 All nine injected faults produced assertion failures with zero test errors.
 The JVM gate caught a `java.lang.Runtime` name collision; the schema is now
 `LoadWorkerSettings`, and the complete validation passed afterward.
+
+Review found that Fortio expands `{uuid}` in decoded URL paths.
+Reject that token before proposal construction, including mixed-case percent encoding and repeated tokens.
+Three new regressions failed against the original implementation with zero test errors.
 
 ## Deployment Plan
 

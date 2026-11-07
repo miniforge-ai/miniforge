@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.kubernetes-load-schema
   (:require [ai.miniforge.phase-opsv.governed-experiment-schema :as experiment]
             [ai.miniforge.phase-opsv.kubernetes-preparation-schema :as native]
+            [clojure.string :as str]
             [malli.util :as mu]
             [slingshot.slingshot :refer [try+]])
   (:import [java.net URI URISyntaxException]))
@@ -13,11 +14,15 @@
 (def ^{:stratum 0} Image
   [:re #"\A(?:[a-z0-9-]+(?:\.[a-z0-9-]+)+|localhost)(?::[0-9]+)?/[a-z0-9]+(?:[._/-][a-z0-9]+)*@sha256:[0-9a-f]{64}\z"])
 
-(defn- ^{:stratum 0} traffic-uri? [value]
+(defn- ^{:stratum 0} traffic-uri?
+  "Fortio expands UUID tokens in decoded paths; an exact destination cannot contain one."
+  [value]
   (try+
-    (let [uri (URI. ^String value)]
+    (let [uri (URI. ^String value)
+          uuid-token "{uuid}"]
       (and (contains? #{"http" "https"} (.getScheme uri))
-           (seq (.getHost uri)) (nil? (.getRawUserInfo uri)) (nil? (.getRawFragment uri))))
+           (seq (.getHost uri)) (nil? (.getRawUserInfo uri)) (nil? (.getRawFragment uri))
+           (not (str/includes? (.getPath uri) uuid-token))))
     (catch URISyntaxException _ false)))
 
 (defn- ^{:stratum 0} count-covers-workers? [value]
