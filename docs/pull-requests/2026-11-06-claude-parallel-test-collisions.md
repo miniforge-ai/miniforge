@@ -37,7 +37,14 @@ three at once, we ran three copies of CI's test sequence (`bb test:poly`,
    the outcome depended on the state already in that file.
 
 Everything else passed in all three runs, and no other test wrote under
-`~/.miniforge`.
+`~/.miniforge`. Two of the `test:poly` runs stopped at the first failure, so
+a second side-by-side run with fixes 1 to 3 covered the whole suite. All three
+`test:poly` runs passed. One `test:integration` run failed
+`backend-health-test/test-cooldown-expires`. That namespace keeps its health
+file at `<java.io.tmpdir>/test_backend_health.edn`, a name every JVM on the
+machine shares, and its fixture deletes the file around each test. The test
+also read back a 1 ms cooldown after a file write and read. A scan for other
+fixed names under `java.io.tmpdir` found none that a test writes.
 
 ## Changes in Detail
 
@@ -60,6 +67,11 @@ Everything else passed in all three runs, and no other test wrote under
    layer headings but no `^{:stratum}` metadata, so the pre-commit autofix
    tagged its forms and regrouped its headings. That rewrite only adds
    metadata and moves comments.
+4. `projects/miniforge/test/.../backend_health_test.clj`: the health file
+   name carries the JVM's PID. `test-cooldown-expires` writes a switch time
+   an hour back, in the Instant-string form `trigger-backend-switch!` stores.
+   It checks that a 30-minute cooldown has expired and a 2-hour one has not,
+   and no longer sleeps.
 
 ## Testing Plan
 
@@ -71,8 +83,16 @@ Everything else passed in all three runs, and no other test wrote under
    `dag-resilience-failover-test` writes `backend_health.edn` there and the new
    one writes nothing. With `find-healthy-backend` changed to record success,
    the new test fails; the old assertion accepts either outcome.
-4. Three copies of the CI test sequence run at the same time with these fixes;
-   the result is recorded below.
+4. With another process deleting the shared health file, the main version of
+   `backend-health-test` fails two tests and the new one passes. With
+   `in-cooldown?` changed to ignore the period, the new
+   `test-cooldown-expires` fails.
+5. Three copies of the CI test sequence ran at the same time with fixes 1
+   to 3. All three `test:poly` runs passed, taking about 18 minutes each
+   against about 9.5 on CI. All three `test:dev` runs and two of three
+   `test:integration` runs passed. No
+   `task-*` branch, no miniforge checkpoint and no backend health write
+   reached the repository or `~/.miniforge`.
 
 ## Deployment Plan
 
