@@ -46,12 +46,10 @@ ingest stages had already read their sources.
 2. `execute-pipeline` runs preflight after structural validation and before it
    creates the run. A refusal returns schema/failure with
    `:preflight/problems` and no `:pipeline-run`.
-3. `pipeline-config` resolver: a rule the registry cannot resolve stays as its
-   descriptor (no `:rule/check-fn`) instead of nil, so preflight can name it.
-4. ETL runner: `run-pack` registers the built-in transforms and resolves rules
+3. ETL runner: `run-pack` registers the built-in transforms and resolves rules
    against the built-in rule registry. `validate-pack` preflights the resolved
    pipeline.
-5. `risk-data` pack: `Normalize` declares `:stage/pass-through? true`. It only
+4. `risk-data` pack: `Normalize` declares `:stage/pass-through? true`. It only
    merges upstream datasets.
 
 ## Behavior changes
@@ -68,7 +66,9 @@ ingest stages had already read their sources.
 
 Stages spawned mid-run are not preflighted. The executor still passes their
 records through when they declare no processing; the next PR makes it refuse
-them and records a pass-through receipt on the stage run. Rule errors (a rule
+them and records a pass-through receipt on the stage run. The resolver still
+maps a rule it cannot resolve to nil; preflight refuses it but cannot name it
+until the resolver keeps the descriptor (next PR). Rule errors (a rule
 that throws or returns a malformed verdict) are also a later PR. The #2422
 gate report waits for the shared qualification harness.
 
@@ -81,14 +81,17 @@ gate report waits for the shared qualification harness.
 2. `interface_test`: fixtures declare pass-through; the tests that asserted
    silent pass-through or a mid-run missing-connector failure now assert the
    preflight refusal.
-3. `pipeline-config` resolver test: unresolved descriptors are kept.
-4. ETL `runner_test`: all three shipped packs pass `validate-pack` with
+3. ETL `runner_test`: all three shipped packs pass `validate-pack` with
    preflight; a pack naming an unknown transform fails it.
 
 ## Deployment Plan
 
 No migration. A pipeline that relied on silent pass-through must declare
 `:stage/pass-through? true` or register its transform.
+
+## Depends on
+
+Stacked on #2444, the mechanical split of `run.clj`.
 
 ## Related Issues/PRs
 
