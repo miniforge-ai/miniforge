@@ -159,3 +159,8 @@
             (stage-result id name :failed (exception-context e)))
           (finally
             (close-handle! connector @handle)))))))
+
+(comment
+  (cursor-entry {:stage/id (random-uuid) :stage/name "Ingest" :stage/connector-ref (random-uuid)}
+                "issues"
+                {:cursor/type :offset :cursor/value 10}))

@@ -69,3 +69,7 @@
              :error-cause   (:error-message (first causes))
              :error-causes  causes}
       truncated? (assoc :error-causes-truncated? true))))
+
+(comment
+  (stage-result (random-uuid) "Ingest" :completed (timestamps))
+  (exception-context (ex-info "outer" {} (ex-info "inner" {}))))

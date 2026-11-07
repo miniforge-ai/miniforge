@@ -90,3 +90,7 @@
                         (assoc sm stage-id stage-def)
                         ds-ids)))]
       (reduce register-spawn stage-map spawns))))
+
+(comment
+  (spawn->stage-def {:spawn/name "Notes #1" :spawn/family :ingest}
+                    {:stage/id (random-uuid) :stage/connector-ref (random-uuid)}))

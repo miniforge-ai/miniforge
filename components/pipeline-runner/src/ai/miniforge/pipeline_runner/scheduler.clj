@@ -95,3 +95,6 @@
        (assoc cursors stage-id (cursor-entry stage-def (:schema-name result) (:cursor result)))
        cursors)
      new-stage-map]))
+
+(comment
+  (collect-inputs {:stage/dependencies []} {} {}))

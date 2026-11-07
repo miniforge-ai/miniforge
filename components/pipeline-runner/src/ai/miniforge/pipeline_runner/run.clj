@@ -107,3 +107,6 @@
                                  {:name (:stage/name (first (filter #(= :failed (:status %)) stage-runs)))})
                           {:pipeline-run final-run})
           (schema/success :pipeline-run final-run))))))
+
+(comment
+  (stage->task-def {:stage/id (random-uuid) :stage/dependencies []}))

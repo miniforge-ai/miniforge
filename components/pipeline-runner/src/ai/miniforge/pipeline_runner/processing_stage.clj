@@ -59,3 +59,8 @@
                            {:records passed
                             :quality-report report})))
     (execute-transform-stage {:stage/id id :stage/name name :stage/config config} context input-records)))
+
+(comment
+  (execute-transform-stage {:stage/id (random-uuid) :stage/name "Normalize" :stage/config {}}
+                           {}
+                           [{:id 1}]))
