@@ -63,7 +63,12 @@ fixed names under `java.io.tmpdir` found none that a test writes.
 3. `dag_resilience_failover_test.clj`: the failover test stubs
    `self-healing/record-backend-call!` and
    `self-healing/trigger-backend-switch!` with recorders that return the real
-   functions' shapes. It now asserts the exact decision
+   functions' shapes: one backend's stats map, and
+   `{:from :to :cooldown-until <Instant> :cooldown-ms}`.
+   `record-backend-call!`'s docstring still says it returns the whole health
+   map. It is not corrected here: `backend_health.clj` uses 7 layers on main,
+   so any edit to it fails stratum-lint's 3-layer budget until the namespace
+   is split. It now asserts the exact decision
    (`{:action :continue :new-backend :openai}`) and the calls
    (`[:record :claude false]`, then `[:switch :claude :openai]`). The file had
    layer headings but no `^{:stratum}` metadata, so the pre-commit autofix
@@ -90,7 +95,8 @@ fixed names under `java.io.tmpdir` found none that a test writes.
 3. Run under a temp `MINIFORGE_HOME`, the main version of
    `dag-resilience-failover-test` writes `backend_health.edn` there and the new
    one writes nothing. With `find-healthy-backend` changed to record success,
-   the new test fails; the old assertion accepts either outcome.
+   the new test fails; the old assertion accepts either outcome. The doubles
+   return the same keys and value types as the real functions.
 4. With another process deleting the shared health file, the main version of
    `backend-health-test` fails two tests and the new one passes. With
    `in-cooldown?` changed to ignore the period, the new

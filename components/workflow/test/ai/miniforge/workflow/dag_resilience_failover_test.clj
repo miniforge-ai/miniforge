@@ -40,24 +40,25 @@
 (defn ^{:stratum 0} generic-err [message]
   (dag/err :task-execution-failed message {:task-id :test}))
 
+(def ^{:stratum 0} switch-cooldown-ms
+  "Cooldown the switch double reports: the self-healing default, 30 minutes."
+  (.toMillis (java.time.Duration/ofMinutes 30)))
+
 (defn ^{:stratum 0} recording-backend-call
   "Stand-in for `self-healing/record-backend-call!` that appends
    [:record backend success?] to CALLS. The real one writes the backend
    health file under the developer's ~/.miniforge, which runs read when
-   choosing a backend. Returns a health map, as the real one does."
+   choosing a backend. Returns the backend's stats after its first call,
+   the shape the real one returns."
   [calls]
   (fn [backend success?]
     (swap! calls conj [:record backend success?])
-    {:backends {}}))
-
-(defn ^{:stratum 0} recording-backend-switch
-  "Stand-in for `self-healing/trigger-backend-switch!` that appends
-   [:switch from to] to CALLS instead of persisting a cooldown and a new
-   default backend. Returns the real one's {:from :to :cooldown-until}."
-  [calls]
-  (fn [from to]
-    (swap! calls conj [:switch from to])
-    {:from from :to to :cooldown-until (str Instant/EPOCH)}))
+    (let [successful   (if success? 1 0)
+          last-failure (when-not success? (str Instant/EPOCH))]
+      {:total-calls      1
+       :successful-calls successful
+       :success-rate     (double successful)
+       :last-failure     last-failure})))
 
 ;; handle-rate-limited-batch tests
 (deftest ^{:stratum 0} test-handle-rate-limited-no-failover-configured
@@ -173,7 +174,22 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} test-handle-rate-limited-with-allowed-backends
+(defn ^{:stratum 1} recording-backend-switch
+  "Stand-in for `self-healing/trigger-backend-switch!` that appends
+   [:switch from to] to CALLS instead of persisting a cooldown and a new
+   default backend. Returns the real one's
+   {:from :to :cooldown-until <Instant> :cooldown-ms}."
+  [calls]
+  (fn [from to]
+    (swap! calls conj [:switch from to])
+    {:from           from
+     :to             to
+     :cooldown-until Instant/EPOCH
+     :cooldown-ms    switch-cooldown-ms}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} test-handle-rate-limited-with-allowed-backends
   (testing "records the current backend's failure, then switches to the allowed one"
     (let [[logger _] (log/collecting-logger)
           calls (atom [])
