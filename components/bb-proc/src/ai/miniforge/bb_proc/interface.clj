@@ -15,49 +15,50 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.bb-proc.interface
   "Subprocess helpers for Babashka tasks. Pass-through to `core`."
   (:refer-clojure :exclude [run!])
   (:require [ai.miniforge.bb-proc.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Public API — pass-through only
 
-(defn run!
-  "Run a command inheriting stdio. Throws ex-info on non-zero exit.
-   Accepts an optional opts map as the first arg (like `p/shell`)."
+;; Public API — pass-through only
+(defn ^{:stratum 0} run!
+  "Run a command through `babashka.process/sh`, which captures stdout and
+   stderr rather than inheriting them. Throws ex-info on non-zero exit, with
+   :exit, :cmd and -- when stderr was captured -- :err in the ex-data.
+   Accepts an optional opts map as the first arg, including stdio overrides."
   [& args]
   (apply core/run! args))
 
-(defn run-bg!
+(defn ^{:stratum 0} run-bg!
   "Start a command in the background. Returns the process handle.
    Caller is responsible for destroying it via `destroy!`."
   [& args]
   (apply core/run-bg! args))
 
-(defn sh
+(defn ^{:stratum 0} sh
   "Run a command, capture stdout/stderr, return the result map.
    Never throws — caller inspects `:exit`."
   [& args]
   (apply core/sh args))
 
-(defn installed?
+(defn ^{:stratum 0} installed?
   "True if `cmd` resolves on PATH."
   [cmd]
   (core/installed? cmd))
 
-(defn resolve-command
+(defn ^{:stratum 0} resolve-command
   "Resolve `cmd` to an executable path when possible."
   [cmd]
   (core/resolve-command cmd))
 
-(defn clojure-command
+(defn ^{:stratum 0} clojure-command
   "Resolve the best Clojure executable for the current process."
   []
   (core/clojure-command))
 
-(defn destroy!
+(defn ^{:stratum 0} destroy!
   "Destroy a background process and wait briefly for it to exit."
   [proc]
   (core/destroy! proc))
