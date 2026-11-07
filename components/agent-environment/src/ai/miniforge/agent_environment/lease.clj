@@ -121,8 +121,9 @@
   [entry request]
   (let [state (:entry/state entry)]
     (cond
-      (or (nil? entry) (= :state/released state) (unleased-cleanup? entry)) (decision :new)
+      (or (nil? entry) (= :state/released state)) (decision :new)
       (not= request (:entry/request entry)) (decision :refuse :anomalies.agent-environment/conflicting-request)
+      (unleased-cleanup? entry) (decision :new)
       (= :state/provisioned state) (decision :duplicate)
       :else (decision :refuse (state->refusal state)))))
 
@@ -134,7 +135,7 @@
    audit calls run after expiry); otherwise the refusal reason."
   [entry operation lease now]
   (cond
-    (nil? entry)
+    (or (nil? entry) (nil? lease))
     :anomalies.agent-environment/unknown-lease
 
     (not= lease (current-lease entry))
