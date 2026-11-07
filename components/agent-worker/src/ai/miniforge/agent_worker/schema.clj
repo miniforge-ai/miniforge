@@ -55,16 +55,11 @@
 
 (def ^{:stratum 0} usage-quantities [:usage/input-tokens :usage/output-tokens :usage/cost-usd])
 
-;------------------------------------------------------------------------------ Layer 1
+(def ^{:stratum 0} Cost
+  "A finite, non-negative amount of US dollars. NaN fails both bounds."
+  [:and number? [:>= 0] [:< ##Inf]])
 
-(def ^{:stratum 1} Config
-  "What was selected. `:config/worker` names exactly one worker; an
-   unavailable one fails rather than being replaced."
-  [:map {:closed true}
-   [:config/worker :keyword]
-   [:config/workdir NonBlank]
-   [:config/model {:optional true} NonBlank]
-   [:config/max-budget-usd {:optional true} [:and number? pos?]]])
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} status-matches-quantities?
   "Unknown has no quantity, reported has all three, partial some but not all."
@@ -97,6 +92,15 @@
    [:worker/config-digest Sha256Hex]
    [:worker/attempt pos-int?]])
 
+(def ^{:stratum 1} Config
+  "What was selected. `:config/worker` names exactly one worker; an
+   unavailable one fails rather than being replaced."
+  [:map {:closed true}
+   [:config/worker :keyword]
+   [:config/workdir NonBlank]
+   [:config/model {:optional true} NonBlank]
+   [:config/max-budget-usd {:optional true} [:and Cost [:> 0]]]])
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (def ^{:stratum 2} Usage
@@ -105,14 +109,8 @@
     [:usage/status (into [:enum] usage-statuses)]
     [:usage/input-tokens [:maybe nat-int?]]
     [:usage/output-tokens [:maybe nat-int?]]
-    [:usage/cost-usd [:maybe number?]]]
+    [:usage/cost-usd [:maybe Cost]]]
    [:fn status-matches-quantities?]])
-
-(def ^{:stratum 2} Submission
-  [:map {:closed true}
-   [:submission/binding Binding]
-   [:submission/config Config]
-   [:submission/prompt NonBlank]])
 
 (def ^{:stratum 2} Session
   "A started attempt: its binding and the worker's native references. A
@@ -123,3 +121,9 @@
    [:session/native-id [:maybe NonBlank]]
    [:session/process-ref NonBlank]
    [:session/turn pos-int?]])
+
+(def ^{:stratum 2} Submission
+  [:map {:closed true}
+   [:submission/binding Binding]
+   [:submission/config Config]
+   [:submission/prompt NonBlank]])

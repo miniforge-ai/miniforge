@@ -84,6 +84,10 @@
     (is (not (m/validate worker/Usage {:usage/status :usage/reported :usage/input-tokens nil
                                        :usage/output-tokens nil :usage/cost-usd nil})))
     (is (m/validate worker/Usage (session/normalize-usage {:usage/input-tokens 0}))))
+  (testing "given a negative or nonfinite cost → invalid Usage"
+    (doseq [cost [-1 ##NaN ##Inf]]
+      (is (not (m/validate worker/Usage {:usage/status :usage/partial :usage/input-tokens nil
+                                         :usage/output-tokens nil :usage/cost-usd cost})))))
   (testing "given every quantity → reported"
     (is (= :usage/reported (:usage/status (session/normalize-usage {:usage/input-tokens reported-tokens
                                                                     :usage/output-tokens reported-tokens

@@ -62,14 +62,9 @@
   (when (not= (content-hash/content-hash config) (:worker/config-digest binding))
     :anomalies.agent-worker/config-digest-mismatch))
 
-(defn ^{:stratum 0} spend-usage
-  "The usage an attempt presents: its run and task, and the configured
-   budget when there is one."
-  [binding config]
-  (cond-> {:effect/scope {:worker/tenant-id (:worker/tenant-id binding)
-                          :worker/run-id (:worker/run-id binding)
-                          :worker/task-id (:worker/task-id binding)}}
-    (:config/max-budget-usd config) (assoc :usage/cost-usd (:config/max-budget-usd config))))
+(def ^{:stratum 0} attempt-count
+  "Effects one worker attempt presents against a grant's count ceiling."
+  1)
 
 (defn ^{:stratum 0} budget-refusal
   "A cost ceiling on the grant needs a configured budget the worker can
@@ -82,7 +77,19 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} grant-refusal
+(defn ^{:stratum 1} spend-usage
+  "The usage an attempt presents: its run and task, one attempt, and the
+   configured budget when there is one."
+  [binding config]
+  (cond-> {:effect/scope {:worker/tenant-id (:worker/tenant-id binding)
+                          :worker/run-id (:worker/run-id binding)
+                          :worker/task-id (:worker/task-id binding)}
+           :usage/count attempt-count}
+    (:config/max-budget-usd config) (assoc :usage/cost-usd (:config/max-budget-usd config))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} grant-refusal
   "Nil when `grant` is the binding's live root spend grant, issued to the
    acting principal, covering the run and task and the configured budget."
   [grant acting binding config now]

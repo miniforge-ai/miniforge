@@ -83,6 +83,9 @@
     (is (= :anomalies.agent-worker/grant-not-bound (admission/grant-refusal (spend) acting bound config now)))
     (is (= :anomalies.agent-worker/grant-wrong-effect
            (admission/grant-refusal (spend :effect-class :effect/provision) acting bound config now)))
+    (is (= :anomalies.agent-worker/grant-exceeded
+           (let [zero-count (spend :constraints {:constraint/max-count 0})]
+             (admission/grant-refusal zero-count acting (session/bind acting lease zero-count config 1) config now))))
     (is (= :anomalies.agent-worker/grant-inactive
            (admission/grant-refusal granted acting bound config (.plusSeconds now (inc ttl-seconds)))))))
 
