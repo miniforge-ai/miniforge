@@ -61,7 +61,7 @@
     (nf/write-stream! w claude-result)
     (is (= {:usage/status :usage/reported :usage/input-tokens 10 :usage/output-tokens 20 :usage/cost-usd 0.25}
            (worker/usage (:wc w) (:acting w) session)))
-    (let [steered (worker/send-input! (:wc w) (:acting w) session "Now the docs.")]
+    (let [steered (worker/send-input! (:wc w) (:acting w) (:spend w) session "Now the docs.")]
       (is (= "native-7" (:session/native-id steered)))
       (is (str/includes? (last (nf/launched-scripts w)) "'--resume' 'native-7'")))))
 
@@ -73,7 +73,7 @@
     (is (= {:usage/status :usage/partial :usage/input-tokens 30 :usage/output-tokens 40 :usage/cost-usd nil}
            (worker/usage (:wc w) (:acting w) session)))
     (is (= :anomalies.agent-worker/steering-unsupported
-           (reason (worker/send-input! (:wc w) (:acting w) session "More."))))))
+           (reason (worker/send-input! (:wc w) (:acting w) (:spend w) session "More."))))))
 
 (deftest ^{:stratum 1} test-missing-harness-or-credential-fails-preflight
   (doseq [missing [:cli :credential]]

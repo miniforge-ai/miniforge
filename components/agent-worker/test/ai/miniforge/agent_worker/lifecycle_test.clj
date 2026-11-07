@@ -18,11 +18,14 @@
 (ns ai.miniforge.agent-worker.lifecycle-test
   (:require
    [ai.miniforge.agent-environment.interface :as env]
+   [ai.miniforge.agent-worker.controller :as controller]
    [ai.miniforge.agent-worker.fake :as fake]
    [ai.miniforge.agent-worker.fixtures :as fx]
    [ai.miniforge.agent-worker.interface :as worker]
    [ai.miniforge.anomaly.interface :as anomaly]
-   [clojure.test :refer [deftest is testing]]))
+   [clojure.test :refer [deftest is testing]])
+  (:import
+   [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -47,6 +50,11 @@
 (defn- ^{:stratum 0} reason [result] (anomaly/subtype result))
 
 (def ^{:stratum 0} fake-config (fx/config :worker/fake))
+
+(defn- ^{:stratum 0} steer [w wc acting session]
+  (worker/send-input! wc acting (:spend w) session "More."))
+
+(defn- ^{:stratum 0} after-expiry [w] (.plusSeconds ^Instant (:now w) (* 2 fx/ttl-seconds)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -92,7 +100,7 @@
 (deftest ^{:stratum 1} test-steering-cancel-and-artifacts
   (let [w (fresh)
         session (fx/start! w fake-config 1 prompt)
-        steered (worker/send-input! (:wc w) (:acting w) session "Also update the docs.")]
+        steered (worker/send-input! (:wc w) (:acting w) (:spend w) session "Also update the docs.")]
     (testing "given a worker that steers between turns → the next turn keeps the native session"
       (is (= 2 (:session/turn steered)))
       (is (= (:session/native-id session) (:session/native-id steered)))
@@ -106,8 +114,36 @@
 (deftest ^{:stratum 1} test-worker-without-steering-refuses-input
   (let [w (fresh {:fake/capabilities (assoc fake/default-capabilities :capabilities/steering :steering/none)} {})
         session (fx/start! w fake-config 1 prompt)]
-    (is (= :anomalies.agent-worker/steering-unsupported
-           (reason (worker/send-input! (:wc w) (:acting w) session "More."))))))
+    (is (= :anomalies.agent-worker/steering-unsupported (reason (steer w (:wc w) (:acting w) session))))))
+
+(deftest ^{:stratum 1} test-a-retry-reconciles-without-preflight-and-says-when-still-starting
+  (let [w (fresh)
+        session (fx/start! w fake-config 1 prompt)
+        failing (assoc-in (:wc w) [:worker/workers :worker/fake] (fake/create {:fake/preflight-failures [:cli-missing]}))]
+    (is (= session (worker/start! failing (:acting w) (:spend w) (:lease w) (fx/submission w fake-config 1 prompt))))
+    (controller/claim! (:wc w) (fx/submission w fake-config 2 prompt))
+    (is (= :anomalies.agent-worker/start-in-flight (reason (fx/start! w fake-config 2 prompt))))))
+
+(deftest ^{:stratum 1} test-a-next-turn-needs-the-principal-a-finished-turn-a-live-grant-and-the-reservation
+  (let [w (fresh)
+        session (fx/start! w fake-config 1 prompt)
+        colleague (assoc (:acting w) :acting/principal-id (random-uuid))
+        expired-grant (assoc (:wc w) :worker/clock (constantly (after-expiry w)))]
+    (is (= :anomalies.agent-worker/forged-principal (reason (steer w (:wc w) colleague session))))
+    (is (= :anomalies.agent-worker/grant-inactive (reason (steer w expired-grant (:acting w) session))))
+    (is (true? (controller/reserve-turn! (:wc w) session)))
+    (is (= :anomalies.agent-worker/turn-in-progress (reason (steer w (:wc w) (:acting w) session))))
+    (is (= 1 (fake/starts (:worker w)))))
+  (let [w (fresh {:fake/final-state :state/unknown} {})
+        session (fx/start! w fake-config 1 prompt)]
+    (is (= :anomalies.agent-worker/turn-unsettled (reason (steer w (:wc w) (:acting w) session))))))
+
+(deftest ^{:stratum 1} test-artifacts-are-collected-after-the-environment-expires
+  (let [w (fresh)
+        session (fx/start! w fake-config 1 prompt)
+        expired (assoc (:wc w) :worker/environment (assoc (:ec w) :controller/clock (constantly (after-expiry w))))]
+    (is (= :anomalies.agent-environment/environment-expired (reason (worker/inspect expired (:acting w) session))))
+    (is (= 1 (count (worker/persist-artifacts! expired (:acting w) session))))))
 
 (deftest ^{:stratum 1} test-another-tenant-cannot-use-the-session
   (let [w (fresh)

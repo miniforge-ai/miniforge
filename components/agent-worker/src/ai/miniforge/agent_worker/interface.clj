@@ -79,11 +79,12 @@
   (or (v/check v/Acting acting schema/Session session) (lifecycle/inspect wc acting session)))
 
 (defn ^{:stratum 0} send-input!
-  "Steer a session between turns: the next turn's session, or an
-   `:unsupported` refusal for a worker without steering."
-  [wc acting session text]
-  (or (v/check v/Acting acting schema/Session session schema/NonBlank text)
-      (lifecycle/send-input! wc acting session text)))
+  "Steer a session between turns: the next turn's session, or a refusal
+   (`:unsupported` for a worker without steering). The spend grant is
+   checked again, since each turn spends."
+  [wc acting grant session text]
+  (or (v/check v/Acting acting v/MaybeGrant grant schema/Session session schema/NonBlank text)
+      (lifecycle/send-input! wc acting grant session text)))
 
 (defn ^{:stratum 0} request-cancel!
   "Ask the running turn to stop: `{:cancel/requested? bool}`. Requested is

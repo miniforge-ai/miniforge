@@ -27,6 +27,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} completed-exit
+  "What the status script prints once a turn has exited cleanly."
+  "0\n")
+
 (def ^{:stratum 0} harness-pid "4242")
 
 (def ^{:stratum 0} turn-dir "/work/.miniforge/worker/1-1")
@@ -50,6 +54,7 @@
       (str/starts-with? script "command -v") (if (= :cli missing) not-found ok)
       (str/starts-with? script "test -n") (if (= :credential missing) not-found ok)
       (str/includes? script "& echo $!") (assoc ok :exec/stdout (str harness-pid "\n"))
+      (str/starts-with? script "if [ -f") (assoc ok :exec/stdout completed-exit)
       :else ok)))
 
 (defn ^{:stratum 1} launched-scripts

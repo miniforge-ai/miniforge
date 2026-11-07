@@ -51,6 +51,18 @@
     ledger
     (assoc ledger k {:record/submission submission :record/result nil :record/cancel-requested? false})))
 
+(defn- ^{:stratum 0} reserved
+  [record session]
+  (if (and (= session (:record/result record)) (not (:record/turn-starting? record)))
+    (assoc record :record/turn-starting? true)
+    record))
+
+(defn ^{:stratum 0} turn-settled
+  "`record` with its turn reservation cleared and, when the turn started,
+   `steered` as its session."
+  [record steered]
+  (cond-> (dissoc record :record/turn-starting?) steered (assoc :record/result steered)))
+
 (defn ^{:stratum 0} settle!
   "Store the start result (session or anomaly) or a later session turn."
   [wc binding f]
@@ -63,6 +75,13 @@
   {:env/controller (:worker/environment wc)
    :env/acting acting
    :env/lease (lease-of binding)})
+
+(defn ^{:stratum 1} reserve-turn!
+  "Reserve `session`'s next turn; true only for the one call that did."
+  [wc session]
+  (let [k (session/submission-key (:session/binding session))
+        [before after] (swap-vals! (:worker/ledger wc) update k reserved session)]
+    (not= (get before k) (get after k))))
 
 (defn ^{:stratum 1} claim!
   "Record `submission` before anything starts and return the decision the
