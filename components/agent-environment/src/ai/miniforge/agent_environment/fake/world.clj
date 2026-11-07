@@ -61,3 +61,24 @@
    learned the UID deletes by name, the only handle it has."
   [world target]
   (or (nil? (:target/uid target)) (some? (live world target))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} delete-outcome
+  "What deleting `target` from `world` reports: an absent namespace is
+   already gone, another UID's is refused, an unconfirmed delete is uncertain."
+  [world target uncertain?]
+  (cond
+    (nil? (get world (:target/namespace target))) :outcome/applied
+    (not (deletable? world target)) :outcome/failed
+    uncertain? :outcome/uncertain
+    :else :outcome/applied))
+
+(defn ^{:stratum 2} delete
+  "`world` after deleting `target`, only when the delete is confirmed."
+  [world target uncertain?]
+  (if (and (some? (get world (:target/namespace target)))
+           (deletable? world target)
+           (not uncertain?))
+    (dissoc world (:target/namespace target))
+    world))

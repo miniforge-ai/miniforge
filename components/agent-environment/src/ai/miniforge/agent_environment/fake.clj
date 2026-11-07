@@ -19,7 +19,8 @@
   "An in-memory provider for contract tests and fake-backed pilots. Options
    inject faults: `:fake/fail-step` stops provisioning at that step after
    the earlier ones apply, `:fake/uncertain-deletes?` leaves deletes
-   unconfirmed, and `:fake/probe-failures` fails the live probe."
+   unconfirmed, `:fake/probe-failures` fails the live probe, and
+   `:fake/omit-uid?` creates the namespace but never reports its UID."
   (:require
    [ai.miniforge.agent-environment.fake.world :as world]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]))
@@ -34,26 +35,16 @@
     (let [{:keys [applied failed]} (world/walk-steps (:fake/fail-step opts))
           uid (when (seq applied) (str (random-uuid)))]
       (when uid (swap! state world/provisioned (:target/namespace target) uid applied))
-      {:provision/uid uid
+      {:provision/uid (when-not (:fake/omit-uid? opts) uid)
        :provision/steps (cond-> (mapv #(world/step % :outcome/applied) applied)
                           failed (conj (world/step failed :outcome/failed)))}))
   (observe [_ target]
     (let [space (get @state (:target/namespace target))]
       {:observed/uid (:uid space) :observed/ready? (boolean (:ready? space))}))
   (deprovision! [_ target]
-    (cond
-      (nil? (get @state (:target/namespace target)))
-      {:deprovision/steps [(world/step :step/namespace-deleted :outcome/applied)]}
-
-      (not (world/deletable? @state target))
-      {:deprovision/steps [(world/step :step/namespace-deleted :outcome/failed)]}
-
-      (:fake/uncertain-deletes? opts)
-      {:deprovision/steps [(world/step :step/namespace-deleted :outcome/uncertain)]}
-
-      :else
-      (do (swap! state dissoc (:target/namespace target))
-          {:deprovision/steps [(world/step :step/namespace-deleted :outcome/applied)]}))))
+    (let [uncertain? (:fake/uncertain-deletes? opts)
+          [before _] (swap-vals! state world/delete target uncertain?)]
+      {:deprovision/steps [(world/step :step/namespace-deleted (world/delete-outcome before target uncertain?))]})))
 
 (defn ^{:stratum 0} replace-uid!
   "Recreate `namespace` under a new UID, as an outside actor reusing the name would."

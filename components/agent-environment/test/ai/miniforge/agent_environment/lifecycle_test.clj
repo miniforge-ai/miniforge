@@ -128,3 +128,16 @@
         env-value (acquire w)]
     (fake/forget-namespace! (:controller/provider (:c w)) (:environment/namespace env-value))
     (is (= {:call/outcome :outcome/applied} (env/release! (:c w) (:a w) (lease-of env-value))))))
+
+(deftest ^{:stratum 1} test-unleased-cleanup-is-retried-before-provisioning-again
+  (let [w (world {:fake/omit-uid? true :fake/uncertain-deletes? true})
+        req (fx/request w (:a w))
+        provider (:controller/provider (:c w))]
+    (is (= :anomalies.agent-environment/provisioning-failed (reason (fx/acquire w (:a w) req))))
+    (testing "given the leftover still unconfirmed → the next acquire retries it and refuses"
+      (is (= :anomalies.agent-environment/cleanup-uncertain (reason (fx/acquire w (:a w) req))))
+      (is (= [:outcome/uncertain :outcome/uncertain] (fx/outcomes w :environment/release))))
+    (testing "given the leftover gone → the retry confirms it before provisioning"
+      (fake/forget-namespace! provider (first (live w)))
+      (fx/acquire w (:a w) req)
+      (is (= :outcome/applied (nth (fx/outcomes w :environment/release) 2))))))
