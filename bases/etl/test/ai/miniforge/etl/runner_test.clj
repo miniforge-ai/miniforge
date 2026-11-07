@@ -64,7 +64,9 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} ^:private invalid-pattern-pipeline
+(defn- invalid-rule-pipeline
+  "A pipeline whose validate stage has one built-in rule descriptor `rule`."
+  [rule]
   {:pipeline/name    "Invalid Pattern"
    :pipeline/version "0.1.0"
    :pipeline/mode    :full-refresh
@@ -75,7 +77,7 @@
     (pack-stage "Check" :validate [:ds/raw] [:ds/checked] ["Ingest"]
                 {:stage/config {:stage/quality-pack
                                 {:pack/id    :pattern-pack
-                                 :pack/rules [{:rule/type :pattern :rule/field :title :rule/pattern "["}]}}})
+                                 :pack/rules [rule]}}})
     (pack-stage "Publish" :publish [:ds/checked] [] ["Check"]
                 {:stage/connector-ref :conn/output})]
    :pipeline/input-datasets  []
@@ -117,9 +119,12 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-validate-pack-preflights-resolved-pipeline
-  (testing "given an unregistered transform or a pattern that does not compile → validation fails with a preflight problem, no exception"
+  (testing "given an unregistered transform, a pattern that does not compile, or a rule missing its field → validation fails with a preflight problem, no exception"
     (doseq [[pipeline-def expected] [[unresolved-transform-pipeline [[:transform/unresolved :no-such-transform]]]
-                                     [invalid-pattern-pipeline [[:quality-rule/invalid :pattern]]]]]
+                                     [(invalid-rule-pipeline {:rule/type :pattern :rule/field :title :rule/pattern "["})
+                                      [[:quality-rule/invalid :pattern]]]
+                                     [(invalid-rule-pipeline {:rule/type :required})
+                                      [[:quality-rule/invalid :required]]]]]
       (let [dir      (.toFile (java.nio.file.Files/createTempDirectory
                                "etl-preflight" (make-array java.nio.file.attribute.FileAttribute 0)))
             pipeline (write-edn! dir "pipeline.edn" pipeline-def)

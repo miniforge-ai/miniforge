@@ -42,6 +42,7 @@
    [ai.miniforge.phase-opsv.boundary.experiment-preflight :as experiment-preflight]
    [ai.miniforge.phase-opsv.boundary.retained-preparation :as retained-preparation]
    [ai.miniforge.phase-opsv.boundary.governed-replica-proposal :as governed-replica-proposal]
+   [ai.miniforge.phase-opsv.boundary.governed-load-proposal :as governed-load-proposal]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -222,6 +223,14 @@
    UID/revision tests and declared bounds constrain the data, not execution authority.
    No provider call, retention/ownership proof, N4/N8 admission or verified recovery."
   native-replica-request/prepare)
+
+(def ^{:stratum 0} prepare-governed-kubernetes-load-proposal!
+  "Construct scheduling-gated Fortio Pod data from a retained original and explicit image/resources.
+   Requires one HTTP(S) destination, positive count/concurrency/rate and a whole-second Pod deadline.
+   Returns exact dedicated load-test scope and payload hash, not authority or ownership proof.
+   Starting traffic needs a separate exact UID/revision-fenced release effect.
+   No provider call, execution opt-in, recovery-plan approval, grant issuance or verified termination."
+  governed-load-proposal/prepare!)
 
 (def ^{:stratum 0} apply-kubernetes-replica-request!
   "Trusted-runtime provider callback: settings, exact committing transaction and required dispatch.
