@@ -83,6 +83,12 @@
       (is (= 1 (:report/passed report)))
       (is (= 1 (:report/failed report))))))
 
+(deftest ^{:stratum 1} test-verdict-cannot-inject-a-rule-error
+  (testing "given a well-formed verdict with its own :rule/error → the rule ran; no rule error is recorded"
+    (let [evaluation (dq/evaluate-records [(rule-returning {:valid? true :rule/error true})] records)]
+      (is (empty? (dq/rule-errors evaluation)))
+      (is (= records (dq/filter-passed evaluation))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-malformed-verdicts-are-rule-errors
@@ -91,3 +97,8 @@
       (is (= [:rule/malformed-verdict :rule/malformed-verdict]
              (error-kinds [(rule-returning verdict)]))
           (pr-str verdict)))))
+
+(deftest ^{:stratum 2} test-verdict-cannot-select-the-exception-path
+  (testing "given a verdict that carries the boundary's internal thrown key → a malformed verdict, not a crash"
+    (is (= [:rule/malformed-verdict :rule/malformed-verdict]
+           (error-kinds [(rule-returning {:ai.miniforge.data-quality.invoke/thrown nil})])))))

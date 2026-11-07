@@ -26,19 +26,24 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} check-with-exception-handling
-  "Call `check-fn` on `record`. Returns its verdict, or {::thrown e} when it
-   throws an Exception or an AssertionError (a failed `assert` in the rule).
-   Other JVM errors stay fatal. Plain try: data-quality has no slingshot dependency (rule 211)."
+  "Call `check-fn` on `record`. Returns [::returned verdict], or
+   [::threw e] when it throws an Exception or an AssertionError (a failed
+   `assert` in the rule). The tag wraps the return value, so no verdict the
+   rule returns can select the exception path. Other JVM errors stay fatal.
+   Plain try: data-quality has no slingshot dependency (rule 211)."
   [check-fn record]
   (try
-    (check-fn record)
+    [::returned (check-fn record)]
     (catch Exception e
-      {::thrown e})
+      [::threw e])
     (catch AssertionError e
-      {::thrown e})))
+      [::threw e])))
 
-(defn- ^{:stratum 0} thrown? [verdict]
-  (and (map? verdict) (contains? verdict ::thrown)))
+(defn- ^{:stratum 0} verdict-evaluation
+  "The evaluation for a well-formed verdict. :rule/error is reserved for
+   errors this boundary records, so a verdict's own :rule/error is dropped."
+  [base verdict]
+  (merge base (dissoc verdict :rule/error)))
 
 (defn- ^{:stratum 0} well-formed-verdict? [verdict]
   (and (map? verdict) (boolean? (:valid? verdict))))
@@ -70,12 +75,12 @@
    but a well-formed verdict, the evaluation has :valid? false and a
    :rule/error describing what went wrong."
   [{:rule/keys [id field severity check-fn]} record]
-  (let [base    {:rule/id id :field field :severity severity}
-        verdict (check-with-exception-handling check-fn record)]
+  (let [base             {:rule/id id :field field :severity severity}
+        [outcome result] (check-with-exception-handling check-fn record)]
     (cond
-      (thrown? verdict)              (thrown-evaluation base (::thrown verdict))
-      (well-formed-verdict? verdict) (merge base verdict)
-      :else                          (malformed-evaluation base verdict))))
+      (= ::threw outcome)           (thrown-evaluation base result)
+      (well-formed-verdict? result) (verdict-evaluation base result)
+      :else                         (malformed-evaluation base result))))
 
 (comment
   (evaluate-rule {:rule/id :r :rule/check-fn (fn [_] {:valid? "yes"})} {:id 1}))
