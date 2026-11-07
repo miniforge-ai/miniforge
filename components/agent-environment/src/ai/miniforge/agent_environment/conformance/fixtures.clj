@@ -50,11 +50,24 @@
   "Generous for a no-op command in a freshly provisioned environment."
   30000)
 
+(def ^{:stratum 0} probe-path
+  "A path writable in any environment image."
+  "/tmp/conformance-probe.txt")
+
+(def ^{:stratum 0} probe-text
+  "Content a write then read must return unchanged."
+  "conformance probe")
+
 (defn ^{:stratum 0} acting-for [tenant-name now]
   (tenancy/establish-acting (tenancy/operator-identity tenant-name now) now))
 
 (defn ^{:stratum 0} subtype? [reason result]
   (and (anomaly/anomaly? result) (= reason (anomaly/subtype result))))
+
+(defn ^{:stratum 0} result [id passed? detail]
+  {:check/id id
+   :check/outcome (if passed? :check/passed :check/failed)
+   :check/detail detail})
 
 (defn ^{:stratum 0} memory-persister [lease path _text]
   {:artifact/path path :artifact/location (str (:lease/environment-uid lease) ":" path)})
@@ -75,6 +88,10 @@
     (mapv :receipt/outcome (filter #(wanted (:receipt/operation %)) @(:receipts w)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} probe-command
+  "A command every environment image can run and exit zero."
+  {:exec/argv ["true"] :exec/timeout-ms exec-timeout-ms})
 
 (defn ^{:stratum 1} world
   "A fresh controller over `provider`, two tenants, and a receipt log."

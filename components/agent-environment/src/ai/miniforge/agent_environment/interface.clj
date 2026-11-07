@@ -21,6 +21,7 @@
    lifecycle; every call emits a receipt marked `:profile/unqualified`.
    Invalid inputs return an `:invalid-input` anomaly without a receipt."
   (:require
+   [ai.miniforge.agent-environment.conformance :as conformance]
    [ai.miniforge.agent-environment.controller :as controller]
    [ai.miniforge.agent-environment.fake :as fake]
    [ai.miniforge.agent-environment.lifecycle :as lifecycle]
@@ -128,3 +129,11 @@
   "Every command a fake provider ran in `namespace`, in order."
   [provider namespace]
   (fake/commands provider namespace))
+
+(defn ^{:stratum 0} run-conformance
+  "Run the contract suite. `:make-provider` returns a fresh provider; the
+   optional `:make-partial-provider` returns one whose provision fails after
+   its first step, and `:await-ready` wraps a readiness thunk until ready.
+   Returns one `{:check/id :check/outcome :check/detail}` per check."
+  [opts]
+  (conformance/run opts))
