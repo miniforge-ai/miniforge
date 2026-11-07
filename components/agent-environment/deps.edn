@@ -1,0 +1,6 @@
+{:paths ["src"]
+ :deps {ai.miniforge/content-hash {:local/root "../content-hash"}
+        ai.miniforge/execution-grant {:local/root "../execution-grant"}
+        metosin/malli {:mvn/version "0.16.4"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}
