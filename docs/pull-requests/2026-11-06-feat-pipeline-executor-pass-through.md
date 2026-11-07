@@ -48,6 +48,15 @@ reported a nil ref, so the operator could not tell which rule was missing.
 2. A spawned validate stage whose quality pack has no rules fails instead of
    passing every record.
 
+Second round:
+
+1. A validate stage whose `:pack/rules` is not a non-empty list, or that has
+   a rule with no callable check fn, fails with `:configuration` before any
+   record is evaluated, so an unbuilt rule fails even when the stage gets no
+   records.
+2. The run-time conflict check treats any `:stage/transform` declaration as
+   processing, matching preflight.
+
 ## Behavior changes
 
 1. A spawned stage that declares no processing fails instead of passing its

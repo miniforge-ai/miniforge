@@ -6,7 +6,8 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.boundary.retained-preparation :as retained]
             [ai.miniforge.phase-opsv.boundary.verification-reporting :as reporting]
-            [ai.miniforge.phase-opsv.governed-replica-proposal :as model]
+            [ai.miniforge.phase-opsv.governed-experiment-proposal :as model]
+            [ai.miniforge.phase-opsv.governed-experiment-schema :as experiment]
             [ai.miniforge.phase-opsv.governed-replica-proposal-schema :as schema]
             [ai.miniforge.phase-opsv.kubernetes-replica-request :as native]
             [ai.miniforge.phase-opsv.messages :as msg]
@@ -16,7 +17,7 @@
 
 (def ^{:stratum 0} ^:private valid-arguments? (m/validator schema/Arguments))
 
-(def ^{:stratum 0} ^:private valid-original? (m/validator schema/RetainedBaseline))
+(def ^{:stratum 0} ^:private valid-original? (m/validator experiment/RetainedBaseline))
 
 (defn- ^{:stratum 0} invalid []
   (anomaly/anomaly :invalid-input (msg/ts :replicas/invalid-proposal) {}))

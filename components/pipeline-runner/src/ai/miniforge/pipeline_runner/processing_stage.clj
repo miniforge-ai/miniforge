@@ -20,6 +20,7 @@
    collected from upstream stages without a connector."
   (:require [ai.miniforge.data-quality.interface :as dq]
             [ai.miniforge.pipeline-runner.messages :as msg]
+            [ai.miniforge.pipeline-runner.preflight.stage-checks :refer [callable?]]
             [ai.miniforge.pipeline-runner.stage-result
              :refer [stage-result timestamps exception-context]]))
 
@@ -54,11 +55,23 @@
                  :error-kind    :configuration}))
 
 (defn- ^{:stratum 0} declares-processing?
-  "True when the stage config names a transform type or carries a quality
+  "True when the stage config declares a transform or carries a quality
    pack, whatever the stage's family."
   [config]
-  (or (some? (get-in config [:stage/transform :transform/type]))
+  (or (some? (:stage/transform config))
       (some? (:stage/quality-pack config))))
+
+(defn- ^{:stratum 0} runnable-rules?
+  "True when a quality pack's :pack/rules is a non-empty list."
+  [quality-pack]
+  (let [rules (:pack/rules quality-pack)]
+    (and (sequential? rules) (seq rules))))
+
+(defn- ^{:stratum 0} every-rule-callable?
+  "True when every rule carries a check fn the executor can call. Checked
+   before evaluation, so an unbuilt rule fails even with no input records."
+  [quality-pack]
+  (every? #(callable? (:rule/check-fn %)) (:pack/rules quality-pack)))
 
 (defn- ^{:stratum 0} apply-transform
   [id name transform-fn config input-records]
@@ -129,17 +142,20 @@
 
 (defn ^{:stratum 2} execute-validate-stage
   "Execute a validate stage with its :stage/quality-pack rules. A pack with
-   no rules fails, as does pass-through beside processing. A stage that
+   no list of rules, or with a rule that has no check fn, fails before any
+   record is evaluated, as does pass-through beside processing. A stage that
    declares :stage/pass-through? true and no processing passes its records
    through; a stage with neither fails."
   [{:stage/keys [id name config]} input-records]
   (let [quality-pack (:stage/quality-pack config)]
     (cond
-      (pass-through-conflict? config)  (configuration-failure id name :run/pass-through-conflict)
-      (seq (:pack/rules quality-pack)) (evaluate-quality-pack id name quality-pack input-records)
-      quality-pack                     (configuration-failure id name :run/quality-pack-empty)
-      (pass-through-declared? config)  (pass-through-result id name input-records)
-      :else                            (unresolved-processing-result id name))))
+      (pass-through-conflict? config)          (configuration-failure id name :run/pass-through-conflict)
+      (and (nil? quality-pack)
+           (pass-through-declared? config))    (pass-through-result id name input-records)
+      (nil? quality-pack)                      (unresolved-processing-result id name)
+      (not (runnable-rules? quality-pack))     (configuration-failure id name :run/quality-pack-empty)
+      (not (every-rule-callable? quality-pack)) (configuration-failure id name :run/quality-rule-unresolved)
+      :else                                    (evaluate-quality-pack id name quality-pack input-records))))
 
 (comment
   (execute-transform-stage {:stage/id (random-uuid) :stage/name "Normalize" :stage/config {:stage/pass-through? true}}

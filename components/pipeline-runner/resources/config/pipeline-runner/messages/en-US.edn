@@ -15,7 +15,8 @@
   "Stage {name}: {count} quality rule evaluation(s) failed to run (a rule threw or returned a malformed verdict)"
   :run/pass-through-conflict
   "Stage {name} declares :stage/pass-through? true beside a transform or quality pack"
-  :run/quality-pack-empty   "Stage {name} has a quality pack with no rules"
+  :run/quality-pack-empty   "Stage {name} has a quality pack with no list of rules"
+  :run/quality-rule-unresolved "Stage {name} has a quality rule with no check fn"
   :run/preflight-failed     "Preflight refused the pipeline before any connector opened: {problems}"
 
   ;; Preflight problems (preflight.clj)
@@ -25,5 +26,6 @@
   :preflight/processing-undeclared   "Stage {stage}: a {ref} stage must declare its processing or set :stage/pass-through? true"
   :preflight/pass-through-conflict   "Stage {stage}: declares :stage/pass-through? true and processing at once"
   :preflight/quality-pack-empty      "Stage {stage}: quality pack {ref} has no rules"
+  :preflight/quality-pack-malformed  "Stage {stage}: quality pack {ref} has :pack/rules that is not a list of rules"
   :preflight/quality-rule-unresolved "Stage {stage}: quality rule {ref} has no implementation"
   :preflight/spawn-fn-unresolved     "Stage {stage}: spawn function {ref} is not registered"}}
