@@ -40,6 +40,10 @@ This split puts the stage executors in their own namespaces first.
 3. New files carry the Apache header; stratum-lint added `^{:stratum n}`
    metadata and `Layer N` headings.
 4. `interface.clj` is unchanged; it still calls `run/execute-pipeline`.
+5. `interface_test.clj` gets the stratum-lint autofix: `Layer N` headings,
+   `^{:stratum n}` metadata, and defs regrouped by stratum. The file had no
+   headings, so its first edit would pull this whole-file rewrite into an
+   unrelated commit.
 
 ## Behavior-neutral proof
 
@@ -48,6 +52,8 @@ new files with `*read-eval*` false. It dropped `ns` and `comment` forms, treated
 `defn-` and `defn` alike, normalized anonymous-fn gensyms, and compared the
 multisets of `pr-str`. Result: 31 code forms on each side, identical. Metadata
 is not printed, so `^{:stratum n}` and `^:private` do not affect the comparison.
+The same check on `interface_test.clj` before and after its autofix: 75 forms
+each, identical.
 
 ## Testing Plan
 
