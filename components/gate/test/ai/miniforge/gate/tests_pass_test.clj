@@ -24,9 +24,12 @@
    pass (checkpoint f413dd80, 2026-09-04: every verify entry logged
    'Gate :tests-pass passed' with failing tests)."
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.gate.test :as gate-test]))
+
+(use-fixtures :once (schema/instrument-fixture 'ai.miniforge.gate.interface))
 
 ;------------------------------------------------------------------------------ Layer 0
 

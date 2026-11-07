@@ -32,7 +32,10 @@
    [ai.miniforge.tool-registry.interface :as tool-registry]
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [clojure.test :refer [deftest is testing]]))
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [ai.miniforge.schema.interface :as schema]))
+
+(use-fixtures :once (schema/instrument-fixture 'ai.miniforge.gate.interface))
 
 ;------------------------------------------------------------------------------ Layer 0
 
