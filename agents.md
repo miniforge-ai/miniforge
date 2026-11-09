@@ -150,9 +150,10 @@ Adversarial review remains necessary because green CI alone cannot establish cor
 
 ## PR Merge Gate
 
-This applies to every session and every PR in this repo.
-It is the shared rule `standards/miniforge/workflows/pr-merge-gate.mdc` (dewey 723), repeated here because sessions
-load this file even when the `standards` submodule is not checked out. Keep the two in step.
+This complete rule applies to every session and every PR in this repo.
+The current pinned standards catalog does not contain `workflows/pr-merge-gate.mdc` (dewey 723).
+Use the complete repository-local rule below alongside all applicable rules that exist at the pinned standards commit.
+Do not substitute a moving standards branch or treat the absent shared file as a waiver of any gate below.
 
 - Open PRs ready for review, never as drafts.
   Automatic Copilot review skips drafts, and a draft adds a manual step for the operator.
