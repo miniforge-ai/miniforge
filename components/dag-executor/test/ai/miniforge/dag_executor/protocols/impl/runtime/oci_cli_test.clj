@@ -513,6 +513,20 @@
    milliseconds, so reaching this (exit 124) means it was never stopped."
   10000)
 
+(def ^{:stratum 0} ^:private term-ignoring-writer-args
+  "Arguments to `sh` for a writer that ignores SIGTERM: the ignored signal
+   is inherited by `yes`, so only the SIGKILL escalation stops it."
+  ["-c" "trap '' TERM; yes"])
+
+(def ^{:stratum 0} ^:private shell-runtime
+  "A runtime executable the arguments above run under."
+  {:runtime/executable "/bin/sh"})
+
+(def ^{:stratum 0} ^:private kill-escalation-slack-ms
+  "Wall-clock allowance for stopping a SIGTERM-resistant writer: the
+   one-second grace before SIGKILL, plus scheduling."
+  5000)
+
 ;; ============================================================================
 ;; run-runtime-timed / run-runtime-process-timed — per-subprocess deadline
 ;; ============================================================================
@@ -1277,6 +1291,17 @@
           (is (= "" (:out r)))
           (is (= expected-err (:err r))))
         (is (zero? (alength ^bytes (:out-bytes bytes-result))))))))
+
+(deftest ^{:stratum 2} runtime-runner-kills-a-term-ignoring-child-past-the-capture-limit-test
+  (testing "a writer that ignores SIGTERM is still stopped at the capture
+            limit, by the SIGKILL that follows the grace period"
+    (with-redefs [runtime-process/drain-stream small-capture-drain]
+      (let [started (System/currentTimeMillis)
+            result  (apply (private-fn 'run-runtime-timed)
+                           stop-deadline-ms shell-runtime term-ignoring-writer-args)
+            took    (- (System/currentTimeMillis) started)]
+        (is (= runtime-process/output-limit-exit-code (:exit result)))
+        (is (< took kill-escalation-slack-ms) (str "returned after " took "ms"))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

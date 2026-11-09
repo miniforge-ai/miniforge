@@ -97,7 +97,9 @@ returned exit 1 with that IOException instead of the output-limit failure.
    a drain parked on a pipe. `config-test`: absent, valid and invalid limits.
 2. `oci-cli-test/runtime-runners-stop-a-child-past-the-capture-limit-test`:
    `/usr/bin/yes` through both runners, with a 1 KiB limit, is stopped and
-   returns exit 141 with the output-limit message.
+   returns exit 141 with the output-limit message. A writer that ignores
+   SIGTERM (`trap '' TERM; yes`) is stopped by the SIGKILL that follows the
+   one-second grace, and the call returns within 5 seconds.
 3. `worktree-execute-test/execute-command-marks-output-cut-at-the-capture-limit-test`:
    4 KiB of output with a 1 KiB limit keeps 1 KiB and ends with the note.
 4. Existing runtime, container, fake-runtime, security-gate and worktree
