@@ -30,7 +30,7 @@
             "agent-environments" {:alias "ae"
                                   :necessary ["agent-environment" "anomaly" "content-hash"
                                               "execution-grant" "file-durability"
-                                              "kubernetes-target" "messages"]}
+                                              "kubernetes-target" "messages" "tenancy"]}
             "data-foundry"   {:alias "df"}
             "miniforge-core" {:alias "core"
                               ;; Runtime-loaded via phase/namespaces.edn resource discovery
