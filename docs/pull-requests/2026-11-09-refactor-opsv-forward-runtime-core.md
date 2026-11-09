@@ -33,6 +33,14 @@ classpaths and a fresh isolated package. Exercise existing real-producer start,
 durability and audit regressions with meaningful authority/readiness/cleanup faults.
 Only HTTP is simulated. Run local JVM work serially under the shared protocol.
 
+Both consuming JVM products, Polylith structure, task classpaths, strict lint
+(zero warnings/errors) and true inferred strata (at most three) pass. A fresh CLI
+package excludes all seven obsolete implementation/schema namespaces. Source and
+isolated package each pass 47 tests / 629 assertions and all nine relevant fault
+checks. Every injected fault produces assertion failures with zero test errors.
+This is pure restructuring: existing start assertions are preserved, and fixture
+changes share the same real-producer factories and name the context-failure callback.
+
 ## Deployment Plan
 
 No activation, live trials, image pulls, traffic, cluster changes or new authority.
@@ -43,7 +51,7 @@ Base: main after #2490 and #2492. Native inert creation follows separately.
 
 ## Checklist
 
-- [ ] Extract shared runtime with the existing live start consumer.
-- [ ] Source, JVM, package and fault validation.
-- [ ] Owner adversarial and full applicable standards review.
+- [x] Extract shared runtime with the existing live start consumer.
+- [x] Source, JVM, package and fault validation.
+- [x] Owner adversarial and full applicable standards review.
 - [ ] Signed commits, current-head full review, all CI and owner merge.
