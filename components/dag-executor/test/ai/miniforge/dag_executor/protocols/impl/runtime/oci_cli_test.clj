@@ -34,7 +34,10 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.git-credentials :as oci-git]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.image :as oci-img]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.process :as oci-run]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as runtime-messages]
    [ai.miniforge.dag-executor.result :as result]
+   [ai.miniforge.subprocess.interface :as subprocess]
    [clojure.java.shell :as shell]
    [clojure.string]
    [clojure.test :refer [deftest is testing]]))
@@ -484,6 +487,19 @@
                     {:runtime-kind kind :image "test:latest"})]
           (is (= kind (proto/executor-type exec))))))))
 
+(def ^{:stratum 0} ^:private small-capture-bytes
+  "A capture limit `yes` passes with its first write."
+  1024)
+
+(def ^{:stratum 0} ^:private endless-writer
+  "A runtime executable that writes to stdout until it is stopped."
+  {:runtime/executable "/usr/bin/yes"})
+
+(def ^{:stratum 0} ^:private stop-deadline-ms
+  "Deadline for the endless writer. `yes` passes the small limit within
+   milliseconds, so reaching this (exit 124) means it was never stopped."
+  10000)
+
 ;; ============================================================================
 ;; run-runtime-timed / run-runtime-process-timed — per-subprocess deadline
 ;; ============================================================================
@@ -847,6 +863,12 @@
             (is (not-any? (fn [[_ opts]] (seq (:env opts))) network) clone-url)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} small-capture-drain
+  "A drain with `small-capture-bytes` as its limit. Calls the component
+   directly: the runtime-process name it stands in for is redefined."
+  [stream opts]
+  (subprocess/drain-stream stream (assoc opts :max-bytes small-capture-bytes)))
 
 (deftest ^{:stratum 1} bootstrap-workspace-returns-the-url-it-cloned-test
   (testing "bootstrap reports the URL it cloned: :https-url with a credential,
@@ -1213,6 +1235,23 @@
                                           "BANNER=hi\nGIT_CONFIG_COUNT=7"))]
         (is (= 1 ((private-fn 'container-git-count) (docker-descriptor) "c1")))
         (is (= ["inspect" "--format" "{{range .Config.Env}}{{json .}}{{println}}{{end}}" "c1"] @args))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} runtime-runners-stop-a-child-past-the-capture-limit-test
+  (testing "a child that writes without end is stopped once a stream passes
+            the capture limit, and both runners fail with the output-limit
+            exit code instead of returning cut output"
+    (with-redefs [runtime-process/drain-stream small-capture-drain]
+      (let [expected-err (runtime-messages/t :oci/output-limit
+                                             {:bytes small-capture-bytes})
+            text-result  ((private-fn 'run-runtime-timed) stop-deadline-ms endless-writer)
+            bytes-result ((private-fn 'run-runtime-process-timed) stop-deadline-ms endless-writer [])]
+        (doseq [r [text-result bytes-result]]
+          (is (= runtime-process/output-limit-exit-code (:exit r)))
+          (is (= "" (:out r)))
+          (is (= expected-err (:err r))))
+        (is (zero? (alength ^bytes (:out-bytes bytes-result))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
