@@ -39,7 +39,7 @@
   (anomaly/let-ok [configured (admit runtime record dispatch)]
     (if (binding/matches? configured record)
       (effect/call-with-provider-dispatch! dispatch
-        (partial http/send! configured record transport/success-status outcome/report outcome/refused) (diagnostics))
+        (partial http/send! configured record #{transport/success-status} outcome/report outcome/refused) (diagnostics))
       (invalid))))
 
 (comment ::required-trusted-dispatch-no-default-admission-or-experiment-activation)
