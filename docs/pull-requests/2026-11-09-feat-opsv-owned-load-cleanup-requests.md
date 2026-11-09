@@ -33,6 +33,15 @@ against the grant schema and obtains a real root recovery grant after workflow
 cancellation. The regression failed before correction with five assertions and
 zero test errors; producer-shaped map assertions alone had missed the mismatch.
 
+The review checkout omitted the standards submodule. Review instructions now
+identify the exact gitlink and public raw-content source for reading the complete
+pinned catalogs and applicable rules. They still require reporting inaccessible
+rules, never substituting summaries or owner assertions. The public entry-point
+bytes match the local pinned checkout by SHA-256. No merge gate is relaxed.
+The root instructions also correct a stale reference to shared rule 723.
+That file does not exist at the pin; the complete repository-local merge rule
+remains authoritative and unchanged.
+
 Deletion uses `Orphan`, not cascading garbage collection: only the Pod UID is
 proven owned. Kubernetes documents these choices in its
 [DeleteOptions contract](https://kubernetes.io/docs/reference/kubernetes-api/definitions/delete-options-v1-meta/).
@@ -50,12 +59,15 @@ Validate affected products, a fresh CLI and an isolated package.
 - Strict clj-kondo: zero warnings/errors; seven changed Clojure namespaces have
   at most three inferred strata.
 - Polylith structure, both consuming JVM products and task classpaths pass.
-- Source and isolated fresh package: 63 tests / 1,282 assertions.
-- Curated OPSV/workflow/artifact integration: 229 tests / 3,290 assertions.
+- Combined with merged native load stopping: source and isolated fresh package
+  each pass 77 tests / 1,775 assertions.
+- Combined curated OPSV/workflow/artifact integration: 243 tests / 3,783 assertions.
 - Native compatibility: 308 tests / 1,903 assertions across the existing 42 suites.
 - Seven injected faults cause assertion failures with zero test errors.
   They cover closed input, quiescence, distinct identity, cascading deletion,
   operation vocabulary, UID preconditions and resource-version preconditions.
+- The combined package also rejects all five native-stop injected faults with
+  assertion failures and zero test errors.
 
 The integrated fixtures use real retained approval, native creation and durable
 records. Only HTTP is simulated. No cleanup request grants permission or proves
