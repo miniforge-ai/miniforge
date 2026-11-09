@@ -169,8 +169,11 @@ error in place of the release result, which would drop snapshot data reported fr
 A snapshot result is `{:kind :phase :sha :tree :tag :dir :changed? :bytes :nested-repos}`, or
 `{:kind :error :reason ...}` on failure. `:nested-repos` is the vector of gitlink paths, empty when there are none.
 `snapshot-workspace!` returns the result; acquire and release results carry it as `:workspace/snapshot`. The runner
-collects each one in the context's `:execution/workspace-snapshots`: the baseline from the acquired environment map
-(`runner_preparation.clj`), one per phase boundary, and the final one in `execute!`.
+collects each one in the context's `:execution/workspace-snapshots`: the baseline, one per phase boundary, and the
+final one in `execute!`. The baseline needs explicit carrying. `describe` (`environment_records.clj`) builds the
+acquired environment map from five fixed keys and drops the rest, so PR 4 adds `:workspace/snapshot` to that map.
+`runner_preparation.clj` then copies it into `:execution/workspace-snapshots`, beside
+`:execution/environment-metadata`, and the acquire event is published from the same map.
 
 Within a process, writes to one store are serialized by a JVM lock keyed on its git dir. Across processes, two file
 locks apply, both through the port's `:lock!` and `:unlock!`. The run owner lock alone is not enough: its file lives
@@ -311,7 +314,7 @@ runs in the infrastructure store, which implements the application's `SnapshotSt
 | 1 | domain | `dag_executor/snapshot_policy.clj`, pure: store path, tag names and the next `n`, the git argv and environment for each operation, result shapes; pure tests | — |
 | 2 | application | `snapshotted.clj` wrapper and the `SnapshotStore` port it calls; `snapshot-workspace!` in the interface; tests with a fake store | 1 |
 | 3 | infrastructure | `dag_executor/snapshot_store.clj`, implementing the port: the slot and store locks; runs PR 1's commands for init, snapshot, verify, restore, import and repack; tests on scratch repos for the cases above | 1, 2 |
-| 4 | wiring | composition in `executor.clj` with PR 3's store; `:snapshots? false` in `governed_environment.clj`; `:workflow/snapshot-root` resolution; run id through acquisition; phase-boundary and final calls; `:execution/workspace-snapshots`; deny-pattern | 3 |
+| 4 | wiring | composition in `executor.clj` with PR 3's store; `:snapshots? false` in `governed_environment.clj`; `:workflow/snapshot-root` resolution; run id through acquisition; `:workspace/snapshot` kept by `describe`; phase-boundary and final calls; `:execution/workspace-snapshots`; deny-pattern | 3 |
 | 5 | adapter | N3 amendment; event schema and constructors; publication at acquire, phase, final and release | 4 |
 | 6 | application | N2-delta §8 amendment; resume and rewind restore from snapshots; `:snapshot-dir` for a resume in place and `:snapshot-import` for a new attempt | 5, follow-up 1 |
 | 7 | adapter | N6 amendment; `:evidence/workspace-snapshots` in `extract-output`; verifier | 4 |
