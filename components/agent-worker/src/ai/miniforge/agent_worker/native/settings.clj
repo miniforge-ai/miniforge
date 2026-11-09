@@ -34,7 +34,9 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} native-config
-  (delay (edn/read-string (slurp (io/resource config-resource)))))
+  "The native settings, read once. A missing resource leaves no settings, so
+   `create` answers worker-unavailable rather than throwing."
+  (delay (some-> (io/resource config-resource) slurp edn/read-string)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
