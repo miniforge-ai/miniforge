@@ -28,6 +28,10 @@ second copy of that schema.
 Stop and cleanup share one pure recovery-scope factory. It binds the current
 owned UID, retained target, comparison, effect identity, limits and payload hash.
 Stop-request behavior is unchanged and remains covered by the existing tests.
+Cleanup uses the shared `:cleanup-load` operation. Its generated scope validates
+against the grant schema and obtains a real root recovery grant after workflow
+cancellation. The regression failed before correction with five assertions and
+zero test errors; producer-shaped map assertions alone had missed the mismatch.
 
 Deletion uses `Orphan`, not cascading garbage collection: only the Pod UID is
 proven owned. Kubernetes documents these choices in its
@@ -46,12 +50,12 @@ Validate affected products, a fresh CLI and an isolated package.
 - Strict clj-kondo: zero warnings/errors; seven changed Clojure namespaces have
   at most three inferred strata.
 - Polylith structure, both consuming JVM products and task classpaths pass.
-- Source and isolated fresh package: 62 tests / 1,262 assertions.
-- Curated OPSV/workflow/artifact integration: 228 tests / 3,270 assertions.
+- Source and isolated fresh package: 63 tests / 1,282 assertions.
+- Curated OPSV/workflow/artifact integration: 229 tests / 3,290 assertions.
 - Native compatibility: 308 tests / 1,903 assertions across the existing 42 suites.
-- Six injected faults cause assertion failures with zero test errors.
+- Seven injected faults cause assertion failures with zero test errors.
   They cover closed input, quiescence, distinct identity, cascading deletion,
-  UID preconditions and resource-version preconditions.
+  operation vocabulary, UID preconditions and resource-version preconditions.
 
 The integrated fixtures use real retained approval, native creation and durable
 records. Only HTTP is simulated. No cleanup request grants permission or proves

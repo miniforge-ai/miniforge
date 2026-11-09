@@ -5,12 +5,17 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.effect-transaction.interface :as effect]
+            [ai.miniforge.execution-grant.interface :as grant]
+            [ai.miniforge.execution-grant.opsv-scope-fixtures :as clock]
+            [ai.miniforge.phase-opsv.governed-load-proposal-fixtures :as load]
             [ai.miniforge.phase-opsv.kubernetes-load-cleanup-fixtures :as cleanup]
             [ai.miniforge.phase-opsv.kubernetes-load-ownership-fixtures :as ownership]
             [ai.miniforge.phase-opsv.kubernetes-load-quiescence-fixtures :as quiescence]
             [ai.miniforge.phase-opsv.kubernetes-load-stop-fixtures :as fixtures]
             [ai.miniforge.phase-opsv.messages :as msg]
-            [clojure.test :refer [deftest is]]))
+            [babashka.fs :as fs]
+            [clojure.test :refer [deftest is]]
+            [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -23,7 +28,8 @@
     (is (= (:execution/id ctx) (:workflow-run/id result)))
     (is (= (:effect/id request) (:effect/id result)))
     (is (= :effect/load-test (:effect/class result)))
-    (is (= :cleanup-resource (:opsv/operation scope)))
+    (is (= :cleanup-load (:opsv/operation scope)))
+    (is (m/validate grant/OpsvExperimentScope result))
     (is (= (hash/content-hash payload) (:opsv/payload-hash scope)))
     (is (= :delete (:method payload)))
     (is (= "application/json" (:media-type payload)))
@@ -81,6 +87,18 @@
       (is (anomaly/anomaly? result))
       (is (empty? calls)))))
 
+(defn- ^{:stratum 0} check-root-authority [{:keys [directory pod] :as fixture}]
+  (let [[proposal calls] (cleanup/prepare fixture pod)
+        breach-directory (str (fs/path directory "cleanup-breach-history"))
+        issuance (assoc (load/issuance-request proposal) :workflow-run/status :cancelled)
+        issued (grant/issue-for-effect breach-directory issuance clock/now)]
+    (is (= [:get] (mapv :method calls)))
+    (is (grant/valid? issued))
+    (when (grant/valid? issued)
+      (is (nil? (:grant/parent-id issued)))
+      (is (false? (:grant/delegable? issued)))
+      (is (grant/authorized? (grant/authorize issued (load/usage proposal) clock/now))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} never-started-owned-worker-produces-an-exact-read-only-cleanup-request-test
@@ -111,5 +129,8 @@
 
 (deftest ^{:stratum 1} substituted-creation-or-comparison-intent-cannot-reuse-retained-approval-test
   (fixtures/with-created check-changed-intent))
+
+(deftest ^{:stratum 1} generated-cleanup-scope-obtains-separate-real-root-recovery-authority-after-cancellation-test
+  (fixtures/with-created check-root-authority))
 
 (comment ::no-delete-dispatch-or-cleanup-success-is-claimed-by-these-read-only-constructor-tests)
