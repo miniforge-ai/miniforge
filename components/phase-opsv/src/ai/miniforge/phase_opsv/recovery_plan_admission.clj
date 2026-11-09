@@ -34,9 +34,12 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} target-refusals [ctx settings request baseline]
-  (when-not (preflight/attempt-bound? ctx (target-settings settings) request baseline)
-    [(target-refusal)]))
+(defn- ^{:stratum 1} target-refusals [ctx settings input baseline]
+  (let [request (get-in input [:load :request])
+        declaration (get-in input [:load :declaration])]
+    (when-not (and (= declaration (:recovery/declaration settings))
+                   (preflight/attempt-bound? ctx (target-settings settings) request baseline))
+      [(target-refusal)])))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -44,7 +47,7 @@
   (let [request (get-in input [:load :request])
         observed (evidence ctx request baseline)
         policy (approval-policy policy settings prepared)
-        refused (target-refusals ctx settings request baseline)
+        refused (target-refusals ctx settings input baseline)
         evaluated (evaluation/evaluate gate-ids ctx (:experiment-pack request) observed policy refused)]
     (assoc prepared
            :recovery/plan-decision-envelope (:opsv/decision-envelope evaluated)

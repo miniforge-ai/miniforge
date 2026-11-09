@@ -34,6 +34,8 @@ Use separate `:opsv/recovery-plan-admission` runtime options.
 Absent approval denies admission; malformed settings return an anomaly.
 Bind approved hashes to exact original identity, attempt, load payload and recovery limits through the existing plan hash.
 Share the existing target predicate rather than duplicate its declaration, pack membership and baseline checks.
+Bind the runtime declaration to the captured Deployment name, namespace and UID, not just service membership.
+Require the recovery declaration to equal the load declaration already validated against the original.
 Keep production allowlisting unable to enable staging experiments.
 Denials carry machine-readable remediation actions and localized human guidance.
 Retain intrinsic target refusals separately from registered gate checks, without changing the gate engine's check summary.
@@ -50,12 +52,14 @@ withdrawn acknowledgement.
 Check every applicable safety gate, strict lint, genuine inferred strata, consuming products and fresh isolated packages.
 Inject targeted faults to verify assertion failures without test errors.
 
-All eight genuinely inferred changed namespaces passed at three or fewer strata.
+All nine genuinely inferred changed namespaces passed at three or fewer strata.
 Strict lint passed with zero warnings/errors; Polylith check and both consuming JVM products passed.
-Focused source and fresh isolated-package suites passed 24 tests/300 assertions.
-Curated integration passed 175 tests/2,142 assertions; native compatibility passed 308 tests/1,903 assertions.
-All five injected faults caused assertion failures with zero errors.
+Focused source and fresh isolated-package suites passed 26 tests/317 assertions.
+Curated integration passed 177 tests/2,159 assertions; native compatibility passed 308 tests/1,903 assertions.
+All six injected faults caused assertion failures with zero errors.
 The isolated package used merged dependencies and no production-source overlay.
+Multi-service regressions reproduced a declaration switch before the fix in both trial and recovery admission.
+Both service names remain in the pack before capture and retention, so service membership cannot mask the mismatch.
 
 ## Standards Gap Analysis
 
@@ -65,6 +69,8 @@ The owner reviewed the actual whole diff after formatting and final validation.
 Share the target predicate, centralize configuration schemas and localize diagnostic copy.
 Boundary registration keeps the N4 registry adapter out of the admission model's dependency list.
 The owner pass clarified plan-only decision names and retained intrinsic target refusals with canonical detailed remediation.
+The review fix reuses native original-target binding and adds exact declaration equality, without duplicating
+identity-check maps.
 Fixture evidence uses actual publication and acknowledgement, not fabricated snapshot references.
 
 ## Deployment Plan

@@ -25,7 +25,7 @@
    :recovery/declaration (get-in input [:load :declaration])
    :recovery/approved-plan-hashes #{digest}})
 
-(defn- ^{:stratum 0} native-source [] (replica/input (preflight/input)))
+(defn- ^{:stratum 0} native-source [transform] (replica/input (preflight/input transform)))
 
 (defn- ^{:stratum 0} with-metric-snapshot [ctx baseline]
   (let [[_discovery plan-step execute-step] support/handlers
@@ -61,7 +61,8 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} with-input [f]
-  (retained/with-input native-source #(f (configured %))))
+(defn ^{:stratum 2} with-input
+  ([f] (with-input identity f))
+  ([transform f] (retained/with-input #(native-source transform) #(f (configured %)))))
 
 (comment ::real-producer-and-acknowledgement-runtime-approval-is-separate-from-forward-opt-in)

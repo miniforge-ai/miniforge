@@ -36,6 +36,8 @@
          (preparation/correlated? declaration request)
          (= pack (get-in ctx [:execution/input :opsv/experiment-pack]))
          (= #{(:experiment/environment settings)} (set environments))
+         (preparation/target-bound? declaration
+                                    (get-in baseline [:environment/raw-observations :kubernetes/verification :kubernetes/source]))
          (contains? (set (get-in pack [:experiment-pack/guardrails :blast-radius :namespaces]))
                     (:namespace target))
          (contains? (set (get-in pack [:experiment-pack/targets :services]))

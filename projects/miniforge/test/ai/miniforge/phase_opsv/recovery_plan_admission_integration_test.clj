@@ -15,6 +15,9 @@
 
 (defn- ^{:stratum 0} verdict [result] (get-in result [:recovery/plan-decision-envelope :envelope/decision]))
 
+(def ^{:stratum 0 :private true} other-service
+  "A second declared pack service, not the retained original Deployment." "catalog-shadow")
+
 (defn- ^{:stratum 0} remediation [action result]
   (let [checks (get-in result [:recovery/plan-gate-checks :results])
         errors (mapcat :errors (concat checks (:recovery/plan-refusals result)))]
@@ -39,6 +42,17 @@
                                          :opsv/recovery-admission (assoc settings :recovery/approved-plan-hashes #{digest})}))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} check-multi-service-declaration [{:keys [ctx input prepared] :as fixture}]
+  (let [services (get-in input [:load :request :experiment-pack :experiment-pack/targets :services])
+        changed (assoc-in ctx [:execution/opts :opsv/recovery-plan-admission :recovery/declaration
+                               :kubernetes/deployment-name] other-service)
+        result (fixtures/admit (assoc fixture :ctx changed))]
+    (is (contains? (set services) other-service))
+    (is (= :allow (verdict (fixtures/admit fixture))))
+    (is (= (:recovery/hash prepared) (:recovery/hash result)))
+    (is (= :deny (verdict result)))
+    (is (= :opsv/recovery-target (get-in result [:recovery/plan-refusals 0 :gate])))))
 
 (defn- ^{:stratum 1} check-remediation [{:keys [ctx] :as fixture}]
   (doseq [[changed action] [[(update ctx :execution/opts dissoc :opsv/recovery-plan-admission)
@@ -132,5 +146,9 @@
 
 (deftest ^{:stratum 2} plan-admission-failures-carry-human-and-machine-remediation-test
   (fixtures/with-input check-remediation))
+
+(deftest ^{:stratum 2} recovery-declaration-cannot-switch-to-another-service-in-the-same-pack-test
+  (fixtures/with-input #(update-in % [:experiment-pack/targets :services] conj other-service)
+                       check-multi-service-declaration))
 
 (comment ::no-fake-retention-grant-or-provider-execution)
