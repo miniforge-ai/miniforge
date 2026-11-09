@@ -21,6 +21,7 @@
    [ai.miniforge.agent-environment.fake :as fake]
    [ai.miniforge.agent-environment.fake.world :as world]
    [ai.miniforge.agent-environment.interface :as env]
+   [ai.miniforge.agent-environment.lease :as lease]
    [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.test :refer [deftest is testing]]))
 
@@ -106,6 +107,14 @@
     (fake/replace-uid! (:controller/provider (:c w)) (:environment/namespace env-value))
     (is (= :anomalies.agent-environment/uid-mismatch (reason (env/readiness (:c w) (:a w) (lease-of env-value)))))
     (is (= :outcome/refused (:receipt/outcome (last @(:receipts w)))))))
+
+(deftest ^{:stratum 1} test-a-namespace-someone-else-holds-is-not-taken-over
+  (let [w (world)
+        req (fx/request w (:a w))]
+    (fake/replace-uid! (:controller/provider (:c w)) (lease/namespace-name req))
+    (is (= :anomalies.agent-environment/provisioning-failed (reason (fx/acquire w (:a w) req))))
+    (is (= 1 (count (live w))))
+    (is (empty? (fx/outcomes w :environment/release)))))
 
 (deftest ^{:stratum 1} test-preflight-refuses-isolation-the-provider-lacks
   (let [w (world {:fake/capabilities (assoc world/default-capabilities

@@ -45,7 +45,8 @@ provider: providers supply compute and report what they did.
    `:invalid-input` anomaly and emits no receipt.
 4. `fake`: in-memory provider with fault options (failed step, unconfirmed deletes, probe
    failures, omitted UID, uncertain steps, a namespace recreated right after provisioning, replaced
-   UID). It records the generation it provisions and `observe` reports it.
+   UID). It records the generation it provisions and `observe` reports it. A namespace that already
+   exists fails its create, as an API server's does, so a collision is not taken over.
 5. `conformance.fixtures`: synthetic tenants, grants and requests shared by these tests and, next,
    by the provider conformance suite.
 
@@ -53,7 +54,8 @@ provider: providers supply compute and report what they did.
 
 `lifecycle_test` drives the public interface over the fake: duplicate acquire, conflicting request,
 forged tenant (request and lease), missing grant, stale lease after release and reacquire, partial
-provisioning with cleanup, unconfirmed delete with retry, recreated namespace, a provider that
+provisioning with cleanup, unconfirmed delete with retry, recreated namespace, a namespace someone
+else already holds (not taken over, not deleted), a provider that
 omits the UID (recovered, or not adopted when the namespace was recreated, or recovered after
 uncertain steps), missing isolation, and invalid input (no receipt). `clj-kondo`, stratum-lint and `poly check` clean.
 
