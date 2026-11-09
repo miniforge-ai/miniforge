@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.boundary.kubernetes-load-start-authority
+(ns ai.miniforge.phase-opsv.boundary.kubernetes-forward-authority
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.phase-opsv.effect-authority :as authority]
@@ -15,7 +15,8 @@
     (assoc (select-keys proposal keys)
            :workflow-run/status (get-in prepared [:context :execution/status])
            :effect/class (:effect/class proposal)
-           :effect/preflight {:preflight/type :preflight/opsv-staging-experiment :preflight/result :allow})))
+           :effect/preflight {:preflight/type :preflight/opsv-staging-experiment
+                              :preflight/result :allow})))
 
 ;------------------------------------------------------------------------------ Layer 1
 

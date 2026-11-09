@@ -4,6 +4,7 @@
 (ns ai.miniforge.phase-opsv.kubernetes-load-start-execution-fault-fixtures
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.opsv-actuation.interface :as actuation]
+            [ai.miniforge.phase-opsv.kubernetes-forward-execution-fixtures :as forward]
             [clojure.test :refer [is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -14,15 +15,16 @@
   (reset! (:host/clock fixture) nil)
   (throw failure))
 
-(defn ^{:stratum 0} policy-deny! [fixture]
-  (swap! (:host/context fixture) assoc-in
-         [:execution/opts :opsv/governance :policy/context :opsv/allowed-environments] #{}))
+(def ^{:stratum 0} policy-deny! forward/deny-policy!)
 
 (defn ^{:stratum 0} check-fenced [fixture result]
   (is (anomaly/anomaly? result))
   (is (true? (:stopped? (actuation/mutation-status (get-in fixture [:host/runtime :fence]))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} unavailable-context! []
+  (throw (ex-info "injected context failure" (refusal))))
 
 (defn ^{:stratum 1} fail-outcome! [publish directory value]
   (if (= :succeeded (get-in value [:artifact/content :effect/transaction :effect/state]))

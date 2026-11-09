@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.boundary.kubernetes-load-start-readiness
+(ns ai.miniforge.phase-opsv.boundary.kubernetes-forward-readiness
   "Retain the actual commit-time N4 decision before admitting the native request."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.artifact-confirmation :as confirmation]
@@ -9,18 +9,14 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0 :private true} material
-  [:native-load-start-readiness :opsv-verification-report :opsv/native-load-start-readiness])
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} retain! [ready record]
+(defn ^{:stratum 0} retain! [operation ready record]
   (let [ctx (:context ready)
-        output {:opsv/native-load-start-readiness
-                {:effect/transaction record :opsv/commit-decision-envelope (:decision ready)
-                 :load/observation (:ownership/observation ready)}}]
+        material (:material operation)
+        output {(nth material 2)
+                {:effect/transaction record
+                 :opsv/commit-decision-envelope (:decision ready)
+                 :load/observation (get ready (:observation-key operation))}}]
     (anomaly/let-ok [value (artifacts/record ctx output material)]
       (confirmation/publish-with-exception-handling ctx value (artifacts/begin-publication output)))))
 
-(comment
-  (count material))
+(comment ::acknowledged-commit-admission-before-native-dispatch)
