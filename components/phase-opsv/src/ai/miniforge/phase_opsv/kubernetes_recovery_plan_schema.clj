@@ -9,6 +9,7 @@
             [ai.miniforge.phase-opsv.governed-experiment-schema :as experiment]
             [ai.miniforge.phase-opsv.kubernetes-load-schema :as load]
             [ai.miniforge.phase-opsv.kubernetes-replica-change-schema :as replica]
+            [ai.miniforge.phase-opsv.kubernetes-replica-request-schema :as replica-request]
             [ai.miniforge.phase-opsv.retained-preparation-schema :as retained]
             [malli.util :as mu]))
 
@@ -27,7 +28,9 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} Input
-  [:map {:closed true} [:load load/Input] [:recovery/duration-ms Duration]])
+  [:map {:closed true}
+   [:load (mu/assoc load/Input :request replica-request/Request)]
+   [:recovery/duration-ms Duration]])
 
 (def ^{:stratum 1} Plan
   [:map {:closed true}

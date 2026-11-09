@@ -49,11 +49,14 @@ fresh isolated-package regressions and focused fault checks.
 
 All five genuinely inferred changed namespaces passed at three or fewer strata.
 Strict lint passed with zero warnings/errors, alongside both consuming JVM products and Polylith check.
-Focused source and fresh isolated-package suites passed 29 tests/345 assertions.
-Curated integration passed 166 tests/1,994 assertions; native compatibility passed 308 tests/1,903 assertions.
+Focused source and fresh isolated-package suites passed 30 tests/387 assertions.
+Curated integration passed 167 tests/2,036 assertions; native compatibility passed 308 tests/1,903 assertions.
 All six injected faults caused assertion failures with zero errors.
 The isolated package contains no production source overlay.
 These checks passed again after integrating current main and preserving both native interface imports.
+The full-review regression reproduced malformed replica-delta failures before the fix.
+It captures and retains the malformed pack before invoking planning, proving that matching pins cannot mask the failure.
+Missing, nil, nonnumeric, negative, fractional and out-of-range deltas now return input anomalies.
 
 ## Standards Gap Analysis
 
@@ -63,6 +66,7 @@ repository's `agents.md` merge policy (including the stricter 200/600 limits).
 Applicable foundations, Clojure, Polylith, Kubernetes, API-surface, test,
 documentation, workflow, and copyright rules were read in full.
 The owner pass decomposed the initial factory and tightened identity text types.
+Reuse the existing replica-request schema for nested guardrails instead of copying validation or catching arithmetic exceptions.
 The main-merge prose gate flagged thirteen long sentences in five existing PR documents.
 Split those sentences without changing their claims; the prose gate remains enabled.
 Boundary schemas precede pure transformations; storage/acknowledgement is re-read,

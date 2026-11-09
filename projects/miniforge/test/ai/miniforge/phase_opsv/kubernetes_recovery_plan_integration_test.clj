@@ -5,9 +5,13 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.phase-opsv.boundary.retained-preparation :as retained-read]
+            [ai.miniforge.phase-opsv.experiment-preflight-fixtures :as preflight]
             [ai.miniforge.phase-opsv.governed-load-proposal-fixtures :as fixtures]
+            [ai.miniforge.phase-opsv.governed-replica-proposal-fixtures :as retained]
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.kubernetes-recovery-plan-schema :as schema]
+            [ai.miniforge.phase-opsv.kubernetes-replica-request-fixtures :as replica]
             [clojure.test :refer [deftest is]]
             [malli.core :as m]))
 
@@ -26,7 +30,21 @@
 (defn- ^{:stratum 0} repin [input contract]
   (assoc-in input [:load :request :comparison/pin] (phase/pin-verification-environment contract)))
 
+(defn- ^{:stratum 0} malformed-delta [value pack]
+  (update-in pack [:experiment-pack/guardrails :blast-radius]
+             #(if (= ::missing value) (dissoc % :replica-delta) (assoc % :replica-delta value))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} check-malformed-delta [{:keys [ctx input id]}]
+  (let [input (fixtures/input input)
+        request (:request input)
+        digest (:experiment-pack/hash request)
+        original (retained-read/read! ctx request id)]
+    (is (= digest (hash/content-hash (:experiment-pack request))))
+    (is (= digest (get-in request [:comparison/pin :comparison/contract :comparison/binding :experiment-pack/hash])))
+    (is (and (map? original) (not (anomaly/anomaly? original))))
+    (is (= :invalid-input (:anomaly/type (phase/prepare-kubernetes-recovery-plan! ctx (plan-input input)))))))
 
 (defn- ^{:stratum 1} check-plan [{:keys [ctx input id] :as fixture}]
   (let [load (phase/prepare-governed-kubernetes-load-proposal! ctx input)
@@ -110,5 +128,9 @@
 
 (deftest ^{:stratum 2} acknowledgement-is-read-again-for-every-plan-test
   (fixtures/with-input check-acknowledgement))
+
+(deftest ^{:stratum 2} malformed-replica-delta-in-an-acknowledged-correlated-original-is-an-anomaly-test
+  (doseq [value [::missing nil "unbounded" -1 0.5 Long/MAX_VALUE]]
+    (retained/with-input #(replica/input (preflight/input (partial malformed-delta value))) check-malformed-delta)))
 
 (comment ::real-retained-producer-storage-and-acknowledgement-no-provider-execution)
