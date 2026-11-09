@@ -29,13 +29,18 @@
                                     {:data (:anomaly/data stop-anomaly)}))
       (ctx/transition-to-failed)))
 
+(defn- ^{:stratum 0} stop-recorded?
+  "True when `context` already records a dashboard stop, as a DAG phase
+   does for a cancel between batches."
+  [context]
+  (boolean (some #(= :dashboard-stop (:type %)) (:execution/errors context))))
+
 (defn- ^{:stratum 0} execute-supervised
   "Run one supervised phase step. Its LLM calls see the run's cancel: once
    CONTROL-STATE is stopped, a streaming agent call in flight kills the
-   agent's process tree and returns, and a later one ends as it starts.
-   `phase-step/execute-phase` also interrupts the step itself on a cancel;
-   workspace persistence still runs after it, and the caller records the
-   stop."
+   agent's process tree and returns, and a later one ends as it starts. The
+   phase then finishes its own flow, boundary persist included, and the
+   caller records the stop."
   [pipeline context callbacks iteration control-state]
   (let [state (monitoring/build-supervision-state context iteration)
         result (monitoring/check-workflow-supervision
@@ -79,21 +84,18 @@
   "Apply control, supervision, phase policy, and checkpoint the resulting context."
   [pipeline context callbacks iteration control-state]
   (await-resume! control-state)
-  (let [result (if-let [stop-anomaly (check-stopped control-state)]
-                 (apply-dashboard-stop context stop-anomaly)
-                 ;; A cancel during the phase interrupts it (and the agent
-                 ;; CLI it waits on). An interrupted phase can come back as
-                 ;; an ordinary failure, so a stop is recorded as one here,
-                 ;; before the checkpoint. A run the phase completed stays
-                 ;; completed: a cancel that lands after the work is done
-                 ;; does not undo it.
-                 (let [phase-context (execute-supervised pipeline context callbacks iteration
-                                                         control-state)
-                       stop-anomaly (when-not (= :completed (:execution/status phase-context))
-                                      (check-stopped control-state))]
-                   (if stop-anomaly
-                     (apply-dashboard-stop phase-context stop-anomaly)
-                     phase-context)))]
+  (let [stopped-before (check-stopped control-state)
+        phase-context (if stopped-before
+                        context
+                        (execute-supervised pipeline context callbacks iteration control-state))
+        ;; A stop during the phase is recorded once, unless the phase completed the run.
+        stop-anomaly (or stopped-before
+                         (when-not (or (= :completed (:execution/status phase-context))
+                                       (stop-recorded? phase-context))
+                           (check-stopped control-state)))
+        result (if stop-anomaly
+                 (apply-dashboard-stop phase-context stop-anomaly)
+                 phase-context)]
     ;; A failed write is warned about and published, never thrown, so
     ;; the run goes on without that checkpoint.
     (runner-checkpoint/checkpoint! result)

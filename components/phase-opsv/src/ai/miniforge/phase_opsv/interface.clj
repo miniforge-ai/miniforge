@@ -37,6 +37,13 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-environment-fingerprint :as native-fingerprint]
    [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as native-preparation]
    [ai.miniforge.phase-opsv.kubernetes-preparation-schema :as native-preparation-schema]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-replica-request :as native-replica-request]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-replica-provider :as native-replica-provider]
+   [ai.miniforge.phase-opsv.boundary.experiment-preflight :as experiment-preflight]
+   [ai.miniforge.phase-opsv.boundary.retained-preparation :as retained-preparation]
+   [ai.miniforge.phase-opsv.boundary.governed-replica-proposal :as governed-replica-proposal]
+   [ai.miniforge.phase-opsv.boundary.governed-load-proposal :as governed-load-proposal]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-provider :as native-load-provider]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -81,7 +88,19 @@
 
 (def ^{:stratum 0} run-verification protocol/run-verification)
 
+(def ^{:stratum 0} read-retained-verification-preparation!
+  "Re-read acknowledged original preparation bound to this workflow, attempt, pin and target.
+   Returns the retained receipt or an anomaly. This read grants no execution authority."
+  retained-preparation/read!)
+
 (def ^{:stratum 0} verification-receipt verification-run/receipt)
+
+(def ^{:stratum 0} prepare-governed-kubernetes-replica-proposal!
+  "Build deployment-effect proposal data from retained original preparation and fresh capture.
+   Input: declaration, request, comparison artifact UUID, current capture, parameters and limits.
+   Runtime limits explicitly supply effect UUID, Kubernetes context, destinations, duration and load bounds.
+   No caller-supplied baseline, admission, grant, provider execution, activation or recovery proof."
+  governed-replica-proposal/prepare!)
 
 (def ^{:stratum 0} VerificationEnvironmentDeclaration
   "Opt-in :opsv/verification-environment execution option: exact candidate/pack hashes,
@@ -196,6 +215,47 @@
 (def ^{:stratum 0} KubernetesVerificationPreparationDeclaration
   "Independent workflow identity and native Deployment target for a preparation callback."
   native-preparation-schema/Declaration)
+
+(def ^{:stratum 0} prepare-kubernetes-replica-request
+  "Prepare a Deployment-only JSON Patch from declaration, native preparation request,
+   original baseline receipt, fresh native capture and closed trial/restoration parameters.
+   Trials supply :replicas/count; restoration derives the original desired count.
+   Return canonical request, payload hash and exact resource reference, or an anomaly.
+   UID/revision tests and declared bounds constrain the data, not execution authority.
+   No provider call, retention/ownership proof, N4/N8 admission or verified recovery."
+  native-replica-request/prepare)
+
+(def ^{:stratum 0} prepare-governed-kubernetes-load-proposal!
+  "Construct scheduling-gated Fortio Pod data from a retained original and explicit image/resources.
+   Requires one HTTP(S) destination, positive count/concurrency/rate and a whole-second Pod deadline.
+   Returns exact dedicated load-test scope and payload hash, not authority or ownership proof.
+   Starting traffic needs a separate exact UID/revision-fenced release effect.
+   No provider call, execution opt-in, recovery-plan approval, grant issuance or verified termination."
+  governed-load-proposal/prepare!)
+
+(def ^{:stratum 0} create-kubernetes-load-pod!
+  "Trusted-runtime callback: explicit settings, exact committing proposal and required current dispatch.
+   Send one canonical, scheduling-gated Pod creation request; never retry uncertain creation.
+   A creation receipt supplies provider-assigned UID/revision, not permission to start traffic.
+   No runtime activation, approved recovery plan, gate release, reconciliation or termination proof."
+  native-load-provider/create!)
+
+(def ^{:stratum 0} apply-kubernetes-replica-request!
+  "Trusted-runtime provider callback: settings, exact committing transaction and required dispatch.
+   Bind the single Deployment replica patch to its complete staging proposal and payload hash.
+   Runtime dispatch must synchronously recheck current N4/N8/grant authority at the mutation boundary.
+   No permissive dispatch default, retries, credential discovery or experiment activation.
+   Report only an exact native API confirmation, otherwise retain uncertainty for reconciliation.
+   Provider confirmation is not rollout readiness or verified original-baseline recovery."
+  native-replica-provider/patch!)
+
+(def ^{:stratum 0} evaluate-experiment-preflight
+  "Evaluate temporary staging N4 gates from trusted runtime opt-in and prepared baseline.
+   Accept a workflow context, canonical native preparation request and correlated receipt.
+   Return experiment-specific checks, envelope and comparison binding, or an anomaly.
+   Does not verify retention/ownership, issue grants, check N8, or authorize a provider;
+   the runtime must compose those obligations and reevaluate at each commit."
+  experiment-preflight/evaluate)
 
 (def ^{:stratum 0} prepare-kubernetes-verification!
   "Correlate the host request and pin before bounded read-only capture and canonical projection.

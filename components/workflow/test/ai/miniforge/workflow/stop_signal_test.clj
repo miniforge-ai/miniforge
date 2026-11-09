@@ -16,188 +16,47 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.workflow.stop-signal-test
-  "Recovery scenario C4: a cancel reaches work in flight. The work is a
-   real subprocess the waiting thread kills when interrupted, the contract
-   both LLM paths keep for the agent CLI."
+  "Recovery scenario C4: a cancel reaches work in flight without
+   interrupting any thread. Waits end on the stop, and the runner records
+   the stop of a phase the cancel cut short."
   (:require
-   [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.dag-loop :as dag-loop]
-   [ai.miniforge.workflow.dag-merge :as dag-merge]
-   [ai.miniforge.workflow.dag-merge-attempt :as dag-merge-attempt]
-   [ai.miniforge.workflow.dag-merge-git :as merge-git]
-   [ai.miniforge.workflow.dag-sub-workflow :as dag-sub-workflow]
    [ai.miniforge.workflow.execution :as exec]
-   [ai.miniforge.workflow.execution-step :as execution-step]
    [ai.miniforge.workflow.monitoring :as monitoring]
    [ai.miniforge.workflow.runner-checkpoint :as runner-checkpoint]
+   [ai.miniforge.workflow.runner-defaults :as runner-defaults]
    [ai.miniforge.workflow.runner-environment :as env]
+   [ai.miniforge.workflow.runner-events :as runner-events]
    [ai.miniforge.workflow.runner-iteration :as runner-iteration]
+   [ai.miniforge.workflow.runner-phase-step :as runner-phase-step]
    [ai.miniforge.workflow.stop-signal :as stop-signal]
-   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} run-subprocess!
-  "Start a 60 s subprocess, record it in `procs`, and wait on it; on an
-   interrupt, kill it and rethrow."
-  [procs]
-  (let [p (.start (ProcessBuilder. ^java.util.List ["sleep" "60"]))]
-    (swap! procs conj p)
-    (try
-      (.waitFor p)
-      :finished
-      (catch InterruptedException e
-        (.destroyForcibly p)
-        (throw e)))))
+(def ^{:stratum 0 :private true} cancel-delay-ms
+  "When a test's cancel lands, after the wait it ends has started."
+  200)
 
-(defn- ^{:stratum 0} dead-within? [^Process p ms]
-  (.waitFor p ms java.util.concurrent.TimeUnit/MILLISECONDS))
+(def ^{:stratum 0 :private true} long-wait-ms
+  "A wait the cancel must cut short."
+  10000)
+
+(def ^{:stratum 0 :private true} prompt-ms
+  "Upper bound for a wait that a cancel ended."
+  5000)
 
 (defn- ^{:stratum 0} cancel-after! [control-state ms]
-  (future (Thread/sleep ms) (es/cancel! control-state)))
+  (future (Thread/sleep (long ms)) (es/cancel! control-state)))
 
-(defn- ^{:stratum 0} alias-script!
-  "Write `body` as an executable sh script in a new temp directory, for a
-   git alias to run as git's child. Returns {:dir :script}."
-  [body]
-  (let [dir    (str (java.nio.file.Files/createTempDirectory
-                     "run-git-" (make-array java.nio.file.attribute.FileAttribute 0)))
-        script (str dir "/helper.sh")]
-    (spit script (str "#!/bin/sh\n" body))
-    (.setExecutable (java.io.File. script) true)
-    {:dir dir :script script}))
+(defn- ^{:stratum 0} elapsed-ms [started]
+  (- (System/currentTimeMillis) started))
 
-(defn- ^{:stratum 0} pids-written
-  "The pids in file `path` once it exists (scripts write it with a rename),
-   waiting up to `ms`; nil if it never appears."
-  [path ms]
-  (let [deadline (+ (System/currentTimeMillis) ms)
-        f        (java.io.File. ^String path)]
-    (loop []
-      (cond
-        (.exists f) (mapv parse-long (str/split-lines (slurp f)))
-        (< (System/currentTimeMillis) deadline) (do (Thread/sleep 20) (recur))
-        :else nil))))
-
-(defn- ^{:stratum 0} with-ancestors
-  "`pids` plus each one's ancestors below this JVM: git, and the shell it
-   runs an alias in. A pid whose ancestry does not reach this JVM adds
-   none, so cleanup can never reach an unrelated process."
-  [pids]
-  (let [jvm (.pid (java.lang.ProcessHandle/current))
-        ancestors (fn [pid]
-                    (let [chain (->> (.orElse (java.lang.ProcessHandle/of pid) nil)
-                                     (iterate #(some-> ^java.lang.ProcessHandle % .parent (.orElse nil)))
-                                     rest
-                                     (take-while some?)
-                                     (take 10)
-                                     (map #(.pid ^java.lang.ProcessHandle %)))
-                          below (take-while #(not= jvm %) chain)]
-                      (if (< (count below) (count chain)) below [])))]
-    (into (set pids) (mapcat ancestors) pids)))
-
-(defn- ^{:stratum 0} none-alive-within?
-  "True once no process in `pids` is alive, waiting up to `ms`."
-  [pids ms]
-  (let [deadline (+ (System/currentTimeMillis) ms)
-        live     (fn [] (filter #(.orElse (.map (java.lang.ProcessHandle/of %)
-                                                 (reify java.util.function.Function
-                                                   (apply [_ h] (.isAlive ^java.lang.ProcessHandle h))))
-                                           false)
-                                pids))]
-    (loop []
-      (cond
-        (empty? (live)) true
-        (< (System/currentTimeMillis) deadline) (do (Thread/sleep 50) (recur))
-        :else false))))
-
-(defn- ^{:stratum 0} kill-all!
-  "Test cleanup: kill whatever in `pids` is still running."
-  [pids]
-  (doseq [pid pids]
-    (.ifPresent (java.lang.ProcessHandle/of pid)
-                (reify java.util.function.Consumer
-                  (accept [_ h] (.destroyForcibly ^java.lang.ProcessHandle h))))))
-
-(deftest ^{:stratum 0} on-stop-fires-once-test
-  (let [cs    (es/create-control-state)
-        calls (atom 0)
-        remove-hook (stop-signal/on-stop! cs #(swap! calls inc))]
-    (es/pause! cs)
-    (is (zero? @calls) "a pause is not a stop")
-    (es/cancel! cs)
-    (es/cancel! cs)
-    (is (= 1 @calls))
-    (remove-hook)
-    (testing "already stopped: fires at once"
-      (let [now (atom 0)]
-        ((stop-signal/on-stop! cs #(swap! now inc)))
-        (is (= 1 @now))))))
-
-(deftest ^{:stratum 0} a-stop-delivered-during-teardown-does-not-interrupt-afterwards
-  ;; The stop's callback is already running when the scope ends; it reaches
-  ;; the interrupt only after teardown, and must find the scope disarmed.
-  (let [cs        (es/create-control-state)
-        entered   (promise)
-        proceed   (promise)
-        stopper   (atom nil)
-        interrupt! @#'stop-signal/interrupt!]
-    (with-redefs-fn {#'stop-signal/interrupt! (fn [hook]
-                                                (deliver entered true)
-                                                (deref proceed 5000 nil)
-                                                (interrupt! hook))}
-      #(stop-signal/interrupting-on-stop
-        cs (fn []
-             (reset! stopper (future (es/cancel! cs)))
-             (deref entered 5000 nil))))
-    (deliver proceed true)
-    (deref @stopper 5000 nil)
-    (let [interrupted? (Thread/interrupted)]
-      (is (not interrupted?)))))
-
-(deftest ^{:stratum 0} interrupts-from-elsewhere-are-kept-test
-  (let [stopped #(doto (es/create-control-state) es/cancel!)]
-    (testing "one pending on entry survives the stop's own"
-      (.interrupt (Thread/currentThread))
-      (stop-signal/interrupting-on-stop (stopped) (fn [] nil))
-      (is (Thread/interrupted)))
-    (testing "one arriving after coordinating cleared the scope's own"
-      (stop-signal/interrupting-on-stop (stopped) (fn []
-                                                    (stop-signal/coordinating (fn [] nil))
-                                                    (.interrupt (Thread/currentThread))))
-      (is (Thread/interrupted)))))
-
-(deftest ^{:stratum 0} a-stop-during-coordination-is-left-to-the-next-boundary
-  ;; The stop's callback is still in flight when coordination ends; the
-  ;; scope stays disarmed, so it cannot interrupt the work after it.
-  (let [cs          (es/create-control-state)
-        entered     (promise)
-        proceed     (promise)
-        stopper     (atom nil)
-        interrupted (atom nil)
-        interrupt!  @#'stop-signal/interrupt!]
-    (with-redefs-fn {#'stop-signal/interrupt! (fn [hook]
-                                                (deliver entered true)
-                                                (deref proceed 5000 nil)
-                                                (interrupt! hook))}
-      #(stop-signal/interrupting-on-stop
-        cs (fn []
-             (stop-signal/coordinating
-              (fn []
-                (reset! stopper (future (es/cancel! cs)))
-                (deref entered 5000 nil)))
-             (deliver proceed true)
-             (deref @stopper 5000 nil)
-             (reset! interrupted (Thread/interrupted)))))
-    (is (false? @interrupted))))
-
-(deftest ^{:stratum 0} stop-caused-failures-at-phase-boundaries-test
-  (let [checkpointed (atom false)
+(deftest ^{:stratum 0} a-stop-during-the-phase-is-recorded-before-the-checkpoint-test
+  (let [checkpointed (atom nil)
         context      (ctx/create-context {:workflow/id :stop-test :workflow/version "1.0.0"
                                           :workflow/pipeline [{:phase :plan}]}
                                          {:task "Test"} {})
@@ -205,205 +64,69 @@
                        (with-redefs-fn {#'monitoring/check-workflow-supervision (constantly {:status :continue})
                                         #'exec/execute-phase-step step
                                         #'env/persist-workspace-at-phase-boundary! (fn [_ _] nil)
-                                        #'runner-checkpoint/checkpoint! (fn [c] (reset! checkpointed true) c)}
-                         #(runner-iteration/execute-single-iteration [] context {} 0 cs)))]
-    (testing "an interruption escaping the phase step (a blocking callback) is the stop, checkpointed"
+                                        #'runner-checkpoint/checkpoint! (fn [c] (reset! checkpointed c) c)}
+                         #(runner-iteration/execute-single-iteration [] context {} 0 cs)))
+        stop-types   #(set (map :type (:execution/errors %)))]
+    (testing "the cancel ended the phase's LLM call and the phase failed: the
+              stop is recorded, and the checkpoint has it"
       (let [cs (es/create-control-state)
-            result (iterate-with cs (fn [_ _ & _] (es/cancel! cs) (throw (InterruptedException. "callback"))))]
-        (is (some #{:dashboard-stop} (map :type (:execution/errors result))))
-        (is (true? @checkpointed))))
+            result (iterate-with cs (fn [_ c & _] (es/cancel! cs) (ctx/transition-to-failed c)))]
+        (is (contains? (stop-types result) :dashboard-stop))
+        (is (contains? (stop-types @checkpointed) :dashboard-stop))))
+    (testing "a stop the phase already recorded (a DAG cancelled between batches) is recorded once"
+      (let [cs (es/create-control-state)
+            result (iterate-with cs (fn [_ c & _]
+                                      (es/cancel! cs)
+                                      (-> (ctx/transition-to-failed c)
+                                          (update :execution/errors conj {:type :dashboard-stop}))))]
+        (is (= 1 (count (filter #{:dashboard-stop} (map :type (:execution/errors result))))))))
     (testing "a cancel landing after the phase completed the run does not undo it"
       (let [cs (es/create-control-state)
             result (iterate-with cs (fn [_ c & _] (es/cancel! cs) (assoc c :execution/status :completed)))]
         (is (= :completed (:execution/status result)))
-        (is (not-any? #{:dashboard-stop} (map :type (:execution/errors result))))))))
+        (is (not (contains? (stop-types result) :dashboard-stop)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} an-interrupted-git-call-ends-git-and-its-children-test
-  ;; The alias script stands in for a merge driver: git -> script -> sleep.
-  ;; Every pid is taken before the interrupt, so a process that outlives
-  ;; it is found even after it is re-parented away from this JVM.
-  (let [{:keys [dir script]} (alias-script!
-                              (str "sleep 30 &\n"
-                                   "echo $$ > \"$(dirname \"$0\")/pids.tmp\"\n"
-                                   "echo $! >> \"$(dirname \"$0\")/pids.tmp\"\n"
-                                   "mv \"$(dirname \"$0\")/pids.tmp\" \"$(dirname \"$0\")/pids\"\n"
-                                   "wait\n"))
-        thread (Thread/currentThread)
-        pids   (promise)
-        _      (future (deliver pids (with-ancestors (pids-written (str dir "/pids") 10000)))
-                       (.interrupt thread))
-        thrown (try (merge-git/run-git "." "-c" (str "alias.wait=!" script) "wait")
-                    (catch InterruptedException e e))]
-    (Thread/interrupted)
-    (try
-      (is (instance? InterruptedException thrown))
-      (is (<= 3 (count @pids)) "git, the script and its child were recorded")
-      (is (none-alive-within? @pids 5000) "git and everything it started are gone")
-      (finally (kill-all! (remove nil? @pids))))))
+(deftest ^{:stratum 1} sleep-ends-on-a-stop-test
+  (testing "a cancel during the sleep ends it"
+    (let [cs (es/create-control-state)
+          _  (cancel-after! cs cancel-delay-ms)
+          started (System/currentTimeMillis)]
+      (is (true? (stop-signal/sleep! cs long-wait-ms)))
+      (is (< (elapsed-ms started) prompt-ms))))
+  (testing "a run already stopped does not sleep"
+    (let [started (System/currentTimeMillis)]
+      (is (true? (stop-signal/sleep! (doto (es/create-control-state) es/cancel!) long-wait-ms)))
+      (is (< (elapsed-ms started) cancel-delay-ms))))
+  (testing "a pause is not a stop, and an unstopped sleep runs to the end"
+    (is (false? (stop-signal/sleep! (doto (es/create-control-state) es/pause!) 1)))
+    (is (false? (stop-signal/sleep! (es/create-control-state) cancel-delay-ms))))
+  (testing "no control state: a plain sleep"
+    (is (false? (stop-signal/sleep! nil 1)))))
 
-(deftest ^{:stratum 1} an-interrupted-git-call-ends-a-child-re-parented-before-the-cancel-test
-  ;; The helper's parent (a subshell) exits after starting it, so by the
-  ;; interrupt the helper is no longer git's descendant.
-  (let [{:keys [dir script]} (alias-script!
-                              (str "d=\"$(dirname \"$0\")\"\n"
-                                   "( sleep 30 & echo $! > \"$d/orphan.tmp\"; mv \"$d/orphan.tmp\" \"$d/orphan\"; sleep 0.5 )\n"
-                                   "echo $$ > \"$d/pids.tmp\"; mv \"$d/pids.tmp\" \"$d/pids\"\n"
-                                   "sleep 30\n"))
-        thread  (Thread/currentThread)
-        listed? (fn [pid] (boolean (some #(= pid (.pid ^java.lang.ProcessHandle %))
-                                         (iterator-seq (.iterator (.descendants (java.lang.ProcessHandle/current)))))))
-        orphan  (promise)
-        moved?  (promise)
-        pids    (promise)
-        _       (future
-                  (let [script-pids (with-ancestors (pids-written (str dir "/pids") 10000))
-                        [helper]    (pids-written (str dir "/orphan") 1000)]
-                    (deliver orphan helper)
-                    (deliver moved? (and (some? helper) (not (listed? helper))))
-                    (deliver pids (conj script-pids helper))
-                    (.interrupt thread)))
-        thrown  (try (merge-git/run-git "." "-c" (str "alias.wait=!" script) "wait")
-                     (catch InterruptedException e e))]
-    (Thread/interrupted)
-    (try
-      (is (instance? InterruptedException thrown))
-      (is (true? @moved?) "the helper was re-parented away from git before the cancel")
-      (is (none-alive-within? [@orphan] 5000) "the re-parented helper is gone")
-      (is (none-alive-within? @pids 5000) "git and the script are gone")
-      (finally (kill-all! (remove nil? @pids))))))
-
-(deftest ^{:stratum 1} cancel-interrupts-the-running-phase-test
-  (let [cs     (es/create-control-state)
-        procs  (atom [])
-        _      (cancel-after! cs 300)
-        thrown (try (stop-signal/interrupting-on-stop cs #(run-subprocess! procs))
-                    (catch InterruptedException _ :interrupted))]
-    (is (= :interrupted thrown) "the phase's wait is interrupted")
-    (is (dead-within? (first @procs) 5000) "its subprocess is killed")
-    (is (not (Thread/interrupted)) "the interrupt it caused is cleared afterwards")))
-
-(deftest ^{:stratum 1} cancel-reaches-in-flight-dag-tasks-test
-  (testing "a DAG batch's tasks run sub-workflows that share the run's control
-            state, so a cancel interrupts each task's running phase; the
-            batch, waited on inside the parent phase's own scope, returns
-            promptly with each task's own result"
+(deftest ^{:stratum 1} a-cancel-during-the-retry-backoff-ends-it-test
+  (testing "the phase step returned a retry; the cancel lands during the
+            backoff that follows"
     (let [cs      (es/create-control-state)
-          procs   (atom [])
+          retry   {:execution/current-phase :implement
+                   :execution/phase-results {:implement {:status :retrying}}
+                   :phase {:iterations 2}}
           started (System/currentTimeMillis)
-          _       (cancel-after! cs 300)
-          task    (fn [_task ctx]
-                    (try (stop-signal/interrupting-on-stop (:control-state ctx)
-                                                           #(run-subprocess! procs))
-                         (catch InterruptedException _
-                           (dag/err :task-execution-failed "stopped" {}))))
-          results (stop-signal/interrupting-on-stop
-                   cs #(dag-loop/execute-tasks-batch {:a {} :b {}} task {:control-state cs}))]
-      (is (< (- (System/currentTimeMillis) started) 10000) "the batch returns promptly")
-      (is (= #{:a :b} (set (keys results))) "the parent collected every task's result")
-      (is (every? dag/err? (vals results)))
-      (is (every? #(dead-within? % 5000) @procs) "every task's subprocess is killed"))))
-
-(deftest ^{:stratum 1} cancel-reaches-the-runner-iteration-phase-test
-  (testing "the runner's phase step is interrupted by a cancel; workspace
-            persistence and the checkpoint after it run with the interrupt
-            cleared, and the run is recorded as stopped"
-    (let [cs         (es/create-control-state)
-          procs      (atom [])
-          persisted  (atom nil)
-          checkpoint (atom nil)
-          context    (ctx/create-context {:workflow/id :stop-test :workflow/version "1.0.0"
-                                          :workflow/pipeline [{:phase :plan}]}
-                                         {:task "Test"} {})
-          _          (cancel-after! cs 300)]
-      (with-redefs-fn {#'monitoring/check-workflow-supervision (constantly {:status :continue})
-                       #'exec/execute-phase-step
-                       (fn [_ context & _]
-                         ;; Re-sets the flag it caught, as some phases do.
-                         (try (run-subprocess! procs) context
-                              (catch InterruptedException _
-                                (.interrupt (Thread/currentThread))
-                                (assoc context ::interrupted true))))
-                       #'env/persist-workspace-at-phase-boundary!
-                       (fn [_ _] (reset! persisted (.isInterrupted (Thread/currentThread))))
-                       #'runner-checkpoint/checkpoint!
-                       (fn [ctx] (reset! checkpoint (.isInterrupted (Thread/currentThread))) ctx)}
-        #(let [result (runner-iteration/execute-single-iteration [] context {} 0 cs)]
-           (is (::interrupted result))
-           (is (dead-within? (first @procs) 5000))
-           (is (false? @persisted))
-           (is (false? @checkpoint))
-           (is (some #{:dashboard-stop} (map :type (:execution/errors result)))))))))
+          result  (with-redefs-fn {#'exec/execute-phase-step (fn [_ c & _] (cancel-after! cs cancel-delay-ms) c)
+                                   #'env/persist-workspace-at-phase-boundary! (fn [_ _] nil)
+                                   #'env/track-unpersisted (fn [_ stepped _] stepped)
+                                   #'runner-defaults/backoff-base-ms (constantly long-wait-ms)
+                                   #'runner-events/check-backend-health-at-boundary! (constantly nil)}
+                    #(runner-phase-step/execute-phase [] retry {} cs))]
+      (is (< (elapsed-ms started) prompt-ms) "the 20 s backoff ended on the cancel")
+      (is (= :retrying (get-in result [:execution/phase-results :implement :status]))))))
 
 (deftest ^{:stratum 1} a-cancel-during-the-dag-pause-wait-returns-stopped-test
-  (let [cs (es/create-control-state)
-        _  (es/pause! cs)
-        _  (cancel-after! cs 300)
-        logger (log/create-logger {:min-level :error :output :human})]
-    (is (true? (stop-signal/interrupting-on-stop
-                cs #(#'dag-loop/await-launch-clearance! cs logger))))
-    (is (not (Thread/interrupted)))))
-
-(deftest ^{:stratum 1} a-cancel-during-a-parent-merge-stops-the-task-test
-  (let [cs (es/create-control-state)
-        _  (cancel-after! cs 300)]
-    ;; As the real merge code does, the stub swallows the interrupt and
-    ;; reports an ordinary merge failure.
-    (with-redefs [dag-merge/merge-parent-branches!
-                  (fn [_ _]
-                    (try (Thread/sleep 10000) nil
-                         (catch InterruptedException _
-                           {:anomaly/category :anomalies/dag-multi-parent-merge-failed})))]
-      (let [opts (dag-sub-workflow/task-sub-opts {:control-state cs}
-                                                 {:task/id :c :task/deps [:a :b]})]
-        (is (= :anomalies/dag-merge-stopped (get-in opts [:dag/merge-anomaly :anomaly/category])))
-        (is (not (Thread/interrupted))))))
-  (testing "a merge that finished after the cancel is the task's stop too"
-    (let [cs (es/create-control-state)]
-      (with-redefs [dag-merge/merge-parent-branches! (fn [_ _] (es/cancel! cs) {:branch "merged"})]
-        (is (= :anomalies/dag-merge-stopped
-               (get-in (dag-sub-workflow/task-sub-opts {:control-state cs} {:task/id :c :task/deps [:a :b]})
-                       [:dag/merge-anomaly :anomaly/category])))
-        (is (not (Thread/interrupted)))))))
-
-(deftest ^{:stratum 1} cancel-at-callback-cooldown-and-resolution-boundaries-test
-  (testing "an interrupted boundary callback refuses the boundary (the context
-            keeps its results) and keeps the interrupt"
-    (let [stopped (doto (es/create-control-state) es/cancel!)
-          receipt (#'execution-step/invoke (fn [& _] (throw (InterruptedException. "cancelled")))
-                                           {:control-state stopped})
-          interrupted? (Thread/interrupted)]
-      (is (anomaly/anomaly? receipt))
-      (is interrupted?)))
-  (testing "a callback's channel I/O the stop interrupted refuses the boundary too"
-    (let [stopped (doto (es/create-control-state) es/cancel!)
-          receipt (#'execution-step/invoke (fn [& _] (throw (java.nio.channels.ClosedByInterruptException.)))
-                                           {:control-state stopped})
-          interrupted? (Thread/interrupted)]
-      (is (anomaly/anomaly? receipt))
-      (is interrupted?)))
-  (testing "an interrupt that is not the run's stop propagates from a callback"
-    (let [thrown (try (#'execution-step/invoke (fn [& _] (throw (InterruptedException. "not a stop")))
-                                               {:control-state (es/create-control-state)})
-                      (catch InterruptedException e e))
-          interrupted? (Thread/interrupted)]
-      (is (instance? InterruptedException thrown))
-      (is interrupted?)))
-  (testing "a cancel's interrupt ends a rate-limit cooldown instead of escaping"
-    (let [cs (es/create-control-state)
-          _  (cancel-after! cs 200)
-          started (System/currentTimeMillis)]
-      (stop-signal/interrupting-on-stop cs #(#'dag-loop/stop-aware-sleep cs 10000))
-      (is (< (- (System/currentTimeMillis) started) 5000))
-      (is (not (Thread/interrupted)))))
-  (testing "the merge-resolution agent is not called once the run is stopped"
-    (let [attempts (atom 0)
-          cs (atom {:stopped false})
-          {edit :agent-edit-fn} (dag-merge-attempt/derive-resolution-overrides
-                                 {:control-state cs
-                                  :dag/resolution-overrides {:agent-edit-fn (fn [& _] (swap! attempts inc))}})]
-      (edit "/tmp/wt" {} 0)
-      (swap! cs assoc :stopped true)
-      (edit "/tmp/wt" {} 1)
-      (is (= 1 @attempts)))))
+  (let [cs      (doto (es/create-control-state) es/pause!)
+        _       (cancel-after! cs cancel-delay-ms)
+        logger  (log/create-logger {:min-level :error :output :human})
+        started (System/currentTimeMillis)]
+    (with-redefs-fn {#'runner-defaults/pause-poll-interval-ms (constantly long-wait-ms)}
+      #(is (true? (#'dag-loop/await-launch-clearance! cs logger))))
+    (is (< (elapsed-ms started) prompt-ms) "a 10 s pause poll ended on the cancel")))

@@ -12,8 +12,7 @@
             [ai.miniforge.workflow.runner-environment :as env]
             [ai.miniforge.workflow.runner-events :as events]
             [ai.miniforge.workflow.runner-outcome :as outcome]
-            [ai.miniforge.workflow.stop-signal :as stop-signal]
-            [slingshot.slingshot :refer [try+]]))
+            [ai.miniforge.workflow.stop-signal :as stop-signal]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -46,21 +45,6 @@
     (cond-> phase-ctx
       switch-result (assoc :self-healing/backend-switch switch-result))))
 
-(defn- ^{:stratum 0} run-phase-step
-  "The phase step in an interrupting scope (`stop-signal`): a stop
-   interrupts it. An interruption that escapes it under a stopped run
-   leaves `context` as it came in."
-  [pipeline context callbacks control-state]
-  (try+
-    (stop-signal/interrupting-on-stop
-     control-state
-     #(exec/execute-phase-step pipeline context callbacks
-                               ctx/merge-metrics
-                               ctx/transition-to-completed
-                               ctx/transition-to-failed))
-    (catch Exception e
-      (if (stop-signal/stop-caused? control-state e) context (throw e)))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} rate-limited?
@@ -84,41 +68,37 @@
                  (resilience/rate-limit-in-text? s)))))
 
 (defn- ^{:stratum 1} apply-backoff-if-retrying!
-  "Sleep with exponential backoff when a phase is being retried."
-  [phase-ctx _context]
+  "Sleep with exponential backoff when a phase is being retried. A cancel
+   before or during the backoff ends it at once (`stop-signal/sleep!`)."
+  [phase-ctx control-state]
   (let [current-phase (:execution/current-phase phase-ctx)
         retrying? (phase/retrying?
                    (get-in phase-ctx [:execution/phase-results current-phase]))
         retry-count (get-in phase-ctx [:phase :iterations] 1)]
     (when (and retrying? (> retry-count 1))
-      (Thread/sleep (backoff-ms retry-count)))))
+      (stop-signal/sleep! control-state (backoff-ms retry-count)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} execute-phase
   "Execute one phase; persist workspace before applying retry or health policy.
-
-   A cancel (`control-state` stopped) while the phase step runs interrupts
-   it and the agent CLI it waits on. An interruption that escapes the step
-   (a blocking phase callback, outside the interceptor's error handler)
-   leaves the context as it came in, for the runner to record the stop.
-   Workspace persistence and the retry and health policy after it run
-   uninterrupted, and a stopped run skips the retry backoff."
-  ([pipeline context callbacks]
-   (execute-phase pipeline context callbacks nil))
-  ([pipeline context callbacks control-state]
-   (let [stepped (-> (run-phase-step pipeline context callbacks control-state)
-                     (monitoring/clear-transient-state))
-         phase-context (->> (env/persist-workspace-at-phase-boundary! context stepped)
-                            (env/track-unpersisted context stepped))
-         error-message (get-in phase-context
-                               [:execution/phase-results
-                                (:execution/current-phase phase-context)
-                                :error :message] "")]
-     (if (rate-limited? error-message)
-       (apply-rate-limit-failure phase-context error-message)
-       (do (when-not (some-> control-state deref :stopped)
-             (apply-backoff-if-retrying! phase-context context))
-           (apply-health-switch phase-context))))))
+   A cancel (`control-state` stopped) before or during the retry backoff
+   ends the backoff at once."
+  [pipeline context callbacks control-state]
+  (let [stepped (-> (exec/execute-phase-step pipeline context callbacks
+                                           ctx/merge-metrics
+                                           ctx/transition-to-completed
+                                           ctx/transition-to-failed)
+                    (monitoring/clear-transient-state))
+        phase-context (->> (env/persist-workspace-at-phase-boundary! context stepped)
+                           (env/track-unpersisted context stepped))
+        error-message (get-in phase-context
+                              [:execution/phase-results
+                               (:execution/current-phase phase-context)
+                               :error :message] "")]
+    (if (rate-limited? error-message)
+      (apply-rate-limit-failure phase-context error-message)
+      (do (apply-backoff-if-retrying! phase-context control-state)
+          (apply-health-switch phase-context)))))
 
 (comment ::phase-boundary-policy)

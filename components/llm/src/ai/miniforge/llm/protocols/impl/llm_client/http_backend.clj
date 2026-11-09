@@ -23,6 +23,7 @@
    [cheshire.core :as json]
    [org.httpkit.client :as http]
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.llm.cost-estimate :as cost-estimate]
    [ai.miniforge.llm.messages :as msg]
    [ai.miniforge.llm.protocols.impl.llm-client.http-wire :as http-wire]
    [ai.miniforge.llm.protocols.impl.llm-client.responses :as responses]
@@ -77,6 +78,16 @@
    server before the client gives up."
   []
   (settings/client-default [:http :idle-timeout-ms]))
+
+(defn- ^{:stratum 0} with-estimated-cost
+  "`response` with a cost-table estimate when the provider billed nothing
+   on it and the estimate can be known (`cost-estimate/known-estimate`);
+   otherwise the cost stays absent, not 0.0 or a partial figure (#2378)."
+  [response model]
+  (let [estimate (when-not (contains? response :cost-usd)
+                   (cost-estimate/known-estimate (:usage response) model))]
+    (cond-> response
+      (some? estimate) (assoc :cost-usd estimate))))
 
 (def ^{:stratum 0} ^:private http-providers
   "Wire-shape registry for the HTTP backends: request-body builder +
@@ -204,7 +215,8 @@
                         {:provider provider}))
 
       :else
-      (parse-fn (http-post-request (request-endpoint backend-config request
-                                                     config)
-                                   (provider-headers provider api-key)
-                                   (body-fn request))))))
+      (-> (parse-fn (http-post-request (request-endpoint backend-config request
+                                                         config)
+                                       (provider-headers provider api-key)
+                                       (body-fn request)))
+          (with-estimated-cost (:model request))))))

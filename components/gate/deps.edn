@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/connector-linter {:local/root "../connector-linter"}
+ :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/connector-linter {:local/root "../connector-linter"}
         ai.miniforge/event-stream {:local/root "../event-stream"}
         ai.miniforge/llm {:local/root "../llm"}
         ai.miniforge/loop {:local/root "../loop"}
@@ -14,6 +15,7 @@
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/tool-registry {:local/root "../tool-registry"}
         babashka/fs {:mvn/version "0.5.34"}
+        borkdude/edamame {:mvn/version "1.6.42"}
         cheshire/cheshire {:mvn/version "5.13.0"}
         slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases

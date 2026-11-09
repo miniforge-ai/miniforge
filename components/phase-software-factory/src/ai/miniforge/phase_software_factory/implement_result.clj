@@ -140,6 +140,17 @@
   (or (:artifact result)
       (:output result)))
 
+(defn ^{:stratum 0} with-implementer-spend
+  "Put the implementer turn's `:tokens` and `:cost-usd` back on `result`'s
+   metrics. The curator spends no implementer tokens, but its response
+   builder fills `:tokens 0`; wherever its result or metrics stand in for
+   the implementer's, the turn's measured spend must survive, on success
+   and on failure alike."
+  [result impl-result]
+  (let [spend (select-keys (:metrics impl-result) [:tokens :cost-usd])]
+    (cond-> result
+      (seq spend) (update :metrics merge spend))))
+
 (defn ^{:stratum 0} raw-agent-output
   "The agent's scalar output text, whether it still sits at :output or
    was preserved under [:output :agent/raw-output] when

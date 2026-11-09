@@ -96,7 +96,7 @@
                     monitoring/clear-transient-state identity
                     environment/persist-workspace-at-phase-boundary! (recording calls :persist nil)
                     events/check-backend-health-at-boundary! (recording calls :health nil)]
-        (let [result (phase-step/execute-phase [] context {})]
+        (let [result (phase-step/execute-phase [] context {} nil)]
           (is (= status (:execution/status result)))
           (is (= order (mapv first @calls)))
           (when (= :failed status)

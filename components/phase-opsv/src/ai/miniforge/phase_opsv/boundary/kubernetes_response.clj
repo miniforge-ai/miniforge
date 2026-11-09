@@ -32,12 +32,14 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} observe! [settings until pending]
-  (let [{:keys [status encodings body]} (http/response-fields (io/await! pending until))]
-    (cond
-      (= http/not-found-status status) not-found
-      (not= http/success-status status) (status-failure status)
-      (not (http/unencoded? encodings)) (invalid-response)
-      :else (document! settings until body))))
+(defn ^{:stratum 2} observe!
+  ([settings until pending] (observe! settings until pending http/success-status))
+  ([settings until pending expected-status]
+   (let [{:keys [status encodings body]} (http/response-fields (io/await! pending until))]
+     (cond
+       (= http/not-found-status status) not-found
+       (not= expected-status status) (status-failure status)
+       (not (http/unencoded? encodings)) (invalid-response)
+       :else (document! settings until body)))))
 
 (comment ::bounded-kubernetes-response)

@@ -49,7 +49,7 @@
    "phase_deployment/provision.clj"      "the phase config"
    "phase_deployment/validate.clj"       "the phase config"
    "phase_software_factory/release.clj"  "the release phase context"
-   "pipeline_runner/run.clj"             "a pipeline stage"
+   "pipeline_runner/processing_stage.clj" "a pipeline stage"
    "policy_calibration/runner.clj"       "the calibration run config"
    "reliability/dependency_health.clj"   "the dependency-health config"
    "training_capture/quality.clj"        "the training-capture quality config"
