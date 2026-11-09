@@ -173,10 +173,14 @@ error in place of the release result, which would drop snapshot data reported fr
    unchanged.
 3. `release-environment!`: take the release-fallback snapshot when one is due, delegate, then `git repack -adq`.
 4. `restore-workspace!` with `:snapshot-dir`, `:snapshot-sha` and `:tree-sha`: verify `rev-parse --verify
-   <sha>^{commit}` and that the commit's tree equals `:tree-sha`. Then `add --all --force` and `reset --hard <sha>`.
-   The add puts the target's current files in the index, so the reset also deletes files the snapshot lacks. Tested
-   both in place and into a fresh worktree: the trees matched exactly and the `.git` file was left alone. A nested
-   repo is the exception (Store, item 5). Other opts go to the delegate unchanged.
+   <sha>^{commit}` and that the commit's tree equals `:tree-sha`. Every command runs with `GIT_NO_REPLACE_OBJECTS=1`,
+   so a `refs/replace/` entry cannot swap in another object behind a matching name. Before touching the worktree,
+   check every object the commit reaches: `fsck --strict --no-dangling <sha>` re-hashes them and fails on a missing
+   or corrupt one (tested: exit 2 for a missing blob, 3 for a corrupted one). A failed check leaves the worktree
+   unchanged and reports `:snapshot-unusable`, and resume falls back to the bundle. Then `add --all --force` and
+   `reset --hard <sha>`. The add puts the target's current files in the index, so the reset also deletes files the
+   snapshot lacks. Tested both in place and into a fresh worktree: the trees matched exactly and the `.git` file
+   was left alone. A nested repo is the exception (Store, item 5). Other opts go to the delegate unchanged.
 
 A snapshot result is `{:kind :phase :sha :tree :tag :dir :changed? :bytes :nested-repos}`, or
 `{:kind :error :reason ...}` on failure. `:nested-repos` is the vector of gitlink paths, empty when there are none.
