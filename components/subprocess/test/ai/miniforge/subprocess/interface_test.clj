@@ -101,6 +101,25 @@
       (is (= sut/max-captured-bytes (:max-bytes handle)))
       (is (= "" (sut/drained-text handle))))))
 
+(deftest ^{:stratum 1} read-bounded-test
+  (testing "given a stream past the limit, read on the calling thread → the
+            same head, overflow mark and note as drain-stream"
+    (let [input  (numbered-bytes multi-read-bytes)
+          calls  (atom 0)
+          handle (sut/read-bounded (ByteArrayInputStream. input)
+                                   {:max-bytes   limit-bytes
+                                    :on-overflow (counting-hook calls)})]
+      (is (= (take limit-bytes input) (seq (sut/drained-bytes handle))))
+      (is (sut/overflowed? handle))
+      (is (= 1 @calls))
+      (is (= limit-bytes (sut/capture-limit handle)))))
+  (testing "given no options → the configured limit, and short input kept whole"
+    (let [input  (numbered-bytes limit-bytes)
+          handle (sut/read-bounded (ByteArrayInputStream. input))]
+      (is (= sut/max-captured-bytes (sut/capture-limit handle)))
+      (is (= (seq input) (seq (sut/drained-bytes handle))))
+      (is (not (sut/overflowed? handle))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} drain-within-limit-test

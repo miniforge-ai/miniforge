@@ -4,6 +4,7 @@
         cheshire/cheshire {:mvn/version "5.13.0"}
         ai.miniforge/anomaly {:local/root "../anomaly"}
         ai.miniforge/logging {:local/root "../logging"}
-        ai.miniforge/messages {:local/root "../messages"}}
+        ai.miniforge/messages {:local/root "../messages"}
+        ai.miniforge/subprocess {:local/root "../subprocess"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

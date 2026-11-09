@@ -24,6 +24,7 @@
    [clojure.string :as str]
    [ai.miniforge.llm.cancellation :as cancellation]
    [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]
+   [ai.miniforge.subprocess.interface :as subprocess]
    [slingshot.slingshot :refer [try+]])
   (:import
    [java.io ByteArrayInputStream]
@@ -159,12 +160,15 @@
          nil)))))
 
 (defn ^{:stratum 1} read-process-stream!
+  "Read `input-stream` to its end on a daemon thread into the `output`
+   atom, keeping at most the subprocess capture limit; a cut stream's text
+   ends with the cut note."
   [thread-name input-stream output]
   (daemon-thread!
    thread-name
    (fn []
      (try
-       (reset! output (slurp input-stream))
+       (reset! output (subprocess/drained-text (subprocess/read-bounded input-stream)))
        (catch Exception e
          (reset! output (or (ex-message e) (str e))))))))
 

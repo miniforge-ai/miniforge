@@ -51,6 +51,15 @@
   ([stream] (capture/drain-stream stream {}))
   ([stream opts] (capture/drain-stream stream opts)))
 
+(defn ^{:stratum 0} read-bounded
+  "`drain-stream` on the calling thread, for a caller that already reads on
+   a thread of its own: read `stream` to its end with the same limit and
+   `:on-overflow`, close it, and return the handle for `drained-text`,
+   `drained-bytes`, `overflowed?` and `capture-limit`. The handle has no
+   `:future`, so it is not for `cancel-drain!`."
+  ([stream] (capture/read-bounded stream {}))
+  ([stream opts] (capture/read-bounded stream opts)))
+
 (defn ^{:stratum 0} drained-text
   "The kept bytes as UTF-8 text, ending in a note when the stream was cut,
    so a reader of the text can tell. Safe to call while the drain runs."
