@@ -124,3 +124,6 @@
 
 (deftest ^{:stratum 1} uncertain-original-creation-cannot-be-adopted-for-a-stop-by-name-test
   (fixtures/with-proposed check-uncertain-creation))
+
+(comment
+  (fixtures/with-proposed check-confirmed))

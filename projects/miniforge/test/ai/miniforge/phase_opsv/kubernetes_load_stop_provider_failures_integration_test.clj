@@ -72,3 +72,6 @@
 
 (deftest ^{:stratum 2} timed-out-patch-cancels-its-owned-future-and-durable-uncertainty-prevents-a-retry-test
   (fixtures/with-proposed check-timeout))
+
+(comment
+  (fixtures/with-proposed check-timeout))
