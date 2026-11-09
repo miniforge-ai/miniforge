@@ -6,6 +6,7 @@
             [ai.miniforge.effect-transaction.interface :as effect]
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-start :as proposal]
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-admission :as admission]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-forward-admission :as common]
             [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -19,9 +20,9 @@
   (anomaly/let-ok [before (admission/readiness! runtime input)
                   intent (proposal/prepare! (:context before) input)
                   current (admission/readiness! runtime input)]
-    (if (= (admission/snapshot (:context before)) (admission/snapshot (:context current)))
+    (if (= (common/snapshot (:context before)) (common/snapshot (:context current)))
       (assoc current :proposal intent)
-      (admission/refused))))
+      (common/refused))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

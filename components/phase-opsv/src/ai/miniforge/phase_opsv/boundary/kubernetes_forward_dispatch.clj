@@ -5,7 +5,8 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.phase-opsv.boundary.kubernetes-effect-audit :as audit]
-            [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-admission :as admission]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-forward-admission :as admission]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-admission :as start]
             [ai.miniforge.phase-opsv.boundary.kubernetes-forward-readiness :as readiness]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.run-control :as control]))
@@ -32,7 +33,7 @@
 (defn ^{:stratum 1} dispatch! [runtime issued prepared input record operation]
   (let [result (anomaly/let-ok [_committing (audit/record! (:context prepared) (:effects-directory runtime)
                                                         (:effect/id record) (:decision prepared))
-                                ready (admission/readiness! runtime input)
+                                ready (start/readiness! runtime input)
                                 _retained (readiness/retain! ready record)]
                  (control/at-boundary! (:control runtime)
                    #(authorized-call! runtime issued ready record operation)))]
