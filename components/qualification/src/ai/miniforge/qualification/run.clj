@@ -59,6 +59,16 @@
 
 (defn- ^{:stratum 0} now [] (str (Instant/now)))
 
+(defn- ^{:stratum 0} write-failure-message [throwable]
+  (or (ex-message throwable) (.getName (class throwable))))
+
+(defn- ^{:stratum 0} unpinned-pass?
+  "Every row passed, yet the verdict is incomplete: the evidence is not
+   pinned to a clean, identified commit."
+  [report passed total]
+  (and (= passed total)
+       (= :verdict/incomplete (:report/verdict report))))
+
 (defn ^{:stratum 0} exit-code
   "0 when the run passed and its report was written, 2 for a gate that is
    not a valid gate, 1 otherwise."
@@ -68,7 +78,9 @@
     (and paths (= :verdict/pass (:report/verdict report)))     0
     :else                                                      1))
 
-(defn ^{:stratum 0} summary-lines
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} summary-lines
   "Human-readable lines for a run result."
   [{:keys [report paths write-failure invalid-gate]}]
   (if invalid-gate
@@ -79,6 +91,7 @@
                                     :verdict (name (:report/verdict report))
                                     :passed  passed
                                     :total   (count rows)})]
+          (cond-> (unpinned-pass? report passed (count rows)) (conj (msg/t :summary/unpinned)))
           (into (map #(msg/t :summary/row {:status      (name (:criterion/status %))
                                            :id          (:criterion/id %)
                                            :description (:criterion/description %)})
@@ -86,8 +99,6 @@
           (conj (if paths
                   (msg/t :summary/wrote {:path (:json paths)})
                   (msg/t :summary/write-failed {:message write-failure})))))))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} scenario-outcome
   "{:output o} for usable scenario output, else {:failure f}."
@@ -108,19 +119,25 @@
      {:failure (thrown-failure e)})))
 
 (defn- ^{:stratum 1} assemble-report
-  [gate {:keys [output failure] :as outcome} {:keys [command root started-at]}]
-  (let [rows (report-rows gate outcome)]
+  "The report for one run. Passing rows give a pass only on pinned evidence:
+   a clean, identified commit and hashed fixtures and config."
+  [gate {:keys [output failure] :as outcome} {:keys [command root started-at build-fn]}]
+  (let [rows         (report-rows gate outcome)
+        build        (build-fn root)
+        fixture-hash (when output (content-hash/content-hash (:scenario/fixtures output)))
+        config-hash  (when output (content-hash/content-hash (:scenario/config output)))
+        pinned       (vocab/pinned? build fixture-hash config-hash)]
     (cond-> {:report/version      vocab/report-version
              :report/gate-id      (:gate/id gate)
              :report/gate-title   (:gate/title gate)
              :report/command      (vec command)
-             :report/build        (build/build-identity root)
-             :report/fixture-hash (when output (content-hash/content-hash (:scenario/fixtures output)))
-             :report/config-hash  (when output (content-hash/content-hash (:scenario/config output)))
+             :report/build        build
+             :report/fixture-hash fixture-hash
+             :report/config-hash  config-hash
              :report/started-at   started-at
              :report/finished-at  (now)
              :report/criteria     rows
-             :report/verdict      (verdict/verdict rows)}
+             :report/verdict      (vocab/report-verdict (map :criterion/status rows) pinned)}
       (:gate/issue gate) (assoc :report/issue (:gate/issue gate))
       failure            (assoc :report/failure failure))))
 
@@ -130,24 +147,30 @@
   "Run `scenario`, a no-argument fn returning a ScenarioOutput, for `gate`,
    and write the report under `out-dir` (default target/qualification).
    `command` is the argv that repeats the run; `root` is the workspace
-   whose build is recorded.
+   whose build is recorded, read by `build-fn` (default
+   `build/build-identity`).
 
    Returns {:report r :paths {:edn :json}}, or {:report r :write-failure
    message} when the report could not be written, or {:invalid-gate
    problems} when `gate` is not a valid gate."
-  [gate scenario {:keys [out-dir command root]
-                  :or   {out-dir "target/qualification" root "."}}]
+  [gate scenario {:keys [out-dir command root build-fn]
+                  :or   {out-dir  "target/qualification"
+                         root     "."
+                         build-fn build/build-identity}}]
   (if-not (m/validate schema/Gate gate)
     {:invalid-gate (pr-str (me/humanize (m/explain schema/Gate gate)))}
     (let [started-at (now)
           outcome    (scenario-outcome gate scenario)
           report     (assemble-report gate outcome {:command    command
                                                     :root       root
+                                                    :build-fn   build-fn
                                                     :started-at started-at})]
       (try+
        {:report report :paths (writer/write-report! out-dir report)}
-       (catch java.io.IOException e
-         {:report report :write-failure (ex-message e)})))))
+       (catch thrown-value? _
+         {:report report :write-failure (write-failure-message (:throwable &throw-context))})
+       (catch Exception e
+         {:report report :write-failure (write-failure-message e)})))))
 
 (comment
   (run-gate! {:gate/id :fixture/gate :gate/title "Fixture"

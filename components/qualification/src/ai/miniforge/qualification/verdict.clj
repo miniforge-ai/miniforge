@@ -59,8 +59,6 @@
   [x]
   (try+
    (= x (edn/read-string (pr-str x)))
-   (catch map? _
-     false)
    (catch Exception _
      false)))
 

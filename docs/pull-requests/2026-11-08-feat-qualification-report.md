@@ -45,6 +45,23 @@ data.
       an invalid gate, 1 otherwise. `summary-lines` for console output.
 5. `interface`: `run-gate!`, `exit-code`, `summary-lines`.
 
+## Review fixes (Copilot)
+
+1. A report that cannot be written for any reason (any `Exception` or thrown
+   value, not only `IOException`) comes back as `:write-failure`.
+2. The file stem takes the whole commit when it is shorter than 12
+   characters instead of throwing.
+3. JSON keys keep their namespaces through an explicit `:key-fn`.
+4. The workspace-commit test also holds outside a git checkout.
+5. The assert case throws `AssertionError` explicitly, so disabled asserts
+   cannot skip it.
+6. `plain-data?` drops a `map?` catch that EDN read errors never reach.
+
+From the schema PR's review: the verdict is `vocabulary/report-verdict`, so
+passing rows on a dirty tree, without a commit or without hashes give
+`:verdict/incomplete`, and the summary says why. `:build-fn` (default
+`build/build-identity`) lets tests supply a clean build without git commits.
+
 ## Testing Plan
 
 1. `build_writer_test`: outside a repository, no commit and not clean; the
@@ -56,7 +73,9 @@ data.
    every criterion unrun; an unreported criterion is incomplete; hashes repeat
    across runs; an invalid gate exits 2; an unwritable report exits 1 even
    when every criterion passed; the summary names the verdict and each row.
-3. Locally: 23 tests, 86 assertions, 0 failures.
+3. Locally: 31 tests, 117 assertions, 0 failures. Also covered: a pass on
+   an unpinned build is incomplete and the summary says why; a short commit
+   names the file.
 
 ## Deployment Plan
 

@@ -37,15 +37,27 @@
   [{:report/keys [started-at build]}]
   (str (str/replace started-at #"[^0-9A-Za-z.-]" "-")
        "-"
-       (if-let [sha (:build/git-sha build)] (subs sha 0 12) "no-commit")))
+       (if-let [sha (not-empty (:build/git-sha build))]
+         (subs sha 0 (min 12 (count sha)))
+         "no-commit")))
 
 (defn- ^{:stratum 0} edn-text [report]
   (with-out-str (pprint/pprint report)))
 
-(defn- ^{:stratum 0} json-text [report]
-  (json/generate-string report {:pretty true}))
+(defn- ^{:stratum 0} json-key
+  "A map key as JSON text: a keyword keeps its namespace, `:report/gate-id`
+   → \"report/gate-id\"; any other key is its string form."
+  [k]
+  (if (keyword? k) (subs (str k) 1) (str k)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} json-text
+  "The report as JSON. Keys keep their namespaces through `json-key`;
+   cheshire writes keyword values with theirs, `:verdict/pass` →
+   \"verdict/pass\", which the writer test checks."
+  [report]
+  (json/generate-string report {:pretty true :key-fn json-key}))
 
 (defn ^{:stratum 1} report-paths
   "{:edn path :json path} for `report` under `out-dir`."

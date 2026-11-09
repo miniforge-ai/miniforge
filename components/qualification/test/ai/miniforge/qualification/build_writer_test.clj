@@ -41,8 +41,10 @@
    :report/verdict    :verdict/pass})
 
 (deftest ^{:stratum 0} test-workspace-commit-is-a-full-sha
-  (testing "given the workspace root → a 40-character commit"
-    (is (re-matches #"[0-9a-f]{40}" (build/git-sha ".")))))
+  (testing "given the workspace root → a 40-character commit, or, outside a checkout, none and not clean"
+    (if-let [sha (build/git-sha ".")]
+      (is (re-matches #"[0-9a-f]{40}" sha))
+      (is (false? (build/clean? "."))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -67,6 +69,9 @@
     (let [{:keys [edn json]} (writer/report-paths "out" report)]
       (is (= "out/fixture.gate/2026-11-08T12-00-00Z-aaaaaaaaaaaa.edn" edn))
       (is (= "out/fixture.gate/2026-11-08T12-00-00Z-aaaaaaaaaaaa.json" json))))
+  (testing "given a commit shorter than 12 characters → the whole commit, no exception"
+    (is (re-find #"-abc\.edn$"
+                 (:edn (writer/report-paths "out" (assoc-in report [:report/build :build/git-sha] "abc"))))))
   (testing "given no commit → the stem says so"
     (is (re-find #"no-commit\.edn$"
                  (:edn (writer/report-paths "out" (assoc-in report [:report/build :build/git-sha] nil)))))))

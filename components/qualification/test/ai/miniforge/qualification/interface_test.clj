@@ -37,6 +37,11 @@
 
 (def ^{:stratum 0} ^:private command ["bb" "qualify" "fixture/gate"])
 
+(def ^{:stratum 0} ^:private clean-build
+  {:build/git-sha   (apply str (repeat 40 "a"))
+   :build/clean?    true
+   :build/deps-hash (apply str (repeat 64 "b"))})
+
 (defn- ^{:stratum 0} temp-dir []
   (str (Files/createTempDirectory "qualification-run" (make-array FileAttribute 0))))
 
@@ -53,8 +58,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} run-in-temp [scenario]
-  (qualification/run-gate! gate scenario {:out-dir (temp-dir) :command command}))
+(defn- ^{:stratum 1} run-in-temp
+  "Run `scenario` with output in a fresh directory, on `build` (default a
+   clean, identified commit)."
+  ([scenario] (run-in-temp scenario clean-build))
+  ([scenario build]
+   (qualification/run-gate! gate scenario {:out-dir  (temp-dir)
+                                           :command  command
+                                           :build-fn (constantly build)})))
 
 (deftest ^{:stratum 1} test-invalid-gate-is-refused
   (testing "given a gate without criteria → no report, exit 2"
@@ -70,7 +81,9 @@
     (let [blocker (io/file (temp-dir) "not-a-directory")
           _       (spit blocker "")
           result  (qualification/run-gate! gate (scenario-returning all-pass)
-                                           {:out-dir (str blocker) :command command})]
+                                           {:out-dir  (str blocker)
+                                            :command  command
+                                            :build-fn (constantly clean-build)})]
       (is (string? (:write-failure result)))
       (is (= :verdict/pass (get-in result [:report :report/verdict])))
       (is (= 1 (qualification/exit-code result))))))
@@ -91,10 +104,10 @@
       (is (= 0 (qualification/exit-code result))))))
 
 (deftest ^{:stratum 2} test-throwing-scenario-is-unrun
-  (testing "given a scenario that throws ex-info, throws a keyword with throw+, or fails an assert → every criterion unrun, still reported, exit 1"
+  (testing "given a scenario that throws ex-info, throws a keyword with throw+, or throws an AssertionError → every criterion unrun, still reported, exit 1"
     (doseq [scenario [(fn [] (throw (ex-info "boom" {:reason :fixture})))
                       (fn [] (throw+ :fixture/stop))
-                      (fn [] (assert false "boom"))]]
+                      (fn [] (throw (AssertionError. "boom")))]]
       (let [{:keys [report paths] :as result} (run-in-temp scenario)]
         (is (qualification/valid-report? report))
         (is (= :scenario/threw (get-in report [:report/failure :error/kind])))
@@ -130,6 +143,17 @@
           b (:report (run-in-temp (scenario-returning all-pass)))]
       (is (= (:report/fixture-hash a) (:report/fixture-hash b)))
       (is (= (:report/config-hash a) (:report/config-hash b))))))
+
+(deftest ^{:stratum 2} test-unpinned-build-is-not-a-pass
+  (testing "given every criterion passing on a dirty tree or without a commit → incomplete, exit 1, and the summary says why"
+    (doseq [build [(assoc clean-build :build/clean? false)
+                   (assoc clean-build :build/git-sha nil)]]
+      (let [{:keys [report] :as result} (run-in-temp (scenario-returning all-pass) build)]
+        (is (qualification/valid-report? report))
+        (is (= :verdict/incomplete (:report/verdict report)))
+        (is (= #{:status/pass} (set (map :criterion/status (:report/criteria report)))))
+        (is (= 1 (qualification/exit-code result)))
+        (is (= 5 (count (qualification/summary-lines result))))))))
 
 (deftest ^{:stratum 2} test-summary-names-verdict-and-rows
   (testing "given a run → a verdict line, one line per criterion, and the report path"

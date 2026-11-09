@@ -13,6 +13,7 @@
 
   ;; Summary (run.clj)
   :summary/verdict          "Qualification {gate}: {verdict}, {passed} of {total} criteria passed"
+  :summary/unpinned         "  Every criterion passed, but the build is not a clean, identified commit, so the verdict is incomplete"
   :summary/row              "  {status} {id}: {description}"
   :summary/wrote            "Report written: {path}"
   :summary/write-failed     "The report could not be written: {message}"
