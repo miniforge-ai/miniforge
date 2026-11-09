@@ -64,13 +64,12 @@ Current N4/N8 effect admission and separately scoped root grants remain mandator
 
 ## Related Issues/PRs
 
-Base branch: main. Local development stacks signed PRs #2481 and #2482.
-This slice will not be published before both merge.
+Base branch: main. Signed prerequisites #2481 and #2482 are merged.
 N7 §5.5/§6.3; N10 §1.5. Baseline recovery and complete runner wiring remain separate.
 
 ## Checklist
 
-- [ ] Both prerequisites merged on main before publication.
+- [x] Both prerequisites merged on main before publication.
 - [x] Implement and validate native cleanup dispatch.
 - [ ] Owner adversarial and full applicable pinned-standard review.
 - [ ] Normal signed commits, budgets, full current-head review and CI.
