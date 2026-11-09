@@ -86,7 +86,10 @@ the plan mounts one) and only the host paths its plan mounts, so a store on the 
    The store copies ignored files the secret scan never sees, such as `.env` or `.claude/settings.local.json`, and
    keeps them for the retention period. So `<snapshot-root>` and every dir under it are created owner-only (`0700`),
    and the store refuses a snapshot root that is a symbolic link, as `checkpoint-store-lock` refuses a linked
-   `.locks` dir.
+   `.locks` dir. `0700` keeps other users out. It does not keep out the agent, which in local mode runs as the
+   operator's user and can already read the operator's home. What the store adds is time: the files outlive the
+   worktree. The deny-pattern entry for the snapshot root (PR 4) catches commands that name it, which, as for
+   writes, detects rather than prevents.
 2. `git --git-dir <dir> init --bare`, so the store has `core.bare=true` and no `core.worktree`. Every command that
    reads or writes files names the work tree with `--work-tree`, which overrides `core.bare` (tested). Before the
    first add, write `info/attributes` containing `* -text -filter -ident !eol !working-tree-encoding`.
@@ -95,8 +98,9 @@ the plan mounts one) and only the host paths its plan mounts, so a store on the 
 3. Every command is `git --git-dir <dir>`, plus `--work-tree <worktree>` when it touches files, with
    `-c core.excludesFile=/dev/null -c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgsign=false` and
    a fixed `user.name`/`user.email`. The process starts from an empty environment holding only `PATH`, `LC_ALL=C`,
-   `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`. An explicit `--git-dir` overrides `GIT_DIR` but not
-   an inherited `GIT_INDEX_FILE` or `GIT_OBJECT_DIRECTORY`; a stray `GIT_INDEX_FILE` moved the index (tested). With
+   `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`, plus the per-write `GIT_INDEX_FILE` the store itself
+   sets (Executor wiring). An explicit `--git-dir` overrides `GIT_DIR` but not an inherited `GIT_INDEX_FILE` or
+   `GIT_OBJECT_DIRECTORY`; a stray `GIT_INDEX_FILE` moved the index (tested). With
    an explicit `--git-dir` git does no discovery, so it never opens the worktree's `.git` file or the host's
    `.git/config`.
 4. A snapshot is `add --all --force` and then a commit only if the tree changed. The first commit uses
@@ -202,9 +206,19 @@ reports `:store-busy` without opening the file.
 
 Acquire takes the slot lock, creates or opens the store, takes the store lock, and then releases the slot lock. A
 process that cannot take the store lock leaves the store alone, and its snapshots report `:workspace/snapshot-failed`
-with `:store-busy`; it does not wait. The OS drops a lock when its holder dies. So the store lock's holder knows no
-other process is writing, and an `index.lock` it finds at acquire can only be a killed process's leftover. It deletes
-that file and records the deletion in the baseline result.
+with `:store-busy`; it does not wait.
+
+The OS drops a lock when its holder dies, but a git child of a killed process can keep running. So the store lock
+alone does not prove that nothing else writes, and the store never deletes a lock file git made. Instead, no two
+writes share state that a survivor could corrupt:
+
+1. Each `snapshot!` and `restore!` sets `GIT_INDEX_FILE` to a new file under `<store>/tmp/` and deletes it when
+   done. The platform environment controls that variable (Store, item 3). No shared index means no `index.lock`
+   to leave behind.
+2. Refs move by compare-and-swap. `update-ref refs/tags/<tag> <sha> <zero-oid>` creates a tag only if it does not
+   exist, and the history branch moves only from the commit the snapshot started from. A surviving child and a new
+   holder cannot both succeed: one fails the swap and reports `:workspace/snapshot-failed`.
+3. Acquire deletes `tmp/` files older than a day.
 
 GC deletes a run's stores only while holding that run's slot lock. For each store it first checks the in-process
 registry and skips a store this process holds; it never opens that store's lock file, because closing any
