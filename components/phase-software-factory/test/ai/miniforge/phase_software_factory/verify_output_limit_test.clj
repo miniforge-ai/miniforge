@@ -35,6 +35,11 @@
   "A test command that writes to stdout until it is stopped."
   "yes")
 
+(def ^{:stratum 0} ^:private endless-stderr-cmd
+  "A test command that writes to stderr until it is stopped, with a line of
+   stdout first."
+  "echo started; yes err >&2")
+
 (def ^{:stratum 0} ^:private stop-deadline-ms
   "Test deadline far past the moment `yes` passes the limit, so a timed-out
    result means the run was never stopped."
@@ -75,6 +80,14 @@
         (is (str/starts-with? (:output result) heading))
         (is (str/includes? (:output result) "y\ny\n") "the start of the output is shown")
         (is (< took stop-slack-ms) (str "returned after " took "ms"))))))
+
+(deftest ^{:stratum 2} run-tests-shows-the-stream-that-passed-the-limit-test
+  (testing "when stderr passes the limit, the failure shows stderr's start"
+    (with-redefs [subprocess/drain-stream small-limit-drain]
+      (let [result (verify/run-tests! "/tmp" :test-cmd endless-stderr-cmd
+                                      :timeout-ms stop-deadline-ms)]
+        (is (false? (:passed? result)))
+        (is (str/includes? (:output result) "err\nerr\n"))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

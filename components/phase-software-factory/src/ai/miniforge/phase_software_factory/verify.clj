@@ -79,11 +79,11 @@
 (defn- ^{:stratum 0} exited-test-result
   "Results for a test process that exited. One stopped for passing the
    capture limit fails with a message naming the limit and showing the
-   start of its output. That failure goes back to implement: output of that
-   size comes from the code under test."
+   start of the stream that passed it. That failure goes back to implement:
+   output of that size comes from the code under test."
   [cmd exit [out err :as drains]]
   (if-let [cut (first (filter subprocess/overflowed? drains))]
-    (let [text (subprocess/drained-text out)
+    (let [text (subprocess/drained-text cut)
           head (subs text 0 (min (count text) output-config/verify-error-preview-limit))]
       (result/test-error-result
        (messages/t :verify/output-limit {:bytes    (subprocess/capture-limit cut)
