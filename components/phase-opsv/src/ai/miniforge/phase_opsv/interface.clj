@@ -85,14 +85,6 @@
 
 (def ^{:stratum 0} OPSVAdapter protocol/OPSVAdapter)
 
-(def ^{:stratum 0} execute-kubernetes-load-creation!
-  "Execute one exact inert Pod creation through current N4, N8, root authority and durable audit.
-   Input is the closed recovery reference plus creation/provider; the admitted load ID must match the retained plan.
-   Runtime handles and current-context/clock readers must come from the trusted host, never serialized input.
-   Return the actual succeeded transaction or an anomaly retaining failure/uncertainty; never retry or release traffic.
-   Default-off, staging-only, and independently approved recovery-plan admission remain required."
-  native-load-creation-execution/create!)
-
 (def ^{:stratum 0} observe-kubernetes-load-absence!
   "Read owned Pod presence between fresh original-cluster and namespace identity checks.
    Input is the closed retained recovery reference/runtime contract, without an effect ID.
@@ -114,6 +106,14 @@
    Returns durable transaction or anomaly. Failed or uncertain commits fence forward effects and retain audit data.
    This API neither enables experiments by default nor proves traffic, SLOs, termination or recovery."
   native-load-start-execution/start!)
+
+(def ^{:stratum 0} execute-kubernetes-load-creation!
+  "Execute one exact inert Pod creation through current N4, N8, root authority and durable audit.
+   Input is the closed recovery reference plus creation/provider; the admitted load ID must match the retained plan.
+   Runtime handles and current-context/clock readers must come from the trusted host, never serialized input.
+   Return the actual succeeded transaction or an anomaly retaining failure/uncertainty; never retry or release traffic.
+   Default-off, staging-only, and independently approved recovery-plan admission remain required."
+  native-load-creation-execution/create!)
 
 (def ^{:stratum 0} prepare-kubernetes-load-stop-proposal!
   "Prepare an exact conditional stop proposal from current retained recovery approval and fresh owned identity.

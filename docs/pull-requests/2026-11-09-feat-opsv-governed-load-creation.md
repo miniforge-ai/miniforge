@@ -41,6 +41,8 @@ strict lint (zero warnings/errors), true inferred strata and a fresh CLI build.
 Source and isolated package each pass 54 tests / 890 assertions and eleven relevant
 fault checks. Every fault produces assertion failures with zero test errors.
 The package contains no deleted load-start implementation or runtime-schema namespaces.
+Grouping the unchanged interface alias with load execution avoids a prospective
+recovery-verifier merge conflict. Source creation regressions again pass 7 tests / 261 assertions.
 
 ## Deployment Plan
 
