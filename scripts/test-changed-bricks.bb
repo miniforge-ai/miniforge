@@ -20,8 +20,8 @@
 
 (def ^:private clean-git-env
   "Environment with GIT_INDEX_FILE stripped.
-   Prevents worktree-specific index from leaking into subprocesses that
-   run git commands (Polylith, Clojure test JVM). Without this, git
+   Prevents worktree-specific index from leaking into Polylith's change
+   query, which runs git. The test JVM gets `test-env`. Without this, git
    operations inside subprocesses can corrupt the committing worktree's
    index, causing empty or wrong-tree commits."
   (dissoc (into {} (System/getenv)) "GIT_INDEX_FILE"))

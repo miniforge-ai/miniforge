@@ -190,18 +190,19 @@
             "GIT_PREFIX"     ""
             "GIT_CONFIG"     (config-file repo)})))
 
-(defn- ^{:stratum 1} started-envs
-  "The `:env` of each process `launcher` starts, in order. The sanitizer
-   returns `sanitized-env` and both process entry points only record, so
-   nothing runs and a zero exit keeps the launcher off `System/exit`."
+(defn- ^{:stratum 1} started-processes
+  "Each process `launcher` starts, in order, as `{:env .. :args ..}`. The
+   sanitizer returns `sanitized-env` and both process entry points only
+   record, so nothing runs and a zero exit keeps the launcher off
+   `System/exit`."
   [launcher]
-  (let [envs   (atom [])
-        record (fn [opts] (swap! envs conj (get opts :env)))]
+  (let [started (atom [])
+        record  (fn [opts args] (swap! started conj {:env (get opts :env) :args (vec args)}))]
     (with-redefs [bb-test-runner/sanitize-git-worktree-env (constantly sanitized-env)
-                  p/process (fn [opts & _] (record opts) (delay {:exit 0}))
-                  p/sh      (fn [opts & _] (record opts) {:exit 0 :out ""})]
+                  p/process (fn [opts & args] (record opts args) (delay {:exit 0}))
+                  p/sh      (fn [opts & args] (record opts args) {:exit 0 :out ""})]
       (with-out-str (launcher)))
-    @envs))
+    @started))
 
 (defn- ^{:stratum 1} call-with-decoy-and-target
   "Call `f` with two fresh repositories under one temp root: `:decoy`
@@ -237,9 +238,14 @@
 (deftest ^{:stratum 2} test-every-launcher-starts-its-processes-with-the-sanitized-environment
   (doseq [[task launcher] launchers]
     (testing (str "given " task " with no environment passed → each process it starts gets the sanitizer's output")
-      (let [envs (started-envs launcher)]
+      (let [envs (map :env (started-processes launcher))]
         (is (seq envs))
         (is (every? (fn [env] (= sanitized-env env)) envs))))))
+
+(deftest ^{:stratum 2} test-poly-all-runs-every-brick-and-project
+  (testing "given test:poly → it runs `poly test :all`, not the form that tests only changed bricks"
+    (is (= [["-M:poly" "test" ":all"]]
+           (map (comp #(vec (take-last 3 %)) :args) (started-processes sut/poly-all))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

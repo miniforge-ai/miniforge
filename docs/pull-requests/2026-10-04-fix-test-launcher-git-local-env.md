@@ -138,7 +138,8 @@ test run. To give a test run its own config, set `GIT_CONFIG_GLOBAL`.
    2. Started through this branch's `run-stream!`, with `GIT_CONFIG` exported on top of what the hook sets:
       15 namespaces, 163 tests, 566 assertions, no failures. The decoy was unchanged after every namespace
       and its hook was never re-entered.
-5. `bb test:poly` argv checked with `run-stream!` stubbed: `clojure -M:poly test :all`, unchanged.
+5. `test-poly-all-runs-every-brick-and-project` pins `bb test:poly`'s argv, `-M:poly test :all`, so a change
+   back to the changed-only form fails.
 6. `bb check:bb-classpaths`: passing. `clj-kondo` and `stratum-lint` on the changed files: no findings.
 7. `scripts/test-changed-bricks.bb` was run from `main` and from this branch: 649 namespaces, 6,588 tests
    each. The shell set none of the 16 variables, so both versions gave their subprocesses the same
@@ -208,9 +209,10 @@ Two findings beyond the config writes:
    instead of stripping them. The run fails if the decoy changed. The audit driver used for the table does
    this by hand. Run in CI it would catch a new unscrubbed fixture in the PR that adds it.
 3. `bb ccov` starts Cloverage, which runs tests, through `bb-dev-tools` with the launch environment
-   unstripped. `bb-test-runner/run-coverage` does the same.
-4. `run-stream!` strips `:env`. A caller that adds a listed variable back through `:extra-env` gets it; no
-   caller does.
+   unstripped. `bb-test-runner/run-coverage` does the same. The fix touches `bb_dev_tools/core.clj`, which
+   already spans five layers, so the stratum lint needs that namespace split first.
+4. `run-stream!` strips `:env`. A caller that adds a listed variable back through `:extra-env` gets it; its
+   docstring names that as the way to set one on purpose. No caller does.
 5. `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_VALUE_<n>` stay in the environment. git ignores them once
    `GIT_CONFIG_COUNT` is gone.
 

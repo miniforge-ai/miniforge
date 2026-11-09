@@ -33,7 +33,8 @@
    this process's own — goes through `sanitize-git-worktree-env` on every
    call. A git hook exports `GIT_DIR`, and a test that inherits it runs
    `git init` and `git config` against the hook's repository instead of
-   its temp directory."
+   its temp directory. `:extra-env` is laid over the stripped environment:
+   it is how a caller sets one of these variables on purpose."
   [& args]
   (let [[opts cmd-args] (if (map? (first args))
                           [(first args) (rest args)]
