@@ -50,6 +50,9 @@ design relies on were tested in a scratch repo with git 2.48.1:
 2. `info/attributes` keeps the bytes on disk; without it, a work tree with `text=auto eol=crlf` was stored as LF.
 3. `reset --hard` restores exactly, both in place and into a fresh worktree.
 4. An inherited `GIT_INDEX_FILE` overrides an explicit `--git-dir`.
+5. `git --git-dir <dir> init` writes `core.bare=true`, and `--work-tree` still works for add and commit.
+6. A nested repo with an uncommitted change is stored as its HEAD commit only, and a restore into an empty
+   directory leaves it empty. The design states this limit.
 
 Snapshot cost was measured on this checkout.
 

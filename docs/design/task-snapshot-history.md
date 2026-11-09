@@ -46,7 +46,7 @@ Two problems found while checking this against the code:
 ## Goals
 
 1. Keep a per-task history of the full work tree, taken by the platform at fixed points, in a store that git
-   commands run in the work tree cannot reach.
+   commands run in the work tree cannot reach. A nested repo's contents are the one exception (Store, item 5).
 2. Restore any recorded point by a verified SHA.
 3. Record each SHA in the event stream when the snapshot is taken, for resume and evidence.
 
@@ -73,12 +73,15 @@ the plan mounts one) and only the host paths its plan mounts, so a store on the 
 
 ### Store
 
-1. One bare git dir per task: `<snapshot-root>/<run-id>/<task-id>.git`. `run-id` is the run's `:execution/id`, a
+1. One bare git dir per task: `<snapshot-root>/<run-id>/<store-id>.git`. `run-id` is the run's `:execution/id`, a
    UUID, the same id the run's events, bundles and checkpoints are keyed by. It is not the workflow definition's
    `:workflow/id`. The new user-config key `:workflow/snapshot-root` defaults in code to
    `<miniforge-home>/snapshots`, as `:workflow/worktree-root` does (`default-base-path`). Like that key, it stays out
-   of `default-user-config.edn`, so `MINIFORGE_HOME` moves it. `task-id` is the full id given to
-   `acquire-environment!`; the environment id holds only its first 8 characters.
+   of `default-user-config.edn`, so `MINIFORGE_HOME` moves it. `store-id` is the full task id given to
+   `acquire-environment!` when the store was created; the environment id holds only its first 8 characters. The
+   store id is never derived again later: `environment-records/build` gives each acquisition a fresh random task id
+   unless the definition id is a UUID, so a resume would land in a new store. Every snapshot event records the
+   store's dir, and a resume passes that dir back (Executor wiring, item 1).
 2. `git --git-dir <dir> init --bare`, so the store has `core.bare=true` and no `core.worktree`. Every command that
    reads or writes files names the work tree with `--work-tree`, which overrides `core.bare` (tested). Before the
    first add, write `info/attributes` containing `* -text -filter -ident !eol !working-tree-encoding`.
@@ -92,12 +95,17 @@ the plan mounts one) and only the host paths its plan mounts, so a store on the 
    an explicit `--git-dir` git does no discovery, so it never opens the worktree's `.git` file or the host's
    `.git/config`.
 4. A snapshot is `add --all --force` and then a commit only if the tree changed. The first commit uses
-   `--allow-empty`, so every store has a root commit. Tested: ignored files are kept, the
-   worktree's own `.git` file is skipped, and a nested repo is stored as a gitlink. An uninitialized submodule
-   directory is empty, so it is not recorded. So the baseline is read from disk and never assumed equal to
-   `base-sha`'s tree. On this repo the two differ by the empty `standards/miniforge` and an ignored
-   `.claude/settings.local.json`.
-5. No alternates. Borrowing the host's objects made the first snapshot 13x faster. But then `git gc` run in the
+   `--allow-empty`, so every store has a root commit. Tested: ignored files are kept, and the worktree's own `.git`
+   file is skipped. An uninitialized submodule directory is empty, so it is not recorded. So the baseline is read
+   from disk and never assumed equal to `base-sha`'s tree. On this repo the two differ by the empty
+   `standards/miniforge` and an ignored `.claude/settings.local.json`.
+5. A nested repo, such as an initialized submodule, is stored as a gitlink: its HEAD commit only. Its files and
+   uncommitted changes are not in the snapshot, and a restore into an empty directory leaves it an empty directory
+   (tested). The first version keeps this limit and reports it: each snapshot result lists the gitlink paths as
+   `:nested-repos`, so evidence shows which paths a snapshot does not cover. The goals exclude those paths.
+   Capturing them would need a store per nested repo, which waits until a task needs it. The store passes
+   `-c advice.addEmbeddedRepo=false`, so this case adds no hint text to its output.
+6. No alternates. Borrowing the host's objects made the first snapshot 13x faster. But then `git gc` run in the
    agent's worktree could delete objects the snapshots depend on.
 
 ### When snapshots are taken
@@ -143,9 +151,11 @@ error in place of the release result, which would drop snapshot data reported fr
    separate argument and puts it in env-config. The definition id keeps its current uses. The worktree executor's
    scratch registry also reads env-config `:workflow-id`, but only to record an in-memory entry.
    `task-executor/runner.clj` also acquires environments, but nothing in production calls it, so it is left as is.
-   With no run id there is no store, and the snapshot reports `:no-workflow-id`. On a new attempt, env-config also
-   carries `:snapshot-import`: the source run's store and the tags the attempt inherits. The wrapper fetches those
-   tags right after `init`, before the baseline, so the tag counter continues after them.
+   With no run id there is no store, and the snapshot reports `:no-workflow-id`. On a resume in place, env-config
+   carries `:snapshot-dir`, the store dir the run's last snapshot event names, and the wrapper reopens that store
+   rather than creating one under the new task id. On a new attempt, env-config carries `:snapshot-import` instead:
+   the source run's store and the tags the attempt inherits. The wrapper fetches those tags into its new store right
+   after `init`, before the baseline. Either way the tag counter continues after the tags already there.
 2. `snapshot-workspace!` (new, in the `dag-executor` interface): take a snapshot of a given kind and phase. On an
    executor that is not wrapped it returns nil. It never calls the delegate. `persist-workspace!` passes through
    unchanged.
@@ -153,24 +163,28 @@ error in place of the release result, which would drop snapshot data reported fr
 4. `restore-workspace!` with `:snapshot-dir`, `:snapshot-sha` and `:tree-sha`: verify `rev-parse --verify
    <sha>^{commit}` and that the commit's tree equals `:tree-sha`. Then `add --all --force` and `reset --hard <sha>`.
    The add puts the target's current files in the index, so the reset also deletes files the snapshot lacks. Tested
-   both in place and into a fresh worktree: the trees matched exactly and the `.git` file was left alone. Other
-   opts go to the delegate unchanged.
+   both in place and into a fresh worktree: the trees matched exactly and the `.git` file was left alone. A nested
+   repo is the exception (Store, item 5). Other opts go to the delegate unchanged.
 
 A snapshot result is `{:kind :phase :sha :tree :tag :dir :changed? :bytes}`, or `{:kind :error :reason ...}` on
 failure. `snapshot-workspace!` returns it; acquire and release results carry it as `:workspace/snapshot`. The runner
 collects each one in the context's `:execution/workspace-snapshots`: the baseline from the acquired environment map
 (`runner_preparation.clj`), one per phase boundary, and the final one in `execute!`.
 
-Within a process, writes to one store are serialized by a JVM lock keyed on its git dir. Across processes they need
-no lock: a store belongs to one run, and the run owner lock (`owner/with-run-owner` in `run-pipeline`) already
-admits one live process per run id. A second process could reach a store only by bypassing that lock, so it fails
-on git's `index.lock` and reports `:workspace/snapshot-failed` rather than waiting. The one expected
-`index.lock` is the one a killed process leaves. Acquire runs under the owner lock, so no other process can be
-writing: the wrapper deletes a leftover `index.lock` there and records that it did in the baseline result.
+Within a process, writes to one store are serialized by a JVM lock keyed on its git dir. Across processes, the
+wrapper holds an OS file lock on `<store-id>.lock`, beside the store, from acquire to release, through the port's
+`:lock!` and `:unlock!`. The store takes it with a non-blocking `tryLock`, as `run-owner-lock` does. The run owner
+lock alone is not enough: its file lives under the checkpoint root, so two processes with different checkpoint roots
+can both own the same run id and reach one store. A process that cannot take the store lock leaves the store alone,
+and its snapshots report `:workspace/snapshot-failed` with `:store-busy`; it does not wait. The OS drops the lock
+when its holder dies. So the holder knows no other process is writing, and an `index.lock` it finds at acquire can
+only be a killed process's leftover. It deletes that file and records the deletion in the baseline result. The GC
+pass skips a store whose lock is held.
 
-The wrapper calls the store through a `SnapshotStore` port, a map of `:init!`, `:snapshot!`, `:verify!`, `:restore!`,
-`:import!` and `:repack!` given at composition. The wrapper defines the port; the git-backed store implements it
-(PR 3), and `create-executor-registry` passes that store in. The wrapper's tests pass fakes.
+The wrapper calls the store through a `SnapshotStore` port, a map of `:init!`, `:lock!`, `:unlock!`, `:snapshot!`,
+`:verify!`, `:restore!`, `:import!` and `:repack!` given at composition. The wrapper defines the port; the
+git-backed store implements it (PR 3), and `create-executor-registry` passes that store in. The wrapper's tests pass
+fakes.
 
 **A snapshot failure never fails the acquire, phase or release it belongs to, but it is never silent.** It reports
 `:workspace/snapshot-failed`, and the gap shows in evidence. This follows the rule N11 §7.3 (No Silent Downgrade,
@@ -214,7 +228,8 @@ versus `/Volumes/Work`, with 105 MB of objects. Clones need their own design (fo
    restore has to happen before the worktree exists, and the snapshot restore needs it to exist. With no usable
    snapshot (pruned, or a bad SHA), resume falls back to the bundle and warns.
 
-   A resume in place keeps the run id, so it reuses the same store. A new attempt has its own run id and store. It
+   A resume in place keeps the run id and passes the recorded store dir (`:snapshot-dir`), so it reopens the same
+   store. A new attempt has its own run id and store. It
    imports the snapshots it inherits at acquire (`:snapshot-import`): a `fetch` of their tags from the source run's
    store into its own, under the same platform flags and environment. It then carries their events forward naming
    its own store, as `resume.clj` already carries persisted checkpoints. So every store holds every snapshot its
@@ -267,12 +282,12 @@ runs in the infrastructure store, which implements the application's `SnapshotSt
 |----|---------|----------|------------|
 | 1 | domain | `dag_executor/snapshot_policy.clj`, pure: store path, tag names and the next `n`, the git argv and environment for each operation, result shapes; pure tests | — |
 | 2 | application | `snapshotted.clj` wrapper and the `SnapshotStore` port it calls; `snapshot-workspace!` in the interface; tests with a fake store | 1 |
-| 3 | infrastructure | `dag_executor/snapshot_store.clj`, implementing the port: runs PR 1's commands for init, snapshot, verify, restore, import and repack; tests on scratch repos for the cases above | 1, 2 |
+| 3 | infrastructure | `dag_executor/snapshot_store.clj`, implementing the port: the store lock; runs PR 1's commands for init, snapshot, verify, restore, import and repack; tests on scratch repos for the cases above | 1, 2 |
 | 4 | wiring | composition in `executor.clj` with PR 3's store; `:snapshots? false` in `governed_environment.clj`; `:workflow/snapshot-root` resolution; run id through acquisition; phase-boundary and final calls; `:execution/workspace-snapshots`; deny-pattern | 3 |
 | 5 | adapter | N3 amendment; event schema and constructors; publication at acquire, phase, final and release | 4 |
-| 6 | application | N2-delta §8 amendment; resume and rewind restore from snapshots; `:snapshot-import` for a new attempt | 5, follow-up 1 |
+| 6 | application | N2-delta §8 amendment; resume and rewind restore from snapshots; `:snapshot-dir` for a resume in place and `:snapshot-import` for a new attempt | 5, follow-up 1 |
 | 7 | adapter | N6 amendment; `:evidence/workspace-snapshots` in `extract-output`; verifier | 4 |
-| 8 | infrastructure | snapshot dirs in the checkpoint GC pass | 4 |
+| 8 | infrastructure | snapshot dirs in the checkpoint GC pass, skipping a store whose lock is held | 4 |
 
 ## Follow-ups outside this design
 
