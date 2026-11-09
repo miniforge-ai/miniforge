@@ -71,6 +71,6 @@ N7 §5.5/§6.3; N10 §1.5. Baseline recovery and complete runner wiring remain s
 
 - [x] Both prerequisites merged on main before publication.
 - [x] Implement and validate native cleanup dispatch.
-- [ ] Owner adversarial and full applicable pinned-standard review.
+- [x] Owner adversarial and full applicable pinned-standard review.
 - [ ] Normal signed commits, budgets, full current-head review and CI.
 - [ ] Fresh-main conflict check and normal owner squash merge.
