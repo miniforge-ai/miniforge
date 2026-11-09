@@ -46,6 +46,11 @@
 
 (def ^{:stratum 0} Sha256Hex [:re #"\A[0-9a-f]{64}\z"])
 
+(def ^{:stratum 0} AbsolutePath
+  "A path from the filesystem root: turn files and the harness's working
+   directory must resolve to the same place."
+  [:re #"\A/[^\x00]*\z"])
+
 (def ^{:stratum 0} Capabilities
   "What a worker declares. Steering between turns resumes the native
    session with new input; a cancel is a request whose effect inspection
@@ -101,7 +106,7 @@
    unavailable one fails rather than being replaced."
   [:map {:closed true}
    [:config/worker :keyword]
-   [:config/workdir NonBlank]
+   [:config/workdir AbsolutePath]
    [:config/model {:optional true} NonBlank]
    [:config/max-budget-usd {:optional true} [:and Cost [:> 0]]]])
 
