@@ -6,7 +6,8 @@
 Claude CLI rate-limit message (twice, streamed and not), the empty-output
 message, and the error text a Codex failed turn or error event appends. The
 file already looks its other messages up in the llm catalog. These now come
-from `config/llm/messages/en-US.edn`, with the same text.
+from `config/llm/messages/en-US.edn`, with the same text. One change: a
+Codex error whose message is null now says "unknown", as a missing one did.
 
 ## Motivation
 
@@ -29,7 +30,9 @@ places). #2089 rewrote the streamed rate-limit message line.
 The text is unchanged; workflow's rate-limit detection reads the notice,
 not the prefix. `interface-test` checks each message against its catalog
 key, including Codex error and failed-turn events whose message is
-missing or null: 73 tests, 389 assertions, 0 failures.
+missing or null. Two checks pin text other code reads: the rate-limit
+message quotes the notice, and the Codex error starts on a new line. 73
+tests, 391 assertions, 0 failures.
 
 ## Deployment Plan
 

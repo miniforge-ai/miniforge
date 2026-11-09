@@ -345,6 +345,7 @@
             missing or null"
     (let [unknown (msg/t :cli-output.system/codex-stream-error
                          {:message (msg/t :cli-output.system/codex-error-unknown)})]
+      (is (str/starts-with? unknown "\n") "the error starts on its own line")
       (doseq [event [{:type "error"}
                      {:type "error" :message nil}
                      {:type "turn.failed" :error {}}
@@ -428,7 +429,10 @@
       (is (= "rate_limit" (get-in resp [:error :type])))
       (is (= (msg/t :cli-output.system/claude-rate-limited
                     {:notice "You've hit your limit · resets 7pm (America/Los_Angeles)"})
-             (get-in resp [:error :message]))))))
+             (get-in resp [:error :message])))
+      (is (str/includes? (get-in resp [:error :message])
+                         "You've hit your limit · resets 7pm (America/Los_Angeles)")
+          "the reset-time parse reads the notice inside the message"))))
 
 (deftest ^{:stratum 0} mock-client-response-includes-metrics-test
   (testing "mock client success response has :tokens and :usage"
