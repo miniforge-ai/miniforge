@@ -43,6 +43,7 @@
    [ai.miniforge.phase-opsv.boundary.retained-preparation :as retained-preparation]
    [ai.miniforge.phase-opsv.boundary.governed-replica-proposal :as governed-replica-proposal]
    [ai.miniforge.phase-opsv.boundary.governed-load-proposal :as governed-load-proposal]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-recovery-plan :as recovery-plan]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -65,6 +66,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} OPSVAdapter protocol/OPSVAdapter)
+
+(def ^{:stratum 0} prepare-kubernetes-recovery-plan!
+  "Construct bounded recovery intent from an acknowledged original and an exact planned load.
+   Requires a rollback comparison contract containing the original replica count.
+   Plan approval/retention, fresh provider identity and preconditions, exact grants,
+   execution, and verified termination/restoration remain separate obligations."
+  recovery-plan/prepare!)
 
 (def ^{:stratum 0} VerificationAdapter protocol/VerificationAdapter)
 
