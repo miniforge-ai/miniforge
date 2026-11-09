@@ -49,13 +49,14 @@
   8)
 
 (defn- ^{:stratum 0} runtime-default-resources
-  "Per-runtime memory/cpu defaults sourced from the registry. Wrapping the
-   two lookups in a tiny constructor keeps the resource-arg builder a flat
-   key-value map."
+  "Per-runtime memory, cpu and process-count defaults sourced from the
+   registry. Wrapping the lookups in a tiny constructor keeps the
+   resource-arg builder a flat key-value map."
   [descriptor]
   (let [k (descriptor/kind descriptor)]
-    {:memory (registry/default k :memory)
-     :cpu    (registry/default k :cpu)}))
+    {:memory     (registry/default k :memory)
+     :cpu        (registry/default k :cpu)
+     :pids-limit (registry/default k :pids-limit)}))
 
 (defn ^{:stratum 0} build-mount-args
   "Build -v mount arguments from an execution plan map.
@@ -263,7 +264,10 @@
        (into ["--memory" (:memory merged)])
 
        (:cpu merged)
-       (into ["--cpus" (str (:cpu merged))])))))
+       (into ["--cpus" (str (:cpu merged))])
+
+       (:pids-limit merged)
+       (into ["--pids-limit" (str (:pids-limit merged))])))))
 
 (defn ^{:stratum 1} container-exec-fn
   "Build a function that executes commands inside a container.

@@ -15,6 +15,8 @@
   :anomalies.agent-environment/grant-denied "The provision grant did not authorize this request"
   :anomalies.agent-environment/request-expired "The request's expiry has already passed"
   :anomalies.agent-environment/environment-expired "The environment has expired; only cleanup and audit calls run"
+  :anomalies.agent-environment/isolation-unavailable "The provider does not offer the requested isolation"
+  :anomalies.agent-environment/limits-exceeded "The requested limits exceed the provider's ceiling"
   :anomalies.agent-environment/preflight-failed "The provider cannot supply this environment"
   :anomalies.agent-environment/conflicting-request "Another request already holds this run and task"
   :anomalies.agent-environment/acquire-in-flight "This run and task are already being provisioned"

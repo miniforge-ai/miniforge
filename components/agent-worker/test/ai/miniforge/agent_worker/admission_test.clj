@@ -89,9 +89,13 @@
     (is (= :anomalies.agent-worker/grant-inactive
            (admission/grant-refusal granted acting bound config (.plusSeconds now (inc ttl-seconds)))))))
 
-(deftest ^{:stratum 2} test-cost-ceiling-needs-a-bounded-observable-budget
+(deftest ^{:stratum 2} test-a-budget-must-be-bounded-and-observable-and-a-token-ceiling-is-refused
   (let [ceilinged (spend :constraints {:constraint/max-cost-usd ceiling-usd})]
     (is (nil? (admission/budget-refusal (spend) config capabilities)))
     (is (= :anomalies.agent-worker/budget-unbounded (admission/budget-refusal ceilinged config capabilities)))
     (is (= :anomalies.agent-worker/budget-unenforceable
-           (admission/budget-refusal ceilinged (assoc config :config/max-budget-usd 1) {:capabilities/budget :budget/none})))))
+           (admission/budget-refusal ceilinged (assoc config :config/max-budget-usd 1) {:capabilities/budget :budget/none})))
+    (is (= :anomalies.agent-worker/budget-unenforceable
+           (admission/budget-refusal (spend) (assoc config :config/max-budget-usd 1) {:capabilities/budget :budget/none})))
+    (is (= :anomalies.agent-worker/budget-unenforceable
+           (admission/budget-refusal (spend :constraints {:constraint/max-tokens 0}) config capabilities)))))
