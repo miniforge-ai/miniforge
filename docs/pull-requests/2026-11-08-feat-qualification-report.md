@@ -63,6 +63,12 @@ data.
    id parts and the commit, and refuses a path outside `:out-dir`.
 9. `clean?` lists untracked files whatever `status.showUntrackedFiles` says,
    and a build is clean only with a known commit.
+10. The build is read before and after the scenario; one that changes during
+    the run is recorded as the first build, not clean.
+11. The writer checks the report directory with symlinks resolved and
+    creates each file with `CREATE_NEW`, so no symlink redirects the write.
+12. The writer refuses a map whose keys JSON would merge (`:a/b` and
+    `"a/b"`), before writing either file.
 
 From the schema PR's review: the verdict is `vocabulary/report-verdict`, so
 passing rows on a dirty tree, without a commit or without hashes give
@@ -80,7 +86,7 @@ passing rows on a dirty tree, without a commit or without hashes give
    every criterion unrun; an unreported criterion is incomplete; hashes repeat
    across runs; an invalid gate exits 2; an unwritable report exits 1 even
    when every criterion passed; the summary names the verdict and each row.
-3. Locally: 34 tests, 125 assertions, 0 failures. Also covered: a pass on
+3. Locally: 36 tests, 131 assertions, 0 failures. Also covered: a pass on
    an unpinned build is incomplete and the summary says why; a short commit
    names the file.
 
