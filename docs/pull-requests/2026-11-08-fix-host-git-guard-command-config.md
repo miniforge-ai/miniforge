@@ -48,7 +48,7 @@ these keys, so a change to one counts toward `:clean?`.
    `:command-drift`. `:clean?` is now false when either `:redirect-drift`
    or `:command-drift` is non-empty.
 3. Command-config values are never held. Each one is replaced by
-   `fingerprint`, an HMAC-SHA256 truncated to 64 bits, keyed by random
+   `fingerprint`, an HMAC-SHA256 truncated to 128 bits, keyed by random
    bytes made once per process. A command line can carry a secret in a form
    no pattern can find, such as an inline credential helper that prints a
    token. Drift only needs equality, and both snapshots are taken in the

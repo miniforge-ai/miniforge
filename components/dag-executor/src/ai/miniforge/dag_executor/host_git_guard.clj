@@ -98,23 +98,41 @@
    `submodule.<name>.update` is left out although its `!command` form runs
    a shell command: `git submodule init` copies it from `.gitmodules`, so
    an ordinary submodule checkout sets it."
-  (str "^("
-       "core\\.(hookspath|fsmonitor|sshcommand|askpass|gitproxy|pager|editor"
-       "|alternaterefscommand)"
-       "|sequence\\.editor|pager\\..*|alias\\..*|interactive\\.difffilter"
-       "|include\\.path|includeif\\..*\\.path"
-       "|credential\\.(.*\\.)?helper"
-       "|filter\\..*\\.(clean|smudge|process)"
-       "|diff\\.external|diff\\..*\\.(command|textconv)|merge\\..*\\.driver"
-       "|(difftool|mergetool)\\..*\\.(cmd|path)"
-       "|gpg\\.(.*\\.)?program|gpg\\.ssh\\.defaultkeycommand"
-       "|remote\\..*\\.(uploadpack|receivepack|vcs)"
-       "|gc\\.recentobjectshook|uploadpack\\.packobjectshook"
-       "|man\\.viewer|(man|browser)\\..*\\.(cmd|path)"
-       "|(web|help|instaweb)\\.browser|instaweb\\.httpd"
-       "|guitool\\..*\\.cmd|trailer\\..*\\.(command|cmd)|imap\\.tunnel"
-       "|sendemail\\.(.*\\.)?(tocmd|cccmd|headercmd|sendmailcmd|smtpserver)"
-       ")$"))
+  (let [key-patterns
+        [;; core programs and hooks
+         "core\\.(hookspath|fsmonitor|sshcommand|askpass|gitproxy|pager|editor|alternaterefscommand)"
+         "gc\\.recentobjectshook"
+         "uploadpack\\.packobjectshook"
+         ;; config that loads more config
+         "include\\.path"
+         "includeif\\..*\\.path"
+         ;; editors, pagers, and aliases
+         "sequence\\.editor"
+         "pager\\..*"
+         "alias\\..*"
+         "interactive\\.difffilter"
+         ;; credentials and signing
+         "credential\\.(.*\\.)?helper"
+         "gpg\\.(.*\\.)?program"
+         "gpg\\.ssh\\.defaultkeycommand"
+         ;; content drivers
+         "filter\\..*\\.(clean|smudge|process)"
+         "diff\\.external"
+         "diff\\..*\\.(command|textconv)"
+         "merge\\..*\\.driver"
+         "(difftool|mergetool)\\..*\\.(cmd|path)"
+         ;; transport
+         "remote\\..*\\.(uploadpack|receivepack|vcs)"
+         ;; viewers and other tools
+         "man\\.viewer"
+         "(man|browser)\\..*\\.(cmd|path)"
+         "(web|help|instaweb)\\.browser"
+         "instaweb\\.httpd"
+         "guitool\\..*\\.cmd"
+         "trailer\\..*\\.(command|cmd)"
+         "imap\\.tunnel"
+         "sendemail\\.(.*\\.)?(tocmd|cccmd|headercmd|sendmailcmd|smtpserver)"]]
+    (str "^(" (str/join "|" key-patterns) ")$")))
 
 (def ^{:stratum 0} remote-ref-namespace
   "Ref namespace holding remote-tracking refs. `refs/remotes/origin/main`
@@ -137,10 +155,11 @@
   "HmacSHA256")
 
 (def ^{:stratum 0} fingerprint-digest-bytes
-  "Bytes of the MAC a fingerprint keeps. 8 bytes (64 bits) make a chance
-   collision between the few values of one key negligible, and keep
-   reports short."
-  8)
+  "Bytes of the MAC a fingerprint keeps. 16 bytes (128 bits): a collision
+   would make a changed value look unchanged, and at this length one is
+   not a practical concern even for a value chosen to cause it, since the
+   key is secret."
+  16)
 
 (def ^{:stratum 0} fingerprint-prefix
   "Marks a fingerprint in a report, so it is not read as the value itself."

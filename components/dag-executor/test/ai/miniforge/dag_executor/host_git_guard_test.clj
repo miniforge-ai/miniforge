@@ -67,7 +67,8 @@
         (finally (fixtures/delete-tree! not-a-repo))))))
 
 (deftest ^{:stratum 0} command-config-pattern-selects-keys-that-run-programs-test
-  (let [watched? #(boolean (re-matches (re-pattern sut/command-config-pattern) %))]
+  (let [pattern  (re-pattern sut/command-config-pattern)
+        watched? #(boolean (re-matches pattern %))]
     (testing "given a key that runs a program or loads config → watched"
       (doseq [k ["core.hookspath" "core.fsmonitor" "core.sshcommand" "core.askpass"
                  "core.pager" "core.editor" "sequence.editor" "pager.log" "alias.st"
