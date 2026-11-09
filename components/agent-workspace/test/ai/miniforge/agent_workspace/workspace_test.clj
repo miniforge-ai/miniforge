@@ -45,6 +45,12 @@
       (is (= :invalid-input (:anomaly/type (workspace/clone! (:wc w) (:acting w) (:lease w) (:grant w) req)))))
     (is (empty? (fx/git-commands w)))))
 
+(deftest ^{:stratum 0} test-a-workspace-scope-that-is-not-a-set-allows-nothing
+  (let [w (fx/world)
+        listed (fx/issue (:acting w) :effect/pr-create (update (:grant/scope (:grant w)) :workspace/repos vec) (:now w))]
+    (is (= :anomalies.agent-workspace/repo-not-allowed
+           (anomaly/subtype (workspace/clone! (:wc w) (:acting w) (:lease w) listed (fx/request fx/allowed)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} test-three-repositories-one-branch-and-one-pr-each
@@ -59,9 +65,25 @@
       (is (= [:succeeded :succeeded :succeeded] (mapv :delivery/state delivered)))
       (is (= 3 (count @(:opened w))))
       (is (= 1 (count (fx/pushed-branches w)))))
-    (testing "given delivery again → the recorded PRs, none opened twice"
-      (is (= delivered (deliver-all w ws)))
+    (testing "given delivery again → the recorded PRs, none opened twice, and no git command runs"
+      (let [commands (count (fx/git-commands w))]
+        (is (= delivered (deliver-all w ws)))
+        (is (= commands (count (fx/git-commands w)))))
       (is (= 3 (count @(:opened w)))))))
+
+(deftest ^{:stratum 1} test-the-base-ref-is-fetched-kept-and-the-recorded-head-pushed
+  (let [w (fx/world)
+        repo-id (first fx/allowed)
+        path (str "/work/repos/" repo-id)
+        url (str fx/repo-base-url repo-id ".git")
+        ws (workspace/clone! (:wc w) (:acting w) (:lease w) (:grant w)
+                             (assoc-in (fx/request [repo-id]) [:workspace/repos 0 :repo/base-ref] "develop"))
+        branch (get-in ws [:workspace/checkouts 0 :repo/task-branch])]
+    (deliver-all w ws)
+    (is (some #{["git" "-C" path "fetch" "--quiet" "--no-tags" "--" url "develop"]} (fx/git-commands w)))
+    (is (some #{["git" "-C" path "checkout" "--quiet" "-B" branch "FETCH_HEAD"]} (fx/git-commands w)))
+    (is (= ["develop" fx/head-sha] ((juxt :repo/base-ref :repo/head-sha) (first @(:opened w)))))
+    (is (some #{["git" "-C" path "push" "--quiet" url (str fx/head-sha ":refs/heads/" branch)]} (fx/git-commands w)))))
 
 (deftest ^{:stratum 1} test-a-repository-outside-the-grant-is-refused-before-anything-runs
   (let [w (fx/world)]
@@ -87,7 +109,8 @@
     (is (empty? (fx/pushed-branches w)))))
 
 (deftest ^{:stratum 1} test-an-unanswered-pr-stays-unresolved-and-is-not-reopened
-  (let [w (fx/world port-down)
-        ws (clone w (take 1 fx/allowed))]
-    (is (= [:unknown-outcome] (mapv :delivery/state (deliver-all w ws))))
-    (is (= [:unknown-outcome] (mapv :delivery/state (deliver-all w ws))))))
+  (doseq [port [port-down (constantly nil) (constantly {:pr/number 0 :pr/url ""})]]
+    (let [w (fx/world port)
+          ws (clone w (take 1 fx/allowed))]
+      (is (= [:unknown-outcome] (mapv :delivery/state (deliver-all w ws))))
+      (is (= [:unknown-outcome] (mapv :delivery/state (deliver-all w ws)))))))

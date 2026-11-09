@@ -45,6 +45,10 @@
 
 (def ^{:stratum 0} GitSha [:re #"\A[0-9a-f]{40}\z"])
 
+(def ^{:stratum 0} PullRequest
+  "What a PR port must answer for a delivery to succeed: a PR number and URL."
+  [:map [:pr/number pos-int?] [:pr/url [:and :string [:fn (complement str/blank?)]]]])
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} Repo
@@ -55,11 +59,12 @@
    [:repo/base-ref RefName]])
 
 (def ^{:stratum 1} Checkout
-  "One cloned repository: where it is, the base it started from, and its
-   task branch."
+  "One cloned repository: where it is, the base ref requested and the
+   commit it resolved to, and its task branch."
   [:map {:closed true}
    [:repo/id RepoId]
    [:repo/path NonBlank]
+   [:repo/base-ref RefName]
    [:repo/base-sha GitSha]
    [:repo/task-branch NonBlank]])
 

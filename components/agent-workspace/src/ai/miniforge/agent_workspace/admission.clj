@@ -28,7 +28,12 @@
   "The grant effect class one repository's pull request spends."
   :effect/pr-create)
 
-(defn ^{:stratum 0} allowed-repos [grant] (get-in grant [:grant/scope :workspace/repos] #{}))
+(defn ^{:stratum 0} allowed-repos
+  "The grant's `:workspace/repos` set. Any other value, such as nil, a
+   vector or a map, allows no repository."
+  [grant]
+  (let [repos (get-in grant [:grant/scope :workspace/repos])]
+    (if (set? repos) repos #{})))
 
 ;------------------------------------------------------------------------------ Layer 1
 

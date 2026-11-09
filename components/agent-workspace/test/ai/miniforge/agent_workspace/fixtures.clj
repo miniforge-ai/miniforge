@@ -39,6 +39,8 @@
 
 (def ^{:stratum 0} base-sha (apply str (repeat 40 "b")))
 
+(def ^{:stratum 0} head-sha "The task branch's commit when delivery proposes." (apply str (repeat 40 "c")))
+
 (def ^{:stratum 0} allowed ["acme-example/frontend" "acme-example/api" "acme-example/worker"])
 
 (def ^{:stratum 0} limits
@@ -73,11 +75,13 @@
    :workspace/repos (mapv repo repo-ids)})
 
 (defn ^{:stratum 1} answer-git
-  "Every git command succeeds; `rev-parse` reports the base."
+  "Every git command succeeds; `rev-parse HEAD` reports the base and
+   `rev-parse --verify` of the task branch reports its head."
   [command]
-  {:exec/exit 0
-   :exec/stdout (if (some #{"rev-parse"} (:exec/argv command)) (str base-sha "\n") "")
-   :exec/stderr ""})
+  (let [argv (:exec/argv command)]
+    {:exec/exit 0
+     :exec/stdout (cond (some #{"--verify"} argv) (str head-sha "\n") (some #{"rev-parse"} argv) (str base-sha "\n") :else "")
+     :exec/stderr ""}))
 
 (defn ^{:stratum 1} issue [acting effect-class scope now]
   (grant/issue {:principal (str (:acting/principal-id acting))
@@ -87,7 +91,7 @@
                now))
 
 (defn ^{:stratum 1} pushed-branches [w]
-  (into #{} (comp (filter #(some #{"push"} %)) (map last) (map #(first (str/split % #":")))) (git-commands w)))
+  (into #{} (comp (filter #(some #{"push"} %)) (map last) (map #(second (str/split % #":")))) (git-commands w)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

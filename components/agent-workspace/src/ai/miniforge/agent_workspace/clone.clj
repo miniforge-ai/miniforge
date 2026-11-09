@@ -32,10 +32,12 @@
   (let [path (git/repo-path root (:repo/id repo))
         branch (git/task-branch (:lease/task-id lease))]
     (anomaly/let-ok [_ (git/git! wc acting lease (git/clone-argv (git/repo-url wc (:repo/id repo)) path))
-                     _ (git/git! wc acting lease (git/branch-argv path branch (:repo/base-ref repo)))
+                     _ (git/git! wc acting lease (git/fetch-argv path (git/repo-url wc (:repo/id repo)) (:repo/base-ref repo)))
+                     _ (git/git! wc acting lease (git/branch-argv path branch))
                      head (git/git! wc acting lease (git/head-argv path))]
       {:repo/id (:repo/id repo)
        :repo/path path
+       :repo/base-ref (:repo/base-ref repo)
        :repo/base-sha (git/sha-of head)
        :repo/task-branch branch})))
 

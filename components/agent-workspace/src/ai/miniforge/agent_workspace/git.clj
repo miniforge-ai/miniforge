@@ -44,14 +44,26 @@
 
 (defn ^{:stratum 0} clone-argv [url path] ["git" "clone" "--no-tags" "--quiet" "--" url path])
 
-(defn ^{:stratum 0} branch-argv [path branch base-ref] ["git" "-C" path "checkout" "--quiet" "-B" branch base-ref])
+(defn ^{:stratum 0} fetch-argv
+  "Fetch the base ref, so a branch other than the default, a tag or a
+   commit can start the task branch; it lands in FETCH_HEAD."
+  [path url base-ref]
+  ["git" "-C" path "fetch" "--quiet" "--no-tags" "--" url base-ref])
+
+(defn ^{:stratum 0} branch-argv [path branch] ["git" "-C" path "checkout" "--quiet" "-B" branch "FETCH_HEAD"])
 
 (defn ^{:stratum 0} head-argv [path] ["git" "-C" path "rev-parse" "HEAD"])
 
+(defn ^{:stratum 0} branch-head-argv
+  "The task branch's commit, whatever the worker has checked out."
+  [path branch]
+  ["git" "-C" path "rev-parse" "--verify" "--quiet" (str "refs/heads/" branch "^{commit}")])
+
 (defn ^{:stratum 0} push-argv
-  "Push to the id's URL, not to whatever `origin` now names."
-  [path url branch]
-  ["git" "-C" path "push" "--quiet" url (str branch ":" branch)])
+  "Push the recorded commit to the task branch at the id's URL, not the
+   branch's tip now or whatever `origin` names."
+  [path url sha branch]
+  ["git" "-C" path "push" "--quiet" url (str sha ":refs/heads/" branch)])
 
 (defn ^{:stratum 0} sha-of [result] (str/trim (str (:exec/stdout result))))
 
