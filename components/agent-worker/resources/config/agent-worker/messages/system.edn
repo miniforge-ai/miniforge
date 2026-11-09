@@ -3,4 +3,28 @@
 ;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 
 {:agent-worker/messages
- {:anomalies.agent-worker/invalid-input "Agent-worker inputs failed validation"}}
+ {:anomalies.agent-worker/invalid-input "Agent-worker inputs failed validation"
+  :anomalies.agent-worker/forged-tenant "The acting tenant is not the tenant this binding names"
+  :anomalies.agent-worker/forged-principal "The acting principal is not the principal this binding names"
+  :anomalies.agent-worker/binding-mismatch "The binding names another run, task or environment than the lease"
+  :anomalies.agent-worker/stale-lease "The binding names an older lease generation than the lease"
+  :anomalies.agent-worker/config-digest-mismatch "The binding's config digest is not the digest of the submitted config"
+  :anomalies.agent-worker/worker-unavailable "The selected worker is not installed; no other worker is substituted"
+  :anomalies.agent-worker/worker-preflight-failed "The selected worker cannot run in this environment"
+  :anomalies.agent-worker/grant-absent "No spend grant was presented"
+  :anomalies.agent-worker/grant-inactive "The spend grant is revoked, expired, or has unverifiable ancestry"
+  :anomalies.agent-worker/grant-scope-mismatch "The spend grant does not cover this run and task"
+  :anomalies.agent-worker/grant-exceeded "The configured budget exceeds the spend grant's ceiling"
+  :anomalies.agent-worker/grant-wrong-effect "The presented grant does not authorize spending"
+  :anomalies.agent-worker/grant-wrong-principal "The spend grant was issued to another principal"
+  :anomalies.agent-worker/grant-not-bound "The presented grant is not the grant the binding names"
+  :anomalies.agent-worker/grant-denied "The spend grant did not authorize this attempt"
+  :anomalies.agent-worker/budget-unbounded "The grant has a cost ceiling but the attempt configures no budget"
+  :anomalies.agent-worker/budget-unenforceable "The grant has a cost ceiling the selected worker cannot observe"
+  :anomalies.agent-worker/conflicting-submission "This attempt was already submitted with different content"
+  :anomalies.agent-worker/unknown-session "This session is not the one recorded for its attempt"
+  :anomalies.agent-worker/turn-in-progress "The session's current turn is still running"
+  :anomalies.agent-worker/environment-not-ready "The environment is not ready; retry once it is"
+  :anomalies.agent-worker/turn-unsettled "Inspection did not show that the session's current turn ended"
+  :anomalies.agent-worker/start-in-flight "This attempt is still starting; retry to get its session"
+  :anomalies.agent-worker/steering-unsupported "The selected worker cannot take further input"}}
