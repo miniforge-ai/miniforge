@@ -48,6 +48,7 @@
    [ai.miniforge.phase-opsv.boundary.recovery-plan-retention :as recovery-retention]
    [ai.miniforge.phase-opsv.boundary.retained-recovery-plan :as retained-recovery]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-provider :as native-load-provider]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-ownership :as load-ownership]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -70,6 +71,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} OPSVAdapter protocol/OPSVAdapter)
+
+(def ^{:stratum 0} read-kubernetes-load-ownership!
+  "Read the plan's durable granted creation record and fresh Pod with its provider-assigned UID.
+   Runtime supplies effects-directory and explicit provider settings. Never adopt by name/labels.
+   Returns creation record and native Pod, not plan approval, lifecycle admission,
+   termination proof or permission to release, stop or delete the worker."
+  load-ownership/read!)
 
 (def ^{:stratum 0} prepare-kubernetes-recovery-plan!
   "Construct bounded recovery intent from an acknowledged original and an exact planned load.

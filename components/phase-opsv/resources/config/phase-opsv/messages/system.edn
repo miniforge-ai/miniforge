@@ -5,6 +5,7 @@
   :recovery/target-mismatch "Recovery-plan admission requires the declared staging target, attempt and original baseline to match."
   :recovery/target-remediation "Declare the matching staging environment and original target in independent recovery-plan admission settings."
   :recovery/invalid-admission "Recovery-plan admission requires valid runtime policy and a separately declared staging approval."
+  :load/ownership-unconfirmed "Owned load identity requires a matching durable granted creation receipt and a fresh Pod with that exact provider-assigned UID."
   :load/invalid-provider "Native load creation requires an exact committing staging load proposal, explicit target and trusted dispatch."
   :load/unconfirmed "Native load creation is unconfirmed; reconcile before another attempt or release."
   :load/submission-refused "Native load creation was interrupted or its deadline elapsed before submission."
