@@ -85,6 +85,8 @@
   :recovery/invalid-plan "Recovery planning requires a bounded native load declaration and duration."
   :load/stop-request-refused "Load stopping requires current retained recovery intent, a distinct effect identity and an owned Pod with a bounded deadline."
   :load/invalid-stop-request "Load stop preparation requires a well-formed recovery reference, runtime settings and effect identity."
+  :load/cleanup-request-refused "Load cleanup requires current retained recovery intent, a distinct effect identity and a proven quiescent owned Pod."
+  :load/invalid-cleanup-request "Load cleanup preparation requires a well-formed recovery reference, runtime settings and effect identity."
   :load/stop-unconfirmed "Native load deadline patch has no confirmed outcome."
   :load/invalid-stop-provider "Native load stopping requires valid runtime settings, a committing transaction and a trusted dispatch callback."
   :load/stop-submission-refused "Native load deadline patch was refused before submission."

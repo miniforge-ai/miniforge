@@ -8,8 +8,8 @@
 
 ## Overview
 
-The host-git guard now also compares git config keys that make git run a
-program or load other config, such as `core.hooksPath`, `core.fsmonitor`,
+The host-git guard now also compares git config keys that run programs or
+load other config. Examples include `core.hooksPath`, `core.fsmonitor`,
 `credential.helper`, `include.path`, and `filter.<driver>.clean`. A change
 to any of them during a task run makes the drift report dirty
 (`:clean? false`), the same as a changed remote URL.
@@ -34,10 +34,10 @@ these keys, so a change to one counts toward `:clean?`.
    `core.alternateRefsCommand`. Also watched: `sequence.editor`, `pager.*`,
    `alias.*`, `interactive.diffFilter`, `include.path`,
    `includeIf.*.path`, `credential.helper` and `credential.<url>.helper`,
-   and `filter.*.clean|smudge|process`. The rest are `diff.external`,
+   and `filter.*.clean|smudge|process`. Additional keys include `diff.external`,
    `diff.*.command|textconv`, `merge.*.driver`,
    `difftool|mergetool.*.cmd|path`, `gpg.program`, `gpg.<format>.program`,
-   `gpg.ssh.defaultKeyCommand`, `remote.*.uploadpack|receivepack|vcs`,
+   and `gpg.ssh.defaultKeyCommand`. Other keys include `remote.*.uploadpack|receivepack|vcs`,
    `gc.recentObjectsHook`, `uploadpack.packObjectsHook`, `man.viewer`,
    `man|browser.*.cmd|path`, `web|help|instaweb.browser`,
    `instaweb.httpd`, `guitool.*.cmd`, `trailer.*.command|cmd`,
@@ -58,9 +58,9 @@ these keys, so a change to one counts toward `:clean?`.
    `<url>` subsection (`url.<base>.insteadOf`, `credential.<url>.helper`)
    can carry userinfo.
 5. Config is read with `git config --null --get-regexp`, which ends each
-   entry with NUL. The old line-based parse split a multi-line value (an
-   inline helper, a multi-line alias) into extra entries, and the first
-   word of a continuation line became a key. A key is not fingerprinted, so
+   entry with NUL. The old line-based parse split multi-line values into
+   extra entries. These included inline helpers and multi-line aliases.
+   The first word of a continuation line became a key. A key is not fingerprinted, so
    a line such as `password=<token>; ...` would have kept the token.
    A valueless key (a bare `log` under `[pager]`, which git reads as
    true) is kept as the marker `valueless-entry`, not dropped. Dropping
@@ -135,8 +135,8 @@ run.
 2. `submodule.<name>.update` is not watched. Its `!command` form runs a
    shell command, but `git submodule init` copies the key from
    `.gitmodules`, so an ordinary submodule checkout in a task sets it.
-3. Two keys that differ only in the userinfo of a URL subsection redact to
-   the same key, so a change of that userinfo alone is not reported. Values
+3. Keys differing only in URL-subsection userinfo redact to the same key.
+   A change of that userinfo alone is not reported. Values
    already had the same limit.
 4. Detection only, as before. A clone instead of a linked worktree is what
    prevents this, and that is a later design.

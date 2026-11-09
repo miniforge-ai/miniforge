@@ -4,8 +4,7 @@
 (ns ai.miniforge.phase-opsv.kubernetes-load-stop
   "Construct an exact conditional deadline reduction; never claim it stopped the worker."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.content-hash.interface :as hash]
-            [ai.miniforge.phase-opsv.governed-experiment-proposal :as proposal]
+            [ai.miniforge.phase-opsv.kubernetes-load-recovery-proposal :as proposal]
             [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -36,15 +35,7 @@
   (if-not (usable? input plan owned)
     (anomaly/anomaly :conflict (msg/ts :load/stop-request-refused) {})
     (let [payload (request owned)
-          resource (assoc (get-in plan [:recovery/load :resource]) :uid (get-in owned [:load/pod "metadata" "uid"]))
-          native (-> (:recovery/input input)
-                     :load
-                     (assoc-in [:limits :effect/id] (:effect/id input))
-                     (assoc-in [:limits :opsv/duration-ms] (:recovery/duration-ms plan)))
-          prepared {:effect/class :effect/load-test :opsv/operation :stop-load
-                    :runtime/target (get-in plan [:recovery/binding :runtime/target])
-                    :opsv/resources [resource] :opsv/payload-hash (hash/content-hash payload)
-                    :kubernetes/request payload}]
-      (proposal/proposal ctx native prepared))))
+          intent {:opsv/operation :stop-load :kubernetes/request payload}]
+      (proposal/proposal ctx input plan owned intent))))
 
 (comment ::current-effect-admission-exact-recovery-grant-and-pinned-commit-remain-mandatory)
