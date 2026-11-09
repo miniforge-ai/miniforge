@@ -62,10 +62,12 @@
 (defn ^{:stratum 0} sha-of [result] (str/trim (str (:exec/stdout result))))
 
 (defn ^{:stratum 0} rejected?
-  "Git ran and exited nonzero. Unlike an exec that timed out or never
-   answered, this is a known outcome."
+  "A `push --porcelain` whose status lines report a ref git rejected (`!`).
+   Any other failure, such as a timeout or a connection lost after the
+   remote updated, leaves the remote's state unknown."
   [result]
-  (= :anomalies.agent-workspace/git-failed (anomaly/subtype result)))
+  (and (= :anomalies.agent-workspace/git-failed (anomaly/subtype result))
+       (boolean (re-find #"(?m)^!" (str (get-in result [:anomaly/data :exec/stdout]))))))
 
 (defn ^{:stratum 0} git!
   [wc acting lease argv]
@@ -76,7 +78,7 @@
       (zero? (:exec/exit result)) result
       :else (anomaly/sub-anomaly :fault :anomalies.agent-workspace/git-failed
                                  (msg/t :anomalies.agent-workspace/git-failed)
-                                 {:git/argv argv :exec/exit (:exec/exit result)}))))
+                                 {:git/argv argv :exec/exit (:exec/exit result) :exec/stdout (:exec/stdout result)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -89,6 +91,6 @@
   "Push the recorded commit to the task branch at the id's URL, not the
    branch's tip now or whatever `origin` names."
   [path url sha branch]
-  ["git" "-C" path "push" "--quiet" url (str sha ":" branch-ref-prefix branch)])
+  ["git" "-C" path "push" "--porcelain" url (str sha ":" branch-ref-prefix branch)])
 
 (defn ^{:stratum 1} task-branch [task-id] (str branch-prefix task-id))

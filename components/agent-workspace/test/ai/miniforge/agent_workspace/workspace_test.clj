@@ -91,7 +91,7 @@
     (is (some #{["git" "-C" path "fetch" "--quiet" "--no-tags" "--" url "develop"]} (fx/git-commands w)))
     (is (some #{["git" "-C" path "checkout" "--quiet" "-B" branch "FETCH_HEAD"]} (fx/git-commands w)))
     (is (= ["develop" fx/head-sha] ((juxt :repo/base-ref :repo/head-sha) (first @(:opened w)))))
-    (is (some #{["git" "-C" path "push" "--quiet" url (str fx/head-sha ":refs/heads/" branch)]} (fx/git-commands w)))))
+    (is (some #{["git" "-C" path "push" "--porcelain" url (str fx/head-sha ":refs/heads/" branch)]} (fx/git-commands w)))))
 
 (deftest ^{:stratum 1} test-a-repository-outside-the-grant-is-refused-before-anything-runs
   (let [w (fx/world)]
@@ -118,7 +118,8 @@
 
 (deftest ^{:stratum 1} test-a-lost-push-awaits-reconciliation-and-a-rejected-one-failed
   (doseq [[answer state] [[(anomaly/anomaly :timeout "exec deadline" {}) :unknown-outcome]
-                          [{:exec/exit 1 :exec/stdout "" :exec/stderr "rejected"} :failed]]]
+                          [{:exec/exit 128 :exec/stdout "" :exec/stderr "fatal: the remote end hung up unexpectedly"} :unknown-outcome]
+                          [{:exec/exit 1 :exec/stdout "!\trefs/heads/x:refs/heads/x\t[rejected] (fetch first)\n" :exec/stderr ""} :failed]]]
     (let [w (fx/world nil (partial fx/push-answered answer))]
       (is (= [state] (mapv :delivery/state (deliver-all w (clone w (take 1 fx/allowed))))))
       (is (empty? @(:opened w))))))
