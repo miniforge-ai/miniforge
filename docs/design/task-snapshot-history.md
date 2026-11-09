@@ -183,6 +183,12 @@ one store.
 2. **Store lock.** `<store-id>.lock` beside the store, held from acquire to release with a non-blocking `tryLock`.
    A process opens this file only while it holds the run's slot lock.
 
+Each lock file has at most one open channel per process. Closing any descriptor of a file releases the process's
+locks on it, so a second channel would silently drop the first one's lock. Both locks therefore sit behind an
+in-process registry keyed on the file, as `checkpoint-store-lock` keeps its slots behind a `ReentrantLock`. A second
+slot taker in the same process waits on the in-process lock. A second acquire of a store this process already holds
+reports `:store-busy` without opening the file.
+
 Acquire takes the slot lock, creates or opens the store, takes the store lock, and then releases the slot lock. A
 process that cannot take the store lock leaves the store alone, and its snapshots report `:workspace/snapshot-failed`
 with `:store-busy`; it does not wait. The OS drops a lock when its holder dies. So the store lock's holder knows no
@@ -259,7 +265,10 @@ versus `/Volumes/Work`, with 105 MB of objects. Clones need their own design (fo
    `extract-output` runs inside `execute!`, before release, which is why the final snapshot is taken there. Evidence
    carries the SHAs only, never the content. The store holds ignored files that the persist secret scan never sees
    (the measurement above captured `.claude/settings.local.json`), so the store is never pushed or exported. A
-   verifier checks each SHA against the store and runs `git fsck`.
+   verifier checks each SHA against the store and runs `git fsck`. Evidence can outlive its store, which retention
+   deletes (decision 4). The verifier then reports `:store-pruned`, which is distinct from a mismatch: the SHAs still
+   name the trees, but nothing local can show their content. A run whose evidence must stay checkable is pinned, and
+   a pinned run's store is never collected.
 
 ### 3. Governed capsules: not now
 
