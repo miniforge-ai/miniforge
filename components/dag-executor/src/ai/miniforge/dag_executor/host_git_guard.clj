@@ -228,9 +228,12 @@
   "`[key value]` of one `git config --null` entry, where the key ends at
    the first newline. An empty value is kept: a key set to the empty string
    is a real state, and treating it as absent would hide a blanked remote
-   URL. An entry with no newline is a valueless key and gives `[key nil]`."
+   URL. An entry with no newline is a valueless key and gives `[key nil]`.
+   One trailing CR is dropped from the key, so CRLF output cannot rename a
+   key; no real key name ends in one."
   [entry]
-  (let [[k v] (str/split entry #"\n" 2)]
+  (let [[raw-k v] (str/split entry #"\n" 2)
+        k         (str/replace raw-k #"\r$" "")]
     (when (seq k)
       [k v])))
 

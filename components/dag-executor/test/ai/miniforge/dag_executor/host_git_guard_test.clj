@@ -94,6 +94,14 @@
                  "trailer.sign.key" "sendemail.smtppass" "gc.auto" "tar.umask"]]
         (is (not (watched? k)) k)))))
 
+(deftest ^{:stratum 0} config-entry-keeps-the-key-stable-test
+  (testing "given CRLF between key and value → the key keeps its name"
+    (is (= ["core.hookspath" "/x"] (#'sut/config-entry "core.hookspath\r\n/x"))))
+  (testing "given a valueless entry → the key with a nil value, not dropped"
+    (is (= ["pager.log" nil] (#'sut/config-entry "pager.log"))))
+  (testing "given an empty value → kept as the empty string"
+    (is (= ["remote.origin.url" ""] (#'sut/config-entry "remote.origin.url\n")))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Pure-comparison tests
