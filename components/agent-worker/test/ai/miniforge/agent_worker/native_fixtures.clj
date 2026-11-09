@@ -18,8 +18,8 @@
 (ns ai.miniforge.agent-worker.native-fixtures
   "A fake environment that answers a native worker's shell lines: tools and
    credentials present unless a check is named missing (`:cli`,
-   `:credential`, `:cancel-tool`), a launch that prints a pid unless `:pid` is, and a turn
-   whose status script reports a clean exit."
+   `:credential`, `:cancel-tool`), a launch that prints a pid unless `:pid` is named missing,
+   and a turn whose status script reports a clean exit."
   (:require
    [ai.miniforge.agent-environment.interface :as env]
    [ai.miniforge.agent-worker.fixtures :as fx]
