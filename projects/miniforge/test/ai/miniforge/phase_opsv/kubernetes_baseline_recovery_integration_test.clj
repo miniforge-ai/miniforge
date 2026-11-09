@@ -6,6 +6,7 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as acquisition]
             [ai.miniforge.phase-opsv.kubernetes-baseline-recovery-fixtures :as fixtures]
             [ai.miniforge.phase-opsv.kubernetes-environment-fingerprint-fixtures :as fingerprint]
             [ai.miniforge.phase-opsv.kubernetes-inventory-fixtures :as inventory]
@@ -103,8 +104,8 @@
     (is (every? #(= :get (:method %)) calls))
     (check-retained fixture output)))
 
-(defn- ^{:stratum 1} check-drift-event [{:keys [ctx] :as fixture}]
-  (let [routes (fixtures/template-image-routes fixture foreign-template-image)
+(defn- ^{:stratum 1} check-drift-event [path value {:keys [ctx] :as fixture}]
+  (let [routes (fixtures/changed-routes path value fixture)
         [output _] (fixtures/verify fixture routes)
         observed (fixtures/drift-events fixture)
         event (first observed)
@@ -116,6 +117,16 @@
     (is (= (get-in ctx [:execution/input :opsv/evidence-bundle-id]) (:opsv/evidence-bundle-id event)))
     (is (= (get-in fixture [:input :load :request :verification/id]) (get-in event [:opsv/deviation :verification/id])))
     (is (contains? (:opsv/event-refs assembly) (:event/id event)))
+    (check-retained fixture output)))
+
+(defn- ^{:stratum 1} check-transport-failure [fixture]
+  (let [failure (anomaly/anomaly :unavailable "injected native transport failure" {})
+        [output _] (with-redefs [acquisition/observe! (constantly failure)]
+                     (fixtures/verify fixture (get-in fixture [:native :routes])))
+        report (:opsv/baseline-recovery output)]
+    (is (false? (:verification/passed? report)))
+    (is (= failure (:comparison/result report)))
+    (is (empty? (fixtures/drift-events fixture)))
     (check-retained fixture output)))
 
 (defn- ^{:stratum 1} check-drift-delivery-failure [fixture]
@@ -159,7 +170,13 @@
   (fixtures/with-input check-unprojectable))
 
 (deftest ^{:stratum 2} rollback-environment-drift-is-correlated-and-linked-to-the-evidence-assembly-test
-  (fixtures/with-input check-drift-event))
+  (doseq [[path value] [[[inventory/deployment-path "spec" "template" "spec" "containers" 0 "image"] foreign-template-image]
+                       [[inventory/namespace-path "metadata" "uid"] "foreign-namespace-uid"]
+                       [[inventory/deployment-path "metadata" "uid"] "foreign-deployment-uid"]]]
+    (fixtures/with-input (partial check-drift-event path value))))
+
+(deftest ^{:stratum 2} unreadable-native-state-remains-a-transport-failure-not-invented-environment-drift-test
+  (fixtures/with-input check-transport-failure))
 
 (deftest ^{:stratum 2} drift-delivery-failure-remains-in-the-retained-failed-recovery-report-test
   (fixtures/with-input check-drift-delivery-failure))

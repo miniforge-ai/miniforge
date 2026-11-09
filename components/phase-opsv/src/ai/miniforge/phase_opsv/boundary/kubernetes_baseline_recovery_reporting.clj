@@ -20,12 +20,12 @@
               (anomaly/anomaly :unavailable (msg/ts :event/publication-failed) {}))
     (drift/record! ctx compared)))
 
-(defn- ^{:stratum 0} comparison [input original observed]
-  (let [request (get-in input [:recovery/input :load :request])
-        compared (model/compare-original (:comparison/pin request) original observed)]
-    (if (get-in compared [:anomaly/data :comparison/reason])
-      (drift/comparison-mismatch compared request)
-      compared)))
+(defn- ^{:stratum 0} drift-sensitive? [compared]
+  (let [details (:anomaly/data compared)]
+    (or (some? (:comparison/reason details))
+        (and (= :conflict (:anomaly/type compared))
+             (contains? details :kubernetes/expected-uid)
+             (contains? details :kubernetes/observed-identity)))))
 
 (defn- ^{:stratum 0} retain! [ctx input admitted original observed compared]
   (let [report (model/report input admitted original observed compared)
@@ -36,7 +36,16 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} publish! [ctx input admitted original observed]
+(defn- ^{:stratum 1} comparison [input original observed]
+  (let [request (get-in input [:recovery/input :load :request])
+        compared (model/compare-original (:comparison/pin request) original observed)]
+    (if (drift-sensitive? compared)
+      (drift/comparison-mismatch compared request)
+      compared)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} publish! [ctx input admitted original observed]
   (let [compared (comparison input original observed)]
     (anomaly/let-ok [safe (reporting/protect {:comparison/result compared})]
       (let [recorded (record-drift! ctx (:comparison/result safe))]

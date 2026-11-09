@@ -27,6 +27,8 @@ Returned reports use the same protected content as the published artifact.
 Retain the bounded fresh capture even when fingerprint projection fails.
 Publish protected rollback drift through the existing N3 producer and N6 event
 linkage. Keep delivery failures, including a missing stream, in the failed report.
+Native namespace and Deployment identity conflicts are drift too; transport failures
+remain acquisition failures and do not invent environment changes.
 
 Recovery population bounds permit replacement replicas and churn. Separately
 require the Deployment's desired replica count to equal the retained original;
@@ -63,6 +65,9 @@ publication. Run lint, JVM/product/package compatibility and fault checks serial
   compatibility passes 308/1,903. Both JVM products and strict structural gates pass.
 - After test-only fixture deduplication, both source and isolated package pass
   the two affected tests / 44 assertions and all three review-fault checks.
+- Identity-conflict validation passes both JVM products and source/isolated
+  recovery 34/1,198. All twelve recovery faults in each environment detect
+  assertion failures with zero errors, including each UID guard and transport distinction.
 
 ## Deployment Plan
 
