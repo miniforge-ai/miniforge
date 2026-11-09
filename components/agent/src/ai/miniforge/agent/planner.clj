@@ -117,9 +117,8 @@
                                 :else   ""))))
               (str/join "\n")))))
 
-(defn ^{:stratum 0} format-existing-files-shed
-  "Shed-path file list: bodies of files marked `:keep-inline?` (the codex
-   pin) stay inlined, every other file drops to the manifest."
+(defn- ^{:stratum 0} format-existing-files-shed
+  "Shed-path file list: `:keep-inline?` bodies (the codex pin) stay inlined."
   [files]
   (let [{kept true shed false} (group-by #(boolean (:keep-inline? %)) files)]
     (->> [(format-existing-files kept) (format-existing-files-manifest shed)]
@@ -616,6 +615,20 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
+(defn- ^{:stratum 3} assemble-with-shed
+  "One budget pass: `shed-fn` renders the shed-path file list and
+   `shed-count` is how many bodies it drops."
+  [spec-text existing-files effective-system model reserve shed-fn shed-count]
+  (context-budget/assemble-within-budget
+   {:effective-system    effective-system
+    :model               model
+    :reserve             reserve
+    :max-inline-fraction (get @planner-prompt-data
+                              :prompt/max-inline-window-fraction 1.0)
+    :build-full          (partial build-user-prompt spec-text existing-files)
+    :build-shed          (partial build-user-prompt spec-text existing-files shed-fn)
+    :shed-count          shed-count}))
+
 (defn- ^{:stratum 3} assemble-within-budget
   "Assemble the planner user-prompt within the model's context window
    (N12 §5). If the prompt reaches the configured inline cap or overflows
@@ -646,23 +659,15 @@
    before window fit, so a barely-fitting prompt can't stall a turn past
    the phase timeout."
   [spec-text existing-files effective-system model reserve]
-  (let [assemble (fn [shed-fn shed-count]
-                   (context-budget/assemble-within-budget
-                    {:effective-system effective-system
-                     :model            model
-                     :reserve          reserve
-                     :max-inline-fraction (get @planner-prompt-data
-                                               :prompt/max-inline-window-fraction 1.0)
-                     :build-full       #(build-user-prompt spec-text existing-files)
-                     :build-shed       #(build-user-prompt spec-text existing-files shed-fn)
-                     :shed-count       shed-count}))
-        kept (count (filter :keep-inline? existing-files))
-        r (assemble format-existing-files-shed (- (count existing-files) kept))]
-    ;; A kept body that alone overflows the window drops to the manifest
-    ;; too, rather than failing a plan the full manifest would fit.
+  (let [assemble (partial assemble-with-shed
+                         spec-text existing-files effective-system model reserve)
+        total    (count existing-files)
+        kept     (count (filter :keep-inline? existing-files))
+        r        (assemble format-existing-files-shed (- total kept))]
+    ;; A pin too big on its own must not fail a plan the plain manifest fits.
     (if (and (pos? kept) (:over-after-shed? r))
-      (assemble format-existing-files-manifest (count existing-files))
-      (assoc r :file-count (count existing-files)))))
+      (assemble format-existing-files-manifest total)
+      (assoc r :file-count total))))
 
 ;------------------------------------------------------------------------------ Layer 4
 

@@ -29,8 +29,10 @@ the codex atlas in #2406.
 - `agent/planner.clj`:
   - new `format-existing-files-shed` inlines `:keep-inline?` files and
     lists the rest in the manifest;
-  - `assemble-within-budget` uses it for the shed path and counts only
-    the other files as sheddable;
+  - new `assemble-with-shed` runs one budget pass for a given shed
+    renderer;
+  - `assemble-within-budget` uses the new renderer for the shed path and
+    counts only the other files as sheddable;
   - if the kept body alone still overflows the window, it falls back to
     the full manifest, so a pin can never fail a plan that used to fit;
   - `:file-count` still reports every existing file.
@@ -45,6 +47,7 @@ The implementer always inlines file bodies and ignores the flag.
   - on the shed path, the pin's body stays and the other body is gone;
   - a pin that overflows the window alone drops to the manifest, and the
     plan still fits.
+- `codex_pin_test.clj`: `pin-outcome`'s entry carries `:keep-inline? true`.
 - Locally only the Clojure reader and a standalone evaluation of
   `format-existing-files-shed` ran; the full suite runs in CI.
 

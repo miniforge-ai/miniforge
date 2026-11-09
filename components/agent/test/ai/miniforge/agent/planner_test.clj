@@ -676,6 +676,10 @@
   {:path "components/agent/src/ai/miniforge/agent/big.clj"
    :content (apply str (repeat chars \x))})
 
+;; Mirrors codex-pin/pin-outcome's :entry (phase-software-factory).
+(defn- ^{:stratum 0} codex-pin-file [content]
+  {:path ".miniforge/codex-consider.md" :content content :keep-inline? true})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Validation tests
@@ -928,8 +932,7 @@
 
   (testing "on the shed path a :keep-inline? file (the codex pin) keeps its
             body while the other files drop to the manifest"
-    (let [pin {:path ".miniforge/codex-consider.md"
-               :content "PIN-BODY-WORRIES" :keep-inline? true}
+    (let [pin (codex-pin-file "PIN-BODY-WORRIES")
           r (assemble-within-budget "do the thing" [pin (big-file 300000)]
                                     "system" "codellama-34b" 0)]
       (is (true? (:shed? r)))
@@ -941,9 +944,9 @@
 
   (testing "a kept body that alone overflows the window drops to the manifest
             rather than failing the plan"
-    (let [pin {:path ".miniforge/codex-consider.md"
-               :content (apply str (repeat 300000 \z)) :keep-inline? true}
-          r (assemble-within-budget "do the thing" [pin (big-file 100)]
+    (let [body (apply str (repeat 300000 \z))
+          pin  (codex-pin-file body)
+          r    (assemble-within-budget "do the thing" [pin (big-file 100)]
                                     "system" "codellama-34b" 0)]
       (is (true? (:shed? r)))
       (is (false? (:over-after-shed? r)))

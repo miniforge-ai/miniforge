@@ -159,10 +159,7 @@
                                    (get phase->secondary-situations phase))
                  content (str/join "\n\n" (cons (:content entry) (map :content secondaries)))
                  pegs (into (vec (:pegs entry)) (mapcat :pegs secondaries))]
-             ;; :keep-inline? — the planner keeps this body when it sheds
-             ;; the others to a manifest (N12 §6): an unfetched pin must
-             ;; still have been seen, or the gate's warning would hide a
-             ;; consultation the agent never read.
+             ;; :keep-inline? so a shedding planner (N12 §6) still sees the pin.
              {:entry {:path (:path entry) :content content :keep-inline? true}
               :status :pinned
               :anomaly nil :situation situation :pegs (not-empty pegs)})))))))
