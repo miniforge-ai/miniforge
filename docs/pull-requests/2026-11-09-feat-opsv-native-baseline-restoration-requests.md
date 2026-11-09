@@ -41,14 +41,15 @@ Use actual retained approval and baseline artifacts with simulated HTTP only.
 Prove original desired count, fresh UID/revision fencing, scope/issuer agreement,
 changed-target refusal and no mutation. Preserve interruption and failure semantics.
 
-- Initial combined source: 10 tests / 238 assertions, zero failures or errors.
+- Source and isolated fresh package: 10 tests / 238 assertions each, zero failures or errors.
+- Both consuming JVM products, Polylith structure and task classpaths pass.
+- Curated OPSV/workflow/artifact integration: 277 tests / 5,230 assertions.
+- Native compatibility: 308 tests / 1,903 assertions across 42 suites.
 - Nine faults each cause assertion failures with zero errors. They cover caller extensions,
   provider/effect identity, physical cluster identity in restoration and trial,
   original count, independent recovery duration, UID and revision fencing.
 - Strict lint has zero warnings/errors; inferred namespace strata remain within
   the three-strata limit.
-- Full JVM, curated integration and isolated fresh package validation remain
-  pending before publication.
 
 ## Deployment Plan
 
@@ -62,7 +63,7 @@ retention APIs. Full runner compensation and recovery verification remain separa
 
 ## Checklist
 
-- [ ] Implement and validate read-only native restoration construction.
-- [ ] Owner adversarial and full applicable pinned-standard review.
+- [x] Implement and validate read-only native restoration construction.
+- [x] Owner adversarial and full applicable pinned-standard review.
 - [ ] Normal signed commits, budgets, full current-head review and CI.
 - [ ] Fresh-main conflict check and normal owner squash merge.
