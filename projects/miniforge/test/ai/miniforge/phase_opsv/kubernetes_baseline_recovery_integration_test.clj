@@ -131,6 +131,16 @@
     (is (empty? (fixtures/drift-events fixture)))
     (check-retained fixture output)))
 
+(defn- ^{:stratum 1} check-unreadable-root [path value fixture]
+  (let [routes (fixtures/changed-routes [path] value fixture)
+        [output _] (fixtures/verify fixture routes)
+        report (:opsv/baseline-recovery output)]
+    (is (false? (:verification/passed? report)))
+    (is (anomaly/anomaly? (:comparison/result report)))
+    (is (not= :absent (get-in report [:comparison/result :anomaly/data :kubernetes/resource-state])))
+    (is (empty? (fixtures/drift-events fixture)))
+    (check-retained fixture output)))
+
 (defn- ^{:stratum 1} check-drift-delivery-failure [fixture]
   (let [routes (fixtures/template-image-routes fixture foreign-template-image)
         failure (anomaly/anomaly :unavailable "injected drift delivery failure" {})
@@ -182,6 +192,15 @@
 (deftest ^{:stratum 2} out-of-bounds-native-controller-count-emits-linked-drift-instead-of-only-a-failed-report-test
   (fixtures/with-input
     #(check-drift-event [inventory/deployment-path "spec" "replicas"] (fixtures/outside-recovery-count %) %)))
+
+(deftest ^{:stratum 2} missing-required-native-resources-publish-correlated-drift-and-evidence-linkage-test
+  (doseq [path [native/cluster-path inventory/namespace-path inventory/deployment-path]]
+    (fixtures/with-input (partial check-drift-event [path] fixtures/absent-resource))))
+
+(deftest ^{:stratum 2} null-and-unreadable-root-responses-do-not-invent-resource-absence-or-drift-test
+  (doseq [path [native/cluster-path inventory/namespace-path inventory/deployment-path]
+          value [nil (java.io.IOException.)]]
+    (fixtures/with-input (partial check-unreadable-root path value))))
 
 (deftest ^{:stratum 2} unreadable-native-state-remains-a-transport-failure-not-invented-environment-drift-test
   (fixtures/with-input check-transport-failure))

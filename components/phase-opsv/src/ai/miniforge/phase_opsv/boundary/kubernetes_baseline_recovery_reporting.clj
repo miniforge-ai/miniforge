@@ -23,6 +23,8 @@
 (defn- ^{:stratum 0} drift-sensitive? [compared]
   (let [details (:anomaly/data compared)]
     (or (some? (:comparison/reason details))
+        (and (= :absent (:kubernetes/resource-state details))
+             (contains? details :kubernetes/expected-identity))
         (and (= :conflict (:anomaly/type compared))
              (contains? details :kubernetes/expected-uid)
              (contains? details :kubernetes/observed-identity)))))

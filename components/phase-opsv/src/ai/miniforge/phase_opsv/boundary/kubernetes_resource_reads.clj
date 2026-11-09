@@ -14,8 +14,12 @@
 (defn- ^{:stratum 0} identity-of [value]
   [(get value "kind") (resource/namespace-of value) (resource/name-of value)])
 
-(defn- ^{:stratum 0} absent [optional?]
-  (if optional? response/not-found (response/invalid-response)))
+(defn- ^{:stratum 0} absent [optional? expected]
+  (if optional?
+    response/not-found
+    (assoc (response/invalid-response) :anomaly/data
+           {:kubernetes/resource-state :absent
+            :kubernetes/expected-identity expected})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -28,7 +32,7 @@
   (let [value (http/read-resource! settings until path {})]
     (cond
       (anomaly/anomaly? value) value
-      (= response/not-found value) (absent optional?)
+      (= response/not-found value) (absent optional? expected)
       (not (admitted? schema expected value)) (response/invalid-response)
       :else value)))
 

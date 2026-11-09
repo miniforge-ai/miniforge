@@ -32,6 +32,9 @@ remain acquisition failures and do not invent environment changes.
 Post-capture projection conflicts, including controller counts outside the
 declared bounds and empty or heterogeneous replica membership, also publish
 linked drift. Their bounded native capture remains in the protected failed report.
+Required native-resource HTTP 404 responses preserve typed absence and the exact
+requested identity. Recovery reports link that drift too. Optional reads remain
+unchanged; JSON-null responses and transport failures do not establish absence.
 
 Recovery population bounds permit replacement replicas and churn. Separately
 require the Deployment's desired replica count to equal the retained original;
@@ -78,6 +81,12 @@ publication. Run lint, JVM/product/package compatibility and fault checks serial
   branch, and formats capture fields individually. Strict lint/true strata and a
   rebuilt package pass; source and isolated package each pass the three affected
   admission/success/cancelled-run tests / 114 assertions.
+- Required-resource absence validation passes both JVM products, strict lint/strata,
+  structure, task classpaths and fresh packaging. Source and isolated recovery
+  each pass 37 tests / 1,464 assertions and all eighteen recovery fault checks.
+  Every fault produces assertion failures with zero errors. Focused absence/null/
+  transport checks pass 225 assertions; isolated native compatibility passes
+  309 tests / 1,913 assertions across 42 suites.
 
 ## Deployment Plan
 

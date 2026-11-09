@@ -13,8 +13,9 @@
 
 (def ^{:stratum 0} with-input restoration/with-input)
 
-(defn ^{:stratum 0} changed-routes [path value fixture]
-  (assoc-in (get-in fixture [:native :routes]) path value))
+(def ^{:stratum 0} absent-resource
+  "An omitted wire route produces a real HTTP 404, not a JSON-null response."
+  ::absent-resource)
 
 (defn ^{:stratum 0} outside-recovery-count [fixture]
   (inc (get-in fixture [:input :load :request :comparison/pin :comparison/contract
@@ -32,6 +33,12 @@
         input (dissoc (:restoration/request fixture) :effect/id)]
     (with-redefs [transport/start! (partial wire/reply! routes calls) transport/response-fields identity]
       [(phase/verify-kubernetes-baseline-recovery! ctx input) @calls])))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} changed-routes [path value fixture]
+  (let [routes (get-in fixture [:native :routes])]
+    (if (= absent-resource value) (dissoc routes (first path)) (assoc-in routes path value))))
 
 (comment
   (with-input #(verify % (get-in % [:native :routes]))))
