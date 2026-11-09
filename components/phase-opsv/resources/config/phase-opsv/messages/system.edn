@@ -1,5 +1,11 @@
 {:phase-opsv/system
- {:load/invalid-provider "Native load creation requires an exact committing staging load proposal, explicit target and trusted dispatch."
+ {:recovery/approval-required "Recovery-plan admission requires independent runtime approval of this exact bounded plan hash."
+  :recovery/approval-description "Approve one exact bounded staging recovery plan independently of forward effects."
+  :recovery/approval-remediation "Approve this plan's exact hash in runtime-owned recovery-plan admission settings."
+  :recovery/target-mismatch "Recovery-plan admission requires the declared staging target, attempt and original baseline to match."
+  :recovery/target-remediation "Declare the matching staging environment and original target in independent recovery-plan admission settings."
+  :recovery/invalid-admission "Recovery-plan admission requires valid runtime policy and a separately declared staging approval."
+  :load/invalid-provider "Native load creation requires an exact committing staging load proposal, explicit target and trusted dispatch."
   :load/unconfirmed "Native load creation is unconfirmed; reconcile before another attempt or release."
   :load/submission-refused "Native load creation was interrupted or its deadline elapsed before submission."
   :load/invalid-request "Native load requests require a retained original, one HTTP destination, digest-pinned image and bounded runtime settings."
