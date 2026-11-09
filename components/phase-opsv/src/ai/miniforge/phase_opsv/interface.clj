@@ -51,6 +51,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-ownership :as load-ownership]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-quiescence :as load-quiescence]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop :as load-stop]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-start :as load-start]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup :as load-cleanup]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop-provider :as native-load-stop-provider]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
@@ -80,6 +81,13 @@
   "Prepare an exact conditional stop proposal from current retained recovery approval and fresh owned identity.
    This read-only API does not issue authority, execute a patch or prove termination."
   load-stop/prepare!)
+
+(def ^{:stratum 0} prepare-kubernetes-load-start-proposal!
+  "Prepare exact UID/revision/gate-pinned forward start from retained recovery readiness and unchanged owned creation.
+   Input uses the closed recovery-reference/runtime/new effect-id contract; forward load bounds remain original.
+   Requires a never-started worker. Returns proposal or anomaly, never permission, mutation or traffic proof.
+   Native execution still requires current N4/N8 admission, exact forward authority and a pinned commit."
+  load-start/prepare!)
 
 (def ^{:stratum 0} prepare-kubernetes-load-cleanup-proposal!
   "Prepare an exact UID/revision-pinned deletion request from current retained recovery intent.
