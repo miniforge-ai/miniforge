@@ -38,7 +38,7 @@
         [result calls] (fixtures/execute-response fixture pending fixtures/timeout-dispatch!)
         [retried retried-calls] (fixtures/execute fixture)]
     (is (= :unknown-outcome (:effect/state result)))
-    (is (= result (effect/read-record (:effects-directory runtime) (:effect/id (:stop/record fixture)))))
+    (is (= result (effect/read-record (:effects-directory runtime) (:effect/id (:recovery/record fixture)))))
     (is (= 1 (count (fixtures/mutations calls))))
     (is (.isCancelled pending))
     (is (not= :succeeded (:effect/state retried)))

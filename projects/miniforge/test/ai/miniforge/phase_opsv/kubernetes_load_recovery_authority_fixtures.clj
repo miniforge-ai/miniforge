@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.kubernetes-load-stop-authority-fixtures
+(ns ai.miniforge.phase-opsv.kubernetes-load-recovery-authority-fixtures
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.execution-grant.opsv-scope-fixtures :as clock]
@@ -13,11 +13,11 @@
 
 (defn ^{:stratum 0} with-stores [{:keys [directory] :as fixture}]
   (assoc fixture
-         :stop/breach-directory (str (fs/path directory "stop-breaches"))
-         :stop/grants-directory (str (fs/path directory "stop-grants"))))
+         :recovery/breach-directory (str (fs/path directory "recovery-breaches"))
+         :recovery/grants-directory (str (fs/path directory "recovery-grants"))))
 
 (defn- ^{:stratum 0} registered! [fixture issued]
-  (let [registered (grant/register! (:stop/grants-directory fixture) issued)
+  (let [registered (grant/register! (:recovery/grants-directory fixture) issued)
         retained? (and (uuid? (:grant/id registered)) (= (:grant/id issued) (:grant/id registered)))]
     (is retained?)
     (when retained? issued)))
@@ -26,7 +26,7 @@
 
 (defn ^{:stratum 1} issue! [fixture proposal]
   (let [issuance (assoc (load/issuance-request proposal) :workflow-run/status :cancelled)
-        issued (grant/issue-for-effect (:stop/breach-directory fixture) issuance clock/now)
+        issued (grant/issue-for-effect (:recovery/breach-directory fixture) issuance clock/now)
         issued? (and (not (anomaly/anomaly? issued)) (uuid? (:grant/id issued)))]
     (is issued?)
     (when issued? (registered! fixture issued))))
