@@ -31,8 +31,10 @@
             [ai.miniforge.phase-software-factory.messages :as messages]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
             [ai.miniforge.phase-software-factory.verify.output :as output]
+            [ai.miniforge.phase-software-factory.verify.output-config :as output-config]
             [ai.miniforge.phase-software-factory.verify.result :as result]
             [ai.miniforge.phase-software-factory.verify.registration :as registration]
+            [ai.miniforge.subprocess.interface :as subprocess]
             [babashka.process :as process]
             [babashka.fs :as fs]
             [clojure.string :as str]))
@@ -67,6 +69,38 @@
    ~indefinite hangs seen when bb test blocks on Docker acquire or stdin.
    Override per spec via :spec/test-timeout-ms or per phase-config."
   (* 30 60 1000))
+
+(def ^{:stratum 0} ^:private output-settle-ms
+  "How long a finished test process's output readers get to reach
+   end-of-stream. A grandchild still holding a pipe must not hold the phase,
+   so past this the output read so far is used."
+  5000)
+
+(defn- ^{:stratum 0} exited-test-result
+  "Results for a test process that exited. Two outcomes fail without
+   parsing the output, each marked so the phase summary keeps its message,
+   and both go back to implement, since the code under test caused them:
+
+   - `:output-limit?`: a stream passed the capture limit and the process
+     was stopped. The message names the limit and shows that stream's start.
+   - `:output-unsettled?`: the output was still open `settle-ms` after the
+     exit, so a process the tests started holds it and the output is
+     incomplete. A summary read so far must not pass the run."
+  [cmd exit [out err :as drains] {:keys [settled? settle-ms]}]
+  (let [cut   (first (filter subprocess/overflowed? drains))
+        text  (subprocess/drained-text (or cut out))
+        head  (subs text 0 (min (count text) output-config/verify-error-preview-limit))
+        limit (some-> cut subprocess/capture-limit)]
+    (cond
+      cut            (assoc (result/test-error-result
+                             (messages/t :verify/output-limit {:bytes limit :test-cmd cmd :head head}))
+                            :output-limit? true)
+      (not settled?) (assoc (result/test-error-result
+                             (messages/t :verify/output-unsettled {:ms settle-ms :test-cmd cmd :head head}))
+                            :output-unsettled? true)
+      :else          (output/parse-test-output
+                      (str (subprocess/drained-text out) "\n" (subprocess/drained-text err))
+                      exit))))
 
 (def ^{:stratum 0} ^:private verify-rate-limit-pattern
   "Pattern for non-actionable verify failures caused by provider throttling."
@@ -202,13 +236,17 @@
         result (get-in ctx [:phase :result])
         agent-status (:status result)
         gate-failed? (phase-gate/gate-failed? (:phase ctx))
-        parse-error? (true? (get-in result [:metrics :parse-error?]))
+        ;; A parse-error or output-capture failure's message carries
+        ;; test output, which can hold any text: it is never read as a
+        ;; timeout or a rate limit.
+        output-text? (some #(true? (get-in result [:metrics %]))
+                           [:parse-error? :output-limit? :output-unsettled?])
         timeout? (and (= :error agent-status)
-                      (not parse-error?)
+                      (not output-text?)
                       (some-> (get-in result [:error :message])
                               (str/includes? timeout-message-fragment)))
         rate-limited? (and (= :error agent-status)
-                           (not parse-error?)
+                           (not output-text?)
                            (let [msg (str (get-in result [:error :message]))]
                              (re-find verify-rate-limit-pattern msg)))
         phase-status (cond
@@ -279,6 +317,10 @@
    destroyed too, the interrupt flag is restored, and a failed result
    carrying `:interrupted? true` is returned.
 
+   Output past the subprocess capture limit on either stream stops the
+   process tree, and the run fails with the start of the output
+   (`exited-test-result`), a failure implement can act on.
+
    Returns parsed test results map."
   [worktree-path & {:keys [test-cmd timeout-ms]}]
   (let [cmd        (or test-cmd (infer-test-command worktree-path))
@@ -288,17 +330,20 @@
       ;; deadline; process/shell only returns after the child exits and
       ;; would block here indefinitely on a hung test command.
       (let [proc     (process/process
-                       {:dir (str worktree-path)
-                        :out :string :err :string :continue true}
+                       {:dir (str worktree-path) :continue true}
                        "sh" "-c" cmd)
+            stop!    (partial destroy-process-tree! (:proc proc))
+            drains   [(subprocess/drain-stream (:out proc) {:on-overflow stop!})
+                      (subprocess/drain-stream (:err proc) {:on-overflow stop!})]
             done-fut (future @proc)]
         ;; Plain `try`: this component has no slingshot dependency
         ;; (rule 211 exemption a).
         (try
           (if (not= ::timeout (deref done-fut timeout-ms ::timeout))
-            (let [result @done-fut]
-              (parse-test-output (str (:out result "") "\n" (:err result ""))
-                                 (:exit result 1)))
+            (let [exit     (:exit @done-fut 1)
+                  settled? (every? #(not= ::open (deref (:future %) output-settle-ms ::open)) drains)]
+              (run! subprocess/cancel-drain! drains)
+              (exited-test-result cmd exit drains {:settled? settled? :settle-ms output-settle-ms}))
             (do
               ;; .destroyForcibly on the `sh` parent does NOT reliably kill the
               ;; test runner child (the actual JVM running `bb test`). Walk the
@@ -306,8 +351,9 @@
               ;; this is what produced the orphan polylith poly-cli process
               ;; observed on 2026-05-18.
               (destroy-process-tree! (:proc proc))
-              ;; Bounded wait for the reader threads to drain; if they don't,
-              ;; cancel the future so the thread doesn't leak across verify runs.
+              (run! subprocess/cancel-drain! drains)
+              ;; Bounded wait for the process future; if it does not settle,
+              ;; cancel it so the thread doesn't leak across verify runs.
               (when (= ::timeout (deref done-fut 5000 ::timeout))
                 (future-cancel done-fut))
               (assoc (test-error-result
@@ -320,6 +366,7 @@
             ;; release the waiting future, then restore the interrupt flag
             ;; the exception cleared so the caller still sees it.
             (destroy-process-tree! (:proc proc))
+            (run! subprocess/cancel-drain! drains)
             (future-cancel done-fut)
             (.interrupt (Thread/currentThread))
             (assoc (test-error-result
@@ -426,6 +473,10 @@
                                                 (get test-results :output ""))
                      (:parse-error? test-results)
                      (assoc :parse-error? true)
+                     (:output-limit? test-results)
+                     (assoc :output-limit? true)
+                     (:output-unsettled? test-results)
+                     (assoc :output-unsettled? true)
                      ;; The runner's own "nothing to test" claim; :tests-pass
                      ;; tells it apart from a run that counted no tests.
                      (:no-tests? test-results)
