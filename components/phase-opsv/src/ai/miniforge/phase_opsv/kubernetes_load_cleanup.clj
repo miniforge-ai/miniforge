@@ -8,6 +8,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0 :private true} cleanup-operation
+  "Closed recovery vocabulary shared by retained plans and root grant profiles." :cleanup-load)
+
 (def ^{:stratum 0 :private true} cleanup-propagation-policy
   "Only the Pod UID is proven owned; never cascade deletion into unproven dependents." "Orphan")
 
@@ -34,7 +37,7 @@
   (if-not (usable? input plan owned)
     (anomaly/anomaly :conflict (msg/ts :load/cleanup-request-refused) {})
     (let [payload (request owned)
-          intent {:opsv/operation :cleanup-resource :kubernetes/request payload}]
+          intent {:opsv/operation cleanup-operation :kubernetes/request payload}]
       (proposal/proposal ctx input plan owned intent))))
 
 (comment ::quiescence-precedes-cleanup-authority-and-acknowledgement-does-not-prove-deletion)
