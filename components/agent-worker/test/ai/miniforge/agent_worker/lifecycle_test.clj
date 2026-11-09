@@ -68,7 +68,9 @@
   (let [w (fresh {:fake/preflight-failures [:cli-missing]} {})]
     (is (= :anomalies.agent-worker/worker-unavailable (reason (fx/start! w (fx/config :worker/claude) 1 prompt))))
     (is (= :anomalies.agent-worker/worker-preflight-failed (reason (fx/start! w fake-config 1 prompt))))
-    (is (zero? (fake/starts (:worker w))))))
+    (is (zero? (fake/starts (:worker w)))))
+  (let [w (fresh) session (fx/start! w fake-config 1 prompt) unregistered (update (:wc w) :worker/workers dissoc :worker/fake)]
+    (is (= :anomalies.agent-worker/worker-unavailable (reason (worker/inspect unregistered (:acting w) session))))))
 
 (deftest ^{:stratum 1} test-stale-lease-stops-new-attempts-and-old-sessions
   (let [w (fresh)

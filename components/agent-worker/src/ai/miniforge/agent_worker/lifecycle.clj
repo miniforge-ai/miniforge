@@ -106,18 +106,21 @@
   "Run `(f worker handle)` for a recorded session. `check` is `:check/ready`
    (a new turn: the environment must be ready), `:check/lease` (the lease
    must be current) or `:check/none` (artifacts: the environment allows them
-   after expiry and checks the lease itself)."
+   after expiry and checks the lease itself). A session whose worker is no
+   longer registered is unavailable; no other worker stands in."
   [wc acting session check f]
   (let [binding (:session/binding session)
+        worker (get (:worker/workers wc) (:session/worker session))
         refused (session-refusal acting session (controller/record wc binding))
         handle (controller/env-handle wc acting binding)
         ready (when-not (or refused (= :check/none check)) (env/readiness (:env/controller handle) acting (:env/lease handle)))]
     (cond
       refused (refusal/reason-anomaly refused {})
+      (nil? worker) (refusal/reason-anomaly :anomalies.agent-worker/worker-unavailable {})
       (anomaly/anomaly? ready) ready
       (and (= :check/ready check) (not (:readiness/ready? ready)))
       (refusal/reason-anomaly :anomalies.agent-worker/environment-not-ready {})
-      :else (f (get (:worker/workers wc) (:session/worker session)) handle))))
+      :else (f worker handle))))
 
 (defn- ^{:stratum 1} next-turn
   "Start the next turn only for the call that reserved it; a competing call
