@@ -24,22 +24,25 @@
 ## 0. Architectural Decision Record
 
 > **A governed capsule that has network access SHALL reach the network only through a per-capsule egress
-> proxy. The proxy enforces an exact-host allowlist and a destination-address guard, and it holds the agent's
-> credentials. The capsule holds opaque tokens in their place.**
+> proxy. The proxy enforces an exact-host allowlist and a destination-address guard, and it holds the
+> capsule's credentials. The capsule holds opaque tokens in their place.**
 
 N11 §2.2 requires deny-by-default networking and ephemeral credentials. The OCI-CLI executor offers two states:
-no network, or the runtime's default network with unrestricted egress (Annex A). An agent on that network can reach
-any host, including link-local metadata endpoints and the host's private network, and it can read its own model
-API key from its environment. A prompt injection can therefore send the key, or anything else in the workspace,
-to any host.
+no network, or the runtime's default network with unrestricted egress (Annex A). A process on that network can
+reach any host, including link-local metadata endpoints and the host's private network. Under N11 §6.1 the agent
+runs in the capsule too, where it would read its own model API key from its environment. A prompt injection could
+then send the key, or anything else in the workspace, to any host.
 
-The boundary is the network, not an environment variable. The capsule joins an internal network whose only
-other member is the proxy, so a tool that ignores `HTTPS_PROXY` has no route out.
+This delta binds every process in the capsule, whether or not the agent CLI runs there yet. The boundary is the
+network, not an environment variable. The capsule joins an internal network whose only other member is the
+proxy, so a tool that ignores `HTTPS_PROXY` has no route out.
 
 ### 0.1 Non-Goals
 
 - This delta does NOT restrict what an allowed host receives. An allowed host can still receive workspace data,
   and a host that serves anyone's content can still deliver injected text. Paths are not checked.
+- This delta does NOT inspect traffic inside a plain tunnel. SNI is checked (§3.3), but a request whose inner
+  Host names another site on the same CDN (domain fronting) is not.
 - This delta does NOT defend against a capsule escape through the shared host kernel.
 - This delta does NOT add a Docker Engine or Podman HTTP API client (N11-delta §1.1).
 - This delta does NOT change local mode (N11 §7.1).
@@ -64,6 +67,9 @@ other member is the proxy, so a tool that ignores `HTTPS_PROXY` has no route out
    cannot reach its model API, so `:none` suits capsules that run no agent.
 4. A capsule under `:restricted` or `:standard` MUST NOT be attached to any network other than its internal
    network.
+5. The profile MUST come from operator configuration (`:miniforge/egress :profile`, or an operator-authored
+   runtime specification). An agent-produced artifact MAY narrow it, in the order `:full`, `:standard`,
+   `:restricted`, `:none`, and MUST NOT widen it.
 
 ---
 
@@ -74,15 +80,17 @@ other member is the proxy, so a tool that ignores `HTTPS_PROXY` has no route out
 Each governed capsule under `:restricted` or `:standard` has:
 
 1. **An internal network** created for that capsule alone, with no gateway route. Its only members are the
-   capsule and its proxy.
+   capsule and its proxy. The capsule MUST NOT reach the host through it, neither at the network's gateway
+   address nor over IPv6.
 2. **An egress proxy sidecar**: a container from a pinned, fully qualified proxy image (N11-delta §5). It joins
    the internal network and one network with outbound access. It runs with the hardening flags the capsule
    gets (`--cap-drop=ALL`, `--read-only`, `no-new-privileges`, non-root user, memory and CPU limits).
 3. **Proxy routing in the capsule env**: `HTTPS_PROXY`, `HTTP_PROXY` and their lowercase forms name the
    sidecar on the internal network. `NO_PROXY` names loopback only.
 4. **No outside name resolution.** The capsule MUST NOT be able to resolve names beyond its internal network.
-   The proxy resolves upstream names. A resolver that forwards the capsule's queries outward is an exfiltration
-   channel: data encoded in query names reaches whoever runs the queried domain's nameserver.
+   The proxy resolves upstream names. A resolver that forwards the capsule's queries outward, including a
+   runtime's embedded resolver, is an exfiltration channel: data encoded in query names reaches whoever runs the
+   queried domain's nameserver.
 
 One sidecar serves one capsule, so the source of every connection identifies the capsule. The proxy needs no
 per-connection identity scheme.
@@ -118,6 +126,13 @@ retry the launch under a less restrictive profile.
 of them is already gone (N11 §10.2). Resource names carry the task-id slice the capsule name carries, so
 release can find each one.
 
+### 2.4 Substrate Selection
+
+Executor selection (N11 §10.3) MUST skip a substrate that cannot provide the requested profile and take the
+next one in N11 §7.4's order. The acquisition fails only when no registered substrate can. Moving to another
+conformant substrate is not a downgrade. Running under a weaker profile is one. A runtime kind set explicitly in
+configuration (N11-delta §3) is not skipped: the acquisition fails.
+
 ---
 
 ## 3. Allowlist
@@ -126,8 +141,10 @@ release can find each one.
 
 The allowlist of a capsule is the union of:
 
-1. **Derived hosts.** The hosts of each credential the launch carries (§5.2), the host of the endpoint the
-   agent backend calls (the route `probe-endpoint-for` resolves), and the host of the repository's git remote.
+1. **Derived hosts.** The hosts declared for each credential the launch carries (§5.2), and the host of the
+   launch's `:repo-url` with its forge API host (for `github.com`, `api.github.com`), declared as data. Derived
+   hosts come from declared data, not from `probe-endpoint-for`, whose fallbacks (an IP literal, localhost) are
+   destinations this delta refuses.
 2. **Operator hosts.** Entries under `:miniforge/egress :allow` in user or repository configuration, and the
    `:network-policy :allow` entries of an operator-authored runtime specification (N11 §5.1).
 3. **Baseline hosts**, under `:standard` only. A list in an EDN resource of the dag-executor component, with a
@@ -149,8 +166,13 @@ A prompt-injected plan could otherwise open its own exfiltration route.
 
 ### 3.3 Enforcement
 
-The proxy MUST check the requested host against the allowlist before it opens any upstream connection, for both
-`CONNECT` and plain HTTP requests. A refused request gets HTTP `403` (§7.1). No upstream sees it.
+1. The proxy MUST check the requested host and port against the allowlist before any DNS lookup and before any
+   upstream connection. A lookup of an unlisted name would itself carry data to that name's nameserver.
+2. The check applies to each `CONNECT` and to each plain HTTP request, including later requests on a reused
+   client connection. A plain HTTP request whose absolute-URI host differs from its `Host` header MUST be refused.
+3. On a plain tunnel the proxy MUST read the TLS ClientHello before forwarding it. It MUST refuse the connection
+   when the SNI is absent, differs from the CONNECT host, or the ClientHello offers Encrypted Client Hello.
+4. A refused request gets HTTP `403` (§7.1). No upstream sees it.
 
 A credential's hosts (§5.2) are not exempt from the list: they enter it as derived hosts, so the recorded
 allowlist (§9) names every host the capsule can reach.
@@ -166,7 +188,8 @@ The proxy MUST refuse a connection whose dialed address is not public, under eve
 2. Blocked IPv4 ranges: `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`,
    `172.16.0.0/12`, `192.0.0.0/24`, `192.0.2.0/24`, `192.168.0.0/16`, `198.18.0.0/15`, `198.51.100.0/24`,
    `203.0.113.0/24`, and `224.0.0.0/3`.
-3. Blocked IPv6 ranges: `::`, `::1`, `fc00::/7`, `fe80::/10`, `ff00::/8`.
+3. Blocked IPv6 ranges: `::`, `::1`, `100::/64`, `2001::/32` (Teredo), `2001:db8::/32`, `2002::/16` (6to4),
+   `64:ff9b:1::/48`, `fc00::/7`, `fe80::/10`, `ff00::/8`.
 4. An IPv6 address that embeds an IPv4 address (`::ffff:0:0/96` in dotted or hex form, `::/96`, and
    `64:ff9b::/96`) MUST be checked as its embedded IPv4 address. Without this, `::ffff:a9fe:a9fe` reaches
    `169.254.169.254`.
@@ -183,10 +206,16 @@ That list follows §3.1's rule: agent-produced artifacts cannot extend it.
 
 ### 5.1 Tokens in the Capsule
 
-For each agent credential the launch carries (`agent-credential-names` and the agent backend's
-`llm/backend-credential-env`), the capsule env MUST carry an
-opaque token under the credential's variable name in place of its value. The value MUST exist only in the
-miniforge host process and the sidecar.
+Every credential that reaches the capsule MUST be substituted under §5.1–§5.4 or be listed under §5.5. A
+credential is an env entry whose name or value the redaction policy marks as one, or whose name has a
+`credential-word-pattern` word. Its source does not matter: the agent's credentials (`agent-credential-names`,
+`llm/backend-credential-env`), `:env-passthrough`, a trusted plan's env, or the env of one exec (release's
+`GH_TOKEN`). Any other credential is refused, at acquisition or at the exec that carries it.
+
+For a substituted credential the capsule env carries an opaque token under the credential's variable name in
+place of its value. The value MUST exist only in the miniforge host process and the sidecar. The executor MAY
+add a credential to a running sidecar through the runtime CLI, and the sidecar MUST apply it before the exec
+that carries the token runs.
 
 1. A token MUST hold at least 128 bits from a CSPRNG and MUST be unique to the capsule.
 2. A token MUST keep the credential's public prefix (for example `sk-ant-api03-`) when the agent CLI checks the
@@ -195,37 +224,47 @@ miniforge host process and the sidecar.
 
 ### 5.2 Credential Hosts
 
-Each credential is scoped to the exact hosts declared for it as data in `backends.edn` (for `:claude`,
-`api.anthropic.com`). When the backend's endpoint route resolves to another host (a base-URL override in
-operator configuration), that host replaces the declared one. Subdomains are excluded. The proxy MUST substitute
-a token only on a connection to one of that credential's hosts.
+Each credential is scoped to exact hosts and to the auth header names that carry it (for example `x-api-key`
+or `authorization`). For an agent credential both are declared in a new `backends.edn` field; for
+`ANTHROPIC_API_KEY` the host is `api.anthropic.com`. When the backend's endpoint route resolves to another host
+(a base-URL override in operator configuration), that host replaces the declared one. Subdomains are excluded.
+
+Forge credentials (§5.7) are scoped to the launch's `:repo-url` host and its forge API host, never to a remote
+configured inside the capsule, which the agent can change.
 
 ### 5.3 Interception
 
 1. The proxy MUST terminate TLS only for a host that some credential is scoped to. Every other allowed host is a
    plain tunnel, with no interception.
-2. On an intercepted connection, the proxy MUST replace tokens with values in the request target and every
-   header, including inside a `Basic` authorization envelope. It MAY substitute in request bodies up to a
-   configured size bound.
-3. The proxy MUST re-encrypt to the upstream with full certificate verification against the sidecar's system
+2. On an intercepted connection the proxy MUST negotiate HTTP/1.1 only, and MUST check each request on it: the
+   `Host` header MUST equal the CONNECT host and the SNI, and the port MUST equal the CONNECT port. A mismatch
+   closes the connection.
+3. The proxy MUST replace a token with its value only in that credential's declared auth headers, including
+   inside a `Basic` envelope there. It MUST NOT substitute in the request target, in other headers, or in the
+   body.
+4. A request to a credential host MUST be refused when an issued token appears anywhere but a declared auth
+   header, or when a declared auth header carries a value other than an issued token. The first stops an API
+   from echoing the value back in a form redaction cannot match (reversed, re-encoded). The second stops the
+   agent from using an outside account's key on an allowed host to deliver workspace data to that account.
+5. The proxy MUST re-encrypt to the upstream with full certificate verification against the sidecar's system
    roots.
-4. Plain HTTP MUST NOT be substituted. The token travels as-is, and the upstream rejects it.
+6. Plain HTTP MUST NOT be substituted. The token travels as-is, and the upstream rejects it.
 
 ### 5.4 Redaction
 
 On an intercepted connection the proxy MUST replace each credential value, and each `Basic` envelope it built,
 with the token, in response headers and bodies. Bodies MUST stream: the proxy holds back at most the length of
 the longest value minus one byte, so a value split across chunks is caught and server-sent events are not
-buffered. The proxy SHOULD remove `Accept-Encoding` from intercepted requests, so responses stay readable for
-redaction.
+buffered. The proxy MUST remove `Accept-Encoding` from intercepted requests. A response that arrives encoded
+anyway MUST be decoded before redaction, or refused when the proxy cannot decode it.
 
 ### 5.5 Credentials the Proxy Cannot Substitute
 
 Signed requests (AWS SigV4 for Bedrock, Google service-account signing for Vertex) carry no token to swap.
 
-1. Such a credential MUST NOT be injected into a governed capsule unless the operator lists its variable name
-   under `:miniforge/egress :in-capsule-credentials`. Otherwise the acquisition fails with
-   `:egress/credential-not-substitutable`.
+1. Such a credential, or any credential with no declared hosts, MUST NOT reach a governed capsule unless the
+   operator lists its variable name under `:miniforge/egress :in-capsule-credentials`. Otherwise the
+   acquisition fails with `:egress/credential-not-substitutable`.
 2. A credential injected under that list MUST be recorded by name in evidence (N11 §8.1 permits names).
 
 ### 5.6 OAuth
@@ -238,11 +277,11 @@ A credential that refreshes itself MUST NOT enter a governed capsule. A credenti
 value, so it cannot redact it, and the capsule would hold a real credential. No launch path may deliver such a
 credential, by mount or by env.
 
-### 5.7 Git Remote Credentials
+### 5.7 Forge Credentials
 
-The git remote credential the executor passes to each capsule git command SHOULD be handled under §5.1–§5.4,
-scoped to the remote's host. Until it is, it travels through a plain tunnel and remains readable inside the
-capsule while the command runs.
+The git remote credential the executor passes to each capsule git command, and the `GH_TOKEN` release passes to
+each `gh` command, MUST be handled under §5.1–§5.4 in governed mode. Phases share one capsule (N11 §3). A process
+started in one phase can read, through `/proc`, the environment of a later phase's `git push` while it runs.
 
 ---
 
@@ -318,11 +357,13 @@ This delta adds two capabilities to N11-delta §4:
 
 | Capability | Meaning |
 |------------|---------|
-| `:network-modes/internal` | Creates and removes a user network with no outbound route (`network create --internal`) |
+| `:network-modes/internal` | Creates and removes a user network with no outbound route (`network create --internal`), from which a container reaches neither the host nor an outside resolver |
 | `:network-attach` | Attaches a container to more than one network |
 
-`:restricted` and `:standard` require both. The executor MUST check them before step 1 of §2.3. If either is
-missing, the acquisition fails with `:egress/capability-missing`, naming the capability.
+`:restricted` and `:standard` require both. The executor MUST check them before step 1 of §2.3. A runtime
+missing either cannot provide those profiles (§2.4). When no substrate can, the acquisition fails with
+`:egress/capability-missing`, naming the capability. A runtime advertises
+`:network-modes/internal` only for `(runtime, version, OS)` triples where Test Obligation 1 passes.
 
 ### 8.2 Flag Dialect
 
@@ -364,9 +405,13 @@ The contract of §1–§7 is substrate-agnostic. On Kubernetes:
 3. NetworkPolicy takes effect only when the cluster's network plugin enforces it. Before reporting a capsule
    acquired under `:restricted` or `:standard`, the executor MUST show that a direct connection from the task
    pod to a public address fails.
+4. The task pod MUST set `automountServiceAccountToken: false`. A service-account token in the pod could be
+   sent out through an allowed host and used against a public API endpoint.
+5. The proxy pod's ingress policy MUST admit only its task pod.
 
 The Kubernetes executor implements none of this. Until it does, a governed Kubernetes acquisition under
-`:restricted` or `:standard` MUST fail with `:egress/unsupported-substrate` (N11.MD.1).
+`:restricted` or `:standard` MUST fail with `:egress/unsupported-substrate` (N11.MD.1), and selection moves on
+to the next substrate (§2.4).
 
 ---
 
@@ -376,9 +421,10 @@ The Kubernetes executor implements none of this. Until it does, a governed Kuber
    through the capsule's proxy.
 2. **§2.2 Credentials.** A substitutable credential is present in the capsule only as a token (§5).
 3. **§5.1.** `:network-policy` becomes `{:profile #{:none :restricted :standard :full} :allow [{:host :port}]}`.
-   `:proto` is dropped: the proxy carries HTTP and HTTPS only. `:mode :deny-default` with no `:allow` entries
-   reads as `:none`. Either mode with entries reads as `:restricted`.
-4. **§5.3.** The default for `:network-policy/profile` in governed mode is `:standard`.
+   `:proto` is dropped: the proxy carries HTTP and HTTPS only. A legacy `:mode` (`:deny-default` or
+   `:allow-listed`) reads as `:restricted`, with its `:allow` entries added to the operator hosts. `:none`
+   applies only when named.
+4. **§5.3.** The `:network-policy/mode` default is removed. In governed mode the default profile is `:standard`.
 5. **§8.1.** The sentence naming `ANTHROPIC_API_KEY` as injected into the capsule is replaced by §5.1: the
    capsule receives a token, and the value stays in the sidecar.
 6. **§8.2.** The endpoint table becomes §3.1's derived and baseline hosts. Git over SSH (`github.com:22`) is
@@ -393,22 +439,26 @@ The Kubernetes executor implements none of this. Until it does, a governed Kuber
 | N11D2.EG.1 | MUST | A `:restricted` or `:standard` capsule has no network route except its proxy (§1, §2.1). |
 | N11D2.EG.2 | MUST | Refuse `:full` in governed mode; default to `:standard` (§1). |
 | N11D2.EG.3 | MUST | Fail acquisition, never weaken the profile, when the substrate cannot provide it (§2.3, §8.1, §10). |
-| N11D2.EG.4 | MUST | Match hosts exactly; refuse every host on an empty list; check before any upstream connect (§3). |
-| N11D2.EG.5 | MUST NOT | Let agent-produced artifacts add allowlist or private-allow entries (§3.1, §4). |
+| N11D2.EG.4 | MUST | Match hosts exactly; refuse every host on an empty list; check before any DNS lookup or connect (§3). |
+| N11D2.EG.5 | MUST NOT | Let agent-produced artifacts widen the profile or add allowlist or private-allow entries (§1, §3.1, §4). |
 | N11D2.EG.6 | MUST | Refuse non-public dialed addresses, including embedded IPv4 forms; fail closed on bad input (§4). |
-| N11D2.EG.7 | MUST | Give the capsule a token, never the value, for every substitutable agent credential (§5.1). |
-| N11D2.EG.8 | MUST | Intercept TLS only on a credential's exact hosts; verify the upstream (§5.3). |
+| N11D2.EG.7 | MUST | Give the capsule a token, never the value, for every credential not listed in-capsule (§5.1, §5.7). |
+| N11D2.EG.8 | MUST | Intercept TLS only on a credential's exact hosts; bind each request to the CONNECT host; verify the upstream (§5.3). |
 | N11D2.EG.9 | MUST | Redact credential values from responses without buffering streams (§5.4). |
 | N11D2.EG.10 | MUST | Refuse non-substitutable and self-refreshing credentials unless the operator lists them (§5.5, §5.6). |
 | N11D2.EG.11 | MUST | Use a per-capsule CA whose private key never leaves the sidecar (§6.1). |
 | N11D2.EG.12 | MUST | State the profile, allowed hosts, and refusal handling in the agent context (§7.2). |
 | N11D2.EG.13 | MUST NOT | Branch on `:runtime/kind` or call a daemon API for egress (§8). |
+| N11D2.EG.14 | MUST | Refuse a plain tunnel whose SNI is absent, differs from the CONNECT host, or uses ECH (§3.3). |
+| N11D2.EG.15 | MUST | Substitute only in declared auth headers; refuse a token elsewhere or an outside credential there (§5.3). |
 
 ### Test Obligations
 
-1. From a `:restricted` capsule, a direct TCP connection to a public address, with proxy variables unset, fails,
-   and resolving a public name fails.
-2. A CONNECT to an unlisted host gets `403`, and an upstream stub records no connection.
+1. From a `:restricted` capsule, with proxy variables unset, a direct TCP connection to a public address fails,
+   a connection to the internal network's gateway address and over IPv6 fails, and resolving a public name
+   fails.
+2. A CONNECT to an unlisted host gets `403`, an upstream stub records no connection, and a stub resolver
+   records no query.
 3. A capsule whose allowlist is empty refuses every host.
 4. `169.254.169.254`, `::ffff:a9fe:a9fe`, `127.0.0.1`, `10.0.0.1`, and a name resolving to `10.0.0.1` are each
    refused by the guard.
@@ -419,8 +469,13 @@ The Kubernetes executor implements none of this. Until it does, a governed Kuber
 7. On a runtime descriptor without `:network-modes/internal`, a `:restricted` acquisition fails and creates no
    container or network.
 8. Release removes the capsule, sidecar, and network, and a second release succeeds.
-9. A planner-generated task definition naming an extra host leaves the allowlist unchanged.
-10. A governed Kubernetes acquisition under `:standard` fails with `:egress/unsupported-substrate`.
+9. A planner-generated task definition naming an extra host, or a wider profile, leaves both unchanged.
+10. With Kubernetes alone registered, a governed `:standard` acquisition fails with
+    `:egress/unsupported-substrate`; with Kubernetes and Podman registered, it selects Podman.
+11. On an intercepted connection, a second request with another `Host` is refused. A tunnel whose SNI differs
+    from the CONNECT host is refused.
+12. A request to a credential host carrying the token in its body, or an outside key in its auth header, is
+    refused.
 
 ---
 
@@ -439,20 +494,30 @@ This annex records the code as of `ea407dfc3` (2026-11-08). Paths are under
   default network with unrestricted egress.
 - **Destination guard.** `rg '169\.254|ssrf' components bases` finds nothing. No code blocks loopback, private,
   CGNAT, or link-local destinations.
-- **Agent credentials.** `agent-credential-names` (`oci_cli/env.clj`) keeps `ANTHROPIC_API_KEY` through
-  `filter-env-by-trust` at every trust level. `build-launch-plan` (`oci_cli/launch.clj`) adds the backend's
-  `backend-credential-env` (`ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` for `:claude`). A launch that
-  carries one puts its value in the container env, where every process can read it. The governed workflow path
-  above passes no `:env`, and `capsule-exec-fn`
-  (`components/llm/src/ai/miniforge/llm/protocols/impl/llm_client/completion.clj`) refuses per-call env, so on
-  that path the credential is not delivered through the plan.
-- **Proxy variables.** `untrusted-env-blanks` sets every proxy variable to an empty value for an untrusted
-  plan, and `create-container` passes them with `-e`. §2.1's routing replaces those values.
+- **Agent placement.** `assemble-initial-context`
+  (`components/workflow/src/ai/miniforge/workflow/runner_preparation.clj`) sets `:execution/exec-fn` to
+  `capsule-exec-fn` in governed mode, but no production code reads that key. The governed agent CLI therefore
+  runs on the host, as the `refuse-network-access-when-governed!` docstring in `runner_environment.clj` states.
+  Today the capsule's network carries tool commands (verify, git, `gh`), not the agent.
+- **Agent credentials.** `agent-credential-names` (`oci_cli/env.clj`) names `ANTHROPIC_API_KEY`, which
+  `filter-env-by-trust` keeps at every trust level. `build-launch-plan` (`oci_cli/launch.clj`) adds the
+  backend's `backend-credential-env` names (`ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` for `:claude`) to
+  the names it keeps. A launch whose `:env` carries one puts its value in the container env, where every process
+  can read it. The governed workflow path above passes no `:env`.
+- **Forge credentials.** `gh-exec-opts`
+  (`components/release-executor/src/ai/miniforge/release_executor/core.clj`) passes `GH_TOKEN` on each `gh`
+  exec, and the executor passes the git remote credential on each capsule git command.
+- **Proxy variables.** For an untrusted plan, `untrusted-env-blanks` gives every proxy variable an empty value,
+  under any env-config value, which survives with its userinfo stripped. A trusted plan gets no blanks.
+  `create-container` passes an untrusted plan's proxy variables with `-e`. §2.1's routing replaces them.
+- **Backend data.** `components/llm/resources/llm/backends.edn` declares `:credential-env` and
+  `:probe-endpoint` per backend. It declares no credential hosts or auth header names, which §5.2 adds.
 - **Registry.** `components/dag-executor/resources/config/dag-executor/runtime/registry.edn` advertises
   `:network-modes/none` and `:network-modes/bridge` for Docker and Podman. Neither capability of §8.1 is
   declared.
-- **Kubernetes.** The Job spec in `protocols/impl/kubernetes.clj` carries no network restriction, and the
-  executor creates no NetworkPolicy. `components/kubernetes-target` holds an identity schema only.
+- **Kubernetes.** The Job spec in `protocols/impl/kubernetes.clj` carries no network restriction and does not
+  set `automountServiceAccountToken: false`. The executor creates no NetworkPolicy.
+  `components/kubernetes-target` holds an identity schema only.
 
 N11 Annex A.2 already lists network policy enforcement (§8.2) as specified and not implemented.
 
