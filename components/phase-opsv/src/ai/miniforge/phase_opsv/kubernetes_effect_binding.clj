@@ -5,6 +5,12 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} configured-target? [settings scope]
+  (let [target (:runtime/target scope)]
+    (and (= (:kubernetes/cluster-id settings) (:cluster target))
+         (= (:kubernetes/namespace settings) (:namespace target))
+         (= (:kubernetes/context settings) (:kubernetes/context scope)))))
+
 (defn ^{:stratum 0} reference [record]
   (first (get-in record [:effect/proposal :opsv/experiment :opsv/resources])))
 
