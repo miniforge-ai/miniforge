@@ -8,60 +8,50 @@
 
 ## Overview
 
-A cancel now reaches a DAG task while its parent branches are being merged. The merge, and the
-merge-resolution agent it may run, are interrupted, and the task ends as stopped instead of as a
-merge failure. Stacked on the PR that makes a cancel interrupt the running phase step.
+A cancel now reaches a DAG task while its parent branches are merged. A run stopped before the
+merge does not merge. The resolution agent's LLM calls see the cancel. Once the run is stopped
+the agent is not called again, and no resolution is committed. A merge that ends under a stopped
+run fails the task with `:anomalies/dag-merge-stopped`, and the run ends cancelled. Nothing is
+interrupted, as in #2277.
 
 ## Motivation
 
-1. A multi-parent task merges its parents before its sub-workflow starts, so before the stop hook
-   that interrupts the sub-workflow is installed. A cancel during the merge, or during the
-   resolution agent's LLM call, waited for both to finish.
-2. The merge code turns an interrupt into an ordinary merge failure, so even an interrupted merge
-   was reported as `:anomalies/dag-multi-parent-merge-failed`.
-3. An agent error response can swallow the interrupt; the resolution loop then calls the agent
-   again within its budget.
-4. `dag-merge-git/run-git` used `clojure.java.shell/sh`, which does not end git when the waiting
-   thread is interrupted, and turned the interruption into exit -1: git (or a merge driver) kept
-   running, and the merge read it as a cache miss and carried on.
+1. A multi-parent task merges its parents before its sub-workflow starts. Its phases, which bind
+   the run's LLM cancel, have not run yet.
+2. Under `mf run plan.edn` no phase runs around the DAG either, so the resolution agent's LLM call
+   ran without the cancel signal and finished on its own.
+3. A cancelled agent call returns an error response. The resolution loop then calls the agent
+   again, within its budget.
+4. A resolution the cancel cut short could still pass the default verify and be committed. It
+   was then cached under the task's merge ref, where a later attempt could reuse it.
+5. A merge cut short by the cancel was reported as an ordinary merge failure.
 
 ## Changes in Detail
 
-1. `dag-sub-workflow/merge-parents`: runs `merge-parent-branches!` in its own interrupting scope
-   (`stop-signal/interrupting-on-stop`). Any result under a stopped run, or an interruption that
-   escapes, becomes the task's stop.
+1. `dag-sub-workflow/merge-parents` skips the merge when the run is stopped. Otherwise it runs
+   `merge-parent-branches!` inside `llm/call-with-cancel-signal`. A merge that ends under a
+   stopped run becomes the task's stop. When the merge itself failed, its anomaly is kept under
+   `:merge/failure`.
 2. `dag-merge-anomaly/merge-stopped-anomaly`: `:anomalies/dag-merge-stopped`, with the stopped
    status message.
-3. `dag-merge-attempt/derive-resolution-overrides` wraps the resolution `:agent-edit-fn` so it does
-   nothing once the run's control state is stopped; the loop then ends without another LLM call.
-4. `dag-merge-git/run-git` waits on git itself. On an interrupt it kills git and every process git
-   started, waits for them, and rethrows, so the merge stages stop. `attempt-merge-with-cache!`
-   removes its temporary worktree before the interruption propagates. While git runs, its
-   descendants are recorded every 100 ms and the kill set includes them: a helper whose parent
-   exited is re-parented and no longer listed as git's descendant at the interrupt (the approach
-   of release-executor's `run-bounded`).
+3. `dag-merge-attempt/derive-resolution-overrides` wraps the resolution `:agent-edit-fn` and
+   `:verify-fn`. Once the run's control state is stopped, the edit fn does nothing and verify
+   fails. The loop then ends within its budget, with no LLM call and no commit.
 
 ## Testing Plan
 
-In `components/workflow/test/ai/miniforge/workflow/stop_signal_test.clj`, each failing on the code
-before its fix:
+`projects/miniforge/test/ai/miniforge/workflow/dag_merge_cancel_test.clj`:
 
-1. `a-cancel-during-a-parent-merge-stops-the-task-test`: a stub merge that swallows the interrupt,
-   as the real one does, ends as `:anomalies/dag-merge-stopped` and leaves no interrupt pending.
-2. `cancel-at-callback-cooldown-and-resolution-boundaries-test`: the resolution agent is not called
-   after the stop.
-3. `an-interrupted-git-call-ends-git-and-its-children-test`: git runs an alias script that
-   starts a `sleep`. The test takes every pid (git, the shell, the script, its child) once the
-   script reports them, then interrupts, and checks with a bounded wait that none is alive. On the
-   code before `run-git` waited on git itself, git and its child stayed.
-4. `an-interrupted-git-call-ends-a-child-re-parented-before-the-cancel-test`: the script's subshell
-   starts a `sleep` and exits, so the `sleep` is re-parented away from git before the interrupt
-   (the test checks this). It is gone afterwards; with only the snapshot taken at the interrupt it
-   stayed running.
-5. A merge that finished after the cancel also ends as the task's stop.
+1. A run stopped before the merge ends the task as `:anomalies/dag-merge-stopped` without merging.
+2. A merge that ends after the cancel is the task's stop, and a merge failure is kept. A merge with
+   no cancel keeps its result.
+3. An LLM call inside the merge sees the run's cancel.
+4. The resolution agent is not called after the stop, and verify fails after it.
 
-Ran the stop-signal, merge-parent integration, merge-resolution agent, merge-resolution and DAG
-operator-control tests (50).
+On #2277 alone 8 of the 9 assertions fail or error. Only the no-cancel case in 2 passes there,
+as it should. Locally on macOS the merge-cancel tests pass, 9 assertions. So do the merge-parent
+integration, merge-resolution, merge-resolution agent, stop-signal, DAG operator-control, DAG
+task-execution and DAG orchestrator tests: 75 tests, 0 failures.
 
 ## Deployment Plan
 
@@ -69,18 +59,20 @@ No configuration or data migration.
 
 ## Notes
 
-The resolution loop's own git runner (`merge-resolution`) still turns an interrupt into a failed
-command; with the agent guarded it ends within its budget without an LLM call. Changing it needs the
-whole-file stratum autofix of `merge_resolution.clj`, so it follows separately.
+1. Each git command in the merge runs to its end. An earlier version killed git on a cancel. A
+   killed git can leave lock files behind, and the temporary worktree's cleanup then raced it.
+   A merge's git steps take seconds, so the stop is checked around the merge instead.
+2. The resolution loop's own git runner (`merge-resolution`) is unchanged. With the agent guarded,
+   the loop ends within its budget without an LLM call.
 
 ## Related Issues/PRs
 
-Stacked on #2277 (a cancel interrupts the running phase and its agent CLI); split out to keep that
-PR under the size limit.
+1. miniforge-ai/miniforge#2277: the base of this PR.
+2. miniforge-ai/miniforge#2377: the cancel issue.
 
 ## Checklist
 
-- [x] Regression tests fail on the previous code
-- [x] Independent review and pinned-standards check
-- [ ] Copilot threads answered and resolved, CI green, no conflicts
-- [ ] Merged
+1. [x] Regression tests fail on the previous code
+2. [ ] Independent review and pinned-standards check
+3. [ ] Copilot threads answered and resolved, CI green, no conflicts
+4. [ ] Merged
