@@ -2,32 +2,20 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-load-start-execution-wire-fixtures
-  (:require [ai.miniforge.phase-opsv.boundary.http-transport :as http]
-            [ai.miniforge.phase-opsv.interface :as phase]
-            [ai.miniforge.phase-opsv.kubernetes-capture-test-support :as wire]
+  (:require [ai.miniforge.phase-opsv.interface :as phase]
+            [ai.miniforge.phase-opsv.kubernetes-forward-execution-wire-fixtures :as wire]
             [ai.miniforge.phase-opsv.kubernetes-load-start-provider-fixtures :as native]
             [ai.miniforge.phase-opsv.prometheus-test-support :as response]
             [cheshire.core :as json]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} respond! [fixture calls pending on-read! options]
-  (if (= :get (:method options))
-    (let [observed (wire/reply! (:host/routes fixture) calls options)]
-      (on-read! fixture @calls options)
-      observed)
-    (do (swap! calls conj options) pending)))
+(defn ^{:stratum 0} execute-response [fixture pending on-read!]
+  (wire/execute-response phase/execute-kubernetes-load-start! fixture pending on-read!))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} execute-response [fixture pending on-read!]
-  (let [calls (atom [])]
-    (with-redefs [http/start! (partial respond! fixture calls pending on-read!) http/response-fields identity]
-      [(phase/execute-kubernetes-load-start! (:host/runtime fixture) (:request fixture)) @calls])))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} execute
+(defn ^{:stratum 1} execute
   ([fixture] (execute fixture (constantly nil)))
   ([fixture on-read!]
    (execute-response fixture
