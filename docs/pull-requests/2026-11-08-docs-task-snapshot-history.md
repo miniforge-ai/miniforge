@@ -48,11 +48,14 @@ design relies on were tested in a scratch repo with git 2.48.1:
 1. `add --all --force` with `core.excludesFile=/dev/null` keeps ignored files, skips the worktree's `.git` file,
    and stores a nested repo as a gitlink.
 2. `info/attributes` keeps the bytes on disk; without it, a work tree with `text=auto eol=crlf` was stored as LF.
-3. `reset --hard` restores exactly, both in place and into a fresh worktree.
+3. `reset --hard` restores exactly, both in place and into a fresh worktree, but it moves the store's branch. So the
+   design restores with `read-tree -u --reset` under a temporary index, which also restores exactly and leaves the
+   branch in place.
 4. An inherited `GIT_INDEX_FILE` overrides an explicit `--git-dir`.
 5. `git --git-dir <dir> init` writes `core.bare=true`, and `--work-tree` still works for add and commit.
 6. A nested repo with an uncommitted change is stored as its HEAD commit only, and a restore into an empty
    directory leaves it empty. The design states this limit.
+7. `fsck --strict --no-dangling <sha>` exits 2 for a missing blob and 3 for a corrupted one.
 
 Snapshot cost was measured on this checkout.
 

@@ -177,10 +177,17 @@ error in place of the release result, which would drop snapshot data reported fr
    so a `refs/replace/` entry cannot swap in another object behind a matching name. Before touching the worktree,
    check every object the commit reaches: `fsck --strict --no-dangling <sha>` re-hashes them and fails on a missing
    or corrupt one (tested: exit 2 for a missing blob, 3 for a corrupted one). A failed check leaves the worktree
-   unchanged and reports `:snapshot-unusable`, and resume falls back to the bundle. Then `add --all --force` and
-   `reset --hard <sha>`. The add puts the target's current files in the index, so the reset also deletes files the
-   snapshot lacks. Tested both in place and into a fresh worktree: the trees matched exactly and the `.git` file
-   was left alone. A nested repo is the exception (Store, item 5). Other opts go to the delegate unchanged.
+   unchanged and reports `:snapshot-unusable`, and resume falls back to the bundle. Then, under a temporary index,
+   `add --all --force` and `read-tree -u --reset <sha>`. The add puts the target's current files in the index, so
+   the read-tree also deletes files the snapshot lacks. A restore never moves a ref: `reset --hard` would rewind the
+   history branch and skip its compare-and-swap. Tested: the tree matched the snapshot exactly, an extra file was
+   deleted, a removed one came back, and the history branch did not move. A nested repo is the exception (Store,
+   item 5). Other opts go to the delegate unchanged.
+
+The store also checks the files git reads from it besides objects and refs. At acquire and before each restore, its
+`config` and `info/attributes` must match what `init!` wrote, and `objects/info/alternates` and `refs/replace/` must
+not exist. A difference reports `:store-tampered` and the store is not used. Like the SHA check, this detects a
+deliberate edit; it does not prevent one.
 
 A snapshot result is `{:kind :phase :sha :tree :tag :dir :changed? :bytes :nested-repos}`, or
 `{:kind :error :reason ...}` on failure. `:nested-repos` is the vector of gitlink paths, empty when there are none.
