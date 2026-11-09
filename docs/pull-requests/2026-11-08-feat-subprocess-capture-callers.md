@@ -76,8 +76,8 @@ None.
 
 ## Related Issues/PRs
 
-Depends on #2466 (the `subprocess` component). Based on its branch,
-`feat/subprocess-capture`; retarget to `main` once it merges.
+Depends on #2466 (the `subprocess` component), merged as `763d0fd`. Based
+on `main` after it.
 
 ## Checklist
 
