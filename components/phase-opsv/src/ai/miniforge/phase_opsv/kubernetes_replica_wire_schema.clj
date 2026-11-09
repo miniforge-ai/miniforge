@@ -4,19 +4,12 @@
 (ns ai.miniforge.phase-opsv.kubernetes-replica-wire-schema
   (:require [ai.miniforge.phase-opsv.kubernetes-replica-change-schema :as replica]
             [ai.miniforge.phase-opsv.kubernetes-replica-payload :as wire]
-            [ai.miniforge.phase-opsv.kubernetes-settings-schema :as settings]
-            [ai.miniforge.schema.interface :as schema]
-            [malli.util :as mu]))
+            [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} operation [op path value]
   [:map {:closed true} ["op" [:= op]] ["path" [:= path]] ["value" value]])
-
-(def ^{:stratum 0} Settings
-  (-> settings/NamespaceInventorySettings
-      (mu/dissoc :kubernetes/max-resources)
-      (mu/assoc :kubernetes/context schema/NonBlankString)))
 
 ;------------------------------------------------------------------------------ Layer 1
 

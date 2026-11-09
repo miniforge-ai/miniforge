@@ -128,7 +128,8 @@
 
 (def ^{:stratum 2} Receipt
   "One lifecycle call's record, refusals included. A nil environment UID
-   means nothing was provisioned for this call."
+   means no UID was learned, not that nothing exists: the steps say what
+   may have been created, and an unconfirmed cleanup stays to reconcile."
   [:map {:closed true}
    [:receipt/id :uuid]
    [:receipt/contract-version [:= contract-version]]

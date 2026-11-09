@@ -21,8 +21,10 @@
    the earlier ones apply, `:fake/uncertain-deletes?` leaves deletes
    unconfirmed, `:fake/probe-failures` fails the live probe, `:fake/exec-fn`
    scripts exec results, `:fake/omit-uid?` creates the namespace but never
-   reports its UID, and `:fake/recreated-after-provision?` has an outside
-   actor recreate it at once."
+   reports its UID, `:fake/uncertain-steps?` reports the steps it applied as
+   uncertain, and `:fake/recreated-after-provision?` has an outside actor
+   recreate it at once. A namespace that already exists fails its create, as
+   an API server's does."
   (:require
    [ai.miniforge.agent-environment.fake.world :as world]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]))
@@ -34,12 +36,14 @@
   (capabilities [_] (get opts :fake/capabilities world/default-capabilities))
   (probe [_ _request] (get opts :fake/probe-failures []))
   (provision! [_ target _request]
-    (let [{:keys [applied failed]} (world/walk-steps (:fake/fail-step opts))
-          uid (when (seq applied) (str (random-uuid)))]
+    (let [taken? (contains? @state (:target/namespace target))
+          {:keys [applied failed]} (world/walk-steps (if taken? :step/namespace (:fake/fail-step opts)))
+          uid (when (seq applied) (str (random-uuid)))
+          reported (if (:fake/uncertain-steps? opts) :outcome/uncertain :outcome/applied)]
       (when uid (swap! state world/provisioned (:target/namespace target) uid (:target/generation target) applied))
       (when (and uid (:fake/recreated-after-provision? opts)) (swap! state world/recreated (:target/namespace target)))
       {:provision/uid (when-not (:fake/omit-uid? opts) uid)
-       :provision/steps (cond-> (mapv #(world/step % :outcome/applied) applied)
+       :provision/steps (cond-> (mapv #(world/step % reported) applied)
                           failed (conj (world/step failed :outcome/failed)))}))
   (observe [_ target]
     (let [space (get @state (:target/namespace target))]
@@ -62,9 +66,10 @@
       {:deprovision/steps [(world/step :step/namespace-deleted (world/delete-outcome before target uncertain?))]})))
 
 (defn ^{:stratum 0} replace-uid!
-  "Recreate `namespace` under a new UID, as an outside actor reusing the name would."
+  "Recreate `namespace` under a new UID and without this controller's
+   generation, as an outside actor reusing the name would."
   [provider namespace]
-  (swap! (:state provider) assoc-in [namespace :uid] (str (random-uuid))))
+  (swap! (:state provider) world/recreated namespace))
 
 (defn ^{:stratum 0} commands
   "Every command exec'd in `namespace`, in order."

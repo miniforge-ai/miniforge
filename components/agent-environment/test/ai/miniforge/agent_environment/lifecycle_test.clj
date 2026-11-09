@@ -21,6 +21,7 @@
    [ai.miniforge.agent-environment.fake :as fake]
    [ai.miniforge.agent-environment.fake.world :as world]
    [ai.miniforge.agent-environment.interface :as env]
+   [ai.miniforge.agent-environment.lease :as lease]
    [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.test :refer [deftest is testing]]))
 
@@ -107,6 +108,14 @@
     (is (= :anomalies.agent-environment/uid-mismatch (reason (env/readiness (:c w) (:a w) (lease-of env-value)))))
     (is (= :outcome/refused (:receipt/outcome (last @(:receipts w)))))))
 
+(deftest ^{:stratum 1} test-a-namespace-someone-else-holds-is-not-taken-over
+  (let [w (world)
+        req (fx/request w (:a w))]
+    (fake/replace-uid! (:controller/provider (:c w)) (lease/namespace-name req))
+    (is (= :anomalies.agent-environment/provisioning-failed (reason (fx/acquire w (:a w) req))))
+    (is (= 1 (count (live w))))
+    (is (empty? (fx/outcomes w :environment/release)))))
+
 (deftest ^{:stratum 1} test-preflight-refuses-isolation-the-provider-lacks
   (let [w (world {:fake/capabilities (assoc world/default-capabilities
                                             :capabilities/isolation #{:isolation/shared-kernel})})
@@ -145,4 +154,11 @@
       (is (= :anomalies.agent-environment/provisioning-failed (reason failed)))
       (is (nil? (get-in failed [:anomaly/data :environment/lease])))
       (is (= 1 (count (live w))))
-      (is (empty? (fx/outcomes w :environment/release))))))
+      (is (empty? (fx/outcomes w :environment/release)))))
+  (testing "given steps reported only as uncertain → the UID is still recovered and the leftover removed"
+    (let [w (world {:fake/omit-uid? true :fake/uncertain-steps? true})
+          failed (acquire w)]
+      (is (= :anomalies.agent-environment/provisioning-failed (reason failed)))
+      (is (some? (get-in failed [:anomaly/data :environment/lease])))
+      (is (empty? (live w)))
+      (is (= [:outcome/applied] (fx/outcomes w :environment/release))))))

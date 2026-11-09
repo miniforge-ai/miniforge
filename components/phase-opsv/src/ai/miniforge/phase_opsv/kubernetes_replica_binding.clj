@@ -4,14 +4,10 @@
 (ns ai.miniforge.phase-opsv.kubernetes-replica-binding
   "Correlate a committing proposal with the sole native request that may be sent."
   (:require [ai.miniforge.content-hash.interface :as hash]
+            [ai.miniforge.phase-opsv.kubernetes-effect-binding :as native]
             [ai.miniforge.phase-opsv.kubernetes-replica-payload :as wire]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(defn ^{:stratum 0} reference [record]
-  (first (get-in record [:effect/proposal :opsv/experiment :opsv/resources])))
-
-(defn ^{:stratum 0} request [record] (get-in record [:effect/proposal :kubernetes/request]))
 
 (defn- ^{:stratum 0} reference-bound? [binding]
   (let [target (:runtime/target binding)
@@ -26,9 +22,9 @@
 (defn ^{:stratum 1} matches? [settings record]
   (let [proposal (:effect/proposal record)
         binding (:opsv/experiment proposal)
-        payload (request record)
+        payload (native/request record)
         [_ revision count] (mapv #(get % "value") (:body payload))
-        expected (wire/request (reference record) revision count)
+        expected (wire/request (native/reference record) revision count)
         target (:runtime/target binding)]
     (and (= (:effect/id record) (:effect/id proposal))
          (= (:kubernetes/cluster-id settings) (:cluster target))
