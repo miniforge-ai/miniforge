@@ -80,6 +80,30 @@
              (assoc-in [:report/criteria 0 :criterion/status] :status/unrun)
              (assoc :report/verdict :verdict/incomplete))))))
 
+(deftest ^{:stratum 1} test-pass-requires-pinned-evidence
+  (testing "given passing rows on a dirty tree, with no commit, or with an unhashed fixture → a pass verdict is invalid"
+    (doseq [unpinned [(assoc-in report [:report/build :build/clean?] false)
+                      (assoc-in report [:report/build :build/git-sha] nil)
+                      (assoc report :report/fixture-hash nil)
+                      (assoc report :report/config-hash nil)]]
+      (is (not (qualification/valid-report? unpinned)))
+      (is (qualification/valid-report? (assoc unpinned :report/verdict :verdict/incomplete))))))
+
+(deftest ^{:stratum 1} test-failure-means-every-row-unrun
+  (testing "given a recorded failure beside a passing row → invalid; beside an unrun row → valid"
+    (let [failure {:error/kind :scenario/threw :error/message "boom"}
+          failed  (-> report
+                      (assoc :report/failure failure)
+                      (assoc :report/verdict :verdict/incomplete))]
+      (is (not (qualification/valid-report? failed)))
+      (is (qualification/valid-report?
+           (assoc-in failed [:report/criteria 0 :criterion/status] :status/unrun))))))
+
+(deftest ^{:stratum 1} test-report-criterion-ids-are-unique
+  (testing "given the same row twice → invalid"
+    (is (not (qualification/valid-report?
+              (update report :report/criteria #(conj % (first %))))))))
+
 (deftest ^{:stratum 1} test-command-arguments-may-be-empty
   (testing "given an empty argument after the executable → valid, so the command repeats exactly"
     (is (qualification/valid-report? (assoc report :report/command ["bb" "qualify" "--filter" ""])))))

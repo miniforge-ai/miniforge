@@ -50,6 +50,12 @@ shared format lets every gate report the same way.
 4. `rows` no longer keeps the last of two results for one criterion: a
    criterion with more than one result is unrun, so `rows` is safe even when
    called without `result-problems`.
+5. A report's criterion ids are unique, as a gate's are.
+6. A report with a recorded failure has only unrun rows.
+7. A pass needs pinned evidence: an identified commit, a clean tree, and
+   hashed fixtures and config (`vocabulary/pinned?`). Passing rows on
+   anything less give `:verdict/incomplete` (`vocabulary/report-verdict`).
+   The rows still show which criteria passed.
 
 ## Testing Plan
 
@@ -60,7 +66,9 @@ shared format lets every gate report the same way.
 2. `schema_test`: a complete report is valid; an unknown key, an unknown
    status, a short hash, no criteria or a blank executable is not; a pass
    verdict over a failed, unrun or unsupported row is not; an empty command
-   argument is; a gate with a repeated criterion id is not.
+   argument is; a gate with a repeated criterion id is not; a pass on a
+   dirty tree, without a commit, or without either hash is not; a failure
+   beside a passing row is not; a repeated row is not.
 
 ## Deployment Plan
 
