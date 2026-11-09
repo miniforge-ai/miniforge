@@ -166,20 +166,35 @@ error in place of the release result, which would drop snapshot data reported fr
    both in place and into a fresh worktree: the trees matched exactly and the `.git` file was left alone. A nested
    repo is the exception (Store, item 5). Other opts go to the delegate unchanged.
 
-A snapshot result is `{:kind :phase :sha :tree :tag :dir :changed? :bytes}`, or `{:kind :error :reason ...}` on
-failure. `snapshot-workspace!` returns it; acquire and release results carry it as `:workspace/snapshot`. The runner
+A snapshot result is `{:kind :phase :sha :tree :tag :dir :changed? :bytes :nested-repos}`, or
+`{:kind :error :reason ...}` on failure. `:nested-repos` is the vector of gitlink paths, empty when there are none.
+`snapshot-workspace!` returns the result; acquire and release results carry it as `:workspace/snapshot`. The runner
 collects each one in the context's `:execution/workspace-snapshots`: the baseline from the acquired environment map
 (`runner_preparation.clj`), one per phase boundary, and the final one in `execute!`.
 
-Within a process, writes to one store are serialized by a JVM lock keyed on its git dir. Across processes, the
-wrapper holds an OS file lock on `<store-id>.lock`, beside the store, from acquire to release, through the port's
-`:lock!` and `:unlock!`. The store takes it with a non-blocking `tryLock`, as `run-owner-lock` does. The run owner
-lock alone is not enough: its file lives under the checkpoint root, so two processes with different checkpoint roots
-can both own the same run id and reach one store. A process that cannot take the store lock leaves the store alone,
-and its snapshots report `:workspace/snapshot-failed` with `:store-busy`; it does not wait. The OS drops the lock
-when its holder dies. So the holder knows no other process is writing, and an `index.lock` it finds at acquire can
-only be a killed process's leftover. It deletes that file and records the deletion in the baseline result. The GC
-pass skips a store whose lock is held.
+Within a process, writes to one store are serialized by a JVM lock keyed on its git dir. Across processes, two file
+locks apply, both through the port's `:lock!` and `:unlock!`. The run owner lock alone is not enough: its file lives
+under the checkpoint root, so two processes with different checkpoint roots can both own the same run id and reach
+one store.
+
+1. **Slot lock.** One of 256 fixed slot files under `<snapshot-root>/.locks/`, picked by the run id's hash, as
+   `checkpoint-store-lock` does under the checkpoint root. Slot files are never deleted, so a lock is always on the
+   file its path names. It is held briefly and waited for, with a timeout.
+2. **Store lock.** `<store-id>.lock` beside the store, held from acquire to release with a non-blocking `tryLock`.
+   A process opens this file only while it holds the run's slot lock.
+
+Acquire takes the slot lock, creates or opens the store, takes the store lock, and then releases the slot lock. A
+process that cannot take the store lock leaves the store alone, and its snapshots report `:workspace/snapshot-failed`
+with `:store-busy`; it does not wait. The OS drops a lock when its holder dies. So the store lock's holder knows no
+other process is writing, and an `index.lock` it finds at acquire can only be a killed process's leftover. It deletes
+that file and records the deletion in the baseline result.
+
+GC deletes a run's stores only while holding that run's slot lock. For each store it first checks the in-process
+registry and skips a store this process holds; it never opens that store's lock file, because closing any
+descriptor of a file releases the process's locks on it. Otherwise it tries the store lock. If the lock is held it
+skips the store; if not, it deletes the store and its lock file, then releases. It removes the run dir once it is
+empty, still under the slot lock. Nothing else can hold an open descriptor to a file GC unlinks, since every opener
+holds the same slot lock first.
 
 The wrapper calls the store through a `SnapshotStore` port, a map of `:init!`, `:lock!`, `:unlock!`, `:snapshot!`,
 `:verify!`, `:restore!`, `:import!` and `:repack!` given at composition. The wrapper defines the port; the
@@ -213,8 +228,8 @@ versus `/Volumes/Work`, with 105 MB of objects. Clones need their own design (fo
 ### 2. Feeding events, resume and evidence
 
 1. **Events (N3).** A new `:workspace/snapshotted` event with `env-id`, `phase`, `snapshot-kind`
-   (`:baseline`/`:phase`/`:final`), `snapshot-sha`, `tree-sha`, `snapshot-tag`, `snapshot-dir`, `changed?` and
-   `bytes`, plus `:workspace/snapshot-failed`. Both are added beside `:workspace/persisted` in
+   (`:baseline`/`:phase`/`:final`), `snapshot-sha`, `tree-sha`, `snapshot-tag`, `snapshot-dir`, `changed?`,
+   `bytes` and `nested-repos`, plus `:workspace/snapshot-failed`. Both are added beside `:workspace/persisted` in
    `event_stream/schema.clj`, with constructors in `event_stream/core.clj` and `interface/events.clj`. They are
    published from the snapshot results:
    1. acquire, in `runner_environment.clj`;
@@ -232,10 +247,13 @@ versus `/Volumes/Work`, with 105 MB of objects. Clones need their own design (fo
    store. A new attempt has its own run id and store. It
    imports the snapshots it inherits at acquire (`:snapshot-import`): a `fetch` of their tags from the source run's
    store into its own, under the same platform flags and environment. It then carries their events forward naming
-   its own store, as `resume.clj` already carries persisted checkpoints. So every store holds every snapshot its
+   its own store, with each event's other fields, `nested-repos` included, unchanged, as `resume.clj` already
+   carries persisted checkpoints. So every store holds every snapshot its
    run's events and evidence name, and GC can judge each run's store on that run alone (decision 4). When the source
    store is already gone, the attempt falls back to the bundle and warns.
-3. **Evidence (N6).** An optional `:evidence/workspace-snapshots` field holds `[{:kind :phase :sha :tree :tag}]`.
+3. **Evidence (N6).** An optional `:evidence/workspace-snapshots` field holds
+   `[{:kind :phase :sha :tree :tag :nested-repos}]`. `:nested-repos` lists paths only, so evidence shows which paths
+   a snapshot does not cover without holding any of their content.
    `extract-output` (`runner_outcome.clj`) builds it from `:execution/workspace-snapshots`, next to
    `:evidence/execution-mode`. It is declared in `evidence_bundle/schema.clj` and projected in `projection.clj`.
    `extract-output` runs inside `execute!`, before release, which is why the final snapshot is taken there. Evidence
@@ -265,10 +283,11 @@ changed blobs.
 1. Repack at release, so a finished task costs about one packed tree plus its changes.
 2. Retention follows checkpoints (N2-delta §7): keep at least 30 days, never collect a pinned run, run at most once
    a day. Whole `<run-id>/` dirs are deleted by the `gc-checkpoints!` pass, under its existing safety rules: a
-   root outside `MINIFORGE_HOME` is refused and live runs are kept. `disposition` judges a run by its own age,
-   pin state and live events only. That is safe here because a new attempt imports what it inherits into its own store
-   (decision 2), so no run's store holds objects another run still names. Tests set `MINIFORGE_HOME` or pass an
-   explicit snapshot root, never the real home.
+   root outside `MINIFORGE_HOME` is refused and live runs are kept. Deletion follows the lock rule in Executor
+   wiring: the run's slot lock, then each store's lock. `.locks/` itself is never deleted. `disposition` judges a run
+   by its own age, pin state and live events only. That is safe here because a new attempt imports what it inherits
+   into its own store (decision 2), so no run's store holds objects another run still names. Tests set
+   `MINIFORGE_HOME` or pass an explicit snapshot root, never the real home.
 3. No size ceiling in the first version. Each event carries `bytes` (`count-objects -v`), so growth shows. Open
    risk: the store sits on the same volume as the worktrees, and an agent that writes gigabytes into the tree
    doubles them.
@@ -282,12 +301,12 @@ runs in the infrastructure store, which implements the application's `SnapshotSt
 |----|---------|----------|------------|
 | 1 | domain | `dag_executor/snapshot_policy.clj`, pure: store path, tag names and the next `n`, the git argv and environment for each operation, result shapes; pure tests | — |
 | 2 | application | `snapshotted.clj` wrapper and the `SnapshotStore` port it calls; `snapshot-workspace!` in the interface; tests with a fake store | 1 |
-| 3 | infrastructure | `dag_executor/snapshot_store.clj`, implementing the port: the store lock; runs PR 1's commands for init, snapshot, verify, restore, import and repack; tests on scratch repos for the cases above | 1, 2 |
+| 3 | infrastructure | `dag_executor/snapshot_store.clj`, implementing the port: the slot and store locks; runs PR 1's commands for init, snapshot, verify, restore, import and repack; tests on scratch repos for the cases above | 1, 2 |
 | 4 | wiring | composition in `executor.clj` with PR 3's store; `:snapshots? false` in `governed_environment.clj`; `:workflow/snapshot-root` resolution; run id through acquisition; phase-boundary and final calls; `:execution/workspace-snapshots`; deny-pattern | 3 |
 | 5 | adapter | N3 amendment; event schema and constructors; publication at acquire, phase, final and release | 4 |
 | 6 | application | N2-delta §8 amendment; resume and rewind restore from snapshots; `:snapshot-dir` for a resume in place and `:snapshot-import` for a new attempt | 5, follow-up 1 |
 | 7 | adapter | N6 amendment; `:evidence/workspace-snapshots` in `extract-output`; verifier | 4 |
-| 8 | infrastructure | snapshot dirs in the checkpoint GC pass, skipping a store whose lock is held | 4 |
+| 8 | infrastructure | snapshot dirs in the checkpoint GC pass, deleting under the slot and store locks | 4 |
 
 ## Follow-ups outside this design
 
