@@ -178,3 +178,131 @@ internal registry) MAY be listed under `:miniforge/egress :private-allow` as a C
 That list follows §3.1's rule: agent-produced artifacts cannot extend it.
 
 ---
+
+## 5. Credential Substitution
+
+### 5.1 Tokens in the Capsule
+
+For each agent credential the launch carries (`agent-credential-names` and the agent backend's
+`llm/backend-credential-env`), the capsule env MUST carry an
+opaque token under the credential's variable name in place of its value. The value MUST exist only in the
+miniforge host process and the sidecar.
+
+1. A token MUST hold at least 128 bits from a CSPRNG and MUST be unique to the capsule.
+2. A token MUST keep the credential's public prefix (for example `sk-ant-api03-`) when the agent CLI checks the
+   format locally. The prefix is not secret.
+3. A token MUST NOT be derivable from the value, and the value MUST NOT be derivable from the token.
+
+### 5.2 Credential Hosts
+
+Each credential is scoped to the exact hosts declared for it as data in `backends.edn` (for `:claude`,
+`api.anthropic.com`). When the backend's endpoint route resolves to another host (a base-URL override in
+operator configuration), that host replaces the declared one. Subdomains are excluded. The proxy MUST substitute
+a token only on a connection to one of that credential's hosts.
+
+### 5.3 Interception
+
+1. The proxy MUST terminate TLS only for a host that some credential is scoped to. Every other allowed host is a
+   plain tunnel, with no interception.
+2. On an intercepted connection, the proxy MUST replace tokens with values in the request target and every
+   header, including inside a `Basic` authorization envelope. It MAY substitute in request bodies up to a
+   configured size bound.
+3. The proxy MUST re-encrypt to the upstream with full certificate verification against the sidecar's system
+   roots.
+4. Plain HTTP MUST NOT be substituted. The token travels as-is, and the upstream rejects it.
+
+### 5.4 Redaction
+
+On an intercepted connection the proxy MUST replace each credential value, and each `Basic` envelope it built,
+with the token, in response headers and bodies. Bodies MUST stream: the proxy holds back at most the length of
+the longest value minus one byte, so a value split across chunks is caught and server-sent events are not
+buffered. The proxy SHOULD remove `Accept-Encoding` from intercepted requests, so responses stay readable for
+redaction.
+
+### 5.5 Credentials the Proxy Cannot Substitute
+
+Signed requests (AWS SigV4 for Bedrock, Google service-account signing for Vertex) carry no token to swap.
+
+1. Such a credential MUST NOT be injected into a governed capsule unless the operator lists its variable name
+   under `:miniforge/egress :in-capsule-credentials`. Otherwise the acquisition fails with
+   `:egress/credential-not-substitutable`.
+2. A credential injected under that list MUST be recorded by name in evidence (N11 §8.1 permits names).
+
+### 5.6 OAuth
+
+`CLAUDE_CODE_OAUTH_TOKEN` is a static bearer credential sent to the backend's API host. It MUST be handled like
+an API key under §5.1–§5.4.
+
+A credential that refreshes itself MUST NOT enter a governed capsule. A credential file with a refresh token
+(an interactive CLI login) would receive a new access token in a response body. The proxy does not know that
+value, so it cannot redact it, and the capsule would hold a real credential. No launch path may deliver such a
+credential, by mount or by env.
+
+### 5.7 Git Remote Credentials
+
+The git remote credential the executor passes to each capsule git command SHOULD be handled under §5.1–§5.4,
+scoped to the remote's host. Until it is, it travels through a plain tunnel and remains readable inside the
+capsule while the command runs.
+
+---
+
+## 6. Proxy CA Trust
+
+### 6.1 Per-Capsule CA
+
+1. The sidecar MUST generate its CA at start. The CA private key MUST NOT leave the sidecar.
+2. The CA MUST be destroyed with the sidecar at DESTROY. A CA MUST NOT be shared across capsules.
+3. Leaf certificates MUST be issued only for credential hosts (§5.2).
+
+### 6.2 Trust in the Capsule
+
+At step 4 of §2.3 the executor writes a combined bundle (the image's system roots plus the proxy CA) to a tmpfs
+path in the capsule and sets:
+
+| Variable | Read by |
+|----------|---------|
+| `NODE_EXTRA_CA_CERTS` | Node CLIs, including Claude Code; adds the proxy CA to the built-in roots |
+| `SSL_CERT_FILE` | OpenSSL and rustls-based clients that read it |
+| `CURL_CA_BUNDLE` | curl |
+| `GIT_SSL_CAINFO` | git |
+| `REQUESTS_CA_BUNDLE` | Python `requests` |
+
+`NODE_EXTRA_CA_CERTS` names the proxy CA alone. The others replace the default store, so they name the combined
+bundle, or tunneled hosts would fail to verify.
+
+### 6.3 Per-Backend Trust
+
+Each CLI backend MUST declare in `backends.edn` the variables through which it trusts an added CA. A backend with
+no such declaration MUST NOT run in a capsule whose credentials are substituted.
+
+The Codex CLI's trust mechanism is not settled. Before Codex runs under this delta, a conformance test MUST show
+it completing one call through the intercepting proxy with only §6.2's variables set (Test Obligation 6).
+
+---
+
+## 7. Refusals
+
+### 7.1 Proxy Response
+
+A refused request gets HTTP `403` with header `X-Miniforge-Egress-Refused` set to `host-not-allowed`,
+`port-not-allowed`, `ip-literal`, or `destination-blocked`. The plain-text body names the refused host and the
+reason in one sentence. The proxy MUST record each refusal for the run (§9).
+
+### 7.2 Agent Context
+
+The agent's task context MUST state, for a capsule with network access:
+
+1. the profile, and the allowed hosts;
+2. that each subdomain and redirect target needs its own entry;
+3. that a refusal is final: the agent names the refused host in its output as a blocker for the operator and
+   does not retry the request.
+
+Under `:none` it MUST state that the capsule has no network. The statement belongs to the system prompt, which
+N12 §5.4 treats as irreducible, so context shedding never removes it. Its text is a message-catalog entry.
+
+### 7.3 Operator Surface
+
+`mf doctor` SHOULD report the resolved profile and allowlist for the next governed run. A run's refused hosts
+SHOULD be shown in its summary, so the operator can add a missing host instead of reading logs.
+
+---
