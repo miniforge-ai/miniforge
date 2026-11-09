@@ -527,7 +527,18 @@
                                     (wr/extract-workspace-checkpoints (read-event-file workflow-id))
                                     from-phase
                                     (:completed-phases reconstructed))]
-                  (es/publish! event-stream (es/workspace-persisted event-stream resume-run-id checkpoint))))]
+                  (es/publish! event-stream (es/workspace-persisted event-stream resume-run-id checkpoint))))
+            ;; Publish the workflow-resumed lifecycle event before the
+            ;; pipeline starts. Skipped phases are those in the full
+            ;; workflow definition that precede the resume phase.
+            _ (let [from-phase-kw (some-> (resume-print-phase machine-snapshot remaining-pipeline) keyword)
+                    from-state    (or (:execution/fsm-state machine-snapshot) :checkpointed)
+                    skipping      (into []
+                                        (comp (map :phase)
+                                              (take-while #(not= % from-phase-kw)))
+                                        (:workflow/pipeline workflow))]
+                (es/publish! event-stream
+                             (es/workflow-resumed event-stream resume-run-id from-state from-phase-kw skipping)))]
 
         (try
           ;; Governed control path: the resumed run gets the same
