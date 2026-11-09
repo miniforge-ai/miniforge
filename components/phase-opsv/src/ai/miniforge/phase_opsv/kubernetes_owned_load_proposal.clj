@@ -1,17 +1,17 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.kubernetes-load-recovery-proposal
+(ns ai.miniforge.phase-opsv.kubernetes-owned-load-proposal
   (:require [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.phase-opsv.governed-experiment-proposal :as proposal]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} native-input [input plan]
+(defn- ^{:stratum 0} native-input [input duration-ms]
   (-> (:recovery/input input)
       :load
       (assoc-in [:limits :effect/id] (:effect/id input))
-      (assoc-in [:limits :opsv/duration-ms] (:recovery/duration-ms plan))))
+      (assoc-in [:limits :opsv/duration-ms] duration-ms)))
 
 (defn- ^{:stratum 0} bound-intent [plan owned intent]
   (let [uid (get-in owned [:load/pod "metadata" "uid"])
@@ -23,7 +23,8 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} proposal [ctx input plan owned intent]
-  (proposal/proposal ctx (native-input input plan) (bound-intent plan owned intent)))
+(defn ^{:stratum 1} proposal [ctx input plan owned intent duration-ms]
+  (proposal/proposal ctx (native-input input duration-ms) (bound-intent plan owned intent)))
 
-(comment ::one-recovery-scope-factory-with-current-owned-uid-not-authority)
+(comment
+  (native-input {:recovery/input {:load {}}} 1000))

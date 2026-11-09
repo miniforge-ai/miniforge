@@ -3,7 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-load-cleanup
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.phase-opsv.kubernetes-load-recovery-proposal :as proposal]
+            [ai.miniforge.phase-opsv.kubernetes-owned-load-proposal :as proposal]
             [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -26,10 +26,16 @@
         path (str collection "/" (get metadata "name"))
         uid (get metadata "uid")
         revision (get metadata "resourceVersion")
-        preconditions {"uid" uid "resourceVersion" revision}
-        body {"apiVersion" "v1" "kind" "DeleteOptions"
-              "preconditions" preconditions "propagationPolicy" cleanup-propagation-policy}]
-    {:method :delete :path path :media-type "application/json" :body body}))
+        preconditions {"uid" uid
+                       "resourceVersion" revision}
+        body {"apiVersion" "v1"
+              "kind" "DeleteOptions"
+              "preconditions" preconditions
+              "propagationPolicy" cleanup-propagation-policy}]
+    {:method :delete
+     :path path
+     :media-type "application/json"
+     :body body}))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -37,7 +43,9 @@
   (if-not (usable? input plan owned)
     (anomaly/anomaly :conflict (msg/ts :load/cleanup-request-refused) {})
     (let [payload (request owned)
-          intent {:opsv/operation cleanup-operation :kubernetes/request payload}]
-      (proposal/proposal ctx input plan owned intent))))
+          intent {:opsv/operation cleanup-operation
+                  :kubernetes/request payload}
+          duration (:recovery/duration-ms plan)]
+      (proposal/proposal ctx input plan owned intent duration))))
 
 (comment ::quiescence-precedes-cleanup-authority-and-acknowledgement-does-not-prove-deletion)
