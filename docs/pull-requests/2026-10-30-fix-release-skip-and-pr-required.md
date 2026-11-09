@@ -9,7 +9,7 @@
 ## Overview
 
 A release asked to open a PR completed when the release executor reported a
-successful publish with no PR, and an explicit `:create-pr? false` in the
+successful publish with no PR. An explicit `:create-pr? false` in the
 execution options was read as absent. This PR fails the first case with
 `:release/pr-missing` and honors the second.
 
@@ -48,16 +48,16 @@ covers the same case. The two Copilot threads on that probe also applied to
 `main`'s probe; they are fixed in #2398, and answered here with a link to it.
 
 This branch builds on #2396 (merged as 453eecc6f), the movement-only split
-of `release.clj` and `release_test.clj`, because both were over the rule 210
-layer budget on `main` and the rescope edits them. It merged `main` after
+of `release.clj` and `release_test.clj`. Both were over the rule 210
+layer budget on `main`. The rescope edits them. It merged `main` after
 that squash, so its diff against `main` is the publish change alone.
 
 ## Testing Plan
 
 1. `release_publish_test.clj`: `publish-requires-the-pr-it-was-asked-for-test`
-   (asked for a PR, none reported: `:release/pr-missing`; not asked: completes)
-   and `create-pr-option-test` (an explicit `false` in the options is honored;
-   absent, the config's value, else `true`).
+   covers the required-PR contract. With no PR reported, it fails with `:release/pr-missing` when asked, and completes otherwise.
+   `create-pr-option-test` covers an explicit `false` in the options,
+   else the config's value, else `true`.
 2. The release, file-scan, committed-work and checking-commits tests, and the
    project tests that run the release phase.
 

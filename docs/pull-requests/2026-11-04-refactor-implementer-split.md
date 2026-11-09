@@ -43,9 +43,8 @@ recomputed by `stratum-lint --fix`.
 
 The scratchpad `split-compare.clj` was run with `split-prefix` set to
 `ai.miniforge.agent.implementer`. It compared every top-level `def*` form
-of main's `implementer.clj` (`base/`) with the forms in the nine new
-files (`new/`), with metadata stripped and references to sibling
-namespaces normalized:
+of main's `implementer.clj` (`base/`) with the forms in the nine new files (`new/`).
+Metadata was stripped, and references to sibling namespaces were normalized:
 
 ```text
 base defs 71 | new defs 71 | identical 71 | changed 0 | removed 0 | added 0
@@ -59,7 +58,7 @@ changes, which are the only ones outside form bodies:
 
 1. Visibility: 16 private vars became public because a sibling
    namespace now calls them, and Clojure refuses a cross-namespace
-   reference to a private var:
+   reference to a private var. These are
    `implementer-prompt-data`, `build-effective-system-prompt`,
    `submission-retry-prompt`, `build-user-prompt`,
    `phase-handoff-findings`, `format-phase-handoff-findings`,

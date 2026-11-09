@@ -31,7 +31,7 @@
    aliases in Layer 0 keep the moved definitions' names here for callers."
   (:require
    [clojure.string :as str]
-   [ai.miniforge.llm.cost :as cost]
+   [ai.miniforge.llm.cost-estimate :as cost-estimate]
    [ai.miniforge.llm.messages :as msg]
    [ai.miniforge.llm.model-registry :as model-registry]
    [ai.miniforge.llm.progress-monitor :as pm]
@@ -398,10 +398,14 @@
           tool-call-count (count tools)
           final-message-preview (cli-output/message-preview diagnostic-content)
           usage @accumulated-usage
-          fallback-response (when (cli-output/blank-streaming-success? exit-code
-                                                            final-content
-                                                            tool-call-count
-                                                            usage)
+          ;; A caller that journals every provider call sets
+          ;; `:empty-stream-fallback? false`, so an empty stream is
+          ;; returned as it is instead of retried unjournaled.
+          fallback-response (when (and (not (false? (:empty-stream-fallback? request)))
+                                       (cli-output/blank-streaming-success? exit-code
+                                                                            final-content
+                                                                            tool-call-count
+                                                                            usage))
                               (complete-impl client request))]
       (if fallback-response
         (do
@@ -429,18 +433,16 @@
                       {:data {:stop-reason stop-reason :num-turns num-turns
                               :content-length (count final-content)}}))
           ;; Cost fallback: some backends (e.g. older Claude Code
-          ;; CLI versions, codex stream parser) don't surface
+          ;; CLI versions, the codex stream parser) don't surface
           ;; total_cost_usd in the result frame, so
-          ;; @accumulated-cost stays nil and the runner banner
-          ;; reports $0.0000 despite real backend costs. When
-          ;; cost is nil but usage carries tokens, compute the
-          ;; fallback estimate from the model + usage via
-          ;; cost/estimate-cost. Models without pricing in the
-          ;; table return 0.0 (no false-positive cost), so this
-          ;; is a non-decreasing fix — never produces a wrong-
-          ;; direction value.
-          (let [resolved-cost (or @accumulated-cost
-                                  (cost/estimate-cost usage model))]
+          ;; @accumulated-cost stays nil. Then the cost is the table
+          ;; estimate for the effective model where it can be known
+          ;; (`cost-estimate/known-estimate`), else unknown: a partial,
+          ;; cached, unpriced or out-of-range estimate would read
+          ;; downstream as a measured cost (#2378).
+          (let [effective-model (:model request-with-model)
+                resolved-cost (or @accumulated-cost
+                                  (cost-estimate/known-estimate usage effective-model))]
             (if (zero? exit-code)
               (cond-> (streaming-success-response final-content exit-code
                                                   usage resolved-cost
@@ -464,9 +466,9 @@
                                                  (:model request-with-model)))
                 (seq tools)   (assoc :tools-called tools)
                 ;; Cost is known when the backend reported one
-                ;; (total_cost_usd) or usage lets us estimate it —
-                ;; same two sources the success branch draws on.
-                (or (some? @accumulated-cost) (some? usage))
+                ;; (total_cost_usd) or usage of a priced model lets
+                ;; us estimate it — same as the success branch.
+                (some? resolved-cost)
                 (assoc :cost-usd resolved-cost)
                 session-id    (assoc :session-id session-id)))))))))
 

@@ -25,6 +25,12 @@
                                 ;; llm's own tests require agent, a test-only dependency this
                                 ;; project does not contain; projects that do test llm.
                                 :test {:exclude ["llm"]}}
+            ;; Opt-in development-agent environments (#2439). No base yet, so
+            ;; every brick is listed; no default project may depend on them.
+            "agent-environments" {:alias "ae"
+                                  :necessary ["agent-environment" "anomaly" "content-hash"
+                                              "execution-grant" "file-durability"
+                                              "kubernetes-target" "messages"]}
             "data-foundry"   {:alias "df"}
             "miniforge-core" {:alias "core"
                               ;; Runtime-loaded via phase/namespaces.edn resource discovery

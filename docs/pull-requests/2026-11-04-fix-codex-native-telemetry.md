@@ -32,11 +32,11 @@ run:
 
 - `codex-rs/exec/src/exec_events.rs`: `ThreadEvent` (`thread.started`,
   `turn.started`, `item.started`, `item.updated`, `item.completed`,
-  `turn.completed`, `turn.failed`, `error`), `ThreadItemDetails`
-  (`agent_message`, `reasoning`, `command_execution`, `file_change`,
-  `mcp_tool_call`, `collab_tool_call`, `web_search`, `todo_list`, `error`)
-  and `Usage` (`input_tokens`, `cached_input_tokens`,
-  `cache_write_input_tokens`, `output_tokens`, `reasoning_output_tokens`).
+  `turn.completed`, `turn.failed`, `error`). `ThreadItemDetails`
+  has variants `agent_message`, `reasoning`, `command_execution`, `file_change`,
+  `mcp_tool_call`, `collab_tool_call`, `web_search`, `todo_list`, and `error`.
+  `Usage` has `input_tokens`, `cached_input_tokens`,
+  `cache_write_input_tokens`, `output_tokens`, and `reasoning_output_tokens`.
 - `codex-rs/exec/src/event_processor_with_jsonl_output.rs`: every started
   item gets exactly one `item.completed`, including items still running
   when the turn ends (`reconcile_unfinished_started_items`). `turn.completed`
@@ -59,7 +59,7 @@ run:
    - `turn.completed` keeps `cache_write_input_tokens` as
      `:cache-write-input-tokens` when Codex reports a number.
    - A tool signal also carries `:tool-completed true`, because Codex
-     reports the call only once it has finished, and `:tool-error?` from
+     reports the call only once it has finished. It also carries `:tool-error?` from
      the item's `status`: true for `failed` or `declined`, false for
      `completed`, absent otherwise.
 2. The docstring lists the current event types and states that a turn is
@@ -69,25 +69,26 @@ run:
    right after `:agent/tool-call-started`, with the same call id, the
    outcome when known, and no duration. It records no start time for
    such a call. Without this, the observer's alert state kept every
-   native call in `:outstanding-calls` (only `:tool/call-completed`
-   removes one), and a `:tool-call-timeout` rule would later report it
+   native call in `:outstanding-calls`; only `:tool/call-completed`
+   removes one. A `:tool-call-timeout` rule would later report it
    as timed out. Claude's `tool_use` / `tool_result` pairing is
    unchanged.
 4. Codex numbers its items `item_0`, `item_1`, ... afresh in every
-   `codex exec` (the exec event processor's `next_item_id` counter), so
+   `codex exec` (the exec event processor's `next_item_id` counter).
+   Thus
    a planning turn's `item_1` and an implement turn's `item_1` were the
-   same published call id, and the timeline named both after the later
+   same published call id. The timeline named both after the later
    one. `thread.started` now parses to a heartbeat carrying
    `:invocation-id` (the thread id). The callback publishes the call ids
    that follow as `<thread id>/<item id>` until the invocation ends.
    Only `turn.completed` and `turn.failed` end it. They now carry
    `:invocation-ended?`, and the exec processor shuts down after them.
-   A top-level `error` is `:done?` but does not end it, because the
+   A top-level `error` is `:done?` but does not end the invocation. The
    processor keeps running (`ServerNotification::Error` returns
-   `CodexStatus::Running`) and can still reconcile items before
+   `CodexStatus::Running`). It can still reconcile items before
    `turn.failed`. A provider that names no invocation (Claude) keeps its
    ids. The ids are qualified where they are produced, not in one
-   consumer, because the observer, the timeline and anything reading
+   consumer. The observer, the timeline and anything reading
    persisted events all key on `:tool/call-id`.
 5. `event-stream/timeline.clj`: a `:tool/call-completed` with neither
    `:tool/success?` nor `:tool/error` renders as `outcome unknown`
@@ -107,7 +108,7 @@ with a transcript written from the serde shapes above:
   and `todo_list` do not.
 - `turn-completed-keeps-cache-write-tokens-test`.
 - `codex-run-reports-native-tool-calls-test`: a streamed Codex client run
-  reports four calls and one turn, and a run that ends in `turn.failed`
+  reports four calls and one turn. A run that ends in `turn.failed`
   still reports the three calls it made.
 
 On main's `cli_output.clj` the new namespace fails 22 of 30 assertions.

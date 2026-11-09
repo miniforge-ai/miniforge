@@ -9,7 +9,7 @@
 ## Overview
 
 The semantic policy judge turned "no judgement" into "no violations". A failed
-judge call or an answer that was not a finding list read as a clean file, so the
+judge call or an answer that was not a finding list read as a clean file. The
 acting semantic rules behind `:policy-verify` and `:policy-review` passed during
 a model outage. This PR makes each of those cases a violation that blocks, and
 bounds the gate's batched judge with a deadline that also fails closed.
@@ -25,10 +25,10 @@ bounds the gate's batched judge with a deadline that also fails closed.
 ## Changes in Detail
 
 1. `parsing/parse-judge-response` returns nil for an answer that is not a
-   finding list, including a vector with any non-map entry (`[nil]`,
-   `[:error]`, a string), which was filtered down to `[]` and read as clean,
-   and an answer with anything after its vector: it reads exactly one EDN form
-   and requires end of input, because `edn/read-string` read only the first,
+   finding list. This includes a vector with any non-map entry (`[nil]`,
+   `[:error]`, a string), previously filtered down to `[]` and read as clean.
+   It also rejects an answer with anything after its vector: it reads exactly one EDN form
+   and requires end of input. Previously, `edn/read-string` read only the first form,
    so `[]` followed by findings read as clean (Copilot review). A real `[]`
    still means no findings.
 2. `judge/analyze-file` and `judge/analyze-file-batched` turn a failed call or an
@@ -40,7 +40,7 @@ bounds the gate's batched judge with a deadline that also fails closed.
 3. `changed-files/analyze-rules-on-files` takes an optional `{:deadline-ms}`
    (default `limits/judge-deadline-ms`, 20 minutes). Each judge call runs within
    what is left of it (`judge-within`, a future dereferenced with the remaining
-   budget); a call still running when it passes is cancelled and its file gets
+   budget). A call still running when it passes is cancelled and its file gets
    a `:deadline-exceeded` failure (Copilot review). Each file still unjudged
    then gets the same failure for each applicable rule, without a call, and the
    status is `:deadline-exceeded`. No file is skipped. The component now depends
@@ -52,21 +52,20 @@ bounds the gate's batched judge with a deadline that also fails closed.
    `messages`.
 
 Left out: the single-rule path's 5-file cap (`max-files-per-rule`, not used by the
-gate) is not copied to the batched path, because dropping files would leave them
-unenforced.
+gate) is not copied to the batched path. Dropping files would leave them unenforced.
 
 ## Behaviour change
 
 A judge outage, a malformed answer, or a judgement that runs past the deadline
-now blocks the acting semantic rules for the affected files instead of passing
-them. The `miniforge scan` path (`analyze-rules-parallel`) reports the same
+now blocks the acting semantic rules for the affected files. The `miniforge scan` path (`analyze-rules-parallel`)
+reports the same
 judge failures as violations. A change large enough to reach the 20-minute
 deadline blocks until the deadline is raised in `limits.edn`.
 
 ## Testing Plan
 
-1. `parsing_test.clj`: prose, nil, malformed and non-vector answers parse to nil,
-   and so do vectors with a non-map entry and answers with a second form or
+1. `parsing_test.clj`: prose, nil, malformed and non-vector answers parse to nil.
+   So do vectors with a non-map entry and answers with a second form or
    prose after the vector.
 2. `judge_test.clj`: an unparseable answer and a failed call each give one
    `:semantic/judge-failure` violation; a failed batched call blocks every rule
@@ -74,12 +73,12 @@ deadline blocks until the deadline is raised in `limits.edn`.
 3. `changed_files_test.clj`: with `:deadline-ms 0`, no call is made, the
    applicable file becomes a `:deadline-exceeded` violation, and the
    non-applicable file is still skipped. A call that sleeps 5 s against a
-   200 ms deadline is cancelled: the file is a `:deadline-exceeded` violation
+   200 ms deadline is cancelled. The file is a `:deadline-exceeded` violation
    and the result returns well before the call would have.
 4. Against #2093's semantic-analyzer source these three namespaces fail
    (9 failures, 2 errors) and pass with this change.
 5. The two review fixes' tests fail on the previous source (7 failures) and
-   pass with them; the semantic-analyzer suites and the gate's
+   pass with them. The semantic-analyzer suites and the gate's
    `policy-pack-test` pass (44 tests).
 6. `components/semantic-analyzer`, `components/gate` and
    `components/policy-pack` (497 tests) pass on this branch merged with current
@@ -92,7 +91,7 @@ No migration. Takes effect with the next CLI build.
 ## Related Issues/PRs
 
 Builds on #2093 (the `core.clj` split into seven namespaces, merged as
-adccc8537). This branch merged `main` after that squash; the merge took this
+adccc8537). This branch merged `main` after that squash. The merge took this
 branch's side for the semantic-analyzer files, since `main` had not changed
 them apart from #2093, and dropped #2093's pre-rename PR doc.
 

@@ -1,0 +1,68 @@
+{:spec/title "Codex gap report — measure the consultation match rate"
+
+ :spec/description
+ "Thesium Codex SPEC T2 §4.1 item 1 defines the coverage slot of the gap
+  vector as matched consultations / consultation attempts, plus the list
+  of situations that matched nothing. `ai.miniforge.codex-gap.report/build-report`
+  fills that slot's member list but sets `:consultation-match-rate` to
+  `:not-instrumented`, and `bb codex-gap-report` reads only the miss ledger.
+
+  Most of the data exists. When a phase result carries a codex
+  consultation, `record-phase-misses!` in `gap_wiring.clj` writes a
+  consultation entry through `codex-gap/record-consultation!`, whatever the
+  phase outcome, and `codex-gap/read-consultations` reads them back. Each
+  entry carries `:consultation/situation` and `:consultation/status`
+  (:pinned, :skipped, :unmapped or :unconfigured, from
+  `codex-pin/landings-outcome`). :skipped covers three causes that
+  `codex/consider` reports as `:codex/anomaly`: :situation-unmatched,
+  :situation-ambiguous, and a codex that could not be read. The entry does
+  not record which, so an unreadable codex would count as a miss.
+
+  Change:
+  1. `build-consultation-entry` also records the summary's anomaly kind as
+     `:consultation/anomaly` (nil when there is none).
+  2. `build-report` takes the consultation entries as an option and reports
+     the rate as matched / attempted, with both counts beside it and the
+     situations of unmatched attempts as the member list. An attempt is a
+     :pinned entry, or a :skipped entry whose anomaly is
+     :situation-unmatched or :situation-ambiguous; a match is :pinned. An
+     entry from before this change, :skipped with no recorded anomaly, is
+     counted apart as unclassified, not as an attempt. With no attempts the
+     slot says so instead of dividing by zero.
+  `bb codex-gap-report` reads each run directory's consultations next to
+  its ledger and passes them in."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/codex-gap/src/ai/miniforge/codex_gap/report.clj"
+          "components/codex-gap/src/ai/miniforge/codex_gap/ledger.clj"
+          "components/codex-gap/src/ai/miniforge/codex_gap/interface.clj"
+          "components/codex-gap/resources"
+          "components/codex-gap/test"
+          "bb.edn"]}
+
+ :spec/constraints
+ ["The report stays a vector: no single number across slots (T2 §4.1)"
+  "The rate ships with its counts and member list, like every other slot (T2 §4.2)"
+  "Consultations are read through the codex-gap interface; no new storage file"
+  "A consultation entry gains only :consultation/anomaly; existing keys keep their meaning"
+  "New report text goes through the codex-gap message catalog"]
+
+ :spec/acceptance-criteria
+ ["A consultation entry built from a summary whose anomaly is :situation-unmatched carries :consultation/anomaly :situation-unmatched"
+  "Given 3 :pinned entries, 1 :skipped :situation-unmatched entry, 1 :skipped entry for an unreadable codex and 2 :unmapped entries, the coverage slot reports 3 matched of 4 attempted"
+  "The coverage slot lists the situation of the :situation-unmatched attempt as its unmatched member"
+  "A :skipped entry with no :consultation/anomaly is counted as unclassified and is not an attempt"
+  "With no attempted consultations the slot reports that nothing was attempted, not a rate"
+  "`bb codex-gap-report` over a checkpoint root whose run directories hold consultation files prints the rate"
+  "Existing report slots and their member lists are unchanged"]
+
+ :spec/priority
+ {:tier :medium
+  :axes #{:observation}
+  :theme :codex-gap
+  :rationale "The coverage rung of the gap vector has no denominator today, so the report cannot say how often a phase's situation reaches the codex at all."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

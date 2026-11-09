@@ -911,6 +911,21 @@
                :content "fallback answer"}]
              @chunks)))))
 
+(deftest ^{:stratum 0} complete-stream-impl-empty-stream-fallback-opt-out-test
+  (testing "a request that opts out gets the empty stream back with no second call"
+    (let [buffered-calls (atom 0)
+          client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude
+                   :stream-exec-fn (fn [_cmd _on-line _opts]
+                                     {:out "" :err "stream stderr" :exit 0})
+                   :exec-fn (fn
+                              ([_cmd] (swap! buffered-calls inc) {:out "fallback answer" :err "" :exit 0})
+                              ([_cmd _opts] (swap! buffered-calls inc) {:out "fallback answer" :err "" :exit 0}))})
+          resp (llm/complete-stream client {:prompt "test" :empty-stream-fallback? false}
+                                    (constantly nil))]
+      (is (zero? @buffered-calls))
+      (is (str/blank? (:content resp))))))
+
 (defn- ^{:stratum 0} recording-claude-client
   "A claude client whose exec-fn and stream-exec-fn record every command
    into `cmds` and return an empty successful result."
@@ -1558,6 +1573,8 @@
                    :stats {:chunks 2 :unique-chunks 2 :files-written 0 :stagnant-cycles 0}}
           client (ai.miniforge.llm.protocols.records.llm-client/create-client
                   {:backend :claude
+                   ;; A priced model, so the cut run's cost can be estimated.
+                   :model "claude-sonnet-4-6"
                    :logger logger
                    :stream-exec-fn (fn [_cmd on-line _opts]
                                      (on-line (tool-line "mcp__context__context_read"))
