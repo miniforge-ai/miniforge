@@ -120,6 +120,12 @@
      :rules-manifest manifest
      :codex-outcome codex-outcome}))
 
+(defn- ^{:stratum 0} run-stopped?
+  "True when the run's control state, carried in `ctx`'s execution opts,
+   is stopped. The runner records the stop when the phase returns."
+  [ctx]
+  (boolean (some-> (get-in ctx [:execution/opts :control-state]) deref :stopped)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} leave-implement
@@ -409,13 +415,8 @@
         ;; Clear any leftover interrupt flag set by the kill-fn so it does not
         ;; poison the curator run or subsequent work on this thread.
         _ (when stalled? (Thread/interrupted))
-        ;; A cancel interrupted the agent, or came while it ran: no curator
-        ;; (its git collection and fallback may call an LLM) runs after it.
-        ;; One that lands during a curator that then fails ends the phase as
-        ;; stopped too; a curator that succeeded keeps its work. The runner
-        ;; records the stop when the phase returns.
-        run-stopped? #(boolean (some-> (get-in ctx [:execution/opts :control-state]) deref :stopped))
-        stopped? (run-stopped?)
+        ;; A cancelled agent turn gets no curator; a turn that succeeded keeps its work.
+        cancelled-turn? (and (run-stopped? ctx) (response/error? impl-result))
         ;; Curator post-processes the implementer's environment writes into a
         ;; structured :code artifact. The environment is the artifact, so we
         ;; invoke the curator regardless of the implementer's self-reported
@@ -424,7 +425,7 @@
         ;; the implementer truly wrote nothing, the curator fast-fails with a
         ;; clear "no files" error instead of silently retrying.
         curator-result
-        (if stopped?
+        (if cancelled-turn?
           impl-result
           (try
             (agent/curate-implement-output
@@ -491,9 +492,9 @@
              (= :mcp (get-in impl-result [:error :data :artifact-source])))
         degraded-handoff? (and impl-errored? (not metadata-only-submit?))
         result (cond
-                 ;; The agent's spend is kept: it ran.
-                 (or stopped?
-                     (and (run-stopped?) (not (phase/result-succeeded? curator-result))))
+                 ;; A cancel before or during a failed curator; the agent's spend is kept.
+                 (or cancelled-turn?
+                     (and (run-stopped? ctx) (not (phase/result-succeeded? curator-result))))
                  (merge (response/error (messages/t :implement/run-stopped) {:data {:code :run-stopped}})
                         (select-keys impl-result [:metrics :cost-usd]))
                  ;; Stream watchdog fired: the agent stalled silently and was
