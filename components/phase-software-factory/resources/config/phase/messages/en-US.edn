@@ -39,6 +39,7 @@
   :verify/failed              "Verification failed"
   :verify/timed-out           "Verify test runner timed out after {timeout-ms}ms (cmd: {test-cmd})"
   :verify/interrupted         "Verify test run was interrupted; its process tree was killed (cmd: {test-cmd})"
+  :verify/output-unsettled    "The test command exited, but its output was still open {ms}ms later, so a process it started still holds stdout or stderr and the output is incomplete (cmd: {test-cmd}). The output read so far:\n{head}"
   :verify/output-limit        "Test output passed the {bytes}-byte capture limit, so the test process was stopped (cmd: {test-cmd}). The output began:\n{head}"
 
   ;; Release phase

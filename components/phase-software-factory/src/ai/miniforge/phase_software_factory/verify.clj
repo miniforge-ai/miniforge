@@ -77,20 +77,30 @@
   5000)
 
 (defn- ^{:stratum 0} exited-test-result
-  "Results for a test process that exited. One stopped for passing the
-   capture limit fails with a message naming the limit and showing the
-   start of the stream that passed it. That failure goes back to implement:
-   output of that size comes from the code under test."
-  [cmd exit [out err :as drains]]
-  (if-let [cut (first (filter subprocess/overflowed? drains))]
-    (let [text (subprocess/drained-text cut)
-          head (subs text 0 (min (count text) output-config/verify-error-preview-limit))]
-      (result/test-error-result
-       (messages/t :verify/output-limit {:bytes    (subprocess/capture-limit cut)
-                                         :test-cmd cmd
-                                         :head     head})))
-    (output/parse-test-output (str (subprocess/drained-text out) "\n" (subprocess/drained-text err))
-                              exit)))
+  "Results for a test process that exited. Two outcomes fail without
+   parsing the output, each marked so the phase summary keeps its message,
+   and both go back to implement, since the code under test caused them:
+
+   - `:output-limit?`: a stream passed the capture limit and the process
+     was stopped. The message names the limit and shows that stream's start.
+   - `:output-unsettled?`: the output was still open `settle-ms` after the
+     exit, so a process the tests started holds it and the output is
+     incomplete. A summary read so far must not pass the run."
+  [cmd exit [out err :as drains] {:keys [settled? settle-ms]}]
+  (let [cut   (first (filter subprocess/overflowed? drains))
+        text  (subprocess/drained-text (or cut out))
+        head  (subs text 0 (min (count text) output-config/verify-error-preview-limit))
+        limit (some-> cut subprocess/capture-limit)]
+    (cond
+      cut            (assoc (result/test-error-result
+                             (messages/t :verify/output-limit {:bytes limit :test-cmd cmd :head head}))
+                            :output-limit? true)
+      (not settled?) (assoc (result/test-error-result
+                             (messages/t :verify/output-unsettled {:ms settle-ms :test-cmd cmd :head head}))
+                            :output-unsettled? true)
+      :else          (output/parse-test-output
+                      (str (subprocess/drained-text out) "\n" (subprocess/drained-text err))
+                      exit))))
 
 (def ^{:stratum 0} ^:private verify-rate-limit-pattern
   "Pattern for non-actionable verify failures caused by provider throttling."
@@ -326,10 +336,10 @@
         ;; (rule 211 exemption a).
         (try
           (if (not= ::timeout (deref done-fut timeout-ms ::timeout))
-            (let [exit (:exit @done-fut 1)]
-              (run! #(deref (:future %) output-settle-ms nil) drains)
+            (let [exit     (:exit @done-fut 1)
+                  settled? (every? #(not= ::open (deref (:future %) output-settle-ms ::open)) drains)]
               (run! subprocess/cancel-drain! drains)
-              (exited-test-result cmd exit drains))
+              (exited-test-result cmd exit drains {:settled? settled? :settle-ms output-settle-ms}))
             (do
               ;; .destroyForcibly on the `sh` parent does NOT reliably kill the
               ;; test runner child (the actual JVM running `bb test`). Walk the

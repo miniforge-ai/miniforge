@@ -36,9 +36,14 @@ every call, and stdout on the non-streaming capture path.
 3. `verify/run-tests!` drains stdout and stderr with an `:on-overflow` that
    destroys the test process tree. `exited-test-result` turns a cut run into a
    failed result whose message names the limit and the command and shows the
-   first `verify-error-preview-limit` characters of output. That message does
-   not contain `timed out`, so leave-verify redirects to implement: output that
-   size comes from the code under test.
+   first `verify-error-preview-limit` characters of the stream that passed it.
+   If the output is still open `output-settle-ms` (5 s) after the command
+   exits, a process the tests started is holding it and the output is
+   incomplete: the run fails as `:output-unsettled?` instead of parsing what
+   arrived. Neither message contains `timed out`, so leave-verify redirects to
+   implement. Both results are marked (`:output-limit?`, `:output-unsettled?`)
+   and `verify-failure-message` passes their message through, so the phase
+   summary and error keep the limit, the command and the preview.
 4. Registration: `llm` and `phase-software-factory` `deps.edn`, and the
    `deliberation-lab` project.
 
@@ -48,6 +53,13 @@ every call, and stdout on the non-streaming capture path.
    before its deadline, and implement sees the start of the output.
 2. An agent CLI stream past 64 MiB reaches the parser cut, ending in
    `[output cut at … bytes; the rest was discarded]`.
+3. A local test run whose output stays open 5 s after the command exits
+   fails, even with a passing summary. Before, `:out :string` waited for the
+   pipe to close, which a leftover process could make wait forever. Whether
+   a leftover can hold the pipe depends on the JDK: measured on 2026-11-08,
+   the JDK 21 reaper closes a child's pipe within 1 ms of its exit (the
+   leftover's later output is lost), while babashka's JDK 25 keeps it open
+   until the leftover exits.
 
 ## Not covered
 
@@ -65,7 +77,12 @@ every call, and stdout on the non-streaming capture path.
    head and a note naming the limit; short input arrives whole.
 3. `verify-output-limit-test`: `yes` as the test command with a 1 KiB limit
    fails within 5 seconds, not at its 10-second deadline, with the
-   output-limit message and the start of the output.
+   output-limit message and the start of the output; a runaway stderr
+   writer shows stderr's start; a command that exits 0 with a passing summary
+   while its output is held open (a pipe nobody closes, so the case does not
+   depend on the JDK) fails as `:output-unsettled?`; and
+   `enter-verify` puts the output-limit message in the phase summary and
+   error.
 4. Existing `llm` capture-process and interface tests and the verify,
    failure-mode and interrupt tests pass. Locally: 121 tests, 551 assertions,
    0 failures.
