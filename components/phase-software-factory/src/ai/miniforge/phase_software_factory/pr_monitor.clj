@@ -73,6 +73,7 @@
             monitor-result (dag-prs/monitor-dag-prs
                             train-state pr-infos
                             {:worktree-path worktree-path
+                             :control-state (get-in ctx [:execution/opts :control-state])
                              :logger logger
                              :generate-fn (get-in ctx [:execution/generate-fn])
                              :event-bus (get-in ctx [:execution/event-bus])})
@@ -90,7 +91,11 @@
                       (if (:success? monitor-result)
                         (response/success result-data)
                         (response/failure "PR monitoring failed"
-                                          {:data {:failed-prs (:failed-prs monitor-result [])}})))
+                                          {:data (cond-> {:failed-prs (:failed-prs monitor-result [])}
+                                                   ;; A cancel ended monitoring: name what merged first.
+                                                   (:stopped? monitor-result)
+                                                   (assoc :stopped? true
+                                                          :merged-prs (:merged-prs monitor-result [])))})))
             (assoc :execution/train train-state))))))
 
 (defn ^{:stratum 0} leave-pr-monitor

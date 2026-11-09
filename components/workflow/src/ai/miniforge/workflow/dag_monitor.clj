@@ -30,11 +30,13 @@
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
    [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.workflow.merge-resolution :as merge-resolution]))
+   [ai.miniforge.workflow.merge-resolution :as merge-resolution]
+   [ai.miniforge.workflow.messages :as messages]
+   [ai.miniforge.workflow.stop-signal :as stop-signal]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Result constructors & predicates
+;; Results, predicates, controllers and one monitor cycle
 (defn ^{:stratum 0} monitor-error
   "Construct a monitor error result map."
   [error train]
@@ -124,10 +126,12 @@
 
    For each PR that the train gate marks as ready-to-merge and whose
    controller is in :ready-to-merge status, attempts the merge and
-   updates train state accordingly."
-  [controllers manager train-id logger]
+   updates train state accordingly. Once `control-state` is stopped, no
+   further merge is attempted."
+  [controllers manager train-id logger control-state]
   (let [ready-prs (pr-train/get-ready-to-merge manager train-id)]
-    (doseq [pr-num ready-prs]
+    (doseq [pr-num ready-prs
+            :while (not (stop-signal/stopped? control-state))]
       (when-let [ctrl (get controllers pr-num)]
         (when (= :ready-to-merge (:status @ctrl))
           (try
@@ -159,16 +163,20 @@
    Arguments:
    - train-state: Map with :train-id :manager :train from dag-train assembly
    - controllers: Map of pr-number -> controller atom
-   - context: Execution context
+   - context: Execution context. Its `:control-state` stops the loop: a
+     cancel ends the poll wait, and no further merge is attempted.
 
    Returns:
    {:success? boolean
     :merged-prs [pr-numbers]
     :failed-prs [pr-numbers]
-    :train final-train-state}"
+    :train final-train-state}
+   A stopped run returns that map with `:success? false :stopped? true`
+   and an `:error` message."
   [train-state controllers context]
   (let [{:keys [train-id manager]} train-state
         logger (:logger context)
+        control-state (:control-state context)
         max-cycles (get context :max-monitor-cycles 100)
         poll-interval-ms (get context :monitor-poll-interval-ms 30000)]
 
@@ -182,6 +190,16 @@
         (all-prs-terminal? controllers)
         (build-monitor-result controllers manager train-id logger cycle)
 
+        (stop-signal/stopped? control-state)
+        (do
+          (when logger
+            (log/info logger :dag-monitor :monitor/stopped {:data {:cycles cycle}}))
+          ;; The PRs merged before the cancel are reported; nil skips the completion log.
+          (assoc (build-monitor-result controllers manager train-id nil cycle)
+                 :success? false
+                 :stopped? true
+                 :error (messages/t :status/stopped-control)))
+
         (>= cycle max-cycles)
         (do
           (when logger
@@ -193,8 +211,8 @@
 
         :else
         (do
-          (execute-monitor-cycle! controllers manager train-id logger)
-          (Thread/sleep poll-interval-ms)
+          (execute-monitor-cycle! controllers manager train-id logger control-state)
+          (stop-signal/sleep! control-state poll-interval-ms)
           (recur (inc cycle)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
