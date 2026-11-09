@@ -1177,6 +1177,48 @@
         (is (= :failed (get-in final-ctx [:phase :status])))
         (is (= :implement/backend-timeout (get-in final-ctx [:phase :verdict])))))))
 
+(deftest ^{:stratum 2} a-cancelled-run-skips-the-curator-test
+  (testing "a cancelled agent turn gets no curator"
+    (let [curated (atom false)]
+      (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                    agent/invoke (fn [_ _ _] (response/failure (ex-info "run cancelled" {})))
+                    agent/curate-implement-output (fn [m] (reset! curated true) (mock-curator-success m))]
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :implement})
+                      (assoc-in [:execution/opts :control-state] (doto (es/create-control-state) es/cancel!)))
+              result ((:enter (phase/get-phase-interceptor {:phase :implement})) ctx)]
+          (is (false? @curated))
+          (is (= :run-stopped (get-in result [:phase :result :error :data :code])))))))
+  (testing "an agent turn that succeeded before the cancel is still curated, so its work is kept"
+    (let [curated (atom false)]
+      (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                    agent/invoke (fn [_ _ _] (response/success nil {:tokens 800 :duration-ms 1500}))
+                    agent/curate-implement-output (fn [m] (reset! curated true) (mock-curator-success m))]
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :implement})
+                      (assoc-in [:execution/opts :control-state] (doto (es/create-control-state) es/cancel!)))
+              result ((:enter (phase/get-phase-interceptor {:phase :implement})) ctx)]
+          (is (true? @curated))
+          (is (not= :run-stopped (get-in result [:phase :result :error :data :code]))))))))
+
+(deftest ^{:stratum 2} a-cancel-during-the-curator-is-recorded-with-the-agents-spend-test
+  (let [enter (fn [curate]
+                (let [cs (es/create-control-state)]
+                  (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                                agent/invoke (fn [_ _ _] (response/success nil {:tokens 800 :duration-ms 1500}))
+                                agent/curate-implement-output (fn [m] (es/cancel! cs) (curate m))]
+                    ((:enter (phase/get-phase-interceptor {:phase :implement}))
+                     (-> (create-base-context)
+                         (assoc :phase-config {:phase :implement})
+                         (assoc-in [:execution/opts :control-state] cs))))))]
+    (testing "a curator that fails after the cancel ends the phase as stopped, keeping the agent's spend"
+      (let [result (enter mock-curator-error)]
+        (is (= :run-stopped (get-in result [:phase :result :error :data :code])))
+        (is (= 800 (get-in result [:phase :result :metrics :tokens])))))
+    (testing "a curator that succeeded keeps its work: the cancel came after it was done"
+      (let [result (enter mock-curator-success)]
+        (is (not= :run-stopped (get-in result [:phase :result :error :data :code])))))))
+
 (use-fixtures :each
   (fn [f]
     (phase/reset-phase-loader!)
