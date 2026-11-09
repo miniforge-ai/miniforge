@@ -514,9 +514,11 @@
   10000)
 
 (def ^{:stratum 0} ^:private term-ignoring-writer-args
-  "Arguments to `sh` for a writer that ignores SIGTERM: the ignored signal
-   is inherited by `yes`, so only the SIGKILL escalation stops it."
-  ["-c" "trap '' TERM; yes"])
+  "Arguments to `sh` for a writer only SIGKILL stops. It ignores SIGTERM,
+   and SIGPIPE too and loops on past failed writes, because Process.destroy
+   closes its stdout: a writer that died of the closed pipe would let the
+   test pass without the SIGKILL escalation."
+  ["-c" "trap '' TERM PIPE; while :; do echo y; done"])
 
 (def ^{:stratum 0} ^:private shell-runtime
   "A runtime executable the arguments above run under."
