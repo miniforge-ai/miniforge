@@ -57,6 +57,9 @@ these keys, so a change to one counts toward `:clean?`.
    inline helper, a multi-line alias) into extra entries, and the first
    word of a continuation line became a key. A key is not fingerprinted, so
    a line such as `password=<token>; ...` would have kept the token.
+   A valueless key (a bare `log` under `[pager]`, which git reads as
+   true) is kept as the marker `valueless-entry`, not dropped. Dropping
+   it would let a task turn on a pager or `core.fsmonitor` unseen.
 6. `redirect-config` becomes `config-values`, which takes the pattern, the
    value scrubber, and the failure message. `changed-redirect-config` is
    renamed `changed-config`, since it now compares both classes.
@@ -99,10 +102,13 @@ Before this change only a global remote URL or `insteadOf` edit did that.
    in a `credential.<url>.helper` key and on the second line of its value
    appears nowhere in the snapshot. The value is one fingerprint under the
    redacted key. A line-based parse fails this test.
-5. Existing guard and guarded-executor tests pass unchanged, apart from the
+5. `a-valueless-key-added-mid-run-is-drift-test` (real git): a bare `log`
+   under `[pager]` appended to the shared config is reported in
+   `:command-drift` as `:valueless`.
+6. Existing guard and guarded-executor tests pass unchanged, apart from the
    `changed-config` rename. The fetch and force-push cases still report
    clean, so command config does not drift on an ordinary fetch.
-6. By hand: the namespace loads and snapshots this checkout under babashka,
+7. By hand: the namespace loads and snapshots this checkout under babashka,
    using the `miniforge` bb task's classpath. `java.util.HexFormat` is not
    available in babashka, so hex is built with `format`.
 

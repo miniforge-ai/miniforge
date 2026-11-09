@@ -312,3 +312,17 @@
           (is (= [(sut/fingerprint helper)] values)
               "the two-line value is one fingerprinted value under the redacted key"))
         (finally (fixtures/delete-tree! host))))))
+
+(deftest ^{:stratum 1} a-valueless-key-added-mid-run-is-drift-test
+  (testing "given a bare `log` under [pager] appended to the shared config → drift, not dropped"
+    (let [host (fixtures/init-host-repo! (fixtures/temp-dir!))]
+      (try
+        (let [before (snapshot! host)
+              _      (spit (File. (str host) ".git/config") "[pager]\n\tlog\n" :append true)
+              report (sut/drift before (snapshot! host))
+              pager  (first (filter #(= "pager.log" (:config-key %)) (:command-drift report)))]
+          (is (false? (:clean? report))
+              "git reads a valueless key as true, so the bare line turns the pager on")
+          (is (= sut/valueless-entry (last (:after pager)))
+              "the local entry is kept as its own value, after any global ones"))
+        (finally (fixtures/delete-tree! host))))))

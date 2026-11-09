@@ -139,6 +139,13 @@
   "Marks a fingerprint in a report, so it is not read as the value itself."
   "hmac-sha256:")
 
+(def ^{:stratum 0} valueless-entry
+  "Stands in for the value of a key written with no `=` (a bare `log`
+   under `[pager]`), which git reads as boolean true. A keyword, so it
+   never equals a scrubbed string; dropping the key instead would let a
+   bare `core.fsmonitor` or pager switch go unreported."
+  :valueless)
+
 (defonce ^{:stratum 0} ^:private
   ^{:doc "Random key for `fingerprint`, made once per process. Both
    snapshots a drift report compares are taken in one process, so equality
@@ -194,10 +201,10 @@
   "`[key value]` of one `git config --null` entry, where the key ends at
    the first newline. An empty value is kept: a key set to the empty string
    is a real state, and treating it as absent would hide a blanked remote
-   URL. An entry with no newline is a valueless key and gives nil."
+   URL. An entry with no newline is a valueless key and gives `[key nil]`."
   [entry]
   (let [[k v] (str/split entry #"\n" 2)]
-    (when (and v (seq k))
+    (when (seq k)
       [k v])))
 
 (defn ^{:stratum 0} changed-config
@@ -321,7 +328,8 @@
          (->> (str/split (get r :out "") (re-pattern config-entry-separator))
               (keep config-entry)
               (reduce (fn [acc [k v]]
-                        (update acc (redact-credentials k) (fnil conj []) (scrub-value v)))
+                        (update acc (redact-credentials k) (fnil conj [])
+                                (if (nil? v) valueless-entry (scrub-value v))))
                       {})))
       1 (result/ok {})
       (result/err :host-git-snapshot-failed
