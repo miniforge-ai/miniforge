@@ -9,9 +9,11 @@
   :criterion/scenario-invalid "Not run: the scenario's output was invalid: {problems}"
   :result/undeclared        "result for criterion {id}, which the gate does not declare"
   :result/duplicate         "more than one result for criterion {id}"
+  :scenario/not-plain-data  "fixtures and config must be plain EDN data, so their hashes repeat"
 
   ;; Summary (run.clj)
   :summary/verdict          "Qualification {gate}: {verdict}, {passed} of {total} criteria passed"
   :summary/row              "  {status} {id}: {description}"
   :summary/wrote            "Report written: {path}"
-  :summary/write-failed     "The report could not be written: {message}"}}
+  :summary/write-failed     "The report could not be written: {message}"
+  :summary/invalid-gate     "Not a valid gate definition: {problems}"}}

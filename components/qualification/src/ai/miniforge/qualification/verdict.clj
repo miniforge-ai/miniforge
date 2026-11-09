@@ -20,7 +20,12 @@
    verdict. A declared criterion with no result is unrun; only a run where
    every criterion passed is a pass."
   (:require
-   [ai.miniforge.qualification.messages :as msg]))
+   [ai.miniforge.qualification.messages :as msg]
+   [ai.miniforge.qualification.schema :as schema]
+   [clojure.edn :as edn]
+   [malli.core :as m]
+   [malli.error :as me]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -51,7 +56,34 @@
           (for [[id n] counts :when (> n 1)]
             (msg/t :result/duplicate {:id id})))))
 
+(defn- ^{:stratum 0} plain-data?
+  "True when `x` prints and reads back equal, so its content hash is the
+   same on every run. A fn or other object does not."
+  [x]
+  (try+
+   (= x (edn/read-string (pr-str x)))
+   (catch map? _
+     false)
+   (catch Exception _
+     false)))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} output-problems
+  "Why a scenario's output cannot be reported, or nil when it can: it is
+   not a ScenarioOutput, its fixtures or config are not plain data, or its
+   results do not match the gate."
+  [gate output]
+  (cond
+    (not (m/validate schema/ScenarioOutput output))
+    [(pr-str (me/humanize (m/explain schema/ScenarioOutput output)))]
+
+    (not (and (plain-data? (:scenario/fixtures output))
+              (plain-data? (:scenario/config output))))
+    [(msg/t :scenario/not-plain-data)]
+
+    :else
+    (not-empty (result-problems gate (:scenario/results output)))))
 
 (defn ^{:stratum 1} unrun-rows
   "Every declared criterion as unrun, for `reason`."
