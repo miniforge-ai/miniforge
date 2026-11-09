@@ -45,6 +45,8 @@
    [ai.miniforge.phase-opsv.boundary.governed-load-proposal :as governed-load-proposal]
    [ai.miniforge.phase-opsv.boundary.kubernetes-recovery-plan :as recovery-plan]
    [ai.miniforge.phase-opsv.boundary.recovery-plan-admission :as recovery-admission]
+   [ai.miniforge.phase-opsv.boundary.recovery-plan-retention :as recovery-retention]
+   [ai.miniforge.phase-opsv.boundary.retained-recovery-plan :as retained-recovery]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-provider :as native-load-provider]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
@@ -83,6 +85,16 @@
   recovery-admission/admit!)
 
 (def ^{:stratum 0} VerificationAdapter protocol/VerificationAdapter)
+
+(def ^{:stratum 0} retain-kubernetes-recovery-plan!
+  "Retain the actual independent plan admission as a protected, acknowledged verification report.
+   Denials remain failure evidence, not approved recovery plans. No effect authority or provider calls."
+  recovery-retention/retain!)
+
+(def ^{:stratum 0} read-retained-kubernetes-recovery-plan!
+  "Read an acknowledged approved plan uncached and require fresh independent admission at the same policy revision.
+   Returns plan intent and its retained reference, never a decision or grant for an effect."
+  retained-recovery/read!)
 
 (def ^{:stratum 0} VerificationPreparationAdapter
   "Read-only target acquisition before verification effects; not admission or authority."
