@@ -62,6 +62,9 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} check
-  "Nil when every `schema value` pair validates, else the first failure."
+  "Nil when every `schema value` pair validates, else the first failure. An
+   odd argument count is a call-site bug, which would otherwise silently
+   skip the last schema."
   [& pairs]
+  {:pre [(even? (count pairs))]}
   (some pair-failure (partition 2 pairs)))
