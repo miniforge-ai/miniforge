@@ -56,5 +56,5 @@ production or test code from the validated tree.
 
 - [x] Implement fresh exact candidate execution with shared factories and boundaries.
 - [x] Source, JVM, isolated package and fault validation.
-- [ ] Owner adversarial and full applicable standards review.
+- [x] Owner adversarial and full applicable standards review.
 - [ ] Signed commits, current-head full review, all CI and owner merge.
