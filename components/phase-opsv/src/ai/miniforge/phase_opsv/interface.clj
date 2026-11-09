@@ -60,6 +60,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup-provider :as native-load-cleanup-provider]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop-provider :as native-load-stop-provider]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-provider :as native-load-start-provider]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-execution :as native-load-start-execution]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -96,6 +97,14 @@
    Publish and acknowledge the existing N3 disposition event; return the record or an audit anomaly.
    Preserves uncertain outcomes. This API grants no authority, performs no provider mutation and proves no recovery."
   native-effect-audit/record!)
+
+(def ^{:stratum 0} execute-kubernetes-load-start!
+  "Trusted-host orchestration of one retained, exact load start with live N4/N8 checks and independent authority.
+   Runtime is closed directories/clock/current-context reader plus matching opaque run-control and fence handles.
+   Input is the existing closed retained recovery reference/ownership runtime/new effect-ID contract.
+   Returns durable transaction or anomaly. Failed or uncertain commits fence forward effects and retain audit data.
+   This API neither enables experiments by default nor proves traffic, SLOs, termination or recovery."
+  native-load-start-execution/start!)
 
 (def ^{:stratum 0} prepare-kubernetes-load-stop-proposal!
   "Prepare an exact conditional stop proposal from current retained recovery approval and fresh owned identity.
