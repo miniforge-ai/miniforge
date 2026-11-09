@@ -57,3 +57,32 @@
                       {:execution/dag-pr-infos [{:pr/number 42}]
                        :execution/dag-result {:tasks []}})]
           (is (= [] (get-in result [:phase :result :error :data :failed-prs]))))))))
+
+(deftest ^{:stratum 0} enter-pr-monitor-passes-the-runs-control-state
+  (testing "the monitor gets the run's control state, so a cancel can end it"
+    (let [cs (atom {:stopped false})
+          seen (atom nil)]
+      (with-redefs [dag-prs/create-train-from-dag-result
+                    (fn [_dag-result _plan-tasks & _opts] {:train-id "train-1"})
+                    dag-prs/monitor-dag-prs
+                    (fn [_train-state _pr-infos opts]
+                      (reset! seen (:control-state opts))
+                      {:success? true :merged-prs [] :failed-prs []})]
+        (sut/enter-pr-monitor {:execution/dag-pr-infos [{:pr/number 42}]
+                               :execution/dag-result {:tasks []}
+                               :execution/opts {:control-state cs}})
+        (is (identical? cs @seen))))))
+
+(deftest ^{:stratum 0} enter-pr-monitor-reports-a-stopped-monitor
+  (testing "a monitor a cancel ended fails the phase and names the PRs merged first"
+    (with-redefs [dag-prs/create-train-from-dag-result
+                  (fn [_dag-result _plan-tasks & _opts] {:train-id "train-1"})
+                  dag-prs/monitor-dag-prs
+                  (fn [_train-state _pr-infos _opts]
+                    {:success? false :stopped? true :merged-prs [41] :failed-prs []})]
+      (let [result (sut/enter-pr-monitor {:execution/dag-pr-infos [{:pr/number 41} {:pr/number 42}]
+                                          :execution/dag-result {:tasks []}})
+            data (get-in result [:phase :result :error :data])]
+        (is (= :failed (get-in result [:phase :status])))
+        (is (true? (:stopped? data)))
+        (is (= [41] (:merged-prs data)))))))
