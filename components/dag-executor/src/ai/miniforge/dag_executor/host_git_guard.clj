@@ -32,6 +32,12 @@
    repoints where the host pushes and fetches. The release path's
    HTTPS-token fallback does `set-url` then restores; a run that dies in
    between leaves a token in the host's config, and that shows up here.
+
+   Config that makes git run a program (`command-config-pattern`) must be
+   identical too: `git config core.hooksPath <dir>` in a task worktree
+   makes the host's next commit, the operator's own included, run those
+   hooks. Ordinary task work sets none of these keys.
+
    Remote-tracking refs are reported alongside, but are not part of the
    verdict. A moved ref that is not a fast-forward looks identical whether
    a task rewound it or upstream force-pushed and an ordinary `git fetch`
@@ -49,7 +55,8 @@
    Credentials are stripped from a URL as it is read, so no snapshot and
    no report ever holds one. The likeliest drift is exactly the
    token-bearing URL above, and a guard that published it while reporting
-   it would be its own leak.
+   it would be its own leak. Command config values are not held at all,
+   only their `fingerprint`.
 
    This detects; it does not prevent. Only a sandbox that does not share a
    common dir (a clone rather than a linked worktree) prevents."
@@ -112,6 +119,11 @@
    it cannot occur in a ref name or a SHA, so splitting on it is total."
   (str (char 0x1F)))
 
+(def ^{:stratum 0} config-entry-separator
+  "NUL, which `git config --null` ends each entry with. It cannot occur in
+   a config key or value, so a value that spans lines stays one value."
+  (str (char 0)))
+
 (def ^{:stratum 0} fingerprint-algorithm
   "MAC that `fingerprint` computes. Keyed, so a fingerprint cannot be
    checked against a guessed value without the per-process key."
@@ -167,20 +179,9 @@
 (defn- ^{:stratum 0} parse-fields
   "Split `sep`-delimited two-field lines into `[key value]` pairs.
 
-   An empty value is kept, not dropped: a config key explicitly set to the
-   empty string is a real state, and folding it into \"absent\" would let
-   a run that blanked a remote URL compare equal to one that never had it.
-   Only a line with no separator at all is dropped, which is how git prints
-   a valueless key — there is nothing there to compare.
-
-   `text` is deliberately NOT trimmed as a whole. `git config --get-regexp`
-   prints an empty value as the key plus a trailing separator, so trimming
-   the last line would turn the one case this cares about back into a line
-   with no separator. Per-field trimming stays, which is what keeps a CRLF
-   line ending out of the value.
-
-   The split limit is 2, so a value containing the separator survives
-   whole."
+   A line with no separator is dropped. Each field is trimmed, which keeps
+   a CRLF line ending out of the value. The split limit is 2, so a value
+   containing the separator survives whole."
   [text sep]
   (->> (str/split-lines (or text ""))
        (remove str/blank?)
@@ -189,13 +190,23 @@
                  (when (and k v (seq (str/trim k)))
                    [(str/trim k) (str/trim v)]))))))
 
-(defn ^{:stratum 0} changed-redirect-config
-  "Redirect-config keys whose values differ between two snapshots.
+(defn- ^{:stratum 0} config-entry
+  "`[key value]` of one `git config --null` entry, where the key ends at
+   the first newline. An empty value is kept: a key set to the empty string
+   is a real state, and treating it as absent would hide a blanked remote
+   URL. An entry with no newline is a valueless key and gives nil."
+  [entry]
+  (let [[k v] (str/split entry #"\n" 2)]
+    (when (and v (seq k))
+      [k v])))
 
-   A key present in only one of the two counts: adding a remote or an
-   `insteadOf` rewrite mid-run is as much a redirect as editing one, and
-   removing the remote a push is about to target is a silent failure
-   waiting to happen.
+(defn ^{:stratum 0} changed-config
+  "Watched config keys whose values differ between two snapshots.
+
+   A key present in only one of the two counts: adding a remote, an
+   `insteadOf` rewrite, or a hooks path mid-run is as much a change as
+   editing one, and removing the remote a push is about to target is a
+   silent failure waiting to happen.
 
    Values are vectors because git config is multi-valued — a second
    `remote.origin.url` line is legal, and `git remote get-url` resolves to
@@ -279,31 +290,42 @@
                         (msg/t :snapshot/common-dir-failed)
                         {:repo-path repo-path :stderr (.getMessage e)})))))))
 
-(defn ^{:stratum 1} redirect-config
-  "Map of redirect-config key to the vector of values it carries.
+(defn ^{:stratum 1} config-values
+  "Map of each config key matching `pattern` to the vector of values it
+   carries, values passed through `scrub-value`. A failed read reports the
+   message under `read-failed`.
 
    `git config --get-regexp` exits 1 when nothing matches, which is a valid
    state (a repo with no remotes) and reported as an empty map. Any other
    non-zero exit is a genuine read failure. Exit 1 is also what a path that
-   is not a repository returns, so this half alone cannot tell those apart
-   — `remote-tracking-refs` is what makes a non-repository fail closed."
-  [repo-path]
-  (let [r (git repo-path "config" "--get-regexp" redirect-config-pattern)]
+   is not a repository returns, so this read alone cannot tell those apart
+   — `remote-tracking-refs` is what makes a non-repository fail closed.
+
+   No scope flag is passed, so a change to the user's global config counts
+   like a change to the shared `.git/config`."
+  [repo-path pattern scrub-value read-failed]
+  (let [r (git repo-path "config" "--null" "--get-regexp" pattern)]
     (case (long (get r :exit 1))
       0 (result/ok
          ;; Accumulated into vectors, not a plain map: git config is
          ;; multi-valued, and collapsing to the last value would hide a
          ;; rewrite of the first — the one `git remote get-url` resolves to.
          ;;
-         ;; Redacted on the way in rather than at report time: snapshots
+         ;; Scrubbed on the way in rather than at report time: snapshots
          ;; are parked in a process-lifetime atom by the guarded executor,
          ;; so a token that entered one would outlive the run that made it.
-         (reduce (fn [acc [k v]] (update acc k (fnil conj []) (redact-credentials v)))
-                 {}
-                 (parse-fields (get r :out "") " ")))
+         ;; Keys too: a `<url>` subsection can carry userinfo.
+         ;;
+         ;; Split on NUL, not lines: each continuation line of a multi-line
+         ;; value would become a key, and keys are never fingerprinted.
+         (->> (str/split (get r :out "") (re-pattern config-entry-separator))
+              (keep config-entry)
+              (reduce (fn [acc [k v]]
+                        (update acc (redact-credentials k) (fnil conj []) (scrub-value v)))
+                      {})))
       1 (result/ok {})
       (result/err :host-git-snapshot-failed
-                  (msg/t :snapshot/remote-urls-failed)
+                  (msg/t read-failed)
                   {:repo-path repo-path :stderr (get r :err "")}))))
 
 (defn ^{:stratum 1} remote-tracking-refs
@@ -340,10 +362,10 @@
   "Compare two snapshots of the same checkout and report what a task run
    changed that it had no business changing.
 
-   Reports; does not judge. `:clean?` tracks the redirect config alone —
-   it is true when every remote URL and `insteadOf` rewrite came through
-   the run unchanged. `:redirect-drift` carries the before and after
-   values, credentials stripped.
+   Reports; does not judge. `:clean?` is true when every remote URL,
+   `insteadOf` rewrite, and command-config key came through the run
+   unchanged. `:redirect-drift` carries the before and after values,
+   credentials stripped; `:command-drift` carries fingerprints.
 
    `:ref-rewinds` lists remote-tracking refs that moved to a commit not
    descended from where they started, and deliberately does **not** feed
@@ -367,33 +389,45 @@
                                  (msg/t :drift/ancestry-unknown)
                                  (msg/t :drift/remote-ref-rewound))))))]
     (let [repo-path (get before :repo-path)
-          redirects (changed-redirect-config (get before :redirects)
-                                             (get after :redirects))
+          redirects (changed-config (get before :redirects)
+                                    (get after :redirects))
+          commands  (changed-config (get before :command-config)
+                                    (get after :command-config))
           rewinds   (->> (moved-remote-refs (get before :remote-refs)
                                             (get after :remote-refs))
                          (keep (partial rewind repo-path))
-                         vec)]
-      {:clean?         (empty? redirects)
+                         vec)
+          clean?    (and (empty? redirects) (empty? commands))]
+      {:clean?         clean?
        :repo-path      repo-path
        :redirect-drift redirects
+       :command-drift  commands
        :ref-rewinds    rewinds})))
 
 ;; Snapshot capture and drift report
 (defn ^{:stratum 2} snapshot
-  "Capture the host checkout's redirect config and remote-tracking refs.
+  "Capture the host checkout's redirect config, command config, and
+   remote-tracking refs.
 
-   Returns result/ok with `{:repo-path :redirects :remote-refs}` — the
-   value `drift` compares against — or result/err when either read failed."
+   Returns result/ok with `{:repo-path :redirects :command-config
+   :remote-refs}` — the value `drift` compares against — or result/err
+   when any read failed."
   [repo-path]
-  (-> (redirect-config repo-path)
+  (-> (config-values repo-path redirect-config-pattern
+                     redact-credentials :snapshot/remote-urls-failed)
       (result/and-then
        (fn [redirects]
-         (-> (remote-tracking-refs repo-path)
-             (result/map-ok
-              (fn [refs]
-                {:repo-path   (str repo-path)
-                 :redirects   redirects
-                 :remote-refs refs})))))))
+         (-> (config-values repo-path command-config-pattern
+                            fingerprint :snapshot/command-config-failed)
+             (result/and-then
+              (fn [commands]
+                (-> (remote-tracking-refs repo-path)
+                    (result/map-ok
+                     (fn [refs]
+                       {:repo-path      (str repo-path)
+                        :redirects      redirects
+                        :command-config commands
+                        :remote-refs    refs}))))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -402,7 +436,7 @@
   ;; ... a task run happens in a linked worktree of that checkout ...
   (drift before (result/unwrap-or (snapshot "/path/to/checkout") nil))
   ;=> {:clean? true :repo-path "/path/to/checkout"
-  ;    :redirect-drift [] :ref-rewinds []}
+  ;    :redirect-drift [] :command-drift [] :ref-rewinds []}
 
   (fast-forward? "/path/to/checkout" "HEAD~3" "HEAD")
   ;=> true

@@ -47,8 +47,8 @@
   ^{:doc "Checkout path -> the drift report that condemned it.
 
    Sticky for the life of the process. A checkout whose remotes or
-   remote-tracking refs a task run moved is not repaired by finishing the
-   run, and every worktree cut from it afterwards inherits the damage, so
+   command-running config a task run changed is not repaired by finishing
+   the run, and every worktree cut from it afterwards inherits the damage, so
    there is no safe point at which to forget."}
   drift-verdicts
   (atom {}))

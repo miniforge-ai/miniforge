@@ -46,6 +46,12 @@
    marked synthetic so it is never mistaken for a real one."
   "ghs_SYNTHETICNOTAREALTOKEN")
 
+(defn- ^{:stratum 0} inline-credential-helper
+  "A two-line credential helper that assigns `token` at the start of its
+   second line, the shape a line-based config parse turns into a key."
+  [token]
+  (str "!f() {\npassword=" token "; echo \"password=$password\"; }; f"))
+
 (defn- ^{:stratum 0} snapshot!
   "Take a snapshot of `dir`, unwrapped. A snapshot that failed comes back
    as nil and fails the assertion that consumes it, which is a clearer
@@ -83,27 +89,27 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Pure-comparison tests
-(deftest ^{:stratum 1} changed-redirect-config-reports-every-kind-of-edit-test
+(deftest ^{:stratum 1} changed-config-reports-every-kind-of-edit-test
   (testing "given identical config → nothing changed"
-    (is (= [] (sut/changed-redirect-config {"remote.origin.url" [host-origin-url]}
-                                           {"remote.origin.url" [host-origin-url]}))))
+    (is (= [] (sut/changed-config {"remote.origin.url" [host-origin-url]}
+                                  {"remote.origin.url" [host-origin-url]}))))
   (testing "given a redirected url → the key with both values"
     (is (= [{:config-key "remote.origin.url"
              :before     [host-origin-url]
              :after      [redirected-origin-url]}]
-           (sut/changed-redirect-config {"remote.origin.url" [host-origin-url]}
-                                        {"remote.origin.url" [redirected-origin-url]}))))
+           (sut/changed-config {"remote.origin.url" [host-origin-url]}
+                               {"remote.origin.url" [redirected-origin-url]}))))
   (testing "given a remote added mid-run → reported, with an empty before"
     (is (= [{:config-key "remote.mirror.url" :before [] :after [redirected-origin-url]}]
-           (sut/changed-redirect-config {} {"remote.mirror.url" [redirected-origin-url]}))))
+           (sut/changed-config {} {"remote.mirror.url" [redirected-origin-url]}))))
   (testing "given a remote removed mid-run → reported, with an empty after"
     (is (= [{:config-key "remote.origin.url" :before [host-origin-url] :after []}]
-           (sut/changed-redirect-config {"remote.origin.url" [host-origin-url]} {}))))
+           (sut/changed-config {"remote.origin.url" [host-origin-url]} {}))))
   (testing "given a multi-valued key whose FIRST value was rewritten → reported"
     (is (= [{:config-key "remote.origin.url"
              :before     [host-origin-url "https://example.invalid/second.git"]
              :after      [redirected-origin-url "https://example.invalid/second.git"]}]
-           (sut/changed-redirect-config
+           (sut/changed-config
             {"remote.origin.url" [host-origin-url "https://example.invalid/second.git"]}
             {"remote.origin.url" [redirected-origin-url "https://example.invalid/second.git"]}))
         "git remote get-url resolves to the first value, so collapsing to the last would miss this")))
@@ -133,6 +139,7 @@
       (try
         (let [snap (snapshot! host)]
           (is (= [host-origin-url] (get-in snap [:redirects "remote.origin.url"])))
+          (is (map? (:command-config snap)))
           (is (= (fixtures/sha-at host "HEAD~1") (get-in snap [:remote-refs tracked-ref]))))
         (finally (fixtures/delete-tree! host))))))
 
@@ -267,3 +274,41 @@
           (fixtures/git! host "worktree" "remove" "--force" linked)
           (fixtures/delete-tree! parent)
           (fixtures/delete-tree! host))))))
+
+(deftest ^{:stratum 1} hooks-path-set-inside-a-linked-worktree-is-drift-test
+  (testing "given core.hooksPath set inside a task worktree → drift, though no remote moved"
+    (let [host   (fixtures/init-host-repo! (fixtures/temp-dir!))
+          parent (fixtures/temp-dir!)
+          linked (str (File. parent "task-worktree"))]
+      (try
+        (fixtures/git! host "worktree" "add" "--quiet" "--detach" linked)
+        (let [before (snapshot! host)
+              _      (fixtures/git! linked "config" "core.hooksPath" (str (File. parent "hooks")))
+              report (sut/drift before (snapshot! host))]
+          (is (false? (:clean? report))
+              "the host's next commit, the operator's own included, would run hooks from that path")
+          (is (= ["core.hookspath"] (mapv :config-key (:command-drift report))))
+          (is (= [] (:redirect-drift report))))
+        (finally
+          (fixtures/git! host "worktree" "remove" "--force" linked)
+          (fixtures/delete-tree! parent)
+          (fixtures/delete-tree! host))))))
+
+(deftest ^{:stratum 1} a-credential-helper-never-reaches-a-snapshot-test
+  (testing "given a token in a credential key and on a helper's second line → neither is held"
+    (let [host   (fixtures/init-host-repo! (fixtures/temp-dir!))
+          helper (inline-credential-helper synthetic-token)]
+      (try
+        (fixtures/git! host "config"
+                       (str "credential.https://x-access-token:" synthetic-token
+                            "@example.invalid.helper")
+                       helper)
+        (let [snap   (snapshot! host)
+              values (get-in snap [:command-config
+                                   "credential.https://***@example.invalid.helper"])]
+          (is (some? snap))
+          (is (not (str/includes? (pr-str snap) synthetic-token))
+              "a line-based parse makes `password=<token>;` a key, and keys are not fingerprinted")
+          (is (= [(sut/fingerprint helper)] values)
+              "the two-line value is one fingerprinted value under the redacted key"))
+        (finally (fixtures/delete-tree! host))))))

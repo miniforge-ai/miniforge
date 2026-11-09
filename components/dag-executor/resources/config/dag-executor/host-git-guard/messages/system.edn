@@ -3,6 +3,11 @@
   :snapshot/remote-urls-failed
   "Could not read redirect config from the host checkout"
 
+  ;; snapshot — `git config --get-regexp` for keys that run commands could
+  ;; not be read
+  :snapshot/command-config-failed
+  "Could not read command-running config from the host checkout"
+
   ;; snapshot — `git rev-parse --git-common-dir` could not be read
   :snapshot/common-dir-failed
   "Could not resolve the git common dir of the host checkout"
@@ -29,9 +34,10 @@
   :guard/host-drifted-before-acquire
   "Acquiring a task worktree of a checkout an earlier run already drifted"
 
-  ;; guarded executor — the post-release check found drift
+  ;; guarded executor — the post-release check found drift in redirect or
+  ;; command config
   :guard/host-drifted-during-run
-  "A task run changed where the host checkout pushes and fetches"
+  "A task run changed the host checkout's remotes or config that runs commands"
 
   ;; guarded executor — the post-release snapshot could not be read, so
   ;; whether the run drifted the checkout is unknown
