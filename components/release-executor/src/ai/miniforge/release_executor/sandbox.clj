@@ -259,45 +259,21 @@
              result))
          result))))))
 
-(defn ^{:stratum 0} create-pr!
-  "Create a pull request using gh CLI inside the sandbox container.
-   Optional exec-opts supports :env for GH_TOKEN injection.
-   Returns {:success? bool :pr-number int :pr-url string :error string}.
+(defn- ^{:stratum 0} current-branch
+  "The branch checked out in the sandbox, or nil when HEAD is detached or
+   git cannot read it."
+  [executor env-id]
+  (let [r (commands/exec! executor env-id pr-lookup/branch-argv)]
+    (when (result/succeeded? r)
+      (not-empty (:output r)))))
 
-   Two robustness guarantees beyond the bare gh call:
-   - A `gh pr create` that exits 0 but prints no PR URL is a FAILURE, not a
-     phantom success — release must never ship a PR doc claiming a PR it
-     never opened.
-   - A branch that already has an open PR (retry/resume) reuses that PR
-     rather than opening a duplicate.
-
-   Title and body are LLM-written and may quote a credential the agent saw;
-   secrets in them are replaced with the redaction marker before gh runs."
-  ([executor env-id pr-opts] (create-pr! executor env-id pr-opts {}))
-  ([executor env-id {:keys [title body base-branch]} exec-opts]
-   (let [base (or base-branch "main")]
-     (or (commands/validate-safe-branch-name base)
-         (let [escaped-title (str/replace (redaction/redact title) "'" "'\\''")
-               escaped-body (str/replace (or (redaction/redact body) "") "'" "'\\''")
-               cmd (str "gh pr create"
-                        " --title '" escaped-title "'"
-                        " --body '" escaped-body "'"
-                        " --base " base)
-               r (commands/exec! executor env-id cmd exec-opts)]
-           (cond
-             (result/succeeded? r)
-             (if-let [pr (commands/parse-pr-ref (:output r ""))]
-               (result/shell-success pr)
-               (result/shell-failure (msg/t :pr/create-unconfirmed
-                                            {:output (str/trim (:output r ""))})
-                                     {:pr-url nil :pr-number nil}))
-
-             (commands/pr-already-exists? (:error r))
-             (commands/reuse-existing-pr! executor env-id exec-opts (:error r))
-
-             :else
-             (result/shell-failure (:error r) (merge {:pr-url nil :pr-number nil}
-                                                     (select-keys r [:timed-out? :interrupted?])))))))))
+(defn- ^{:stratum 0} origin-push-url
+  "The URL a push to origin goes to from the sandbox, or nil when git cannot
+   read it."
+  [executor env-id]
+  (let [r (commands/exec! executor env-id pr-lookup/push-url-argv)]
+    (when (result/succeeded? r)
+      (:output r))))
 
 (defn ^{:stratum 0} diff-stats-range
   "Get diff stats for the changes this branch introduced since branching
@@ -330,6 +306,56 @@
         (commands/count-deftest (:output r ""))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-pr!
+  "Create a pull request using gh CLI inside the sandbox container.
+   Optional exec-opts supports :env for GH_TOKEN injection.
+   Returns {:success? bool :pr-number int :pr-url string :error string}.
+
+   Two robustness guarantees beyond the bare gh call:
+   - A `gh pr create` that exits 0 but prints no PR URL is a FAILURE, not a
+     phantom success — release must never ship a PR doc claiming a PR it
+     never opened.
+   - A branch that already has an open PR (retry/resume) reuses that PR
+     rather than opening a duplicate.
+
+   The head is the branch checked out in the sandbox, named as origin's
+   (`pr-lookup/head-ref`) and passed as `--head`: gh's own head detection
+   can miss a pushed branch when the checkout has a second remote for the
+   same repository. A detached HEAD leaves the head to gh; an unsafe
+   branch name fails without running gh.
+
+   Title and body are LLM-written and may quote a credential the agent saw;
+   secrets in them are replaced with the redaction marker before gh runs."
+  ([executor env-id pr-opts] (create-pr! executor env-id pr-opts {}))
+  ([executor env-id {:keys [title body base-branch]} exec-opts]
+   (let [base (or base-branch "main")]
+     (or (commands/validate-safe-branch-name base)
+         (let [branch (current-branch executor env-id)
+               head   (some->> branch (pr-lookup/head-ref (origin-push-url executor env-id)))]
+           (or (some-> branch commands/validate-safe-branch-name)
+               (let [escaped-title (str/replace (redaction/redact title) "'" "'\\''")
+                     escaped-body (str/replace (or (redaction/redact body) "") "'" "'\\''")
+                     cmd (str "gh pr create"
+                              " --title '" escaped-title "'"
+                              " --body '" escaped-body "'"
+                              " --base " base
+                              (when head (str " --head " head)))
+                     r (commands/exec! executor env-id cmd exec-opts)]
+                 (cond
+                   (result/succeeded? r)
+                   (if-let [pr (commands/parse-pr-ref (:output r ""))]
+                     (result/shell-success pr)
+                     (result/shell-failure (msg/t :pr/create-unconfirmed
+                                                  {:output (str/trim (:output r ""))})
+                                           {:pr-url nil :pr-number nil}))
+
+                   (commands/pr-already-exists? (:error r))
+                   (commands/reuse-existing-pr! executor env-id exec-opts (:error r))
+
+                   :else
+                   (result/shell-failure (:error r) (merge {:pr-url nil :pr-number nil}
+                                                           (select-keys r [:timed-out? :interrupted?])))))))))))
 
 (defn ^{:stratum 1} metrics->result
   "Convert operation metrics to a final result, staging files if no errors."

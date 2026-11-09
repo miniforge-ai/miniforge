@@ -24,6 +24,7 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [clojure.string]
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.release-executor.pr-lookup :as pr-lookup]
    [ai.miniforge.release-executor.sandbox :as sandbox]
    [ai.miniforge.release-executor.sandbox.commands :as commands]))
 
@@ -42,6 +43,11 @@
   (if (vector? command)
     (clojure.string/join " " command)
     (str command)))
+
+(defn- ^{:stratum 0} exit-0
+  "A mock executor reply for a command that succeeds and prints `stdout`."
+  [stdout]
+  {:exit-code 0 :stdout stdout :stderr ""})
 
 (deftest ^{:stratum 0} write-file-roundtrip-base64-test
   (testing "write-file! base64 encoding is valid"
@@ -485,10 +491,32 @@
       (is (:success? result))
       (is (= 42 (:pr-number result)))
       (is (= "https://github.com/org/repo/pull/42" (:pr-url result)))
-      (let [cmd (first @cmds)]
-        (is (clojure.string/includes? cmd "gh pr create"))
+      (let [cmd (some #(when (clojure.string/includes? (cmd-str %) "gh pr create") %) @cmds)]
+        (is (some? cmd))
         (is (clojure.string/includes? cmd "--title"))
         (is (clojure.string/includes? cmd "--base main"))))))
+
+(deftest ^{:stratum 2} create-pr-names-checked-out-branch-test
+  (let [gh-cmds (fn [cmds] (filter #(clojure.string/includes? (cmd-str %) "gh pr create") cmds))
+        open    (fn [branch-output]
+                  (let [[exec cmds] (create-mock-executor
+                                     :responses {(cmd-str pr-lookup/branch-argv)   (exit-0 branch-output)
+                                                 (cmd-str pr-lookup/push-url-argv) (exit-0 "git@github.com:o/r.git\n")
+                                                 "gh pr create" (exit-0 "https://github.com/org/repo/pull/42\n")})]
+                    [(sandbox/create-pr! exec "env-1" {:title "PR" :body "" :base-branch "main"})
+                     @cmds]))]
+    (testing "on a branch → gh is given it as --head, named as origin's"
+      (let [[result cmds] (open "release/x\n")]
+        (is (:success? result))
+        (is (clojure.string/ends-with? (first (gh-cmds cmds)) " --head o:release/x"))))
+    (testing "detached HEAD (no branch printed) → no --head; gh's own detection decides"
+      (let [[result cmds] (open "")]
+        (is (:success? result))
+        (is (not (clojure.string/includes? (first (gh-cmds cmds)) "--head")))))
+    (testing "a branch name unsafe in a shell command → failure, gh not run"
+      (let [[result cmds] (open "a$(id)\n")]
+        (is (not (:success? result)))
+        (is (empty? (gh-cmds cmds)))))))
 
 (deftest ^{:stratum 2} create-pr-failure-test
   (testing "create-pr! returns failure when gh pr create fails"
