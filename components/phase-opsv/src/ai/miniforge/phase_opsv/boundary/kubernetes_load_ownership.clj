@@ -29,6 +29,22 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} admit!
+  "Read and validate durable native ownership without requiring the Pod still to exist."
+  [runtime plan]
+  (check-interruption!)
+  (anomaly/let-ok [_bounded (reporting/admit [runtime plan])]
+    (if-not (valid-arguments? [runtime plan])
+      (refused :invalid-input)
+      (anomaly/let-ok [configured (settings/load-settings (:provider runtime) native/Settings
+                                                        [:kubernetes/node-pool-label :kubernetes/max-resources])
+                      record (effect/read-record (:effects-directory runtime)
+                                                 (get-in plan [:recovery/load :creation-effect/id]))]
+        (check-interruption!)
+        (if (ownership/recorded? configured plan record)
+          {:settings configured :load/creation-record record}
+          (refused :conflict))))))
+
 (defn- ^{:stratum 1} read-owned! [settings record]
   (let [proposal (:effect/proposal record)
         path (str (get-in proposal [:kubernetes/request :path]) "/"
@@ -44,21 +60,12 @@
 
 (defn ^{:stratum 2} read! [runtime plan]
   (try+
-    (check-interruption!)
-    (anomaly/let-ok [_bounded (reporting/admit [runtime plan])]
-      (if-not (valid-arguments? [runtime plan])
-        (refused :invalid-input)
-        (anomaly/let-ok [configured (settings/load-settings (:provider runtime) native/Settings
-                                                          [:kubernetes/node-pool-label :kubernetes/max-resources])
-                        record (effect/read-record (:effects-directory runtime)
-                                                   (get-in plan [:recovery/load :creation-effect/id]))]
-          (check-interruption!)
-          (if (ownership/recorded? configured plan record)
-            (read-owned! configured record)
-            (refused :conflict)))))
+    (anomaly/let-ok [admitted (admit! runtime plan)]
+      (read-owned! (:settings admitted) (:load/creation-record admitted)))
     (catch InterruptedException interrupted
       (.interrupt (Thread/currentThread))
       (throw interrupted))
     (catch exceptions/nonfatal? _ (refused :unavailable))))
 
-(comment ::read-only-no-create-retry-gate-release-stop-delete-or-inferred-termination)
+(comment
+  (read! {} {}))

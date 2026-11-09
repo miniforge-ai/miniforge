@@ -49,6 +49,7 @@
    [ai.miniforge.phase-opsv.boundary.retained-recovery-plan :as retained-recovery]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-provider :as native-load-provider]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-ownership :as load-ownership]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-absence :as load-absence]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-quiescence :as load-quiescence]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop :as load-stop]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-start :as load-start]
@@ -80,6 +81,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} OPSVAdapter protocol/OPSVAdapter)
+
+(def ^{:stratum 0} observe-kubernetes-load-absence!
+  "Read owned Pod presence between fresh original-cluster and namespace identity checks.
+   Input is the closed retained recovery reference/runtime contract, without an effect ID.
+   Returns explicit :absent, :present or :unresolved resource state, or an admission anomaly.
+   Absence proves neither container termination nor original-baseline recovery; no effects are authorized."
+  load-absence/observe!)
 
 (def ^{:stratum 0} prepare-kubernetes-load-stop-proposal!
   "Prepare an exact conditional stop proposal from current retained recovery approval and fresh owned identity.
