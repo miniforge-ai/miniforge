@@ -926,6 +926,30 @@
       (is (false? (:shed? r)) "a trivial prompt still fits")
       (is (false? (:over-after-shed? r)) "not forced over-budget")))
 
+  (testing "on the shed path a :keep-inline? file (the codex pin) keeps its
+            body while the other files drop to the manifest"
+    (let [pin {:path ".miniforge/codex-consider.md"
+               :content "PIN-BODY-WORRIES" :keep-inline? true}
+          r (assemble-within-budget "do the thing" [pin (big-file 300000)]
+                                    "system" "codellama-34b" 0)]
+      (is (true? (:shed? r)))
+      (is (false? (:over-after-shed? r)))
+      (is (= 2 (:file-count r)))
+      (is (str/includes? (:user-prompt r) "PIN-BODY-WORRIES"))
+      (is (str/includes? (:user-prompt r) "big.clj"))
+      (is (not (str/includes? (:user-prompt r) (apply str (repeat 5000 \x)))))))
+
+  (testing "a kept body that alone overflows the window drops to the manifest
+            rather than failing the plan"
+    (let [pin {:path ".miniforge/codex-consider.md"
+               :content (apply str (repeat 300000 \z)) :keep-inline? true}
+          r (assemble-within-budget "do the thing" [pin (big-file 100)]
+                                    "system" "codellama-34b" 0)]
+      (is (true? (:shed? r)))
+      (is (false? (:over-after-shed? r)))
+      (is (str/includes? (:user-prompt r) "codex-consider.md"))
+      (is (not (str/includes? (:user-prompt r) (apply str (repeat 5000 \z)))))))
+
   (testing "irreducible overflow (huge spec, no files) → over-after-shed?, no shed"
     (let [r (assemble-within-budget (apply str (repeat 300000 \y)) []
                                     "system" "codellama-34b" 0)]

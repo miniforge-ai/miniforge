@@ -34,9 +34,9 @@
 <text x="688" y="168" font-size="19" fill="#333" font-weight="bold">Push: the pin</text>
 <text x="688" y="194" font-size="16" fill="#333">For plan and implement, the rendered consultation is placed in the</text>
 <text x="688" y="217" font-size="16" fill="#333">agent&#x27;s context cache at .miniforge/codex-consider.md. The path is</text>
-<text x="688" y="240" font-size="16" fill="#333">virtual and never on disk. Its body is also inlined in the prompt,</text>
-<text x="688" y="263" font-size="16" fill="#333">unless the planner sheds file bodies to a manifest to fit its window.</text>
-<text x="688" y="286" font-size="16" fill="#333">Implement&#x27;s secondary situation appends to the same pin.</text>
+<text x="688" y="240" font-size="16" fill="#333">virtual and never on disk. Its body is also inlined in the prompt, and</text>
+<text x="688" y="263" font-size="16" fill="#333">stays inlined when the planner sheds other file bodies to fit its</text>
+<text x="688" y="286" font-size="16" fill="#333">window. Implement&#x27;s secondary situation appends to the same pin.</text>
 <rect x="672" y="386" width="552" height="176" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
 <text x="688" y="414" font-size="19" fill="#333" font-weight="bold">Push: in the prompt</text>
 <text x="688" y="440" font-size="16" fill="#333">Review and release have no existing-files channel, so they receive the</text>
