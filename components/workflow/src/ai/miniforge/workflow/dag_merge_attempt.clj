@@ -31,6 +31,8 @@
    [ai.miniforge.workflow.dag-merge-exec :as merge-exec]
    [ai.miniforge.workflow.dag-merge-git :as merge-git]
    [ai.miniforge.workflow.merge-resolution :as merge-resolution]
+   [ai.miniforge.workflow.messages :as messages]
+   [ai.miniforge.workflow.stop-signal :as stop-signal]
    [babashka.fs :as fs]
    [clojure.string :as str]))
 
@@ -148,7 +150,29 @@
                                       extras))
       (anomaly/ref-write-failed-anomaly task-id ref-name commit-sha upd))))
 
-(defn ^{:stratum 0} derive-resolution-overrides
+(defn- ^{:stratum 0} stop-guarded-edit-fn
+  "`edit` (a resolution agent-edit-fn) that does nothing once
+   `control-state` is stopped. A cancelled agent call returns an error
+   response, and the resolution loop would call the agent again."
+  [control-state edit]
+  (fn [& args]
+    (when-not (stop-signal/stopped? control-state) (apply edit args))))
+
+(defn- ^{:stratum 0} stop-guarded-verify-fn
+  "`verify` (a resolution verify-fn) that fails once `control-state` is
+   stopped, so a resolution the cancel cut short is never committed or
+   cached under the task's merge ref. The stop is read again after
+   `verify` returns, so a cancel during verification wins over its pass."
+  [control-state verify]
+  (fn [worktree-path]
+    (let [result (when-not (stop-signal/stopped? control-state) (verify worktree-path))]
+      (if (stop-signal/stopped? control-state)
+        (response/error (messages/t :status/stopped-control) {:data {:reason :run-stopped}})
+        result))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} derive-resolution-overrides
   "Build the resolution-overrides map handed to `resolve-conflict!`.
    Combines:
    - explicit overrides on `context` under `:dag/resolution-overrides`
@@ -161,18 +185,25 @@
    tests stay free to inject deterministic mocks. With neither
    override nor backend present, the resolution loop falls back to
    the namespace-default no-op stub (preserves Stage 2B behaviour for
-   non-LLM contexts)."
+   non-LLM contexts). With a control state on `context`, the edit fn
+   (explicit or derived) is not called once the run is stopped, and
+   verify then fails, so nothing is committed."
   [context]
   (let [explicit (get context :dag/resolution-overrides)
         llm-backend (:llm-backend context)
+        control-state (:control-state context)
         auto (when (and llm-backend (not (:agent-edit-fn explicit)))
                {:agent-edit-fn
                 (merge-resolution/agent-driven-edit-fn
                  (cond-> {:llm-backend llm-backend}
-                   (:logger context) (assoc :logger (:logger context))))})]
-    (merge auto explicit)))
-
-;------------------------------------------------------------------------------ Layer 1
+                   (:logger context) (assoc :logger (:logger context))))})
+        overrides (merge auto explicit)
+        edit (:agent-edit-fn overrides)
+        verify (get overrides :verify-fn merge-resolution/always-pass-verify-fn)]
+    ;; After a cancel the loop ends within its budget, with no LLM call and no commit.
+    (cond-> overrides
+      (and control-state edit) (assoc :agent-edit-fn (stop-guarded-edit-fn control-state edit))
+      control-state (assoc :verify-fn (stop-guarded-verify-fn control-state verify)))))
 
 (defn ^{:stratum 1} attempt-resolution!
   "Spec §6.1 conflict path. The merge produced a conflict; spawn the
