@@ -7,6 +7,7 @@
             [ai.miniforge.effect-transaction.interface :as effect]
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.opsv-actuation.interface :as actuation]
+            [ai.miniforge.phase-opsv.effect-authority :as authority]
             [ai.miniforge.phase-opsv.pr-model :as model]
             [ai.miniforge.phase-opsv.run-control :as control]
             [ai.miniforge.phase-opsv.messages :as msg]))
@@ -17,13 +18,7 @@
   (or (true? (:stopped? (actuation/mutation-status (:fence runtime))))
       (when-let [handle (:control runtime)] (control/stopped? handle))))
 
-(defn ^{:stratum 0} abandon! [runtime issued now result]
-  (if-not (anomaly/anomaly? result)
-    result
-    (let [revoked (grant/revoke-stored! (:authority-directory runtime)
-                                       (:grant/id issued) :revocation/superseded now)]
-      (cond-> (assoc-in result [:anomaly/data :grant/id] (:grant/id issued))
-        (anomaly/anomaly? revoked) (assoc-in [:anomaly/data :grant/revocation-failure] revoked)))))
+(def ^{:stratum 0} abandon! authority/abandon!)
 
 (defn ^{:stratum 0} refusal [reason]
   {:effect/outcome :failed :effect/failure (msg/ts reason)})
