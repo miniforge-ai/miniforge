@@ -1,0 +1,14 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
+{:agent-environment-kubernetes/messages
+ {:anomalies.agent-environment-kubernetes/invalid-settings "Kubernetes provider settings failed validation"
+  :anomalies.agent-environment-kubernetes/kubectl-timeout "kubectl did not finish before its deadline"
+  :anomalies.agent-environment-kubernetes/kubectl-unavailable "kubectl could not be started"
+  :anomalies.agent-environment-kubernetes/target-missing "The namespace no longer carries the environment's UID"
+  :anomalies.agent-environment-kubernetes/file-write-failed "The file could not be written in the environment"
+  :anomalies.agent-environment-kubernetes/file-read-failed "The file could not be read in the environment"
+  :anomalies.agent-environment-kubernetes/cluster-unreachable "The configured cluster context is not reachable"
+  :anomalies.agent-environment-kubernetes/runtime-class-missing "The RuntimeClass for the requested isolation is not installed"
+  :anomalies.agent-environment-kubernetes/no-eligible-nodes "No node matches the requested isolation's node selector"}}

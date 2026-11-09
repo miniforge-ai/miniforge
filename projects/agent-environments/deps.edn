@@ -7,6 +7,7 @@
 
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
         ai.miniforge/agent-environment {:local/root "../../components/agent-environment"}
+        ai.miniforge/agent-environment-kubernetes {:local/root "../../components/agent-environment-kubernetes"}
         ai.miniforge/agent-worker {:local/root "../../components/agent-worker"}
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}
         ai.miniforge/config {:local/root "../../components/config"}
