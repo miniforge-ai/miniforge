@@ -53,6 +53,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop :as load-stop]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-start :as load-start]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup :as load-cleanup]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup-provider :as native-load-cleanup-provider]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop-provider :as native-load-stop-provider]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
@@ -95,6 +96,13 @@
    Requires durable creation ownership and fresh not-started or physically terminated observation.
    Returns a proposal or anomaly, never authority, provider mutation or proof of completed cleanup."
   load-cleanup/prepare!)
+
+(def ^{:stratum 0} cleanup-kubernetes-load-pod!
+  "Submit one exact noncascading cleanup through a required trusted synchronous dispatch callback.
+   Runtime carries context/recovery input; record must be granted and committing. Returns outcome or anomaly.
+   Requires current effect admission, separate exact recovery authority and a six-argument pinned commit.
+   An acknowledgement proves neither resource absence nor baseline recovery."
+  native-load-cleanup-provider/delete!)
 
 (def ^{:stratum 0} stop-kubernetes-load-pod!
   "Execute one exact deadline patch through a required trusted synchronous dispatch callback.

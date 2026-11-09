@@ -29,22 +29,22 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} submit! [settings record until options expected-status report refused]
+(defn- ^{:stratum 1} submit! [settings record until options accepted-statuses report refused]
   (let [remaining (io/remaining-ms until)]
     (if-not (submission-allowed? remaining)
       (refused)
       (let [pending (http/start! (assoc options :timeout (min remaining (:timeout options))))
-            operation (partial response/observe! settings until pending expected-status)
+            operation (partial response/observe! settings until pending accepted-statuses)
             observed (io/owned-result! operation (partial http/release! pending))]
         (when-not (pos? (io/remaining-ms until)) (throw (TimeoutException.)))
         (report record observed)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} send! [settings record expected-status report refused]
+(defn ^{:stratum 2} send! [settings record accepted-statuses report refused]
   (let [bounded (bounded-settings settings record)
         until (io/deadline (:kubernetes/timeout-ms bounded))
         options (request-options bounded record)]
-    (submit! bounded record until options expected-status report refused)))
+    (submit! bounded record until options accepted-statuses report refused)))
 
 (comment ::shared-owned-future-deadline-byte-limit-strict-json-and-no-redirect-client)
