@@ -36,7 +36,8 @@
 
 (defn- ^{:stratum 0} cleanup!
   [c subject target uid]
-  (let [steps (:deprovision/steps (protocol/deprovision! (support/provider c) (assoc target :target/uid uid)))]
+  (let [steps (support/reported-steps (protocol/deprovision! (support/provider c) (assoc target :target/uid uid))
+                                      :deprovision/steps)]
     (controller/record! c subject :environment/release (receipt/steps-outcome steps) steps
                         :anomalies.agent-environment/provisioning-failed)))
 
@@ -78,7 +79,7 @@
                 :target/uid nil
                 :target/generation generation}
         provisioned (protocol/provision! (support/provider c) target request)
-        steps (:provision/steps provisioned)
+        steps (support/reported-steps provisioned :provision/steps)
         env (support/environment request target (or (:provision/uid provisioned) (recovered-uid c target steps)))]
     (if (and env (= :outcome/applied (receipt/steps-outcome steps)))
       (do (controller/settle-provision! c request generation :state/provisioned env)
