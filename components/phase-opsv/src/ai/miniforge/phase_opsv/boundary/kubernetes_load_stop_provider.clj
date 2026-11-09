@@ -8,9 +8,7 @@
             [ai.miniforge.phase-opsv.boundary.http-transport :as transport]
             [ai.miniforge.phase-opsv.boundary.kubernetes-effect-http :as http]
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop :as stop]
-            [ai.miniforge.phase-opsv.boundary.kubernetes-settings :as settings]
-            [ai.miniforge.phase-opsv.boundary.verification-reporting :as reporting]
-            [ai.miniforge.phase-opsv.kubernetes-effect-schema :as native]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-load-recovery-provider :as admission]
             [ai.miniforge.phase-opsv.kubernetes-load-stop-outcome :as outcome]
             [ai.miniforge.phase-opsv.kubernetes-load-stop-provider-schema :as schema]
             [ai.miniforge.phase-opsv.messages :as msg]
@@ -20,29 +18,17 @@
 
 (def ^{:stratum 0 :private true} valid-arguments? (m/validator schema/Arguments))
 
-(defn- ^{:stratum 0} invalid []
-  (anomaly/anomaly :invalid-input (msg/ts :load/invalid-stop-provider) {}))
-
 (defn- ^{:stratum 0} diagnostics []
   (effect/provider-dispatch-diagnostics (msg/ts :load/stop-unconfirmed) (msg/ts :load/invalid-stop-provider)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} admit [runtime record dispatch]
-  (anomaly/let-ok [_bounded (reporting/admit [(:input runtime) record])]
-    (if (valid-arguments? [runtime record dispatch])
-      (settings/load-settings (get-in runtime [:input :ownership/runtime :provider]) native/Settings
-                              [:kubernetes/node-pool-label :kubernetes/max-resources])
-      (invalid))))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} patch! [runtime record dispatch]
-  (anomaly/let-ok [configured (admit runtime record dispatch)
+(defn ^{:stratum 1} patch! [runtime record dispatch]
+  (anomaly/let-ok [configured (admission/admit runtime record dispatch valid-arguments? :load/invalid-stop-provider)
                   prepared (stop/prepare! (:context runtime) (:input runtime))]
     (if (= prepared (:effect/proposal record))
       (effect/call-with-provider-dispatch! dispatch
-        (partial http/send! configured record transport/success-status outcome/report outcome/refused) (diagnostics))
+        (partial http/send! configured record #{transport/success-status} outcome/report outcome/refused) (diagnostics))
       (anomaly/anomaly :conflict (msg/ts :load/stop-request-refused) {}))))
 
 (comment ::dispatch-does-not-establish-authority-host-must-independently-admit-issue-and-pin-the-current-grant)

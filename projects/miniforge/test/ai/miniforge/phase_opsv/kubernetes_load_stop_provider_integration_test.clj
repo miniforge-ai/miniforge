@@ -16,8 +16,8 @@
 (defn- ^{:stratum 0} check-confirmed [{:keys [runtime] :as fixture}]
   (let [[result calls] (fixtures/execute fixture)
         patch (first (fixtures/mutations calls))
-        payload (get-in fixture [:stop/proposal :kubernetes/request])
-        stored (effect/read-record (:effects-directory runtime) (:effect/id (:stop/record fixture)))]
+        payload (get-in fixture [:recovery/proposal :kubernetes/request])
+        stored (effect/read-record (:effects-directory runtime) (:effect/id (:recovery/record fixture)))]
     (is (= :succeeded (:effect/state result)))
     (is (= result stored))
     (is (= 2 (count calls)))
@@ -33,14 +33,14 @@
     (is (nil? (:recovery/verified? result)))))
 
 (defn- ^{:stratum 0} check-current-retention [fixture]
-  (let [changed (assoc-in fixture [:stop/runtime :context :execution/opts
+  (let [changed (assoc-in fixture [:recovery/runtime :context :execution/opts
                                   :opsv/recovery-plan-admission :recovery/approved-plan-hashes] #{})
         [result calls] (fixtures/execute changed)]
     (is (not= :succeeded (:effect/state result)))
     (is (empty? calls))))
 
 (defn- ^{:stratum 0} check-invalid-runtime [transform fixture]
-  (let [[result calls] (fixtures/execute (update fixture :stop/runtime transform))]
+  (let [[result calls] (fixtures/execute (update fixture :recovery/runtime transform))]
     (is (not= :succeeded (:effect/state result)))
     (is (empty? calls))))
 
@@ -50,7 +50,7 @@
     (is (empty? (fixtures/mutations calls)))))
 
 (defn- ^{:stratum 0} check-rebound-payload [fixture]
-  (let [proposal (:stop/proposal fixture)
+  (let [proposal (:recovery/proposal fixture)
         payload (assoc-in (:kubernetes/request proposal) [:body 2 "value"] 2)
         changed (-> proposal (assoc :kubernetes/request payload)
                     (assoc-in [:opsv/experiment :opsv/payload-hash] (hash/content-hash payload)))]
@@ -60,10 +60,10 @@
         (is (empty? (fixtures/mutations calls)))))))
 
 (defn- ^{:stratum 0} check-independent-pin [fixture]
-  (when-let [rebound (fixtures/rebind! fixture (:stop/proposal fixture))]
-    (let [issued-id (:stop/issued-id fixture)
-          [result calls] (fixtures/execute (assoc rebound :stop/issued-id issued-id))]
-      (is (not= issued-id (:stop/issued-id rebound)))
+  (when-let [rebound (fixtures/rebind! fixture (:recovery/proposal fixture))]
+    (let [issued-id (:recovery/issued-id fixture)
+          [result calls] (fixtures/execute (assoc rebound :recovery/issued-id issued-id))]
+      (is (not= issued-id (:recovery/issued-id rebound)))
       (is (not= :succeeded (:effect/state result)))
       (is (empty? calls)))))
 
@@ -78,13 +78,13 @@
         revoked (grant/revoke-stored! directory (:effect/grant-id record) :revocation/operator clock/now)
         [result calls] (fixtures/execute fixture)]
     (is (some? (:grant/revoked-at revoked)))
-    (is (not= (:effect/grant-id record) (:stop/issued-id fixture)))
+    (is (not= (:effect/grant-id record) (:recovery/issued-id fixture)))
     (is (= :succeeded (:effect/state result)))
     (is (= 1 (count (fixtures/mutations calls))))))
 
 (defn- ^{:stratum 0} check-revoked-recovery [fixture]
-  (let [directory (:stop/grants-directory fixture)
-        revoked (grant/revoke-stored! directory (:stop/issued-id fixture) :revocation/operator clock/now)
+  (let [directory (:recovery/grants-directory fixture)
+        revoked (grant/revoke-stored! directory (:recovery/issued-id fixture) :revocation/operator clock/now)
         [result calls] (fixtures/execute fixture)]
     (is (some? (:grant/revoked-at revoked)))
     (is (not= :succeeded (:effect/state result)))

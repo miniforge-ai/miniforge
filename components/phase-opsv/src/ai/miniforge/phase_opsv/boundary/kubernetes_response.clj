@@ -33,12 +33,12 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} observe!
-  ([settings until pending] (observe! settings until pending http/success-status))
-  ([settings until pending expected-status]
+  ([settings until pending] (observe! settings until pending #{http/success-status}))
+  ([settings until pending accepted-statuses]
    (let [{:keys [status encodings body]} (http/response-fields (io/await! pending until))]
      (cond
        (= http/not-found-status status) not-found
-       (not= expected-status status) (status-failure status)
+       (not (contains? accepted-statuses status)) (status-failure status)
        (not (http/unencoded? encodings)) (invalid-response)
        :else (document! settings until body)))))
 

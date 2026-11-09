@@ -44,7 +44,7 @@
     (let [input (binding/input record)]
       (if (and (valid-load? [(:limits input) (:runtime input)]) (binding/matches? configured record input))
         (effect/call-with-provider-dispatch! dispatch
-          (partial http/send! configured record transport/created-status outcome/report outcome/refused) (diagnostics))
+          (partial http/send! configured record #{transport/created-status} outcome/report outcome/refused) (diagnostics))
         (invalid)))))
 
 (comment ::required-trusted-dispatch-no-auto-retry-release-or-reconciliation-by-name)
