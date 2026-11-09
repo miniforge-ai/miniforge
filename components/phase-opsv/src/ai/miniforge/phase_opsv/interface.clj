@@ -52,6 +52,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-quiescence :as load-quiescence]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop :as load-stop]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-start :as load-start]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-baseline-restoration :as baseline-restoration]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup :as load-cleanup]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup-provider :as native-load-cleanup-provider]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop-provider :as native-load-stop-provider]
@@ -90,6 +91,13 @@
    Requires a never-started worker. Returns proposal or anomaly, never permission, mutation or traffic proof.
    Native execution still requires current N4/N8 admission, exact forward authority and a pinned commit."
   load-start/prepare!)
+
+(def ^{:stratum 0} prepare-kubernetes-baseline-restoration-proposal!
+  "Prepare original-baseline replica restoration after current retained recovery admission and complete native reads.
+   Input: closed recovery reference/input, restoration/provider settings and distinct effect/id; no count or capture.
+   Bind the original desired count and freshly observed UID/resource version, preserving bounded recovery limits.
+   Returns proposal or anomaly, never permission, mutation or proof of restored runtime invariants."
+  baseline-restoration/prepare!)
 
 (def ^{:stratum 0} prepare-kubernetes-load-cleanup-proposal!
   "Prepare an exact UID/revision-pinned deletion request from current retained recovery intent.
