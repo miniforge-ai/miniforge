@@ -48,6 +48,10 @@ Unconfirmed acknowledgements and timeout retain durable uncertainty; a repeat
 commit does not dispatch. Repeated, cross-thread, absent or late-failing callbacks
 cannot repeat or fabricate the patch outcome.
 
+The timeout injection starts inside the synchronous dispatch callback, after the
+ownership GET and canonical reconstruction. The completed GET keeps its normal
+budget; only the deliberately pending PATCH future receives the short wait.
+
 - Strict clj-kondo: zero warnings/errors; actual inferred strata at most three.
 - Polylith structure, both consuming JVM products and task classpaths pass.
 - Fresh CLI build; source and isolated package: 68 tests / 1,538 assertions.

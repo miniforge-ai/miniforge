@@ -8,6 +8,7 @@
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.execution-grant.opsv-commit-fixtures :as commit]
             [ai.miniforge.execution-grant.opsv-scope-fixtures :as clock]
+            [ai.miniforge.phase-opsv.boundary.bounded-io :as io]
             [ai.miniforge.phase-opsv.boundary.http-transport :as http]
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.kubernetes-load-stop-authority-fixtures :as authority]
@@ -20,6 +21,9 @@
 
 (def ^{:stratum 0} confirmed-revision
   "A concrete acknowledged revision distinct from the precondition read." "confirmed-stop-revision")
+
+(def ^{:stratum 0 :private true} pending-timeout-ms
+  "Expire the pending PATCH wait only after ownership GET and canonical reconstruction finish." 1)
 
 (defn- ^{:stratum 0} respond! [calls pod pending options]
   (swap! calls conj options)
@@ -47,6 +51,10 @@
              :stop/proposal proposal :stop/record record :stop/issued-id (:grant/id issued)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} timeout-dispatch! [operation]
+  (with-redefs [io/remaining-ms (constantly pending-timeout-ms)]
+    (dispatch/dispatch! operation)))
 
 (defn ^{:stratum 1} response [pod]
   (-> pod (assoc-in ["spec" "activeDeadlineSeconds"] 1)

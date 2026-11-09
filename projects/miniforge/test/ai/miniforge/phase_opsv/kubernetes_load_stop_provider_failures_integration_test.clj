@@ -4,7 +4,6 @@
 (ns ai.miniforge.phase-opsv.kubernetes-load-stop-provider-failures-integration-test
   (:require [ai.miniforge.effect-transaction.interface :as effect]
             [ai.miniforge.effect-transaction.provider-dispatch-fixtures :as dispatch]
-            [ai.miniforge.phase-opsv.boundary.bounded-io :as io]
             [ai.miniforge.phase-opsv.kubernetes-load-stop-provider-fixtures :as fixtures]
             [ai.miniforge.phase-opsv.prometheus-test-support :as wire]
             [cheshire.core :as json]
@@ -12,9 +11,6 @@
   (:import [java.util.concurrent CompletableFuture]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0 :private true} expired-wait-ms
-  "A pending owned future must time out immediately without sleeping or depending on host scheduling." 1)
 
 (defn- ^{:stratum 0} check-unconfirmed [transform fixture]
   (let [response (transform (fixtures/response (:pod fixture)))
@@ -37,12 +33,9 @@
     (is (= :succeeded (:effect/state result)))
     (is (= 1 (count (fixtures/mutations calls))))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} check-timeout [{:keys [runtime] :as fixture}]
+(defn- ^{:stratum 0} check-timeout [{:keys [runtime] :as fixture}]
   (let [pending (CompletableFuture.)
-        [result calls] (with-redefs [io/remaining-ms (constantly expired-wait-ms)]
-                         (fixtures/execute-response fixture pending dispatch/dispatch!))
+        [result calls] (fixtures/execute-response fixture pending fixtures/timeout-dispatch!)
         [retried retried-calls] (fixtures/execute fixture)]
     (is (= :unknown-outcome (:effect/state result)))
     (is (= result (effect/read-record (:effects-directory runtime) (:effect/id (:stop/record fixture)))))
@@ -50,6 +43,8 @@
     (is (.isCancelled pending))
     (is (not= :succeeded (:effect/state retried)))
     (is (empty? retried-calls))))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} foreign-incomplete-or-unconfirmed-patch-receipts-never-prove-stop-or-recovery-test
   (doseq [transform [#(assoc-in % ["metadata" "uid"] "foreign-uid")
@@ -68,9 +63,7 @@
   (doseq [callback [dispatch/twice! dispatch/after-result!]]
     (fixtures/with-proposed (partial check-once callback))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(deftest ^{:stratum 2} timed-out-patch-cancels-its-owned-future-and-durable-uncertainty-prevents-a-retry-test
+(deftest ^{:stratum 1} timed-out-patch-cancels-its-owned-future-and-durable-uncertainty-prevents-a-retry-test
   (fixtures/with-proposed check-timeout))
 
 (comment
