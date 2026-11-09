@@ -25,10 +25,12 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} issue! [fixture proposal]
-  (let [issuance (assoc (load/issuance-request proposal) :workflow-run/status :cancelled)
+  (let [status (get fixture :workflow-run/status :cancelled)
+        issuance (assoc (load/issuance-request proposal) :workflow-run/status status)
         issued (grant/issue-for-effect (:recovery/breach-directory fixture) issuance clock/now)
         issued? (and (not (anomaly/anomaly? issued)) (uuid? (:grant/id issued)))]
     (is issued?)
     (when issued? (registered! fixture issued))))
 
-(comment ::real-root-issuance-with-breach-history-isolated-from-grants-and-transactions)
+(comment
+  (with-stores {:directory "/tmp/example"}))

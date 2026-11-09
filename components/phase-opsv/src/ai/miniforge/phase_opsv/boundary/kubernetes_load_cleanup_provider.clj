@@ -8,7 +8,7 @@
             [ai.miniforge.phase-opsv.boundary.http-transport :as transport]
             [ai.miniforge.phase-opsv.boundary.kubernetes-effect-http :as http]
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup :as cleanup]
-            [ai.miniforge.phase-opsv.boundary.kubernetes-load-recovery-provider :as admission]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-owned-load-provider :as admission]
             [ai.miniforge.phase-opsv.kubernetes-load-cleanup-outcome :as outcome]
             [ai.miniforge.phase-opsv.kubernetes-load-cleanup-provider-schema :as schema]
             [ai.miniforge.phase-opsv.messages :as msg]
@@ -25,11 +25,10 @@
 
 (defn ^{:stratum 1} delete! [runtime record dispatch]
   (anomaly/let-ok [configured (admission/admit runtime record dispatch valid-arguments? :load/invalid-cleanup-provider)
-                  prepared (cleanup/prepare! (:context runtime) (:input runtime))]
-    (if (= prepared (:effect/proposal record))
-      (effect/call-with-provider-dispatch! dispatch
-        (partial http/send! configured record #{transport/success-status transport/accepted-status}
-                 outcome/report outcome/refused) (diagnostics))
-      (anomaly/anomaly :conflict (msg/ts :load/cleanup-request-refused) {}))))
+                  _canonical (admission/reconstruct! runtime record cleanup/prepare! :load/cleanup-request-refused)]
+    (effect/call-with-provider-dispatch! dispatch
+      (partial http/send! configured record #{transport/success-status transport/accepted-status}
+               outcome/report outcome/refused) (diagnostics))))
 
-(comment ::independent-current-effect-admission-exact-recovery-grant-and-pinned-commit-remain-mandatory)
+(comment
+  (delete! {} {} identity))

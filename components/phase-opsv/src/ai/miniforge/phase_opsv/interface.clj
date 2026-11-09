@@ -56,6 +56,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup :as load-cleanup]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup-provider :as native-load-cleanup-provider]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop-provider :as native-load-stop-provider]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-provider :as native-load-start-provider]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -111,6 +112,13 @@
    Requires current effect admission, separate exact recovery authority and a six-argument pinned commit.
    An acknowledgement proves neither resource absence nor baseline recovery."
   native-load-cleanup-provider/delete!)
+
+(def ^{:stratum 0} start-kubernetes-load-pod!
+  "Submit one UID/revision/gate-pinned forward start through required synchronous provider dispatch.
+   Runtime carries context and the retained recovery-reference input; record must be granted and committing.
+   Requires current N4/N8 effect admission, separate exact forward authority and an independently pinned commit.
+   Returns outcome or anomaly. Gate-release acknowledgement proves neither actual traffic nor verified SLOs."
+  native-load-start-provider/patch!)
 
 (def ^{:stratum 0} stop-kubernetes-load-pod!
   "Execute one exact deadline patch through a required trusted synchronous dispatch callback.
