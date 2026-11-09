@@ -33,6 +33,8 @@ does not change and Docker gets the same bound.
    `build-resource-args` emits `--pids-limit <n>` when it is set.
 3. N11-delta §4: the `:resource-limits` capability now names process-count
    limits.
+4. `registry-test`: the commit hook's stratum-lint added a `Layer 0` heading
+   and `^{:stratum 0}` metadata to each test. No test body changed.
 
 ## Testing Plan
 
