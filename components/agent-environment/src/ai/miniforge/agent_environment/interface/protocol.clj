@@ -31,11 +31,12 @@
      can satisfy `request` now.")
   (provision! [provider target request]
     "Create the environment named by `target` (`:target/namespace`,
-     `:target/generation`). Returns `{:provision/uid s :provision/steps
-     [Step]}`; a failed step leaves earlier steps applied and later ones
-     unattempted.")
+     `:target/generation`), recording the generation on what it creates.
+     Returns `{:provision/uid s :provision/steps [Step]}`; a failed step
+     leaves earlier steps applied and later ones unattempted.")
   (observe [provider target]
-    "`{:observed/uid s-or-nil :observed/ready? bool}` for `target`.")
+    "`{:observed/uid s-or-nil :observed/generation n-or-nil :observed/ready?
+     bool}` for `target`; the generation is the one recorded at provision.")
   (exec! [provider target command]
     "Run `{:exec/argv [s] :exec/timeout-ms n}`. Returns `{:exec/exit n
      :exec/stdout s :exec/stderr s}`. Refuses a target whose UID differs.")

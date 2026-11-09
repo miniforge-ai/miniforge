@@ -18,7 +18,8 @@
 (ns ai.miniforge.agent-environment.lifecycle.provisioning
   "Provisioning a claimed generation: a complete provision becomes the
    key's environment; one that stops part way is receipted, cleaned up at
-   once, and left `cleanup-uncertain` when the cleanup is not confirmed."
+   once, and left `cleanup-uncertain` when the cleanup is not confirmed. An
+   object whose ownership is not shown is never deleted by name."
   (:require
    [ai.miniforge.agent-environment.controller :as controller]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]
@@ -29,13 +30,30 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} maybe-created
+  "Step outcomes after which something may exist to recover."
+  #{:outcome/applied :outcome/uncertain})
+
 (defn- ^{:stratum 0} cleanup!
   [c subject target uid]
-  (let [steps (:deprovision/steps (protocol/deprovision! (support/provider c) (assoc target :target/uid uid)))]
+  (let [steps (support/reported-steps (protocol/deprovision! (support/provider c) (assoc target :target/uid uid))
+                                      :deprovision/steps)]
     (controller/record! c subject :environment/release (receipt/steps-outcome steps) steps
                         :anomalies.agent-environment/provisioning-failed)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} recovered-uid
+  "A provider that applied (or may have applied) steps but reported no UID
+   is asked for it, so the environment still gets a lease. The UID is
+   adopted only from an object carrying this generation, so one recreated
+   under the name is not ours; nil when nothing may exist or ownership is
+   not shown."
+  [c target steps]
+  (when (some #(contains? maybe-created (:step/outcome %)) steps)
+    (let [observed (protocol/observe (support/provider c) target)]
+      (when (= (:target/generation target) (:observed/generation observed))
+        (:observed/uid observed)))))
 
 (defn- ^{:stratum 1} provision-failed
   [c acting request target environment steps]
@@ -43,9 +61,9 @@
         outcome (support/unconfirmed-if-anonymous (receipt/steps-outcome steps) environment)
         acquired (controller/record! c subject :environment/acquire outcome steps
                                      :anomalies.agent-environment/provisioning-failed)
-        cleaned (when (not= :outcome/failed outcome)
+        cleaned (when (and environment (not= :outcome/failed outcome))
                   (cleanup! c subject target (:environment/uid environment)))
-        state (if (contains? #{nil :outcome/applied} (:receipt/outcome cleaned))
+        state (if (or (= :outcome/failed outcome) (= :outcome/applied (:receipt/outcome cleaned)))
                 :state/released
                 :state/cleanup-uncertain)]
     (controller/settle-provision! c request (:target/generation target) state environment)
@@ -61,8 +79,8 @@
                 :target/uid nil
                 :target/generation generation}
         provisioned (protocol/provision! (support/provider c) target request)
-        steps (:provision/steps provisioned)
-        env (support/environment request target (:provision/uid provisioned))]
+        steps (support/reported-steps provisioned :provision/steps)
+        env (support/environment request target (or (:provision/uid provisioned) (recovered-uid c target steps)))]
     (if (and env (= :outcome/applied (receipt/steps-outcome steps)))
       (do (controller/settle-provision! c request generation :state/provisioned env)
           (controller/record! c (support/subject-of acting request env) :environment/acquire :outcome/applied steps nil)

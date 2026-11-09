@@ -88,22 +88,22 @@
       (lifecycle/exec! c acting lease command)))
 
 (defn ^{:stratum 0} write-file!
-  "Write UTF-8 `text` at `path` inside the leased environment."
+  "Write UTF-8 `text` at absolute `path` inside the leased environment."
   [c acting lease path text]
-  (or (v/check v/Acting acting schema/Lease lease schema/NonBlank path :string text)
+  (or (v/check v/Acting acting schema/Lease lease schema/AbsolutePath path :string text)
       (lifecycle/write-file! c acting lease path text)))
 
 (defn ^{:stratum 0} read-file
   "The UTF-8 text at `path` inside the leased environment, or an anomaly."
   [c acting lease path]
-  (or (v/check v/Acting acting schema/Lease lease schema/NonBlank path)
+  (or (v/check v/Acting acting schema/Lease lease schema/AbsolutePath path)
       (lifecycle/read-file c acting lease path)))
 
 (defn ^{:stratum 0} persist-artifacts!
   "Copy each path out of the environment to the controller's artifact store;
    returns the store's references in path order, or the first anomaly."
   [c acting lease paths]
-  (or (v/check v/Acting acting schema/Lease lease [:vector schema/NonBlank] paths)
+  (or (v/check v/Acting acting schema/Lease lease [:vector schema/AbsolutePath] paths)
       (lifecycle/persist-artifacts! c acting lease paths)))
 
 (defn ^{:stratum 0} cancel!

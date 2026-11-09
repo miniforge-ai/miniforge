@@ -93,7 +93,7 @@
                        :event-stream (events/create-event-stream
                                       {:sinks [(events/durable-sink (fn [_event] nil))]}))]
     (with-redefs [dag/persist-workspace! (fn [_ _ opts] (workspace/git-persist! exec! opts))]
-      (phase-step/execute-phase [(writer phase gates artifact)] (merge context extra) {}))
+      (phase-step/execute-phase [(writer phase gates artifact)] (merge context extra) {} nil))
     @cmds)))
 
 ;------------------------------------------------------------------------------ Layer 2
