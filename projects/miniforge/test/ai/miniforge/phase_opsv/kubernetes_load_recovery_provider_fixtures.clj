@@ -71,7 +71,10 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} with-proposed [prepare f]
-  (creation/with-created #(some->> % authority/with-stores (proposed! prepare) f)))
+(defn ^{:stratum 2} with-proposed
+  ([prepare f] (with-proposed prepare identity f))
+  ([prepare transform f]
+   (creation/with-created #(some->> % transform authority/with-stores (proposed! prepare) f))))
 
-(comment ::real-issued-authority-independent-pins-and-durable-records-for-each-recovery-operation)
+(comment
+  (fn [fixture] (rebind! fixture (:recovery/proposal fixture))))
