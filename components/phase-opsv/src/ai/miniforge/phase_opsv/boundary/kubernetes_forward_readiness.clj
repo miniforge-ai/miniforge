@@ -9,14 +9,22 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} retain! [operation ready record]
+(defn- ^{:stratum 0} content [operation ready record]
+  (let [key (:material-observation-key operation)
+        observed (get ready (:observation-key operation))]
+    {:effect/transaction record
+     :opsv/commit-decision-envelope (:decision ready)
+     key observed}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} retain! [operation ready record]
   (let [ctx (:context ready)
         material (:material operation)
-        output {(nth material 2)
-                {:effect/transaction record
-                 :opsv/commit-decision-envelope (:decision ready)
-                 :load/observation (get ready (:observation-key operation))}}]
+        report (content operation ready record)
+        output {(nth material 2) report}]
     (anomaly/let-ok [value (artifacts/record ctx output material)]
-      (confirmation/publish-with-exception-handling ctx value (artifacts/begin-publication output)))))
+      (let [safe (artifacts/recorded-output output material value)]
+        (confirmation/publish-with-exception-handling ctx value (artifacts/begin-publication safe))))))
 
 (comment ::acknowledged-commit-admission-before-native-dispatch)

@@ -33,7 +33,7 @@
   (let [report (model/report input admitted original observed compared)
         output {:opsv/baseline-recovery report}]
     (anomaly/let-ok [value (artifacts/record ctx output schema/material)]
-      (let [protected-output (assoc output :opsv/baseline-recovery (:artifact/content value))]
+      (let [protected-output (artifacts/recorded-output output schema/material value)]
         (confirmation/publish-with-exception-handling ctx value (artifacts/begin-publication protected-output))))))
 
 ;------------------------------------------------------------------------------ Layer 1

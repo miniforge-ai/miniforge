@@ -5,6 +5,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} same-proposal? [current record]
+  (= current (:effect/proposal record)))
+
 (defn ^{:stratum 0} provider-for-plan? [provider plan]
   (let [target (get-in plan [:recovery/binding :runtime/target])]
     (and (= (:kubernetes/context plan) (:kubernetes/context provider))
