@@ -37,8 +37,13 @@ these keys, so a change to one counts toward `:clean?`.
    and `filter.*.clean|smudge|process`. The rest are `diff.external`,
    `diff.*.command|textconv`, `merge.*.driver`,
    `difftool|mergetool.*.cmd|path`, `gpg.program`, `gpg.<format>.program`,
-   `gpg.ssh.defaultKeyCommand`, and
-   `remote.*.uploadpack|receivepack|vcs`.
+   `gpg.ssh.defaultKeyCommand`, `remote.*.uploadpack|receivepack|vcs`,
+   `gc.recentObjectsHook`, `uploadpack.packObjectsHook`, `man.viewer`,
+   `man|browser.*.cmd|path`, `web|help|instaweb.browser`,
+   `instaweb.httpd`, `guitool.*.cmd`, `trailer.*.command|cmd`,
+   `imap.tunnel`, and the `sendemail` command and server keys. The list
+   comes from a sweep of the `git-config` keys of git 2.48.1 that name a
+   program or command.
 2. The snapshot gains `:command-config`, and `drift` gains
    `:command-drift`. `:clean?` is now false when either `:redirect-drift`
    or `:command-drift` is non-empty.

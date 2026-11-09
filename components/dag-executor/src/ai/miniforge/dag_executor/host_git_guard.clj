@@ -87,11 +87,13 @@
   "^(remote\\..*url|url\\..*insteadof)$")
 
 (def ^{:stratum 0} command-config-pattern
-  "Config keys that make git run a program (hooks, fsmonitor, ssh, pager,
-   editor, credential helper, filter, diff and merge drivers, signing,
-   remote helpers, aliases), or load config that can (`include.path`,
-   `includeIf.*.path`). Lowercase for the same reason as
-   `redirect-config-pattern`.
+  "Config keys that make git run a program (hooks, fsmonitor, gc and
+   pack-objects hooks, ssh, pager, editor, credential helper, filter, diff
+   and merge drivers, signing, remote helpers, man and web viewers, gui
+   tools, trailer commands, send-email and imap-send helpers, aliases), or
+   load config that can (`include.path`, `includeIf.*.path`). Taken from
+   the `git-config` key list of git 2.48.1. Lowercase for the same reason
+   as `redirect-config-pattern`.
 
    `submodule.<name>.update` is left out although its `!command` form runs
    a shell command: `git submodule init` copies it from `.gitmodules`, so
@@ -107,6 +109,11 @@
        "|(difftool|mergetool)\\..*\\.(cmd|path)"
        "|gpg\\.(.*\\.)?program|gpg\\.ssh\\.defaultkeycommand"
        "|remote\\..*\\.(uploadpack|receivepack|vcs)"
+       "|gc\\.recentobjectshook|uploadpack\\.packobjectshook"
+       "|man\\.viewer|(man|browser)\\..*\\.(cmd|path)"
+       "|(web|help|instaweb)\\.browser|instaweb\\.httpd"
+       "|guitool\\..*\\.cmd|trailer\\..*\\.(command|cmd)|imap\\.tunnel"
+       "|sendemail\\.(.*\\.)?(tocmd|cccmd|headercmd|sendmailcmd|smtpserver)"
        ")$"))
 
 (def ^{:stratum 0} remote-ref-namespace

@@ -77,13 +77,19 @@
                  "diff.external" "diff.pdf.textconv" "diff.pdf.command" "merge.ours.driver"
                  "difftool.vim.cmd" "mergetool.vim.path"
                  "gpg.program" "gpg.ssh.program" "gpg.ssh.defaultkeycommand"
-                 "remote.origin.uploadpack" "remote.origin.receivepack" "remote.origin.vcs"]]
+                 "remote.origin.uploadpack" "remote.origin.receivepack" "remote.origin.vcs"
+                 "gc.recentobjectshook" "uploadpack.packobjectshook"
+                 "man.viewer" "man.custom.cmd" "man.custom.path" "browser.firefox.cmd"
+                 "web.browser" "help.browser" "instaweb.httpd" "guitool.lint.cmd"
+                 "trailer.sign.command" "trailer.sign.cmd" "imap.tunnel"
+                 "sendemail.tocmd" "sendemail.work.cccmd" "sendemail.smtpserver"]]
         (is (watched? k) k)))
     (testing "given a neighbouring key that runs nothing → not watched"
       (doseq [k ["core.autocrlf" "core.bare" "user.name" "remote.origin.url"
                  "remote.origin.fetch" "filter.lfs.required" "diff.renames"
                  "credential.usehttppath" "gpg.format" "include.pathx"
-                 "submodule.standards/miniforge.update"]]
+                 "submodule.standards/miniforge.update" "man.custom.manual"
+                 "trailer.sign.key" "sendemail.smtppass" "gc.auto"]]
         (is (not (watched? k)) k)))))
 
 ;------------------------------------------------------------------------------ Layer 1
