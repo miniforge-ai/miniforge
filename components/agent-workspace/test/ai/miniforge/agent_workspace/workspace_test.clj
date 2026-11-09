@@ -116,6 +116,13 @@
       (is (= :anomalies.agent-workspace/checkout-mismatch (anomaly/subtype (deliver-all w forged)))))
     (is (empty? (fx/pushed-branches w)))))
 
+(deftest ^{:stratum 1} test-a-lost-push-awaits-reconciliation-and-a-rejected-one-failed
+  (doseq [[answer state] [[(anomaly/anomaly :timeout "exec deadline" {}) :unknown-outcome]
+                          [{:exec/exit 1 :exec/stdout "" :exec/stderr "rejected"} :failed]]]
+    (let [w (fx/world nil (partial fx/push-answered answer))]
+      (is (= [state] (mapv :delivery/state (deliver-all w (clone w (take 1 fx/allowed))))))
+      (is (empty? @(:opened w))))))
+
 (deftest ^{:stratum 1} test-an-unanswered-pr-stays-unresolved-and-is-not-reopened
   (doseq [port [port-down (constantly nil) (constantly {:pr/number 0 :pr/url ""})]]
     (let [w (fx/world port)

@@ -61,6 +61,12 @@
 
 (defn ^{:stratum 0} sha-of [result] (str/trim (str (:exec/stdout result))))
 
+(defn ^{:stratum 0} rejected?
+  "Git ran and exited nonzero. Unlike an exec that timed out or never
+   answered, this is a known outcome."
+  [result]
+  (= :anomalies.agent-workspace/git-failed (anomaly/subtype result)))
+
 (defn ^{:stratum 0} git!
   [wc acting lease argv]
   (let [result (env/exec! (:workspace/environment wc) acting lease

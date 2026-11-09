@@ -43,7 +43,8 @@ twice when a delivery is retried.
    recorded commit is pushed to `refs/heads/<task branch>` at the id's URL (not to whatever `origin`
    now names), and the PR port is called with the proposal. Only an answer with a positive PR number
    and a URL succeeds; an anomaly, nil or a malformed answer is `:unknown-outcome`, left for
-   reconciliation.
+   reconciliation. A push git rejected (nonzero exit) is `:failed`; a push whose answer was lost,
+   such as an exec timeout, may have updated the remote and is `:unknown-outcome`.
 5. `deliver!` takes the path and task branch from the workspace's root and lease. A checkout that
    names a different path or branch, for example `main`, is refused and nothing is pushed.
 6. `projects/agent-environments` and the opt-in guard include the new brick; no default project
@@ -65,7 +66,8 @@ Over the fake environment, with git answered by a scripted exec:
    the base ref and the task branch's commit, and that commit is what is pushed;
 9. a second delivery runs no git command;
 10. a grant whose `:workspace/repos` is a vector allows nothing;
-11. clone and delivery with another tenant's acting identity are refused `forged-tenant`.
+11. clone and delivery with another tenant's acting identity are refused `forged-tenant`;
+12. a push that times out is `:unknown-outcome` and a rejected one `:failed`, neither opening a PR.
 
 Not verified: real git against real remotes. Git configuration inside the environment (such as
 `url.*.insteadOf`) is not neutralized. Per-repository push credentials are what bound the push

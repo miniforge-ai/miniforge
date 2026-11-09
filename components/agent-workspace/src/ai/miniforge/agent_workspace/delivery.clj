@@ -62,8 +62,9 @@
 (defn- ^{:stratum 0} open!
   "The effect itself: push the proposal's head commit to the task branch at
    the id's URL, then open the PR for the proposal through the workspace's
-   PR port. Only a confirmed PR succeeds; any other answer awaits
-   reconciliation."
+   PR port. Only a push git itself rejected has failed; a push whose answer
+   was lost, such as on a timeout, may have updated the remote, so it awaits
+   reconciliation like any answer other than a confirmed PR."
   [wc acting lease checkout record]
   (let [proposed (:effect/proposal record)
         url (git/repo-url wc (:repo/id checkout))
@@ -71,7 +72,8 @@
         pushed (git/git! wc acting lease argv)
         opened (when-not (anomaly/anomaly? pushed) ((:workspace/open-pr! wc) proposed))]
     (cond
-      (anomaly/anomaly? pushed) {:effect/outcome :failed :effect/failure (:anomaly/message pushed)}
+      (git/rejected? pushed) {:effect/outcome :failed :effect/failure (:anomaly/message pushed)}
+      (anomaly/anomaly? pushed) {:effect/outcome :unknown-outcome :effect/observed {:anomaly (:anomaly/message pushed)}}
       (anomaly/anomaly? opened) {:effect/outcome :unknown-outcome :effect/observed {:anomaly (:anomaly/message opened)}}
       (not (m/validate schema/PullRequest opened)) {:effect/outcome :unknown-outcome :effect/observed {:unconfirmed (pr-str opened)}}
       :else {:effect/outcome :succeeded :effect/observed opened})))

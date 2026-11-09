@@ -95,15 +95,21 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} push-answered
+  "Git as `answer-git`, except that `push` gets `answer`."
+  [answer command]
+  (if (some #{"push"} (:exec/argv command)) answer (answer-git command)))
+
 (defn ^{:stratum 2} world
   "A leased fake environment, a PR grant over `allowed`, and a workspace
    controller whose PR port is `open-pr!` (default: record and succeed)."
   ([] (world nil))
-  ([open-pr!]
+  ([open-pr!] (world open-pr! answer-git))
+  ([open-pr! exec-fn]
    (let [now (Instant/now)
          acting (acting-for "workspace-tenant" now)
          run-id (random-uuid)
-         provider (env/fake-provider {:fake/exec-fn answer-git})
+         provider (env/fake-provider {:fake/exec-fn exec-fn})
          ec (env/create-controller {:provider provider :clock #(Instant/now)
                                     :emit! (partial collect! (atom [])) :persist! store-artifact})
          scope {:environment/tenant-id (:acting/tenant-id acting) :environment/run-id run-id}
