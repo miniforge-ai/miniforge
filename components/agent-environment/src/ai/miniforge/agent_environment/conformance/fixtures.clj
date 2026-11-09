@@ -143,9 +143,10 @@
     env))
 
 (defn ^{:stratum 1} cleaned?
-  "True when releasing `lease` confirmed it gone, or it was already gone."
+  "True when releasing `lease` confirmed it gone, or it was already gone. A
+   release that throws is unconfirmed, and the other leases are still tried."
   [w [acting lease]]
-  (let [released (lifecycle/release! (:c w) acting lease)]
+  (let [released (try (lifecycle/release! (:c w) acting lease) (catch Exception _ nil))]
     (or (= :outcome/applied (:call/outcome released))
         (contains? already-gone (anomaly/subtype released)))))
 

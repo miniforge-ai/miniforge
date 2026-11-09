@@ -45,7 +45,8 @@ reported as unrun rather than passed.
    receipts (unrun when the provider supplies no failing fixture), every receipt valid and
    unqualified, and cleanup confirmed: every lease a check acquired is released, also when the
    check throws, and every ledger entry ends released. A check that throws, such as a readiness
-   hook timing out, is that check failed with what it threw, and the other checks still run.
+   hook timing out, is that check failed with what it threw, and the other checks still run. A
+   release that throws during cleanup counts as unconfirmed, and the other leases are still released.
    `:await-ready` lets a real provider poll readiness.
 
 ## Testing Plan
@@ -57,7 +58,8 @@ reported as unrun rather than passed.
 2. `conformance_test`: the fake passes every check; a check without its fixture is unrun; a
    provider that cannot provision fails the acquire-based checks (forged tenant included), so the
    suite cannot pass a provider that refuses everything; an exec without its output fails the round
-   trip; a readiness hook that throws fails only the checks that use it; unconfirmed cleanup and a leak with no lease
+   trip; a readiness hook that throws fails only the checks that use it; a release that throws fails
+   the cleanup check without stopping the suite; unconfirmed cleanup and a leak with no lease
    fail the cleanup check.
 
 ## Deployment Plan

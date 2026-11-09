@@ -19,6 +19,7 @@
   (:require
    [ai.miniforge.agent-environment.fake :as fake]
    [ai.miniforge.agent-environment.interface :as env]
+   [ai.miniforge.agent-environment.lifecycle :as lifecycle]
    [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -59,6 +60,12 @@
         outcomes (outcomes-by-check results)]
     (is (= :check/failed (:check/stale-lease-refused outcomes) (:check/lifecycle-roundtrip outcomes)))
     (is (= :check/passed (:check/duplicate-acquire-returns-one-environment outcomes) (:check/cleanup-confirmed outcomes)))))
+
+(deftest ^{:stratum 1} test-a-release-that-throws-fails-cleanup-and-the-suite-still-returns
+  (with-redefs [lifecycle/release! (fn [& _] (throw (ex-info "provider down" {})))]
+    (let [outcomes (outcomes-by-check (env/run-conformance {:make-provider env/fake-provider}))]
+      (is (= :check/failed (:check/cleanup-confirmed outcomes)))
+      (is (= :check/passed (:check/duplicate-acquire-returns-one-environment outcomes))))))
 
 (deftest ^{:stratum 1} test-the-suite-releases-what-it-acquires
   (let [provider (env/fake-provider)
