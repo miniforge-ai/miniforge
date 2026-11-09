@@ -36,7 +36,8 @@ interrupted, as in #2277.
    status message.
 3. `dag-merge-attempt/derive-resolution-overrides` wraps the resolution `:agent-edit-fn` and
    `:verify-fn`. Once the run's control state is stopped, the edit fn does nothing and verify
-   fails. The loop then ends within its budget, with no LLM call and no commit.
+   fails. Verify reads the stop again after it returns, so a cancel during verification wins over
+   its pass. The loop then ends within its budget, with no LLM call and no commit.
 
 ## Testing Plan
 
@@ -46,10 +47,12 @@ interrupted, as in #2277.
 2. A merge that ends after the cancel is the task's stop, and a merge failure is kept. A merge with
    no cancel keeps its result.
 3. An LLM call inside the merge sees the run's cancel.
-4. The resolution agent is not called after the stop, and verify fails after it.
+4. The resolution agent is not called after the stop, and verify fails after it. A cancel while
+   an explicit verify runs makes it fail even when that verify passes.
 
-On #2277 alone 8 of the 9 assertions fail or error. Only the no-cancel case in 2 passes there,
-as it should. Locally on macOS the merge-cancel tests pass, 9 assertions. So do the merge-parent
+On #2277 alone 8 of the first 9 assertions fail or error. Only the no-cancel case in 2 passes
+there, as it should. The verify-during-cancel case fails without its re-check. Locally on macOS
+the merge-cancel tests pass, 10 assertions. So do the merge-parent
 integration, merge-resolution, merge-resolution agent, stop-signal, DAG operator-control, DAG
 task-execution and DAG orchestrator tests: 75 tests, 0 failures.
 

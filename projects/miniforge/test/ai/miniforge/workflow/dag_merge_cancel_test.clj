@@ -91,4 +91,11 @@
           {verify :verify-fn} (dag-merge-attempt/derive-resolution-overrides {:control-state cs})]
       (is (response/success? (verify "/tmp/wt")))
       (es/cancel! cs)
+      (is (response/error? (verify "/tmp/wt")))))
+  (testing "a cancel while an explicit verify runs wins over the verify's pass"
+    (let [cs (es/create-control-state)
+          {verify :verify-fn} (dag-merge-attempt/derive-resolution-overrides
+                               {:control-state cs
+                                :dag/resolution-overrides
+                                {:verify-fn (fn [_] (es/cancel! cs) (response/success nil nil))}})]
       (is (response/error? (verify "/tmp/wt"))))))

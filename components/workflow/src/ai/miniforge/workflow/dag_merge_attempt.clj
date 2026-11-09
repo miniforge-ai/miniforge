@@ -161,12 +161,14 @@
 (defn- ^{:stratum 0} stop-guarded-verify-fn
   "`verify` (a resolution verify-fn) that fails once `control-state` is
    stopped, so a resolution the cancel cut short is never committed or
-   cached under the task's merge ref."
+   cached under the task's merge ref. The stop is read again after
+   `verify` returns, so a cancel during verification wins over its pass."
   [control-state verify]
   (fn [worktree-path]
-    (if (stop-signal/stopped? control-state)
-      (response/error (messages/t :status/stopped-control) {:data {:reason :run-stopped}})
-      (verify worktree-path))))
+    (let [result (when-not (stop-signal/stopped? control-state) (verify worktree-path))]
+      (if (stop-signal/stopped? control-state)
+        (response/error (messages/t :status/stopped-control) {:data {:reason :run-stopped}})
+        result))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
