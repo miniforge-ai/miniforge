@@ -27,4 +27,6 @@
   :anomalies.agent-worker/environment-not-ready "The environment is not ready; retry once it is"
   :anomalies.agent-worker/turn-unsettled "Inspection did not show that the session's current turn ended"
   :anomalies.agent-worker/start-in-flight "This attempt is still starting; retry to get its session"
-  :anomalies.agent-worker/steering-unsupported "The selected worker cannot take further input"}}
+  :anomalies.agent-worker/steering-unsupported "The selected worker cannot take further input"
+  :anomalies.agent-worker/launch-failed "The native harness did not start in the environment"
+  :anomalies.agent-worker/native-session-unknown "No native session id has been reported to resume"}}
