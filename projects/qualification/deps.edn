@@ -1,0 +1,9 @@
+;; Gate-evidence harness (tracker #2421): the qualification component and the
+;; bricks it needs. It is tooling for qualification runs, not part of a shipped
+;; product, so no product project contains it. Polylith tests a brick only
+;; through a project that contains it, so this project is how CI tests it.
+{:paths []
+
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        ai.miniforge/messages {:local/root "../../components/messages"}
+        ai.miniforge/qualification {:local/root "../../components/qualification"}}}
