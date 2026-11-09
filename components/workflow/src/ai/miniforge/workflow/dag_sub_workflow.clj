@@ -55,7 +55,10 @@
         (let [merged (llm/call-with-cancel-signal
                       #(stop-signal/stopped? control-state)
                       #(dag-merge/merge-parent-branches! context task-def))]
-          (or (stopped) merged)))))
+          (if-let [stop (stopped)]
+            ;; The merge's own failure, if any, is kept for the operator.
+            (cond-> stop (merge-anomaly/merge-error? merged) (assoc :merge/failure merged))
+            merged)))))
 
 (defn ^{:stratum 0} task-sub-workflow
   "Build a sub-workflow config for a single DAG task.
@@ -175,8 +178,9 @@
    - Multi-dep (v2), merge succeeds → the merged ref produced by
      `merge-parent-branches!` (`:branch` set).
    - Multi-dep (v2), merge produces a typed anomaly (conflict /
-     unrelated histories / branch unresolvable / strategy unsupported)
-     → `:branch` is OMITTED and the anomaly is surfaced via
+     unrelated histories / branch unresolvable / strategy unsupported,
+     or `:anomalies/dag-merge-stopped` for a run cancelled before or
+     during the merge) → `:branch` is OMITTED and the anomaly is surfaced via
      `:dag/merge-anomaly` on opts. `run-mini-workflow` checks for this
      and short-circuits with a structured failure rather than running a
      doomed sub-workflow against a stale base.

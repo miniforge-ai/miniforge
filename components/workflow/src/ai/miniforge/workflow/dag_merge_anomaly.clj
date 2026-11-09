@@ -190,8 +190,8 @@
    :git/stderr       (:err git-result)})
 
 (defn ^{:stratum 0} merge-stopped-anomaly
-  "Anomaly: the run was cancelled while the task's parent branches were
-   being merged (the merge-resolution agent was interrupted)."
+  "Anomaly: the run was cancelled before or while the task's parent
+   branches were merged."
   [task-id]
   {:anomaly/category :anomalies/dag-merge-stopped
    :anomaly/message  (messages/t :status/stopped-control)
