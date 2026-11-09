@@ -326,7 +326,7 @@
     (let [host (fixtures/init-host-repo! (fixtures/temp-dir!))]
       (try
         (let [before (snapshot! host)
-              _      (spit (File. (str host) ".git/config") "[pager]\n\tlog\n" :append true)
+              _      (spit (File. (str host) ".git/config") "\n[pager]\n\tlog\n" :append true)
               report (sut/drift before (snapshot! host))
               pager  (first (filter #(= "pager.log" (:config-key %)) (:command-drift report)))]
           (is (false? (:clean? report))
