@@ -24,6 +24,7 @@
   :anomalies.agent-worker/conflicting-submission "This attempt was already submitted with different content"
   :anomalies.agent-worker/unknown-session "This session is not the one recorded for its attempt"
   :anomalies.agent-worker/turn-in-progress "The session's current turn is still running"
+  :anomalies.agent-worker/environment-not-ready "The environment is not ready; retry once it is"
   :anomalies.agent-worker/turn-unsettled "Inspection did not show that the session's current turn ended"
   :anomalies.agent-worker/start-in-flight "This attempt is still starting; retry to get its session"
   :anomalies.agent-worker/steering-unsupported "The selected worker cannot take further input"
