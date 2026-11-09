@@ -138,11 +138,13 @@
 (defn- ^{:stratum 0} call-once [f] (f))
 
 (defn- ^{:stratum 0} checked
-  "Run `check` on `w`, then release everything it acquired, also when the
-   check throws; returns the result and whether cleanup was confirmed."
-  [check w]
+  "Run check `id` on `w`, then release everything it acquired; returns the
+   result and whether cleanup was confirmed. A check that throws, such as a
+   readiness hook timing out, is that check failed, and the rest still run."
+  [[id check w]]
   (let [cleaned (volatile! false)
         result (try (check w)
+                    (catch Exception e (fx/result id false {:thrown (str e)}))
                     (finally (vreset! cleaned (fx/release-all! w))))]
     [result @cleaned]))
 
@@ -154,15 +156,15 @@
         await-ready (get opts :await-ready call-once)
         fresh #(fx/world (make-provider) isolation)
         partial-world (when make-partial-provider (fx/world (make-partial-provider) isolation))
-        runs [[duplicate-acquire (fresh)]
-              [conflicting-request (fresh)]
-              [forged-tenant (fresh)]
-              [grant-required (fresh)]
-              [#(stale-lease % await-ready) (fresh)]
-              [#(lifecycle-roundtrip % await-ready) (fresh)]]
-        outcomes (cond-> (mapv (fn [[check w]] (checked check w)) runs)
-                   partial-world (conj (checked partial-provisioning partial-world)))
-        worlds (cond-> (mapv second runs) partial-world (conj partial-world))]
+        runs [[:check/duplicate-acquire-returns-one-environment duplicate-acquire (fresh)]
+              [:check/conflicting-request-refused conflicting-request (fresh)]
+              [:check/forged-tenant-refused forged-tenant (fresh)]
+              [:check/grant-required grant-required (fresh)]
+              [:check/stale-lease-refused #(stale-lease % await-ready) (fresh)]
+              [:check/lifecycle-roundtrip #(lifecycle-roundtrip % await-ready) (fresh)]]
+        outcomes (cond-> (mapv checked runs)
+                   partial-world (conj (checked [:check/partial-provisioning-receipts partial-provisioning partial-world])))
+        worlds (cond-> (mapv last runs) partial-world (conj partial-world))]
     (-> (mapv first outcomes)
         (cond-> (nil? partial-world) (conj (unrun :check/partial-provisioning-receipts)))
         (conj (receipts-unqualified worlds))

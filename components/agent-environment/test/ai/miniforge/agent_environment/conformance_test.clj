@@ -53,6 +53,13 @@
   (let [bare #(env/fake-provider {:fake/exec-fn (constantly {:exec/exit 0})})]
     (is (= :check/failed (:check/lifecycle-roundtrip (outcomes-by-check (env/run-conformance {:make-provider bare})))))))
 
+(deftest ^{:stratum 1} test-a-check-that-throws-fails-and-the-rest-still-run
+  (let [results (env/run-conformance {:make-provider env/fake-provider
+                                      :await-ready (fn [_poll] (throw (ex-info "not ready in time" {})))})
+        outcomes (outcomes-by-check results)]
+    (is (= :check/failed (:check/stale-lease-refused outcomes) (:check/lifecycle-roundtrip outcomes)))
+    (is (= :check/passed (:check/duplicate-acquire-returns-one-environment outcomes) (:check/cleanup-confirmed outcomes)))))
+
 (deftest ^{:stratum 1} test-the-suite-releases-what-it-acquires
   (let [provider (env/fake-provider)
         outcomes (outcomes-by-check (env/run-conformance {:make-provider (constantly provider)}))]
