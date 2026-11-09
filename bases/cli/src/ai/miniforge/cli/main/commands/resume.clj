@@ -513,9 +513,7 @@
             ;; Runtime wiring (CLI concern — stays here)
             event-stream (es/create-event-stream)
             _supervisor (supervisory/attach! event-stream)
-            ;; N15-6: route routing-causality through the witness surface.
-            ;; Mirrors the meta-loop and workflow-runner attach sites; the
-            ;; correlator emits `:supervisory/automation-edge-upserted`
+            ;; The correlator emits `:supervisory/automation-edge-upserted`
             ;; alongside the supervisory snapshots.
             _correlator (correlator/attach! event-stream)
             control-state (es/create-control-state)
@@ -528,9 +526,9 @@
                                     from-phase
                                     (:completed-phases reconstructed))]
                   (es/publish! event-stream (es/workspace-persisted event-stream resume-run-id checkpoint))))
-            ;; Publish the workflow-resumed lifecycle event before the
-            ;; pipeline starts. Skipped phases are those in the full
-            ;; workflow definition that precede the resume phase.
+            ;; `skipping` uses the full (pre-trim) workflow pipeline so the
+            ;; event records every phase bypassed, including those stripped
+            ;; by trim-pipeline that do not appear in remaining-pipeline.
             _ (let [from-phase-kw (some-> (resume-print-phase machine-snapshot remaining-pipeline) keyword)
                     from-state    (or (:execution/fsm-state machine-snapshot) :checkpointed)
                     skipping      (into []
