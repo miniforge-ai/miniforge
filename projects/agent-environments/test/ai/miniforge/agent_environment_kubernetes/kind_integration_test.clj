@@ -96,6 +96,7 @@
     (let [results (env/run-conformance {:make-provider #(kubernetes/create-provider (settings context kubeconfig))
                                         :make-partial-provider #(kubernetes/create-provider (settings context kubeconfig) refusing-pods)
                                         :await-ready await-ready})]
+      (is (some #(= :check/cleanup-confirmed (:check/id %)) results) "the suite reports a cleanup verdict")
       (doseq [{:check/keys [id outcome detail]} results]
         (is (= :check/passed outcome) (str id " " detail))))))
 

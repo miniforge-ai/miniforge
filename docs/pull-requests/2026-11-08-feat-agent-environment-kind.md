@@ -24,7 +24,8 @@ namespace behind.
 ## Changes in Detail
 
 1. `projects/agent-environments/test/.../kind_integration_test.clj` runs three tests:
-   1. the full conformance suite through the provider, cleanup check included;
+   1. the full conformance suite through the provider; it must report a cleanup verdict, and every
+      check must pass, so a run that leaves an environment behind fails;
    2. a partial provision (pod creation refused) with real cleanup;
    3. a dedicated-kernel request refused at preflight when its RuntimeClass is not installed, and
       the API refusing a pod that names it, so nothing runs on the node default runtime.
