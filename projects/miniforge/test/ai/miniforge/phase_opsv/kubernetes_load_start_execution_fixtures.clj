@@ -48,7 +48,7 @@
         runtime (merge registered {:effects-directory (str (fs/path directory "native-start-effects"))
                                    :authority-directory authority-directory
                                    :breach-directory (str (fs/path directory "native-start-breaches"))
-                                   :clock #(deref time) :current-context #(deref current)})
+                                   :clock (partial deref time) :current-context (partial deref current)})
         routes (assoc (:routes native) (owned/pod-path fixture) pod)]
     (is (some? (:control registered)))
     (f (assoc fixture :host/runtime runtime :host/context current :host/clock time

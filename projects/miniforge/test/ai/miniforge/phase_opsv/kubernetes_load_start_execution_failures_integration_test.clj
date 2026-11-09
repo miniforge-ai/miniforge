@@ -15,20 +15,11 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} check-interrupted [cleanup-failed? {:keys [host/runtime request] :as fixture}]
-  (let [failure (InterruptedException.)
-        revoke grant/revoke-stored!
-        [caught flagged?] (wire/interrupted-result
-                           #(with-redefs [audit/record! (fn [& _] (throw failure))
-                                          grant/revoke-stored! (if cleanup-failed? (constantly (faults/refusal)) revoke)]
-                              (fixtures/execute fixture)))
-        record (effect/read-record (:effects-directory runtime) (:effect/id request))
-        current (grant/current (:authority-directory runtime) (:effect/grant-id record))]
-    (is (identical? failure caught))
-    (is flagged?)
-    (is (= cleanup-failed? (nil? (:grant/revoked-at current))))
-    (is (= cleanup-failed? (boolean (some (comp anomaly/anomaly? ex-data) (.getSuppressed ^Throwable caught)))))
-    (is (true? (:stopped? (actuation/mutation-status (:fence runtime)))))))
+(defn- ^{:stratum 0} execute-interrupted! [cleanup-failed? failure fixture]
+  (let [revoke grant/revoke-stored!]
+    (with-redefs [audit/record! (partial faults/interrupt-with-unavailable-clock! fixture failure)
+                  grant/revoke-stored! (if cleanup-failed? (constantly (faults/refusal)) revoke)]
+      (fixtures/execute fixture))))
 
 (defn- ^{:stratum 0} check-invalid [transform fixture]
   (let [[result calls] (fixtures/execute (transform fixture))]
@@ -87,6 +78,18 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} check-interrupted [cleanup-failed? {:keys [host/runtime request] :as fixture}]
+  (let [failure (InterruptedException.)
+        [caught flagged?] (wire/interrupted-result
+                           (partial execute-interrupted! cleanup-failed? failure fixture))
+        record (effect/read-record (:effects-directory runtime) (:effect/id request))
+        current (grant/current (:authority-directory runtime) (:effect/grant-id record))]
+    (is (identical? failure caught))
+    (is flagged?)
+    (is (= cleanup-failed? (nil? (:grant/revoked-at current))))
+    (is (= cleanup-failed? (boolean (some (comp anomaly/anomaly? ex-data) (.getSuppressed ^Throwable caught)))))
+    (is (true? (:stopped? (actuation/mutation-status (:fence runtime)))))))
+
 (deftest ^{:stratum 1} closed-runtime-input-and-running-context-are-required-before-any-provider-read-test
   (doseq [transform [#(assoc-in % [:host/runtime :serialized-allow?] true)
                      #(assoc-in % [:request :serialized-authority] true)
@@ -112,7 +115,9 @@
 (deftest ^{:stratum 1} changed-policy-during-readiness-publication-refuses-the-already-prepared-patch-test
   (fixtures/with-startable check-late-publication))
 
-(deftest ^{:stratum 1} interruption-after-registration-revokes-exact-grant-and-preserves-independent-cleanup-failure-test
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} interruption-after-registration-revokes-exact-grant-and-preserves-independent-cleanup-failure-test
   (doseq [cleanup-failed? [false true]] (fixtures/with-startable (partial check-interrupted cleanup-failed?))))
 
 (comment

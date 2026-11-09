@@ -51,6 +51,9 @@ publication. Run lint, JVM/product/package compatibility and fault checks serial
 - With the signed interruption-cleanup prerequisite, source and rebuilt isolated
   package again pass recovery 29/1,042 and runtime/PR 42/601, plus thirteen fault checks.
   Both JVM products, structure, strict lint and task classpaths pass again.
+- Against merged #2490, source and fresh isolated package each pass recovery
+  29/1,042 and runtime/PR 47/629, plus all fifteen fault checks with zero errors.
+  Both JVM products, strict lint/strata, structure and task classpaths pass.
 
 ## Deployment Plan
 
@@ -58,7 +61,7 @@ No live calls, mutation, execution activation, grant issuance or recovery action
 
 ## Related Issues/PRs
 
-Base: main after #2490 before publication. Baseline verification remains independent
+Base: main after merged #2490. Baseline verification remains independent
 of forward execution, while validation includes the governed-start prerequisite.
 
 ## Checklist

@@ -40,13 +40,13 @@ uncertain responses and pre/post-mutation publication failures.
 - Curated integration passes 338 tests / 7,573 assertions; native compatibility
   passes 308 tests / 1,903 assertions. All 56 injected faults fail assertions with zero errors.
 - Owner review then decomposed preparation, presence admission and retained-result
-  selection. Review found an interruption cleanup gap after registration.
-  Final fixes touch five runtime source files and one failure-test namespace
-  relative to the broad run. Other production and test sources remain byte-identical.
-  Final source and freshly rebuilt isolated package each pass runtime/PR 42/601
-  and all seven runtime fault checks. Both JVM products and structural/lint checks were repeated.
-  The new regression preserves the exact interruption, thread flag and independent
-  cleanup failure, while verifying revocation of the actual stored grant.
+  selection. Review fixed interruption cleanup after registration and a failed clock.
+  The shared abandonment fix in #2491 also covers interrupted post-link registration.
+  Final source and freshly rebuilt isolated package each pass runtime/PR 47/629
+  and all nine runtime fault checks. Both JVM products and structural/lint checks were repeated.
+  Regressions preserve exact interruption, thread flags and independent cleanup
+  failure, while proving stored-grant revocation despite an invalidated clock.
+  Named host-reader adapters and interruption injectors keep fixture mechanics separate.
 
 ## Deployment Plan
 
@@ -56,7 +56,7 @@ input cannot provide runtime authority.
 
 ## Related Issues/PRs
 
-Base: main after #2489. Native effect audit is a prerequisite. Recovery orchestration and
+Base: main after #2491. Native effect audit is a prerequisite. Recovery orchestration and
 full ramp/verification integration remain subsequent obligations.
 
 ## Checklist
