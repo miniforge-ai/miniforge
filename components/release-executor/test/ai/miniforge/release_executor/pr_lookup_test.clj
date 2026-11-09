@@ -52,3 +52,17 @@
     (doseq [url [nil "" "/srv/git/r.git" "file:///srv/git/r.git"
                  "https://github.com/o/group/r.git" "https://github.com/-o/r.git"]]
       (is (= "mf/x" (pr-lookup/head-ref url "mf/x")) (pr-str url)))))
+
+(deftest ^{:stratum 0} head-from-lookups-test
+  (let [read-ok   (fn [output] {:success? true :output output :error ""})
+        branch-r  (read-ok "mf/x\n")
+        url-r     (read-ok "git@github.com:o/r.git\n")]
+    (testing "given a branch and origin's URL → the branch and its <owner>:<branch> head"
+      (is (= {:branch "mf/x" :head "o:mf/x"} (pr-lookup/head-from-lookups branch-r url-r))))
+    (testing "given no branch printed (detached HEAD) → no branch, no head"
+      (is (= {:branch nil :head nil} (pr-lookup/head-from-lookups (read-ok "") url-r))))
+    (testing "given an interrupted or timed-out lookup → {:stopped <that result>}"
+      (let [interrupted {:success? false :output "" :error "cancelled" :interrupted? true}
+            timed-out   {:success? false :output "" :error "deadline" :timed-out? true}]
+        (is (= {:stopped interrupted} (pr-lookup/head-from-lookups interrupted url-r)))
+        (is (= {:stopped timed-out} (pr-lookup/head-from-lookups branch-r timed-out)))))))

@@ -119,6 +119,8 @@
    through `sh -c` — so shell metacharacters in any argument are inert and
    there is no command-injection surface even if an argument carries
    untrusted data. Returns {:success? bool :output string :error string}.
+   An interrupt comes back as a failure with :interrupted? true and the
+   thread's interrupt flag set again, so the caller can stop.
    For ad-hoc git commands (rev-parse, diff --name-only, add, amend)."
   [worktree-path args]
   (try
@@ -130,6 +132,9 @@
         (result/shell-success {:output (str/trim (get r :out ""))})
         (result/shell-failure (str/trim (get r :err ""))
                               {:output (str/trim (get r :out ""))})))
+    (catch InterruptedException e
+      (.interrupt (Thread/currentThread))
+      (result/shell-failure (.getMessage e) {:output "" :interrupted? true}))
     (catch Exception e
       (result/shell-failure (.getMessage e) {:output ""}))))
 
@@ -550,21 +555,11 @@
     (catch Exception e
       (result/shell-failure (.getMessage e)))))
 
-(defn- ^{:stratum 1} current-branch
-  "The branch checked out in `worktree-path`, or nil when HEAD is detached
-   or git cannot read it."
+(defn- ^{:stratum 1} look-up-head
+  "pr-lookup/head-from-lookups for the branch checked out in `worktree-path`."
   [worktree-path]
-  (let [r (exec! worktree-path pr-lookup/branch-argv)]
-    (when (result/succeeded? r)
-      (not-empty (:output r)))))
-
-(defn- ^{:stratum 1} origin-push-url
-  "The URL a push to origin goes to from `worktree-path`, or nil when git
-   cannot read it."
-  [worktree-path]
-  (let [r (exec! worktree-path pr-lookup/push-url-argv)]
-    (when (result/succeeded? r)
-      (:output r))))
+  (pr-lookup/head-from-lookups (exec! worktree-path pr-lookup/branch-argv)
+                               (exec! worktree-path pr-lookup/push-url-argv)))
 
 (defn- ^{:stratum 1} reuse-existing-pr!
   "Resolve the PR already open for the current branch via gh pr view, so a
@@ -690,8 +685,8 @@
    The head is the branch checked out in the worktree, named as origin's
    (`pr-lookup/head-ref`) and passed as `--head`: gh's own head detection
    can miss a pushed branch when the checkout has a second remote for the
-   same repository. A detached HEAD leaves the head to gh; an unsafe
-   branch name fails without running gh.
+   same repository. A detached HEAD leaves the head to gh. An interrupted
+   lookup, or an unsafe branch name, returns a failure without running gh.
 
    The optional `github-token` (injected as GH_TOKEN) is the new host-mode
    credential path; the 2-arity keeps the historical public-interface
@@ -710,9 +705,9 @@
          body  (redaction/redact body)]
      (or
       (validate-safe-branch-name base)
-      (let [branch (current-branch worktree-path)
-            head   (some->> branch (pr-lookup/head-ref (origin-push-url worktree-path)))]
+      (let [{:keys [stopped branch head]} (look-up-head worktree-path)]
         (or
+         stopped
          (some-> branch validate-safe-branch-name)
          (try
            (let [result (shell/run-bounded (pr-create-argv title body base head)

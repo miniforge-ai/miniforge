@@ -350,7 +350,17 @@
           (is (= 2 @calls) "one push, one create: no retry over HTTPS")
           (is push-flag)
           (is (:interrupted? created))
-          (is create-flag))))))
+          (is create-flag)))))
+  (testing "an interrupt during create-pr!'s git lookup stops it before gh
+            starts, and the flag is kept"
+    (let [gh-calls (atom 0)]
+      (with-redefs [process/shell     (fn [& _] (throw (InterruptedException. "cancelled")))
+                    shell/run-bounded (fn [& _] (swap! gh-calls inc) {:exit 0 :out "" :err ""})]
+        (let [created (git/create-pr! "/tmp/wt" {:title "t" :body "b" :base-branch "main"} "token")
+              flag    (Thread/interrupted)]
+          (is (:interrupted? created))
+          (is (zero? @gh-calls) "gh never starts")
+          (is flag))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

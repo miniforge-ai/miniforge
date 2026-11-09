@@ -259,21 +259,14 @@
              result))
          result))))))
 
-(defn- ^{:stratum 0} current-branch
-  "The branch checked out in the sandbox, or nil when HEAD is detached or
-   git cannot read it."
-  [executor env-id]
-  (let [r (commands/exec! executor env-id pr-lookup/branch-argv)]
-    (when (result/succeeded? r)
-      (not-empty (:output r)))))
-
-(defn- ^{:stratum 0} origin-push-url
-  "The URL a push to origin goes to from the sandbox, or nil when git cannot
-   read it."
-  [executor env-id]
-  (let [r (commands/exec! executor env-id pr-lookup/push-url-argv)]
-    (when (result/succeeded? r)
-      (:output r))))
+(defn- ^{:stratum 0} look-up-head
+  "pr-lookup/head-from-lookups for the branch checked out in the sandbox.
+   The git reads take `exec-opts` without its :env, so they run where gh
+   will run and without the token."
+  [executor env-id exec-opts]
+  (let [opts (dissoc exec-opts :env)]
+    (pr-lookup/head-from-lookups (commands/exec! executor env-id pr-lookup/branch-argv opts)
+                                 (commands/exec! executor env-id pr-lookup/push-url-argv opts))))
 
 (defn ^{:stratum 0} diff-stats-range
   "Get diff stats for the changes this branch introduced since branching
@@ -322,8 +315,9 @@
    The head is the branch checked out in the sandbox, named as origin's
    (`pr-lookup/head-ref`) and passed as `--head`: gh's own head detection
    can miss a pushed branch when the checkout has a second remote for the
-   same repository. A detached HEAD leaves the head to gh; an unsafe
-   branch name fails without running gh.
+   same repository. A detached HEAD leaves the head to gh. An interrupted
+   or timed-out lookup, or an unsafe branch name, returns a failure
+   without running gh.
 
    Title and body are LLM-written and may quote a credential the agent saw;
    secrets in them are replaced with the redaction marker before gh runs."
@@ -331,9 +325,9 @@
   ([executor env-id {:keys [title body base-branch]} exec-opts]
    (let [base (or base-branch "main")]
      (or (commands/validate-safe-branch-name base)
-         (let [branch (current-branch executor env-id)
-               head   (some->> branch (pr-lookup/head-ref (origin-push-url executor env-id)))]
-           (or (some-> branch commands/validate-safe-branch-name)
+         (let [{:keys [stopped branch head]} (look-up-head executor env-id exec-opts)]
+           (or stopped
+               (some-> branch commands/validate-safe-branch-name)
                (let [escaped-title (str/replace (redaction/redact title) "'" "'\\''")
                      escaped-body (str/replace (or (redaction/redact body) "") "'" "'\\''")
                      cmd (str "gh pr create"

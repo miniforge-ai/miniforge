@@ -55,19 +55,33 @@ the run cannot answer a prompt. With `--head`, gh skips this lookup;
    3. A branch name the existing guard rejects returns that failure without
       running gh. The sandbox puts the head into a shell command, so the
       guard matters there.
-   4. The base-branch check still runs first, before any process starts.
-   5. Host: the gh argv is built by a new pure `pr-create-argv`. Sandbox: the
-      stratum autofix moved `create-pr!` to Layer 1, because it now calls
-      same-file Layer 0 helpers.
-3. Tests:
+   4. An interrupted or timed-out lookup returns that result without running
+      gh (`pr-lookup/head-from-lookups`). A cancelled release does not open a
+      PR after the cancellation.
+   5. The sandbox lookups take `exec-opts` without its `:env`: they run in
+      the directory gh will run in, without the token.
+   6. The base-branch check still runs first, before any process starts.
+   7. Host: the gh argv is built by a new pure `pr-create-argv`. Sandbox: the
+      stratum autofix moved `create-pr!` to Layer 1, because it now calls a
+      same-file Layer 0 helper.
+3. `git/exec!`: an interrupt now comes back with `:interrupted? true` and
+   the thread's interrupt flag set again, as `raw-push!` and `create-pr!`
+   already do. Before, `exec!` cleared the flag and returned a plain
+   failure. Release steps stop after a failed step, so other callers see
+   the change only when the run is being cancelled.
+4. Tests:
    1. `pr_lookup_test`: `head-ref` for scp-style SSH, `ssh://`, HTTPS, and
-      URLs with no owner to read.
-   2. `git_test` and `sandbox_test`: on a branch, with and without an origin;
-      detached HEAD; an unsafe branch name. Git replies are the outputs git
-      2.48 prints in each case.
-   3. The GH_TOKEN and redaction tests stub local git to print no branch, so
+      URLs with no owner to read. `head-from-lookups` for a branch, a
+      detached HEAD, and an interrupted or timed-out lookup.
+   2. `git_test` and `sandbox_test`: on a branch, with and without an
+      origin; detached HEAD; an unsafe branch name. Git replies are the
+      outputs git 2.48 prints in each case.
+   3. Cancellation: on the host, `process/shell` interrupted during the
+      lookup; in the sandbox, an interrupted or a timed-out lookup. Also the
+      sandbox lookups' directory and env.
+   4. The GH_TOKEN and redaction tests stub local git to print no branch, so
       they still see the gh call they check.
-   4. `fake_remote` answers `git branch --show-current` with its checked-out
+   5. `fake_remote` answers `git branch --show-current` with its checked-out
       branch, so the release pipeline and crash-matrix tests run the new
       path.
 
@@ -88,10 +102,11 @@ checked against this remote layout.
 
 ## Testing Plan
 
-1. `ai.miniforge.release-executor.*` tests: 313 tests, 920 assertions, 0
+1. `ai.miniforge.release-executor.*` tests: 315 tests, 935 assertions, 0
    failures.
-2. With `git.clj` and `sandbox.clj` reverted, the new tests fail 7
-   assertions.
+2. With `git.clj` and `sandbox.clj` reverted to main, the head tests fail 7
+   assertions. Reverted to the PR's first push, the interrupt, timeout and
+   workdir tests fail 8.
 3. `gh pr create --dry-run` in a worktree on the run's branch: aborts without
    `--head`; with `--head miniforge-ai:<branch>` it reports the PR it would
    create.
