@@ -43,7 +43,7 @@ uncertain receipt handling. Run source, JVM and isolated-package checks.
 
 Both consuming JVM products, Polylith and task-classpath checks pass. Source and
 the fresh isolated package pass 46 tests and 746 assertions. Broader integration
-passes 212 tests and 2,754 assertions; native compatibility passes 308 tests and
+passes 220 tests and 3,053 assertions after merging current main; native compatibility passes 308 tests and
 1,903 assertions. Packaging uses only the new JAR and test directories, without
 production-source overlays. Strict lint is zero-warning; all six actual call
 graphs fit within three strata. All five injected faults cause assertion failures
