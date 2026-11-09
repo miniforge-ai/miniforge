@@ -87,6 +87,9 @@
   :load/invalid-stop-request "Load stop preparation requires a well-formed recovery reference, runtime settings and effect identity."
   :load/cleanup-request-refused "Load cleanup requires current retained recovery intent, a distinct effect identity and a proven quiescent owned Pod."
   :load/invalid-cleanup-request "Load cleanup preparation requires a well-formed recovery reference, runtime settings and effect identity."
+  :load/stop-unconfirmed "Native load deadline patch has no confirmed outcome."
+  :load/invalid-stop-provider "Native load stopping requires valid runtime settings, a committing transaction and a trusted dispatch callback."
+  :load/stop-submission-refused "Native load deadline patch was refused before submission."
   :recovery/unretainable-plan "Protected reporting must preserve the exact bounded plan and its admission before retaining it."
   :recovery/retained-plan-required "Recovery requires a protected, acknowledged approved plan and fresh matching admission at the current policy revision."
   :verification/retained-preparation-required "Verification requires readable, acknowledged original preparation bound to this workflow and comparison."}}
