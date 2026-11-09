@@ -38,6 +38,9 @@ identify the exact gitlink and public raw-content source for reading the complet
 pinned catalogs and applicable rules. They still require reporting inaccessible
 rules, never substituting summaries or owner assertions. The public entry-point
 bytes match the local pinned checkout by SHA-256. No merge gate is relaxed.
+The root instructions also correct a stale reference to shared rule 723.
+That file does not exist at the pin; the complete repository-local merge rule
+remains authoritative and unchanged.
 
 Deletion uses `Orphan`, not cascading garbage collection: only the Pod UID is
 proven owned. Kubernetes documents these choices in its
