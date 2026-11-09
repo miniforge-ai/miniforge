@@ -87,5 +87,5 @@ N7.EX.6; N10 §1.5; N6 §3.1.1; #2440; #2461; #2467.
 - [x] Admission dependency merged
 - [x] Actual-diff adversarial and applicable standards review
 - [x] Affected-product, integration, isolated-package and fault checks
-- [ ] Normal signed commits and hooks
+- [x] Normal signed commits and hooks
 - [ ] Current-head full Copilot review, resolved comments, CI and clean merge
