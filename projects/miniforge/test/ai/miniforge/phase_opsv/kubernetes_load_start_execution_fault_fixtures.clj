@@ -10,6 +10,10 @@
 
 (defn ^{:stratum 0} refusal [] (anomaly/anomaly :unavailable "injected evidence failure" {}))
 
+(defn ^{:stratum 0} interrupt-with-unavailable-clock! [fixture failure & _]
+  (reset! (:host/clock fixture) nil)
+  (throw failure))
+
 (defn ^{:stratum 0} policy-deny! [fixture]
   (swap! (:host/context fixture) assoc-in
          [:execution/opts :opsv/governance :policy/context :opsv/allowed-environments] #{}))
