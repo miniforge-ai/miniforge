@@ -48,6 +48,7 @@
    [ai.miniforge.phase-opsv.boundary.recovery-plan-retention :as recovery-retention]
    [ai.miniforge.phase-opsv.boundary.retained-recovery-plan :as retained-recovery]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-provider :as native-load-provider]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-effect-audit :as native-effect-audit]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-ownership :as load-ownership]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-absence :as load-absence]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-quiescence :as load-quiescence]
@@ -88,6 +89,13 @@
    Returns explicit :absent, :present or :unresolved resource state, or an admission anomaly.
    Absence proves neither container termination nor original-baseline recovery; no effects are authorized."
   load-absence/observe!)
+
+(def ^{:stratum 0} record-kubernetes-experiment-disposition!
+  "Read one durable native effect and retain its exact allowing-decision join in protected N6 material.
+   Arguments: runtime context, effect directory, effect UUID and the actual allowing DecisionEnvelope.
+   Publish and acknowledge the existing N3 disposition event; return the record or an audit anomaly.
+   Preserves uncertain outcomes. This API grants no authority, performs no provider mutation and proves no recovery."
+  native-effect-audit/record!)
 
 (def ^{:stratum 0} prepare-kubernetes-load-stop-proposal!
   "Prepare an exact conditional stop proposal from current retained recovery approval and fresh owned identity.
