@@ -34,4 +34,7 @@
         revision (get metadata "resourceVersion")]
     [(test-value uid-path uid) (test-value revision-path revision)]))
 
-(comment ::one-wire-factory-for-deployment-and-owned-load-conditional-patches)
+(comment
+  (metadata-tests {"uid" "owned-uid"
+                   "resourceVersion" "fresh-revision"})
+  (remove-value "/spec/schedulingGates"))

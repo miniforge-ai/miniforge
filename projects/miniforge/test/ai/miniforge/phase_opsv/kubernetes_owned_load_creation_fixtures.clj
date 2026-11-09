@@ -40,4 +40,5 @@
     (is (= 1 (count calls)))
     (created native record)))
 
-(comment ::actual-native-producer-grant-pinned-commit-and-durable-creation-not-synthetic-ownership)
+(comment
+  (fn [retained-fixture] (create! retained-fixture)))

@@ -20,4 +20,5 @@
     (with-redefs [http/start! (partial respond! calls pending) http/response-fields identity]
       [(constructor ctx request) @calls])))
 
-(comment ::only-http-is-simulated-not-retained-intent-creation-ownership-or-authority)
+(comment
+  (prepare (fn [_ _] :refused) {} {}))

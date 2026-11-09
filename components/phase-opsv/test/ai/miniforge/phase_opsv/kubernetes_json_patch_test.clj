@@ -31,4 +31,5 @@
           (patch/metadata-tests {"uid" "owned-uid"
                                  "resourceVersion" "fresh-revision"}))))
 
-(comment ::shared-wire-factory-does-not-validate-intent-or-authorize-effects)
+(comment
+  (patch/remove-value "/spec/schedulingGates"))

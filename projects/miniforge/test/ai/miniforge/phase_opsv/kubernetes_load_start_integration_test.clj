@@ -147,6 +147,7 @@
                        [["spec" "hostNetwork"] true]
                        [["spec" "hostPID"] true]
                        [["spec" "futureExecutionExtension"] true]
+                       [["metadata" "labels" "access"] "unrequested-network-policy"]
                        [["metadata" "annotations"] {"container.apparmor.security.beta.kubernetes.io/load" "unconfined"}]
                        [["metadata" "finalizers"] ["foreign-controller/finalizer"]]
                        [["metadata" "ownerReferences"] [{"apiVersion" "apps/v1"

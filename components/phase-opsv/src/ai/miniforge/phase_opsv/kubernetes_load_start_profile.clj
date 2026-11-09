@@ -24,7 +24,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} matches? [record pod]
-  (and (unadorned? pod)
-       (= (execution-spec (:body (binding/request record))) (execution-spec pod))))
+  (let [expected (:body (binding/request record))]
+    (and (unadorned? pod)
+         (= (get-in expected ["metadata" "labels"]) (get-in pod ["metadata" "labels"]))
+         (= (execution-spec expected) (execution-spec pod)))))
 
-(comment ::creation-subset-matching-alone-cannot-authorize-releasing-an-extended-worker)
+(comment
+  (unadorned? {"metadata" {"annotations" {"admission/extension" "unsupported"}}}))

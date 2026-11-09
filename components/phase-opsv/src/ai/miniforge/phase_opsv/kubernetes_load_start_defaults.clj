@@ -36,4 +36,6 @@
      "imagePullSecrets" []
      "tolerations" tolerations}))
 
-(comment ::defaults-are-filled-on-both-sides-never-stripped-from-the-actual-observation)
+(comment
+  (get pod "schedulerName")
+  (get container "terminationMessagePolicy"))

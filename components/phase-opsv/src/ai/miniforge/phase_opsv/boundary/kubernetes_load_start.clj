@@ -26,4 +26,5 @@
                       owned (quiescence/read! (:ownership/runtime input) (:recovery/plan admitted))]
         (model/prepare ctx input (:recovery/plan admitted) owned)))))
 
-(comment ::recovery-readiness-is-required-but-never-grants-forward-load-permission)
+(comment
+  (prepare! {} {}))

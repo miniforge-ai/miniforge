@@ -39,6 +39,11 @@ The known values follow Kubernetes' native
 and [default toleration admission](https://github.com/kubernetes/kubernetes/blob/master/plugin/pkg/admission/defaulttolerationseconds/admission.go).
 Custom admission extensions fail closed instead of becoming implicit permissions.
 
+A further actual-producer regression exposed acceptance of an added Pod label
+(one assertion failure, zero errors before correction). Labels select network
+policies and Services, so the start profile also requires exact original labels.
+See Kubernetes' [network-policy contract](https://kubernetes.io/docs/concepts/services-networking/network-policies/).
+
 Share the conditional JSON Patch vocabulary across replica, stop and start
 requests. Reuse one owned-load scope factory with explicit operation-specific
 duration. Shared native creation and HTTP fixtures replace duplicated setup and
@@ -50,16 +55,19 @@ Use real retained admission and durable native creation, with simulated HTTP
 only. Validate canonical issuer compatibility and refusal of changed workers,
 reused identity, revoked approval and unproven lifecycle state.
 
-- Strict clj-kondo: zero warnings/errors; all 21 checked namespaces have at most
+- Strict clj-kondo: zero warnings/errors; all 19 changed namespaces have at most
   three inferred strata.
 - Polylith structure, both consuming JVM products and task classpaths pass.
-- Source and isolated fresh package: 89 tests / 2,299 assertions each.
-- Curated OPSV/workflow/artifact integration: 252 tests / 4,297 assertions.
+- Combined source and isolated fresh package:
+  104 tests / 2,993 assertions each.
+- Combined OPSV/workflow/artifact integration:
+  267 tests / 4,991 assertions.
 - Native compatibility: 308 tests / 1,903 assertions across 42 suites.
-- Ten start, seven cleanup and five stop faults each cause assertion failures
+- Ten start, seven cleanup and nine native-cleanup faults each cause assertion failures
   with zero test errors. They cover closed input, owned execution profile,
   lifecycle, distinct identity, gate/UID/revision preconditions, operation
   vocabulary, forward/recovery duration, native receipts and synchronous dispatch.
+- The final corrected profile passes the complete rebuild and validation above.
 
 ## Deployment Plan
 
@@ -74,6 +82,6 @@ Base branch: main. Builds on merged #2482 and the existing retained recovery API
 ## Checklist
 
 - [x] Prerequisite merged; implementation and real producer tests pass.
-- [ ] Owner adversarial and full applicable pinned-standard review.
+- [x] Owner adversarial and full applicable pinned-standard review.
 - [ ] Normal signed commits, budgets, full current-head review and CI.
 - [ ] Fresh-main conflict check and normal owner squash merge.

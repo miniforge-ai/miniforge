@@ -32,4 +32,5 @@
         (assoc-in ["spec" "containers" 0 "resources" "limits" "cpu"] "0.1")
         (assoc-in ["spec" "containers" 0 "resources" "requests" "cpu"] "0.1"))))
 
-(comment ::the-real-created-fixture-requests-100m-the-native-equivalent-is-zero-point-one-cpu)
+(comment
+  (server-defaulted {"spec" {"containers" [{}]}}))

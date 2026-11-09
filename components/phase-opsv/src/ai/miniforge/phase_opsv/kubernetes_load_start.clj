@@ -48,4 +48,5 @@
           duration (get-in input [:recovery/input :load :limits :opsv/duration-ms])]
       (proposal/proposal ctx input plan owned intent duration))))
 
-(comment ::original-forward-load-bounds-not-recovery-duration-or-creation-authority)
+(comment
+  (prepare {} {} {} {}))

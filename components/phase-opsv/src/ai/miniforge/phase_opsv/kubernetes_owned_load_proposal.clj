@@ -26,4 +26,5 @@
 (defn ^{:stratum 1} proposal [ctx input plan owned intent duration-ms]
   (proposal/proposal ctx (native-input input duration-ms) (bound-intent plan owned intent)))
 
-(comment ::one-owned-load-scope-factory-with-operation-specific-duration-never-authority)
+(comment
+  (native-input {:recovery/input {:load {}}} 1000))
