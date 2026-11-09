@@ -39,12 +39,15 @@ and live ownership reconstruction; simulate HTTP only. Cover stale revisions,
 changed execution, revoked grants, independent pins, uncertain responses,
 bounded future cancellation and synchronous dispatch ownership.
 
-Initial focused source validation passes: 13 tests / 629 assertions, zero
-failures or errors. All six native-start faults produce assertion failures with
-zero errors. They cover closed input, canonical payload, receipt identity, gate
-removal, accepted statuses and synchronous ownership. Strict lint is clean; inferred
-strata remain within the three-strata limit. Full JVM, package and combined
-stop/cleanup compatibility validation are pending before publication.
+- Strict lint: zero warnings/errors; every checked namespace has at most three inferred strata.
+- Polylith structure, both consuming JVM products and task classpaths pass.
+- Source and isolated fresh package: 127 tests / 3,860 assertions each.
+- Curated OPSV/workflow/artifact integration: 290 tests / 5,859 assertions.
+- Native compatibility: 308 tests / 1,903 assertions across 42 suites.
+- Thirty-two faults each trigger assertion failures with zero errors.
+  These include six native-start, ten start-constructor, seven cleanup and nine
+  native-cleanup faults. They cover exact scope, canonical reconstruction,
+  execution profile, native receipts, status policies and synchronous ownership.
 
 ## Deployment Plan
 
@@ -59,7 +62,7 @@ that prerequisite has merged and the combined implementation is validated.
 
 ## Checklist
 
-- [ ] Prerequisite merged and native provider implemented.
-- [ ] Source, JVM, isolated package and fault-injection validation.
-- [ ] Owner adversarial and full applicable standards review.
+- [x] Prerequisite merged and native provider implemented.
+- [x] Source, JVM, isolated package and fault-injection validation.
+- [x] Owner adversarial and full applicable standards review.
 - [ ] Normal signed commits, current full review, CI and owner merge.

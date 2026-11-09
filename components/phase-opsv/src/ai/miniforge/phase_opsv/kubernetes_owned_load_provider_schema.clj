@@ -10,7 +10,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} Runtime
+(def ^{:stratum 0} OwnedLoadRuntime
   [:map {:closed true} [:context retained/Context] [:input request/Input]])
 
 (defn ^{:stratum 0} proposal [operation method media-type body-schema]
@@ -27,7 +27,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} arguments [proposal]
-  [:tuple Runtime (committing proposal) fn?])
+  [:tuple OwnedLoadRuntime (committing proposal) fn?])
 
 (comment
   (proposal :start-load :patch "application/json-patch+json" [:vector :map]))
