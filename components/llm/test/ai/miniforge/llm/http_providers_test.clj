@@ -338,6 +338,23 @@
       (is (= "max_tokens" (:stop-reason completed)))
       (is (= "max_tokens" (:stop-reason streamed))))))
 
+(deftest ^{:stratum 1} gemini-thinking-tokens-count-as-output-test
+  (testing "thinking tokens, which Gemini reports beside the answer's and
+            bills as output, are in :output-tokens and in the estimate"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:candidates [{:content {:parts [{:text "answer"}]}}]
+                                   :usageMetadata {:promptTokenCount 10
+                                                   :candidatesTokenCount 5
+                                                   :thoughtsTokenCount 20}})
+                        #(impl/http-complete (backend-config :gemini-api)
+                                             {:prompt "q" :model "gemini-2.5-pro"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (= {:input-tokens 10 :output-tokens 25 :reasoning-output-tokens 20} (:usage result)))
+      (is (= 35 (:tokens result)))
+      (is (= (llm/estimate-cost {:input-tokens 10 :output-tokens 25} "gemini-2.5-pro")
+             (:cost-usd result))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 ;; http-complete: headers, endpoints, parsing, key resolution
@@ -428,6 +445,61 @@
       (is (not (:success result)))
       (is (= "empty_success_output" (get-in result [:error :type])))
       (is (= 0.00125 (:cost-usd result))))))
+
+(deftest ^{:stratum 2} unbilled-response-cost-is-estimated-for-a-priced-model-test
+  (testing "a provider that bills nothing on the response gets the
+            cost-table estimate for a priced model"
+    (let [{:keys [result]}
+          (capture-http (anthropic-200 "answer")
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-sonnet-4-6"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (pos? (:cost-usd result)))
+      (is (= (llm/estimate-cost (:usage result) "claude-sonnet-4-6") (:cost-usd result)))))
+  (testing "an unpriced model's cost stays absent, not 0.0"
+    (let [{:keys [result]}
+          (capture-http (anthropic-200 "answer")
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-unpriced-test-model"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (not (contains? result :cost-usd)))))
+  (testing "an Anthropic response that read the prompt cache keeps the cache
+            count and gets no estimate: the cache tokens are counted beside
+            input and the table does not price them"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:content [{:type "text" :text "answer"}]
+                                   :usage {:input_tokens 11
+                                           :output_tokens 7
+                                           :cache_read_input_tokens 5000}})
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-sonnet-4-6"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (= {:input-tokens 11 :output-tokens 7 :cache-read-input-tokens 5000} (:usage result)))
+      (is (not (contains? result :cost-usd)))))
+  (testing "a response with no token counts gets no estimate, not 0.0"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:content [{:type "text" :text "answer"}]})
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-sonnet-4-6"}
+                                             {:api-key test-api-key}))]
+      (is (:success result))
+      (is (not (contains? result :cost-usd)))))
+  (testing "an empty answer keeps the tokens it consumed and their estimated cost"
+    (let [{:keys [result]}
+          (capture-http (http-200 {:content []
+                                   :stop_reason "max_tokens"
+                                   :usage {:input_tokens 11 :output_tokens 7}})
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "claude-sonnet-4-6"}
+                                             {:api-key test-api-key}))]
+      (is (not (:success result)))
+      (is (= "empty_success_output" (get-in result [:error :type])))
+      (is (= 18 (:tokens result)))
+      (is (= (llm/estimate-cost {:input-tokens 11 :output-tokens 7} "claude-sonnet-4-6")
+             (:cost-usd result))))))
 
 (deftest ^{:stratum 2} openrouter-missing-key-fails-closed-test
   (testing "no config key and no OPENROUTER_API_KEY fails before any request"

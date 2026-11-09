@@ -8,4 +8,23 @@
 
   ;; Execution errors (run.clj)
   :run/connector-not-found  "No connector found for ref: {ref}"
-  :run/stage-failed         "Stage failed: {name}"}}
+  :run/stage-failed         "Stage failed: {name}"
+  :run/processing-unresolved
+  "Stage {name} has no resolved transform or quality pack and does not declare :stage/pass-through? true"
+  :run/pass-through-conflict
+  "Stage {name} declares :stage/pass-through? true beside a transform or quality pack"
+  :run/quality-pack-empty   "Stage {name} has a quality pack with no list of rules"
+  :run/quality-rule-unresolved "Stage {name} has a quality rule with no check fn"
+  :run/preflight-failed     "Preflight refused the pipeline before any connector opened: {problems}"
+
+  ;; Preflight problems (preflight.clj)
+  :preflight/connector-missing       "Stage {stage}: no connector is bound to ref {ref}"
+  :preflight/connector-role          "Stage {stage}: the bound connector does not implement {ref}"
+  :preflight/transform-unresolved    "Stage {stage}: transform {ref} is not registered"
+  :preflight/processing-undeclared   "Stage {stage}: a {ref} stage must declare its processing or set :stage/pass-through? true"
+  :preflight/pass-through-conflict   "Stage {stage}: declares :stage/pass-through? true and processing at once"
+  :preflight/quality-pack-empty      "Stage {stage}: quality pack {ref} has no rules"
+  :preflight/quality-pack-malformed  "Stage {stage}: quality pack {ref} has :pack/rules that is not a list of rules"
+  :preflight/quality-rule-unresolved "Stage {stage}: quality rule {ref} has no implementation"
+  :preflight/quality-rule-invalid    "Stage {stage}: quality rule {ref} is configured but could not be built"
+  :preflight/spawn-fn-unresolved     "Stage {stage}: spawn function {ref} is not registered"}}

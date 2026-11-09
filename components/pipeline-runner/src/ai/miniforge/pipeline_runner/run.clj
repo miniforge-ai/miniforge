@@ -21,6 +21,7 @@
   (:require [ai.miniforge.pipeline.interface :as pipeline]
             [ai.miniforge.pipeline-runner.core :as core]
             [ai.miniforge.pipeline-runner.messages :as msg]
+            [ai.miniforge.pipeline-runner.preflight :as preflight]
             [ai.miniforge.pipeline-runner.scheduler
              :refer [skip-remaining-tasks! step-pipeline]]
             [ai.miniforge.dag-executor.interface :as dag]
@@ -71,42 +72,57 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} execute-pipeline
+(defn- ^{:stratum 1} run-preflighted-pipeline
+  "Execute a pipeline that passed validation and preflight."
+  [pipeline-def connectors context]
+  (let [{:pipeline/keys [id version stages mode]} pipeline-def
+        run-result   (core/create-pipeline-run
+                      {:pipeline-run/pipeline-id id
+                       :pipeline-run/version version
+                       :pipeline-run/mode (or mode :full-refresh)})
+        pipeline-run (:pipeline-run run-result)
+        stage-map    (into {} (map (juxt :stage/id identity)) stages)
+        task-defs    (map stage->task-def stages)
+        run-atom     (dag/create-run-atom
+                       (dag/create-dag-from-tasks (random-uuid) task-defs))
+        {:keys [stage-runs cursors failed?]}
+        (run-pipeline-dag run-atom stage-map connectors context)
+        final-run    (assoc pipeline-run
+                            :pipeline-run/status (if failed? :failed :completed)
+                            :pipeline-run/stage-runs stage-runs
+                            :pipeline-run/connector-cursors cursors
+                            :pipeline-run/started-at (:pipeline-run/created-at pipeline-run)
+                            :pipeline-run/completed-at (Instant/now))]
+    (if failed?
+      (schema/failure :pipeline-run
+                      (msg/t :run/stage-failed
+                             {:name (:stage/name (first (filter #(= :failed (:status %)) stage-runs)))})
+                      {:pipeline-run final-run})
+      (schema/success :pipeline-run final-run))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} execute-pipeline
   "Execute a pipeline using dag-executor for dependency scheduling.
    Runs stages in topological order. Each stage result feeds into dependent stages.
    Stops on first failure — skips all remaining pending stages.
+
+   Before any stage runs, preflight checks that every connector, transform,
+   quality rule and spawn function the pipeline names resolves. A preflight
+   failure returns the schema/failure from `preflight/check`, carrying
+   :preflight/problems; no connector is opened.
 
    context may include:
      :transforms  — map of keyword → (fn [records config] -> records)
      :spawn-fns   — map of keyword → (fn [records config] -> [spawn-request ...])"
   [pipeline-def connectors context]
-  (let [validation (pipeline/validate-pipeline pipeline-def)]
-    (if-not (:success? validation)
-      (schema/failure-with-errors :pipeline-run (:errors validation))
-      (let [{:pipeline/keys [id version stages mode]} pipeline-def
-            run-result   (core/create-pipeline-run
-                          {:pipeline-run/pipeline-id id
-                           :pipeline-run/version version
-                           :pipeline-run/mode (or mode :full-refresh)})
-            pipeline-run (:pipeline-run run-result)
-            stage-map    (into {} (map (juxt :stage/id identity)) stages)
-            task-defs    (map stage->task-def stages)
-            run-atom     (dag/create-run-atom
-                           (dag/create-dag-from-tasks (random-uuid) task-defs))
-            {:keys [stage-runs cursors failed?]}
-            (run-pipeline-dag run-atom stage-map connectors context)
-            final-run    (assoc pipeline-run
-                                :pipeline-run/status (if failed? :failed :completed)
-                                :pipeline-run/stage-runs stage-runs
-                                :pipeline-run/connector-cursors cursors
-                                :pipeline-run/started-at (:pipeline-run/created-at pipeline-run)
-                                :pipeline-run/completed-at (Instant/now))]
-        (if failed?
-          (schema/failure :pipeline-run
-                          (msg/t :run/stage-failed
-                                 {:name (:stage/name (first (filter #(= :failed (:status %)) stage-runs)))})
-                          {:pipeline-run final-run})
-          (schema/success :pipeline-run final-run))))))
+  (let [validation (pipeline/validate-pipeline pipeline-def)
+        checked    (when (:success? validation)
+                     (preflight/check pipeline-def connectors context))]
+    (cond
+      (not (:success? validation)) (schema/failure-with-errors :pipeline-run (:errors validation))
+      (schema/failed? checked)     checked
+      :else                        (run-preflighted-pipeline pipeline-def connectors context))))
 
 (comment
   (stage->task-def {:stage/id (random-uuid) :stage/dependencies []}))
