@@ -6,6 +6,7 @@
   :recovery/target-remediation "Declare the matching staging environment and original target in independent recovery-plan admission settings."
   :recovery/invalid-admission "Recovery-plan admission requires valid runtime policy and a separately declared staging approval."
   :recovery/baseline-verification-refused "Baseline recovery verification requires the retained original, current independent plan admission and a matching native target with acknowledged evidence."
+  :replicas/native-trial-refused "A native replica trial requires valid retained recovery input, an unchanged original baseline, a matching physical target and a distinct bounded trial request."
   :load/ownership-unconfirmed "Owned load identity requires a matching durable granted creation receipt and a fresh Pod with that exact provider-assigned UID."
   :load/invalid-absence-request "Owned-load absence requires valid context and a retained recovery reference with explicit ownership runtime."
   :load/absence-unconfirmed "Owned-load resource absence could not be confirmed on the original physical target."
