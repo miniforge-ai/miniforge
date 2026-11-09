@@ -34,7 +34,7 @@
             ;; Gate-evidence harness (tracker #2421). No base, so every brick is
             ;; listed.
             "qualification" {:alias "qual"
-                             :necessary ["messages" "qualification"]}
+                             :necessary ["content-hash" "messages" "qualification"]}
             "data-foundry"   {:alias "df"}
             "miniforge-core" {:alias "core"
                               ;; Runtime-loaded via phase/namespaces.edn resource discovery

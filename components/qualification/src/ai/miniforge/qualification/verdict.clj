@@ -21,7 +21,12 @@
    every criterion passed is a pass."
   (:require
    [ai.miniforge.qualification.messages :as msg]
-   [ai.miniforge.qualification.vocabulary :as vocab]))
+   [ai.miniforge.qualification.schema :as schema]
+   [ai.miniforge.qualification.vocabulary :as vocab]
+   [clojure.edn :as edn]
+   [malli.core :as m]
+   [malli.error :as me]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -48,7 +53,32 @@
           (for [[id n] counts :when (> n 1)]
             (msg/t :result/duplicate {:id id})))))
 
+(defn- ^{:stratum 0} plain-data?
+  "True when `x` prints and reads back equal, so its content hash is the
+   same on every run. A fn or other object does not."
+  [x]
+  (try+
+   (= x (edn/read-string (pr-str x)))
+   (catch Exception _
+     false)))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} output-problems
+  "Why a scenario's output cannot be reported, or nil when it can: it is
+   not a ScenarioOutput, its fixtures, config or results are not plain data
+   (the hashes would not repeat, and the report could not be written as
+   EDN), or its results do not match the gate."
+  [gate output]
+  (cond
+    (not (m/validate schema/ScenarioOutput output))
+    [(pr-str (me/humanize (m/explain schema/ScenarioOutput output)))]
+
+    (not (plain-data? (select-keys output [:scenario/fixtures :scenario/config :scenario/results])))
+    [(msg/t :scenario/not-plain-data)]
+
+    :else
+    (not-empty (result-problems gate (:scenario/results output)))))
 
 (defn ^{:stratum 1} unrun-rows
   "Every declared criterion as unrun, for `reason`."
