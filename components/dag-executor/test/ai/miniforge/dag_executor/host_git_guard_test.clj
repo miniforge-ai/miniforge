@@ -83,14 +83,15 @@
                  "man.viewer" "man.custom.cmd" "man.custom.path" "browser.firefox.cmd"
                  "web.browser" "help.browser" "instaweb.httpd" "guitool.lint.cmd"
                  "trailer.sign.command" "trailer.sign.cmd" "imap.tunnel"
-                 "sendemail.tocmd" "sendemail.work.cccmd" "sendemail.smtpserver"]]
+                 "sendemail.tocmd" "sendemail.work.cccmd" "sendemail.smtpserver"
+                 "tar.tar.xz.command"]]
         (is (watched? k) k)))
     (testing "given a neighbouring key that runs nothing → not watched"
       (doseq [k ["core.autocrlf" "core.bare" "user.name" "remote.origin.url"
                  "remote.origin.fetch" "filter.lfs.required" "diff.renames"
                  "credential.usehttppath" "gpg.format" "include.pathx"
                  "submodule.standards/miniforge.update" "man.custom.manual"
-                 "trailer.sign.key" "sendemail.smtppass" "gc.auto"]]
+                 "trailer.sign.key" "sendemail.smtppass" "gc.auto" "tar.umask"]]
         (is (not (watched? k)) k)))))
 
 ;------------------------------------------------------------------------------ Layer 1
