@@ -27,6 +27,8 @@ twice when a delivery is retried.
 1. `admission`: the allowed set is the `:workspace/repos` set in the scope of a live root
    `:effect/pr-create` grant issued to the acting principal. A repository outside that set is refused
    before any command runs. A scope value that is not a set (nil, a vector, a map) allows nothing.
+   Clone and delivery also refuse a lease of another tenant than the acting one, before any command
+   runs or any record is read, since a grant need not bind the tenant.
 2. `schema`: a request names repositories by id only. The controller derives each URL from its
    `:repo-base-url` and the id, so a request cannot point an allowed id at another repository. Ids
    cannot contain `.` or `..` parts, base refs cannot start with `-`, and the root must be absolute.
@@ -62,7 +64,8 @@ Over the fake environment, with git answered by a scripted exec:
 8. a `develop` base is fetched and the task branch starts from FETCH_HEAD; the PR proposal carries
    the base ref and the task branch's commit, and that commit is what is pushed;
 9. a second delivery runs no git command;
-10. a grant whose `:workspace/repos` is a vector allows nothing.
+10. a grant whose `:workspace/repos` is a vector allows nothing;
+11. clone and delivery with another tenant's acting identity are refused `forged-tenant`.
 
 Not verified: real git against real remotes. Git configuration inside the environment (such as
 `url.*.insteadOf`) is not neutralized. Per-repository push credentials are what bound the push

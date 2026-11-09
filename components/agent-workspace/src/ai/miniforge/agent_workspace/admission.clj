@@ -35,6 +35,13 @@
   (let [repos (get-in grant [:grant/scope :workspace/repos])]
     (if (set? repos) repos #{})))
 
+(defn ^{:stratum 0} tenant-refusal
+  "Nil when the lease belongs to the acting tenant. Checked before any
+   record is read, since a grant need not bind the tenant."
+  [acting lease]
+  (when-not (= (:acting/tenant-id acting) (:lease/tenant-id lease))
+    :anomalies.agent-workspace/forged-tenant))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} pr-scope

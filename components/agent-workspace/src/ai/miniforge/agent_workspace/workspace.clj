@@ -44,7 +44,8 @@
 (defn- ^{:stratum 0} admission-refusal
   [wc acting lease grant repo-ids]
   (let [now ((:workspace/clock wc))]
-    (or (admission/repo-refusal grant repo-ids)
+    (or (admission/tenant-refusal acting lease)
+        (admission/repo-refusal grant repo-ids)
         (some #(admission/grant-refusal grant acting lease % now) repo-ids))))
 
 ;------------------------------------------------------------------------------ Layer 1

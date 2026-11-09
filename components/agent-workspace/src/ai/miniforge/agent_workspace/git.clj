@@ -32,6 +32,11 @@
    repository's own branches."
   "miniforge/task-")
 
+(def ^{:stratum 0} branch-ref-prefix
+  "Where local and pushed branches live; naming it in full keeps a branch
+   from being read as a tag or a remote-tracking ref of the same name."
+  "refs/heads/")
+
 (defn ^{:stratum 0} repo-path
   "`root/owner/name`: `/` is in no part of an id, so two ids never share a path."
   [root repo-id]
@@ -54,17 +59,6 @@
 
 (defn ^{:stratum 0} head-argv [path] ["git" "-C" path "rev-parse" "HEAD"])
 
-(defn ^{:stratum 0} branch-head-argv
-  "The task branch's commit, whatever the worker has checked out."
-  [path branch]
-  ["git" "-C" path "rev-parse" "--verify" "--quiet" (str "refs/heads/" branch "^{commit}")])
-
-(defn ^{:stratum 0} push-argv
-  "Push the recorded commit to the task branch at the id's URL, not the
-   branch's tip now or whatever `origin` names."
-  [path url sha branch]
-  ["git" "-C" path "push" "--quiet" url (str sha ":refs/heads/" branch)])
-
 (defn ^{:stratum 0} sha-of [result] (str/trim (str (:exec/stdout result))))
 
 (defn ^{:stratum 0} git!
@@ -79,5 +73,16 @@
                                  {:git/argv argv :exec/exit (:exec/exit result)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} branch-head-argv
+  "The task branch's commit, whatever the worker has checked out."
+  [path branch]
+  ["git" "-C" path "rev-parse" "--verify" "--quiet" (str branch-ref-prefix branch "^{commit}")])
+
+(defn ^{:stratum 1} push-argv
+  "Push the recorded commit to the task branch at the id's URL, not the
+   branch's tip now or whatever `origin` names."
+  [path url sha branch]
+  ["git" "-C" path "push" "--quiet" url (str sha ":" branch-ref-prefix branch)])
 
 (defn ^{:stratum 1} task-branch [task-id] (str branch-prefix task-id))

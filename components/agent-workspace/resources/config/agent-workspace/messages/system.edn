@@ -4,6 +4,7 @@
 
 {:agent-workspace/messages
  {:anomalies.agent-workspace/invalid-input "Agent-workspace inputs failed validation"
+  :anomalies.agent-workspace/forged-tenant "The environment lease belongs to another tenant"
   :anomalies.agent-workspace/repo-not-allowed "A requested repository is outside the grant's allowed set"
   :anomalies.agent-workspace/grant-absent "No pull-request grant was presented"
   :anomalies.agent-workspace/grant-wrong-effect "The presented grant does not authorize pull requests"

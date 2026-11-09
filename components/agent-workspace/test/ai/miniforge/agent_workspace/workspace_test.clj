@@ -53,6 +53,14 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} test-another-tenants-lease-is-refused-before-any-record-is-read
+  (let [w (fx/world)
+        ws (clone w (take 1 fx/allowed))
+        _ (deliver-all w ws)
+        stranger (assoc (:acting w) :acting/tenant-id (random-uuid))]
+    (is (= :anomalies.agent-workspace/forged-tenant (anomaly/subtype (workspace/deliver! (:wc w) stranger (:grant w) ws))))
+    (is (= :anomalies.agent-workspace/forged-tenant (anomaly/subtype (workspace/clone! (:wc w) stranger (:lease w) (:grant w) (fx/request fx/allowed)))))))
+
 (deftest ^{:stratum 1} test-three-repositories-one-branch-and-one-pr-each
   (let [w (fx/world)
         ws (clone w fx/allowed)
