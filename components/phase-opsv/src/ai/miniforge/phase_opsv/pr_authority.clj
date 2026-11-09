@@ -10,7 +10,7 @@
             [ai.miniforge.phase-opsv.flow :as flow]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.pr-transaction :as transaction]
-            [ai.miniforge.phase-opsv.pr-registration :as registration]
+            [ai.miniforge.phase-opsv.effect-registration :as registration]
             [ai.miniforge.phase-opsv.pr-stop :as stop]))
 
 ;------------------------------------------------------------------------------ Layer 0
