@@ -82,6 +82,11 @@ the plan mounts one) and only the host paths its plan mounts, so a store on the 
    store id is never derived again later: `environment-records/build` gives each acquisition a fresh random task id
    unless the definition id is a UUID, so a resume would land in a new store. Every snapshot event records the
    store's dir, and a resume passes that dir back (Executor wiring, item 1).
+
+   The store copies ignored files the secret scan never sees, such as `.env` or `.claude/settings.local.json`, and
+   keeps them for the retention period. So `<snapshot-root>` and every dir under it are created owner-only (`0700`),
+   and the store refuses a snapshot root that is a symbolic link, as `checkpoint-store-lock` refuses a linked
+   `.locks` dir.
 2. `git --git-dir <dir> init --bare`, so the store has `core.bare=true` and no `core.worktree`. Every command that
    reads or writes files names the work tree with `--work-tree`, which overrides `core.bare` (tested). Before the
    first add, write `info/attributes` containing `* -text -filter -ident !eol !working-tree-encoding`.
@@ -117,9 +122,10 @@ the plan mounts one) and only the host paths its plan mounts, so a store on the 
 | final | `runner-session/execute!`, before output extraction | `final/<n>` |
 | release fallback | `release-environment!`, only when `execute!` took no final snapshot | `final/<n>` |
 
-`n` is one counter over all the store's tags, counted from the tags already there, so the order survives a restart
-and a resume that reuses the store. A snapshot with no change makes no commit,
-but it still tags the current commit and is still reported. So "state after phase X" always resolves.
+`n` is one counter over all the store's tags: one more than the highest `n` already there, read under the store
+lock. So the order survives a restart, a resume that reuses the store, and tags a new attempt imported, and "follows"
+below means a higher `n`. A snapshot with no change makes no commit, but it still tags the current commit and is
+still reported. So "state after phase X" always resolves.
 
 The phase snapshot does not go through `persist-workspace!`. `persist-workspace-at-phase-boundary!` returns without
 calling the executor when a gate denied the phase for secrets, the outgoing scan finds a secret, or there is no
@@ -134,7 +140,9 @@ The final snapshot is taken in `execute!` because release comes too late for evi
 output, including its evidence fields, and finalizes it. Only then does `runner-lifetime/protect!` run the release
 cleanup. Release still takes a final snapshot when no `final/` tag follows the latest `baseline/` tag, which happens
 when `execute!` threw before output extraction. That snapshot is in the event stream only; that run has no output to
-carry evidence. A killed process gets neither, and its last phase snapshot stands.
+carry evidence. A killed process gets neither, and its last phase snapshot stands. On a resume, every acquire takes
+a new baseline after any reopened or imported tags, so an earlier attempt's `final/` tag never counts as this
+attempt's.
 
 ### Executor wiring
 
