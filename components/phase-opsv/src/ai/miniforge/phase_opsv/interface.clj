@@ -51,6 +51,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-ownership :as load-ownership]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-quiescence :as load-quiescence]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop :as load-stop]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop-provider :as native-load-stop-provider]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -78,6 +79,13 @@
   "Prepare an exact conditional stop proposal from current retained recovery approval and fresh owned identity.
    This read-only API does not issue authority, execute a patch or prove termination."
   load-stop/prepare!)
+
+(def ^{:stratum 0} stop-kubernetes-load-pod!
+  "Execute one exact deadline patch through a required trusted synchronous dispatch callback.
+   Runtime carries context/recovery input; record must be granted and committing. Returns outcome or anomaly.
+   Requires independently admitted current authority and a six-argument pinned durable commit.
+   A confirmed deadline patch does not establish actual worker termination or recovered baseline."
+  native-load-stop-provider/patch!)
 
 (def ^{:stratum 0} read-kubernetes-load-ownership!
   "Read the plan's durable granted creation record and fresh Pod with its provider-assigned UID.
