@@ -29,7 +29,7 @@
             ;; every brick is listed; no default project may depend on them.
             "agent-environments" {:alias "ae"
                                   :necessary ["agent-environment" "agent-environment-kubernetes" "agent-worker"
-                                              "anomaly" "config" "content-hash"
+                                              "agent-workspace" "anomaly" "config" "content-hash" "effect-transaction"
                                               "execution-grant" "file-durability" "kubernetes-target"
                                               "llm" "logging" "messages" "redaction" "response" "tenancy"]
                                   ;; llm's own tests need the agent brick, which this project

@@ -1,0 +1,14 @@
+;; Title: Miniforge.ai
+;; Author: Christopher Lester (christopher@miniforge.ai)
+;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+
+{:agent-workspace/messages
+ {:anomalies.agent-workspace/invalid-input "Agent-workspace inputs failed validation"
+  :anomalies.agent-workspace/forged-tenant "The environment lease belongs to another tenant"
+  :anomalies.agent-workspace/repo-not-allowed "A requested repository is outside the grant's allowed set"
+  :anomalies.agent-workspace/grant-absent "No pull-request grant was presented"
+  :anomalies.agent-workspace/grant-wrong-effect "The presented grant does not authorize pull requests"
+  :anomalies.agent-workspace/grant-wrong-principal "The pull-request grant was issued to another principal"
+  :anomalies.agent-workspace/grant-denied "The pull-request grant does not cover this run and repository"
+  :anomalies.agent-workspace/git-failed "A git command failed inside the environment"
+  :anomalies.agent-workspace/checkout-mismatch "A checkout names a path or branch its workspace does not give it"}}
