@@ -6,7 +6,13 @@
 # Task snapshot history outside the agent's reach
 
 Status: draft, 2026-11-08. Scope: local-mode task worktrees in `dag-executor`. Once accepted, the event and evidence
-contracts go into N3 and N6, and the resume rule goes into N2-delta §8. This doc is design only, with no code.
+contracts go into N3 and N6, and the resume rule goes into N2-delta §8. The specs cited here are in
+`specs/normative/`. This doc is design only, with no code.
+
+Terms: *worktree* means the task's linked worktree, the directory `git worktree add` made. *Work tree* means the
+files git tracks in a directory, as in `--work-tree`. In `dag-executor` opts, `:workflow-id` already means the run id
+(`persist-opts` sets it from `:execution/id`), and this design keeps that name. `:workflow/id` is only the workflow
+definition's id.
 
 Reference: PAODO-Workspaces `doc/adr/accepted/platform/adr-workspace-git-versioning.md` and `lib/infra/git/`.
 
@@ -73,16 +79,17 @@ the plan mounts one) and only the host paths its plan mounts, so a store on the 
    `<miniforge-home>/snapshots`, as `:workflow/worktree-root` does (`default-base-path`). Like that key, it stays out
    of `default-user-config.edn`, so `MINIFORGE_HOME` moves it. `task-id` is the full id given to
    `acquire-environment!`; the environment id holds only its first 8 characters.
-2. `git --git-dir <dir> init`, with no `--work-tree`, so no `core.worktree` is written. Before the first add, write
-   `info/attributes` containing `* -text -filter -ident !eol !working-tree-encoding`. `info/attributes` outranks
-   in-tree `.gitattributes`. Without it, a work tree with `text=auto eol=crlf` was stored with LF line endings
-   instead of the CRLF on disk (tested).
-3. Every command is `git --git-dir <dir> --work-tree <worktree>` with
+2. `git --git-dir <dir> init --bare`, so the store has `core.bare=true` and no `core.worktree`. Every command that
+   reads or writes files names the work tree with `--work-tree`, which overrides `core.bare` (tested). Before the
+   first add, write `info/attributes` containing `* -text -filter -ident !eol !working-tree-encoding`.
+   `info/attributes` outranks in-tree `.gitattributes`. Without it, a work tree with `text=auto eol=crlf` was stored
+   with LF line endings instead of the CRLF on disk (tested).
+3. Every command is `git --git-dir <dir>`, plus `--work-tree <worktree>` when it touches files, with
    `-c core.excludesFile=/dev/null -c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgsign=false` and
    a fixed `user.name`/`user.email`. The process starts from an empty environment holding only `PATH`, `LC_ALL=C`,
    `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`. An explicit `--git-dir` overrides `GIT_DIR` but not
    an inherited `GIT_INDEX_FILE` or `GIT_OBJECT_DIRECTORY`; a stray `GIT_INDEX_FILE` moved the index (tested). With
-   an explicit `--git-dir` git does no discovery, so it never opens the work tree's `.git` file or the host's
+   an explicit `--git-dir` git does no discovery, so it never opens the worktree's `.git` file or the host's
    `.git/config`.
 4. A snapshot is `add --all --force` and then a commit only if the tree changed. The first commit uses
    `--allow-empty`, so every store has a root commit. Tested: ignored files are kept, the
@@ -152,15 +159,22 @@ error in place of the release result, which would drop snapshot data reported fr
 A snapshot result is `{:kind :phase :sha :tree :tag :dir :changed? :bytes}`, or `{:kind :error :reason ...}` on
 failure. `snapshot-workspace!` returns it; acquire and release results carry it as `:workspace/snapshot`. The runner
 collects each one in the context's `:execution/workspace-snapshots`: the baseline from the acquired environment map
-(`runner_preparation.clj`), one per phase boundary, and the final one in `execute!`. Writes to one store are
-serialized by a JVM lock keyed on its git dir. A second process fails on git's `index.lock`; it does not wait.
+(`runner_preparation.clj`), one per phase boundary, and the final one in `execute!`.
+
+Within a process, writes to one store are serialized by a JVM lock keyed on its git dir. Across processes they need
+no lock: a store belongs to one run, and the run owner lock (`owner/with-run-owner` in `run-pipeline`) already
+admits one live process per run id. A second process could reach a store only by bypassing that lock, so it fails
+on git's `index.lock` and reports `:workspace/snapshot-failed` rather than waiting. The one expected
+`index.lock` is the one a killed process leaves. Acquire runs under the owner lock, so no other process can be
+writing: the wrapper deletes a leftover `index.lock` there and records that it did in the baseline result.
 
 The wrapper calls the store through a `SnapshotStore` port, a map of `:init!`, `:snapshot!`, `:verify!`, `:restore!`,
 `:import!` and `:repack!` given at composition. The wrapper defines the port; the git-backed store implements it
 (PR 3), and `create-executor-registry` passes that store in. The wrapper's tests pass fakes.
 
 **A snapshot failure never fails the acquire, phase or release it belongs to, but it is never silent.** It reports
-`:workspace/snapshot-failed`, and the gap shows in evidence (N11 §7.3).
+`:workspace/snapshot-failed`, and the gap shows in evidence. This follows the rule N11 §7.3 (No Silent Downgrade,
+`N11-task-capsule-isolation.md`) sets for a downgrade: a failure is logged and recorded in evidence.
 
 Governed mode also acquires a host worktree (`governed-environment/acquire!`), but the agent does not work in it.
 PR 4 changes the registry config there from `{:worktree {}}` to `{:worktree {:snapshots? false}}`.
