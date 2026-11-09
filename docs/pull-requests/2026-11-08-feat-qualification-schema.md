@@ -10,8 +10,9 @@
 
 A new `qualification` component holds the values of gate evidence: the
 criteria a gate declares, the result a scenario reports per criterion, the
-build it ran on, and the report. This PR adds the values and the verdict. The
-stacked PR adds build identity, the report writer and the run boundary.
+build it ran on, and the report. This PR adds the values, including the
+`Build` schema, and the verdict. The stacked PR reads the build identity from
+git, writes the report, and adds the run boundary.
 
 ## Motivation
 

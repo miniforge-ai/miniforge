@@ -31,6 +31,10 @@
                                   :necessary ["agent-environment" "agent-worker" "anomaly" "content-hash"
                                               "execution-grant" "file-durability"
                                               "kubernetes-target" "messages" "tenancy"]}
+            ;; Gate-evidence harness (tracker #2421). No base, so every brick is
+            ;; listed.
+            "qualification" {:alias "qual"
+                             :necessary ["content-hash" "messages" "qualification"]}
             "data-foundry"   {:alias "df"}
             "miniforge-core" {:alias "core"
                               ;; Runtime-loaded via phase/namespaces.edn resource discovery
