@@ -204,7 +204,13 @@
           parsed (impl/parse-claude-stream-line line)]
       (is (true? (:heartbeat parsed))
           "system init refreshes liveness once at the start of the stream")
-      (is (false? (:done? parsed))))))
+      (is (false? (:done? parsed)))))
+
+  (testing "system init with a session id announces it without making the run resumable"
+    (let [parsed (impl/parse-claude-stream-line (json/generate-string {:type "system" :subtype "init" :session_id "s-1"}))]
+      (is (= "s-1" (:announced-session-id parsed)))
+      (is (nil? (:session-id parsed)))
+      (is (nil? (:invocation-id parsed))))))
 
 (deftest ^{:stratum 0} record-parsed-progress-heartbeat-liveness-test
   (testing "heartbeat-only Claude stream events are recorded as activity"

@@ -34,7 +34,10 @@ expose real capability differences.
    prints no pid failed. The workdir must be absolute. A cancel that signals nothing reports false.
 3. The backend's own stream parser reads the native session id and usage. Claude reports tokens and
    cost; Codex reports tokens only, so its cost stays nil. A Claude turn cut before its result
-   frame reports the tokens its messages billed, once per message, with cost nil.
+   frame reports the tokens its messages billed, once per message, with cost nil. Its next turn
+   resumes the session the CLI announced in its `system` init frame: the llm Claude parser now
+   carries that id as `:announced-session-id`, a new key the llm client and stream callbacks do not
+   read, so the default product's resume and tool-call events are unchanged.
 4. Capabilities differ: Claude steers between turns (`--resume`) and observes a budget; Codex does
    neither, so a spend grant with a cost ceiling refuses it.
 5. Preflight checks the CLI and a credential inside the environment; either missing fails the
@@ -44,9 +47,11 @@ expose real capability differences.
 
 A scripted fake environment answers the worker's shell lines: Claude and Codex command lines,
 prompt, settings and MCP files, Claude usage and resume from its stream, per-message tokens from a
-cut Claude turn, Codex tokens without cost and no steering, missing CLI or credential, a launch with
+cut Claude turn and its resume from the init frame, Codex tokens without cost and no steering, missing CLI or
+credential, a launch with
 no pid, and a relative workdir. Shell quoting, status mapping and credential-name filtering
-are unit-tested. No real harness runs in CI.
+are unit-tested. The llm parser test checks the init frame's id is announced and is not the
+resumable `:session-id`. No real harness runs in CI.
 
 ## Deployment Plan
 

@@ -328,7 +328,11 @@
 
    Claude CLI stream-json emits:
    - {\"type\":\"system\"} — one-shot init event; parsed to a heartbeat
-     so it refreshes stream supervision once at session start
+     so it refreshes stream supervision once at session start. Its
+     session_id, when present, rides as :announced-session-id, which the
+     llm client and stream callbacks ignore; :session-id still comes only
+     from the result frame, so a run cut before it is not offered for
+     resume.
    - {\"type\":\"assistant\",\"message\":{\"content\":[{\"text\":\"...\"}]}} — content
    - {\"type\":\"tool_use\"} — tool invocation (carries :tool-use)
    - {\"type\":\"rate_limit_event\"} — periodic liveness pulse from
@@ -480,7 +484,8 @@
           ;; events + 1 system init in 60s, stagnation killed the run
           ;; with zero assistant output produced.
           ("system" "rate_limit_event")
-          {:delta "" :done? false :heartbeat true}
+          (cond-> {:delta "" :done? false :heartbeat true}
+            (:session_id data) (assoc :announced-session-id (:session_id data)))
 
           ;; Any other unrecognised event type — emit a heartbeat so the
           ;; stream stays alive during tool-heavy phases
