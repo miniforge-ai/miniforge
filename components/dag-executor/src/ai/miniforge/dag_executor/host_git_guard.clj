@@ -59,7 +59,11 @@
    [clojure.java.shell :as shell]
    [clojure.string :as str])
   (:import
-   [java.io File]))
+   [java.io File]
+   [java.nio.charset StandardCharsets]
+   [java.security SecureRandom]
+   [javax.crypto Mac]
+   [javax.crypto.spec SecretKeySpec]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -75,6 +79,29 @@
    lowercases the key, so the pattern is written lowercase."
   "^(remote\\..*url|url\\..*insteadof)$")
 
+(def ^{:stratum 0} command-config-pattern
+  "Config keys that make git run a program (hooks, fsmonitor, ssh, pager,
+   editor, credential helper, filter, diff and merge drivers, signing,
+   remote helpers, aliases), or load config that can (`include.path`,
+   `includeIf.*.path`). Lowercase for the same reason as
+   `redirect-config-pattern`.
+
+   `submodule.<name>.update` is left out although its `!command` form runs
+   a shell command: `git submodule init` copies it from `.gitmodules`, so
+   an ordinary submodule checkout sets it."
+  (str "^("
+       "core\\.(hookspath|fsmonitor|sshcommand|askpass|gitproxy|pager|editor"
+       "|alternaterefscommand)"
+       "|sequence\\.editor|pager\\..*|alias\\..*|interactive\\.difffilter"
+       "|include\\.path|includeif\\..*\\.path"
+       "|credential\\.(.*\\.)?helper"
+       "|filter\\..*\\.(clean|smudge|process)"
+       "|diff\\.external|diff\\..*\\.(command|textconv)|merge\\..*\\.driver"
+       "|(difftool|mergetool)\\..*\\.(cmd|path)"
+       "|gpg\\.(.*\\.)?program|gpg\\.ssh\\.defaultkeycommand"
+       "|remote\\..*\\.(uploadpack|receivepack|vcs)"
+       ")$"))
+
 (def ^{:stratum 0} remote-ref-namespace
   "Ref namespace holding remote-tracking refs. `refs/remotes/origin/main`
    is what the 2026-08-06 incident moved backwards."
@@ -84,6 +111,32 @@
   "ASCII unit separator (U+001F). Delimits `for-each-ref --format` fields;
    it cannot occur in a ref name or a SHA, so splitting on it is total."
   (str (char 0x1F)))
+
+(def ^{:stratum 0} fingerprint-algorithm
+  "MAC that `fingerprint` computes. Keyed, so a fingerprint cannot be
+   checked against a guessed value without the per-process key."
+  "HmacSHA256")
+
+(def ^{:stratum 0} fingerprint-digest-bytes
+  "Bytes of the MAC a fingerprint keeps. 8 bytes (64 bits) make a chance
+   collision between the few values of one key negligible, and keep
+   reports short."
+  8)
+
+(def ^{:stratum 0} fingerprint-prefix
+  "Marks a fingerprint in a report, so it is not read as the value itself."
+  "hmac-sha256:")
+
+(defonce ^{:stratum 0} ^:private
+  ^{:doc "Random key for `fingerprint`, made once per process. Both
+   snapshots a drift report compares are taken in one process, so equality
+   is all a fingerprint has to support."}
+  fingerprint-key
+  ;; 32 bytes, the HMAC-SHA256 output length; RFC 2104 discourages shorter.
+  (let [key-bytes 32
+        k         (byte-array key-bytes)]
+    (.nextBytes (SecureRandom.) k)
+    k))
 
 (defn ^{:stratum 0} redact-credentials
   "Replace the userinfo in a URL that carries one.
@@ -266,6 +319,20 @@
       (result/err :host-git-snapshot-failed
                   (msg/t :snapshot/remote-refs-failed)
                   {:repo-path repo-path :stderr (get r :err "")}))))
+
+(defn ^{:stratum 1} fingerprint
+  "Keyed digest standing in for a config value that may carry a secret.
+   No pattern can find a secret inside an arbitrary command line, so the
+   value is not kept. Equal values give equal fingerprints within one
+   process, and only within it."
+  [value]
+  (let [mac (Mac/getInstance fingerprint-algorithm)]
+    (.init mac (SecretKeySpec. ^bytes fingerprint-key fingerprint-algorithm))
+    ;; `format`, not `java.util.HexFormat`, which babashka does not expose.
+    (->> (.doFinal mac (.getBytes (str value) StandardCharsets/UTF_8))
+         (take fingerprint-digest-bytes)
+         (map #(format "%02x" (bit-and % 0xff)))
+         (apply str fingerprint-prefix))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

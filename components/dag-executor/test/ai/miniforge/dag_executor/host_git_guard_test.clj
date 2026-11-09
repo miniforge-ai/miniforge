@@ -27,6 +27,7 @@
    [ai.miniforge.dag-executor.host-git-fixtures :as fixtures]
    [ai.miniforge.dag-executor.host-git-guard :as sut]
    [ai.miniforge.dag-executor.result :as result]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]])
   (:import
    [java.io File]))
@@ -39,6 +40,11 @@
 (def ^{:stratum 0} ^:private redirected-origin-url fixtures/redirected-origin-url)
 
 (def ^{:stratum 0} ^:private tracked-ref fixtures/tracked-ref)
+
+(def ^{:stratum 0} ^:private synthetic-token
+  "Shaped like a GitHub installation token so a leak is recognizable, and
+   marked synthetic so it is never mistaken for a real one."
+  "ghs_SYNTHETICNOTAREALTOKEN")
 
 (defn- ^{:stratum 0} snapshot!
   "Take a snapshot of `dir`, unwrapped. A snapshot that failed comes back
@@ -53,6 +59,26 @@
       (try
         (is (result/err? (sut/snapshot not-a-repo)))
         (finally (fixtures/delete-tree! not-a-repo))))))
+
+(deftest ^{:stratum 0} command-config-pattern-selects-keys-that-run-programs-test
+  (let [watched? #(boolean (re-matches (re-pattern sut/command-config-pattern) %))]
+    (testing "given a key that runs a program or loads config → watched"
+      (doseq [k ["core.hookspath" "core.fsmonitor" "core.sshcommand" "core.askpass"
+                 "core.pager" "core.editor" "sequence.editor" "pager.log" "alias.st"
+                 "include.path" "includeif.gitdir:/work/.path"
+                 "credential.helper" "credential.https://example.invalid.helper"
+                 "filter.lfs.clean" "filter.lfs.smudge" "filter.lfs.process"
+                 "diff.external" "diff.pdf.textconv" "diff.pdf.command" "merge.ours.driver"
+                 "difftool.vim.cmd" "mergetool.vim.path"
+                 "gpg.program" "gpg.ssh.program" "gpg.ssh.defaultkeycommand"
+                 "remote.origin.uploadpack" "remote.origin.receivepack" "remote.origin.vcs"]]
+        (is (watched? k) k)))
+    (testing "given a neighbouring key that runs nothing → not watched"
+      (doseq [k ["core.autocrlf" "core.bare" "user.name" "remote.origin.url"
+                 "remote.origin.fetch" "filter.lfs.required" "diff.renames"
+                 "credential.usehttppath" "gpg.format" "include.pathx"
+                 "submodule.standards/miniforge.update"]]
+        (is (not (watched? k)) k)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -81,6 +107,15 @@
             {"remote.origin.url" [host-origin-url "https://example.invalid/second.git"]}
             {"remote.origin.url" [redirected-origin-url "https://example.invalid/second.git"]}))
         "git remote get-url resolves to the first value, so collapsing to the last would miss this")))
+
+(deftest ^{:stratum 1} fingerprint-tells-values-apart-without-holding-them-test
+  (testing "given the same value twice → the same fingerprint"
+    (is (= (sut/fingerprint synthetic-token) (sut/fingerprint synthetic-token))))
+  (testing "given different values, empty included → different fingerprints"
+    (let [values [synthetic-token "osxkeychain" ""]]
+      (is (= (count values) (count (into #{} (map sut/fingerprint) values))))))
+  (testing "given a token → the fingerprint does not contain it"
+    (is (not (str/includes? (sut/fingerprint synthetic-token) synthetic-token)))))
 
 (deftest ^{:stratum 1} moved-remote-refs-ignores-refs-only-one-side-has-test
   (testing "given a ref at a new sha → reported with both shas"
@@ -206,7 +241,7 @@
   (testing "given a token-bearing https url → the token never reaches a snapshot"
     (is (= "https://***@github.com/o/r.git"
            (sut/redact-credentials
-            "https://x-access-token:ghs_SYNTHETICNOTAREALTOKEN@github.com/o/r.git"))))
+            (str "https://x-access-token:" synthetic-token "@github.com/o/r.git")))))
   (testing "given an scp-style ssh remote → left alone, git@ is a username not a secret"
     (is (= "git@github.com:o/r.git" (sut/redact-credentials "git@github.com:o/r.git"))))
   (testing "given a plain url → unchanged"
