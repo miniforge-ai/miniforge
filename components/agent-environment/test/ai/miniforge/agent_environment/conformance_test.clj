@@ -17,7 +17,9 @@
 ;; limitations under the License.
 (ns ai.miniforge.agent-environment.conformance-test
   (:require
+   [ai.miniforge.agent-environment.fake :as fake]
    [ai.miniforge.agent-environment.interface :as env]
+   [ai.miniforge.agent-environment.lifecycle :as lifecycle]
    [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -43,6 +45,42 @@
 
 (deftest ^{:stratum 1} test-a-provider-that-cannot-provision-fails-the-suite
   (let [outcomes (outcomes-by-check (env/run-conformance {:make-provider failing-provider}))]
+    (is (= :check/failed (:check/forged-tenant-refused outcomes)))
     (is (= :check/failed (:check/duplicate-acquire-returns-one-environment outcomes)))
     (is (= :check/failed (:check/stale-lease-refused outcomes)))
     (is (= :check/failed (:check/lifecycle-roundtrip outcomes)))))
+
+(deftest ^{:stratum 1} test-an-exec-answer-without-its-output-fails-the-roundtrip
+  (let [bare #(env/fake-provider {:fake/exec-fn (constantly {:exec/exit 0})})]
+    (is (= :check/failed (:check/lifecycle-roundtrip (outcomes-by-check (env/run-conformance {:make-provider bare})))))))
+
+(deftest ^{:stratum 1} test-a-check-that-throws-fails-and-the-rest-still-run
+  (let [results (env/run-conformance {:make-provider env/fake-provider
+                                      :await-ready (fn [_poll] (throw (ex-info "not ready in time" {})))})
+        outcomes (outcomes-by-check results)]
+    (is (= :check/failed (:check/stale-lease-refused outcomes) (:check/lifecycle-roundtrip outcomes)))
+    (is (= :check/passed (:check/duplicate-acquire-returns-one-environment outcomes) (:check/cleanup-confirmed outcomes)))))
+
+(deftest ^{:stratum 1} test-a-release-that-throws-fails-cleanup-and-the-suite-still-returns
+  (with-redefs [lifecycle/release! (fn [& _] (throw (ex-info "provider down" {})))]
+    (let [outcomes (outcomes-by-check (env/run-conformance {:make-provider env/fake-provider}))]
+      (is (= :check/failed (:check/cleanup-confirmed outcomes)))
+      (is (= :check/passed (:check/duplicate-acquire-returns-one-environment outcomes))))))
+
+(deftest ^{:stratum 1} test-the-suite-releases-what-it-acquires
+  (let [provider (env/fake-provider)
+        outcomes (outcomes-by-check (env/run-conformance {:make-provider (constantly provider)}))]
+    (is (= :check/passed (:check/cleanup-confirmed outcomes)))
+    (is (empty? (fake/live-namespaces provider)))))
+
+(deftest ^{:stratum 1} test-unconfirmed-cleanup-of-a-partial-provision-fails-the-cleanup-check
+  (let [leaky #(env/fake-provider {:fake/fail-step :step/workload :fake/uncertain-deletes? true})
+        outcomes (outcomes-by-check (env/run-conformance {:make-provider env/fake-provider
+                                                          :make-partial-provider leaky}))]
+    (is (= :check/failed (:check/cleanup-confirmed outcomes)))))
+
+(deftest ^{:stratum 1} test-a-leak-with-no-lease-still-fails-the-cleanup-check
+  (let [unreported #(env/fake-provider {:fake/fail-step :step/workload :fake/omit-uid? true :fake/uncertain-deletes? true})
+        outcomes (outcomes-by-check (env/run-conformance {:make-provider env/fake-provider
+                                                          :make-partial-provider unreported}))]
+    (is (= :check/failed (:check/cleanup-confirmed outcomes)))))

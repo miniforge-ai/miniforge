@@ -19,8 +19,13 @@
   "An in-memory provider for contract tests and fake-backed pilots. Options
    inject faults: `:fake/fail-step` stops provisioning at that step after
    the earlier ones apply, `:fake/uncertain-deletes?` leaves deletes
-   unconfirmed, `:fake/probe-failures` fails the live probe, and
-   `:fake/exec-fn` scripts exec results."
+   unconfirmed, `:fake/probe-failures` fails the live probe, `:fake/exec-fn`
+   scripts exec results, `:fake/omit-uid?` creates the namespace but never
+   reports its UID, `:fake/uncertain-steps?` reports the steps it applied as
+   uncertain, and `:fake/recreated-after-provision?` has an outside actor
+   recreate it at once, and `:fake/no-steps?` answers cancel and delete with
+   no steps. A namespace that already exists fails its create, as an API
+   server's does."
   (:require
    [ai.miniforge.agent-environment.fake.world :as world]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]))
@@ -32,54 +37,53 @@
   (capabilities [_] (get opts :fake/capabilities world/default-capabilities))
   (probe [_ _request] (get opts :fake/probe-failures []))
   (provision! [_ target _request]
-    (let [{:keys [applied failed]} (world/walk-steps (:fake/fail-step opts))
-          uid (when (seq applied) (str (random-uuid)))]
-      (when uid (swap! state world/provisioned (:target/namespace target) uid applied))
-      {:provision/uid uid
-       :provision/steps (cond-> (mapv #(world/step % :outcome/applied) applied)
+    (let [walked (world/walk-steps (:fake/fail-step opts))
+          fresh (str (random-uuid))
+          [before _] (swap-vals! state world/provisioned (:target/namespace target) fresh (:target/generation target) (:applied walked))
+          {:keys [applied failed]} (if (contains? before (:target/namespace target)) (world/walk-steps :step/namespace) walked)
+          uid (when (seq applied) fresh)
+          reported (if (:fake/uncertain-steps? opts) :outcome/uncertain :outcome/applied)]
+      (when (and uid (:fake/recreated-after-provision? opts)) (swap! state world/recreated (:target/namespace target)))
+      {:provision/uid (when-not (:fake/omit-uid? opts) uid)
+       :provision/steps (cond-> (mapv #(world/step % reported) applied)
                           failed (conj (world/step failed :outcome/failed)))}))
   (observe [_ target]
     (let [space (get @state (:target/namespace target))]
-      {:observed/uid (:uid space) :observed/ready? (boolean (:ready? space))}))
+      {:observed/uid (:uid space) :observed/generation (:generation space) :observed/ready? (boolean (:ready? space))}))
   (exec! [_ target command]
-    (if (world/live @state target)
-      (do (swap! state update-in [(:target/namespace target) :commands] (fnil conj []) command)
-          ((get opts :fake/exec-fn world/echo) command))
-      (world/missing target)))
+    (world/running! state target command (get opts :fake/exec-fn world/echo)))
   (write-file! [_ target path text]
-    (if (world/live @state target)
-      (do (swap! state assoc-in [(:target/namespace target) :files path] text) {:file/path path})
-      (world/missing target)))
+    (let [[before _] (swap-vals! state world/with-file target path text)]
+      (if (world/live before target) {:file/path path} (world/missing target))))
   (read-file [_ target path]
     (if-let [space (world/live @state target)]
       (get-in space [:files path] (world/file-missing path))
       (world/missing target)))
   (cancel! [_ target]
-    (if (world/live @state target)
-      (do (swap! state assoc-in [(:target/namespace target) :cancelled?] true)
-          {:cancel/steps [(world/step :step/workload-stopped :outcome/applied)]})
-      {:cancel/steps [(world/step :step/workload-stopped :outcome/failed)]}))
+    (let [space (world/live @state target)]
+      (when-not (:fake/no-steps? opts)
+        {:cancel/steps [(world/step :step/workload-stopped (world/cancel-outcome space))]})))
   (deprovision! [_ target]
-    (cond
-      (not (world/deletable? @state target))
-      {:deprovision/steps [(world/step :step/namespace-deleted :outcome/failed)]}
-
-      (:fake/uncertain-deletes? opts)
-      {:deprovision/steps [(world/step :step/namespace-deleted :outcome/uncertain)]}
-
-      :else
-      (do (swap! state dissoc (:target/namespace target))
-          {:deprovision/steps [(world/step :step/namespace-deleted :outcome/applied)]}))))
+    (let [uncertain? (or (:fake/uncertain-deletes? opts) (:fake/no-steps? opts))
+          [before _] (swap-vals! state world/delete target uncertain?)]
+      (when-not (:fake/no-steps? opts)
+        {:deprovision/steps [(world/step :step/namespace-deleted (world/delete-outcome before target uncertain?))]}))))
 
 (defn ^{:stratum 0} replace-uid!
-  "Recreate `namespace` under a new UID, as an outside actor reusing the name would."
+  "Recreate `namespace` under a new UID and without this controller's
+   generation, as an outside actor reusing the name would."
   [provider namespace]
-  (swap! (:state provider) assoc-in [namespace :uid] (str (random-uuid))))
+  (swap! (:state provider) world/recreated namespace))
 
 (defn ^{:stratum 0} commands
   "Every command exec'd in `namespace`, in order."
   [provider namespace]
   (get-in @(:state provider) [namespace :commands] []))
+
+(defn ^{:stratum 0} forget-namespace!
+  "Delete `namespace` behind the controller's back, as an outside actor would."
+  [provider namespace]
+  (swap! (:state provider) dissoc namespace))
 
 (defn ^{:stratum 0} live-namespaces
   [provider]

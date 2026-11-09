@@ -147,7 +147,21 @@
        (zero? tool-call-count)
        (nil? usage)))
 
-(defn ^{:stratum 0} parse-codex-stream-line
+(defn ^{:stratum 0} ^:private codex-error-delta
+  "The text a Codex failed turn or error event appends: its message, or the
+   catalog's placeholder when the event carries none."
+  [message]
+  (msg/t :cli-output.system/codex-stream-error
+         {:message (or message (msg/t :cli-output.system/codex-error-unknown))}))
+
+(defn ^{:stratum 0} error-response [output exit-code stderr]
+  (let [error-message (if (and stderr (str/blank? output)) stderr output)]
+    (responses/llm-error :anomalies.agent/llm-error "cli_error" (str/trim error-message)
+               {:exit-code exit-code :stderr stderr :stdout output})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} parse-codex-stream-line
   "Parse a line from Codex CLI streaming output.
 
    `codex exec --json` emits JSONL events (`ThreadEvent` in
@@ -287,14 +301,14 @@
           ;; events after which the exec processor shuts down, so they
           ;; carry :invocation-ended?.
           "turn.failed"
-          {:delta (str "\nError: " (get-in data [:error :message] "unknown")) :done? true
+          {:delta (codex-error-delta (get-in data [:error :message])) :done? true
            :invocation-ended? true}
 
           ;; A top-level error notification. The exec processor keeps
           ;; running after it (it can still reconcile items and emit
           ;; turn.failed), so it does not end the invocation.
           "error"
-          {:delta (str "\nError: " (:message data "unknown")) :done? true}
+          {:delta (codex-error-delta (:message data)) :done? true}
 
           ;; Each `codex exec` starts a thread and numbers its items
           ;; item_0, item_1, ... afresh, so an item id is unique only
@@ -309,13 +323,6 @@
     (catch Exception _e
       nil)))
 
-(defn ^{:stratum 0} error-response [output exit-code stderr]
-  (let [error-message (if (and stderr (str/blank? output)) stderr output)]
-    (responses/llm-error :anomalies.agent/llm-error "cli_error" (str/trim error-message)
-               {:exit-code exit-code :stderr stderr :stdout output})))
-
-;------------------------------------------------------------------------------ Layer 1
-
 (defn ^{:stratum 1} terminated-by
   "Return the `:llm/terminated-by` marker for an adaptive-timeout envelope,
    or nil when the run was not cut by the client (no envelope, or an
@@ -328,7 +335,11 @@
 
    Claude CLI stream-json emits:
    - {\"type\":\"system\"} — one-shot init event; parsed to a heartbeat
-     so it refreshes stream supervision once at session start
+     so it refreshes stream supervision once at session start. Its
+     session_id, when present, rides as :announced-session-id, which the
+     llm client and stream callbacks ignore; :session-id still comes only
+     from the result frame, so a run cut before it is not offered for
+     resume.
    - {\"type\":\"assistant\",\"message\":{\"content\":[{\"text\":\"...\"}]}} — content
    - {\"type\":\"tool_use\"} — tool invocation (carries :tool-use)
    - {\"type\":\"rate_limit_event\"} — periodic liveness pulse from
@@ -480,7 +491,8 @@
           ;; events + 1 system init in 60s, stagnation killed the run
           ;; with zero assistant output produced.
           ("system" "rate_limit_event")
-          {:delta "" :done? false :heartbeat true}
+          (cond-> {:delta "" :done? false :heartbeat true}
+            (:session_id data) (assoc :announced-session-id (:session_id data)))
 
           ;; Any other unrecognised event type — emit a heartbeat so the
           ;; stream stays alive during tool-heavy phases
@@ -545,12 +557,12 @@
     (cond
       (str/blank? trimmed)
       (responses/llm-error :anomalies.agent/llm-error "empty_success_output"
-                 "CLI backend exited successfully but produced no output"
+                 (msg/t :cli-output.system/empty-success-output)
                  {:exit-code exit-code :stderr stderr :stdout output})
 
       (rate-limited? trimmed)
       (responses/llm-error :anomalies.agent/rate-limited "rate_limit"
-                 (str "Claude CLI rate limited: " trimmed)
+                 (msg/t :cli-output.system/claude-rate-limited {:notice trimmed})
                  {:exit-code exit-code :stdout output})
 
       :else
@@ -578,7 +590,7 @@
     cli-text]
    (if-let [notice (first (filter rate-limited? [content cli-text]))]
      (responses/llm-error :anomalies.agent/rate-limited "rate_limit"
-                (str "Claude CLI rate limited: " (str/trim notice))
+                (msg/t :cli-output.system/claude-rate-limited {:notice (str/trim notice)})
                 {:exit-code exit-code :stdout content
                  :stop-reason stop-reason :num-turns num-turns})
      (cond-> (responses/llm-success content {:exit-code exit-code :usage usage})

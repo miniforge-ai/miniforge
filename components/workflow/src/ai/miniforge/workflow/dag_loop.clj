@@ -29,6 +29,7 @@
    [ai.miniforge.workflow.dag-resilience :as resilience]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-defaults :as runner-defaults]
+   [ai.miniforge.workflow.stop-signal :as stop-signal]
    [clojure.set :as set]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -155,9 +156,19 @@
           paused  (do (when-not logged?
                         (log/info logger :dag-orchestrator :dag/paused
                                   {:message (messages/t :status/paused)}))
-                      (Thread/sleep (long (runner-defaults/pause-poll-interval-ms)))
+                      ;; A cancel ends the wait; the loop then returns the cancelled result.
+                      (stop-signal/sleep! control-state (runner-defaults/pause-poll-interval-ms))
                       (recur true))
           :else   false)))))
+
+(defn- ^{:stratum 0} with-stop-aware-wait
+  "`(f)` with the rate-limit wait (`resilience/*sleep!*`) ending on a stop.
+   A wait a caller already bound (a test's fake clock) is left as it is."
+  [control-state f]
+  (if (thread-bound? #'resilience/*sleep!*)
+    (f)
+    (binding [resilience/*sleep!* (partial stop-signal/sleep! control-state)]
+      (f))))
 
 (defn- ^{:stratum 0} cancelled-dag-result
   "Terminal result for a run the operator stopped between batches. Built by
@@ -284,16 +295,30 @@
                      (inc iteration))
 
               (seq rate-limited-ids)
-              (let [decision (dag-rate-limit/handle-rate-limit-in-batch
-                              context rate-limited-ids new-completed new-failed
-                              all-results results event-stream workflow-id logger)]
-                (if (= :continue (:action decision))
+              (let [decision (with-stop-aware-wait
+                               control-state
+                               #(dag-rate-limit/handle-rate-limit-in-batch
+                                 context rate-limited-ids new-completed new-failed
+                                 all-results results event-stream workflow-id logger))]
+                (cond
+                  ;; A cancel during the wait or the decision wins over the decision.
+                  (stop-signal/stopped? control-state)
+                  (recur new-completed
+                         new-failed
+                         (merge all-results results)
+                         (into sub-workflow-ids batch-sub-ids)
+                         current-backend
+                         (inc iteration))
+
+                  (= :continue (:action decision))
                   (recur new-completed
                          new-failed
                          (merge all-results (select-keys results completed))
                          (into sub-workflow-ids batch-sub-ids)
                          (:new-backend decision)
                          (inc iteration))
+
+                  :else
                   (:result decision)))
 
               :else

@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.governed-replica-proposal
+(ns ai.miniforge.phase-opsv.governed-experiment-proposal
   (:require [ai.miniforge.phase-opsv.verification-schema :as verification]))
 
 ;------------------------------------------------------------------------------ Layer 0

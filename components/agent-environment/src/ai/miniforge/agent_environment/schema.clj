@@ -57,13 +57,18 @@
 (def ^{:stratum 0} NonBlank
   [:and :string [:fn (complement str/blank?)]])
 
+(def ^{:stratum 0} AbsolutePath
+  "A path inside the environment from its root, so a provider's commands
+   never read it as an option."
+  [:re #"\A/[^\x00]*\z"])
+
 (def ^{:stratum 0} Sha256Hex
   "Lowercase hex SHA-256, as `content-hash` produces."
-  [:re #"^[0-9a-f]{64}$"])
+  [:re #"\A[0-9a-f]{64}\z"])
 
 (def ^{:stratum 0} NamespaceName
   "A DNS-1123 label: the strictest naming rule a provider namespace meets."
-  [:re #"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"])
+  [:re #"\A[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?\z"])
 
 (def ^{:stratum 0} Limits
   [:map {:closed true}
@@ -123,7 +128,8 @@
 
 (def ^{:stratum 2} Receipt
   "One lifecycle call's record, refusals included. A nil environment UID
-   means nothing was provisioned for this call."
+   means no UID was learned, not that nothing exists: the steps say what
+   may have been created, and an unconfirmed cleanup stays to reconcile."
   [:map {:closed true}
    [:receipt/id :uuid]
    [:receipt/contract-version [:= contract-version]]
