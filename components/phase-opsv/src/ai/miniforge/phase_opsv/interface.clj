@@ -44,6 +44,7 @@
    [ai.miniforge.phase-opsv.boundary.governed-replica-proposal :as governed-replica-proposal]
    [ai.miniforge.phase-opsv.boundary.governed-load-proposal :as governed-load-proposal]
    [ai.miniforge.phase-opsv.boundary.kubernetes-recovery-plan :as recovery-plan]
+   [ai.miniforge.phase-opsv.boundary.recovery-plan-admission :as recovery-admission]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-provider :as native-load-provider]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
@@ -74,6 +75,12 @@
    Plan approval/retention, fresh provider identity and preconditions, exact grants,
    execution, and verified termination/restoration remain separate obligations."
   recovery-plan/prepare!)
+
+(def ^{:stratum 0} admit-kubernetes-recovery-plan!
+  "Rebuild bounded recovery intent from retained originals and obtain independent runtime N4 admission.
+   Requires exact plan-hash approval and an independently declared staging target.
+   Does not retain the decision, enable experiments, grant effects or call providers."
+  recovery-admission/admit!)
 
 (def ^{:stratum 0} VerificationAdapter protocol/VerificationAdapter)
 
