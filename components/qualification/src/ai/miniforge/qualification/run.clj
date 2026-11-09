@@ -73,8 +73,7 @@
        (= :verdict/incomplete (:report/verdict report))))
 
 (defn ^{:stratum 0} exit-code
-  "0 when the run passed and its report was written, 2 for an invalid gate
-   or an invalid assembled report, 1 otherwise."
+  "See `interface/exit-code`."
   [{:keys [report paths invalid-gate invalid-report]}]
   (cond
     (or invalid-gate invalid-report)                           2

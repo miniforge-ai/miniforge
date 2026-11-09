@@ -102,7 +102,7 @@
       (is (.startsWith (.getCanonicalPath (io/file json)) (str base "/"))))))
 
 (deftest ^{:stratum 1} test-writer-refuses-escapes-and-merged-keys
-  (testing "given a gate directory that is a symlink outside, or two keys one JSON property → throws, nothing written"
+  (testing "given a symlinked gate directory, two keys one JSON property, or an existing JSON file → throws, no new file"
     (let [dir     (temp-dir)
           outside (temp-dir)]
       (Files/createSymbolicLink (.toPath (io/file dir "fixture.gate")) (.toPath (io/file outside))
@@ -111,7 +111,11 @@
       (is (empty? (.list (io/file outside)))))
     (let [dir (temp-dir)]
       (is (thrown? Exception (writer/write-report! dir (assoc report :report/extra {:sink/calls 0 "sink/calls" 1}))))
-      (is (empty? (.list (io/file dir)))))))
+      (is (empty? (.list (io/file dir)))))
+    (let [dir (temp-dir) {:keys [edn json]} (writer/report-paths dir report)]
+      (io/make-parents json) (spit json "old")
+      (is (thrown? Exception (writer/write-report! dir report)))
+      (is (and (not (.exists (io/file edn))) (= "old" (slurp json)))))))
 
 (deftest ^{:stratum 1} test-written-report-round-trips
   (testing "given a report → the EDN reads back equal, the JSON keeps namespaced names"

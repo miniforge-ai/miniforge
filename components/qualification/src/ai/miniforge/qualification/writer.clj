@@ -22,7 +22,8 @@
    [cheshire.core :as json]
    [clojure.java.io :as io]
    [clojure.pprint :as pprint]
-   [clojure.string :as str])
+   [clojure.string :as str]
+   [slingshot.slingshot :refer [try+ throw+]])
   (:import [java.nio.file Files LinkOption OpenOption StandardOpenOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -101,22 +102,23 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} write-report!
-  "Write `report` under `out-dir` as EDN and JSON. Returns the two paths.
-   Throws, writing neither file, when a path would leave `out-dir` (as
-   written or through a symlink), when JSON would merge two keys, or when a
-   file already exists; the caller decides what that means for the run."
+  "Write `report` under `out-dir` as EDN and JSON; returns the paths. Throws,
+   leaving no new file, when a path leaves `out-dir` (as written or through
+   a symlink), when JSON would merge two keys, or when a file exists."
   [out-dir report]
   (let [{:keys [edn json] :as paths} (report-paths out-dir report)
-        refuse (fn [reason] (throw (ex-info reason {:out-dir out-dir :paths paths})))]
+        refuse (fn [reason] (throw (ex-info reason {:out-dir out-dir :paths paths})))
+        bodies [(edn-text report) (when-not (json-key-collision? report) (json-text report))]]
     (when-not (and (inside? out-dir edn) (inside? out-dir json))
       (refuse "report path leaves the output directory"))
-    (when (json-key-collision? report)
+    (when-not (second bodies)
       (refuse "two keys in one map would write the same JSON property"))
     (io/make-parents edn)
     (when-not (and (real-inside? out-dir edn) (real-inside? out-dir json))
       (refuse "report directory resolves outside the output directory"))
-    (write-new! edn (edn-text report))
-    (write-new! json (json-text report))
+    (write-new! edn (first bodies))
+    (try+ (write-new! json (second bodies))
+          (catch Object _ (Files/deleteIfExists (.toPath (io/file edn))) (throw+)))
     paths))
 
 (comment
