@@ -306,3 +306,185 @@ N12 §5.4 treats as irreducible, so context shedding never removes it. Its text 
 SHOULD be shown in its summary, so the operator can add a missing host instead of reading logs.
 
 ---
+
+## 8. Runtime Registry Mapping
+
+Code SHALL NOT branch on `:runtime/kind` (N11-delta §2) and SHALL NOT call a runtime daemon API. Every
+difference between runtimes lives in `runtime/registry.edn`.
+
+### 8.1 Capabilities
+
+This delta adds two capabilities to N11-delta §4:
+
+| Capability | Meaning |
+|------------|---------|
+| `:network-modes/internal` | Creates and removes a user network with no outbound route (`network create --internal`) |
+| `:network-attach` | Attaches a container to more than one network |
+
+`:restricted` and `:standard` require both. The executor MUST check them before step 1 of §2.3. If either is
+missing, the acquisition fails with `:egress/capability-missing`, naming the capability.
+
+### 8.2 Flag Dialect
+
+The CLI argument vectors for creating, attaching, and removing a network are `:flags` entries keyed by
+capability. A runtime whose syntax differs (for example, one that takes several `--network` flags at `run`
+while another needs a separate `network connect`) declares its own vector. The executor composes argv from the
+entry and contains no per-kind `case`.
+
+### 8.3 Images
+
+The proxy image is an `images.edn` entry with a fully qualified reference, resolved to a digest before launch
+(N11-delta §5). The security gate checks the sidecar's launch plan as it checks the capsule's.
+
+---
+
+## 9. Events and Evidence
+
+The following are **not yet N3 events or N6 artifact fields**. Registering them there is a prerequisite to
+emitting them (SPEC_INDEX: wire contracts stay in N3 and N6), as for N11 §9.1.
+
+*Proposed. Not emittable until registered.*
+
+- Event `capsule/egress-refused`: run, task, host, port, reason. Throttled per N3 §4.2.
+- Evidence keys: `:evidence/network-profile`, `:evidence/egress-allowlist` (hosts and their source per §3.1),
+  `:evidence/egress-refused-hosts`, `:evidence/in-capsule-credentials` (names only, §5.5).
+
+Credential values and tokens MUST NOT appear in either (N3 §8).
+
+---
+
+## 10. Kubernetes Targets
+
+The contract of §1–§7 is substrate-agnostic. On Kubernetes:
+
+1. The proxy runs in its own pod. Containers in one pod share a network namespace, so a NetworkPolicy cannot
+   separate a capsule from a sidecar in the same pod.
+2. A per-task NetworkPolicy denies all egress from the task pod except to its proxy pod, including DNS. The
+   proxy pod's policy permits egress to public addresses and to the cluster's DNS service only.
+3. NetworkPolicy takes effect only when the cluster's network plugin enforces it. Before reporting a capsule
+   acquired under `:restricted` or `:standard`, the executor MUST show that a direct connection from the task
+   pod to a public address fails.
+
+The Kubernetes executor implements none of this. Until it does, a governed Kubernetes acquisition under
+`:restricted` or `:standard` MUST fail with `:egress/unsupported-substrate` (N11.MD.1).
+
+---
+
+## 11. Amendments to N11
+
+1. **§2.2 Network.** Deny-by-default is enforced by §1–§4 of this delta. Allowed endpoints are reached only
+   through the capsule's proxy.
+2. **§2.2 Credentials.** A substitutable credential is present in the capsule only as a token (§5).
+3. **§5.1.** `:network-policy` becomes `{:profile #{:none :restricted :standard :full} :allow [{:host :port}]}`.
+   `:proto` is dropped: the proxy carries HTTP and HTTPS only. `:mode :deny-default` with no `:allow` entries
+   reads as `:none`. Either mode with entries reads as `:restricted`.
+4. **§5.3.** The default for `:network-policy/profile` in governed mode is `:standard`.
+5. **§8.1.** The sentence naming `ANTHROPIC_API_KEY` as injected into the capsule is replaced by §5.1: the
+   capsule receives a token, and the value stays in the sidecar.
+6. **§8.2.** The endpoint table becomes §3.1's derived and baseline hosts. Git over SSH (`github.com:22`) is
+   not reachable through the proxy. Governed capsules clone over HTTPS.
+
+---
+
+## Conformance Requirements
+
+| ID | Level | Requirement |
+|----|-------|-------------|
+| N11D2.EG.1 | MUST | A `:restricted` or `:standard` capsule has no network route except its proxy (§1, §2.1). |
+| N11D2.EG.2 | MUST | Refuse `:full` in governed mode; default to `:standard` (§1). |
+| N11D2.EG.3 | MUST | Fail acquisition, never weaken the profile, when the substrate cannot provide it (§2.3, §8.1, §10). |
+| N11D2.EG.4 | MUST | Match hosts exactly; refuse every host on an empty list; check before any upstream connect (§3). |
+| N11D2.EG.5 | MUST NOT | Let agent-produced artifacts add allowlist or private-allow entries (§3.1, §4). |
+| N11D2.EG.6 | MUST | Refuse non-public dialed addresses, including embedded IPv4 forms; fail closed on bad input (§4). |
+| N11D2.EG.7 | MUST | Give the capsule a token, never the value, for every substitutable agent credential (§5.1). |
+| N11D2.EG.8 | MUST | Intercept TLS only on a credential's exact hosts; verify the upstream (§5.3). |
+| N11D2.EG.9 | MUST | Redact credential values from responses without buffering streams (§5.4). |
+| N11D2.EG.10 | MUST | Refuse non-substitutable and self-refreshing credentials unless the operator lists them (§5.5, §5.6). |
+| N11D2.EG.11 | MUST | Use a per-capsule CA whose private key never leaves the sidecar (§6.1). |
+| N11D2.EG.12 | MUST | State the profile, allowed hosts, and refusal handling in the agent context (§7.2). |
+| N11D2.EG.13 | MUST NOT | Branch on `:runtime/kind` or call a daemon API for egress (§8). |
+
+### Test Obligations
+
+1. From a `:restricted` capsule, a direct TCP connection to a public address, with proxy variables unset, fails,
+   and resolving a public name fails.
+2. A CONNECT to an unlisted host gets `403`, and an upstream stub records no connection.
+3. A capsule whose allowlist is empty refuses every host.
+4. `169.254.169.254`, `::ffff:a9fe:a9fe`, `127.0.0.1`, `10.0.0.1`, and a name resolving to `10.0.0.1` are each
+   refused by the guard.
+5. `env` inside the capsule shows the token, not the value. A call to a stub credential host succeeds with the
+   value substituted, and a response echoing the value arrives with the token in its place.
+6. The Claude CLI and the Codex CLI each complete one call through the intercepting proxy with only §6.2's
+   variables set.
+7. On a runtime descriptor without `:network-modes/internal`, a `:restricted` acquisition fails and creates no
+   container or network.
+8. Release removes the capsule, sidecar, and network, and a second release succeeds.
+9. A planner-generated task definition naming an extra host leaves the allowlist unchanged.
+10. A governed Kubernetes acquisition under `:standard` fails with `:egress/unsupported-substrate`.
+
+---
+
+## Annex A — Current Implementation (informative)
+
+This annex records the code as of `ea407dfc3` (2026-11-08). Paths are under
+`components/dag-executor/src/ai/miniforge/dag_executor/` unless stated.
+
+- **Profiles.** `build-security-args` (`protocols/impl/runtime/oci_cli/container.clj`) adds `--network=none`
+  for `:none` and `:restricted`, and no network argument otherwise, so `:restricted` behaves as `:none`.
+  `network-profiles` (`execution_plan.clj`) documents `:restricted` as an allow-list and `:standard` as
+  default-deny with exceptions. Neither is enforced.
+- **Governed default.** `acquire-execution-environment!`
+  (`components/workflow/src/ai/miniforge/workflow/runner_environment.clj`) passes an env-config holding only
+  `:repo-url`, `:branch`, and `:repo-path`. With no `:network-profile`, governed capsules run on the runtime's
+  default network with unrestricted egress.
+- **Destination guard.** `rg '169\.254|ssrf' components bases` finds nothing. No code blocks loopback, private,
+  CGNAT, or link-local destinations.
+- **Agent credentials.** `agent-credential-names` (`oci_cli/env.clj`) keeps `ANTHROPIC_API_KEY` through
+  `filter-env-by-trust` at every trust level. `build-launch-plan` (`oci_cli/launch.clj`) adds the backend's
+  `backend-credential-env` (`ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` for `:claude`). A launch that
+  carries one puts its value in the container env, where every process can read it. The governed workflow path
+  above passes no `:env`, and `capsule-exec-fn`
+  (`components/llm/src/ai/miniforge/llm/protocols/impl/llm_client/completion.clj`) refuses per-call env, so on
+  that path the credential is not delivered through the plan.
+- **Proxy variables.** `untrusted-env-blanks` sets every proxy variable to an empty value for an untrusted
+  plan, and `create-container` passes them with `-e`. §2.1's routing replaces those values.
+- **Registry.** `components/dag-executor/resources/config/dag-executor/runtime/registry.edn` advertises
+  `:network-modes/none` and `:network-modes/bridge` for Docker and Podman. Neither capability of §8.1 is
+  declared.
+- **Kubernetes.** The Job spec in `protocols/impl/kubernetes.clj` carries no network restriction, and the
+  executor creates no NetworkPolicy. `components/kubernetes-target` holds an identity schema only.
+
+N11 Annex A.2 already lists network policy enforcement (§8.2) as specified and not implemented.
+
+---
+
+## Open Questions
+
+- **Proxy implementation.** The sidecar needs a CONNECT proxy with selective TLS termination and streaming
+  redaction. Whether it is a miniforge program (bb or JVM) in its own image, or an existing proxy configured
+  per capsule, is open. §2–§7 bind its behavior either way.
+- **Rootless Podman.** Internal networks and multi-network attach under rootless Podman with netavark need
+  confirming per `(runtime, OS, arch)` triple before Podman advertises §8.1's capabilities.
+- **Baseline contents.** §3.1's baseline list is to be agreed with the operator before `:standard` becomes the
+  governed default.
+- **CLI side traffic.** Agent CLIs contact hosts besides their API (telemetry, update checks). Those are refused
+  unless listed. Whether `backends.edn` also carries each CLI's switch for turning such traffic off is open.
+
+---
+
+## References
+
+- N11 §2.2, §5, §7.3, §8, §10 — base contract.
+- N11-delta-runtime-adapter §2, §4, §5, §6 — runtime descriptor, capabilities, images, policies.
+- N3 §4.2, §8 — throttling and credential redaction.
+- PAODO-Workspaces `doc/adr/accepted/sandbox/adr-workspace-secrets-credential-proxy.md`,
+  `adr-workspace-domain-allowlist.md`, `adr-workspace-internet-access-toggle.md`; `lib/infra/proxy/`
+  `destinationGuard.ts` and `credentialProxy.ts`.
+
+---
+
+**Version History:**
+
+- 0.1.0-draft (2026-11-08): Initial egress-control delta: network profiles, per-capsule proxy topology, exact-host
+  allowlist, destination guard, credential substitution, per-capsule CA, refusal handling, registry mapping, and
+  Kubernetes fail-closed rule.
