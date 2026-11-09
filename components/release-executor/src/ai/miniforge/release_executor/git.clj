@@ -260,6 +260,11 @@
   [error]
   (boolean (some-> error str/lower-case (str/includes? "already exists"))))
 
+(defn- ^{:stratum 0} pr-create-argv
+  [title body base head]
+  (cond-> ["gh" "pr" "create" "--title" title "--body" (or body "") "--base" base]
+    head (into ["--head" head])))
+
 (defn- ^{:stratum 0} reuse-branch!
   "Check out `branch-name`, which `git checkout -b` could not create, when it
    already exists and holds HEAD: a retried or resumed release of the same
@@ -545,6 +550,22 @@
     (catch Exception e
       (result/shell-failure (.getMessage e)))))
 
+(defn- ^{:stratum 1} current-branch
+  "The branch checked out in `worktree-path`, or nil when HEAD is detached
+   or git cannot read it."
+  [worktree-path]
+  (let [r (exec! worktree-path pr-lookup/branch-argv)]
+    (when (result/succeeded? r)
+      (not-empty (:output r)))))
+
+(defn- ^{:stratum 1} origin-push-url
+  "The URL a push to origin goes to from `worktree-path`, or nil when git
+   cannot read it."
+  [worktree-path]
+  (let [r (exec! worktree-path pr-lookup/push-url-argv)]
+    (when (result/succeeded? r)
+      (:output r))))
+
 (defn- ^{:stratum 1} reuse-existing-pr!
   "Resolve the PR already open for the current branch via gh pr view, so a
    release retry reuses it instead of opening a duplicate.
@@ -666,6 +687,12 @@
    - A branch that already has an open PR (retry/resume) reuses that PR via
      `gh pr view` rather than opening a duplicate.
 
+   The head is the branch checked out in the worktree, named as origin's
+   (`pr-lookup/head-ref`) and passed as `--head`: gh's own head detection
+   can miss a pushed branch when the checkout has a second remote for the
+   same repository. A detached HEAD leaves the head to gh; an unsafe
+   branch name fails without running gh.
+
    The optional `github-token` (injected as GH_TOKEN) is the new host-mode
    credential path; the 2-arity keeps the historical public-interface
    signature and inherits the ambient environment.
@@ -683,30 +710,31 @@
          body  (redaction/redact body)]
      (or
       (validate-safe-branch-name base)
-      (try
-        (let [result (shell/run-bounded ["gh" "pr" "create"
-                                         "--title" title
-                                         "--body"  (or body "")
-                                         "--base"  base]
-                                        (gh-shell-opts worktree-path github-token))]
-          (cond
-            (zero? (:exit result))
-            (if-let [pr (parse-pr-ref (get result :out ""))]
-              (result/shell-success pr)
-              (result/shell-failure (msg/t :pr/create-unconfirmed
-                                           {:output (str/trim (get result :out ""))})
-                                    {:pr-url nil :pr-number nil}))
+      (let [branch (current-branch worktree-path)
+            head   (some->> branch (pr-lookup/head-ref (origin-push-url worktree-path)))]
+        (or
+         (some-> branch validate-safe-branch-name)
+         (try
+           (let [result (shell/run-bounded (pr-create-argv title body base head)
+                                           (gh-shell-opts worktree-path github-token))]
+             (cond
+               (zero? (:exit result))
+               (if-let [pr (parse-pr-ref (get result :out ""))]
+                 (result/shell-success pr)
+                 (result/shell-failure (msg/t :pr/create-unconfirmed
+                                              {:output (str/trim (get result :out ""))})
+                                       {:pr-url nil :pr-number nil}))
 
-            (pr-already-exists? (get result :err ""))
-            (reuse-existing-pr! worktree-path github-token)
+               (pr-already-exists? (get result :err ""))
+               (reuse-existing-pr! worktree-path github-token)
 
-            :else
-            (result/shell-failure (get result :err "")
-                                  (merge {:pr-url nil :pr-number nil} (timeout-data result)))))
-        ;; Interrupted mid-create, the PR may exist: :interrupted? marks the
-        ;; outcome unknown, and the flag is set again.
-        (catch InterruptedException e
-          (.interrupt (Thread/currentThread))
-          (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil :interrupted? true}))
-        (catch Exception e
-          (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil})))))))
+               :else
+               (result/shell-failure (get result :err "")
+                                     (merge {:pr-url nil :pr-number nil} (timeout-data result)))))
+           ;; Interrupted mid-create, the PR may exist: :interrupted? marks the
+           ;; outcome unknown, and the flag is set again.
+           (catch InterruptedException e
+             (.interrupt (Thread/currentThread))
+             (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil :interrupted? true}))
+           (catch Exception e
+             (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil})))))))))

@@ -27,6 +27,7 @@
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.release-executor.core :as core]
    [ai.miniforge.release-executor.git :as git]
+   [ai.miniforge.release-executor.pr-lookup :as pr-lookup]
    [ai.miniforge.release-executor.push-auth :as push-auth]
    [ai.miniforge.release-executor.shell :as shell]))
 
@@ -37,6 +38,34 @@
   (apply process/shell
          {:dir (str dir) :out :string :err :string :continue true}
          args))
+
+(def ^{:stratum 0} ^:private no-origin
+  "git's reply to `git remote get-url` in a checkout with no origin."
+  {:exit 2 :out "" :err "error: No such remote 'origin'"})
+
+(defn- ^{:stratum 0} git-out
+  "git's reply when a command succeeds and prints `out`."
+  [out]
+  {:exit 0 :out out :err ""})
+
+(defn- ^{:stratum 0} create-pr-against
+  "git/create-pr! with each local git call answered from `git-replies`
+   (argv → reply; any other prints nothing) and gh stubbed to print a PR
+   URL. Returns [result gh-argvs]."
+  [git-replies]
+  (let [gh-argvs (atom [])]
+    (with-redefs [shell/run-bounded (fn [args _opts]
+                                      (swap! gh-argvs conj args)
+                                      {:exit 0 :out "https://github.com/o/r/pull/7" :err ""})
+                  process/shell     (fn [_opts & args] (get git-replies (vec args) {:exit 0 :out "" :err ""}))]
+      [(git/create-pr! "/tmp/wt" {:title "t" :body "b" :base-branch "main"} "tok")
+       @gh-argvs])))
+
+(defn- ^{:stratum 0} gh-head-args
+  "The last two arguments of the first gh call in a `create-pr-against`
+   result, where create-pr! puts `--head <head>`."
+  [[_result gh-argvs]]
+  (take-last 2 (first gh-argvs)))
 
 ;;------------------------------------------------------ branch-name safety
 (deftest ^{:stratum 0} validate-safe-branch-name-test
@@ -54,18 +83,19 @@
 (deftest ^{:stratum 0} gh-token-injection-test
   (testing "create-pr! injects GH_TOKEN via :extra-env when a token is present"
     (let [seen (atom nil)]
-      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
-                    process/shell (fn [opts & _]
-                                    (reset! seen opts)
-                                    {:exit 0 :out "https://github.com/o/r/pull/7" :err ""})]
+      (with-redefs [shell/run-bounded (fn [_args opts]
+                                        (reset! seen opts)
+                                        {:exit 0 :out "https://github.com/o/r/pull/7" :err ""})
+                    ;; local git prints no branch, so create-pr! runs gh without --head
+                    process/shell (constantly {:exit 0 :out "" :err ""})]
         (git/create-pr! "/tmp/wt" {:title "t" :body "b" :base-branch "main"} "sekret"))
       (is (= "sekret" (get-in @seen [:extra-env "GH_TOKEN"])))))
   (testing "create-pr! omits :extra-env when no token (inherits ambient env)"
     (let [seen (atom :unset)]
-      (with-redefs [shell/run-bounded (fn [args opts] (apply process/shell opts args))
-                    process/shell (fn [opts & _]
-                                    (reset! seen opts)
-                                    {:exit 0 :out "https://github.com/o/r/pull/7" :err ""})]
+      (with-redefs [shell/run-bounded (fn [_args opts]
+                                        (reset! seen opts)
+                                        {:exit 0 :out "https://github.com/o/r/pull/7" :err ""})
+                    process/shell (constantly {:exit 0 :out "" :err ""})]
         (git/create-pr! "/tmp/wt" {:title "t" :body "b" :base-branch "main"} nil))
       (is (nil? (:extra-env @seen)))))
   (testing "create-pr! rejects an unsafe base branch without shelling out"
@@ -336,6 +366,27 @@
   (spit (str (fs/path dir "README.md")) "seed\n")
   (sh! dir "git" "add" ".")
   (sh! dir "git" "commit" "-q" "-m" "seed"))
+
+;;------------------------------------------- PR head is the checked-out branch
+(deftest ^{:stratum 1} create-pr-names-checked-out-branch-test
+  (testing "given a branch → it is the --head, so gh does not search
+            remote-tracking refs for one"
+    (let [on-branch {pr-lookup/branch-argv (git-out "release/x\n")}]
+      (is (= ["--head" "o:release/x"]
+             (gh-head-args (create-pr-against
+                            (assoc on-branch pr-lookup/push-url-argv (git-out "git@github.com:o/r.git\n")))))
+          "a GitHub origin → <owner>:<branch>")
+      (is (= ["--head" "release/x"]
+             (gh-head-args (create-pr-against (assoc on-branch pr-lookup/push-url-argv no-origin))))
+          "no origin → the bare branch")))
+  (testing "given a detached HEAD → no --head; gh's own detection decides"
+    (let [[result gh-argvs] (create-pr-against {pr-lookup/branch-argv (git-out "")})]
+      (is (:success? result))
+      (is (not-any? #{"--head"} (first gh-argvs)))))
+  (testing "given a branch name the guard rejects → failure, gh not run"
+    (let [[result gh-argvs] (create-pr-against {pr-lookup/branch-argv (git-out "a$b\n")})]
+      (is (not (:success? result)))
+      (is (empty? gh-argvs)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
