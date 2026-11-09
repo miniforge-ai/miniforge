@@ -236,13 +236,17 @@
         result (get-in ctx [:phase :result])
         agent-status (:status result)
         gate-failed? (phase-gate/gate-failed? (:phase ctx))
-        parse-error? (true? (get-in result [:metrics :parse-error?]))
+        ;; A parse-error or output-capture failure's message carries
+        ;; test output, which can hold any text: it is never read as a
+        ;; timeout or a rate limit.
+        output-text? (some #(true? (get-in result [:metrics %]))
+                           [:parse-error? :output-limit? :output-unsettled?])
         timeout? (and (= :error agent-status)
-                      (not parse-error?)
+                      (not output-text?)
                       (some-> (get-in result [:error :message])
                               (str/includes? timeout-message-fragment)))
         rate-limited? (and (= :error agent-status)
-                           (not parse-error?)
+                           (not output-text?)
                            (let [msg (str (get-in result [:error :message]))]
                              (re-find verify-rate-limit-pattern msg)))
         phase-status (cond
@@ -469,6 +473,10 @@
                                                 (get test-results :output ""))
                      (:parse-error? test-results)
                      (assoc :parse-error? true)
+                     (:output-limit? test-results)
+                     (assoc :output-limit? true)
+                     (:output-unsettled? test-results)
+                     (assoc :output-unsettled? true)
                      ;; The runner's own "nothing to test" claim; :tests-pass
                      ;; tells it apart from a run that counted no tests.
                      (:no-tests? test-results)

@@ -44,6 +44,10 @@ every call, and stdout on the non-streaming capture path.
    implement. Both results are marked (`:output-limit?`, `:output-unsettled?`)
    and `verify-failure-message` passes their message through, so the phase
    summary and error keep the limit, the command and the preview.
+   `enter-verify` keeps both markers in the phase metrics, and `leave-verify`
+   then skips its timeout and rate-limit text checks, as it already did for a
+   parse error: the message holds test output, so `yes 'timed out'` must
+   not become a terminal verdict.
 4. Registration: `llm` and `phase-software-factory` `deps.edn`, and the
    `deliberation-lab` project.
 
@@ -68,6 +72,12 @@ every call, and stdout on the non-streaming capture path.
    away the way a test loop can.
 2. The drain treats every failed read, `InterruptedIOException` included, as
    end-of-stream. Neither caller here needs to tell a read failure apart.
+3. On a JDK that lets a leftover process hold the pipe (babashka's JDK 25),
+   `cancel-drain!` closes the stream, but a reader already blocked in a pipe
+   read stays blocked until the leftover closes its end, keeping its thread
+   and kept bytes until then. Before this PR the same case hung verify
+   itself. Freeing that thread needs a way to find and stop the leftover,
+   which is out of reach once its parent shell has exited.
 
 ## Testing Plan
 

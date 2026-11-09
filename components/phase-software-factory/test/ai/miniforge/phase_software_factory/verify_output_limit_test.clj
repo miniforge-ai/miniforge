@@ -75,6 +75,19 @@
   [message-key params]
   (first (str/split (messages/t message-key (assoc params :head "")) #"\n")))
 
+(def ^{:stratum 0} ^:private classifier-bait-previews
+  "Output previews holding the words leave-verify reads as a timeout or a
+   rate limit, as `yes 'timed out'` or `yes 429` would print."
+  ["timed out\ntimed out\n" "429\n429\n"])
+
+(defn- ^{:stratum 0} capture-failure
+  "A run-tests! result for output-capture failure `marker`, as
+   `exited-test-result` builds it."
+  [marker message]
+  {:passed? false :test-count 0 :assertion-count 0
+   :fail-count 0 :error-count 1
+   marker true :output message})
+
 (defn- ^{:stratum 0} verify-context
   []
   {:execution/id             (random-uuid)
@@ -103,13 +116,30 @@
             a bare failure count"
     (let [message (messages/t :verify/output-limit
                               {:bytes limit-bytes :test-cmd endless-test-cmd :head "y\ny\n"})]
-      (with-redefs [verify/run-tests! (fn [_path & _opts]
-                                        {:passed? false :test-count 0 :assertion-count 0
-                                         :fail-count 0 :error-count 1
-                                         :output-limit? true :output message})]
+      (with-redefs [verify/run-tests! (fn [_path & _opts] (capture-failure :output-limit? message))]
         (let [result (get-in (verify/enter-verify (verify-context)) [:phase :result])]
           (is (= message (:summary result)))
           (is (str/includes? (str (get-in result [:error :message])) message)))))))
+
+(deftest ^{:stratum 1} leave-verify-routes-capture-failures-back-to-implement-test
+  (testing "an output-capture failure whose preview reads like a timeout or a
+            rate limit still goes back to implement, not to a terminal verdict"
+    (doseq [[marker message-key] [[:output-limit? :verify/output-limit]
+                                  [:output-unsettled? :verify/output-unsettled]]
+            preview classifier-bait-previews]
+      (let [message (messages/t message-key {:bytes    limit-bytes
+                                             :ms       short-settle-ms
+                                             :test-cmd endless-test-cmd
+                                             :head     preview})]
+        (with-redefs [verify/run-tests! (fn [_path & _opts] (capture-failure marker message))]
+          (let [ctx (-> (verify-context)
+                        (assoc-in [:phase-config :on-fail] :implement)
+                        verify/enter-verify
+                        verify/leave-verify)]
+            (is (true? (get-in ctx [:phase :result :metrics marker]))
+                "enter-verify keeps the marker in the metrics leave-verify reads")
+            (is (= :repair-requested (get-in ctx [:phase :verdict]))
+                (str marker " with preview " (pr-str preview)))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
