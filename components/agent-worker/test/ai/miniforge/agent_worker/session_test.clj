@@ -19,6 +19,7 @@
   (:require
    [ai.miniforge.agent-worker.interface :as worker]
    [ai.miniforge.agent-worker.session :as session]
+   [ai.miniforge.agent-worker.validation :as validation]
    [clojure.test :refer [deftest is testing]]
    [malli.core :as m])
   (:import
@@ -61,6 +62,9 @@
     (is (= :duplicate (:decision/kind (session/submission-decision {:record/submission submission} submission))))
     (is (= :anomalies.agent-worker/conflicting-submission
            (:decision/reason (session/submission-decision {:record/submission {:submission/prompt "q"}} submission))))))
+
+(deftest ^{:stratum 0} test-an-odd-validation-argument-count-is-a-call-site-bug
+  (is (thrown? AssertionError (validation/check pos-int? 1 pos-int?))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

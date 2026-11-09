@@ -204,7 +204,13 @@
           parsed (impl/parse-claude-stream-line line)]
       (is (true? (:heartbeat parsed))
           "system init refreshes liveness once at the start of the stream")
-      (is (false? (:done? parsed))))))
+      (is (false? (:done? parsed)))))
+
+  (testing "system init with a session id announces it without making the run resumable"
+    (let [parsed (impl/parse-claude-stream-line (json/generate-string {:type "system" :subtype "init" :session_id "s-1"}))]
+      (is (= "s-1" (:announced-session-id parsed)))
+      (is (nil? (:session-id parsed)))
+      (is (nil? (:invocation-id parsed))))))
 
 (deftest ^{:stratum 0} record-parsed-progress-heartbeat-liveness-test
   (testing "heartbeat-only Claude stream events are recorded as activity"
@@ -339,7 +345,20 @@
                   :error {:message "Rate limited"}})
           parsed (impl/parse-codex-stream-line line)]
       (is (true? (:done? parsed)))
-      (is (str/includes? (:delta parsed) "Rate limited"))))
+      (is (= (msg/t :cli-output.system/codex-stream-error {:message "Rate limited"}) (:delta parsed)))))
+
+  (testing "an error event without a message says so, whether the message is
+            missing or null"
+    (let [unknown (msg/t :cli-output.system/codex-stream-error
+                         {:message (msg/t :cli-output.system/codex-error-unknown)})]
+      (is (str/starts-with? unknown "\n") "the error starts on its own line")
+      (doseq [event [{:type "error"}
+                     {:type "error" :message nil}
+                     {:type "turn.failed" :error {}}
+                     {:type "turn.failed" :error {:message nil}}]]
+        (is (= unknown
+               (:delta (impl/parse-codex-stream-line (json/generate-string event))))
+            (pr-str event)))))
 
   (testing "thread.started is a heartbeat naming the invocation"
     (let [line (json/generate-string {:type "thread.started" :thread_id "abc"})
@@ -408,7 +427,18 @@
     (let [resp (impl/parse-cli-output "" 0)]
       (is (not (:success resp)))
       (is (= "empty_success_output" (get-in resp [:error :type])))
-      (is (some? (:anomaly resp))))))
+      (is (= (msg/t :cli-output.system/empty-success-output) (get-in resp [:error :message])))
+      (is (some? (:anomaly resp)))))
+
+  (testing "the CLI's limit notice as its whole output is a rate limit that quotes it"
+    (let [resp (impl/parse-cli-output "You've hit your limit · resets 7pm (America/Los_Angeles)" 0)]
+      (is (= "rate_limit" (get-in resp [:error :type])))
+      (is (= (msg/t :cli-output.system/claude-rate-limited
+                    {:notice "You've hit your limit · resets 7pm (America/Los_Angeles)"})
+             (get-in resp [:error :message])))
+      (is (str/includes? (get-in resp [:error :message])
+                         "You've hit your limit · resets 7pm (America/Los_Angeles)")
+          "the reset-time parse reads the notice inside the message"))))
 
 (deftest ^{:stratum 0} mock-client-response-includes-metrics-test
   (testing "mock client success response has :tokens and :usage"
@@ -1559,6 +1589,8 @@
                    :stats {:chunks 2 :unique-chunks 2 :files-written 0 :stagnant-cycles 0}}
           client (ai.miniforge.llm.protocols.records.llm-client/create-client
                   {:backend :claude
+                   ;; A priced model, so the cut run's cost can be estimated.
+                   :model "claude-sonnet-4-6"
                    :logger logger
                    :stream-exec-fn (fn [_cmd on-line _opts]
                                      (on-line (tool-line "mcp__context__context_read"))
@@ -1695,7 +1727,10 @@
                                    (assistant-frame "<synthetic>" "You've hit your limit · resets 7pm (America/Los_Angeles)")])]
       (is (< 300 (count long-answer)) "the answer alone is longer than any notice")
       (is (not (:success resp)))
-      (is (= "rate_limit" (get-in resp [:error :type])))))
+      (is (= "rate_limit" (get-in resp [:error :type])))
+      (is (= (msg/t :cli-output.system/claude-rate-limited
+                    {:notice "You've hit your limit · resets 7pm (America/Los_Angeles)"})
+             (get-in resp [:error :message])))))
   (testing "a model's short final answer that mentions a limit is not a limit"
     (let [resp (streamed-response [(assistant-frame "claude-opus-5" long-answer)
                                    (assistant-frame "claude-opus-5" "{\"summary\":\"Added handling for too many requests.\"}")])]

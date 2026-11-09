@@ -28,8 +28,10 @@
   (keep parse-line (str/split-lines (str text))))
 
 (defn- ^{:stratum 0} native-id
+  "The session a turn ran in: the reported one, else (a first turn cut
+   before its result) the one the harness announced at start."
   [chunks]
-  (some #(or (:session-id %) (:invocation-id %)) chunks))
+  (or (some #(or (:session-id %) (:invocation-id %)) chunks) (some :announced-session-id chunks)))
 
 (defn- ^{:stratum 0} add-message
   "Add one assistant frame's usage, once per message (frames of one message

@@ -39,6 +39,10 @@
   (str "{\"type\":\"assistant\",\"message\":{\"id\":\"" id "\",\"content\":[{\"type\":\"text\",\"text\":\"x\"}],"
        "\"usage\":{\"input_tokens\":" input ",\"output_tokens\":" output "}}}"))
 
+(def ^{:stratum 0} claude-init
+  "The init frame the Claude CLI writes first, naming its session."
+  "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"native-9\"}")
+
 (def ^{:stratum 0} codex-completed
   "A turn.completed event as `codex exec --json` writes it: tokens, no cost."
   "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":30,\"output_tokens\":40}}")
@@ -107,6 +111,9 @@
 (deftest ^{:stratum 2} test-a-cut-claude-turn-reports-its-per-message-tokens
   (let [w (nf/native-world :worker/claude nil)
         session (fx/start! w (fx/config :worker/claude) 1 prompt)]
-    (nf/write-stream! w (str/join "\n" [claude-message-a claude-message-a claude-message-b]))
+    (nf/write-stream! w (str/join "\n" [claude-init claude-message-a claude-message-a claude-message-b]))
     (is (= {:usage/status :usage/partial :usage/input-tokens 7 :usage/output-tokens 5 :usage/cost-usd nil}
-           (worker/usage (:wc w) (:acting w) session)))))
+           (worker/usage (:wc w) (:acting w) session)))
+    (testing "given no result frame → the next turn resumes the session the init frame named"
+      (is (= "native-9" (:session/native-id (worker/send-input! (:wc w) (:acting w) (:spend w) session "Go on."))))
+      (is (str/includes? (last (nf/launched-scripts w)) "'--resume' 'native-9'")))))

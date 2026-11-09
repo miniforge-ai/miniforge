@@ -17,6 +17,10 @@
   "HTTP OK supplies the complete representation required by observation admission."
   HttpURLConnection/HTTP_OK)
 
+(def ^{:stratum 0} created-status
+  "Only HTTP Created acknowledges creation of a previously absent native resource."
+  HttpURLConnection/HTTP_CREATED)
+
 (def ^{:stratum 0} not-found-status
   "HTTP absence is distinct from JSON null; only declared optional resources may be absent."
   HttpURLConnection/HTTP_NOT_FOUND)

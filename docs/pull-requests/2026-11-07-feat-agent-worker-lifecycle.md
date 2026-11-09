@@ -51,6 +51,11 @@ starts failing, steering under an expired grant, an unsettled turn, an unready e
 another caller's reservation, a worker without cancellation, a usage error, and artifacts after the
 environment expires.
 
+Known limit: after the environment's lease expires, a worker-level cancel is refused, since it
+checks the lease and native workers cancel through `exec!`, which the environment no longer admits.
+The environment's own `cancel!` and `release!` are admitted after expiry and stop every process in
+it. Routing a worker cancel after expiry to the environment's `cancel!` is a follow-up.
+
 ## Deployment Plan
 
 Nothing deploys. The submission ledger is in memory, like the environment ledger.

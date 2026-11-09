@@ -29,7 +29,9 @@ native session reference; unknown usage must never read as zero.
 2. `admission`: the binding must belong to the acting tenant and name the environment's current
    lease (an older generation is `stale-lease`); a live root `:effect/spend` grant issued to the
    acting principal and named by the binding must cover the run and task and the configured budget;
-   a cost ceiling needs a configured budget the worker can at least observe.
+   a cost ceiling needs a configured budget, and any configured budget needs a worker that can at
+   least observe it. A grant with a token ceiling is refused as unenforceable: an attempt presents no
+   token reading, so even a zero-token ceiling could not hold it.
 3. `session`: `bind` builds a binding (config digest from `content-hash`); a resubmission of the
    same attempt is a duplicate (reconcile, never relaunch) or, with different content, refused;
    `normalize-usage` keeps unreported quantities nil and says so in `:usage/status`.
