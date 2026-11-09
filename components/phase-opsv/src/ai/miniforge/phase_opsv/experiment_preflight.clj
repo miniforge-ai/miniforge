@@ -24,7 +24,9 @@
   ;; A production allowlist for final actuation cannot enable temporary trials.
   (when policy (assoc-in policy [:policy/context :opsv/production-allowlist] #{})))
 
-(defn- ^{:stratum 0} attempt-bound? [ctx settings request baseline]
+(defn ^{:stratum 0} attempt-bound?
+  "Share exact runtime declaration, staging membership and retained-original correlation checks."
+  [ctx settings request baseline]
   (let [declaration (:experiment/declaration settings)
         pack (:experiment-pack request)
         target (:runtime/target request)
@@ -34,6 +36,8 @@
          (preparation/correlated? declaration request)
          (= pack (get-in ctx [:execution/input :opsv/experiment-pack]))
          (= #{(:experiment/environment settings)} (set environments))
+         (preparation/target-bound? declaration
+                                    (get-in baseline [:environment/raw-observations :kubernetes/verification :kubernetes/source]))
          (contains? (set (get-in pack [:experiment-pack/guardrails :blast-radius :namespaces]))
                     (:namespace target))
          (contains? (set (get-in pack [:experiment-pack/targets :services]))

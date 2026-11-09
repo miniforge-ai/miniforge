@@ -21,6 +21,7 @@
    lifecycle; every call emits a receipt marked `:profile/unqualified`.
    Invalid inputs return an `:invalid-input` anomaly without a receipt."
   (:require
+   [ai.miniforge.agent-environment.conformance :as conformance]
    [ai.miniforge.agent-environment.controller :as controller]
    [ai.miniforge.agent-environment.fake :as fake]
    [ai.miniforge.agent-environment.lifecycle :as lifecycle]
@@ -51,7 +52,9 @@
 
 (defn ^{:stratum 0} create-controller
   "A controller over `:provider` with an empty in-memory ledger. `:clock`
-   returns the current Instant and `:emit!` receives every receipt."
+   returns the current Instant, `:emit!` receives every receipt, and
+   `:persist!` stores one artifact `(persist! lease path text)` outside
+   the environment, returning its reference or an anomaly."
   [opts]
   (or (v/check v/ControllerOptions opts) (controller/create opts)))
 
@@ -78,6 +81,37 @@
   [c acting lease]
   (or (v/check v/Acting acting schema/Lease lease) (lifecycle/readiness c acting lease)))
 
+(defn ^{:stratum 0} exec!
+  "Run `command` in the leased environment: `{:exec/exit :exec/stdout :exec/stderr}`."
+  [c acting lease command]
+  (or (v/check v/Acting acting schema/Lease lease schema/Command command)
+      (lifecycle/exec! c acting lease command)))
+
+(defn ^{:stratum 0} write-file!
+  "Write UTF-8 `text` at absolute `path` inside the leased environment."
+  [c acting lease path text]
+  (or (v/check v/Acting acting schema/Lease lease schema/AbsolutePath path :string text)
+      (lifecycle/write-file! c acting lease path text)))
+
+(defn ^{:stratum 0} read-file
+  "The UTF-8 text at `path` inside the leased environment, or an anomaly."
+  [c acting lease path]
+  (or (v/check v/Acting acting schema/Lease lease schema/AbsolutePath path)
+      (lifecycle/read-file c acting lease path)))
+
+(defn ^{:stratum 0} persist-artifacts!
+  "Copy each path out of the environment to the controller's artifact store;
+   returns the store's references in path order, or the first anomaly."
+  [c acting lease paths]
+  (or (v/check v/Acting acting schema/Lease lease [:vector schema/AbsolutePath] paths)
+      (lifecycle/persist-artifacts! c acting lease paths)))
+
+(defn ^{:stratum 0} cancel!
+  "Stop admitting new work and ask the provider to stop running work.
+   Returns `{:call/outcome o}`: what the provider confirmed."
+  [c acting lease]
+  (or (v/check v/Acting acting schema/Lease lease) (lifecycle/cancel! c acting lease)))
+
 (defn ^{:stratum 0} release!
   "Deprovision the environment. `{:call/outcome :outcome/applied}` only when
    the provider confirmed every delete; otherwise the ledger keeps it as
@@ -90,3 +124,16 @@
    the fault options."
   ([] (fake/create {}))
   ([opts] (fake/create opts)))
+
+(defn ^{:stratum 0} fake-commands
+  "Every command a fake provider ran in `namespace`, in order."
+  [provider namespace]
+  (fake/commands provider namespace))
+
+(defn ^{:stratum 0} run-conformance
+  "Run the contract suite. `:make-provider` returns a fresh provider; the
+   optional `:make-partial-provider` returns one whose provision fails after
+   its first step, and `:await-ready` wraps a readiness thunk until ready.
+   Returns one `{:check/id :check/outcome :check/detail}` per check."
+  [opts]
+  (conformance/run opts))
