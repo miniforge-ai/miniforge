@@ -21,7 +21,7 @@ record the platform keeps of a task's files can be changed by the agent, or is b
 2. **Persist bundle.** `archive-bundle!` runs `git add -A` and `git commit --no-verify` inside the worktree under
    the shared config. So it follows `.gitignore` and `.gitattributes` the agent edited, and runs any
    `core.fsmonitor` or post-commit hook that config names. Every phase overwrites the one file,
-   `<archive-dir>/<workflow-id>/<task-id>.bundle`.
+   `<archive-dir>/<workflow-id>/<env-id>.bundle` (`persist-opts` passes the environment id as `:task-id`).
 3. **Scratch refs.** `scratch-commit!` writes `refs/miniforge/scratch/<workflow-id>` into the shared ref store. Only
    the interface exports it; no production code calls it.
 
@@ -32,9 +32,10 @@ Two problems found while checking this against the code:
    `:branch` to `restore-from-bundle!`, which fetches the bundle's branch tip. That bundle was overwritten by the
    latest phase, so the rewind starts from work its docstring says it never restores. The event's
    `:workspace/commit-sha` is recorded, but the restore does not use it.
-2. **`host-git-guard` does not watch code-execution keys.** It watches remote URLs and `insteadOf` only
-   (`redirect-config-pattern`). Running `git config core.hooksPath <dir>` in a linked worktree writes the host's
-   `.git/config` (tested). The host's next commit, including the operator's own, then runs those hooks.
+2. **`host-git-guard` does not watch code-execution keys.** Besides remote-tracking refs, the only config keys it
+   compares are remote URLs and `insteadOf` (`redirect-config-pattern`). Running `git config core.hooksPath <dir>`
+   in a linked worktree writes the host's `.git/config` (tested). The host's next commit, including the operator's
+   own, then runs those hooks.
 
 ## Goals
 
@@ -132,7 +133,7 @@ process fails on git's `index.lock`; it does not wait.
 `:workspace/snapshot-failed`, and the gap shows in evidence (N11 §7.3).
 
 Governed mode also acquires a host worktree (`governed-environment/acquire!`), but the agent does not work in it.
-`governed_environment.clj` creates its registry with `{:worktree {:snapshots? false}}`.
+PR 2 changes the registry config there from `{:worktree {}}` to `{:worktree {:snapshots? false}}`.
 
 ## Decisions
 
@@ -178,8 +179,9 @@ versus `/Volumes/Work`, with 105 MB of objects. Clones need their own design (fo
 
 ### 3. Governed capsules: not now
 
-1. No shared common dir. The capsule clones into its own tmpfs `/workspace` (`bootstrap-workspace!`,
-   `build-runtime-fs-args`), and the registry applies `host-git-guard` only to the worktree executor.
+1. No shared common dir. The capsule clones into its own `/workspace`, a tmpfs unless the plan mounts one
+   (`bootstrap-workspace!`, `build-runtime-fs-args`). The registry applies `host-git-guard` only to the worktree
+   executor.
 2. Anchors already exist by SHA. Bootstrap records `:base-sha`. `git-persist!` pushes a commit whose SHA is
    recorded, and the capsule holds no credential for that remote, since the credential joins platform-issued
    network commands only (`workspace-exec-fn`).
