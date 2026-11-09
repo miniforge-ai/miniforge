@@ -4,12 +4,37 @@
 (ns ai.miniforge.phase-opsv.pr-cleanup-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.execution-grant.interface :as grant]
+            [ai.miniforge.file-durability.interface :as durability]
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.pr-fixtures :as fixture]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} interrupted-post-link-registration-revokes-written-authority-without-losing-interrupt-test
+  (let [{:keys [ctx runtime calls]} (fixture/setup)
+        sync durability/sync-ancestry!
+        refused? (atom false)
+        grants (str (:authority-directory runtime) "/grants")
+        [result interrupted?]
+        (try+
+          (with-redefs [durability/sync-ancestry!
+                        (fn [directory]
+                          (if (and (= grants (str directory)) (compare-and-set! refused? false true))
+                            (do (.interrupt (Thread/currentThread))
+                                (anomaly/anomaly :unavailable "interrupted post-link durability" {}))
+                            (sync directory)))]
+            [(phase/actuate ctx) (.isInterrupted (Thread/currentThread))])
+          (finally (Thread/interrupted)))
+        issued (grant/current (:authority-directory runtime) (get-in result [:anomaly/data :grant/id]))]
+    (is @refused?)
+    (is interrupted?)
+    (is (anomaly/anomaly? result))
+    (is (= :revocation/superseded (:grant/revocation-reason issued)))
+    (is (nil? (get-in result [:anomaly/data :grant/revocation-failure])))
+    (is (empty? @calls))))
 
 (deftest ^{:stratum 0} pre-dispatch-failure-revokes-newly-issued-authority-test
   (doseq [port [#'actuation/propose-pr! #'actuation/commit-pr!]]
