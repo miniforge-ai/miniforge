@@ -83,6 +83,7 @@
   :event/sequence-unavailable "The recorded OPSV event has no recoverable sequence acknowledgement."
   :event/publication-failed "The OPSV event stream rejected a domain event."
   :recovery/invalid-plan "Recovery planning requires a bounded native load declaration and duration."
+  :recovery/invalid-restoration-provider "Native baseline replica restoration requires valid context and input, a granted committing restoration transaction and trusted synchronous dispatch."
   :load/start-request-refused "Load start preparation requires current recovery readiness, a distinct effect identity and an unchanged owned never-started Pod."
   :load/invalid-start-request "Load start preparation requires a well-formed recovery reference, runtime settings and effect identity."
   :recovery/invalid-restoration-request "Baseline restoration preparation requires a well-formed retained recovery reference, explicit provider settings and a new effect identity."
