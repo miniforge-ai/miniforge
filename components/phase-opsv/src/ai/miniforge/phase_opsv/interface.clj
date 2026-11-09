@@ -51,6 +51,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-ownership :as load-ownership]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-quiescence :as load-quiescence]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop :as load-stop]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup :as load-cleanup]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -78,6 +79,13 @@
   "Prepare an exact conditional stop proposal from current retained recovery approval and fresh owned identity.
    This read-only API does not issue authority, execute a patch or prove termination."
   load-stop/prepare!)
+
+(def ^{:stratum 0} prepare-kubernetes-load-cleanup-proposal!
+  "Prepare an exact UID/revision-pinned deletion request from current retained recovery intent.
+   Input is the closed recovery reference/runtime/new effect-id contract used for load stopping.
+   Requires durable creation ownership and fresh not-started or physically terminated observation.
+   Returns a proposal or anomaly, never authority, provider mutation or proof of completed cleanup."
+  load-cleanup/prepare!)
 
 (def ^{:stratum 0} read-kubernetes-load-ownership!
   "Read the plan's durable granted creation record and fresh Pod with its provider-assigned UID.

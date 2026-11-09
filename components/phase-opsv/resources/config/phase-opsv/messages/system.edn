@@ -85,6 +85,8 @@
   :recovery/invalid-plan "Recovery planning requires a bounded native load declaration and duration."
   :load/stop-request-refused "Load stopping requires current retained recovery intent, a distinct effect identity and an owned Pod with a bounded deadline."
   :load/invalid-stop-request "Load stop preparation requires a well-formed recovery reference, runtime settings and effect identity."
+  :load/cleanup-request-refused "Load cleanup requires current retained recovery intent, a distinct effect identity and a proven quiescent owned Pod."
+  :load/invalid-cleanup-request "Load cleanup preparation requires a well-formed recovery reference, runtime settings and effect identity."
   :recovery/unretainable-plan "Protected reporting must preserve the exact bounded plan and its admission before retaining it."
   :recovery/retained-plan-required "Recovery requires a protected, acknowledged approved plan and fresh matching admission at the current policy revision."
   :verification/retained-preparation-required "Verification requires readable, acknowledged original preparation bound to this workflow and comparison."}}
