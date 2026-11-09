@@ -20,6 +20,7 @@
   :issuance/input-invalid "ExecutionGrant issuer inputs failed validation"
   :issuance/output-invalid "ExecutionGrant issuer produced an invalid grant"
   :issuance/preflight-refused "Effect preflight did not allow grant issuance"
+  :issuance/policy-refused "Runtime issuance policy refused the effect profile, resource bounds or duration"
   :issuance/ineligible "Breach history refuses the requested effect authority"
   :attenuation/effect-class "A delegated grant cannot change effect class"
   :attenuation/scope "Child scope drops or changes a binding the parent set"

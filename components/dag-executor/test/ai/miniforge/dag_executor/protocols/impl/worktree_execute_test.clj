@@ -47,10 +47,14 @@
   10000)
 
 (def ^{:stratum 0} ^:private outlives-deadline-cmd
-  "Sleeps far longer than any deadline used here. The odd duration doubles
-   as a process-table sentinel for the reap check, so a stray `sleep 30`
-   from another test cannot produce a false match."
-  "sleep 3607")
+  "Sleeps far longer than any deadline used here. The duration doubles as
+   the process-table sentinel for the reap check: its fraction is this
+   JVM's PID, so a sleeper from another suite running this test at the
+   same time cannot match `outlives-deadline-pattern`. `sleep` takes
+   decimal seconds on BSD and GNU.
+   A marker in a shell comment would not do: `sh -c` may exec `sleep`
+   directly and drop it from the process's arguments."
+  (str "sleep 3600." (.pid (java.lang.ProcessHandle/current))))
 
 (def ^{:stratum 0} ^:private aggressive-timeout-ms
   "Deadline handed to the executor. Short so the test is fast; the contract
@@ -75,16 +79,11 @@
    so the assertions isolate the deadlock from a command failure."
   (str "head -c " stderr-flood-bytes " /dev/zero | tr '\\0' x >&2; echo done"))
 
-(deftest ^{:stratum 1} execute-command-kills-process-tree-at-deadline-test
-  (testing "a positive timeout bounds the wait, kills the tree and flags the result"
-    (let [start (System/currentTimeMillis)
-          r     (worktree/execute-command scratch-dir outlives-deadline-cmd {} aggressive-timeout-ms)
-          took  (- (System/currentTimeMillis) start)]
-      (is (true? (:timed-out? r)) ":timed-out? must sit at the top level of the result")
-      (is (= runtime-process/timeout-exit-code (:exit-code (:data r))))
-      (is (< took deadline-slack-ms) (str "returned after " took "ms"))
-      (is (= pgrep-no-match-exit (:exit (shell/sh "pgrep" "-f" outlives-deadline-cmd)))
-          "the sleeper must be reaped, not orphaned"))))
+(def ^{:stratum 1} ^:private outlives-deadline-pattern
+  "`pgrep -f -x` pattern for the sleeper's whole command line. `-x` anchors
+   it, so PID 123's sentinel does not also match PID 1234's; the escaped dot
+   matches only a dot."
+  (str/replace outlives-deadline-cmd "." "\\."))
 
 (deftest ^{:stratum 1} worktree-executor-execute-threads-timeout-test
   (testing "execute! forwards :timeout-ms so the deadline is honoured at the protocol boundary"
@@ -95,6 +94,17 @@
       (is (= runtime-process/timeout-exit-code (:exit-code (:data r)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} execute-command-kills-process-tree-at-deadline-test
+  (testing "a positive timeout bounds the wait, kills the tree and flags the result"
+    (let [start (System/currentTimeMillis)
+          r     (worktree/execute-command scratch-dir outlives-deadline-cmd {} aggressive-timeout-ms)
+          took  (- (System/currentTimeMillis) start)]
+      (is (true? (:timed-out? r)) ":timed-out? must sit at the top level of the result")
+      (is (= runtime-process/timeout-exit-code (:exit-code (:data r))))
+      (is (< took deadline-slack-ms) (str "returned after " took "ms"))
+      (is (= pgrep-no-match-exit (:exit (shell/sh "pgrep" "-f" "-x" outlives-deadline-pattern)))
+          "the sleeper must be reaped, not orphaned"))))
 
 (deftest ^{:stratum 2} execute-command-drains-stderr-flood-without-deadlock-test
   (testing "a child that fills the stderr pipe before writing stdout still completes"

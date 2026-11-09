@@ -8,21 +8,21 @@
 ## Overview
 
 In the `independent` condition each candidate takes one turn on a fresh
-private board, and the closing selector starts from a fresh board with only
+private board. The closing selector starts from a fresh board with only
 the candidates' solutions and rationales. An observation a candidate
 requested is attached to that candidate's board after its only turn, so no
 request in the condition ever showed one. Since #2346 credits only what the
 closing turn's board showed, the condition could never earn evidence credit.
 
 Before the selector's closing turn, the trusted fixture reader now attaches
-every observation the candidates' boards attest to the selector's fresh
-board, through the same admission path as any other observation.
+every observation the candidates' boards attest to the selector's fresh board.
+It uses the same admission path as any other observation.
 
 ## Motivation
 
 The operator asked that the independent condition see the observations. This
-keeps the condition's design: candidates stay isolated from each other, the
-selector still receives only solutions and rationales as handoff, and the
+keeps the condition's design. Candidates stay isolated from each other.
+The selector still receives only solutions and rationales as handoff, and the
 turn allowance is unchanged. The alternative, a budgeted second turn per
 candidate, would change the condition's allowance.
 
@@ -30,7 +30,7 @@ candidate, would change the condition's allowance.
 
 - `experiment/board-for`: the board a turn acts on. For the independent
   closing selector, it is a fresh board plus the union of the candidates'
-  attested observations, each attached by `turn/attach-observation`, in a
+  attested observations. Each is attached by `turn/attach-observation` in a
   stable order. Every other turn uses its own board as before.
 - `take-turn` uses `board-for`. The selector's recorded board carries the
   fixture reader's admitted transactions, so `verify` replays it.
@@ -58,8 +58,7 @@ None. Development lab only.
 
 ## Related Issues/PRs
 
-- Resolves the open design question in #2346's PR doc and the atlas README
-  (#2349).
+Resolves the open design question in #2346's PR doc and the atlas README (#2349).
 
 ## Checklist
 

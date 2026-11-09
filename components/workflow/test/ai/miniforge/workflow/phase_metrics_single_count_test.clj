@@ -20,8 +20,9 @@
    :leave fns add [:phase :metrics] to :execution/metrics themselves, and
    the runner merged [:phase :metrics] again after :leave."
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [clojure.test :refer [deftest testing is use-fixtures]]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.workflow.isolation-test-support :as isolation]
    [ai.miniforge.workflow.runner :as runner]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -97,3 +98,5 @@
 (doseq [phase-kw [:self-accumulating-probe :reporting-probe]]
   (phase/register-phase-defaults! phase-kw {:phase phase-kw :agent :workflow-tester
                                             :gates [] :budget probe-budget}))
+
+(use-fixtures :once isolation/with-isolated-host)

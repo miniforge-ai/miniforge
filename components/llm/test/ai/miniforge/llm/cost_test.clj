@@ -153,11 +153,11 @@
         "2000 * 15/1M = 0.03 — :input-tokens default 0 contributes 0")))
 
 (deftest ^{:stratum 2} estimate-cost-haiku-cheap-pricing-test
-  (testing "Haiku's much cheaper pricing demonstrates the table
-            is per-model (not a constant rate). 10k+2k tokens at
-            $0.25/$1.25 per 1M = (10000*0.25 + 2000*1.25)/1M =
-            (2500 + 2500)/1M = 0.005"
-    (is (approx= 0.005
+  (testing "Haiku's cheaper pricing demonstrates the table is
+            per-model (not a constant rate). 10k+2k tokens at
+            $1.00/$5.00 per 1M = (10000*1.00 + 2000*5.00)/1M =
+            (10000 + 10000)/1M = 0.02"
+    (is (approx= 0.02
                  (sut/estimate-cost {:input-tokens 10000
                                      :output-tokens 2000}
                                     "claude-haiku-4-5-20251001")))))

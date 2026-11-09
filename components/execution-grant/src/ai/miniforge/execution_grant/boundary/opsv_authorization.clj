@@ -4,6 +4,7 @@
 (ns ai.miniforge.execution-grant.boundary.opsv-authorization
   (:require [ai.miniforge.execution-grant.authorization-result :as result]
             [ai.miniforge.execution-grant.constraints :as constraints]
+            [ai.miniforge.execution-grant.opsv-profile :as profile]
             [ai.miniforge.execution-grant.opsv-scope-schema :as schema]
             [malli.core :as m]))
 
@@ -16,19 +17,6 @@
     (or (schema/experiment-effect? class (:grant/scope grant))
         (schema/experiment-effect? class actual))))
 
-(defn- ^{:stratum 0} operation-class? [grant actual]
-  (= (:grant/effect-class grant)
-     (get schema/operation-classes (get-in actual [:opsv/experiment :opsv/operation]))))
-
-(defn- ^{:stratum 0} resource-identities? [actual]
-  (or (= :start-load (get-in actual [:opsv/experiment :opsv/operation]))
-      (every? :uid (get-in actual [:opsv/experiment :opsv/resources]))))
-
-(defn- ^{:stratum 0} load-start-bounded? [actual]
-  (or (not= :start-load (get-in actual [:opsv/experiment :opsv/operation]))
-      (and (seq (get-in actual [:opsv/experiment :opsv/traffic-destinations]))
-           (every? pos? (vals (get-in actual [:opsv/experiment :opsv/load-limits]))))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} admitted? [grant actual]
@@ -38,9 +26,7 @@
          (false? (:grant/delegable? grant))
          (nil? (:grant/parent-id grant))
          (= 1 (get-in grant [:grant/constraints :constraint/max-count]))
-         (operation-class? grant actual)
-         (resource-identities? actual)
-         (load-start-bounded? actual))))
+         (profile/admissible? (:grant/effect-class grant) actual))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -54,8 +54,10 @@ Make miniforge capable of running miniforge without paying for
 | blocker | ● | dogfood-resilience | `worktree-persistence-scratch-branch.spec.edn` — Persist worktrees outside /tmp + scratch-branch commits on every write | dogfoodenabler |
 | high | ● | dogfood-resilience | `pedestal-interceptor-chain.spec.edn` — Pedestal-style interceptor chain for phase lifecycle | correctness+dogfoodenabler |
 | high | ● | dogfood-resilience | `phase-transition-graph-validator.spec.edn` — Phase transition graph validator — static checks over phase EDN configs | correctness+observation+dogfoodenabler |
+| high | ● | dogfood-resilience | `spec-kanban-thrown-run.spec.edn` — A work spec whose run throws moves to work/failed instead of staying in work/in-progress | correctness+dogfoodenabler |
 | high | ● | dogfood-resilience | `tech-registry-doctor-repo-scoped-bootstrap.spec.edn` — Tech-registry-driven runtime bootstrap — repo-scoped, print-don't-install | correctness+ux+dogfoodenabler |
 | high | ○ | dogfood-resilience | `workflow-dependency-declarations.spec.edn` — Workflow dependency declarations — supervisor sequencing + DAG dependencies | dogfoodenabler |
+| high | ● | dogfood-resilience | `workflow-resume-emits-resumed-event.spec.edn` — Workflow resume — emit :workflow/resumed naming the phase it resumes from and the phases it skips | observation+dogfoodenabler |
 | blocker | ○ | dogfood-resilience | `workflow-phase-checkpoint-and-resume.spec.edn` — Workflow phase checkpoint + resume | tokenconservation+dogfoodenabler |
 | blocker | ○ | dogfood-resilience | `workflow-resume-fsm-advance-investigation.spec.edn` — Workflow resume — make FSM advance from production checkpoints, not just synthetic ones | observation+tokenconservation+dogfoodenabler |
 | high | ○ | dogfood-resilience | `phase-boundary-contracts.spec.edn` — Phase boundary contracts — declare + enforce :phase/input/:output (Ixi pattern, re-derived) | correctness+observation+dogfoodenabler |

@@ -16,7 +16,7 @@ its journal recorded.
 
 The lab journals each call before making it and never retries a failed one.
 Before this change, a stream that exited cleanly with no content, tool call
-or usage made the `llm` client retry once, and that second provider call had
+or usage made the `llm` client retry once. That second provider call had
 no journal record. The atlas README (#2349) documented the gap; #2399 added
 the opt-out in the component, and this base change uses it (dewey 722).
 
@@ -26,7 +26,7 @@ the opt-out in the component, and this base change uses it (dewey 722).
   the docstring says why.
 - With the retry off, an empty stream returns a blank success whose usage
   reports zero tokens. `call-result` already treats zero input as missing
-  metering, a failed call with unknown usage, so the activation is charged the same way as before, minus the
+  metering: a failed call with unknown usage. The activation is charged the same way as before, minus the
   hidden second call.
 - `docs/architecture/deliberation/README.md`: the "Running development
   experiments" paragraph now says the adapter turns the retry off, replacing

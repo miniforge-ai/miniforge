@@ -6,8 +6,8 @@
 
 # N10 — Governed Tool Execution
 
-**Version:** 0.5.0-draft
-**Date:** 2026-11-04
+**Version:** 0.5.1-draft
+**Date:** 2026-11-06
 **Status:** Draft
 **Conformance:** MUST
 
@@ -123,6 +123,19 @@ grants, and durable transactions. Recovery authority MUST remain independent of
 revoked or expired forward grants and MUST NOT permit new trials. Cleanup MUST
 bind proven resource identity and provider preconditions; a reused resource name
 MUST NOT authorize deletion of a different resource.
+
+Before a trial's first effect, the runtime MUST independently approve and retain
+the bounded recovery plan required by N7 §5.5. This approval MUST NOT be an
+execution grant, a wildcard scope, or reuse of forward authority.
+Immediately before each recovery effect, the runtime MUST read fresh provider
+preconditions and prove affected resource identities.
+It MUST then obtain a current allowing decision and matching exact grant.
+A Deployment restore MUST bind its fresh resource version;
+cleanup of a newly created Job MUST bind its proven UID. These provider values
+need not exist when the plan is approved, but MUST remain within its target,
+operation, ownership, and limit bounds. Missing or refused recovery authority
+MUST leave forward effects fenced and retain an unresolved recovery disposition,
+even when the pretrial plan was approved.
 
 The runtime MUST verify recovery postconditions against N7 §6.3's original
 baseline and recovery bounds. Missing authority or uncertain recovery MUST fail
@@ -1044,6 +1057,9 @@ Tests MUST reject missing, expired, revoked, foreign-attempt, changed-target,
 changed-payload, and cross-class grants before provider mutation (N10.OT.1).
 Tests MUST distinguish confirmed, failed, and unknown outcomes, including resource
 name reuse and recovery after forward-grant revocation (N10.OT.2).
+Tests MUST show that plan approval precedes trial effects but does not authorize recovery.
+Exact recovery grants MUST require fresh resource versions or proven provider-assigned identities.
+Refused issuance MUST leave forward effects fenced with unresolved recovery evidence (N10.OT.2).
 
 ---
 
@@ -1183,6 +1199,9 @@ guarantees and are currently assertions.
 
 **Version History:**
 
+- 0.5.1-draft (2026-11-06): Clarified operator-approved pretrial recovery-plan
+  approval versus just-in-time exact recovery decisions and grants; unknown
+  provider identities or preconditions never justify wildcard authority.
 - 0.5.0-draft (2026-11-04): Added the operator-approved OPSV staging profile:
   exact temporary deployment and dedicated load-test authority, independent
   cleanup/recovery transactions, and verified original-baseline restoration.

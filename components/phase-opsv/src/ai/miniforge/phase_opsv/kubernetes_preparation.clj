@@ -3,16 +3,24 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-preparation
   (:require [ai.miniforge.content-hash.interface :as hash]
-            [ai.miniforge.phase-opsv.verification-schema :as verification]))
+            [ai.miniforge.phase-opsv.environment-comparison-bindings :as bindings]
+            [ai.miniforge.phase-opsv.kubernetes-resource :as resource]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn ^{:stratum 0} target-bound? [declaration capture]
+  (let [target (:runtime/target declaration)
+        inventory (:kubernetes/inventory capture)
+        deployment (:kubernetes/deployment inventory)]
+    (and (= target (:runtime/target inventory))
+         (= (:cluster target) (:kubernetes/cluster-id inventory))
+         (= (:namespace-uid target) (resource/uid (:kubernetes/namespace inventory)))
+         (= (:workload-uid target) (resource/uid deployment))
+         (= (:namespace target) (resource/namespace-of deployment))
+         (= (:kubernetes/deployment-name declaration) (resource/name-of deployment)))))
+
 (defn ^{:stratum 0} population-declared? [pin]
   (contains? (:comparison/contract pin) :comparison/replica-contract))
-
-(defn- ^{:stratum 0} request-binding [declaration request]
-  (assoc (select-keys request verification/correlation-keys)
-         :workflow/id (:workflow/id declaration) :runtime/target (:runtime/target declaration)))
 
 (defn- ^{:stratum 0} payloads-match? [request]
   (and (= (:candidate/hash request) (hash/content-hash (:candidate/policy request)))
@@ -38,7 +46,8 @@
   (let [pin (:comparison/pin request)
         contract (:comparison/contract pin)]
     (and (= (:runtime/target request) (:runtime/target declaration))
-         (= (:comparison/binding contract) (request-binding declaration request))
+         (= (:comparison/binding contract)
+            (bindings/comparison-binding (:workflow/id declaration) (:runtime/target declaration) request))
          (= (:comparison/hash pin) (hash/content-hash contract))
          (payloads-match? request))))
 

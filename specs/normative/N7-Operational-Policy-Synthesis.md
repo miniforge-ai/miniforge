@@ -6,8 +6,8 @@
 
 # N7 — Operational Policy Synthesis With Verification
 
-**Version:** 0.4.0-draft
-**Date:** 2026-11-04
+**Version:** 0.4.1-draft
+**Date:** 2026-11-06
 **Status:** Complete
 **Conformance:** MUST
 **Class:** Extension spec (N7+)
@@ -346,9 +346,20 @@ or mismatched authority MUST prevent mutation. Candidate SLO verification succes
 MUST NOT be a prerequisite for these trial effects; all other safety checks MUST remain.
 
 Before the first effect, the runtime MUST retain the §6.3 comparison contract
-and original baseline. It MUST verify a viable recovery plan and establish
-separate authority for stopping load, cleaning up owned experiment resources,
-and restoring that baseline. Forward authority MUST NOT implicitly authorize recovery.
+and original baseline. It MUST independently approve and retain a viable bounded
+plan for stopping load, cleaning up owned experiment resources, and restoring
+that baseline. The plan MUST bind the attempt, original baseline, exact staging
+target, permitted recovery operations, ownership rules, and recovery limits.
+Plan approval MUST NOT itself authorize execution or substitute for an exact
+recovery DecisionEnvelope, ExecutionGrant, or durable transaction.
+
+Immediately before each recovery effect, the runtime MUST obtain a current
+allowing decision and matching exact grant under N10 §1.5. It MUST first read
+fresh provider preconditions and prove the identity of affected resources,
+including a newly created Job's UID before cleanup. Provider-assigned identities
+and post-trial resource versions need not be known at pretrial plan approval.
+They MUST NOT be replaced by wildcard grants or inferred from a resource name.
+Forward authority MUST NOT implicitly authorize recovery.
 
 Effects MUST stay within predeclared payloads, resources, traffic destinations,
 load limits, durations, and iteration budgets. Changing a payload or candidate
@@ -519,6 +530,11 @@ IDs are never reused; a withdrawn requirement is marked withdrawn.
     recovery; revoking forward grants does not bypass recovery authorization (N7.EX.6).
 11. Uncertain effect or recovery outcomes remain explicit and prevent success
     and new forward effects (N7.EX.6).
+12. A separately approved, retained bounded recovery plan precedes the trial;
+    exact recovery grants use fresh post-trial preconditions and proven resource
+    identity. Plan approval alone cannot authorize recovery, and a refused
+    recovery grant leaves forward effects fenced with unresolved disposition
+    evidence (N7.EX.6).
 
 ---
 
@@ -590,6 +606,9 @@ depends on machinery that is not there.
 
 **Version History:**
 
+- 0.4.1-draft (2026-11-06): Clarified operator-approved recovery timing:
+  retain an independently approved bounded plan before trial.
+  Obtain exact recovery grants just in time from fresh preconditions and proven identities.
 - 0.4.0-draft (2026-11-04): Added operator-approved separate temporary staging
   experiment authority, with default-off execution and separately authorized,
   verified cleanup and baseline recovery. Final-actuation gates remain unchanged.
