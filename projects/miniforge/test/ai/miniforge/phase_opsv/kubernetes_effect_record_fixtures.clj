@@ -17,7 +17,8 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} propose! [{:keys [ctx request runtime] :as fixture} proposal issued]
-  (let [options (assoc (commit/proposal issued proposal) :proposal proposal)
+  (let [options (cond-> (assoc (commit/proposal issued proposal) :proposal proposal)
+                  (:effect/envelope-id fixture) (assoc :envelope-id (:effect/envelope-id fixture)))
         record (effect/propose! (:effects-directory runtime) options clock/now)]
     (is (= :proposed (:effect/state record)))
     (when (= :proposed (:effect/state record))

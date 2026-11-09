@@ -3,21 +3,13 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.pr-audit-model
   "Disposition payloads and lossless pending-audit retention."
-  (:require [ai.miniforge.phase-opsv.pr-model :as model]))
+  (:require [ai.miniforge.phase-opsv.effect-disposition :as disposition]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} payload [transaction]
-  (let [envelope (get-in transaction [:effect/proposal :opsv/envelope])
-        observed (select-keys (:effect/observed transaction) [:pr/url :pr/number :pr/head-sha])]
-    {:opsv/governed-effect (model/governed-effect transaction)
-     :opsv/effect-state (:effect/state transaction)
-     :opsv/decision-envelope envelope
-     :opsv/effect-observed observed
-     :opsv/effect-failure (:effect/failure transaction)}))
-
-(defn ^{:stratum 0} matching-event [expected records]
-  (first (filter #(= expected (select-keys % (keys expected))) records)))
+  (disposition/payload transaction (get-in transaction [:effect/proposal :opsv/envelope])
+                       [:pr/url :pr/number :pr/head-sha]))
 
 (defn- ^{:stratum 0} append-distinct [records event]
   (into [] (distinct) (conj (vec records) event)))

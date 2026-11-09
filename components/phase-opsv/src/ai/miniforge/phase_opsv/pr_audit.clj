@@ -6,7 +6,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.effect-transaction.interface :as effect]
             [ai.miniforge.evidence-bundle.interface :as evidence]
-            [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.phase-opsv.boundary.effect-disposition-event :as disposition-event]
             [ai.miniforge.phase-opsv.event-delivery :as delivery]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.pr-audit-model :as model]
@@ -19,15 +19,9 @@
   (anomaly/anomaly :unavailable (msg/ts :pr/audit-unavailable) {}))
 
 (defn- ^{:stratum 0} event [ctx stream transaction]
-  (let [data (model/payload transaction)
-        workflow-id (context/workflow-id ctx)
-        bundle-id (get-in transaction [:effect/proposal :opsv/evidence-bundle-id])
-        expected (assoc data :event/type :opsv.actuation/disposition
-                             :workflow/id workflow-id :opsv/evidence-bundle-id bundle-id)
-        published (if (events/current-event-stream? stream) [] (events/get-events stream))]
-    (if (anomaly/any-anomaly? published) published
-      (or (model/matching-event expected (concat published (:opsv/disposition-events ctx)))
-          (events/actuation-disposition stream workflow-id bundle-id data)))))
+  (disposition-event/draft ctx stream
+                           (get-in transaction [:effect/proposal :opsv/evidence-bundle-id])
+                           (model/payload transaction)))
 
 (defn- ^{:stratum 0} call-with-audit-failure [failure operation]
   (try+ (operation)
