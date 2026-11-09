@@ -53,6 +53,18 @@ when the cluster cannot be reached.
    an existing environment first checks the namespace still has the target's UID. `observe`
    reports the generation label, so recovery adopts only the namespace this lease created. Release
    is applied only when the namespace is confirmed gone.
+   Outcomes stay honest when kubectl's answer is ambiguous:
+   1. A namespace create the API refused (for example `AlreadyExists`) is failed. One whose answer
+      was lost, such as on a deadline, is uncertain unless the namespace is then confirmed absent,
+      so the lifecycle recovers it by generation and cleans it up.
+   2. A delete is failed only when the API refused it; a timed-out wait on a namespace still
+      present is uncertain.
+   3. A file write or read that exits nonzero is a `file-write-failed` or `file-read-failed`
+      anomaly with the path, exit and output, not a success or a missing namespace. A runner
+      anomaly is returned as it is.
+   4. Cancel signals everything except the keep-alive (PID 1), a `sleep` it runs, zombies and its
+      own shell. A keep-alive shell that forks `sleep` no longer makes every cancel uncertain. The
+      cost: an agent's own `sleep`, reparented to PID 1 and ignoring TERM, would be spared.
 5. `projects/agent-environments` and the opt-in guard include the new brick; no default project
    depends on it.
 
@@ -64,18 +76,17 @@ when the cluster cannot be reached.
    3. offered isolation;
    4. a refused pod leaving a partial provision;
    5. calls on a recreated namespace refused, with no delete issued;
-   6. release confirmed only when the namespace is gone;
+   6. release confirmed only when the namespace is gone, uncertain after a timed-out wait, and
+      failed when the API refuses the delete;
    7. the observed generation;
-   8. the manifests' labels and security settings.
-2. `projects/agent-environments/test/.../kind_integration_test.clj` runs against a local kind
-   cluster and refuses any context not named `kind-*`. No CI job runs it. It was run locally
-   against kind (podman provider) with its own kubeconfig file, and its three tests passed:
-   1. the full conformance suite;
-   2. a partial provision with real cleanup;
-   3. a dedicated-kernel request refused at preflight, and the API refusing a pod whose
-      RuntimeClass is absent.
-
-   No namespaces were left behind. Real Kata was not tested.
+   8. the manifests' labels and security settings;
+   9. a lost namespace create (uncertain, or failed when the namespace is absent) and a refused one;
+   10. failed file writes and reads keeping their path and output.
+2. The cancel script was run in busybox pods on a local kind cluster. With the shipped keep-alive
+   it exits 0 idle and after stopping agent work, and 3 while a process ignores TERM. With a
+   keep-alive that forks `sleep`, the earlier script exited 3 and this one exits 0.
+3. The kind integration test, which runs the conformance suite against a real cluster, moves to
+   its own PR stacked on this one. Real Kata was not tested.
 
 ## Deployment Plan
 

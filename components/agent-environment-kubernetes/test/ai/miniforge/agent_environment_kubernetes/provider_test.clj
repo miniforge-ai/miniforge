@@ -29,6 +29,8 @@
   [calls answers]
   (kubernetes/create-provider (fx/settings) (fx/scripted calls answers)))
 
+(def ^{:stratum 0} read-only "sh: can't create /etc/report.txt: Read-only file system")
+
 (def ^{:stratum 0} healthy
   [[["get" "--raw"] (fx/result 0 "ok")]
    [["get" "runtimeclass"] (fx/result 0 "runtimeclass.node.k8s.io/kata-test")]
@@ -72,6 +74,22 @@
     (is (= fx/uid (:provision/uid result)))
     (is (= [:outcome/applied :outcome/failed] (mapv :step/outcome (:provision/steps result))))))
 
+(deftest ^{:stratum 1} test-a-lost-namespace-create-is-uncertain-and-a-refused-one-failed
+  (let [steps #(mapv :step/outcome (:provision/steps (protocol/provision! (provider (atom []) (into % healthy)) fx/target fx/request)))
+        lost (anomaly/anomaly :timeout "kubectl deadline" {})]
+    (is (= [:outcome/uncertain] (steps [[["create"] lost]])))
+    (is (= [:outcome/failed] (steps [[["create"] lost] [["get" "namespace"] fx/not-found]])))
+    (is (= [:outcome/failed] (steps [[["create"] (fx/refusal "AlreadyExists")]])))))
+
+(deftest ^{:stratum 1} test-a-failed-file-command-keeps-its-path-and-output
+  (let [failing (provider (atom []) (into [[["exec"] (assoc (fx/result 1 "") :kubectl/err read-only)]] healthy))
+        written (protocol/write-file! failing fx/target "/etc/report.txt" "text")
+        read (protocol/read-file failing fx/target "/work/missing.txt")]
+    (is (= :anomalies.agent-environment-kubernetes/file-write-failed (anomaly/subtype written)))
+    (is (= read-only (get-in written [:anomaly/data :exec/stderr])))
+    (is (= :anomalies.agent-environment-kubernetes/file-read-failed (anomaly/subtype read)))
+    (is (= "/work/missing.txt" (get-in read [:anomaly/data :file/path])))))
+
 (deftest ^{:stratum 1} test-cancel-is-applied-only-when-nothing-is-left-running
   (let [cancel-with #(protocol/cancel! (provider (atom []) (into [[["exec"] %]] healthy)) fx/target)]
     (is (= [:outcome/applied] (mapv :step/outcome (:cancel/steps (cancel-with (fx/result 0 ""))))))
@@ -94,4 +112,7 @@
   (let [absent (provider (atom []) (into [[["get" "namespace"] fx/not-found]] healthy))
         lingering (provider (atom []) healthy)]
     (is (= [:outcome/applied] (mapv :step/outcome (:deprovision/steps (protocol/deprovision! absent fx/target)))))
-    (is (= [:outcome/uncertain] (mapv :step/outcome (:deprovision/steps (protocol/deprovision! lingering fx/target)))))))
+    (is (= [:outcome/uncertain] (mapv :step/outcome (:deprovision/steps (protocol/deprovision! lingering fx/target)))))
+    (testing "given a delete whose wait timed out → uncertain; one the API refused → failed"
+      (is (= [:outcome/uncertain] (mapv :step/outcome (:deprovision/steps (protocol/deprovision! (provider (atom []) (into [[["delete"] (fx/result 1 "")]] healthy)) fx/target)))))
+      (is (= [:outcome/failed] (mapv :step/outcome (:deprovision/steps (protocol/deprovision! (provider (atom []) (into [[["delete"] (fx/refusal "Forbidden")]] healthy)) fx/target))))))))
