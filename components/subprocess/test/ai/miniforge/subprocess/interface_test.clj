@@ -133,12 +133,13 @@
 (deftest ^{:stratum 2} cancel-drain-test
   (testing "given a drain parked on a pipe nobody writes → cancel closes the
             stream (a thread parked in a process pipe read wakes only on
-            that) and cancels the future"
+            that) and the drain is over"
     (with-open [writer (PipedOutputStream.)]
       (let [reader (PipedInputStream. writer)
             handle (sut/drain-stream reader)]
         (sut/cancel-drain! handle)
-        (is (future-cancelled? (:future handle)))
+        (is (future-done? (:future handle))
+            "cancelled, or finished on the closed stream if it had not yet read")
         (is (thrown? java.io.IOException (.read reader))
             "the stream is closed, not just the future cancelled"))))
   (testing "given a finished drain → cancel is a no-op and the bytes stay"
