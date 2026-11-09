@@ -192,6 +192,7 @@
   :env/persist-held         "Workspace committed but not pushed at {phase}"
   :env/persist-unscanned    "Workspace at {phase} could not be scanned for secrets: committing locally, not pushing"
   :env/restore-failed       "Workspace restore failed: {error}"
+  :env/restore-refused      "Resume refused: branch {branch} could not be put at its checkpoint commit {commit-sha}: {error}"
 
   ;; v2 multi-parent merge (DAG orchestrator) — anomaly + log messages
   :dag.merge/branch-name-invalid      "Parent branch name is structurally invalid (empty, leading dash, or whitespace)"
