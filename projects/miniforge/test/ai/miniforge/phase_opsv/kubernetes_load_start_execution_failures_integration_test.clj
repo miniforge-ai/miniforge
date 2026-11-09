@@ -19,7 +19,7 @@
   (let [failure (InterruptedException.)
         revoke grant/revoke-stored!
         [caught flagged?] (wire/interrupted-result
-                           #(with-redefs [audit/record! (fn [& _] (throw failure))
+                           #(with-redefs [audit/record! (fn [& _] (reset! (:host/clock fixture) nil) (throw failure))
                                           grant/revoke-stored! (if cleanup-failed? (constantly (faults/refusal)) revoke)]
                               (fixtures/execute fixture)))
         record (effect/read-record (:effects-directory runtime) (:effect/id request))

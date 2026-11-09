@@ -19,8 +19,8 @@
                                (:authority-directory runtime) (:fence runtime)))
     (actuation/stop-mutations! (:fence runtime))))
 
-(defn- ^{:stratum 0} revoke! [runtime issued]
-  (let [revoked (grant/revoke-stored! (:authority-directory runtime) (:grant/id issued) :revocation/superseded ((:clock runtime)))]
+(defn- ^{:stratum 0} revoke! [runtime issued now]
+  (let [revoked (grant/revoke-stored! (:authority-directory runtime) (:grant/id issued) :revocation/superseded now)]
     (when (anomaly/anomaly? revoked) (throw+ revoked))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -41,7 +41,7 @@
   (try+ (finish! runtime input issued now (operation))
     (catch Object _
       (fence! runtime input)
-      (cleanup/after-failure! (:throwable &throw-context) (partial revoke! runtime issued)))))
+      (cleanup/after-failure! (:throwable &throw-context) (partial revoke! runtime issued now)))))
 
 (comment
   (fence! {} {}))

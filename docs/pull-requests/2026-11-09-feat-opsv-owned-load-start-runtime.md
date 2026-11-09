@@ -44,9 +44,9 @@ uncertain responses and pre/post-mutation publication failures.
   Final fixes touch five runtime source files and one failure-test namespace
   relative to the broad run. Other production and test sources remain byte-identical.
   Final source and freshly rebuilt isolated package each pass runtime/PR 42/601
-  and all seven runtime fault checks. Both JVM products and structural/lint checks were repeated.
+  and all eight runtime fault checks. Both JVM products and structural/lint checks were repeated.
   The new regression preserves the exact interruption, thread flag and independent
-  cleanup failure, while verifying revocation of the actual stored grant.
+  cleanup failure, while proving stored-grant revocation despite an invalidated clock.
 
 ## Deployment Plan
 
