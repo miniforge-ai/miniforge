@@ -47,10 +47,9 @@ both `run-pack` and `validate-pack` (Copilot, on the preflight PR).
 
 ## Testing Plan
 
-1. ETL `runner_test`: all three shipped packs pass `validate-pack` with
-   preflight; a pack naming an unknown transform fails with
-   `:transform/unresolved`; a pack whose `:pattern` is `"["` fails with
-   `:quality-rule/invalid`, with no exception.
+1. ETL `runner_test`: all three shipped packs pass `validate-pack` with preflight.
+   A pack naming an unknown transform fails with `:transform/unresolved`.
+   A pack whose `:pattern` is `"["` fails with `:quality-rule/invalid`, with no exception.
 2. Locally, pipeline-runner, pipeline-config and ETL namespaces pass.
 
 ## Deployment Plan

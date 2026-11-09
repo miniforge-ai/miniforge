@@ -75,4 +75,5 @@
   :event/invalid "The projected OPSV event does not satisfy its N3 schema."
   :event/sequence-unavailable "The recorded OPSV event has no recoverable sequence acknowledgement."
   :event/publication-failed "The OPSV event stream rejected a domain event."
+  :recovery/invalid-plan "Recovery planning requires a bounded native load declaration and duration."
   :verification/retained-preparation-required "Verification requires readable, acknowledged original preparation bound to this workflow and comparison."}}
