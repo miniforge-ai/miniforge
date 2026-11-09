@@ -85,5 +85,5 @@ N7.EX.6; N7.VF.4; N10 §1.5; #2440; #2450; #2461; #2467.
 
 - [x] Actual-diff owner adversarial and applicable pinned-rule review
 - [x] Affected-product, integration, isolated-package and deliberate-fault validation
-- [ ] Normal signed commits and hooks
+- [x] Normal signed commits and hooks
 - [ ] Current-head full Copilot review, resolved comments, CI and clean merge
