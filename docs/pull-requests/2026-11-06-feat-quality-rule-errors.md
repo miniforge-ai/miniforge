@@ -26,8 +26,8 @@ the rule's id. A throw escaped `execute-pipeline` uncaught. A verdict of
    catch-and-convert helper. A throw becomes `:rule/error` with
    `:error/kind :rule/threw` and the exception class and message. A malformed
    verdict becomes `:error/kind :rule/malformed-verdict` with the verdict's
-   type, not its value, so record contents stay out of the error. Both set
-   `:valid? false`.
+   runtime class name, not its value, so record contents stay out of the
+   error. Both set `:valid? false`.
 2. `data-quality/rule-errors` (new): every rule evaluation that failed to run,
    as `{:record-index :rule/id :error/kind ...}`.
 3. `pipeline-runner.processing-stage`: when `rule-errors` is non-empty, the
@@ -42,6 +42,22 @@ the rule's id. A throw escaped `execute-pipeline` uncaught. A verdict of
    from violations, and counts their records as failed.
 3. The rule boundary also catches `AssertionError`, so a rule's failed
    `assert` becomes `:rule/threw`; other JVM errors stay fatal.
+4. The boundary wraps the check fn's return value in a tag, so no verdict
+   can select the thrown path; a verdict's own `:rule/error` is dropped, so
+   a rule that ran cannot report itself as failed to run.
+5. The malformed-verdict error records `(class verdict)`, not `type`, which
+   reads `:type` metadata a verdict could fill with record data.
+6. The field summary counts rule errors against their field (`:rule-errors`
+   beside `:violations`), and a field's pass rate counts each failed record
+   once, however many rules on the field failed it.
+
+Final review pass:
+
+1. The interface docstrings for `filter-passed` and `generate-report` describe
+   rule errors.
+2. The test that a verdict cannot select the thrown path now returns the
+   boundary's own thrown tag.
+3. `data-quality` `core.clj` and `interface.clj` get the Apache header.
 
 ## Behavior changes
 
@@ -57,11 +73,14 @@ the rule's id. A throw escaped `execute-pipeline` uncaught. A verdict of
    per record with its exception type; nil, `true`, `{:valid? "yes"}` and a map
    without `:valid?` yield `:rule/malformed-verdict`; a malformed verdict never
    passes a record; a rule that ran and rejected a record is a violation, not
-   a rule error.
+   a rule error. Also: a failed `assert`, a warning-severity rule error, the
+   report's rule errors and field summary, distinct failed records in a pass
+   rate, and verdicts that try to inject a `:rule/error` or the thrown tag.
 2. `preflight_test`: a throwing rule and a malformed verdict each fail the
    validate stage with `:error-kind :execution`, and the sink is never called.
-3. Locally, data-quality, pipeline-runner, pipeline-config and ETL namespaces:
-   100 tests, 316 assertions, 0 failures.
+3. Locally, on main plus the executor PR: data-quality, pipeline-runner,
+   pipeline-config, ETL and workbench-etl-adapter namespaces, 140 tests, 514
+   assertions, 0 failures.
 
 ## Deployment Plan
 

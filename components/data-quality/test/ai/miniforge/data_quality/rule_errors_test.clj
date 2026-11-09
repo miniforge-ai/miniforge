@@ -130,6 +130,7 @@
           (pr-str verdict)))))
 
 (deftest ^{:stratum 2} test-verdict-cannot-select-the-exception-path
-  (testing "given a verdict that carries the boundary's internal thrown key → a malformed verdict, not a crash"
+  (testing "given a verdict shaped like the boundary's own thrown tag → a malformed verdict, not :rule/threw"
     (is (= [:rule/malformed-verdict :rule/malformed-verdict]
-           (error-kinds [(rule-returning {:ai.miniforge.data-quality.invoke/thrown nil})])))))
+           (error-kinds [(rule-returning [:ai.miniforge.data-quality.invoke/threw
+                                          (ex-info "not thrown" {})])])))))
