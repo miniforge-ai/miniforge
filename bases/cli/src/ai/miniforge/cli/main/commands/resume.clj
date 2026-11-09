@@ -466,7 +466,6 @@
             ;; From the run as recorded: a rewind drops the snapshot, which
             ;; names the workflow when no spec was recorded.
             identity (resolve-resume-workflow recorded)
-            _ (resume-anomaly/throw-resume-anomaly! identity)
             {:keys [workflow-type workflow-version]} identity
             {:keys [workflow]} (load-workflow workflow-type workflow-version {})
 
