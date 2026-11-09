@@ -22,7 +22,9 @@
    it is set: the thread running a phase step is interrupted (both LLM
    paths kill the agent CLI's process tree on interrupt). Work in that
    scope that waits on tasks which stop on their own (a DAG batch) runs in
-   `coordinating`, so it collects their results instead.")
+   `coordinating`, so it collects their results instead."
+  (:require
+   [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -67,6 +69,15 @@
     (when @armed
       (reset! interrupted true)
       (.interrupt thread))))
+
+(def ^{:stratum 0 :private true} poll-ms
+  "How often `sleep!` re-reads the control state."
+  100)
+
+(defn ^{:stratum 0} stopped?
+  "True when `control-state` (an atom, or nil) is stopped."
+  [control-state]
+  (boolean (and control-state (es/cancelled? control-state))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -120,5 +131,20 @@
                 (when-not (some-> control-state deref :stopped)
                   (reset! armed true))))))
       (f))))
+
+(defn ^{:stratum 1} sleep!
+  "Sleep `ms` unless `control-state` is stopped first. The sleep runs in
+   slices of `poll-ms`, so a stop before or during it ends it within one
+   slice. Returns true when a stop ended or skipped the sleep, false when
+   it ran to the end."
+  [control-state ms]
+  (let [deadline (+ (System/currentTimeMillis) (long ms))]
+    (loop []
+      (let [remaining (- deadline (System/currentTimeMillis))]
+        (cond
+          (stopped? control-state) true
+          (pos? remaining) (do (Thread/sleep (long (min remaining poll-ms)))
+                               (recur))
+          :else false)))))
 
 (comment ::stop-signal)
