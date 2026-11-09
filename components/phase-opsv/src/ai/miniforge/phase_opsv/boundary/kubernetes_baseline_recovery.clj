@@ -4,8 +4,7 @@
 (ns ai.miniforge.phase-opsv.boundary.kubernetes-baseline-recovery
   "API surface class 1: fresh retained-original verification, not recovery execution or whole-trial success."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.phase-opsv.artifact-confirmation :as confirmation]
-            [ai.miniforge.phase-opsv.artifact-model :as artifacts]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-baseline-recovery-reporting :as recovery-reporting]
             [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as native]
             [ai.miniforge.phase-opsv.boundary.retained-preparation :as original]
             [ai.miniforge.phase-opsv.boundary.retained-recovery-plan :as recovery]
@@ -28,19 +27,13 @@
 (defn- ^{:stratum 0} observe! [input]
   (let [load (get-in input [:recovery/input :load])
         provider (dissoc (:restoration/provider input) :kubernetes/context)]
-    (native/prepare! provider (:declaration load) (:request load))))
+    (anomaly/let-ok [acquired (native/observe! provider (:declaration load) (:request load))]
+      (model/observation acquired))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} publish! [ctx input admitted original]
-  (let [observed (observe! input)
-        pin (get-in input [:recovery/input :load :request :comparison/pin])
-        compared (model/compare-original pin original observed)
-        report (model/report input admitted original observed compared)
-        output {:opsv/baseline-recovery report}]
-    (anomaly/let-ok [value (artifacts/record ctx output schema/material)]
-      (let [protected-output (assoc output :opsv/baseline-recovery (:artifact/content value))]
-        (confirmation/publish-with-exception-handling ctx value (artifacts/begin-publication protected-output))))))
+  (recovery-reporting/publish! ctx input admitted original (observe! input)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

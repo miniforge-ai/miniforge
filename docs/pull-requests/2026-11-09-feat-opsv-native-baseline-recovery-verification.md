@@ -24,6 +24,9 @@ through the existing bounded preparation boundary. Compare in rollback mode,
 preserve raw observations and the comparison outcome, and acknowledge protected
 verification-report publication. Reuse target admission with restoration.
 Returned reports use the same protected content as the published artifact.
+Retain the bounded fresh capture even when fingerprint projection fails.
+Publish protected rollback drift through the existing N3 producer and N6 event
+linkage. Keep delivery failures, including a missing stream, in the failed report.
 
 Recovery population bounds permit replacement replicas and churn. Separately
 require the Deployment's desired replica count to equal the retained original;
@@ -54,6 +57,10 @@ publication. Run lint, JVM/product/package compatibility and fault checks serial
 - Against merged #2490, source and fresh isolated package each pass recovery
   29/1,042 and runtime/PR 47/629, plus all fifteen fault checks with zero errors.
   Both JVM products, strict lint/strata, structure and task classpaths pass.
+- Review-fix validation passes source and isolated recovery 33/1,132 and runtime/PR
+  47/629, with all eighteen relevant faults in each environment detecting assertion
+  failures and zero errors. Curated integration passes 350/7,988 and native
+  compatibility passes 308/1,903. Both JVM products and strict structural gates pass.
 
 ## Deployment Plan
 
@@ -61,7 +68,7 @@ No live calls, mutation, execution activation, grant issuance or recovery action
 
 ## Related Issues/PRs
 
-Base: main after merged #2490. Baseline verification remains independent
+Base: main after merged #2490 and test-support prerequisite #2492. Baseline verification remains independent
 of forward execution, while validation includes the governed-start prerequisite.
 
 ## Checklist

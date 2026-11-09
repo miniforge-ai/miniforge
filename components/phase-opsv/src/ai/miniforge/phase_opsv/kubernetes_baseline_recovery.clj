@@ -12,6 +12,13 @@
   (get-in observation [:environment/raw-observations :kubernetes/verification :kubernetes/source
                        :kubernetes/inventory :kubernetes/deployment "spec" "replicas"]))
 
+(defn ^{:stratum 0} observation [acquired]
+  (let [result (:preparation/result acquired)]
+    (if (anomaly/anomaly? result)
+      (assoc-in result [:anomaly/data :environment/raw-observations]
+                {:kubernetes/verification {:kubernetes/source (:preparation/capture acquired)}})
+      result)))
+
 (defn ^{:stratum 0} report [input admitted original observed comparison]
   (let [load (get-in input [:recovery/input :load])
         pin (get-in load [:request :comparison/pin])
