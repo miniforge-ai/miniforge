@@ -25,7 +25,8 @@
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]
-   [ai.miniforge.dag-executor.result :as result]))
+   [ai.miniforge.dag-executor.result :as result]
+   [ai.miniforge.subprocess.interface :as subprocess]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -72,7 +73,21 @@
    graceful-shutdown wait in `destroy-process-tree!`, and JVM scheduling."
   5000)
 
+(def ^{:stratum 0} ^:private small-capture-bytes
+  "A capture limit the oversized command below passes four times over."
+  1024)
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} small-capture-drain
+  "A drain with `small-capture-bytes` as its limit. Calls the component
+   directly: the runtime-process name it stands in for is redefined."
+  [stream]
+  (subprocess/drain-stream stream {:max-bytes small-capture-bytes}))
+
+(def ^{:stratum 1} ^:private oversized-cmd
+  "Writes four times `small-capture-bytes` of `x` to stdout and exits 0."
+  (str "head -c " (* 4 small-capture-bytes) " /dev/zero | tr '\\0' x"))
 
 (def ^{:stratum 1} ^:private stderr-flood-cmd
   "Floods stderr past the pipe buffer, then writes `done` to stdout. Exits 0
@@ -120,3 +135,15 @@
         (is (str/includes? (:stdout (:data r)) "done"))
         (is (= stderr-flood-bytes (count (:stderr (:data r))))
             "every stderr byte must be captured, not just the first pipe buffer")))))
+
+(deftest ^{:stratum 2} execute-command-marks-output-cut-at-the-capture-limit-test
+  (testing "stdout past the capture limit keeps its head and says it was cut"
+    (with-redefs [runtime-process/drain-stream small-capture-drain]
+      (let [r              (worktree/execute-command scratch-dir oversized-cmd {})
+            stdout         (:stdout (:data r))
+            [kept note]    (map #(apply str %) (split-at small-capture-bytes stdout))]
+        (is (result/ok? r))
+        (is (= 0 (:exit-code (:data r))) "the command ran to its own end")
+        (is (= (apply str (repeat small-capture-bytes \x)) kept))
+        (is (str/includes? note (str small-capture-bytes))
+            "the text after the kept head is the cut note, naming the limit")))))

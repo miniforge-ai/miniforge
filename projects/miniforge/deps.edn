@@ -71,6 +71,7 @@
         ai.miniforge/evidence-bundle {:local/root "../../components/evidence-bundle"}
         ;; DAG orchestration components
         ai.miniforge/dag-executor {:local/root "../../components/dag-executor"}
+        ai.miniforge/subprocess {:local/root "../../components/subprocess"}
         ai.miniforge/pr-lifecycle {:local/root "../../components/pr-lifecycle"}
         ai.miniforge/pr-label-watcher {:local/root "../../components/pr-label-watcher"}
         ai.miniforge/task-executor {:local/root "../../components/task-executor"}
