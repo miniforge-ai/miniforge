@@ -31,7 +31,7 @@ records four decisions:
 ## Changes in Detail
 
 1. `docs/design/task-snapshot-history.md`: problem, reachability model, store layout, snapshot points, executor
-   wiring, the four decisions, a six-PR implementation plan by stratum, and follow-ups found while tracing.
+   wiring, the four decisions, an eight-PR implementation plan by stratum, and follow-ups found while tracing.
 
 ## Findings recorded in the doc
 
