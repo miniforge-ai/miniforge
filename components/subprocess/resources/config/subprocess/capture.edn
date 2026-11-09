@@ -1,0 +1,5 @@
+;; Most bytes kept from one stdout or stderr stream of a child process
+;; (64 MiB). The largest miniforge agent session transcript measured on
+;; 2026-11-08 was 8.4 MB over 109 task runs, so this leaves 8x headroom;
+;; a runaway writer is cut here instead of filling the JVM heap.
+{:subprocess/max-captured-bytes 67108864}
