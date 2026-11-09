@@ -33,6 +33,8 @@ it through the existing confirmation boundary.
 Return a retained reference only after confirmation.
 Retain denials as failure evidence, never as approved plans.
 Refuse protection that changes the exact recovery plan or its hash.
+Require all protected envelope pins to equal the actual admission pins before publication.
+If privacy protection alters a valid policy revision, refuse retention instead of acknowledging an unusable reference.
 
 Read the artifact uncached and require current acknowledgement, producer binding, protection metadata, consistent
 approval criteria and the exact plan hash.
@@ -52,15 +54,19 @@ Check publication and acknowledgement failures after real fixture setup, plus un
 Run strict lint, genuine inferred strata, consuming products, curated integration, fresh isolated packages and targeted
 fault checks.
 
-Source and a freshly built isolated package pass 32 tests and 496 assertions.
+Source and a freshly built isolated package pass 33 tests and 513 assertions.
 The isolated package uses the JAR and test directories only, without production-source overlays.
 Both consuming JVM products and Polylith structure checks pass.
-Curated integration passes 189 tests and 2,356 assertions; native compatibility passes 308 tests and 1,903 assertions.
+Curated integration passes 190 tests and 2,373 assertions; native compatibility passes 308 tests and 1,903 assertions.
 Strict lint has zero warnings or errors; all eight genuinely inferred namespaces stay within three strata.
-Each of six injected faults causes assertion failures with zero errors.
-The faults cover current approval, acknowledgement, exact plan, policy revision, criteria consistency and producer binding.
+Each of seven injected faults causes assertion failures with zero errors.
+The faults cover current approval, acknowledgement, exact plan, policy revision, criteria consistency, producer binding
+and pin preservation.
 Actual file withdrawal proves the plan reader does not substitute cached success.
 Interruption tests capture the flag before test reporting and verify the original exception propagates.
+The review regression uses actual admission and protection with a valid numeric policy revision.
+It proves protection changes the pin while preserving the report schema and plan/hash.
+The publication guard refuses before the real publisher is called; read-time journal progress remains allowed.
 
 ## Standards Gap Analysis
 

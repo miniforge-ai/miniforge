@@ -25,7 +25,8 @@
   (let [output {schema/content-key (material/report admitted)}]
     (anomaly/let-ok [value (artifacts/record ctx output schema/material)]
       (let [content (:artifact/content value)]
-        (if (and (material/valid-content? content) (material/plan-matches? admitted content))
+        (if (and (material/valid-content? content) (material/plan-matches? admitted content)
+                 (material/pins-preserved? admitted content))
           {:record value :output (artifacts/begin-publication {schema/content-key content})}
           (refused))))))
 

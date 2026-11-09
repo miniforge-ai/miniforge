@@ -22,6 +22,12 @@
        (= (:recovery/hash admission) (:recovery/hash content))
        (= (:recovery/hash content) (hash/content-hash (:recovery/plan content)))))
 
+(defn ^{:stratum 0} pins-preserved?
+  "Publication must preserve every admission pin; later journal progress is a separate read concern."
+  [admission content]
+  (= (get-in admission [:recovery/plan-decision-envelope :envelope/pins])
+     (get-in content [:recovery/plan-decision-envelope :envelope/pins])))
+
 (defn- ^{:stratum 0} same-policy? [admission content]
   (let [old (get-in content [:recovery/plan-decision-envelope :envelope/pins])
         current (get-in admission [:recovery/plan-decision-envelope :envelope/pins])]

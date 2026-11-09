@@ -3,9 +3,12 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.recovery-plan-retention-integration-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.evidence-bundle.interface :as evidence]
             [ai.miniforge.phase-opsv.protected-material :as protected]
+            [ai.miniforge.phase-opsv.recovery-plan-admission-fixtures :as admission]
+            [ai.miniforge.phase-opsv.recovery-plan-material :as material]
             [ai.miniforge.phase-opsv.recovery-plan-material-schema :as schema]
             [ai.miniforge.phase-opsv.recovery-plan-retention-fixtures :as fixtures]
             [clojure.test :refer [deftest is]]
@@ -100,6 +103,28 @@
         (is (protected/valid? (:ctx other) value))
         (is (= :conflict (:anomaly/type (fixtures/read-plan (assoc fixture :plan-id id)))))))))
 
+(defn- ^{:stratum 0} check-protected-pins [fixture]
+  (let [revision "20261109055404"
+        changed (assoc-in fixture [:ctx :execution/opts :opsv/governance :policy/revision] revision)
+        admitted (admission/admit changed)
+        value (fixtures/record changed (material/report admitted) schema/material)
+        content (:artifact/content value)
+        original artifact/publish!
+        calls (atom 0)
+        output (with-redefs [artifact/publish! (fn [directory value]
+                                               (swap! calls inc)
+                                               (original directory value))]
+                 (fixtures/retain changed))]
+    (is (= :allow (get-in admitted [:recovery/plan-decision-envelope :envelope/decision])))
+    (is (= revision (get-in admitted [:recovery/plan-decision-envelope :envelope/pins :pins/pack-revision])))
+    (is (m/validate schema/Content content))
+    (is (= (:recovery/plan admitted) (:recovery/plan content)))
+    (is (= (:recovery/hash admitted) (:recovery/hash content)))
+    (is (not= revision (get-in content [:recovery/plan-decision-envelope :envelope/pins :pins/pack-revision])))
+    (is (= :invalid-input (:anomaly/type output)))
+    (is (not (contains? output :recovery/artifact-ref)))
+    (is (zero? @calls))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} approved-plan-has-real-protected-retention-and-no-effect-authority-test
@@ -130,5 +155,8 @@
 
 (deftest ^{:stratum 1} actual-protected-report-from-another-workflow-or-bundle-is-refused-test
   (fixtures/with-retained check-producer-substitution))
+
+(deftest ^{:stratum 1} actual-protection-cannot-publish-an-admission-with-changed-pins-test
+  (fixtures/with-input check-protected-pins))
 
 (comment ::actual-protected-producers-and-acknowledgements-no-fake-recovery-success)
