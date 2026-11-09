@@ -23,8 +23,9 @@
    scripts exec results, `:fake/omit-uid?` creates the namespace but never
    reports its UID, `:fake/uncertain-steps?` reports the steps it applied as
    uncertain, and `:fake/recreated-after-provision?` has an outside actor
-   recreate it at once. A namespace that already exists fails its create, as
-   an API server's does."
+   recreate it at once, and `:fake/no-steps?` answers cancel and delete with
+   no steps. A namespace that already exists fails its create, as an API
+   server's does."
   (:require
    [ai.miniforge.agent-environment.fake.world :as world]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]))
@@ -59,11 +60,13 @@
       (world/missing target)))
   (cancel! [_ target]
     (let [space (world/live @state target)]
-      {:cancel/steps [(world/step :step/workload-stopped (world/cancel-outcome space))]}))
+      (when-not (:fake/no-steps? opts)
+        {:cancel/steps [(world/step :step/workload-stopped (world/cancel-outcome space))]})))
   (deprovision! [_ target]
-    (let [uncertain? (:fake/uncertain-deletes? opts)
+    (let [uncertain? (or (:fake/uncertain-deletes? opts) (:fake/no-steps? opts))
           [before _] (swap-vals! state world/delete target uncertain?)]
-      {:deprovision/steps [(world/step :step/namespace-deleted (world/delete-outcome before target uncertain?))]})))
+      (when-not (:fake/no-steps? opts)
+        {:deprovision/steps [(world/step :step/namespace-deleted (world/delete-outcome before target uncertain?))]}))))
 
 (defn ^{:stratum 0} replace-uid!
   "Recreate `namespace` under a new UID and without this controller's

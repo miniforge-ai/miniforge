@@ -34,10 +34,14 @@ reported as unrun rather than passed.
 3. The fake provider runs scripted exec (`:fake/exec-fn`), keeps files and records every command;
    `fake-commands` reads them through the interface. A write or an exec registers against the
    target's UID in one atomic step, and a cancel while an exec runs is uncertain.
-4. `conformance`: `run-conformance` drives fresh controllers through the public lifecycle with
+   `:fake/no-steps?` answers cancel and delete with no steps.
+4. A provider answer without steps, such as an anomaly, confirms nothing: provision, cancel,
+   release and cleanup read it as one uncertain step, so it is never receipted as applied.
+5. `conformance`: `run-conformance` drives fresh controllers through the public lifecycle with
    synthetic tenants and grants and returns one result per check: duplicate acquire returns one
    environment, conflicting request refused, forged tenant refused (request and lease), grant
-   required, stale lease refused after reacquire, a full lifecycle round trip, partial provisioning
+   required, stale lease refused after reacquire, a full lifecycle round trip (an exec must return
+   its exit, stdout and stderr), partial provisioning
    receipts (unrun when the provider supplies no failing fixture), every receipt valid and
    unqualified, and cleanup confirmed: every lease a check acquired is released, also when the
    check throws, and every ledger entry ends released. `:await-ready` lets a real provider poll
@@ -47,11 +51,12 @@ reported as unrun rather than passed.
 
 1. `work_test`: exec, files, absolute paths, scripted exec with stdin, artifact persistence and a
    partial persist, cancel stopping new work while persistence and release still run, a cancel
-   during an exec, an exec outliving its environment, and the fake touching only its own namespace.
+   during an exec, an exec outliving its environment, the fake touching only its own namespace, and
+   cancel and release answered without steps (uncertain, and the key stays cleanup-uncertain).
 2. `conformance_test`: the fake passes every check; a check without its fixture is unrun; a
    provider that cannot provision fails the acquire-based checks (forged tenant included), so the
-   suite cannot pass a provider that refuses everything; unconfirmed cleanup and a leak with no
-   lease fail the cleanup check.
+   suite cannot pass a provider that refuses everything; an exec without its output fails the round
+   trip; unconfirmed cleanup and a leak with no lease fail the cleanup check.
 
 ## Deployment Plan
 

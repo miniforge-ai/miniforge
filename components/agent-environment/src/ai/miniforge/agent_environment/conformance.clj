@@ -100,6 +100,7 @@
     (fx/result :check/lifecycle-roundtrip
                (and (:readiness/ready? ready)
                     (= 0 (:exec/exit ran))
+                    (every? #(string? (get ran %)) [:exec/stdout :exec/stderr])
                     (map? written)
                     (not (anomaly/anomaly? written))
                     (= fx/probe-text read-back)

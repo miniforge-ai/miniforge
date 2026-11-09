@@ -33,6 +33,10 @@
 
 (defn ^{:stratum 0} failure-step [reason] {:step/name reason :step/outcome :outcome/failed})
 
+(def ^{:stratum 0} unreported-step
+  "What a provider response without steps confirms: nothing."
+  {:step/name :step/unreported :step/outcome :outcome/uncertain})
+
 (defn ^{:stratum 0} artifact-step
   [stored]
   {:step/name :artifact/persisted
@@ -65,6 +69,13 @@
     (receipt/request-subject acting request)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} reported-steps
+  "The steps under `k` in a provider response. A response without any, such
+   as an anomaly, is one unconfirmed step, never an empty success."
+  [response k]
+  (let [steps (get response k)]
+    (if (and (vector? steps) (seq steps)) steps [unreported-step])))
 
 (defn ^{:stratum 1} preflight-failures
   [c request]

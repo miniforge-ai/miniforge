@@ -105,6 +105,14 @@
     (is (vector? (env/persist-artifacts! c a lease [report-path])))
     (is (= {:call/outcome :outcome/applied} (env/release! c a lease)))))
 
+(deftest ^{:stratum 1} test-a-provider-answer-without-steps-confirms-nothing
+  (let [w (fx/world (env/fake-provider {:fake/no-steps? true}) :isolation/shared-kernel)
+        lease (:environment/lease (fx/acquire w (:a w) (fx/request w (:a w))))]
+    (is (= {:call/outcome :outcome/uncertain} (env/cancel! (:c w) (:a w) lease)))
+    (is (= {:call/outcome :outcome/uncertain} (env/release! (:c w) (:a w) lease)))
+    (is (= :anomalies.agent-environment/cleanup-uncertain
+           (reason (fx/acquire w (:a w) (fx/request w (:a w) (:lease/task-id lease) (first fx/template-hashes))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-scripted-exec-receives-the-command-and-its-stdin

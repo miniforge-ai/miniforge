@@ -49,6 +49,10 @@
     (is (= :check/failed (:check/stale-lease-refused outcomes)))
     (is (= :check/failed (:check/lifecycle-roundtrip outcomes)))))
 
+(deftest ^{:stratum 1} test-an-exec-answer-without-its-output-fails-the-roundtrip
+  (let [bare #(env/fake-provider {:fake/exec-fn (constantly {:exec/exit 0})})]
+    (is (= :check/failed (:check/lifecycle-roundtrip (outcomes-by-check (env/run-conformance {:make-provider bare})))))))
+
 (deftest ^{:stratum 1} test-the-suite-releases-what-it-acquires
   (let [provider (env/fake-provider)
         outcomes (outcomes-by-check (env/run-conformance {:make-provider (constantly provider)}))]
