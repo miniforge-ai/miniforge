@@ -89,7 +89,10 @@ None beyond the preflight PR's: pipelines that skip processing declare
 
 ## Depends on
 
-Stacked on #2446 (preflight), which is stacked on #2444.
+Builds on the preflight PR (#2446) and the `run.clj` split (#2444), both
+merged. Main also has the ETL wiring PR (#2454), whose guarded rule
+constructors keep an invalid rule as its descriptor with a `:rule/error`;
+this executor refuses such a rule as `:run/quality-rule-unresolved`.
 
 ## Related Issues/PRs
 
