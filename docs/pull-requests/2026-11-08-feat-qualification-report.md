@@ -33,12 +33,15 @@ data.
    values that are not plain EDN data (fixtures, config or results), or names
    undeclared or duplicate criteria.
 4. `run`:
-   1. `run-gate!` catches a scenario's `ex-info`, any `Exception`, and a failed
-      `assert`; the report then records the failure and every criterion is
-      unrun, so the verdict is incomplete.
-   2. A report that cannot be written comes back as `:write-failure`; an
+   1. `run-gate!` catches a scenario's `ex-info`, any value thrown with
+      `throw+`, any `Exception`, and a failed `assert`; the report then
+      records the failure and every criterion is unrun, so the verdict is
+      incomplete. Other JVM errors stay fatal.
+   2. Reports go under `target/qualification` unless `:out-dir` says
+      otherwise.
+   3. A report that cannot be written comes back as `:write-failure`; an
       invalid gate as `:invalid-gate`.
-   3. `exit-code`: 0 only for a written report with a passing verdict, 2 for
+   4. `exit-code`: 0 only for a written report with a passing verdict, 2 for
       an invalid gate, 1 otherwise. `summary-lines` for console output.
 5. `interface`: `run-gate!`, `exit-code`, `summary-lines`.
 
@@ -48,12 +51,12 @@ data.
    workspace commit is a full SHA; the deps hash follows `deps.edn`; report
    paths name gate and run; EDN and JSON round-trip.
 2. `interface_test`: a passing run is valid, written and exits 0; a throwing
-   scenario (`ex-info`, `assert`) and unusable output (malformed, a fn in the
+   scenario (`ex-info`, a `throw+` keyword, `assert`) and unusable output (malformed, a fn in the
    fixtures or in observed state, an undeclared criterion) are reported with
    every criterion unrun; an unreported criterion is incomplete; hashes repeat
    across runs; an invalid gate exits 2; an unwritable report exits 1 even
    when every criterion passed; the summary names the verdict and each row.
-3. Locally: 23 tests, 79 assertions, 0 failures.
+3. Locally: 23 tests, 86 assertions, 0 failures.
 
 ## Deployment Plan
 

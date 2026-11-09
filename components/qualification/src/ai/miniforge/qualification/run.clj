@@ -36,6 +36,12 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(defn- ^{:stratum 0} thrown-value?
+  "True for a value thrown with slingshot's throw+ that is not itself a
+   Throwable: a map from ex-info, or any other object."
+  [x]
+  (not (instance? Throwable x)))
+
 (defn- ^{:stratum 0} thrown-failure
   "The failure for a scenario that threw `throwable`."
   [throwable]
@@ -94,7 +100,7 @@
                   :error/message (msg/t :criterion/scenario-invalid
                                         {:problems (str/join "; " problems)})}}
        {:output output}))
-   (catch map? _
+   (catch thrown-value? _
      {:failure (thrown-failure (:throwable &throw-context))})
    (catch Exception e
      {:failure (thrown-failure e)})
@@ -122,13 +128,15 @@
 
 (defn ^{:stratum 2} run-gate!
   "Run `scenario`, a no-argument fn returning a ScenarioOutput, for `gate`,
-   and write the report under `out-dir`. `command` is the argv that repeats
-   the run; `root` is the workspace whose build is recorded.
+   and write the report under `out-dir` (default target/qualification).
+   `command` is the argv that repeats the run; `root` is the workspace
+   whose build is recorded.
 
    Returns {:report r :paths {:edn :json}}, or {:report r :write-failure
    message} when the report could not be written, or {:invalid-gate
    problems} when `gate` is not a valid gate."
-  [gate scenario {:keys [out-dir command root] :or {root "."}}]
+  [gate scenario {:keys [out-dir command root]
+                  :or   {out-dir "target/qualification" root "."}}]
   (if-not (m/validate schema/Gate gate)
     {:invalid-gate (pr-str (me/humanize (m/explain schema/Gate gate)))}
     (let [started-at (now)

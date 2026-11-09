@@ -54,8 +54,9 @@
 (defn ^{:stratum 0} run-gate!
   "Run `scenario` (a no-argument fn returning a ScenarioOutput) for `gate`
    and write the report as EDN and JSON under `:out-dir`. Options:
-   `:out-dir`, `:command` (the argv that repeats the run), `:root` (the
-   workspace whose build is recorded, default \".\").
+   `:out-dir` (default \"target/qualification\"), `:command` (the argv
+   that repeats the run), `:root` (the workspace whose build is recorded,
+   default \".\").
 
    Returns {:report r :paths {:edn :json}}, {:report r :write-failure
    message}, or {:invalid-gate problems}. A scenario that throws or returns

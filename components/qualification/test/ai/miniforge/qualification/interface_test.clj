@@ -20,7 +20,8 @@
    run where every criterion passed exits 0."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.qualification.interface :as qualification]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [slingshot.slingshot :refer [throw+]])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]))
 
@@ -90,8 +91,9 @@
       (is (= 0 (qualification/exit-code result))))))
 
 (deftest ^{:stratum 2} test-throwing-scenario-is-unrun
-  (testing "given a scenario that throws ex-info or fails an assert → every criterion unrun, still reported, exit 1"
+  (testing "given a scenario that throws ex-info, throws a keyword with throw+, or fails an assert → every criterion unrun, still reported, exit 1"
     (doseq [scenario [(fn [] (throw (ex-info "boom" {:reason :fixture})))
+                      (fn [] (throw+ :fixture/stop))
                       (fn [] (assert false "boom"))]]
       (let [{:keys [report paths] :as result} (run-in-temp scenario)]
         (is (qualification/valid-report? report))
