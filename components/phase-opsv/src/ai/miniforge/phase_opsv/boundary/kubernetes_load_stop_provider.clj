@@ -8,7 +8,7 @@
             [ai.miniforge.phase-opsv.boundary.http-transport :as transport]
             [ai.miniforge.phase-opsv.boundary.kubernetes-effect-http :as http]
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop :as stop]
-            [ai.miniforge.phase-opsv.boundary.kubernetes-load-recovery-provider :as admission]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-owned-load-provider :as admission]
             [ai.miniforge.phase-opsv.kubernetes-load-stop-outcome :as outcome]
             [ai.miniforge.phase-opsv.kubernetes-load-stop-provider-schema :as schema]
             [ai.miniforge.phase-opsv.messages :as msg]
@@ -25,10 +25,9 @@
 
 (defn ^{:stratum 1} patch! [runtime record dispatch]
   (anomaly/let-ok [configured (admission/admit runtime record dispatch valid-arguments? :load/invalid-stop-provider)
-                  prepared (stop/prepare! (:context runtime) (:input runtime))]
-    (if (= prepared (:effect/proposal record))
-      (effect/call-with-provider-dispatch! dispatch
-        (partial http/send! configured record #{transport/success-status} outcome/report outcome/refused) (diagnostics))
-      (anomaly/anomaly :conflict (msg/ts :load/stop-request-refused) {}))))
+                  _canonical (admission/reconstruct! runtime record stop/prepare! :load/stop-request-refused)]
+    (effect/call-with-provider-dispatch! dispatch
+      (partial http/send! configured record #{transport/success-status} outcome/report outcome/refused) (diagnostics))))
 
-(comment ::dispatch-does-not-establish-authority-host-must-independently-admit-issue-and-pin-the-current-grant)
+(comment
+  (patch! {} {} identity))
