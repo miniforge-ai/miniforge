@@ -81,5 +81,5 @@ N7.EX.6; N10 §1.5; #2440; #2441.
 - [x] Constructor dependency merged
 - [x] Actual-diff adversarial and applicable standards review
 - [x] Affected-product, integration, isolated-package and fault checks
-- [ ] Normal signed commits and hooks
+- [x] Normal signed commits and hooks
 - [ ] Current-head full Copilot review, resolved comments, CI and clean merge
