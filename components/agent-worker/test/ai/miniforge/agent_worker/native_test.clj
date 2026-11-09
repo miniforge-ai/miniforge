@@ -99,8 +99,8 @@
   (is (= :anomalies.agent-worker/launch-failed
          (reason (fx/start! (nf/native-world :worker/claude :pid) (fx/config :worker/claude) 1 prompt)))))
 
-(deftest ^{:stratum 1} test-missing-harness-or-credential-fails-preflight
-  (doseq [missing [:cli :credential]]
+(deftest ^{:stratum 1} test-missing-harness-credential-or-cancel-tool-fails-preflight
+  (doseq [missing [:cli :credential :cancel-tool]]
     (let [w (nf/native-world :worker/claude missing)
           refused (fx/start! w (fx/config :worker/claude) 1 prompt)]
       (is (= :anomalies.agent-worker/worker-preflight-failed (reason refused)))

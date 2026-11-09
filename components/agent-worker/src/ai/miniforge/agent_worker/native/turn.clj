@@ -77,7 +77,10 @@
       (conj :anomalies.agent-worker/cli-missing)
 
       (not (succeeded? (run-script! handle (shell/credential-script credentials))))
-      (conj :anomalies.agent-worker/credential-missing))))
+      (conj :anomalies.agent-worker/credential-missing)
+
+      (not (succeeded? (run-script! handle (shell/present-script shell/cancel-tool))))
+      (conj :anomalies.agent-worker/cancel-tool-missing))))
 
 (defn ^{:stratum 1} status [handle session]
   (let [[dir pid] (shell/split-ref (:session/process-ref session))
