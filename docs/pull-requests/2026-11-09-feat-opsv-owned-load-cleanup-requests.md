@@ -33,6 +33,12 @@ against the grant schema and obtains a real root recovery grant after workflow
 cancellation. The regression failed before correction with five assertions and
 zero test errors; producer-shaped map assertions alone had missed the mismatch.
 
+The review checkout omitted the standards submodule. Review instructions now
+identify the exact gitlink and public raw-content source for reading the complete
+pinned catalogs and applicable rules. They still require reporting inaccessible
+rules, never substituting summaries or owner assertions. The public entry-point
+bytes match the local pinned checkout by SHA-256. No merge gate is relaxed.
+
 Deletion uses `Orphan`, not cascading garbage collection: only the Pod UID is
 proven owned. Kubernetes documents these choices in its
 [DeleteOptions contract](https://kubernetes.io/docs/reference/kubernetes-api/definitions/delete-options-v1-meta/).
