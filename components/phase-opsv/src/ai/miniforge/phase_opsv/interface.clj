@@ -49,6 +49,7 @@
    [ai.miniforge.phase-opsv.boundary.retained-recovery-plan :as retained-recovery]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-provider :as native-load-provider]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-ownership :as load-ownership]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop :as load-stop]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -71,6 +72,11 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} OPSVAdapter protocol/OPSVAdapter)
+
+(def ^{:stratum 0} prepare-kubernetes-load-stop-proposal!
+  "Prepare an exact conditional stop proposal from current retained recovery approval and fresh owned identity.
+   This read-only API does not issue authority, execute a patch or prove termination."
+  load-stop/prepare!)
 
 (def ^{:stratum 0} read-kubernetes-load-ownership!
   "Read the plan's durable granted creation record and fresh Pod with its provider-assigned UID.
