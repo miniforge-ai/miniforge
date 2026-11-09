@@ -79,6 +79,7 @@
   :timeline/unknown-event-type  "<unknown>"
   :timeline/status-success      "success"
   :timeline/status-error        "error"
+  :timeline/status-unknown      "outcome unknown"
   :timeline/terminated-marker   "TERMINATED"
   :timeline/stall-marker        "[stall]"
   :timeline/stall-default-msg   "stream stalled"

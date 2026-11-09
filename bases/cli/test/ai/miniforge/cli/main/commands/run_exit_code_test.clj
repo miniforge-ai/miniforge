@@ -118,8 +118,9 @@
       (is (= 1 (exit-code {:resume "wf-1"} {:execution/status :failed}))))
     (testing "resuming a run that is already complete is a no-op, not a failure"
       (is (= :no-exit (exit-code {:resume "wf-1"} nil))))
-    (testing "usage errors exit 1"
-      (is (= 1 (exit-code {} nil)) "no spec argument")
+    (testing "a usage error (no spec argument) exits 2"
+      (is (= 2 (exit-code {} nil))))
+    (testing "a spec that cannot be read exits 1"
       (is (= 1 (exit-code {:spec "/nonexistent/spec.md"} nil)) "missing file")
       (is (= 1 (exit-code {:spec (temp-file ".edn" "{:something :else}")} nil))
           "unrecognized format"))

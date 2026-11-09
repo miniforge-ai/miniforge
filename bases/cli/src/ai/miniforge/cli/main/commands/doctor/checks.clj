@@ -26,7 +26,9 @@
 
    The container runtime is required only for an execution mode whose
    tasks run in a container capsule, and reported as optional otherwise.
-   The user config file is optional: defaults apply without it.
+   The user config file is optional: defaults apply without it. One that
+   exists but does not parse fails, as an optional check: every run
+   ignores it and uses the defaults.
 
    Every external command runs with `check-timeout-ms`, so a hung tool
    fails its check instead of hanging the doctor.
@@ -45,6 +47,7 @@
    :check/require-output? (a zero exit with blank output fails)."
   (:require
    [babashka.fs :as fs]
+   [clojure.edn :as edn]
    [clojure.string :as str]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
@@ -55,6 +58,15 @@
    [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} config-parse-error
+  "nil when the EDN file at `path` parses, else the reader's message."
+  [path]
+  (try+
+    (edn/read-string (slurp (str path)))
+    nil
+    (catch Exception e
+      (or (ex-message e) (.getName (class e))))))
 
 (def ^{:stratum 0} check-timeout-ms
   "Upper bound on each external command the doctor runs."
@@ -211,12 +223,28 @@
                [])))))
 
 (defn ^{:stratum 1} config-check
+  "The user config file at `config-path`: present and parsing passes. A
+   missing file fails (defaults apply); so does one that does not parse,
+   with the reader's error and a hint, since runs ignore it."
   [config-path]
   (let [exists? (fs/exists? config-path)
-        detail  (if exists?
-                  (messages/t :doctor/config-exists {:config-path config-path})
-                  (messages/t :doctor/no-config {:command (app-config/command-string "config init")}))]
-    (check-result :config (messages/t :doctor/label-config) false exists? detail)))
+        error   (when exists? (config-parse-error config-path))
+        label   (messages/t :doctor/label-config)]
+    (cond
+      (not exists?)
+      (check-result :config label false false
+                    (messages/t :doctor/no-config {:command (app-config/command-string "config init")}))
+
+      error
+      (assoc (check-result :config label false false
+                           (messages/t :doctor/config-unparseable {:config-path config-path :error error}))
+             :check/details
+             [(messages/t :doctor/hint-config-unparseable
+                          {:command (app-config/command-string "config reset")})])
+
+      :else
+      (check-result :config label false true
+                    (messages/t :doctor/config-exists {:config-path config-path})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

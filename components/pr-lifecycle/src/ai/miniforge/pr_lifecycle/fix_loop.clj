@@ -23,6 +23,7 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.events :as events]
+   [ai.miniforge.pr-lifecycle.fix-stage :as fix-stage]
    [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
    [ai.miniforge.pr-lifecycle.policy-eval.fs :as policy-fs]
    [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
@@ -228,17 +229,26 @@
           (dag/err :fix-apply-failed (.getMessage e)))))))
 
 (defn ^{:stratum 0} commit-fix
-  "Commit fix changes and push to the PR branch, with every git hook
-   disabled: the fix just wrote LLM-proposed files, and a hook they
-   changed must not run inside the loop.
+  "Stage the files the fix wrote or deleted, commit them, and push to the
+   PR branch, every git command with hooks disabled: the fix just wrote
+   LLM-proposed files, and a hook they changed must not run inside the
+   loop.
+
+   Only `files` are staged, never the whole tree: the worktree can hold
+   changes the fix did not make. They are staged and committed under
+   git's own index lock (`fix-stage`): the lock file replaces the index
+   only after the commit succeeds, so a staging or commit failure leaves
+   the index as it was, a retry never commits leftovers, and a concurrent
+   git command is never overwritten.
 
    Arguments:
    - worktree-path: Path to git worktree
    - fix-context: Fix context for commit message
    - branch: Branch name to push to
+   - files: The applied artifact's `:code/files` (`:path`, `:action`)
 
    Returns result with commit SHA."
-  [worktree-path fix-context branch logger]
+  [worktree-path fix-context branch logger files]
   (let [fix-type (:fix/type fix-context)
         commit-msg (str "fix: " (case fix-type
                                   :ci-failure "resolve CI failures"
@@ -254,17 +264,23 @@
                 {:message "Committing fix"
                  :data {:branch branch :fix-type fix-type}}))
 
-    ;; Stage and commit changes
-    (let [stage-result (release/commit-changes! worktree-path commit-msg
-                                                git-dir/hooks-disabled-args)]
-      (if (:success? stage-result)
-        (let [push-result (release/push-branch! worktree-path branch nil
-                                                git-dir/hooks-disabled-args)]
-          (if (:success? push-result)
-            (dag/ok {:commit-sha (:commit-sha stage-result)
-                     :branch branch})
-            (dag/err :push-failed (:error push-result))))
-        (dag/err :commit-failed (:error stage-result))))))
+    (let [staged (fix-stage/stage-files! worktree-path files)]
+      (if-let [stage-error (:error staged)]
+        (dag/err :stage-failed stage-error)
+        (let [commit-result (release/commit-changes! worktree-path commit-msg
+                                                     git-dir/hooks-disabled-args
+                                                     {"GIT_INDEX_FILE" (:lock staged)})]
+          (if-not (:success? commit-result)
+            (do (fix-stage/discard-index! staged)
+                (dag/err :commit-failed (:error commit-result)))
+            (if-let [install-error (fix-stage/install-index! staged)]
+              (dag/err :index-update-failed install-error)
+              (let [push-result (release/push-branch! worktree-path branch nil
+                                                      git-dir/hooks-disabled-args)]
+                (if (:success? push-result)
+                  (dag/ok {:commit-sha (:commit-sha commit-result)
+                           :branch branch})
+                  (dag/err :push-failed (:error push-result)))))))))))
 
 ;; Conversation follow-up
 (defn ^{:stratum 0} resolve-comment-thread
@@ -399,7 +415,8 @@
 
               (if (dag/ok? apply-result)
                 ;; Commit and push
-                (let [commit-result (commit-fix worktree-path fix-context branch logger)]
+                (let [commit-result (commit-fix worktree-path fix-context branch logger
+                                                (:code/files artifact))]
                   (if (dag/ok? commit-result)
                     (do
                       (when logger

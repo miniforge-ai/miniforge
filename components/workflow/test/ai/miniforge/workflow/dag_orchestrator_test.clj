@@ -26,6 +26,7 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.dag-loop :as dag-loop]
    [ai.miniforge.workflow.dag-resilience :as resilience]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -158,7 +159,7 @@
     (let [tasks [[id-a {:task/id id-a}]
                  [id-b {:task/id id-b}]
                  [id-c {:task/id id-c}]]
-          batch (dag-orch/select-non-conflicting-batch tasks 4)]
+          batch (dag-loop/select-non-conflicting-batch tasks 4)]
       (is (= 3 (count batch))))))
 
 (deftest ^{:stratum 1} select-non-conflicting-batch-respects-max-test
@@ -166,7 +167,7 @@
     (let [tasks [[id-a {:task/id id-a}]
                  [id-b {:task/id id-b}]
                  [id-c {:task/id id-c}]]
-          batch (dag-orch/select-non-conflicting-batch tasks 2)]
+          batch (dag-loop/select-non-conflicting-batch tasks 2)]
       (is (= 2 (count batch))))))
 
 (deftest ^{:stratum 1} select-non-conflicting-batch-skips-conflicts-test
@@ -177,7 +178,7 @@
                         :task/exclusive-files ["src/bar.clj" "src/baz.clj"]}]
                  [id-c {:task/id id-c
                         :task/exclusive-files ["src/qux.clj"]}]]
-          batch (dag-orch/select-non-conflicting-batch tasks 4)
+          batch (dag-loop/select-non-conflicting-batch tasks 4)
           selected-ids (set (map first batch))]
       ;; a and c should be selected; b conflicts with a on src/bar.clj
       (is (contains? selected-ids id-a))
@@ -191,7 +192,7 @@
                  [id-b {:task/id id-b}]
                  [id-c {:task/id id-c
                         :task/exclusive-files ["src/foo.clj"]}]]
-          batch (dag-orch/select-non-conflicting-batch tasks 4)
+          batch (dag-loop/select-non-conflicting-batch tasks 4)
           selected-ids (set (map first batch))]
       ;; a and b selected; c conflicts with a
       (is (contains? selected-ids id-a))
@@ -284,6 +285,11 @@
           in  (dag-orch/task-sub-input (make-task-def id-a "A") ctx)]
       (is (= "parent-run-1" (:workflow/parent-id in)))
       (is (= "work/x.spec.edn" (:spec/path in)))
+      (is (not (contains? in :workflow/origin-id)) "no lineage recorded, none passed")
+      (is (= "first-run" (:workflow/origin-id (dag-orch/task-sub-input
+                                               (make-task-def id-a "A")
+                                               (assoc ctx :execution/origin-id "first-run"))))
+          "the parent's lineage, which outlives its attempt ids")
       (is (= id-a (:task/id in)) "task id distinguishes PRs within the run")))
   (testing "1-arity (no context) omits provenance — backward compatible"
     (let [in (dag-orch/task-sub-input (make-task-def id-a "A"))]

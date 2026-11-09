@@ -22,7 +22,8 @@
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [clojure.java.io :as io]
-   [clojure.string :as str])
+   [clojure.string :as str]
+   [slingshot.slingshot :refer [try+]])
   (:import
    [java.io File]))
 
@@ -58,18 +59,36 @@
 
 (defn ^{:stratum 0} read-event
   "Decode one event file; nil when unreadable or not an event. The
-   reader returns UUIDs as strings; :event/id and :workflow/id come back
-   as UUIDs, as a live event carries them."
+   reader returns UUIDs and instants as strings; event, workflow and
+   artifact ids come back as UUIDs and :event/timestamp as a Date, as a
+   live event carries them."
   [f]
-  (let [event (es/read-event-file f)
-        as-uuid #(or (when (string? %) (parse-uuid %)) %)]
+  (let [event    (es/read-event-file f)
+        as-uuid  #(or (when (string? %) (parse-uuid %)) %)
+        as-date  (fn [s] (try+ (java.util.Date/from (java.time.Instant/parse s))
+                               (catch Exception _ s)))
+        artifact (fn [a] (if (map? a)
+                           (cond-> a
+                             (contains? a :artifact/id) (update :artifact/id as-uuid)
+                             (contains? a :id)          (update :id as-uuid))
+                           (as-uuid a)))]
     (when (:event/type event)
       (cond-> event
-        (contains? event :event/id)    (update :event/id as-uuid)
-        (contains? event :workflow/id) (update :workflow/id as-uuid)))))
+        (contains? event :event/id)            (update :event/id as-uuid)
+        (contains? event :workflow/id)         (update :workflow/id as-uuid)
+        (string? (:event/timestamp event))     (update :event/timestamp as-date)
+        (sequential? (:phase/artifacts event)) (update :phase/artifacts (partial mapv artifact))))))
+
+(defn ^{:stratum 0} order-key
+  "An event's place in creation order: the ms its file's name records,
+   then its :event/sequence-number."
+  [event]
+  [(some-> ^File (::file (meta event)) .getName es/event-file-ms)
+   (get event :event/sequence-number 0)])
 
 (defn ^{:stratum 0} roots
-  "The file sink's per-workflow roots under `events-dir`, live first."
+  "The file sink's per-workflow roots under `events-dir`, live first: a
+   directory moving to archived/ is then seen in at least one of them."
   [events-dir]
   [(es/live-dir events-dir) (es/archived-dir events-dir)])
 
@@ -97,24 +116,56 @@
   [events-dir]
   (mapcat #(remove hidden? (.listFiles ^File %)) (roots events-dir)))
 
+(defn ^{:stratum 1} count-before
+  "How many of `files` (in creation order) were recorded before `ms`."
+  [files ms]
+  (count (take-while #(< (file-ms %) ms) files)))
+
+(defn ^{:stratum 1} unread?
+  "True when event file `f` is not covered by `tracked` (see
+   `unseen-files`): a name not tracked, recorded at or after the floor
+   (or with no floor yet). A file before the floor counts as covered."
+  [{:keys [names floor]} f]
+  (and (not (contains? names (file-name f)))
+       (or (nil? floor) (>= (file-ms f) floor))))
+
 (defn ^{:stratum 1} read-ordered
   "Decode `files` and return their events in creation order: by recorded
-   ms, then :event/sequence-number (files from one millisecond)."
+   ms, then :event/sequence-number (files from one millisecond). Each
+   event carries its file as `::file` metadata (see `order-key`)."
   [files]
   (->> files
-       (keep (fn [f] (some->> (read-event f) (vector (file-ms f)))))
-       (sort-by (fn [[ms event]] [ms (get event :event/sequence-number 0)]))
-       (mapv second)))
+       (keep (fn [f] (some-> (read-event f) (vary-meta assoc ::file f))))
+       (sort-by order-key)
+       vec))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} unseen-files
-  "[names files]: the names of all event files in `dir`, and those files
-   whose names are not in `seen`. A file name always holds one event."
-  [dir seen]
-  (let [files (event-files dir)]
-    [(into #{} (map file-name) files)
-     (filterv #(not (contains? seen (file-name %))) files)]))
+  "[tracked files rebuild?] for workflow directory `dir`: its event files
+   not covered by `tracked`, and the tracking after them. Tracking stays
+   bounded: the names from the millisecond of the `keep-names`-th newest
+   file on, and a count of the older files. A file that appears among the
+   older ones later (a delayed rename) raises that count; then all files
+   come back with rebuild? true. With no tracking yet (nil), the unseen
+   files are those modified at or after `since-ms`."
+  ([dir tracked keep-names]
+   (unseen-files dir tracked keep-names 0))
+  ([dir tracked keep-names since-ms]
+   (let [files    (event-files dir)
+         floor    (some-> (take-last keep-names files) first file-ms)
+         below    (if floor (count-before files floor) 0)
+         rebuild? (boolean (when-let [old-floor (:floor tracked)]
+                             (> (count-before files old-floor) (:below tracked))))]
+     [{:names (into #{} (map file-name) (drop below files))
+       :floor floor
+       :below below}
+      (cond
+        rebuild? (vec files)
+        tracked  (filterv (partial unread? tracked) files)
+        ;; mtime 0: gone since the listing (moved); a caller retries it.
+        :else    (filterv #(let [m (mtime %)] (or (>= m since-ms) (zero? m))) files))
+      rebuild?])))
 
 (defn ^{:stratum 2} workflow-events
   "Every event of `workflow-id` in the sink layout (its archived, live or

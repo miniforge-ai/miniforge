@@ -46,6 +46,7 @@
    this: git will not track such a path, and a case-insensitive file
    system maps `.GIT` onto `.git`."
   (:require
+   [ai.miniforge.release-executor.interface :as release]
    [babashka.process :as process]
    [clojure.java.io :as io]
    [clojure.string :as str]
@@ -60,14 +61,12 @@
   ["-c" "core.hooksPath=/dev/null"])
 
 (defn ^{:stratum 0} git-env
-  "This process's environment without the variables that make git use
-   another repository than the one its working directory is in. A git
-   hook exports these to its children; dropping them makes a query answer
-   for the worktree. Same list the test launcher strips
-   (`bb-test-runner/sanitize-git-worktree-env`)."
+  "This process's environment without the variables that bind git to one
+   repository (`release/repository-env-vars`, what `git rev-parse
+   --local-env-vars` prints). A git hook exports some of them to its
+   children; dropping them makes every git call here act on the worktree."
   []
-  (apply dissoc (into {} (System/getenv))
-         ["GIT_DIR" "GIT_WORK_TREE" "GIT_INDEX_FILE" "GIT_COMMON_DIR"]))
+  (release/local-git-env))
 
 (defn ^{:stratum 0} git-dir-name?
   "True when path component `segment` is `.git` in any letter case."

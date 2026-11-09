@@ -22,8 +22,12 @@
    workspace persistence at phase boundaries. Extracted from runner.clj."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.phase.interface.boundary-commit :as boundary-commit]
+   [ai.miniforge.phase.interface.task-base :as task-base]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.boundary.environment :as boundary]
    [ai.miniforge.workflow.context :as context]
@@ -153,18 +157,68 @@
 (defn- ^{:stratum 0} persist-opts
   "Build the opts map passed to `dag/persist-workspace!`. Keeps map
    construction key-value with all derivations lifted into the let so
-   readers see the shape of the call without a cond-> obscuring it."
+   readers see the shape of the call without a cond-> obscuring it.
+   The commit message names in trailers every phase whose work the commit
+   holds: PHASE, and any earlier phase whose own persist committed nothing
+   (`track-unpersisted`), so release can tell implement's work from what a
+   checking phase left behind."
   [context phase env-id]
   (let [metadata    (get context :execution/environment-metadata)
         branch      (get context :execution/task-branch)
         base-branch (:base-branch metadata)
-        message     (messages/t :env/persist-message {:phase (name phase)})]
+        phases      (sort-by name (conj (set (get context :execution/unpersisted-phases)) phase))
+        message     (boundary-commit/with-phase-trailers
+                      (messages/t :env/persist-message {:phase (name phase)})
+                      phases)]
     (cond-> {:message     message
              :workdir     (get context :execution/worktree-path)
              :workflow-id (get context :execution/id)
              :task-id     env-id}
       branch      (assoc :branch branch)
       base-branch (assoc :base-branch base-branch))))
+
+(defn- ^{:stratum 0} gate-denial
+  "How the gates judged phase RAN in PHASE-CTX: :secrets-detected when
+   :no-secrets denied it, :gate-denied when another gate did, else nil."
+  [phase-ctx ran]
+  (let [result (get-in phase-ctx [:execution/phase-results ran])]
+    (cond
+      (some #(= :no-secrets (:gate %)) (:phase/gate-failures result)) :secrets-detected
+      (seq (:phase/gate-errors result)) :gate-denied)))
+
+(defn ^{:stratum 0} refuse-local-when-governed-required!
+  "Throw an :anomalies/forbidden anomaly when the user config requires
+   governed execution (read strictly, see
+   `config/user-config-requires-governed?`) and the run is not governed:
+   its `execution-mode` is anything but :governed, or it was handed a
+   pre-acquired `executor` that runs on the host (a :worktree executor,
+   which a host-guarded wrapper reports too). Every pipeline run passes
+   through here before it acquires or reuses an environment, so this
+   covers DAG child tasks, resumed runs, chain steps and runs handed a
+   pre-acquired executor."
+  [workflow-id execution-mode executor]
+  (when (and (or (not= :governed execution-mode)
+                 (and executor (= :worktree (dag/executor-type executor))))
+             (config/user-config-requires-governed?))
+    (response/throw-anomaly! :anomalies/forbidden
+                             (messages/t :env/governed-required {:workflow-id (str workflow-id)})
+                             {:workflow/id workflow-id :execution-mode execution-mode})))
+
+(defn ^{:stratum 0} refuse-network-access-when-governed!
+  "Throw an :anomalies/forbidden anomaly when a governed run's LLM client
+   gives the Codex agent network access (`network-access?`, from
+   [:llm :codex :network-access?]). The agent CLI is started by the
+   miniforge process, not inside the capsule, so the capsule's network
+   settings do not bound it; the setting is for local runs only. Called
+   beside `refuse-local-when-governed-required!`, so it covers the same
+   runs: DAG child tasks, resumed runs, chain steps and plan runs."
+  [workflow-id execution-mode network-access?]
+  (when (and (= :governed execution-mode) network-access?)
+    (response/throw-anomaly! :anomalies/forbidden
+                             (messages/t :env/network-access-local-only {:workflow-id (str workflow-id)})
+                             {:workflow/id workflow-id
+                              :execution-mode execution-mode
+                              :config/key [:llm :codex :network-access?]})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -209,7 +263,16 @@
    worktree tier's no-op `persist-workspace!` meant local-mode tasks
    lost their work the moment the scratch worktree was torn down. Per
    the fidelity goal in N11 §7.4, local should match governed in not
-   destroying work on failure."
+   destroying work on failure.
+
+   A phase its gates denied is not published, and no phase publishes a
+   worktree whose outgoing changes carry a secret (gate/outgoing-secrets
+   runs before every commit or push). When :no-secrets denied it, or the
+   scan finds a secret, nothing is committed at all: a commit would carry the secret into
+   history, and the next successful phase's push sends history. When
+   another gate denied it, or the worktree cannot be scanned, the work is
+   committed but not pushed (`:push? false`); the next persist that can
+   scan it and finds nothing pushes the held commits."
   [context phase-ctx]
   (let [executor (get context :execution/executor)
         env-id   (get context :execution/environment-id)
@@ -219,7 +282,17 @@
         ;; turn an allowed implement into work that is never committed.
         workdir  (or (get context :execution/worktree-path)
                      (get phase-ctx :execution/worktree-path))
-        phase    (boundary-phase phase-ctx)
+        ;; The phase that just ran is the one the pre-step context was on:
+        ;; PHASE-CTX's current phase has already advanced to the next one
+        ;; (or back to implement on a redirect).
+        phase    (boundary-phase context)
+        denial   (gate-denial phase-ctx phase)
+        ;; The :no-secrets check over what a commit or push would publish,
+        ;; run only when the persist would otherwise go ahead.
+        scan     (delay (gate/outgoing-secrets (assoc context
+                                                      :execution/worktree-path workdir
+                                                      :execution/task-base-refs (task-base/recorded-refs phase-ctx))))
+        found?   (fn [error-type] (some #(= error-type (:type %)) (:errors @scan)))
         ;; Governed mode pushes to a remote via the capsule, so it persists with
         ;; or without a host worktree. LOCAL mode archives a git bundle of the
         ;; worktree — with NO worktree-path there is nothing to archive and the
@@ -228,9 +301,14 @@
         ;; leak a real commit into the live worktree. So local persistence
         ;; requires a worktree.
         skip     (cond
+                   (= :secrets-detected denial) :secrets-detected
                    (nil? executor) :no-executor
                    (nil? env-id) :no-environment-id
-                   (not (or (= :governed mode) workdir)) :no-worktree)]
+                   (not (or (= :governed mode) workdir)) :no-worktree
+                   ;; Whatever phase is persisting, a commit or push must not
+                   ;; carry a credential an earlier phase left in the worktree
+                   ;; (a redirect after a denial runs other phases over it).
+                   (found? :secrets-detected) :secrets-detected)]
     (if skip
       ;; A skipped persist is a silent loss of work unless it is said out
       ;; loud: trap-bench series 4/5 read an allowed implement whose fix
@@ -243,9 +321,22 @@
                             :worktree? (some? workdir)}})
           nil)
       (try
-        (let [result (dag/persist-workspace! executor env-id
-                                             (-> (persist-opts context phase env-id)
-                                                 (assoc :workdir workdir)))
+        (let [;; Unscanned work is committed but held back from the remote
+              ;; until a later persist can inspect it and finds nothing.
+              hold   (or denial (when (found? :worktree-uninspectable) :worktree-uninspectable))
+              _      (when (= :worktree-uninspectable hold)
+                       (log/warn env-logger :workflow :workflow/persist-unscanned
+                                 {:message (messages/t :env/persist-unscanned {:phase (name phase)})
+                                  :data {:phase phase :reason hold}}))
+              result (dag/persist-workspace! executor env-id
+                                             (cond-> (-> (persist-opts context phase env-id)
+                                                         ;; A governed capsule has its own
+                                                         ;; checkout (/workspace by default);
+                                                         ;; the host worktree path does not
+                                                         ;; exist inside it.
+                                                         (assoc :workdir (or (get context :execution/capsule-workdir)
+                                                                             workdir)))
+                                               hold (assoc :push? false)))
               data   (when (dag/ok? result) (dag/unwrap result))]
           (cond
             (not (dag/ok? result))
@@ -254,6 +345,11 @@
                                             {:phase (name phase)
                                              :code (str (get-in result [:error :code]))})
                        :data {:phase phase :result result}})
+
+            (and (:persisted? data) (false? (:pushed? data)))
+            (log/warn env-logger :workflow :workflow/persist-held
+                      {:message (messages/t :env/persist-held {:phase (name phase)})
+                       :data {:phase phase :reason hold :branch (:branch data)}})
 
             (:persisted? data)
             (notifications/announce! env-logger context phase env-id data)
@@ -271,6 +367,17 @@
                      :data {:phase phase :error (ex-message e)}})
           nil)))))
 
+(defn ^{:stratum 1} track-unpersisted
+  "PHASE-CTX noting whether the boundary persist that returned RESULT
+   committed the work of the phase CONTEXT ran. A persist that was skipped,
+   rejected or threw leaves that work in the worktree for the next
+   boundary commit, which must name this phase too: otherwise implement's
+   work committed at verify's boundary reads as a verify by-product."
+  [context phase-ctx result]
+  (if (and (some? result) (dag/ok? result))
+    (dissoc phase-ctx :execution/unpersisted-phases)
+    (update phase-ctx :execution/unpersisted-phases (fnil conj #{}) (boundary-phase context))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 ;; Full acquisition and release
@@ -281,7 +388,10 @@
    Returns env map, or nil (local) / throws (governed) on failure. Governed
    acquisition failure deliberately escalates for legacy runner callers that
    rely on try+ exception flow; prefer anomaly-returning helpers such as
-   `check-executor-for-mode` for non-boundary branching."
+   `check-executor-for-mode` for non-boundary branching.
+
+   `runner-preparation/acquire-environment`, its only caller, runs
+   `refuse-local-when-governed-required!` first."
   [workflow-id {:keys [repo-url branch repo-path execution-mode executor-config
                        runtime-config resume-workspace]}]
   (let [mode (get {:governed :governed} execution-mode :local)]

@@ -15,40 +15,24 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.self-healing.backend-health-test
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
    [clojure.java.io :as io]
    [ai.miniforge.self-healing.backend-health :as health]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;;------------------------------------------------------------------------------ Test fixtures
-
-(def test-health-file
-  "Test file path for backend health data"
-  (str (System/getProperty "java.io.tmpdir") "/test_backend_health.edn"))
-
-(defn cleanup-test-file
-  "Delete test health file"
-  []
-  (when (.exists (io/file test-health-file))
-    (.delete (io/file test-health-file))))
-
-(defn with-test-file
-  "Fixture to use test file and clean up after"
-  [f]
-  (with-redefs [health/backend-health-path (constantly test-health-file)]
-    (cleanup-test-file)
-    (try
-      (f)
-      (finally
-        (cleanup-test-file)))))
-
-(use-fixtures :each with-test-file)
+(def ^{:stratum 0} test-health-file
+  "Test file path for backend health data. The name carries this JVM's PID:
+   every JVM on the machine shares java.io.tmpdir, and with one fixed name
+   another suite running these tests deleted and rewrote the file mid-test."
+  (str (System/getProperty "java.io.tmpdir") "/test_backend_health-"
+       (.pid (java.lang.ProcessHandle/current)) ".edn"))
 
 ;;------------------------------------------------------------------------------ Tests
-
-(deftest test-load-save-roundtrip
+(deftest ^{:stratum 0} test-load-save-roundtrip
   (testing "Load and save backend health data"
     (let [test-data {:backends {:anthropic {:total-calls 100
                                              :successful-calls 95
@@ -64,16 +48,7 @@
         (is (= (get-in test-data [:backends :anthropic :total-calls])
                (get-in loaded [:backends :anthropic :total-calls])))))))
 
-(deftest test-default-health-data
-  (testing "Load returns default data when file doesn't exist"
-    (cleanup-test-file)
-    (let [health (health/load-health)]
-      (is (= :anthropic (:default-backend health)))
-      (is (seq (:fallback-order health)))
-      (is (map? (:backends health)))
-      (is (map? (:switch-cooldowns health))))))
-
-(deftest test-record-backend-call-success
+(deftest ^{:stratum 0} test-record-backend-call-success
   (testing "Record successful backend call"
     (health/record-backend-call! :anthropic true)
     (let [rate (health/get-backend-success-rate :anthropic)]
@@ -83,13 +58,13 @@
     (let [rate (health/get-backend-success-rate :anthropic)]
       (is (= 1.0 rate)))))
 
-(deftest test-record-backend-call-failure
+(deftest ^{:stratum 0} test-record-backend-call-failure
   (testing "Record failed backend call"
     (health/record-backend-call! :openai false)
     (let [rate (health/get-backend-success-rate :openai)]
       (is (= 0.0 rate)))))
 
-(deftest test-record-backend-call-mixed
+(deftest ^{:stratum 0} test-record-backend-call-mixed
   (testing "Record mix of successful and failed calls"
     ;; 8 successes, 2 failures = 80% success rate
     (dotimes [_ 8]
@@ -100,7 +75,7 @@
     (let [rate (health/get-backend-success-rate :codex)]
       (is (= 0.8 rate)))))
 
-(deftest test-success-rate-calculation
+(deftest ^{:stratum 0} test-success-rate-calculation
   (testing "Success rate updates correctly"
     (health/record-backend-call! :ollama true)
     (is (= 1.0 (health/get-backend-success-rate :ollama)))
@@ -111,7 +86,7 @@
     (health/record-backend-call! :ollama false)
     (is (= (/ 1.0 3.0) (health/get-backend-success-rate :ollama)))))
 
-(deftest test-should-switch-backend-threshold
+(deftest ^{:stratum 0} test-should-switch-backend-threshold
   (testing "Should switch when below threshold"
     ;; 85% success rate, below 90% threshold
     (dotimes [_ 85]
@@ -121,7 +96,7 @@
 
     (is (health/should-switch-backend? :anthropic 0.90))))
 
-(deftest test-should-not-switch-backend-above-threshold
+(deftest ^{:stratum 0} test-should-not-switch-backend-above-threshold
   (testing "Should not switch when above threshold"
     ;; 95% success rate, above 90% threshold
     (dotimes [_ 95]
@@ -131,38 +106,40 @@
 
     (is (not (health/should-switch-backend? :openai 0.90)))))
 
-(deftest test-should-not-switch-no-data
+(deftest ^{:stratum 0} test-should-not-switch-no-data
   (testing "Should not switch when no data available"
     (is (not (health/should-switch-backend? :newbackend 0.90)))))
 
-(deftest test-cooldown-period
+(deftest ^{:stratum 0} test-cooldown-period
   (testing "Backend in cooldown after switch"
     (let [switch-result (health/trigger-backend-switch! :anthropic :openai 1800000)]
       (is (= :anthropic (:from switch-result)))
       (is (= :openai (:to switch-result)))
       (is (health/in-cooldown? :anthropic 1800000)))))
 
-(deftest test-not-in-cooldown
+(deftest ^{:stratum 0} test-not-in-cooldown
   (testing "Backend not in cooldown when no recent switch"
     (is (not (health/in-cooldown? :anthropic 1800000)))))
 
-(deftest test-cooldown-expires
-  (testing "Cooldown expires after period"
-    ;; Use very short cooldown for testing
-    (health/trigger-backend-switch! :anthropic :openai 1)
-    (is (health/in-cooldown? :anthropic 1))
-    ;; Wait for cooldown to expire
-    (Thread/sleep 2)
-    (is (not (health/in-cooldown? :anthropic 1)))))
+(deftest ^{:stratum 0} test-cooldown-expires
+  (testing "A switch older than the cooldown period no longer counts"
+    ;; The switch time is stored as an Instant string, as
+    ;; trigger-backend-switch! writes it; an hour back needs no sleep.
+    (let [an-hour-ago  (str (.minus (java.time.Instant/now) (java.time.Duration/ofHours 1)))
+          half-hour-ms (.toMillis (java.time.Duration/ofMinutes 30))
+          two-hours-ms (.toMillis (java.time.Duration/ofHours 2))]
+      (health/save-health! (assoc-in (health/load-health) [:switch-cooldowns :anthropic] an-hour-ago))
+      (is (not (health/in-cooldown? :anthropic half-hour-ms)))
+      (is (health/in-cooldown? :anthropic two-hours-ms)))))
 
-(deftest test-select-best-backend-basic
+(deftest ^{:stratum 0} test-select-best-backend-basic
   (testing "Select best backend from fallback order"
     ;; No health data yet, should select first non-current backend
     (let [best (health/select-best-backend :anthropic 0.90 1800000)]
       (is (not= :anthropic best))
       (is (some? best)))))
 
-(deftest test-select-best-backend-skip-unhealthy
+(deftest ^{:stratum 0} test-select-best-backend-skip-unhealthy
   (testing "Skip unhealthy backends in selection"
     ;; Make openai unhealthy (50% success rate)
     (dotimes [_ 50]
@@ -174,7 +151,7 @@
       (is (not= :openai best))
       (is (not= :anthropic best)))))
 
-(deftest test-select-best-backend-skip-cooldown
+(deftest ^{:stratum 0} test-select-best-backend-skip-cooldown
   (testing "Skip backends in cooldown"
     ;; Put openai in cooldown
     (health/trigger-backend-switch! :openai :anthropic 1800000)
@@ -183,13 +160,13 @@
       (is (not= :openai best))
       (is (not= :anthropic best)))))
 
-(deftest test-trigger-backend-switch-updates-default
+(deftest ^{:stratum 0} test-trigger-backend-switch-updates-default
   (testing "Triggering switch updates default backend"
     (health/trigger-backend-switch! :anthropic :openai 1800000)
     (let [health-data (health/load-health)]
       (is (= :openai (:default-backend health-data))))))
 
-(deftest test-check-and-switch-if-needed-no-switch
+(deftest ^{:stratum 0} test-check-and-switch-if-needed-no-switch
   (testing "No switch when backend is healthy"
     ;; 95% success rate
     (dotimes [_ 95]
@@ -200,7 +177,7 @@
     (let [result (health/check-and-switch-if-needed :anthropic 0.90 1800000)]
       (is (nil? result)))))
 
-(deftest test-check-and-switch-if-needed-triggers-switch
+(deftest ^{:stratum 0} test-check-and-switch-if-needed-triggers-switch
   (testing "Triggers switch when backend is unhealthy"
     ;; 85% success rate, below 90% threshold
     (dotimes [_ 85]
@@ -214,7 +191,7 @@
       (is (= :anthropic (:from result)))
       (is (not= :anthropic (:to result))))))
 
-(deftest test-check-and-switch-respects-cooldown
+(deftest ^{:stratum 0} test-check-and-switch-respects-cooldown
   (testing "No switch when in cooldown"
     ;; Make anthropic unhealthy
     (dotimes [_ 80]
@@ -229,7 +206,7 @@
     (let [result (health/check-and-switch-if-needed :anthropic 0.90 1800000)]
       (is (nil? result)))))
 
-(deftest test-multiple-backends-tracking
+(deftest ^{:stratum 0} test-multiple-backends-tracking
   (testing "Track health for multiple backends independently"
     ;; Anthropic: 90% success
     (dotimes [_ 90]
@@ -253,7 +230,7 @@
     (is (= 0.7 (health/get-backend-success-rate :openai)))
     (is (= 0.95 (health/get-backend-success-rate :codex)))))
 
-(deftest test-last-failure-timestamp
+(deftest ^{:stratum 0} test-last-failure-timestamp
   (testing "Last failure timestamp is recorded"
     (health/record-backend-call! :anthropic true)
     (health/record-backend-call! :anthropic false)
@@ -263,7 +240,7 @@
       (is (some? (:last-failure backend-stats)))
       (is (string? (:last-failure backend-stats))))))
 
-(deftest test-should-not-switch-stale-failure
+(deftest ^{:stratum 0} test-should-not-switch-stale-failure
   (testing "Should not switch when last failure is stale (older than 5 minutes)"
     ;; Manually write health data with an old last-failure timestamp
     (let [old-instant (.minus (java.time.Instant/now) 10 java.time.temporal.ChronoUnit/MINUTES)
@@ -278,7 +255,7 @@
       ;; 75% success rate is below 90% threshold, but failure is stale
       (is (not (health/should-switch-backend? :anthropic 0.90))))))
 
-(deftest test-should-switch-recent-failure
+(deftest ^{:stratum 0} test-should-switch-recent-failure
   (testing "Should switch when last failure is recent and rate is below threshold"
     ;; Record calls so last failure is "now"
     (dotimes [_ 85]
@@ -288,7 +265,7 @@
     ;; Last failure is very recent, rate is 85% < 90%
     (is (health/should-switch-backend? :anthropic 0.90))))
 
-(deftest test-reset-backend-health
+(deftest ^{:stratum 0} test-reset-backend-health
   (testing "Reset clears all health data"
     ;; Record some data
     (dotimes [_ 10]
@@ -302,3 +279,34 @@
     (let [health-data (health/load-health)]
       (is (= {} (:backends health-data)))
       (is (= :anthropic (:default-backend health-data))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} cleanup-test-file
+  "Delete test health file"
+  []
+  (when (.exists (io/file test-health-file))
+    (.delete (io/file test-health-file))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} with-test-file
+  "Fixture to use test file and clean up after"
+  [f]
+  (with-redefs [health/backend-health-path (constantly test-health-file)]
+    (cleanup-test-file)
+    (try
+      (f)
+      (finally
+        (cleanup-test-file)))))
+
+(deftest ^{:stratum 2} test-default-health-data
+  (testing "Load returns default data when file doesn't exist"
+    (cleanup-test-file)
+    (let [health (health/load-health)]
+      (is (= :anthropic (:default-backend health)))
+      (is (seq (:fallback-order health)))
+      (is (map? (:backends health)))
+      (is (map? (:switch-cooldowns health))))))
+
+(use-fixtures :each with-test-file)

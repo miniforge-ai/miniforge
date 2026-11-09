@@ -7,9 +7,10 @@
 
    `gc-checkpoints!` deletes a run's checkpoint directory once nothing in
    it has changed for the retention period (30 days by default, per the
-   checkpoint spec), unless the run is pinned (`:pinned? true` in its
-   manifest), its manifest cannot be read (so whether it is pinned is
-   unknown), or its events are still live (in flight or paused).
+   checkpoint spec), unless the run is pinned (a pin marker, or a legacy
+   `:pinned? true` in its manifest), its manifest cannot be read (so
+   whether it is pinned is unknown), or its events are still live (in
+   flight or paused).
 
    Event retention is shorter (archived events go 7 days after archiving),
    so without a hold a failed run resumed after a week would find its
@@ -20,14 +21,18 @@
    prunes them."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.workflow.boundary.checkpoint-directory :as directory]
+   [ai.miniforge.workflow.checkpoint-announcements :as announcements]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
+   [ai.miniforge.workflow.checkpoint-store-lock :as checkpoint-lock]
    [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.messages :as messages]
    [babashka.fs :as fs]
    [clojure.edn :as edn]
-   [clojure.string :as str]
-   [slingshot.slingshot :refer [try+]]))
+   [slingshot.slingshot :refer [try+]])
+  (:import [java.nio.file.attribute BasicFileAttributes]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -44,86 +49,118 @@
   [dir]
   (parse-uuid (str (fs/file-name dir))))
 
-(defn- ^{:stratum 0} announced-run-dir
-  "The checkpoint run directory a run's own events last announced writing
-   to, scanning its event files newest first and stopping at the first
-   announcement: the run directory above the phase file or snapshot it
-   names. `:unknown` when a file that does not read comes first (it may
-   be the announcement); nil when no event announces a write."
-  [events-dir workflow-id]
-  (let [dir (es/workflow-events-dir events-dir workflow-id)
-        files (when dir
-                (->> (fs/list-dir dir)
-                     (filter #(str/ends-with? (str (fs/file-name %)) ".json"))
-                     (sort-by #(str (fs/file-name %)))
-                     reverse))]
-    (reduce (fn [_ file]
-              (let [event (es/read-event-file (fs/file file))]
-                (cond
-                  (nil? event) (reduced :unknown)
-                  (= :workflow/checkpoint-written (:event/type event))
-                  (reduced (some-> (:checkpoint/path event) fs/parent fs/parent))
-                  (= :workflow/machine-snapshot-written (:event/type event))
-                  (reduced (some-> (:snapshot/path event) fs/parent))
-                  :else nil)))
-            nil
-            files)))
-
 (defn- ^{:stratum 0} last-change-ms
   "When anything in `dir` last changed: the newest mtime in its own tree.
    The walk does not follow links, and a link's own mtime is left out, so
-   a link to a fresh tree elsewhere cannot keep an expired run recent."
+   a link to a fresh tree elsewhere cannot keep an expired run recent.
+
+   Times come from the attributes the walk read when it listed each entry,
+   never a second stat: a file renamed or deleted in between (a checkpoint
+   or pin write landing) cannot fail the scan, and one gone before the walk
+   reads it is skipped (the walk's default). Pin marker temp files are
+   skipped too; their rename changes the directory's own mtime anyway."
   [dir]
   (let [newest (volatile! 0)
-        see! (fn [path _attrs]
-               (when-not (fs/sym-link? path)
-                 (vswap! newest max (fs/file-time->millis
-                                     (fs/last-modified-time path {:nofollow-links true}))))
+        see! (fn [path ^BasicFileAttributes attrs]
+               (when-not (or (.isSymbolicLink attrs) (checkpoint-paths/pin-marker-temp? path))
+                 (vswap! newest max (.toMillis (.lastModifiedTime attrs))))
                :continue)]
     (fs/walk-file-tree dir {:pre-visit-dir see! :visit-file see!})
     @newest))
 
 (defn- ^{:stratum 0} manifest-hold
-  "`:pinned` when the run's manifest pins it, `:unreadable` when the
-   manifest exists but cannot be read as a map (pinned or not is then
-   unknown), else nil."
+  "`:pinned` when the run has a pin marker, or its manifest carries a
+   legacy `:pinned? true`; `:unreadable` when the manifest exists but
+   cannot be read as a map (pinned or not is then unknown); else nil."
   [dir]
   (let [manifest (fs/file dir checkpoint-paths/manifest-filename)]
-    (when (fs/exists? manifest)
+    (cond
+      (fs/exists? (fs/file dir checkpoint-paths/pin-marker-filename)) :pinned
+      (fs/exists? manifest)
       (try+
         (let [content (edn/read-string (slurp manifest))]
           (cond (not (map? content)) :unreadable
                 (true? (:pinned? content)) :pinned))
         (catch Exception _ :unreadable)))))
 
-(defn- ^{:stratum 0} delete-run!
-  "Delete one run's checkpoint directory: its id, or an anomaly naming it."
+(defn- ^{:stratum 0} delete-failure [dir id e]
+  (anomaly/exception-anomaly :unavailable
+                             (messages/t :checkpoint/gc-delete-failed
+                                         {:path (str dir)
+                                          :error (or (ex-message e) (.getName (class e)))})
+                             {:workflow/run-id id :checkpoint/path (str dir)}
+                             e))
+
+(defn- ^{:stratum 0} delete-run-dir!
+  "Delete run directory `dir` and answer run id `id`. The lock file stays:
+   unlinking it would let a new caller lock a fresh file while a waiter
+   holds the old one."
   [dir id]
+  (fs/delete-tree dir)
+  id)
+
+(defn- ^{:stratum 0} pinned-dir?
+  [dir]
+  (fs/exists? (fs/file dir checkpoint-paths/pin-marker-filename)))
+
+(defmethod ^{:stratum 0} es/retention-hold ::checkpoint
+  [_hold workflow-id events-dir]
+  (or (checkpoint-store/checkpoint-present? workflow-id)
+      (let [location (announcements/latest events-dir workflow-id)]
+        (cond
+          ;; An unreadable file newer than any announcement may be the
+          ;; one naming the root: the events are kept, not guessed about.
+          (= :unknown location) true
+          location (directory/populated? (:checkpoint/run-directory location))
+          :else false))))
+
+(defn ^{:stratum 0} run-checkpoint-root
+  "The checkpoint root run `workflow-id` was checkpointed under: the
+   default root when it holds the run, else the root the run's own events
+   (under `events-dir`) announce, else nil. An `:unavailable` anomaly when
+   the lookup fails, such as a run directory that cannot be listed, or
+   when a newer unreadable or invalid announcement makes storage identity
+   uncertain. An older announcement cannot prove that storage stayed put."
+  [workflow-id events-dir]
   (try+
-    (fs/delete-tree dir)
-    id
+    (if (checkpoint-store/checkpoint-present? workflow-id)
+      (checkpoint-paths/resolve-checkpoint-root {})
+      (let [location (announcements/latest events-dir workflow-id)]
+        (cond
+          (= :unknown location)
+          (anomaly/anomaly :unavailable
+                           (messages/t :checkpoint/root-unknown {:run-id (str workflow-id)})
+                           {:workflow/run-id workflow-id})
+          :else (:checkpoint/root location))))
     (catch Exception e
       (anomaly/exception-anomaly :unavailable
-                                 (messages/t :checkpoint/gc-delete-failed
-                                             {:path (str dir)
+                                 (messages/t :checkpoint/root-lookup-failed
+                                             {:run-id (str workflow-id)
                                               :error (or (ex-message e) (.getName (class e)))})
-                                 {:workflow/run-id id :checkpoint/path (str dir)}
+                                 {:workflow/run-id workflow-id}
                                  e))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defmethod ^{:stratum 1} es/retention-hold ::checkpoint
-  [_hold workflow-id events-dir]
-  (or (checkpoint-store/checkpoint-present? workflow-id)
-      (let [run-dir (announced-run-dir events-dir workflow-id)]
-        (cond
-          ;; An unreadable file newer than any announcement may be the
-          ;; one naming the root: the events are kept, not guessed about.
-          (= :unknown run-dir) true
-          (and run-dir (= (str workflow-id) (str (fs/file-name run-dir))))
-          (checkpoint-store/checkpoint-present? workflow-id
-                                                {:checkpoint/root (str (fs/parent run-dir))})
-          :else false))))
+(defn- ^{:stratum 1} delete-run!
+  "Delete one run's checkpoint directory under the run's lock, which a pin
+   and a checkpoint write take too. The pin marker and the last change are
+   checked again under it, so a pin or a write that landed after the run
+   was classified keeps the run, and one that comes later finds the run
+   gone. Returns the run id when deleted, `{:pinned id}` when a pin
+   arrived first, `{:recent id}` when a write did, or an anomaly (lock
+   busy, I/O)."
+  [root dir id cutoff-ms]
+  (checkpoint-lock/with-run-lock
+   root id
+   (fn []
+     (try+
+       (cond
+         (pinned-dir? dir) {:pinned id}
+         (>= (last-change-ms dir) cutoff-ms) {:recent id}
+         :else (delete-run-dir! dir id))
+       (catch Exception e
+         (delete-failure dir id e))))))
 
 (defn- ^{:stratum 1} disposition
   "What the GC does with run directory `dir`: `:recent`, `:live`,
@@ -185,22 +222,44 @@
 
    Returns `{:checkpoint/root :deleted [run-id] :kept {disposition [run-id]}
    :failures [anomaly]}`. Only directories named by a run id are
-   considered; a symlinked one is never followed."
+   considered; a symlinked one is never followed.
+
+   With MINIFORGE_HOME set, a root that lies outside it is refused: a
+   `:conflict` anomaly, nothing read or deleted. The one exception is a
+   root named by `:checkpoint/root` that is also the root that resolved;
+   `:execution/checkpoint-root` takes precedence over it, so naming one
+   root must never let GC collect another."
   [opts]
   (let [root (checkpoint-paths/resolve-checkpoint-root opts)
-        days (get opts :max-age-days default-retention-days)
-        cutoff-ms (- (get opts :now-ms (System/currentTimeMillis)) (* days day-ms))
-        events-dir (get opts :events-dir (es/default-events-dir))
-        runs (when (fs/directory? root)
-               (filter #(fs/directory? % {:nofollow-links true}) (fs/list-dir root)))
-        by-disposition (group-by #(disposition % cutoff-ms events-dir) runs)
-        results (mapv #(delete-run! % (run-id %)) (get by-disposition :expired))]
-    {:checkpoint/root root
-     :deleted (filterv uuid? results)
-     :kept (into {}
-                 (map (fn [[k dirs]] [k (mapv run-id dirs)]))
-                 (dissoc by-disposition :expired nil))
-     :failures (filterv anomaly/anomaly? results)}))
+        home (config/miniforge-home-override)
+        named (get opts checkpoint-paths/checkpoint-root-option-key)
+        named-and-resolved? (and named
+                                 (= root (checkpoint-paths/resolve-checkpoint-root
+                                          {checkpoint-paths/checkpoint-root-option-key named})))]
+    (if (and home
+             (not named-and-resolved?)
+             (config/path-outside? home root))
+      (anomaly/anomaly :conflict
+                       (messages/t :checkpoint/gc-outside-home {:root root :home home})
+                       {:checkpoint/root root :miniforge/home home})
+      (let [days (get opts :max-age-days default-retention-days)
+            cutoff-ms (- (get opts :now-ms (System/currentTimeMillis)) (* days day-ms))
+            events-dir (get opts :events-dir (es/default-events-dir))
+            runs (when (fs/directory? root)
+                   (filter #(fs/directory? % {:nofollow-links true}) (fs/list-dir root)))
+            by-disposition (group-by #(disposition % cutoff-ms events-dir) runs)
+            results (mapv #(delete-run! root % (run-id %) cutoff-ms) (get by-disposition :expired))
+            late (filter map? (remove anomaly/anomaly? results))
+            pinned-late (keep :pinned late)
+            recent-late (keep :recent late)]
+        {:checkpoint/root root
+         :deleted (filterv uuid? results)
+         :kept (cond-> (into {}
+                             (map (fn [[k dirs]] [k (mapv run-id dirs)]))
+                             (dissoc by-disposition :expired nil))
+                 (seq pinned-late) (update :pinned (fnil into []) pinned-late)
+                 (seq recent-late) (update :recent (fnil into []) recent-late))
+         :failures (filterv anomaly/anomaly? results)}))))
 
 (comment
   (gc-checkpoints! {:max-age-days 30}))

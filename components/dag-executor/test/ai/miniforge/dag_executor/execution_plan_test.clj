@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-executor.execution-plan-test
   (:require
    [clojure.test :refer [deftest is testing]]
@@ -23,16 +22,41 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures and factories
 
-(defn- valid-mount
+;; Test fixtures and factories
+(defn- ^{:stratum 0} valid-mount
   [& {:as overrides}]
   (merge {:host-path      "/host/workspace"
           :container-path "/work"
           :read-only?     false}
          overrides))
 
-(defn- valid-plan
+;; Constant exposure — trust levels and network profiles
+(deftest ^{:stratum 0} trust-levels-test
+  (testing "trust-levels exposes the documented closed set"
+    (is (= #{:untrusted :trusted :privileged} sut/trust-levels))))
+
+(deftest ^{:stratum 0} network-profiles-test
+  (testing "network-profiles exposes the documented closed set"
+    (is (= #{:none :restricted :standard :full} sut/network-profiles))))
+
+(deftest ^{:stratum 0} create-execution-plan-returns-anomaly-on-invalid-input-test
+  (testing "create-execution-plan returns :anomalies/incorrect for invalid input"
+    (let [result (sut/create-execution-plan {:trust-level :rogue})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (some? (:errors result)) "anomaly must carry :errors"))))
+
+(deftest ^{:stratum 0} create-execution-plan-anomaly-includes-original-plan-test
+  (testing "anomaly carries the offending plan map under :plan"
+    (let [bad {:trust-level :rogue :command "wrong"}
+          result (sut/create-execution-plan bad)]
+      (is (response/anomaly-map? result))
+      (is (= bad (:plan result))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} valid-plan
   "Build a minimal valid plan with optional overrides."
   [& {:as overrides}]
   (merge {:image-digest    "sha256:abc123"
@@ -46,32 +70,21 @@
           :trust-level     :trusted}
          overrides))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Constant exposure — trust levels and network profiles
+;------------------------------------------------------------------------------ Layer 2
 
-(deftest trust-levels-test
-  (testing "trust-levels exposes the documented closed set"
-    (is (= #{:untrusted :trusted :privileged} sut/trust-levels))))
-
-(deftest network-profiles-test
-  (testing "network-profiles exposes the documented closed set"
-    (is (= #{:none :restricted :standard :full} sut/network-profiles))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; validate-plan — happy path
-
-(deftest validate-plan-accepts-fully-populated-plan-test
+(deftest ^{:stratum 2} validate-plan-accepts-fully-populated-plan-test
   (testing "A plan with every key correctly typed validates"
     (is (= {:valid? true} (sut/validate-plan (valid-plan))))))
 
-(deftest validate-plan-accepts-empty-collections-test
+(deftest ^{:stratum 2} validate-plan-accepts-empty-collections-test
   (testing "Empty mounts / empty env / empty secrets-refs still validate"
     (is (= {:valid? true}
            (sut/validate-plan (valid-plan :mounts       []
                                           :env          {}
                                           :secrets-refs []))))))
 
-(deftest validate-plan-accepts-omitted-optional-runtime-fields-test
+(deftest ^{:stratum 2} validate-plan-accepts-omitted-optional-runtime-fields-test
   (testing "Limits, network profile, and secret refs may be absent"
     (is (= {:valid? true}
            (sut/validate-plan (dissoc (valid-plan)
@@ -80,7 +93,7 @@
                                       :time-limit-ms
                                       :memory-limit-mb))))))
 
-(deftest validate-plan-each-trust-level-and-network-profile-test
+(deftest ^{:stratum 2} validate-plan-each-trust-level-and-network-profile-test
   (testing "Every trust-level and network-profile keyword validates"
     (doseq [t sut/trust-levels]
       (is (= {:valid? true}
@@ -91,42 +104,46 @@
              (sut/validate-plan (valid-plan :network-profile n)))
           (str ":network-profile " n " should be accepted")))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; validate-plan — failure paths
-
-(deftest validate-plan-rejects-missing-required-keys-test
+(deftest ^{:stratum 2} validate-plan-rejects-missing-required-keys-test
   (testing "Removing :image-digest fails validation"
     (let [{:keys [valid? errors]} (sut/validate-plan (dissoc (valid-plan) :image-digest))]
       (is (false? valid?))
       (is (some? errors)))))
 
-(deftest validate-plan-rejects-bad-trust-level-test
+(deftest ^{:stratum 2} validate-plan-rejects-bad-trust-level-test
   (testing "An unknown trust-level fails validation"
     (let [{:keys [valid? errors]} (sut/validate-plan (valid-plan :trust-level :rogue))]
       (is (false? valid?))
       (is (some? errors)))))
 
-(deftest validate-plan-rejects-bad-network-profile-test
+(deftest ^{:stratum 2} validate-plan-rejects-bad-network-profile-test
   (testing "An unknown network-profile fails validation"
     (let [{:keys [valid? errors]} (sut/validate-plan (valid-plan :network-profile :open))]
       (is (false? valid?))
       (is (some? errors)))))
 
-(deftest validate-plan-rejects-string-command-test
+(deftest ^{:stratum 2} validate-plan-rejects-string-command-test
   (testing ":command must be a vector of strings, not a single string"
     (is (false? (:valid? (sut/validate-plan (valid-plan :command "bb run test")))))))
 
-(deftest validate-plan-rejects-non-string-env-values-test
+(deftest ^{:stratum 2} validate-plan-rejects-non-string-env-values-test
   (testing ":env must be string→string"
     (is (false? (:valid? (sut/validate-plan (valid-plan :env {"PORT" 8080})))))))
 
-(deftest validate-plan-rejects-mount-with-missing-fields-test
+(deftest ^{:stratum 2} validate-plan-rejects-env-names-that-are-not-identifiers-test
+  (testing "an env name with a line break, '=' or a leading digit is invalid"
+    (doseq [n ["SAFE\nHTTPS_PROXY" "SAFE\n" "A=B" "1A" ""]]
+      (is (false? (:valid? (sut/validate-plan (valid-plan :env {n "x"})))) (pr-str n)))
+    (is (true? (:valid? (sut/validate-plan (valid-plan :env {"_A1" "x"})))))))
+
+(deftest ^{:stratum 2} validate-plan-rejects-mount-with-missing-fields-test
   (testing "A mount missing :read-only? fails validation"
     (let [bad-mount (dissoc (valid-mount) :read-only?)
           {:keys [valid?]} (sut/validate-plan (valid-plan :mounts [bad-mount]))]
       (is (false? valid?)))))
 
-(deftest validate-plan-rejects-non-int-limits-test
+(deftest ^{:stratum 2} validate-plan-rejects-non-int-limits-test
   (testing ":time-limit-ms and :memory-limit-mb must be positive ints"
     (is (false? (:valid? (sut/validate-plan (valid-plan :time-limit-ms   "60000")))))
     (is (false? (:valid? (sut/validate-plan (valid-plan :memory-limit-mb 1.5)))))
@@ -136,24 +153,8 @@
       (is (false? (:valid? (sut/validate-plan
                             (valid-plan :memory-limit-mb invalid))))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; create-execution-plan — round-trip and anomaly paths
-
-(deftest create-execution-plan-returns-plan-unchanged-test
+(deftest ^{:stratum 2} create-execution-plan-returns-plan-unchanged-test
   (testing "A valid plan is returned unchanged (identity, no normalization)"
     (let [plan (valid-plan)]
       (is (= plan (sut/create-execution-plan plan))))))
-
-(deftest create-execution-plan-returns-anomaly-on-invalid-input-test
-  (testing "create-execution-plan returns :anomalies/incorrect for invalid input"
-    (let [result (sut/create-execution-plan {:trust-level :rogue})]
-      (is (response/anomaly-map? result))
-      (is (= :anomalies/incorrect (:anomaly/category result)))
-      (is (some? (:errors result)) "anomaly must carry :errors"))))
-
-(deftest create-execution-plan-anomaly-includes-original-plan-test
-  (testing "anomaly carries the offending plan map under :plan"
-    (let [bad {:trust-level :rogue :command "wrong"}
-          result (sut/create-execution-plan bad)]
-      (is (response/anomaly-map? result))
-      (is (= bad (:plan result))))))

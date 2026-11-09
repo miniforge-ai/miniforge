@@ -23,7 +23,8 @@
    workflow and phase components."
   (:require
    [ai.miniforge.release-executor.core :as core]
-   [ai.miniforge.release-executor.git :as git]))
+   [ai.miniforge.release-executor.git :as git]
+   [ai.miniforge.release-executor.shell :as shell]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -49,6 +50,18 @@
                             {:releaser my-releaser-agent})"
   core/execute-release-phase)
 
+(def ^{:stratum 0} prepare-release
+  "First half of the release: metadata, branch and commit, nothing pushed.
+   Arguments as execute-release-phase. Success carries :prepared, the
+   plain-data input publish-release takes."
+  core/prepare-release)
+
+(def ^{:stratum 0} publish-release
+  "Second half of the release: push the prepared branch and open the PR.
+   Args: [prepared context], `prepared` a prepare-release result's
+   :prepared. Returns a result as execute-release-phase."
+  core/publish-release)
+
 ;; Git operations (for testing and advanced use)
 (def ^{:stratum 0} check-gh-auth!
   "Check if GitHub CLI is available and authenticated.
@@ -60,10 +73,26 @@
    Returns {:success? bool :branch string :base-branch string :error string}"
   git/create-branch!)
 
+;; Git child-process environment
+(def ^{:stratum 0} repository-env-vars
+  "The variables that bind a git command to one repository (what `git
+   rev-parse --local-env-vars` prints). Every git call the release and
+   fix-loop paths make drops them, so it acts on the worktree it runs in."
+  shell/repository-env-vars)
+
+(def ^{:stratum 0} without-repository-env
+  "`env` (a map) without `repository-env-vars`. Args: [env]."
+  shell/without-repository-env)
+
+(def ^{:stratum 0} local-git-env
+  "This process's environment without `repository-env-vars`, for a git
+   child process. Args: []."
+  shell/local-git-env)
+
 (def ^{:stratum 0} commit-changes!
-  "Commit staged changes. Args: [worktree-path message] or
-   [worktree-path message git-args], git-args being global git options
-   placed before `commit` (e.g. to disable hooks).
+  "Commit staged changes. Args: [worktree-path message], plus optional
+   git-args (global git options placed before `commit`, e.g. to disable
+   hooks) and extra-env (e.g. GIT_INDEX_FILE for a temporary index).
    Returns {:success? bool :commit-sha string :error string}"
   git/commit-changes!)
 

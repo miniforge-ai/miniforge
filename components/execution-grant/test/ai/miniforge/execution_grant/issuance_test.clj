@@ -17,9 +17,13 @@
 ;; limitations under the License.
 (ns ai.miniforge.execution-grant.issuance-test
   (:require
+   [ai.miniforge.execution-grant.core :as core]
    [ai.miniforge.execution-grant.eligibility :as eligibility]
    [ai.miniforge.execution-grant.interface :as grant]
-   [clojure.test :refer [deftest is testing]])
+   [ai.miniforge.execution-grant.issuance.schema :as input]
+   [ai.miniforge.execution-grant.opsv-issuance-fixtures :as fixtures]
+   [clojure.test :refer [deftest is testing]]
+   [malli.core :as m])
   (:import
    [java.nio.file Files]
    [java.nio.file.attribute FileAttribute]
@@ -29,6 +33,8 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} now (Instant/parse "2026-08-07T00:00:00Z"))
+
+(def ^{:stratum 0 :private true} valid-arguments? (m/validator input/Arguments))
 
 (def ^{:stratum 0} workflow-run-id
   (UUID/fromString "b4bd9e4f-57ac-40fb-a724-26f4619a47fe"))
@@ -76,7 +82,8 @@
            :effect/merge
            :preflight/merge-readiness
            {:pr/repo "miniforge-ai/miniforge"
-            :pr/number 1702}))
+            :pr/number 1702
+            :pr/head-sha "0123456789abcdef0123456789abcdef01234567"}))
 
 (def ^{:stratum 1} deploy-request
   (request workflow-run-id
@@ -89,7 +96,30 @@
             :namespace "miniforge"
             :deployment-name "miniforge-api"}))
 
+(def ^{:stratum 1} push-request
+  (request workflow-run-id effect-id :effect/push :preflight/push-readiness
+           {:git/remote-url "https://github.com/miniforge-ai/miniforge.git"
+            :git/branch "task/abc"
+            :git/sha "0123456789abcdef0123456789abcdef01234567"
+            :git/force? false}))
+
+(def ^{:stratum 1} comment-request
+  (request workflow-run-id effect-id :effect/comment :preflight/comment-readiness
+           {:pr/repo "miniforge-ai/miniforge" :pr/number 1702
+            :github/action :reply
+            :github/payload-hash (apply str (repeat 64 "a"))}))
+
+(def ^{:stratum 1} provision-request
+  (request workflow-run-id effect-id :effect/provision :preflight/provision-plan
+           {:pulumi/stack "dev" :pulumi/stack-dir "infra/gcp"
+            :pulumi/plan-hash (apply str (repeat 64 "b"))}))
+
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} generic-profiles-never-inherit-stopped-recovery-admission-test
+  (doseq [request [merge-request deploy-request push-request comment-request provision-request]
+          status fixtures/stopped-statuses]
+    (is (false? (valid-arguments? [(assoc request :workflow-run/status status) now])))))
 
 (deftest ^{:stratum 2} issuer-input-is-closed-and-preflight-gated-test
   (testing "callers cannot supply runtime-owned authority fields"
@@ -116,9 +146,12 @@
                                  :preflight/result :deny))))))))
 
 (deftest ^{:stratum 2} issuer-refuses-incomplete-target-scope-test
-  (doseq [field [:pr/repo :pr/number]]
+  (doseq [field [:pr/repo :pr/number :pr/head-sha]]
     (is (= :invalid-input
            (:anomaly/type (issue (dissoc merge-request field))))))
+  (testing "an abbreviated head commit cannot bind a merge"
+    (is (= :invalid-input
+           (:anomaly/type (issue (assoc merge-request :pr/head-sha "0123abc"))))))
   (doseq [field [:kustomize-dir :context :default-context
                  :namespace :deployment-name]]
     (is (= :invalid-input
@@ -143,7 +176,8 @@
     (is (= {:effect/id effect-id
             :workflow-run/id workflow-run-id
             :pr/repo "miniforge-ai/miniforge"
-            :pr/number 1702}
+            :pr/number 1702
+            :pr/head-sha "0123456789abcdef0123456789abcdef01234567"}
            (:grant/scope g)))
     (is (= {:constraint/max-count 1} (:grant/constraints g)))
     (is (false? (:grant/delegable? g)))
@@ -168,8 +202,8 @@
 
 (deftest ^{:stratum 2} issuer-calls-root-grant-factory-test
   (let [called (atom nil)
-        issue-root grant/issue]
-    (with-redefs [grant/issue
+        issue-root core/issue]
+    (with-redefs [core/issue
                   (fn [options issued-at]
                     (reset! called [options issued-at])
                     (issue-root options issued-at))]
@@ -186,10 +220,26 @@
             (grant/issue-for-effect dir merge-request now))))))
 
 (deftest ^{:stratum 2} issuer-validates-its-output-test
-  (with-redefs [grant/issue (fn [& _] {:not :a-grant})]
+  (with-redefs [core/issue (fn [& _] {:not :a-grant})]
     (is (= :fault (:anomaly/type (issue merge-request))))))
 
 (deftest ^{:stratum 2} date-issuance-time-produces-an-instant-expiry-test
   (let [g (issue merge-request (Date/from now))]
     (is (= now (:grant/issued-at g)))
     (is (= (.plusSeconds now (* 15 60)) (:grant/expires-at g)))))
+
+(deftest ^{:stratum 2} push-comment-and-provision-grants-bind-their-exact-target-test
+  (doseq [[r target-keys] [[push-request [:git/remote-url :git/branch :git/sha :git/force?]]
+                           [comment-request [:pr/repo :pr/number :github/action :github/payload-hash]]
+                           [provision-request [:pulumi/stack :pulumi/stack-dir :pulumi/plan-hash]]]]
+    (let [g (issue r)]
+      (is (grant/valid? g) (pr-str (:effect/class r)))
+      (is (= (:effect/class r) (:grant/effect-class g)))
+      (is (= (select-keys r (into [:effect/id :workflow-run/id] target-keys))
+             (:grant/scope g)))
+      (is (= {:constraint/max-count 1} (:grant/constraints g)))
+      (doseq [field target-keys]
+        (is (= :invalid-input (:anomaly/type (issue (dissoc r field))))
+            (str "missing " field)))
+      (is (= :unauthorized
+             (:anomaly/type (issue (assoc-in r [:effect/preflight :preflight/result] :deny))))))))

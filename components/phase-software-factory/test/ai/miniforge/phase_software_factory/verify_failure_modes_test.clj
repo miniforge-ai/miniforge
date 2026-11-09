@@ -27,6 +27,7 @@
    [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
    [ai.miniforge.phase-software-factory.messages :as messages]
+   [ai.miniforge.phase-software-factory.verify.output-config :as output-config]
    [ai.miniforge.phase-software-factory.verify :as verify]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -56,6 +57,16 @@
       (is (true? (:parse-error? result)))
       (is (= 1 (:error-count result)))
       (is (= 0 (:fail-count result))))))
+
+(def ^{:stratum 0} ^:private cargo-workspace-output
+  "`cargo test --workspace` output: a library with no unit tests, then an
+   integration-test binary and doc tests."
+  (str "     Running unittests src/lib.rs\n"
+       "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n"
+       "     Running tests/api.rs\n"
+       "test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n"
+       "   Doc-tests mylib\n"
+       "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n"))
 
 (deftest ^{:stratum 0} parse-test-output-exit-code-is-authoritative-test
   ;; A change-scoped runner can print a clean "Ran N ... 0 failures, 0 errors"
@@ -104,6 +115,21 @@
        "\u001b[31mTest results: 15 passes, 1 failures, 0 errors.\u001b[0m\n"))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} parse-test-output-sums-every-cargo-summary-test
+  (testing "every Cargo test binary's summary counts, not just the first, so a
+            library without unit tests does not hide the integration tests"
+    (let [result (verify/parse-test-output cargo-workspace-output 0)]
+      (is (true? (:passed? result)))
+      (is (= 9 (:test-count result)))
+      (is (= 0 (:fail-count result)))))
+  (testing "a failure in a later binary is counted"
+    (let [output (str cargo-workspace-output
+                      "test result: FAILED. 3 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out\n")
+          result (verify/parse-test-output output 101)]
+      (is (false? (:passed? result)))
+      (is (= 13 (:test-count result)))
+      (is (= 1 (:fail-count result))))))
 
 (defn ^{:stratum 1} with-passing-tests [body-fn]
   (with-redefs-fn
@@ -166,8 +192,8 @@
 
 (deftest ^{:stratum 1} verify-bounds-unparseable-output-preview-test
   (testing "long unparseable output is bounded in the verify error message"
-    (let [preview-limit @#'verify/verify-error-preview-limit
-          suffix @#'verify/truncated-output-suffix
+    (let [preview-limit output-config/verify-error-preview-limit
+          suffix output-config/truncated-output-suffix
           output (apply str (repeat (+ preview-limit 50) "x"))]
       (with-redefs-fn
         {run-tests-var (fn [_ & _opts] {:passed? false

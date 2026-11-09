@@ -32,6 +32,8 @@
    [ai.miniforge.workflow.interface.registry :as registry]
    [ai.miniforge.workflow.interface.runtime :as runtime]
    [ai.miniforge.workflow.interface.supervision :as supervision]
+   [ai.miniforge.workflow.run-owner-lock :as run-owner-lock]
+   [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
    [ai.miniforge.workflow.visualize :as visualize]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -223,7 +225,23 @@
    [workflow input] or [workflow input opts]. Acquires the execution
    environment, runs phases, validates, publishes, and always cleans up.
    Returns the final execution context map; throws a slingshot anomaly on
-   governed-mode misconfiguration."
+   governed-mode misconfiguration.
+
+   Options an embedder supplies (see docs/architecture/workflow-component.md):
+   - :event-stream - required when any phase has gates. Each gate decision
+     is published as a :gate/decision event, and only an acknowledged
+     publication lets the phase advance. With no stream the decision is
+     unacknowledged and the gated phase fails closed. A process that keeps
+     its stream for days creates it with `:retention` (event-stream
+     `bounded-retention`) so the in-memory history stays bounded; sinks and
+     subscribers still see every event.
+   - :logger - the run's structured logger, kept as :execution/logger; the
+     default writes human-readable lines.
+   - :policy-packs - the packs the pack gates evaluate. Without it,
+     :policy-verify and :policy-review use the shipped standards pack, and
+     :policy-pack blocks.
+   - :checkpoint/root - where checkpoints are written; the default is the
+     configured root under the user's home."
   pipeline/run-pipeline)
 
 (def ^{:stratum 0} build-pipeline
@@ -260,6 +278,30 @@
    `:checkpoint/read-failures`; an unreadable snapshot or manifest
    returns an `:unavailable` anomaly naming every unreadable file."
   checkpoints/load-checkpoint-data)
+
+(def ^{:stratum 0} run-checkpoint-root
+  "The checkpoint root a run was checkpointed under: the default root when
+   it holds the run, else the root its events announce, else nil. Args:
+   [workflow-run-id events-dir]."
+  checkpoint-gc/run-checkpoint-root)
+
+(defn ^{:stratum 0} run-owner
+  "The process running a run, from the owner lock run-pipeline holds for
+   the run's lifetime: its record ({:owner/pid :owner/started-at ...}, {}
+   when unreadable), nil when no process runs it, or an :unavailable
+   anomaly on an I/O error. Args: [workflow-run-id] or [workflow-run-id
+   checkpoint-root], nil root meaning the default."
+  ([workflow-run-id] (run-owner workflow-run-id nil))
+  ([workflow-run-id checkpoint-root]
+   (run-owner-lock/owner (or checkpoint-root (checkpoint-paths/resolve-checkpoint-root))
+                         workflow-run-id)))
+
+(def ^{:stratum 0} pin-checkpoint!
+  "Pin a run's checkpoint: `:pinned? true` in its manifest, which the
+   checkpoint GC never collects and later checkpoints keep. Args:
+   [workflow-run-id] or [workflow-run-id opts]. Returns the manifest path,
+   or an anomaly (:not-found without a manifest, :unavailable on I/O)."
+  checkpoints/pin-checkpoint!)
 
 (def ^{:stratum 0} run-chain
   "Run a sequence of workflows, feeding each step's output into the next.
@@ -501,6 +543,11 @@
    :spec/expected-hash :spec/actual-hash}; actual is nil when the file is
    gone."
   checkpoint-spec/spec-drift)
+
+(def ^{:stratum 0} spec-content-hash
+  "The digest `spec-file-hash` records, of spec text already read. Args:
+   [content]."
+  checkpoint-spec/spec-content-hash)
 
 (def ^{:stratum 0} spec-file-hash
   "The SHA-256 digest a run's manifest records for its spec file, or nil

@@ -211,6 +211,7 @@
       (try
         (git! "config" "user.email" "t@example.com")
         (git! "config" "user.name" "t")
+        (git! "config" "commit.gpgsign" "false")
         (doseq [hook ["pre-commit" "commit-msg" "post-commit"]]
           (let [f (fs/path *worktree* ".git" "hooks" hook)]
             (spit (str f) (str "#!/bin/sh\necho " hook " >> '" ran "'\n"))

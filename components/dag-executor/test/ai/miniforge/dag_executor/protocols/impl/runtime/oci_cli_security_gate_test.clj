@@ -21,10 +21,16 @@
    resolver is injected, so these exercise the gate decision (block / warn /
    review / pass) without a container runtime."
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.execution-plan :as execution-plan]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.capsule-git :as cap-git]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.container :as oci-ctr]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.image :as oci-img]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.launch :as oci-gate]
    [ai.miniforge.dag-executor.result :as result]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -39,38 +45,94 @@
 
 (defn- ^{:stratum 0} err-rules [r] (set (map :security/rule (get-in r [:error :data :security/findings]))))
 
+(def ^{:stratum 0} ^:private proxy-blanks
+  "The empty proxy variables every :untrusted plan sets."
+  (zipmap ["HTTP_PROXY" "HTTPS_PROXY" "FTP_PROXY" "ALL_PROXY" "NO_PROXY"
+           "http_proxy" "https_proxy" "ftp_proxy" "all_proxy" "no_proxy"]
+          (repeat "")))
+
+(defn- ^{:stratum 0} set-env
+  "A plan's :env without its empty values."
+  [plan]
+  (into {} (remove (comp #{""} val)) (:env plan)))
+
+(defn- ^{:stratum 0} gate-check-without-image-env
+  "`security-gate-check` for an image whose ENV is empty."
+  [descriptor image env-config digest-fn]
+  (oci-gate/security-gate-check descriptor image env-config digest-fn (constantly {})))
+
+(defn- ^{:stratum 0} rootless-executor
+  "An executor on a rootless runtime that has recorded no remote yet."
+  []
+  (oci-cli/map->OciCliExecutor
+   {:descriptor  {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+    :image       "task-runner:latest"
+    :git-remotes (atom {})}))
+
+(deftest ^{:stratum 0} release-keeps-git-remote-until-removed-test
+  (testing "the recorded remote survives a release whose container removal
+            failed, so the capsule's work can still be persisted, and goes
+            once removal succeeds"
+    (let [remote   {:repo-url "https://github.com/o/r.git" :https-url "https://github.com/o/r.git"
+                    :clone-url "https://github.com/o/r.git" :host-kind :github}
+          executor (oci-cli/map->OciCliExecutor
+                    {:descriptor  {:runtime/kind :docker}
+                     :git-remotes (atom {"c1" remote})})
+          removed? (atom false)]
+      (with-redefs [oci-ctr/stop-container   (fn [& _] {:exit 0})
+                    oci-ctr/remove-container (fn [& _] (result/ok {:released? @removed?}))]
+        (proto/release-environment! executor "c1")
+        (is (= {"c1" remote} @(:git-remotes executor)))
+        (reset! removed? true)
+        (proto/release-environment! executor "c1")
+        (is (= {} @(:git-remotes executor)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} ^:private good-digest-fn (fn [_descriptor _image] valid-digest))
 
+(defn- ^{:stratum 1} acquire-with-bootstrap
+  "acquire-environment! on `executor` with the runtime stubbed (the image is
+   present and pinned, its ENV empty, the container starts) and bootstrap
+   returning `bootstrap-result`."
+  [executor env-config bootstrap-result]
+  (with-redefs [oci-img/image-exists?          (fn [_ _] true)
+                oci-img/resolve-image-digest!  (fn [_ _] valid-digest)
+                oci-img/image-env              (fn [_ _] {})
+                oci-ctr/create-container       (fn [_d container-name & _]
+                                                 (result/ok {:container-name container-name}))
+                cap-git/bootstrap-workspace!   (fn [& _] bootstrap-result)
+                oci-img/container-image-digest (fn [_ _] valid-digest)]
+    (proto/acquire-environment! executor "abcd1234efgh" env-config)))
+
 (deftest ^{:stratum 1} nil-digest-fails-closed-test
   (testing "a nil resolved digest (resolution failed) is a hard-stop, not a silent pass"
-    (let [r (oci-cli/security-gate-check rootless-descriptor "img" base-env (fn [_ _] nil))]
+    (let [r (gate-check-without-image-env rootless-descriptor "img" base-env (fn [_ _] nil))]
       (is (result/err? r))
       (is (= :security-policy-violation (get-in r [:error :code])))
       (is (contains? (err-rules r) :std/runtime-require-image-digest-pin)))))
 
 (deftest ^{:stratum 1} unpinned-digest-hard-stops-test
   (testing "a tag / non-sha256 digest is a hard-stop"
-    (let [r (oci-cli/security-gate-check rootless-descriptor "img" base-env (fn [_ _] "latest"))]
+    (let [r (gate-check-without-image-env rootless-descriptor "img" base-env (fn [_ _] "latest"))]
       (is (result/err? r))
       (is (contains? (err-rules r) :std/runtime-require-image-digest-pin)))))
 
 (deftest ^{:stratum 1} build-launch-plan-defaults-test
   (testing "a minimal env-config yields the untrusted keep-alive plan with no
             invented optional fields"
-    (let [plan (oci-cli/build-launch-plan valid-digest {:workdir "/workspace"})]
+    (let [plan (oci-gate/build-launch-plan valid-digest {:workdir "/workspace"})]
       (is (= {:image-digest valid-digest
               :command      ["sleep" "infinity"]
               :mounts       []
-              :env          {}
+              :env          proxy-blanks
               :trust-level  :untrusted}
              plan))
       (is (= {:valid? true} (execution-plan/validate-plan plan))))))
 
 (deftest ^{:stratum 1} build-launch-plan-passes-optional-fields-through-test
   (testing "optional plan fields thread from env-config when present"
-    (let [plan (oci-cli/build-launch-plan
+    (let [plan (oci-gate/build-launch-plan
                 valid-digest
                 {:mounts          [{:host-path "/workspace" :container-path "/w" :read-only? false}]
                  :env             {:A "1"}
@@ -87,13 +149,222 @@
       (is (= {"A" "1"} (:env plan))
           "env keys normalize to the schema's string->string shape")
       (is (= {"PORT" "8080" "DEBUG" "true"}
-             (:env (oci-cli/build-launch-plan valid-digest
-                                              {:env {:PORT 8080 :DEBUG true}})))
+             (:env (oci-gate/build-launch-plan valid-digest
+                                               {:env {:PORT 8080 :DEBUG true}
+                                                :trust-level :trusted})))
           "non-string env values stringify to their wire form")
       (is (= [{:host-path "/workspace" :container-path "/w" :read-only? false}]
              (:mounts plan)))
       (is (= {:valid? true} (execution-plan/validate-plan plan))
           "a fully-threaded launch plan conforms to ExecutionPlanSchema"))))
+
+(deftest ^{:stratum 1} build-launch-plan-drops-secrets-for-untrusted-test
+  (testing "an :untrusted plan (the default) launches without secret-named
+            env such as GH_TOKEN, so no process in the capsule inherits it,
+            but keeps the agent's ANTHROPIC_API_KEY (N11 §8.1); :trusted
+            keeps everything"
+    (let [env {:GH_TOKEN "t" :ANTHROPIC_API_KEY "k" :LANG "C.UTF-8"}]
+      (is (= {"ANTHROPIC_API_KEY" "k" "LANG" "C.UTF-8"}
+             (set-env (oci-gate/build-launch-plan valid-digest {:env env}))))
+      (is (= {"GH_TOKEN" "t" "ANTHROPIC_API_KEY" "k" "LANG" "C.UTF-8"}
+             (:env (oci-gate/build-launch-plan valid-digest
+                                               {:env env :trust-level :trusted})))))))
+
+(deftest ^{:stratum 1} build-launch-plan-keeps-agent-backend-credentials-test
+  (testing "an :untrusted plan keeps the credential the agent backend reads,
+            named by :agent-backend or else the configured [:llm :backend]"
+    (let [env {:OPENAI_API_KEY "o" :CURSOR_API_KEY "c" :GH_TOKEN "t"}]
+      (is (= {"OPENAI_API_KEY" "o"}
+             (set-env (oci-gate/build-launch-plan valid-digest {:env env :agent-backend :codex}))))
+      (with-redefs [config/load-merged-config (constantly {:llm {:backend :cursor}})]
+        (is (= {"CURSOR_API_KEY" "c"}
+               (set-env (oci-gate/build-launch-plan valid-digest {:env env})))))))
+  (testing "an OAuth-only :claude agent keeps its CLAUDE_CODE_OAUTH_TOKEN"
+    (is (= {"CLAUDE_CODE_OAUTH_TOKEN" "a"}
+           (set-env (oci-gate/build-launch-plan valid-digest
+                                                {:env {:CLAUDE_CODE_OAUTH_TOKEN "a" :GH_TOKEN "t"}
+                                                 :agent-backend :claude}))))))
+
+(deftest ^{:stratum 1} build-launch-plan-allows-only-listed-env-for-untrusted-test
+  (testing "an :untrusted plan keeps a shell's basics, LC_*, CLAUDE_CODE_*
+            knobs and :env-passthrough names, and drops every other name,
+            such as AUTHORIZATION, PASSPHRASE or, for an agent that does not
+            read it, CLAUDE_CODE_OAUTH_TOKEN"
+    (is (= {"PATH" "/bin" "LC_ALL" "C" "CLAUDE_CODE_MAX_OUTPUT_TOKENS" "8000" "MY_FLAG" "1"}
+           (set-env (oci-gate/build-launch-plan
+                     valid-digest
+                     {:env {"PATH" "/bin" "LC_ALL" "C" "CLAUDE_CODE_MAX_OUTPUT_TOKENS" "8000"
+                            "MY_FLAG" "1" "OTHER" "x" "AUTHORIZATION" "Bearer t"
+                            "PASSPHRASE" "p" "CLAUDE_CODE_OAUTH_TOKEN" "o"}
+                      :env-passthrough [:MY_FLAG]
+                      :agent-backend :codex}))))))
+
+(deftest ^{:stratum 1} build-launch-plan-blanks-image-secrets-and-proxies-test
+  (testing "an :untrusted plan sets an empty value for each proxy variable it
+            does not supply, so Docker cannot add the client's, and for each
+            image ENV entry with a secret's name or value or git config, so
+            the image's value is overridden; :trusted sets none"
+    (let [image-env {"GH_TOKEN" "t" "DB_PASSPHRASE" "p" "DEPLOY_KEY" "k" "GITHUB_PAT" "p"
+                     "MYSQL_PWD" "p" "NPM_CONFIG__AUTH" "a"
+                     "DATABASE_URL" "postgres://app:s3cret@db:5432/app"
+                     "REDIS_URL" "redis://:s3cret@redis:6379/0"
+                     "GIT_CONFIG_VALUE_0" "v" "GIT_CONFIG_PARAMETERS" "p"
+                     "ANTHROPIC_API_KEY" "k" "JAVA_HOME" "/opt/java"
+                     "CLAUDE_CODE_MAX_OUTPUT_TOKENS" "8000" "DBPASSWORD" "hunter2"}
+          plan      (oci-gate/build-launch-plan valid-digest
+                                                {:env {"HTTPS_PROXY" "http://proxy:3128"}}
+                                                image-env)]
+      (is (= (merge proxy-blanks
+                    {"HTTPS_PROXY" "http://proxy:3128"}
+                    (zipmap ["GH_TOKEN" "DB_PASSPHRASE" "DEPLOY_KEY" "GITHUB_PAT" "MYSQL_PWD"
+                             "NPM_CONFIG__AUTH" "DATABASE_URL" "REDIS_URL" "GIT_CONFIG_VALUE_0"
+                             "GIT_CONFIG_PARAMETERS" "DBPASSWORD"]
+                            (repeat "")))
+             (:env plan)))
+      (is (= {:valid? true} (execution-plan/validate-plan plan)))
+      (is (= {} (:env (oci-gate/build-launch-plan valid-digest {:trust-level :trusted}
+                                                  image-env)))))))
+
+(deftest ^{:stratum 1} build-launch-plan-treats-unknown-trust-as-untrusted-test
+  (testing "a nil or unknown :trust-level launches as :untrusted: secrets
+            are dropped and the plan records :untrusted"
+    (doseq [trust-level [nil :unknown "trusted"]]
+      (let [plan (oci-gate/build-launch-plan valid-digest {:env {:GH_TOKEN "t"}
+                                                           :trust-level trust-level})]
+        (is (= {} (set-env plan)) (str "trust level " (pr-str trust-level)))
+        (is (= :untrusted (:trust-level plan)))
+        (is (= {:valid? true} (execution-plan/validate-plan plan)))))))
+
+(deftest ^{:stratum 1} acquire-removes-container-when-bootstrap-fails-test
+  (testing "a container whose workspace bootstrap failed is removed, since
+            the caller gets no environment id to release it with"
+    (let [removed  (atom [])
+          executor (oci-cli/map->OciCliExecutor
+                    {:descriptor {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                     :image      "task-runner:latest"})]
+      (with-redefs [oci-img/image-exists?         (fn [_ _] true)
+                    oci-img/resolve-image-digest! (fn [_ _] valid-digest)
+                    oci-img/image-env             (fn [_ _] {})
+                    oci-ctr/create-container      (fn [_d container-name & _]
+                                                    (result/ok {:container-name container-name}))
+                    cap-git/bootstrap-workspace!  (fn [& _] (result/err :container-command-failed "no branch"))
+                    oci-ctr/remove-container      (fn [_d id] (swap! removed conj id) (result/ok {}))]
+        (is (result/err? (proto/acquire-environment! executor "abcd1234efgh"
+                                                     {:repo-url "https://github.com/o/r.git"})))
+        (is (= ["miniforge-task-abcd1234"] @removed))))))
+
+(deftest ^{:stratum 1} acquire-removes-container-when-bootstrap-throws-test
+  (testing "a bootstrap that throws (a failed env-file write), or a record
+            step after it that throws, still removes the container, and
+            acquire returns :acquire-failed"
+    (doseq [[bootstrap digest]
+            [[(fn [& _] (throw (java.io.IOException. "No space left on device"))) (fn [_ _] nil)]
+             [(fn [& _] (result/ok {:base-branch "main"})) (fn [_ _] (throw (RuntimeException. "inspect")))]]]
+      (let [removed  (atom [])
+            executor (oci-cli/map->OciCliExecutor
+                      {:descriptor {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                       :image      "task-runner:latest"})]
+        (with-redefs [oci-img/image-exists?          (fn [_ _] true)
+                      oci-img/resolve-image-digest!  (fn [_ _] valid-digest)
+                      oci-img/image-env              (fn [_ _] {})
+                      oci-img/container-image-digest digest
+                      oci-ctr/create-container       (fn [_d container-name & _]
+                                                       (result/ok {:container-name container-name}))
+                      cap-git/bootstrap-workspace!   bootstrap
+                      oci-ctr/remove-container       (fn [_d id] (swap! removed conj id) (result/ok {}))]
+          (is (= :acquire-failed
+                 (get-in (proto/acquire-environment! executor "abcd1234efgh"
+                                                     {:repo-url "https://github.com/o/r.git"})
+                         [:error :code])))
+          (is (= ["miniforge-task-abcd1234"] @removed)))))))
+
+(deftest ^{:stratum 1} acquire-releases-container-when-it-finishes-after-the-deadline-test
+  (testing "an acquire whose deadline fires during the image-digest read,
+            after bootstrap, returns the timeout while its body still builds
+            an ok record; the container that record names is released, with
+            the interrupt flag clear"
+    (let [removed  (promise)
+          executor (oci-cli/map->OciCliExecutor
+                    {:descriptor {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                     :image      "task-runner:latest"})]
+      (with-redefs [oci-img/image-exists?          (fn [_ _] true)
+                    oci-img/resolve-image-digest!  (fn [_ _] valid-digest)
+                    oci-img/image-env              (fn [_ _] {})
+                    oci-ctr/create-container       (fn [_d container-name & _]
+                                                     (result/ok {:container-name container-name}))
+                    cap-git/bootstrap-workspace!   (fn [& _] (result/ok {:base-branch "main"}))
+                    ;; As a runtime call cut short by the interrupt: nil.
+                    oci-img/container-image-digest (fn [_ _]
+                                                     (try (Thread/sleep 5000) (catch InterruptedException _))
+                                                     nil)
+                    oci-ctr/stop-container         (fn [& _] {:exit 0})
+                    oci-ctr/remove-container       (fn [_d id]
+                                                     (deliver removed [id (.isInterrupted (Thread/currentThread))])
+                                                     (result/ok {:released? true}))]
+        (is (= :timeout
+               (get-in (proto/acquire-environment! executor "abcd1234efgh"
+                                                   {:repo-url "https://github.com/o/r.git"
+                                                    :acquisition-timeout-ms 100})
+                       [:error :code])))
+        (is (= ["miniforge-task-abcd1234" false] (deref removed 5000 :not-removed)))))))
+
+(deftest ^{:stratum 1} acquire-removes-container-when-interrupted-test
+  (testing "a bootstrap cut short by the acquire timeout, which leaves the
+            worker interrupted, still removes its container: removal runs
+            with the interrupt flag clear, and the flag is set again after"
+    (let [interrupted-in-rm (atom nil)
+          executor          (oci-cli/map->OciCliExecutor
+                             {:descriptor {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                              :image      "task-runner:latest"})]
+      (with-redefs [oci-img/image-exists?         (fn [_ _] true)
+                    oci-img/resolve-image-digest! (fn [_ _] valid-digest)
+                    oci-ctr/create-container      (fn [_d container-name & _]
+                                                    (result/ok {:container-name container-name}))
+                    oci-img/image-env             (fn [_ _] {})
+                    cap-git/bootstrap-workspace!  (fn [& _] (.interrupt (Thread/currentThread))
+                                                    (result/err :container-command-failed "interrupted"))
+                    oci-ctr/remove-container      (fn [_d _id]
+                                                    (reset! interrupted-in-rm (.isInterrupted (Thread/currentThread)))
+                                                    (result/ok {}))]
+        ;; :acquisition-timeout-ms 0 runs the body on this thread; the flag
+        ;; is read (and cleared) before `is`, which clears it too.
+        (let [r    (proto/acquire-environment! executor "abcd1234efgh"
+                                               {:repo-url "https://github.com/o/r.git"
+                                                :acquisition-timeout-ms 0})
+              flag (Thread/interrupted)]
+          (is (result/err? r))
+          (is (false? @interrupted-in-rm))
+          (is (true? flag)))))))
+
+(deftest ^{:stratum 1} build-launch-plan-drops-git-config-tuples-test
+  (testing "an :untrusted plan drops a whole GIT_CONFIG_* tuple, whose
+            VALUE_n can hold an Authorization header, not just its KEY_n"
+    (is (= {"LANG" "C.UTF-8"}
+           (set-env (oci-gate/build-launch-plan
+                  valid-digest
+                  {:env {"GIT_CONFIG_COUNT"   "1"
+                         "GIT_CONFIG_KEY_0"   "http.https://github.com/.extraheader"
+                         "GIT_CONFIG_VALUE_0" "Authorization: Basic eDp0b2s="
+                         "LANG"               "C.UTF-8"}}))))))
+
+(deftest ^{:stratum 1} build-launch-plan-strips-proxy-and-git-c-credentials-test
+  (testing "an :untrusted plan keeps proxy addresses without user:password@,
+            even with an unencoded @ or leading space, empties one it cannot
+            parse, and drops GIT_CONFIG_PARAMETERS, which can carry an
+            extraheader"
+    (is (= {"HTTPS_PROXY" "http://proxy:3128" "http_proxy" "proxy:8080"
+            "ALL_PROXY" "socks5://proxy:1080" "NO_PROXY" "localhost"
+            "FTP_PROXY" "http://proxy:21" "https_proxy" "http://proxy:3128"}
+           (set-env (oci-gate/build-launch-plan
+                  valid-digest
+                  {:env {"HTTPS_PROXY" "http://u:pw@proxy:3128"
+                         "http_proxy" "u:pw@proxy:8080"
+                         "ALL_PROXY" "socks5://proxy:1080"
+                         "NO_PROXY" "localhost"
+                         "FTP_PROXY" " http://u:pw@proxy:21"
+                         "https_proxy" "http://u:p@ss@proxy:3128"
+                         "all_proxy" "http://u:p/w@proxy:3128"
+                         "GIT_CONFIG_PARAMETERS" "'http.extraheader=Authorization: Basic eDp0b2s='"}}))))))
 
 (deftest ^{:stratum 1} acquire-launches-from-checked-plan-test
   (testing "acquire-environment! creates the container from the gate-checked
@@ -105,16 +376,17 @@
                      :descriptor {:runtime/kind :docker :runtime/capabilities #{:rootless}}
                      :image      "task-runner:latest"
                      :network    nil})]
-      (with-redefs [oci-cli/image-exists?          (fn [_ _] true)
-                    oci-cli/resolve-image-digest!  (fn [_ _] valid-digest)
-                    oci-cli/create-container       (fn [_d container-name image _workdir
+      (with-redefs [oci-img/image-exists?          (fn [_ _] true)
+                    oci-img/resolve-image-digest!  (fn [_ _] valid-digest)
+                    oci-img/image-env              (fn [_ _] {})
+                    oci-ctr/create-container       (fn [_d container-name image _workdir
                                                         _env _resources _network
                                                         & {:keys [execution-plan]}]
                                                      (reset! launched {:image image
                                                                        :plan  execution-plan})
                                                      (result/ok {:container-id "c1"
                                                                  :container-name container-name}))
-                    oci-cli/container-image-digest (fn [_ _] valid-digest)]
+                    oci-img/container-image-digest (fn [_ _] valid-digest)]
         (let [r (proto/acquire-environment! executor "abcd1234efgh" {:workdir "/workspace"})]
           (is (result/ok? r))
           (is (= valid-digest (:image @launched)))
@@ -123,9 +395,36 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(deftest ^{:stratum 2} acquire-records-git-remote-for-persist-test
+  (testing "a bootstrapped acquire records the caller's remote (not one read
+            back from the capsule) under the environment id, with the URL
+            bootstrap cloned, which stays out of the environment record"
+    (let [executor (rootless-executor)
+          r        (acquire-with-bootstrap executor
+                                           {:workdir "/workspace" :repo-url "git@github.com:o/r.git"}
+                                           (result/ok {:base-branch "main"
+                                                       :clone-url "git@github.com:o/r.git"}))]
+      (is (result/ok? r))
+      (is (= {"miniforge-task-abcd1234"
+              {:repo-url  "git@github.com:o/r.git"
+               :https-url "https://github.com/o/r.git"
+               :clone-url "git@github.com:o/r.git"
+               :host-kind :github}}
+             @(:git-remotes executor)))
+      (is (not (contains? (get-in r [:data :metadata]) :clone-url)))))
+  (testing "the environment record returned to the caller carries the repo URL
+            without the user:password@ it was given"
+    (let [r (acquire-with-bootstrap (rootless-executor)
+                                    {:workdir "/workspace"
+                                     :repo-url "https://bob:s3cret@github.com/o/r.git"}
+                                    (result/ok {:base-branch "main"
+                                                :clone-url "https://github.com/o/r.git"}))]
+      (is (= "https://github.com/o/r.git" (get-in r [:data :repo-url])))
+      (is (not (str/includes? (pr-str r) "s3cret"))))))
+
 (deftest ^{:stratum 2} clean-launch-passes-test
   (testing "pinned digest, rootless runtime, no mounts -> ok, decision :pass"
-    (let [r (oci-cli/security-gate-check rootless-descriptor "img" base-env good-digest-fn)]
+    (let [r (gate-check-without-image-env rootless-descriptor "img" base-env good-digest-fn)]
       (is (result/ok? r))
       (is (= :pass (get-in r [:data :security/decision])))
       (is (empty? (get-in r [:data :security/warnings]))))))
@@ -134,13 +433,13 @@
   (testing "a host runtime-socket mount aborts the launch"
     (let [env (assoc base-env :mounts
                      [{:host-path "/var/run/docker.sock" :container-path "/x" :read-only? false}])
-          r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
+          r   (gate-check-without-image-env rootless-descriptor "img" env good-digest-fn)]
       (is (result/err? r))
       (is (contains? (err-rules r) :std/runtime-no-host-docker-socket)))))
 
 (deftest ^{:stratum 2} non-rootless-warns-does-not-block-test
   (testing "OSS default: a non-rootless runtime warns but the launch proceeds"
-    (let [r (oci-cli/security-gate-check rooted-descriptor "img" base-env good-digest-fn)]
+    (let [r (gate-check-without-image-env rooted-descriptor "img" base-env good-digest-fn)]
       (is (result/ok? r) "rootless is a warning in OSS, not a block")
       (is (= #{:std/runtime-require-rootless}
              (set (map :security/rule (get-in r [:data :security/warnings]))))))))
@@ -149,7 +448,7 @@
   (testing "a host mount outside the workdir allowlist is a review, launch proceeds"
     (let [env (assoc base-env :mounts
                      [{:host-path "/Users/alice" :container-path "/home" :read-only? false}])
-          r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
+          r   (gate-check-without-image-env rootless-descriptor "img" env good-digest-fn)]
       (is (result/ok? r))
       (is (= :review (get-in r [:data :security/decision])))
       (is (= #{:std/runtime-restrict-host-mounts}
@@ -159,15 +458,40 @@
   (testing "a mount of the sandbox workdir itself is on the allowlist -> no review"
     (let [env (assoc base-env :mounts
                      [{:host-path "/workspace" :container-path "/work" :read-only? false}])
-          r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
+          r   (gate-check-without-image-env rootless-descriptor "img" env good-digest-fn)]
       (is (result/ok? r))
       (is (= :pass (get-in r [:data :security/decision]))))))
 
+(deftest ^{:stratum 2} unreadable-image-env-fails-closed-for-untrusted-test
+  (testing "an :untrusted launch whose image ENV cannot be read is refused,
+            and the ENV is read from the pinned digest; :trusted needs none"
+    (let [seen (atom nil)
+          r    (oci-gate/security-gate-check rootless-descriptor "img" base-env good-digest-fn
+                                             (fn [_ ref] (reset! seen ref) nil))]
+      (is (= :security-policy-violation (get-in r [:error :code])))
+      (is (= valid-digest @seen)))
+    (is (result/ok? (oci-gate/security-gate-check rootless-descriptor "img"
+                                                  (assoc base-env :trust-level :trusted)
+                                                  good-digest-fn (constantly nil))))))
+
 (deftest ^{:stratum 2} gate-ok-carries-launch-plan-test
   (testing "a passing gate returns the checked launch plan for the launch to use"
-    (let [r    (oci-cli/security-gate-check rootless-descriptor "img" base-env good-digest-fn)
+    (let [r    (gate-check-without-image-env rootless-descriptor "img" base-env good-digest-fn)
           plan (get-in r [:data :launch-plan])]
       (is (result/ok? r))
       (is (= valid-digest (:image-digest plan)))
       (is (= :untrusted (:trust-level plan)))
       (is (= ["sleep" "infinity"] (:command plan))))))
+
+(deftest ^{:stratum 2} non-identifier-env-name-hard-stops-test
+  (testing "an env name such as * or GH_*, which Podman's `-e NAME` reads as
+            a pattern over its own environment, stops the launch, as does
+            DOCKER_CUSTOM_HEADERS, which would go inline on argv"
+    (doseq [n ["*" "GH_*" "A B" "DOCKER_CUSTOM_HEADERS"]]
+      (let [env (assoc base-env :env {n "x"} :trust-level :trusted)
+            r   (gate-check-without-image-env rootless-descriptor "img" env good-digest-fn)]
+        (is (= :security-policy-violation (get-in r [:error :code])) (pr-str n))
+        (is (str/includes? (get-in r [:error :message]) (pr-str n)))))
+    (is (result/ok? (gate-check-without-image-env
+                     rootless-descriptor "img"
+                     (assoc base-env :env {"_A1" "x"} :trust-level :trusted) good-digest-fn)))))

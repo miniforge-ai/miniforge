@@ -22,7 +22,8 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.llm.network-health :as nh]
-   [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
+   [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+   [ai.miniforge.llm.protocols.impl.llm-client.settings :as settings]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -79,7 +80,7 @@
   ;; lookup out of network-health so the probe primitive stays
   ;; URL-driven and backend-agnostic. No environment variables, so a
   ;; base URL set on the machine running the tests does not apply.
-  (with-redefs [impl/getenv-value (constantly nil)]
+  (with-redefs [settings/getenv-value (constantly nil)]
     (testing "known backends resolve to provider-specific URLs"
       (is (= "https://api.anthropic.com/" (impl/probe-endpoint-for :claude)))
       (is (= "https://api.openai.com/"    (impl/probe-endpoint-for :codex)))

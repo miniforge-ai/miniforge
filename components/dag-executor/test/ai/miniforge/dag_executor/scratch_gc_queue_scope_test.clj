@@ -102,6 +102,7 @@
     (spit queue (pr-str [{:workflow-id "wf-a" :finished-at eight-days-ago :git-dir (git-dir repo-a)}
                          {:workflow-id "wf-b" :finished-at eight-days-ago :git-dir (git-dir repo-b)}]))
     (with-redefs [sut/gc-queue-path               (constantly queue)
+                  mf-config/miniforge-home-override (constantly (str (fs/parent queue)))
                   scratch-commit/gc-scratch-refs! (fn [repo _]
                                                     (swap! gc-calls conj repo)
                                                     (result/ok {:deleted [] :retained 0}))]
@@ -121,6 +122,7 @@
     (git! "-C" repo "commit" "-q" "--allow-empty" "-m" "init")
     (git! "-C" repo "worktree" "add" "-q" worktree)
     (with-redefs [sut/gc-queue-path               (constantly queue)
+                  mf-config/miniforge-home-override (constantly (str (fs/parent queue)))
                   scratch-commit/gc-scratch-refs! (fn [_ _] (result/ok {:deleted [] :retained 0}))]
       (testing "an entry enqueued from a worktree names the repository"
         (sut/enqueue-workflow-gc! "wf-wt" worktree)
@@ -135,7 +137,8 @@
   (let [dir   (str (fs/create-temp-dir))
         queue (str dir "/queue.edn")
         repo  (git-repo! dir "a")]
-    (with-redefs [sut/gc-queue-path (constantly queue)]
+    (with-redefs [sut/gc-queue-path (constantly queue)
+                  mf-config/miniforge-home-override (constantly (str (fs/parent queue)))]
       (doseq [damaged ["[{:workflow-id \"wf-a\" :finished-at"
                        "[] [{:workflow-id \"wf-old\"}]"
                        "({:workflow-id \"wf-old\"})"]
@@ -166,7 +169,8 @@
     (scratch-ref! bare-b "wf-b")
     (spit queue (pr-str [{:workflow-id "wf-a" :finished-at eight-days-ago :git-dir bare-a}
                          {:workflow-id "wf-b" :finished-at eight-days-ago :git-dir bare-b}]))
-    (with-redefs [sut/gc-queue-path (constantly queue)]
+    (with-redefs [sut/gc-queue-path (constantly queue)
+                  mf-config/miniforge-home-override (constantly (str (fs/parent queue)))]
       (testing "a pass on a.git prunes its entry and deletes its scratch ref"
         (is (= ["wf-a"] (:pruned-ids (result/unwrap (sut/run-deferred-gc! bare-a 0)))))
         (is (= [""] (scratch-refs bare-a))))
@@ -182,7 +186,8 @@
         work    (git-repo! dir "work" "--separate-git-dir" sep-dir)
         sep-dir (.getCanonicalPath (fs/file sep-dir))]
     (scratch-ref! sep-dir "wf-sep")
-    (with-redefs [sut/gc-queue-path (constantly queue)]
+    (with-redefs [sut/gc-queue-path (constantly queue)
+                  mf-config/miniforge-home-override (constantly (str (fs/parent queue)))]
       (testing "an entry enqueued from the checkout names the separate git dir"
         (sut/enqueue-workflow-gc! "wf-sep" work)
         (is (= sep-dir (:git-dir (first (edn/read-string (slurp queue)))))))
@@ -198,6 +203,7 @@
         gc-calls (atom [])]
     (spit queue (pr-str [{:workflow-id "wf-old" :finished-at eight-days-ago}]))
     (with-redefs [sut/gc-queue-path               (constantly queue)
+                  mf-config/miniforge-home-override (constantly (str (fs/parent queue)))
                   scratch-commit/gc-scratch-refs! (fn [target _]
                                                     (swap! gc-calls conj target)
                                                     (result/ok {:deleted [] :retained 0}))]

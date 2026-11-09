@@ -17,23 +17,26 @@
 ;; limitations under the License.
 (ns ai.miniforge.deliberation-workspace.run-test
   (:require
-   [ai.miniforge.deliberation-workspace.guards :as guards]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.deliberation-workspace.object :as object]
    [ai.miniforge.deliberation-workspace.run :as run]
-   [ai.miniforge.deliberation-workspace.transaction :as tx]
-   [ai.miniforge.deliberation-workspace.validation :as validation]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} ^:private stages
-  (into validation/concurrency-stages guards/guard-stages))
 
 (defn- ^{:stratum 0} goal [id]
   (object/new-object {:id id :type :goal :statement "ship the thing"
                       :role :interpreter :activation "act-0" :version 1}))
 
 (defn- ^{:stratum 0} passes [_] nil)
+
+(defn- ^{:stratum 0} fresh-claim
+  "An activation that asserts one new claim per turn, named by the version
+   its projection was rendered from, so every turn commits."
+  [{:keys [projection]}]
+  {:tx/operations [{:op :assert-claim
+                    :creates [{:id (str "claim-" (:projection/version projection))
+                               :type :claim :statement "a claim"}]}]})
 
 (defn- ^{:stratum 0} events-of [ws kind]
   (filter #(= kind (:event %)) (:workspace/events ws)))
@@ -45,7 +48,6 @@
           :workspace/objects {"goal-1" (goal "goal-1")}
           :workspace/roles [:proposer :skeptic :synthesizer]
           :workspace/eligibility {}
-          :workspace/stages stages
           :workspace/log []
           :workspace/budget {:activations 3}}
          extra))
@@ -59,8 +61,11 @@
     (is (= 3 (get-in closed [:workspace/spent :activations])))))
 
 (deftest ^{:stratum 2} a-run-closes-as-success-when-every-goal-is-terminal
-  (let [ws (workspace :workspace/objects
-                      {"goal-1" (assoc (goal "goal-1") :object/status :accepted)})]
+  (let [cover (assoc (object/new-object {:id "d" :type :decision :statement "d" :role :synthesizer
+                                         :activation "a" :version 1 :links {:depends-on ["goal-1"]}})
+                     :object/status :accepted)
+        ws (workspace :workspace/objects
+                      {"goal-1" (assoc (goal "goal-1") :object/status :accepted) "d" cover})]
     (is (= :success (get-in (run/run ws passes {})
                             [:workspace/termination :termination/rule])))))
 
@@ -71,22 +76,18 @@
       (is (= 1 (count (events-of after :transaction/passed)))))))
 
 (deftest ^{:stratum 2} a-committed-transaction-advances-the-version
-  (let [activate (fn [{:keys [role]}]
-                   (tx/new-transaction
-                    {:role role :activation "act-1" :basis 1
-                     :operations [{:op :assert-claim
+  (let [activate (fn [_]
+                   {:tx/operations [{:op :assert-claim
                                    :creates [{:id "claim-1" :type :claim
-                                              :statement "a claim"}]}]}))
+                                              :statement "a claim"}]}]})
         after (run/step (workspace) activate)]
     (is (= 2 (:workspace/version after)))
     (is (some? (get-in after [:workspace/objects "claim-1"])))
     (is (= 1 (count (events-of after :transaction/committed))))))
 
 (deftest ^{:stratum 2} a-rejected-transaction-is-logged-with-its-reason
-  (let [activate (fn [{:keys [role]}]
-                   (tx/new-transaction
-                    {:role role :activation "act-1" :basis 1
-                     :operations [{:op :not-an-operation}]}))
+  (let [activate (fn [_]
+                   {:tx/operations [{:op :not-an-operation}]})
         after (run/step (workspace) activate)]
     (testing "the workspace does not advance"
       (is (= 1 (:workspace/version after))))
@@ -94,6 +95,14 @@
       (is (= 1 (get-in after [:workspace/spent :activations])))
       (is (= :anomalies.deliberation/unknown-operation
              (:reason (first (events-of after :transaction/rejected))))))))
+
+(deftest ^{:stratum 2} a-restricted-participant-gets-no-rejection-reason
+  (let [turn #(run/activate-participant %1 %2 {:participant :proposer :reason :round-robin})
+        rejected (turn (workspace) (fn [_] {:tx/operations [{:op :not-an-operation}]}))
+        delivered #(let [seen (atom nil)] (turn (merge rejected %) (fn [r] (reset! seen (:feedback r)) nil)) @seen)]
+    (is (= :anomalies.deliberation/unknown-operation (:reason (delivered {}))))
+    (is (= {:status :rejected} (delivered {:workspace/visibility :none})
+           (delivered {:workspace/readable {:proposer #{"goal-1"}}})))))
 
 (deftest ^{:stratum 2} the-ablation-setting-reaches-the-projection
   (let [seen (atom nil)
@@ -103,20 +112,11 @@
 
 (deftest ^{:stratum 2} each-role-sees-a-delta-from-its-own-last-activation
   (let [seen (atom [])
-        ;; This test runs four activations, so the basis has to come from the
-        ;; projection each one was actually rendered from — that is what the
-        ;; §3.1 contract means by basis. A constant would be right only for
-        ;; the first activation.
-        activate (fn [{:keys [role projection workspace]}]
+        activate (fn [{:keys [role projection] :as request}]
                    (swap! seen conj
                           {:role role
                            :delta (set (map :object/id (:projection/delta projection)))})
-                   (tx/new-transaction
-                    {:role role :activation "act-1"
-                     :basis (:projection/version projection)
-                     :operations [{:op :assert-claim
-                                   :creates [{:id (str "claim-" (:workspace/version workspace))
-                                              :type :claim :statement "a claim"}]}]}))
+                   (fresh-claim request))
         _ (run/run (workspace :workspace/budget {:activations 4}) activate {})
         by-role (group-by :role @seen)
         proposals (get by-role :proposer)]
@@ -131,21 +131,10 @@
       (is (= #{"goal-1" "claim-1"} (:delta (first (get by-role :skeptic))))))))
 
 (deftest ^{:stratum 2} the-step-bound-is-a-defect-signal-not-a-normal-ending
-  (let [endless (workspace :workspace/budget {} :workspace/quiescence-rounds 10000)
-        closed (run/run endless passes {:max-steps 5})]
+  (let [endless (workspace :workspace/budget {})
+        closed (run/run endless fresh-claim {:max-steps 5})]
     (is (= :step-bound-exceeded
            (get-in closed [:workspace/termination :termination/rule])))))
-
-(deftest ^{:stratum 2} missing-stages-fall-back-to-validation-not-to-nothing
-  (testing "an empty chain would commit anything the activation proposed"
-    (let [ws (dissoc (workspace) :workspace/stages)
-          activate (fn [{:keys [role]}]
-                     (tx/new-transaction {:role role :activation "act-1" :basis 1
-                                          :operations [{:op :not-an-operation}]}))
-          after (run/step ws activate)]
-      (is (= 1 (:workspace/version after)) "nothing may commit unvalidated")
-      (is (= :anomalies.deliberation/unknown-operation
-             (:reason (first (events-of after :transaction/rejected))))))))
 
 (deftest ^{:stratum 2} an-ineligible-workspace-does-not-charge-an-activation
   (testing "no role to run means no activation ran"
@@ -172,14 +161,12 @@
 
 (deftest ^{:stratum 2} an-edge-the-engine-cannot-write-is-routed-not-thrown
   (testing "the operation's own :links reach the event log as a subtype too"
-    (let [propose (fn [{:keys [role]}]
-                    (tx/new-transaction
-                     {:role role :activation "act-1" :basis 1
-                      :operations [{:op :assert-claim
+    (let [propose (fn [_]
+                    {:tx/operations [{:op :assert-claim
                                     :creates [{:id "claim-1" :type :claim
                                                :statement "a claim"}]}
                                    {:op :attach-evidence :targets #{"goal-1"}
-                                    :links {:bogus #{"evidence-1"}}}]}))
+                                    :links {:bogus #{"evidence-1"}}}]})
           after (run/step (workspace) propose)]
       (is (= [:anomalies.deliberation/invalid-links]
              (mapv :reason (events-of after :transaction/rejected))))
@@ -190,12 +177,10 @@
 
 (deftest ^{:stratum 2} a-creation-the-engine-cannot-construct-is-routed-not-thrown
   (testing "the rejection reaches the event log as a subtype, like every other"
-    (let [propose (fn [{:keys [role]}]
-                    (tx/new-transaction
-                     {:role role :activation "act-1" :basis 1
-                      :operations [{:op :assert-claim
+    (let [propose (fn [_]
+                    {:tx/operations [{:op :assert-claim
                                     :creates [{:id "x" :type :wormhole
-                                               :statement "unconstructable"}]}]}))
+                                               :statement "unconstructable"}]}]})
           after (run/step (workspace) propose)]
       (is (= [:anomalies.deliberation/invalid-creation]
              (mapv :reason (events-of after :transaction/rejected))))
@@ -206,13 +191,11 @@
 
 (deftest ^{:stratum 2} an-unreadable-id-field-is-routed-not-thrown
   (testing "a scalar :targets threw out of validate itself, so step saw no anomaly"
-    (let [propose (fn [{:keys [role]}]
-                    (tx/new-transaction
-                     {:role role :activation "act-1" :basis 1
-                      :operations [{:op :assert-claim
+    (let [propose (fn [_]
+                    {:tx/operations [{:op :assert-claim
                                     :creates [{:id "claim-1" :type :claim
                                                :statement "a claim"}]}
-                                   {:op :refine-claim :targets :goal-1}]}))
+                                   {:op :refine-claim :targets :goal-1}]})
           after (run/step (workspace) propose)]
       (is (= [:anomalies.deliberation/invalid-object-ids]
              (mapv :reason (events-of after :transaction/rejected))))
@@ -223,17 +206,14 @@
 
 (deftest ^{:stratum 2} an-activation-returning-a-malformed-transaction-is-routed
   (testing "step hands the activation's return straight to validate"
-    (let [after (run/step (workspace) (fn [_] {:tx/role :proposer :tx/basis 1
-                                               :tx/operations :assert-claim}))]
-      (is (= [:anomalies.deliberation/invalid-transaction]
+    (let [after (run/step (workspace) (fn [_] {:tx/operations :assert-claim}))]
+      (is (= [:anomalies.deliberation/operation-count]
              (mapv :reason (events-of after :transaction/rejected)))))))
 (deftest ^{:stratum 2} a-close-goal-the-engine-cannot-honor-is-routed-not-absorbed
   (testing "this committed, advanced the version, and left the goal open"
-    (let [propose (fn [{:keys [role]}]
-                    (tx/new-transaction
-                     {:role role :activation "act-1" :basis 1
-                      :operations [{:op :close-goal :targets #{"goal-1"}
-                                    :outcome :maybe}]}))
+    (let [propose (fn [_]
+                    {:tx/operations [{:op :close-goal :targets #{"goal-1"}
+                                    :outcome :maybe}]})
           after (run/step (workspace :workspace/roles [:synthesizer]) propose)
           closed (get-in after [:workspace/objects "goal-1"])]
       (is (= [:anomalies.deliberation/invalid-outcome]
@@ -245,3 +225,108 @@
       (is (= :open (:object/status closed)))
       (is (= 1 (:object/touched-at closed))
           "and the goal is untouched, not touched-but-still-open"))))
+
+(deftest ^{:stratum 2} the-activation-never-receives-the-workspace
+  (let [seen (atom nil)]
+    (run/step (workspace) (fn [request] (reset! seen request) nil))
+    (is (= #{:role :participant :activation :basis :projection :closing? :feedback} (set (keys @seen))))))
+
+(deftest ^{:stratum 2} passes-and-rejections-advance-the-round
+  (let [participants (atom [])
+        closed (run/run (workspace :workspace/budget {:activations 4}
+                                   :workspace/closure-reserve 1)
+                        (fn [{:keys [participant]}] (swap! participants conj participant) nil)
+                        {})]
+    (is (= [:proposer :skeptic :synthesizer :synthesizer] @participants))
+    (is (= :executed (get-in closed [:workspace/termination :termination/closure])))
+    (is (= 4 (get-in closed [:workspace/spent :activations])))))
+
+(deftest ^{:stratum 2} a-boundary-without-a-reserve-records-an-unfunded-closure
+  (let [closed (run/run (workspace) fresh-claim {})]
+    (is (= :budget-boundary (get-in closed [:workspace/termination :termination/rule])))
+    (is (= :unfunded (get-in closed [:workspace/termination :termination/closure])))))
+
+(deftest ^{:stratum 2} participants-sharing-a-responsibility-act-separately
+  (let [seen (atom [])
+        ws (workspace :workspace/roles [:proposer-1 :proposer-2]
+                      :workspace/participant-roles {:proposer-1 :proposer :proposer-2 :proposer})]
+    (run/run (assoc ws :workspace/budget {:activations 2})
+             (fn [{:keys [role participant]}] (swap! seen conj [participant role]) nil) {})
+    (is (= [[:proposer-1 :proposer] [:proposer-2 :proposer]] @seen))))
+
+(deftest ^{:stratum 2} a-closure-needs-allowance-left
+  (let [ws (workspace :workspace/closure-reserve 1 :workspace/spent {:activations 3})
+        closed (run/run ws (fn [_] (throw (ex-info "must not run" {}))) {})]
+    (is (= :unfunded (get-in closed [:workspace/termination :termination/closure])))
+    (is (= 3 (get-in closed [:workspace/spent :activations])))))
+
+(deftest ^{:stratum 2} a-turn-missing-its-frame-is-refused-before-the-model
+  (let [called (atom false)
+        after (run/step (workspace :workspace/readable {:proposer #{}})
+                        (fn [_] (reset! called true) nil))]
+    (is (false? @called))
+    (is (nil? (get-in after [:workspace/spent :activations])))
+    (is (= [{:event :activation/refused :role :proposer :withheld ["goal-1"]}]
+           (events-of after :activation/refused)))))
+
+(deftest ^{:stratum 2} a-frame-refused-participant-does-not-stall-the-run
+  (let [ws (workspace :workspace/readable {:proposer #{}} :workspace/budget {:activations 2})
+        seen (atom [])
+        closed (run/run ws (fn [{:keys [participant]}] (swap! seen conj participant) nil)
+                        {:max-steps 20})]
+    (is (not= :step-bound-exceeded (get-in closed [:workspace/termination :termination/rule])))
+    (is (= [:skeptic :synthesizer] @seen))))
+
+(deftest ^{:stratum 2} a-refused-closure-is-recorded-as-refused
+  (let [ws (workspace :workspace/closure-reserve 1 :workspace/spent {:activations 2}
+                      :workspace/readable {:synthesizer #{}})
+        closed (run/run ws (fn [_] (throw (ex-info "must not run" {}))) {})]
+    (is (= :refused (get-in closed [:workspace/termination :termination/closure])))))
+
+(deftest ^{:stratum 2} a-negative-closure-reserve-is-refused
+  (let [result (run/run (workspace :workspace/closure-reserve -1) fresh-claim {})]
+    (is (and (anomaly/anomaly? result) (= :invalid-input (:anomaly/type result))))))
+
+(deftest ^{:stratum 2} a-spent-cost-ceiling-leaves-closure-unfunded
+  (let [ws (workspace :workspace/budget {:activations 5 :cost 25} :workspace/closure-reserve 1
+                      :workspace/spent {:activations 1 :cost 25})
+        closed (run/run ws (fn [_] (throw (ex-info "must not run" {}))) {})]
+    (is (= :unfunded (get-in closed [:workspace/termination :termination/closure])))))
+
+(deftest ^{:stratum 2} a-closed-run-is-never-driven-again
+  (let [ws (workspace :workspace/budget {:activations 5} :workspace/closure-reserve 2)
+        closed (run/run ws passes {})]
+    (is (= closed (run/run closed (fn [_] (throw (ex-info "must not run" {}))) {})))))
+
+(deftest ^{:stratum 2} a-single-turn-respects-the-budget-and-the-reserve
+  (let [ws (workspace :workspace/closure-reserve 1 :workspace/spent {:activations 2})
+        turn (fn [w reason f] (run/activate-participant w f {:participant :synthesizer :reason reason}))
+        never (fn [_] (throw (ex-info "must not run" {})))]
+    (is (= 1 (count (events-of (turn ws :round-robin never) :activation/unfunded))))
+    (is (= 3 (get-in (turn ws :closure passes) [:workspace/spent :activations])))
+    (is (= 1 (count (events-of (turn (workspace :workspace/spent {:activations 3}) :closure never)
+                               :activation/unfunded))))
+    (is (= 1 (count (events-of (turn (assoc ws :workspace/closure-reserve -1 :workspace/spent {:activations 3})
+                                     :round-robin never) :activation/unfunded))))))
+
+(deftest ^{:stratum 2} a-commit-outside-the-loop-starts-a-new-round
+  (let [closed (run/run (workspace :workspace/version 2 :workspace/round-version 1
+                                   :workspace/passed #{:proposer :skeptic :synthesizer}
+                                   :workspace/frame-refused #{:proposer}) passes {})]
+    (is (not= :quiescence (get-in closed [:workspace/termination :termination/rule])))))
+
+(deftest ^{:stratum 2} the-read-scope-not-the-ablation-bounds-what-a-turn-touches
+  (let [ws (workspace :workspace/roles [:skeptic] :workspace/objects
+                      {"goal-1" (goal "goal-1") "secret" (assoc (goal "secret") :object/type :claim :object/role :proposer)})
+        challenge (fn [id] (constantly {:tx/operations [{:op :challenge :targets [id] :reason "r" :resolution "s"}]}))
+        status #(get-in (run/step (assoc ws %1 %2) (challenge %3)) [:workspace/feedback :skeptic :status])]
+    (is (= :committed (status :workspace/visibility :none "secret")))
+    (is (= :rejected (status :workspace/readable {:skeptic #{"goal-1"}} "secret")
+           (status :workspace/readable {:skeptic #{"goal-1"}} "absent")))))
+
+(deftest ^{:stratum 2} a-step-schedules-from-the-current-round-and-a-pass-clears-feedback
+  (let [ws (workspace :workspace/roles [:proposer] :workspace/feedback {:proposer {:status :rejected}})
+        after (run/step (assoc ws :workspace/version 2 :workspace/round-version 1
+                               :workspace/frame-refused #{:proposer}) passes)]
+    (is (= 1 (get-in after [:workspace/spent :activations])))
+    (is (nil? (get-in after [:workspace/feedback :proposer])))))

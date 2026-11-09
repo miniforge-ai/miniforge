@@ -47,10 +47,10 @@ mf config init | edit | reset | validate
 - `MINIFORGE_NETWORK_MONITOR` - Set to `off` (or `false`, `0`, `no`) to turn
   off the network-drop monitor. During a streaming CLI call (`:claude`,
   `:codex`) it probes the provider every 10 s and stops the call after 3
-  failed probes in a row. The probe targets the endpoint the CLI is set up
-  to use (`ANTHROPIC_BASE_URL`, the Bedrock and Vertex settings, or
-  `OPENAI_BASE_URL`; otherwise the provider's API host) and follows
-  `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` the way the agent CLI does.
+  failed probes in a row. The probe uses the CLI's configured endpoint.
+  It checks `ANTHROPIC_BASE_URL`, Bedrock and Vertex settings, or `OPENAI_BASE_URL`; otherwise it uses the provider's
+  API host.
+  It follows `HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY` as the agent CLI does.
 
 ## Models
 
@@ -65,12 +65,11 @@ the execution tier. A role's model is the first of these that is set:
    `[:agents :default-models :execution]` (`MINIFORGE_AGENT_THINKING_MODEL`,
    `MINIFORGE_AGENT_EXECUTION_MODEL`).
 2. `llm.model` (`MINIFORGE_LLM_MODEL`), for both tiers.
-3. Miniforge's default for the backend: Claude Opus 4.6 for the thinking
-   tier and Claude Sonnet 4.6 for the execution tier, on `opencode` (as
-   `anthropic/...` ids), `claude` and `anthropic-api`.
+3. Miniforge defaults to Claude Opus 4.6 for thinking and Claude Sonnet 4.6 for execution.
+   This applies to `opencode` (`anthropic/...` ids), `claude`, and `anthropic-api`.
 4. None: the backend's own default. The `codex` CLI uses its built-in
-   default model: miniforge runs it with `--ignore-user-config`, so a model
-   set in `~/.codex/config.toml` is not used; set `llm.model` instead.
+   default model. Miniforge runs it with `--ignore-user-config`, ignoring the model in `~/.codex/config.toml`.
+   Set `llm.model` instead.
    The `cursor` CLI uses its own default and `ollama` uses `codellama`. The
    `openai-api`, `gemini-api`, `openrouter` and `openai-compat` backends
    need a model, so set `llm.model` for them.
@@ -80,9 +79,9 @@ config file key it maps to. A blank setting counts as unset, and
 `mf config set llm.model nil` clears one. `claude` and `anthropic-api`
 take an `anthropic/...` id without the prefix.
 
-A setting that names a model from the catalog the backend does not serve
-is skipped, with one warning on stderr naming the key, the model and the
-backend; the next source applies. Examples are `gpt-5.4` on `claude`, or a
+A setting naming a catalog model the backend does not serve is skipped.
+One warning on stderr names the key, model, and backend; the next source applies. Examples are `gpt-5.4` on `claude`, or
+a
 Claude id on `codex` or `gemini-api`. `opencode`, `openrouter`,
 `openai-compat` and `cursor` route to many providers and take any model.
 A model the catalog does not know is used as given, since it may be newer
@@ -102,6 +101,45 @@ mf config backend codex                # roles use codex's built-in model
 mf config set llm.model gpt-5.4        # every role uses "gpt-5.4"
 MINIFORGE_AGENT_THINKING_MODEL=gpt-5.4-pro mf run spec.edn  # planner only
 ```
+
+## Codex network access
+
+Miniforge runs `codex exec` with `--sandbox=workspace-write`,
+`--ignore-user-config` and `approval_policy=never`. In that sandbox the
+commands the Codex agent runs (`git push`, `gh pr create`, package
+installs) have no network access. Codex loads a project's
+`.codex/config.toml` but disables it unless the project is trusted, and
+`--ignore-user-config` skips `~/.codex/config.toml`, so neither file is a
+supported way to turn network access on for a Miniforge run.
+
+To give the agent's commands network access, set
+`[:llm :codex :network-access?]`:
+
+```bash
+mf config set llm.codex.network-access? true
+```
+
+Each codex call then also gets
+`-c sandbox_workspace_write.network_access=true`. The sandbox stays
+`workspace-write` and approvals stay off. The setting is off by default.
+
+1. It is a boolean. `mf config set` and `mf config validate` reject
+   any other value, and a run with any other value in `config.edn`
+   stops before its first LLM call.
+2. It applies to the `codex` backend only. Other backends ignore it.
+3. It applies to local runs only. A governed run
+   (`--execution-mode governed`, or every run when
+   `[:execution :require-governed?]` is true) is refused while it is set,
+   because the agent CLI runs on the host, outside the capsule's network
+   settings. Set it to `false` for a governed run.
+4. Miniforge's tool policy (the command deny list in
+   `components/agent/resources/config/agent/tool-policy.edn`) reaches
+   Claude Code through a PreToolUse hook and OpenCode through its
+   permissions. Miniforge applies nothing like it to Codex, so with this
+   setting on, any command the Codex agent runs can reach any host.
+
+A local run with the setting on prints
+`Codex network access: on` under the local-mode notice.
 
 ## Timeouts and budgets
 
@@ -123,7 +161,10 @@ The limits that do apply live in shipped resources:
 ## Container runtime
 
 Per [N11-delta](../specs/normative/N11-delta-runtime-adapter.md),
-miniforge runs each task inside an OCI container. Two layers configure
+miniforge runs each task inside an OCI container in governed mode
+(`--execution-mode governed`). The default, local mode, runs each task
+in a git worktree on the host, with the operator's privileges and no
+isolation. Two layers configure
 the runtime today; the third (file config) is a documented follow-up.
 
 ### Today: env var + descriptor config map

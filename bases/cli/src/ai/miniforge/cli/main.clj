@@ -55,6 +55,7 @@
    [ai.miniforge.cli.main.status.presentation :as status-presentation]
    [ai.miniforge.cli.main.status.summary :as status-summary]
    [ai.miniforge.cli.main.version :as version]
+   [ai.miniforge.cli.main.commands.hook-eval :as cmd-hook-eval]
    [ai.miniforge.cli.main.commands.run :as cmd-run]
    [ai.miniforge.cli.main.commands.shared :as cmd-shared]
    [ai.miniforge.cli.main.commands.monitoring :as cmd-monitoring]
@@ -78,7 +79,6 @@
    [ai.miniforge.cli.main.commands.etl :as cmd-etl]
    ;; GROUP 3b: timeline-based events show
    [ai.miniforge.cli.main.commands.events :as cmd-events]
-   [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
    [ai.miniforge.lsp-mcp-bridge.main :as lsp-bridge]
    [ai.miniforge.lsp-mcp-bridge.tasks :as lsp-tasks]
@@ -101,12 +101,7 @@
 
 (defn ^{:stratum 0} runtime-run-cmd [m] (cmd-runtime/runtime-run-cmd m))
 
-(defn ^{:stratum 0} hook-eval-cmd
-  "Evaluate a tool-use request from a Claude PreToolUse hook.
-
-   Reads JSON from stdin, evaluates against policy, writes decision to stdout."
-  [_m]
-  (System/exit (agent/hook-eval-stdin!)))
+(defn ^{:stratum 0} hook-eval-cmd [m] (cmd-hook-eval/hook-eval-cmd m))
 
 (defn ^{:stratum 0} lsp-mcp-bridge-cmd
   "Run the LSP-to-MCP bridge server (spawned by Claude Code/Desktop/Codex as MCP server).
@@ -268,7 +263,7 @@
                   (first args))]
     (if (str/blank? (str wf-id))
       (do (display/print-error (messages/t :resume/missing-workflow-id))
-          (cmd-shared/exit! 1))
+          (cmd-shared/exit! cmd-shared/usage-exit-code))
       (some-> (cmd-run/resume-reporting-failure wf-id opts) cmd-run/finish!))))
 
 (defn ^{:stratum 0} scan-cmd [m] (cmd-scan/scan-cmd (util/get-opts m)))
@@ -376,7 +371,8 @@
     (catch Error fatal (throw fatal))
     (catch Object failure
       (display/print-error (messages/t :status/read-failed
-                            {:message (util/caught-message failure (:throwable &throw-context))})))))
+                            {:message (util/caught-message failure (:throwable &throw-context))}))
+      (cmd-shared/exit! 1))))
 
 (defn ^{:stratum 0} version-cmd [_m] (version/print!))
 
@@ -401,7 +397,9 @@
 
    ;; Tool-use supervision hook (Claude PreToolUse)
    {:cmds ["hook-eval"]
-    :fn hook-eval-cmd}
+    :fn hook-eval-cmd
+    :spec {:role {:coerce :keyword}
+           :root {}}}
 
    ;; MCP context server (internal — spawned as subprocess by agent)
    {:cmds ["context-server"]
@@ -473,6 +471,7 @@
     :restrict true
     :spec {:workflow-id {:alias :w}
            :resume      {:alias :r}
+           :pin         {:coerce :boolean}
            :quiet       {:coerce :boolean :alias :q}
            :run-id      {}
            :correlation-id {}
@@ -635,7 +634,8 @@
            :out       {:default "table"}
            :post      {:coerce :boolean}
            :pr-number {:coerce :long}}}
-   {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]}
+   {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]
+    :spec {:execution-mode {:coerce :keyword :alias :m}}}
    {:cmds ["pr" "merge"]   :fn pr-merge-cmd   :args->opts [:url]}
    {:cmds ["pr" "monitor"] :fn pr-monitor-cmd :restrict true
     :spec {:author        {:alias :a}

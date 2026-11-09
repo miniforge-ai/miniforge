@@ -14,5 +14,13 @@
   (is (not (gate/gate-failed? {:status :completed :phase/decision-envelope {:envelope/decision :allow}})))
   (is (not (gate/gate-failed? nil))))
 
+(deftest ^{:stratum 0} completed-bookkeeping-follows-the-gate-outcome
+  (is (= :completed (gate/completed-status {:status :completed})))
+  (is (= :failed (gate/completed-status {:status :completed :phase/status :failed})))
+  (is (= {:phase {} :execution {:phases-completed [:scan]}}
+         (gate/count-completed {:phase {}} :scan)))
+  (is (= {:phase {:phase/status :failed}}
+         (gate/count-completed {:phase {:phase/status :failed}} :scan))))
+
 (comment
   (clojure.test/run-tests 'ai.miniforge.phase.interface.gate-test))

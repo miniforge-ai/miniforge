@@ -30,7 +30,7 @@
   (let [workflow-id (random-uuid)]
     (doseq [[event-type payload] (fixture/payloads)
             :let [draft (fixture/draft workflow-id event-type)]
-            field (keys payload)]
+            field (remove #{:checkpoint/root} (keys payload))]
       (is (anomaly/any-anomaly? (events/publish! stream (dissoc draft field))))
       (is (anomaly/any-anomaly? (events/publish! stream (assoc draft field nil)))))
     (assert-no-reservations! stream workflow-id)))
@@ -44,6 +44,7 @@
            [:workflow/machine-snapshot-write-failed :machine/state "failed"]
            [:workflow/resumed :skipping [:plan "implement"]]
            [:workflow/checkpoint-written :checkpoint/path "AKIAIOSFODNN7EXAMPLE"]
+           [:workflow/checkpoint-written :checkpoint/root "AKIAIOSFODNN7EXAMPLE"]
            [:workflow/machine-snapshot-written :snapshot/path "AKIAIOSFODNN7EXAMPLE"]
            [:workflow/spec-hash-mismatch :expected-hash "AKIAIOSFODNN7EXAMPLE"]]]
       (let [draft (fixture/draft workflow-id event-type)]
@@ -59,6 +60,16 @@
     (events/close-current-event-stream! stream)
     (verify-reopen options drafts receipts)))
 
+(defn- ^{:stratum 1} verify-root-less-history [stream options]
+  ;; Announcements written before they carried :checkpoint/root.
+  (let [workflow-id (random-uuid)
+        drafts (mapv #(dissoc (fixture/draft workflow-id %) :checkpoint/root)
+                     [:workflow/checkpoint-written :workflow/machine-snapshot-written])
+        receipts (mapv (partial events/publish! stream) drafts)]
+    (is (not-any? anomaly/any-anomaly? receipts))
+    (events/close-current-event-stream! stream)
+    (verify-reopen options drafts receipts)))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} malformed-recovery-facts-do-not-consume-sequences
@@ -67,5 +78,8 @@
 
 (deftest ^{:stratum 2} recovery-receipts-survive-reopen-and-duplicate-publication
   (journal/with-stream verify-durability))
+
+(deftest ^{:stratum 2} announcements-without-a-root-still-recover
+  (journal/with-stream verify-root-less-history))
 
 (comment ::recovery-admission-regressions)

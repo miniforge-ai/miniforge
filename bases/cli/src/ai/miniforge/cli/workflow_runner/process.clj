@@ -27,6 +27,9 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} cli-process-env
+  "The environment for a command run without an explicit `:env`: miniforge's
+   own, without CLAUDECODE, or nil to inherit it unchanged. Host-side checks
+   such as `gh auth status` need it whole."
   []
   (when (System/getenv "CLAUDECODE")
     (into {} (remove (fn [[k _]] (= k "CLAUDECODE"))) (System/getenv))))
@@ -71,13 +74,15 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} start-cli-process
-  [cmd workdir]
+  "Start `cmd` in `workdir` with exactly `env` when given (a backend probe
+   passes the agent environment), else with `cli-process-env`."
+  [cmd workdir env]
   (let [builder (ProcessBuilder. ^java.util.List cmd)]
-    (when-let [process-env (cli-process-env)]
-      (let [env (.environment builder)]
-        (.clear env)
+    (when-let [process-env (or env (cli-process-env))]
+      (let [target (.environment builder)]
+        (.clear target)
         (doseq [[k v] process-env]
-          (.put env k v))))
+          (.put target k v))))
     (when workdir
       (.directory builder (java.io.File. workdir)))
     (.start builder)))
@@ -85,11 +90,11 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} run-cli-command
-  [cmd timeout-ms & {:keys [workdir stdin]}]
+  [cmd timeout-ms & {:keys [workdir stdin env]}]
   (when (and (some? stdin) (not (string? stdin)))
     (throw (ex-info "run-cli-command :stdin must be a string"
                     {:stdin-type (type stdin)})))
-  (let [^Process process (start-cli-process cmd workdir)
+  (let [^Process process (start-cli-process cmd workdir env)
         in-future (stream-writer (.getOutputStream process) stdin)
         out-future (stream-reader (.getInputStream process))
         err-future (stream-reader (.getErrorStream process))

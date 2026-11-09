@@ -28,15 +28,29 @@
    [ai.miniforge.messages.interface :as messages]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [babashka.fs :as fs]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Constants and utilities
-(defn ^{:stratum 0} miniforge-home
+(defn ^{:stratum 0} default-miniforge-home
+  "The miniforge home when MINIFORGE_HOME is not set: <user.home>/.miniforge."
   []
-  (or (System/getenv "MINIFORGE_HOME")
-      (str (System/getProperty "user.home") "/.miniforge")))
+  (str (System/getProperty "user.home") "/.miniforge"))
+
+(defn ^{:stratum 0} miniforge-home-override
+  "MINIFORGE_HOME (or `value`) when it is set and not blank, else nil: a
+   home the user chose. The one place MINIFORGE_HOME is read, so a blank
+   value counts as unset for every path."
+  ([] (miniforge-home-override (System/getenv "MINIFORGE_HOME")))
+  ([value] (when-not (str/blank? value) value)))
+
+(defn ^{:stratum 0} path-outside?
+  "True when `path` does not resolve inside directory `home` (symlinks are
+   resolved as far as each path exists)."
+  [home path]
+  (not (fs/starts-with? (fs/canonicalize path) (fs/canonicalize home))))
 
 (def ^{:stratum 0} ^:private default-config-resource-path
   "Primary resource path for shipped user config defaults."
@@ -56,6 +70,11 @@
 (def ^{:stratum 0} ^:private t
   (messages/create-translator "config/config/messages/system.edn" :config/system))
 
+(defonce ^{:stratum 0} ^:private warned-unparseable
+  ;; Config files already reported as not parsing in this process. One
+  ;; command reads the config many times; the warning is printed once.
+  (atom #{}))
+
 ;; Repo-level configuration
 (def ^{:stratum 0} repo-config-dir-name
   ".miniforge")
@@ -66,31 +85,27 @@
   [var-name]
   (System/getenv var-name))
 
-(defn ^{:stratum 0} parse-env-value
-  "Parse environment variable value (string -> EDN)."
-  [value]
-  (when value
-    (try
-      (edn/read-string value)
-      (catch Exception _
-        value))))
-
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} default-user-config-path
-  (str (miniforge-home) "/config.edn"))
+(defn ^{:stratum 1} miniforge-home
+  "The miniforge home: MINIFORGE_HOME when set and not blank, else
+   <user.home>/.miniforge."
+  []
+  (or (miniforge-home-override) (default-miniforge-home)))
 
 (defn ^{:stratum 1} read-edn-file
   "Read an EDN file; nil when it is absent or does not parse. A parse failure
    is reported on stderr, naming the file, so a typo in config.edn does not
-   silently run every workflow on defaults."
+   silently run every workflow on defaults. The report is printed once per
+   file per process: one command reads the config many times."
   [path]
   (try
     (when (and path (fs/exists? path))
       (edn/read-string (slurp path)))
     (catch Exception e
-      (binding [*out* *err*]
-        (println (t :config-file/ignored {:path path :error (.getMessage e)})))
+      (when-not (contains? (first (swap-vals! warned-unparseable conj (str path))) (str path))
+        (binding [*out* *err*]
+          (println (t :config-file/ignored {:path path :error (.getMessage e)}))))
       nil)))
 
 (defn- ^{:stratum 1} read-config-resource
@@ -126,19 +141,12 @@
    - MINIFORGE_LLM_MODEL
    - MINIFORGE_AGENT_THINKING_MODEL
    - MINIFORGE_AGENT_EXECUTION_MODEL
-   - MINIFORGE_MODEL_SELECTION_ENABLED
-   - MINIFORGE_MODEL_SELECTION_STRATEGY
-   - MINIFORGE_MODEL_SELECTION_COST_LIMIT
-   - MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL
-   - MINIFORGE_SELF_HEALING_ENABLED
-   - MINIFORGE_SELF_HEALING_AUTO_APPLY
-   - MINIFORGE_BACKEND_AUTO_SWITCH
-   - MINIFORGE_BACKEND_HEALTH_THRESHOLD
 
    Map a variable only when code reads the key it sets: an operator who sets
-   a variable that nothing reads believes a setting is in force. The
-   MODEL_SELECTION_*, SELF_HEALING_* and BACKEND_* entries do not meet that
-   yet; no run reads :model-selection or :self-healing from this config."
+   a variable that nothing reads believes a setting is in force. No run
+   reads :model-selection or :self-healing from this config, so the
+   MODEL_SELECTION_*, SELF_HEALING_* and BACKEND_* variables are not
+   mapped."
   [config]
   (cond-> config
     ;; LLM settings
@@ -153,35 +161,12 @@
     (assoc-in [:agents :default-models :thinking] (get-env-var "MINIFORGE_AGENT_THINKING_MODEL"))
 
     (get-env-var "MINIFORGE_AGENT_EXECUTION_MODEL")
-    (assoc-in [:agents :default-models :execution] (get-env-var "MINIFORGE_AGENT_EXECUTION_MODEL"))
-
-    ;; Model selection settings
-    (get-env-var "MINIFORGE_MODEL_SELECTION_ENABLED")
-    (assoc-in [:model-selection :enabled] (parse-env-value (get-env-var "MINIFORGE_MODEL_SELECTION_ENABLED")))
-
-    (get-env-var "MINIFORGE_MODEL_SELECTION_STRATEGY")
-    (assoc-in [:model-selection :strategy] (keyword (get-env-var "MINIFORGE_MODEL_SELECTION_STRATEGY")))
-
-    (get-env-var "MINIFORGE_MODEL_SELECTION_COST_LIMIT")
-    (assoc-in [:model-selection :cost-limit-per-task] (parse-env-value (get-env-var "MINIFORGE_MODEL_SELECTION_COST_LIMIT")))
-
-    (get-env-var "MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL")
-    (assoc-in [:model-selection :require-local] (parse-env-value (get-env-var "MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL")))
-
-    ;; Self-healing settings
-    (get-env-var "MINIFORGE_SELF_HEALING_ENABLED")
-    (assoc-in [:self-healing :enabled] (parse-env-value (get-env-var "MINIFORGE_SELF_HEALING_ENABLED")))
-
-    (get-env-var "MINIFORGE_SELF_HEALING_AUTO_APPLY")
-    (assoc-in [:self-healing :workaround-auto-apply] (parse-env-value (get-env-var "MINIFORGE_SELF_HEALING_AUTO_APPLY")))
-
-    (get-env-var "MINIFORGE_BACKEND_AUTO_SWITCH")
-    (assoc-in [:self-healing :backend-auto-switch] (parse-env-value (get-env-var "MINIFORGE_BACKEND_AUTO_SWITCH")))
-
-    (get-env-var "MINIFORGE_BACKEND_HEALTH_THRESHOLD")
-    (assoc-in [:self-healing :backend-health-threshold] (parse-env-value (get-env-var "MINIFORGE_BACKEND_HEALTH_THRESHOLD")))))
+    (assoc-in [:agents :default-models :execution] (get-env-var "MINIFORGE_AGENT_EXECUTION_MODEL"))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} default-user-config-path
+  (str (miniforge-home) "/config.edn"))
 
 (defn ^{:stratum 2} load-default-config
   "Load default configuration from resources.
@@ -208,14 +193,6 @@
   ([path]
    (read-edn-file path)))
 
-;; Config loading and merging
-(defn ^{:stratum 2} load-user-config
-  "Load user configuration from file.
-   Returns nil if file doesn't exist."
-  ([] (load-user-config default-user-config-path))
-  ([path]
-   (read-edn-file path)))
-
 (defn ^{:stratum 2} merge-configs
   "Merge configurations with precedence: user > env > defaults.
 
@@ -230,6 +207,14 @@
     (apply-env-overrides base)))
 
 ;------------------------------------------------------------------------------ Layer 3
+
+;; Config loading and merging
+(defn ^{:stratum 3} load-user-config
+  "Load user configuration from file.
+   Returns nil if file doesn't exist."
+  ([] (load-user-config default-user-config-path))
+  ([path]
+   (read-edn-file path)))
 
 (def ^{:stratum 3} default-config
   (load-default-config))

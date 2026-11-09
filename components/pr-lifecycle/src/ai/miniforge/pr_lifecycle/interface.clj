@@ -35,6 +35,7 @@
   (:require
    [ai.miniforge.pr-lifecycle.controller :as controller]
    [ai.miniforge.pr-lifecycle.ci-monitor :as ci]
+   [ai.miniforge.pr-lifecycle.ci-checks :as ci-checks]
    [ai.miniforge.pr-lifecycle.classifier :as classifier]
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
@@ -42,6 +43,8 @@
    [ai.miniforge.pr-lifecycle.github-conversation :as conversation]
    [ai.miniforge.pr-lifecycle.listener-registry :as listener-registry]
    [ai.miniforge.pr-lifecycle.policy-eval-responder :as policy-eval-responder]
+   [ai.miniforge.pr-lifecycle.policy-eval.fs :as policy-fs]
+   [ai.miniforge.pr-lifecycle.policy-eval.git-dir :as git-dir]
    [ai.miniforge.pr-lifecycle.resume-dispatcher :as resume-dispatcher]
    [ai.miniforge.pr-lifecycle.review-scheduler :as review-scheduler]
    [ai.miniforge.pr-lifecycle.triage :as triage]
@@ -252,7 +255,7 @@
 (def ^{:stratum 0} compute-ci-status
   "Compute overall CI status from individual checks.
    Returns {:status keyword :passed [] :failed [] :pending []}"
-  ci/compute-ci-status)
+  ci-checks/compute-ci-status)
 
 ;; Review monitoring
 (def ^{:stratum 0} create-review-monitor
@@ -568,6 +571,28 @@
    Returns DAG result with the full per-pass summary."
   policy-eval-responder/respond-to-policy-comments!)
 
+;; Worktree path guards (shared with fix-loop/apply-fix-to-worktree)
+(def ^{:stratum 0} safe-worktree-path
+  "Resolve `relative-path` under `worktree-root` for a read or write.
+   Returns the canonical path, or nil when it escapes the worktree or
+   reaches git metadata: the git dir, common dir or hooks dir git reports,
+   a `.git` component, or an untracked file a symlink in that metadata
+   points at. Refuses every path when git cannot report its metadata.
+   Args: [worktree-root relative-path]."
+  policy-fs/safe-worktree-path)
+
+(def ^{:stratum 0} safe-worktree-entry-path
+  "Like `safe-worktree-path` for a delete: checks the directory entry
+   `relative-path` names without following a final symlink. Returns its
+   absolute path or nil. Args: [worktree-root relative-path]."
+  policy-fs/safe-worktree-entry-path)
+
+(def ^{:stratum 0} hooks-disabled-git-args
+  "Global git options that stop every hook from running. The fix loop
+   puts them before each git command it issues after writing generated
+   files; other writers of agent output can do the same."
+  git-dir/hooks-disabled-args)
+
 ;; Fix loop
 (def ^{:stratum 0} create-fix-context
   "Build context pack for fix generation.
@@ -631,24 +656,6 @@
    Example:
      (evaluate-merge-readiness \"/path/to/repo\" 123 default-merge-policy)"
   merge/evaluate-merge-readiness)
-
-(def ^{:stratum 0} merge-pr!
-  "Merge a PR using gh CLI.
-
-   Options:
-   - :policy - Merge policy map
-
-   Example:
-     (merge-pr! \"/path/to/repo\" 123 :policy {:method :squash})"
-  merge/merge-pr!)
-
-(def ^{:stratum 0} enable-auto-merge!
-  "Enable auto-merge for a PR."
-  merge/enable-auto-merge!)
-
-(def ^{:stratum 0} disable-auto-merge!
-  "Disable auto-merge for a PR."
-  merge/disable-auto-merge!)
 
 (def ^{:stratum 0} rebase-pr!
   "Rebase a PR onto the latest base branch."

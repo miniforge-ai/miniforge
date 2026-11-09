@@ -60,18 +60,27 @@
   [v]
   (not (or (nil? v) (number? v) (boolean? v) (inst? v) (uuid? v))))
 
-(defn ^{:stratum 0} secret-string?
-  "True when S contains a secret-shaped value.
-
-   False for anything that is not a string. A predicate reached through
-   the interface should answer rather than throw, and \"does this
-   non-string contain a secret\" has an answer: no. Only a string can
-   carry one by shape — a key names it instead, which is `secret-key?`."
+(defn ^{:stratum 0} pattern-secret-string?
+  "True when S matches one of the secret value patterns. Unlike
+   `secret-string?`, payment-card candidates are not checked: those are
+   found by checksum over any 12-19 digit run, which ordinary numbers in
+   source code pass one time in ten. False for anything not a string."
   [s]
   (boolean
    (when (string? s)
-     (or (payment-card/present? s)
-         (some #(re-find % s) (:redaction/secret-value-patterns @policy/policy))))))
+     (some #(re-find % s) (:redaction/secret-value-patterns @policy/policy)))))
+
+(defn ^{:stratum 0} pattern-secret-spans
+  "[start end] of every secret value pattern match in S, over the whole
+   string, so a match spanning lines is found whole. Payment-card
+   candidates are not checked (see `pattern-secret-string?`)."
+  [s]
+  (when (string? s)
+    (vec (for [^java.util.regex.Pattern pattern (:redaction/secret-value-patterns @policy/policy)
+               :let [m (re-matcher pattern s)]
+               span (loop [acc []]
+                      (if (.find m) (recur (conj acc [(.start m) (.end m)])) acc))]
+           span))))
 
 (defn ^{:stratum 0} redact-string
   "Replace every secret-looking substring in S with the marker.
@@ -107,6 +116,19 @@
   (if (payment-card/present? value) (policy/marker) value))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} secret-string?
+  "True when S contains a secret-shaped value.
+
+   False for anything that is not a string. A predicate reached through
+   the interface should answer rather than throw, and \"does this
+   non-string contain a secret\" has an answer: no. Only a string can
+   carry one by shape — a key names it instead, which is `secret-key?`."
+  [s]
+  (boolean
+   (when (string? s)
+     (or (payment-card/present? s)
+         (pattern-secret-string? s)))))
 
 (defn ^{:stratum 1} redact-key
   "Redact a secret hiding in K itself, by shape.

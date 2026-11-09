@@ -32,6 +32,7 @@
   :verify/tests-passed        "All {pass-count} test(s) passed"
   :verify/tests-failed        "Tests failed: {fail-count} failure(s), {error-count} error(s)"
   :verify/failing-tests       "Failing: {tests}"
+  :verify/more-failing-tests  "{tests} (+{count} more)"
   :verify/output-unparseable  "Test output could not be parsed"
   :verify/gate-failed         "Gate validation failed"
   :verify/failed              "Verification failed"
@@ -41,6 +42,11 @@
   ;; Release phase
   :release/zero-files                   "Release phase received code artifact with zero files"
   :release/git-status-failed            "Release could not list changed files in {worktree-path}: {detail}"
+  :release/path-outside-worktree        "{path} resolves outside the worktree"
+  :release/command-exited               "{command} exited {exit}"
   :release/skipped-already-implemented  "Release skipped — task was already implemented"
   :release/changes-description          "Changes from implementation"
-  :release/phase-failed                 "Release phase failed"}}
+  :release/phase-failed                 "Release phase failed"
+  :release/publish-failed               "Release could not push the branch or open the PR"
+  :release/not-prepared                 "Release has no prepared branch to publish"
+  :release/pr-missing                   "Release was asked to open a PR but the release executor reported none"}}

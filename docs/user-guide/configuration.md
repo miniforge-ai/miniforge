@@ -11,9 +11,8 @@ Miniforge uses OpenCode as the default provider/auth wrapper for LLM
 access. Configure provider keys in OpenCode, then let miniforge invoke
 `opencode run`.
 
-Claude Code and Codex remain supported direct CLI backends for users who
-already have those tools configured, but miniforge no longer accepts
-provider API keys directly.
+Claude Code and Codex remain supported direct CLI backends for users who already have them configured.
+Miniforge no longer accepts provider API keys directly.
 
 ### Provider Key Setup
 

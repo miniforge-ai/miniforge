@@ -41,6 +41,7 @@
                     :event-bus                     nil
                     :logger                        nil
                     :worktree-path                 "/dev/null"
+                    :repo-slug                     "example/repo"
                     :self-author                   "bot"
                     :generate-fn                   nil
                     :max-fix-attempts-per-comment  3
@@ -59,32 +60,38 @@
 
 (defn- ^{:stratum 1} run-polls
   "Run the loop with `poll-result` as every open-PR poll's answer, stopping
-   it from inside the `polls`th poll. Returns the number of polls made."
+   it from inside the `polls`th poll. Returns `[open-pr-polls
+   comment-polls]`: how often each poller ran. A full cycle polls the PR's
+   comments once; one stopped early (no repo slug, spent budget) does not."
   [monitor poll-result]
-  (let [calls (atom 0)]
+  (let [calls         (atom 0)
+        comment-polls (atom 0)]
     (with-redefs [poller/poll-open-prs
                   (fn [_worktree-path _author]
                     (when (>= (swap! calls inc) polls)
                       (sut/stop-monitor-loop monitor))
                     poll-result)
                   poller/poll-pr-for-new-comments
-                  (fn [& _] {:ok? true :data {:new-comments [] :watermarks {}}})
+                  (fn [& _]
+                    (swap! comment-polls inc)
+                    {:ok? true :data {:new-comments [] :watermarks {}}})
                   poller/save-watermarks! (constantly nil)]
       (sut/run-monitor-loop monitor "bot"))
-    @calls))
+    [@calls @comment-polls]))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} loop-survives-many-polls-with-open-prs-test
   (testing "a poll that finds an open PR and runs its cycle adds no stack per poll"
     (let [monitor (test-monitor)]
-      (is (= polls (run-polls monitor {:ok? true :data {:prs [open-pr]}})))
+      (is (= [polls (dec polls)] (run-polls monitor {:ok? true :data {:prs [open-pr]}}))
+          "every poll but the stopping one runs a full cycle, comment poll included")
       (is (= polls (:cycles @monitor)))
       (is (= :manual-stop (:stop-reason @monitor))))))
 
 (deftest ^{:stratum 2} loop-survives-many-failed-polls-test
   (testing "a failed open-PR poll retries without adding stack per retry"
     (let [monitor (test-monitor)]
-      (is (= polls (run-polls monitor {:ok? false :error {:code :gh-failed}})))
+      (is (= [polls 0] (run-polls monitor {:ok? false :error {:code :gh-failed}})))
       (is (zero? (:cycles @monitor)))
       (is (= :manual-stop (:stop-reason @monitor))))))

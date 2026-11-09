@@ -34,7 +34,7 @@ All acceptance criteria from the specification have been met:
 Features:
 
 - 16 model profiles across 4 providers (Anthropic, OpenAI, Google, OSS)
-- Comprehensive capability metadata (reasoning, code-generation, speed, cost)
+- Capability metadata (reasoning, code-generation, speed, cost)
 - Use-case mappings for each model
 - Query functions by capability, use-case, provider
 - Task-type recommendations with tiered fallbacks
@@ -91,7 +91,7 @@ Features:
 - Model selection info stored in agent state
 - Logging of selection decisions
 - Explicit model override support
-- Seamless integration with existing agent lifecycle
+- Integration with existing agent lifecycle
 
 Integration points:
 
@@ -135,12 +135,8 @@ Configuration keys:
   :require-local false}}            ; Require local models only
 ```
 
-Environment variables:
-
-- `MINIFORGE_MODEL_SELECTION_ENABLED`
-- `MINIFORGE_MODEL_SELECTION_STRATEGY`
-- `MINIFORGE_MODEL_SELECTION_COST_LIMIT`
-- `MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL`
+No run reads this block, and the `MINIFORGE_MODEL_SELECTION_*` environment variables that once mapped onto it
+are no longer accepted. Selection takes its options as arguments to `llm/select-model` and `agent/create-agent`.
 
 ## Tests Implemented
 
@@ -148,18 +144,18 @@ Environment variables:
 
 **Model Registry Tests** (`components/llm/test/ai/miniforge/llm/model_registry_test.clj`)
 
-- ✅ 154 lines, comprehensive coverage
+- ✅ 154 lines, test coverage
 - Tests: get-model, query by capability, query by use-case, provider queries, local models, context support,
   recommendations
 
 **Model Selector Tests** (`components/llm/test/ai/miniforge/llm/model_selector_test.clj`)
 
-- ✅ 189 lines, comprehensive coverage
+- ✅ 189 lines, test coverage
 - Tests: automatic selection, cost-optimized, speed, constraints, strategies, fallback
 
 **Task Classifier Tests** (`components/agent/test/ai/miniforge/agent/task_classifier_test.clj`)
 
-- ✅ 189 lines, comprehensive coverage
+- ✅ 189 lines, test coverage
 - Tests: phase classification, agent-type, keywords, context, privacy, cost, merging
 
 ### Integration Tests
@@ -176,7 +172,7 @@ Environment variables:
 
 **MODEL_SELECTION.md** (`docs/MODEL_SELECTION.md`)
 
-- ✅ Comprehensive user guide (500+ lines)
+- ✅ User guide (500+ lines)
 - Sections:
   - How it works (classification + selection)
   - Configuration (all options explained)
@@ -258,29 +254,6 @@ Override: :spec/model-override :opus-4.6
 ```
 
 ## Usage Examples
-
-### Automatic Selection in Workflows
-
-```bash
-# Create agent - automatically selects based on role and phase
-miniforge workflow run spec.edn
-```
-
-### Cost-Optimized Mode
-
-```bash
-export MINIFORGE_MODEL_SELECTION_STRATEGY=cost-optimized
-miniforge workflow run spec.edn
-# Uses free local models or cheapest cloud models
-```
-
-### Privacy Mode
-
-```bash
-export MINIFORGE_MODEL_SELECTION_REQUIRE_LOCAL=true
-miniforge workflow run spec.edn
-# Only uses local models (Llama, Qwen, DeepSeek, etc.)
-```
 
 ### Programmatic API
 
@@ -435,7 +408,7 @@ The intelligent model selection system is **fully implemented and production-rea
 4. ✅ Cross-provider best-of-breed approach
 5. ✅ Transparent reasoning for every selection
 6. ✅ User override and configuration options
-7. ✅ Comprehensive test coverage
+7. ✅ Test coverage
 8. ✅ Complete user documentation
 
 The system is ready for use in production workflows and can immediately start optimizing costs while maintaining code
