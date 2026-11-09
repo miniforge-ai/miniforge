@@ -10,6 +10,7 @@
             [ai.miniforge.phase-opsv.kubernetes-replica-provider-fixtures :as replica]
             [ai.miniforge.phase-opsv.prometheus-test-support :as wire]
             [ai.miniforge.phase-opsv.recovery-plan-retention-fixtures :as retention]
+            [babashka.fs :as fs]
             [cheshire.core :as json]
             [clojure.test :refer [is]]))
 
@@ -21,7 +22,7 @@
 
 (defn- ^{:stratum 0} create! [{:keys [ctx input directory] :as fixture}]
   (let [native (assoc fixture :input (:load input) :runtime (replica/settings)
-                      :authority-directory (str directory "/stop-load-creation")
+                      :authority-directory (str (fs/path directory "stop-load-creation"))
                       :proposal (phase/prepare-governed-kubernetes-load-proposal! ctx (:load input)))
         [record calls] (provider/commit! native (provider/response native) dispatch/dispatch!)
         stored (effect/read-record (:authority-directory native) (:effect/id record))]

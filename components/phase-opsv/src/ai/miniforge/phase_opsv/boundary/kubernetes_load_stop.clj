@@ -21,7 +21,7 @@
 (defn ^{:stratum 1} prepare! [ctx input]
   (anomaly/let-ok [_bounded (reporting/admit input)]
     (if-not (valid-arguments? [ctx input])
-      (anomaly/anomaly :invalid-input (msg/ts :load/stop-request-refused) {})
+      (anomaly/anomaly :invalid-input (msg/ts :load/invalid-stop-request) {})
       (anomaly/let-ok [admitted (retained/read! ctx (:recovery/input input) (:recovery/artifact-ref input))
                       owned (ownership/read! (:ownership/runtime input) (:recovery/plan admitted))]
         (model/prepare ctx input (:recovery/plan admitted) owned)))))

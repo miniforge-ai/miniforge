@@ -42,13 +42,24 @@ Simulate HTTP only. Verify exact request bytes, revocation, substitutions and
 uncertain receipt handling. Run source, JVM and isolated-package checks.
 
 Both consuming JVM products, Polylith and task-classpath checks pass. Source and
-the fresh isolated package pass 44 tests and 704 assertions. Broader integration
-passes 210 tests and 2,712 assertions; native compatibility passes 308 tests and
+the fresh isolated package pass 46 tests and 746 assertions. Broader integration
+passes 212 tests and 2,754 assertions; native compatibility passes 308 tests and
 1,903 assertions. Packaging uses only the new JAR and test directories, without
 production-source overlays. Strict lint is zero-warning; all six actual call
-graphs fit within three strata. All four injected faults cause assertion failures
-with zero errors: bypassed closed input, distinct identity/deadline admission,
-and each exact UID and resource-version precondition.
+graphs fit within three strata. All five injected faults cause assertion failures
+with zero errors. They bypass closed input, distinct identity/deadline admission,
+each exact UID and resource-version precondition, or distinct diagnostics.
+
+Review separated schema-invalid diagnostics from valid-but-refused intent and
+made fixture paths portable with `fs/path`. The diagnostic regression failed
+before the fix with two assertion failures and zero errors.
+
+Keep `reporting/admit` before schema validation: this is a side-effect-free carrier
+guard, not report publication or N4 policy admission. It rejects opaque objects,
+deferred sequences, and excessive structure before Malli traversal. Its shared
+representation limits are 128 levels and 100,000 nodes. The new regression wraps
+the actual schema validator to prove unsupported carriers never reach it or HTTP.
+Actual current N4 admission remains later, in the retained-plan reader.
 
 ## Standards Gap Analysis
 

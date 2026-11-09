@@ -6,8 +6,10 @@
             [ai.miniforge.content-hash.interface :as hash]
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.execution-grant.opsv-scope-fixtures :as clock]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop :as boundary]
             [ai.miniforge.phase-opsv.kubernetes-load-ownership-fixtures :as ownership]
             [ai.miniforge.phase-opsv.kubernetes-load-stop-fixtures :as fixtures]
+            [ai.miniforge.phase-opsv.messages :as msg]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -48,6 +50,31 @@
         [result calls] (fixtures/prepare (assoc fixture :ctx revoked) pod)]
     (is (anomaly/anomaly? result))
     (is (empty? calls))))
+
+(defn- ^{:stratum 0} check-diagnostics [{:keys [pod record] :as fixture}]
+  (let [[invalid invalid-calls] (fixtures/prepare (assoc-in fixture [:request :approved?] true) pod)
+        [refused refused-calls] (fixtures/prepare (assoc-in fixture [:request :effect/id] (:effect/id record)) pod)]
+    (is (= :invalid-input (:anomaly/type invalid)))
+    (is (= :conflict (:anomaly/type refused)))
+    (is (= (msg/ts :load/invalid-stop-request) (:anomaly/message invalid)))
+    (is (= (msg/ts :load/stop-request-refused) (:anomaly/message refused)))
+    (is (not= (:anomaly/message invalid) (:anomaly/message refused)))
+    (is (empty? invalid-calls))
+    (is (= 1 (count refused-calls)))))
+
+(defn- ^{:stratum 0} check-carrier-before-schema [{:keys [pod] :as fixture}]
+  (let [actual @#'boundary/valid-arguments?
+        schema-calls (atom 0)
+        deferred (lazy-seq (throw (AssertionError.)))
+        deep (nth (iterate vector :leaf) 130)]
+    (doseq [unsupported [(Object.) deferred deep]]
+      (let [changed (assoc-in fixture [:request :ownership/runtime :provider :unsupported] unsupported)
+            [result calls] (with-redefs-fn {#'boundary/valid-arguments?
+                                           (fn [value] (swap! schema-calls inc) (actual value))}
+                             #(fixtures/prepare changed pod))]
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (empty? calls))
+        (is (zero? @schema-calls))))))
 
 (defn- ^{:stratum 0} check-substituted-intent [{:keys [pod] :as fixture}]
   (doseq [[path value] [[[:load :limits :effect/id] (random-uuid)]
@@ -96,6 +123,12 @@
 
 (deftest ^{:stratum 1} current-retained-plan-approval-is-required-before-any-provider-read-test
   (fixtures/with-created check-current-approval))
+
+(deftest ^{:stratum 1} invalid-shape-and-valid-but-refused-intent-have-distinct-localized-diagnostics-test
+  (fixtures/with-created check-diagnostics))
+
+(deftest ^{:stratum 1} unsupported-or-deferred-carriers-refuse-before-schema-or-provider-work-test
+  (fixtures/with-created check-carrier-before-schema))
 
 (deftest ^{:stratum 1} changed-creation-payload-original-service-or-target-cannot-reuse-retained-plan-test
   (fixtures/with-created check-substituted-intent))
