@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.boundary.kubernetes-load-start-result
+(ns ai.miniforge.phase-opsv.boundary.kubernetes-forward-result
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.opsv-actuation.interface :as actuation]

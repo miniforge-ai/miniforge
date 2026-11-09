@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.boundary.kubernetes-load-start-readiness
+(ns ai.miniforge.phase-opsv.boundary.kubernetes-forward-readiness
   "Retain the actual commit-time N4 decision before admitting the native request."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.artifact-confirmation :as confirmation]

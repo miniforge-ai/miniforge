@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.phase-opsv.kubernetes-load-start-runtime-schema
+(ns ai.miniforge.phase-opsv.kubernetes-forward-runtime-schema
   (:require [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.phase-opsv.kubernetes-load-stop-schema :as input]
             [ai.miniforge.phase-opsv.retained-preparation-schema :as retained]

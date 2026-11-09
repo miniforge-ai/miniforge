@@ -8,7 +8,7 @@
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-absence :as ownership]
             [ai.miniforge.phase-opsv.boundary.retained-preparation :as original]
             [ai.miniforge.phase-opsv.boundary.retained-recovery-plan :as recovery]
-            [ai.miniforge.phase-opsv.kubernetes-load-start-runtime-schema :as schema]
+            [ai.miniforge.phase-opsv.kubernetes-forward-runtime-schema :as schema]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.run-control :as control]
             [malli.core :as m]))
