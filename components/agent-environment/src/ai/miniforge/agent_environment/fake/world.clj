@@ -60,12 +60,11 @@
   (anomaly/anomaly :not-found (msg/t :fake/file-missing) {:path path}))
 
 (defn ^{:stratum 0} provisioned
+  "`world` with `namespace` created, in one step, unless the name is taken."
   [world namespace uid generation applied]
-  (assoc world namespace {:uid uid
-                          :generation generation
-                          :ready? (contains? (set applied) :step/workload)
-                          :files {}
-                          :cancelled? false}))
+  (cond-> world (and (seq applied) (not (contains? world namespace)))
+          (assoc namespace {:uid uid :generation generation :ready? (contains? (set applied) :step/workload)
+                            :files {} :cancelled? false})))
 
 (defn ^{:stratum 0} cancel-outcome
   "A fake cannot stop a scripted exec mid-call: with one running, a cancel
