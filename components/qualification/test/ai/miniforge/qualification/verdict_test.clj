@@ -62,7 +62,16 @@
                                                    (result :c/one :status/pass)
                                                    (result :c/one :status/fail)])))))
   (testing "given one result per declared criterion → no problems"
-    (is (empty? (verdict/result-problems gate [(result :c/one :status/pass)])))))
+    (is (empty? (verdict/result-problems gate [(result :c/one :status/pass)
+                                               (result :c/two :status/pass)])))))
+
+(deftest ^{:stratum 1} test-duplicate-results-never-pass-a-row
+  (testing "given two results for one criterion, one passing → that row is unrun, not a pass"
+    (let [rows (verdict/rows gate [(result :c/one :status/fail)
+                                   (result :c/one :status/pass)
+                                   (result :c/two :status/pass)])]
+      (is (= [:status/unrun :status/pass] (mapv :criterion/status rows)))
+      (is (= :verdict/incomplete (verdict/verdict rows))))))
 
 (deftest ^{:stratum 1} test-unrun-rows-cover-every-criterion
   (testing "given a reason → every declared criterion is unrun with it"

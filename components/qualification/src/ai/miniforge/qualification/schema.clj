@@ -57,12 +57,19 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} Gate
-  "A gate: the criteria a qualification run must report on."
-  [:map {:closed true}
-   [:gate/id :qualified-keyword]
-   [:gate/title vocab/NonBlank]
-   [:gate/issue {:optional true} pos-int?]
-   [:gate/criteria [:vector {:min 1} Criterion]]])
+  "A gate: the criteria a qualification run must report on. Criterion ids
+   are unique, so each result counts for one declared criterion only."
+  [:and
+   [:map {:closed true}
+    [:gate/id :qualified-keyword]
+    [:gate/title vocab/NonBlank]
+    [:gate/issue {:optional true} pos-int?]
+    [:gate/criteria [:vector {:min 1} Criterion]]]
+   [:fn {:error/message "criterion ids must be unique"}
+    (fn [gate]
+      (let [criteria (:gate/criteria gate)]
+        (or (not (and (sequential? criteria) (seq criteria)))
+            (apply distinct? (map :criterion/id criteria)))))]])
 
 (def ^{:stratum 1} CriterionResult
   "What a scenario reports for one criterion."
@@ -85,21 +92,29 @@
 
 (def ^{:stratum 2} Report
   "A machine-readable qualification report, tied to the build, the fixtures
-   and the config it ran with."
-  [:map {:closed true}
-   [:report/version [:= vocab/report-version]]
-   [:report/gate-id :qualified-keyword]
-   [:report/gate-title vocab/NonBlank]
-   [:report/issue {:optional true} pos-int?]
-   [:report/command [:vector {:min 1} vocab/NonBlank]]
-   [:report/build Build]
-   [:report/fixture-hash [:maybe vocab/Sha256Hex]]
-   [:report/config-hash [:maybe vocab/Sha256Hex]]
-   [:report/started-at vocab/NonBlank]
-   [:report/finished-at vocab/NonBlank]
-   [:report/criteria [:vector {:min 1} Row]]
-   [:report/verdict (into [:enum] vocab/verdicts)]
-   [:report/failure {:optional true} Failure]])
+   and the config it ran with. The command's executable is nonblank; its
+   arguments may be any string. The verdict must be the one its rows give."
+  [:and
+   [:map {:closed true}
+    [:report/version [:= vocab/report-version]]
+    [:report/gate-id :qualified-keyword]
+    [:report/gate-title vocab/NonBlank]
+    [:report/issue {:optional true} pos-int?]
+    [:report/command [:and [:vector :string] [:cat vocab/NonBlank [:* :string]]]]
+    [:report/build Build]
+    [:report/fixture-hash [:maybe vocab/Sha256Hex]]
+    [:report/config-hash [:maybe vocab/Sha256Hex]]
+    [:report/started-at vocab/NonBlank]
+    [:report/finished-at vocab/NonBlank]
+    [:report/criteria [:vector {:min 1} Row]]
+    [:report/verdict (into [:enum] vocab/verdicts)]
+    [:report/failure {:optional true} Failure]]
+   [:fn {:error/message "verdict must match the criteria statuses"}
+    (fn [report]
+      (let [criteria (:report/criteria report)]
+        (or (not (sequential? criteria))
+            (= (:report/verdict report)
+               (vocab/verdict-of-statuses (map :criterion/status criteria))))))]])
 
 (comment
   (require '[malli.core :as m])

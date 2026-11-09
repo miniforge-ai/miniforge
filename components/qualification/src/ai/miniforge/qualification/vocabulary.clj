@@ -16,7 +16,8 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.qualification.vocabulary
-  "The closed vocabularies and scalar shapes qualification values use."
+  "The closed vocabularies and scalar shapes qualification values use, and
+   the rule that turns criterion statuses into a verdict."
   (:require
    [clojure.string :as str]))
 
@@ -39,6 +40,16 @@
 (def ^{:stratum 0} failure-kinds
   "Why a scenario produced no usable results."
   [:scenario/threw :scenario/invalid-output])
+
+(defn ^{:stratum 0} verdict-of-statuses
+  "`:verdict/fail` when any status failed, `:verdict/pass` when every
+   status passed, `:verdict/incomplete` otherwise."
+  [statuses]
+  (let [status-of (set statuses)]
+    (cond
+      (contains? status-of :status/fail) :verdict/fail
+      (= #{:status/pass} status-of)      :verdict/pass
+      :else                              :verdict/incomplete)))
 
 (def ^{:stratum 0} NonBlank
   [:and :string [:fn (complement str/blank?)]])

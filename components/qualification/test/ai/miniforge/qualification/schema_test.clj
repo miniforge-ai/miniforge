@@ -19,7 +19,8 @@
   "A report is a closed map: an unknown key, an unknown status or a
    non-hex hash is not a report."
   (:require [clojure.test :refer [deftest is testing]]
-            [ai.miniforge.qualification.interface :as qualification]))
+            [ai.miniforge.qualification.interface :as qualification]
+            [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -43,6 +44,14 @@
                           :criterion/observed    {:sink-calls 0}}]
    :report/verdict      :verdict/pass})
 
+(deftest ^{:stratum 0} test-gate-criterion-ids-are-unique
+  (testing "given two criteria with one id → not a gate"
+    (is (not (m/validate qualification/Gate
+                         {:gate/id       :fixture/gate
+                          :gate/title    "Fixture gate"
+                          :gate/criteria [{:criterion/id :c/one :criterion/description "First"}
+                                          {:criterion/id :c/one :criterion/description "Second"}]})))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Tests
@@ -51,9 +60,26 @@
     (is (qualification/valid-report? report))))
 
 (deftest ^{:stratum 1} test-malformed-reports
-  (testing "given an unknown key, an unknown status, a short hash or no criteria → invalid"
+  (testing "given an unknown key, an unknown status, a short hash, no criteria or a blank executable → invalid"
     (doseq [bad [(assoc report :report/extra true)
                  (assoc-in report [:report/criteria 0 :criterion/status] :status/maybe)
                  (assoc report :report/fixture-hash "abc")
-                 (assoc report :report/criteria [])]]
+                 (assoc report :report/criteria [])
+                 (assoc report :report/command [" " "qualify"])]]
       (is (not (qualification/valid-report? bad)) (pr-str (keys bad))))))
+
+(deftest ^{:stratum 1} test-verdict-must-match-rows
+  (testing "given a pass verdict over a failed, unrun or unsupported row → invalid"
+    (doseq [status [:status/fail :status/unrun :status/unsupported]]
+      (is (not (qualification/valid-report?
+                (assoc-in report [:report/criteria 0 :criterion/status] status)))
+          (str status))))
+  (testing "given an unrun row and the incomplete verdict it gives → valid"
+    (is (qualification/valid-report?
+         (-> report
+             (assoc-in [:report/criteria 0 :criterion/status] :status/unrun)
+             (assoc :report/verdict :verdict/incomplete))))))
+
+(deftest ^{:stratum 1} test-command-arguments-may-be-empty
+  (testing "given an empty argument after the executable → valid, so the command repeats exactly"
+    (is (qualification/valid-report? (assoc report :report/command ["bb" "qualify" "--filter" ""])))))

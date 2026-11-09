@@ -38,6 +38,19 @@ shared format lets every gate report the same way.
    `valid-report?`.
 5. Root `deps.edn`: the component in the `:dev` and `:test` aliases.
 
+## Review fixes (Copilot)
+
+1. A gate's criterion ids must be unique; otherwise one result would count
+   for two declared criteria.
+2. A report's verdict must be the one its rows give, so a report cannot claim
+   a pass over a failed, unrun or unsupported row. The rule moves to
+   `vocabulary/verdict-of-statuses` so the schema and `verdict` share it.
+3. Only the command's executable must be nonblank; arguments may be any
+   string, so a command with an empty argument repeats exactly.
+4. `rows` no longer keeps the last of two results for one criterion: a
+   criterion with more than one result is unrun, so `rows` is safe even when
+   called without `result-problems`.
+
 ## Testing Plan
 
 1. `verdict_test`: all-pass is a pass; a missing result is unrun and the
@@ -45,7 +58,9 @@ shared format lets every gate report the same way.
    declaration order and evidence; undeclared and duplicate results are
    problems; gate schema rejects an unqualified id and an empty criteria list.
 2. `schema_test`: a complete report is valid; an unknown key, an unknown
-   status, a short hash or no criteria is not.
+   status, a short hash, no criteria or a blank executable is not; a pass
+   verdict over a failed, unrun or unsupported row is not; an empty command
+   argument is; a gate with a repeated criterion id is not.
 
 ## Deployment Plan
 
