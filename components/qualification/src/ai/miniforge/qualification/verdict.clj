@@ -20,7 +20,8 @@
    verdict. A declared criterion with no result is unrun; only a run where
    every criterion passed is a pass."
   (:require
-   [ai.miniforge.qualification.messages :as msg]))
+   [ai.miniforge.qualification.messages :as msg]
+   [ai.miniforge.qualification.vocabulary :as vocab]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -33,11 +34,7 @@
   "`:verdict/fail` when any row failed, `:verdict/pass` when every row
    passed, `:verdict/incomplete` otherwise."
   [rows]
-  (let [status-of (set (map :criterion/status rows))]
-    (cond
-      (contains? status-of :status/fail) :verdict/fail
-      (= #{:status/pass} status-of)      :verdict/pass
-      :else                              :verdict/incomplete)))
+  (vocab/verdict-of-statuses (map :criterion/status rows)))
 
 (defn ^{:stratum 0} result-problems
   "Messages for results the gate cannot accept: a result for a criterion
