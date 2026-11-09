@@ -88,7 +88,8 @@ None. A custom rule must return a map with a boolean `:valid?`.
 
 ## Depends on
 
-Stacked on #2448, which is stacked on #2446 and #2444.
+Builds on the executor PR (#2448), the preflight PR (#2446) and the
+`run.clj` split (#2444), all merged; base is `main`.
 
 ## Related Issues/PRs
 
