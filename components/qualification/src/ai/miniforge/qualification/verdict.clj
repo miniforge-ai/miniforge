@@ -57,14 +57,17 @@
 
 (defn ^{:stratum 1} rows
   "One row per declared criterion, in declaration order: the criterion with
-   its result, or unrun when the scenario reported none. Call only with
-   results `result-problems` accepts."
+   its result; unrun when the scenario reported none; unrun when it reported
+   more than one, since no single result stands for the criterion. Results
+   for undeclared criteria have no row; `result-problems` names them."
   [gate results]
-  (let [by-id (into {} (map (juxt :criterion/id identity)) results)]
-    (mapv (fn [criterion]
-            (if-let [result (get by-id (:criterion/id criterion))]
-              (merge criterion result)
-              (unrun-row criterion (msg/t :criterion/no-result))))
+  (let [by-id (group-by :criterion/id results)]
+    (mapv (fn [{:criterion/keys [id] :as criterion}]
+            (let [found (get by-id id)]
+              (case (count found)
+                0 (unrun-row criterion (msg/t :criterion/no-result))
+                1 (merge criterion (first found))
+                (unrun-row criterion (msg/t :result/duplicate {:id id})))))
           (:gate/criteria gate))))
 
 (comment

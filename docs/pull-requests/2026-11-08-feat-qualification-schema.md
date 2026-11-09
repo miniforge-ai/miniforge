@@ -47,6 +47,9 @@ shared format lets every gate report the same way.
    `vocabulary/verdict-of-statuses` so the schema and `verdict` share it.
 3. Only the command's executable must be nonblank; arguments may be any
    string, so a command with an empty argument repeats exactly.
+4. `rows` no longer keeps the last of two results for one criterion: a
+   criterion with more than one result is unrun, so `rows` is safe even when
+   called without `result-problems`.
 
 ## Testing Plan
 
