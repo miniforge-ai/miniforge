@@ -35,11 +35,12 @@
   (capabilities [_] (get opts :fake/capabilities world/default-capabilities))
   (probe [_ _request] (get opts :fake/probe-failures []))
   (provision! [_ target _request]
-    (let [taken? (contains? @state (:target/namespace target))
-          {:keys [applied failed]} (world/walk-steps (if taken? :step/namespace (:fake/fail-step opts)))
-          uid (when (seq applied) (str (random-uuid)))
+    (let [walked (world/walk-steps (:fake/fail-step opts))
+          fresh (str (random-uuid))
+          [before _] (swap-vals! state world/provisioned (:target/namespace target) fresh (:target/generation target) (:applied walked))
+          {:keys [applied failed]} (if (contains? before (:target/namespace target)) (world/walk-steps :step/namespace) walked)
+          uid (when (seq applied) fresh)
           reported (if (:fake/uncertain-steps? opts) :outcome/uncertain :outcome/applied)]
-      (when uid (swap! state world/provisioned (:target/namespace target) uid (:target/generation target) applied))
       (when (and uid (:fake/recreated-after-provision? opts)) (swap! state world/recreated (:target/namespace target)))
       {:provision/uid (when-not (:fake/omit-uid? opts) uid)
        :provision/steps (cond-> (mapv #(world/step % reported) applied)

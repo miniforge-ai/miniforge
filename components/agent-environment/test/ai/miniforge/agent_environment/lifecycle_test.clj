@@ -109,8 +109,8 @@
     (is (= :outcome/refused (:receipt/outcome (last @(:receipts w)))))))
 
 (deftest ^{:stratum 1} test-a-namespace-someone-else-holds-is-not-taken-over
-  (let [w (world)
-        req (fx/request w (:a w))]
+  (is (= {"ns" {:uid "other"}} (world/provisioned {"ns" {:uid "other"}} "ns" "mine" 1 [:step/namespace])))
+  (let [w (world) req (fx/request w (:a w))]
     (fake/replace-uid! (:controller/provider (:c w)) (lease/namespace-name req))
     (is (= :anomalies.agent-environment/provisioning-failed (reason (fx/acquire w (:a w) req))))
     (is (= 1 (count (live w))))

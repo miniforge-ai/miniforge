@@ -43,10 +43,10 @@
       space)))
 
 (defn ^{:stratum 0} provisioned
+  "`world` with `namespace` created, in one step, unless the name is taken."
   [world namespace uid generation applied]
-  (assoc world namespace {:uid uid
-                          :generation generation
-                          :ready? (contains? (set applied) :step/workload)}))
+  (cond-> world (and (seq applied) (not (contains? world namespace)))
+          (assoc namespace {:uid uid :generation generation :ready? (contains? (set applied) :step/workload)})))
 
 (defn ^{:stratum 0} recreated
   "`world` after an outside actor recreates `namespace` under its own UID,
