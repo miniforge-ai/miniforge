@@ -53,9 +53,11 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop :as load-stop]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-start :as load-start]
    [ai.miniforge.phase-opsv.boundary.kubernetes-baseline-restoration :as baseline-restoration]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-baseline-restoration-provider :as native-baseline-restoration]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup :as load-cleanup]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-cleanup-provider :as native-load-cleanup-provider]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-stop-provider :as native-load-stop-provider]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-provider :as native-load-start-provider]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -98,6 +100,13 @@
    Returns proposal or anomaly, never permission, mutation or proof of restored runtime invariants."
   baseline-restoration/prepare!)
 
+(def ^{:stratum 0} restore-kubernetes-baseline-replicas!
+  "Submit original-baseline desired replicas after current retained recovery admission and complete native capture.
+   Runtime is closed context/restoration input; record must be a granted committing restore-baseline transaction.
+   Requires current N4/N8 recovery admission, exact independent authority, an issued pin and synchronous dispatch.
+   Returns outcome or anomaly. An acknowledged replica patch does not prove restored runtime invariants."
+  native-baseline-restoration/restore!)
+
 (def ^{:stratum 0} prepare-kubernetes-load-cleanup-proposal!
   "Prepare an exact UID/revision-pinned deletion request from current retained recovery intent.
    Input is the closed recovery reference/runtime/new effect-id contract used for load stopping.
@@ -111,6 +120,13 @@
    Requires current effect admission, separate exact recovery authority and a six-argument pinned commit.
    An acknowledgement proves neither resource absence nor baseline recovery."
   native-load-cleanup-provider/delete!)
+
+(def ^{:stratum 0} start-kubernetes-load-pod!
+  "Submit one UID/revision/gate-pinned forward start through required synchronous provider dispatch.
+   Runtime carries context and the retained recovery-reference input; record must be granted and committing.
+   Requires current N4/N8 effect admission, separate exact forward authority and an independently pinned commit.
+   Returns outcome or anomaly. Gate-release acknowledgement proves neither actual traffic nor verified SLOs."
+  native-load-start-provider/patch!)
 
 (def ^{:stratum 0} stop-kubernetes-load-pod!
   "Execute one exact deadline patch through a required trusted synchronous dispatch callback.
