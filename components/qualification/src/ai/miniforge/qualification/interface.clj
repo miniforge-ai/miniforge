@@ -17,11 +17,15 @@
 ;; limitations under the License.
 (ns ai.miniforge.qualification.interface
   "Public API for the qualification component: gate evidence with a
-   machine-readable report tied to the build, fixture and config hashes,
-   the injected faults and observed state, and pass or fail per criterion.
-   A criterion that was not run, or that the scenario does not support, is
-   never a pass."
+   repeatable command and a machine-readable report tied to the build,
+   fixture and config hashes, the injected faults and observed state, and
+   pass or fail per criterion. A criterion that was not run, or that the
+   scenario does not support, is never a pass.
+
+   A gate's scenario namespace calls `run-gate!` from its `-main`, prints
+   `summary-lines`, and exits with `exit-code`."
   (:require
+   [ai.miniforge.qualification.run :as run]
    [ai.miniforge.qualification.schema :as schema]
    [malli.core :as m]))
 
@@ -38,10 +42,35 @@
   schema/ScenarioOutput)
 
 (def ^{:stratum 0} Report
-  "A qualification report."
+  "The report `run-gate!` writes."
   schema/Report)
 
 (defn ^{:stratum 0} valid-report?
   "True when `report` is a well-formed qualification report."
   [report]
   (m/validate schema/Report report))
+
+;; Running a gate
+(defn ^{:stratum 0} run-gate!
+  "Run `scenario` (a no-argument fn returning a ScenarioOutput) for `gate`
+   and write the report as EDN and JSON under `:out-dir`. Options:
+   `:out-dir`, `:command` (the argv that repeats the run), `:root` (the
+   workspace whose build is recorded, default \".\").
+
+   Returns {:report r :paths {:edn :json}}, {:report r :write-failure
+   message}, or {:invalid-gate problems}. A scenario that throws or returns
+   malformed output still yields a report: every criterion unrun, verdict
+   incomplete."
+  [gate scenario opts]
+  (run/run-gate! gate scenario opts))
+
+(defn ^{:stratum 0} exit-code
+  "0 when the run passed and its report was written, 2 for an invalid gate,
+   1 otherwise."
+  [result]
+  (run/exit-code result))
+
+(defn ^{:stratum 0} summary-lines
+  "Human-readable lines for a `run-gate!` result."
+  [result]
+  (run/summary-lines result))

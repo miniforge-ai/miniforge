@@ -71,15 +71,15 @@
 
 (defn ^{:stratum 1} output-problems
   "Why a scenario's output cannot be reported, or nil when it can: it is
-   not a ScenarioOutput, its fixtures or config are not plain data, or its
-   results do not match the gate."
+   not a ScenarioOutput, its fixtures, config or results are not plain data
+   (the hashes would not repeat, and the report could not be written as
+   EDN), or its results do not match the gate."
   [gate output]
   (cond
     (not (m/validate schema/ScenarioOutput output))
     [(pr-str (me/humanize (m/explain schema/ScenarioOutput output)))]
 
-    (not (and (plain-data? (:scenario/fixtures output))
-              (plain-data? (:scenario/config output))))
+    (not (plain-data? (select-keys output [:scenario/fixtures :scenario/config :scenario/results])))
     [(msg/t :scenario/not-plain-data)]
 
     :else
