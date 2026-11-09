@@ -89,5 +89,5 @@
    :delivery/effect-id :delivery/pull-request}`. A repeat returns what the
    first delivery recorded."
   [wc acting grant workspace]
-  (or (check tenancy/ActingContext acting grant/ExecutionGrant grant schema/Workspace workspace)
+  (or (check tenancy/ActingContext acting grant/ExecutionGrant grant schema/Workspace workspace env/Lease (:workspace/lease workspace))
       (workspace/deliver! wc acting grant workspace)))

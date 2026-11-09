@@ -114,6 +114,7 @@
     (doseq [forged [(assoc-in ws [:workspace/checkouts 0 :repo/task-branch] "main")
                     (assoc-in ws [:workspace/checkouts 0 :repo/path] "/work/elsewhere")]]
       (is (= :anomalies.agent-workspace/checkout-mismatch (anomaly/subtype (deliver-all w forged)))))
+    (is (= :invalid-input (:anomaly/type (deliver-all w (update ws :workspace/lease dissoc :lease/generation)))))
     (is (empty? (fx/pushed-branches w)))))
 
 (deftest ^{:stratum 1} test-a-lost-push-awaits-reconciliation-and-a-rejected-one-failed
