@@ -53,16 +53,21 @@ issuance, pinned commit, and durable storage. Exercise fresh ownership, real
 termination, synthetic and malformed state, other possible workers, and changes
 after a previously successful observation. Simulate only HTTP transport.
 
-Source and a freshly built isolated package pass 31 tests and 634 assertions.
+Source and a freshly built isolated package pass 32 tests and 653 assertions.
 Both consuming JVM products, Polylith structure and task-classpath checks pass.
-Broader integration passes 210 tests and 2,856 assertions; native compatibility
+Broader integration passes 211 tests and 2,875 assertions; native compatibility
 passes 308 tests and 1,903 assertions. The isolated package uses only the current
 JAR and test directories, without production-source overlays.
 
 Strict lint has zero warnings or errors; all seven actual inferred call graphs
-fit within three strata. All five injected faults cause assertion failures with
-zero errors: bypassed scheduling, all-worker accounting, native termination,
-identified timestamped state, and fresh ownership.
+fit within three strata. All six injected faults cause assertion failures with
+zero errors. Faults bypass scheduling, all-worker accounting, native termination,
+identified timestamped state, fresh ownership, and required nonempty worker data.
+
+Review caught that omitted or empty regular-container data could previously be
+classified as not started. Require the nonempty collection before classifying
+either outcome. The actual-producer regression failed before the fix with two
+assertion failures and zero errors; both source and isolated package now pass it.
 
 ## Standards Gap Analysis
 

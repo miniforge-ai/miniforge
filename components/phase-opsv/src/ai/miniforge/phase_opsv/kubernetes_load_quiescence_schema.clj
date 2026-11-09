@@ -11,7 +11,7 @@
   [:map
    ["spec" [:map ["schedulingGates" {:optional true} [:vector :map]]
             ["nodeName" {:optional true} :string] ["restartPolicy" {:optional true} :string]
-            ["containers" {:optional true} [:vector :map]]
+            ["containers" [:vector {:min 1} :map]]
             ["initContainers" {:optional true} [:vector :map]]
             ["ephemeralContainers" {:optional true} [:vector :map]]]]
    ["status" {:optional true}

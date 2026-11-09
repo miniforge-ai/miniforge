@@ -82,6 +82,11 @@
                 ["status" "ephemeralContainerStatuses"]]]
     (check-observation fixture (assoc-in pod path 42) :unresolved)))
 
+(defn- ^{:stratum 1} check-incomplete-worker [{:keys [pod] :as fixture}]
+  (doseq [changed [(update pod "spec" dissoc "containers")
+                   (assoc-in pod ["spec" "containers"] [])]]
+    (check-observation fixture changed :unresolved)))
+
 (deftest ^{:stratum 1} disappearance-or-foreign-identity-is-not-owned-quiescence-test
   (ownership/with-created check-missing-or-foreign))
 
@@ -114,6 +119,9 @@
 
 (deftest ^{:stratum 2} malformed-provider-state-is-unresolved-not-an-exception-or-proof-test
   (ownership/with-created check-malformed))
+
+(deftest ^{:stratum 2} omitted-or-empty-regular-worker-data-cannot-prove-not-started-test
+  (ownership/with-created check-incomplete-worker))
 
 (deftest ^{:stratum 2} deadline-deletion-and-previous-observations-do-not-establish-current-quiescence-test
   (ownership/with-created check-fresh-state))
