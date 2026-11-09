@@ -341,11 +341,17 @@
       (is (true? (:done? parsed)))
       (is (= (msg/t :cli-output.system/codex-stream-error {:message "Rate limited"}) (:delta parsed)))))
 
-  (testing "an error event without a message says so"
-    (let [parsed (impl/parse-codex-stream-line (json/generate-string {:type "error"}))]
-      (is (= (msg/t :cli-output.system/codex-stream-error
-                    {:message (msg/t :cli-output.system/codex-error-unknown)})
-             (:delta parsed)))))
+  (testing "an error event without a message says so, whether the message is
+            missing or null"
+    (let [unknown (msg/t :cli-output.system/codex-stream-error
+                         {:message (msg/t :cli-output.system/codex-error-unknown)})]
+      (doseq [event [{:type "error"}
+                     {:type "error" :message nil}
+                     {:type "turn.failed" :error {}}
+                     {:type "turn.failed" :error {:message nil}}]]
+        (is (= unknown
+               (:delta (impl/parse-codex-stream-line (json/generate-string event))))
+            (pr-str event)))))
 
   (testing "thread.started is a heartbeat naming the invocation"
     (let [line (json/generate-string {:type "thread.started" :thread_id "abc"})

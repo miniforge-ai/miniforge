@@ -28,8 +28,8 @@ places). #2089 rewrote the streamed rate-limit message line.
 
 The text is unchanged; workflow's rate-limit detection reads the notice,
 not the prefix. `interface-test` checks each message against its catalog
-key, including a Codex error event with no message: 72 tests, 382
-assertions, 0 failures.
+key, including Codex error and failed-turn events whose message is
+missing or null: 73 tests, 389 assertions, 0 failures.
 
 ## Deployment Plan
 
