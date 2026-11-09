@@ -506,7 +506,7 @@
                     (messages/t :resume/resuming-from-phase
                                 {:phase (or (resume-print-phase machine-snapshot
                                                                 remaining-pipeline)
-                                            "?")
+                                            (messages/t :cp/unknown-fallback))
                                  :count (count remaining-pipeline)}))
                   (display/print-info (messages/t :resume/all-phases-completed))))
 
@@ -554,9 +554,8 @@
                                       ;; `--pin` also pins the checkpoints this
                                       ;; attempt writes, under a new run id too.
                                       :checkpoint/pin? (boolean (:pin opts))
-                                      ;; The id announced and registered
-                                      ;; above; without it a snapshot-less
-                                      ;; resume minted a second id.
+                                      ;; The id registered above: ensures events land under
+                                      ;; the same id the control plane tracks this run as.
                                       :workflow-id resume-run-id
                                       :origin-id origin-id
                                       :workflow-run/correlation-id correlation-id
@@ -588,10 +587,8 @@
                             {:status final-status})))
             (when-not (terminal-status? final-status)
               ;; Non-terminal status means run-pipeline returned without
-              ;; advancing the FSM to a terminal state. The CLI used to
-              ;; print this and exit 0 — silently losing the prior
-              ;; session's plan/explore/verify token spend. Throw so
-              ;; main exits non-zero and dogfood drivers see the failure.
+              ;; advancing the FSM to a terminal state; throw so callers
+              ;; get a non-zero exit and can detect the resume failure.
               (response/throw-anomaly!
                 :anomalies.workflow/resume-non-terminal
                 (messages/t :resume/non-terminal-status
