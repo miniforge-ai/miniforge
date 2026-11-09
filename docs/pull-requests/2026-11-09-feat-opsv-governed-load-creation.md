@@ -48,9 +48,8 @@ No default activation, live experiments, image pulls, traffic or cluster changes
 
 ## Related Issues/PRs
 
-Local dependent branch on `refactor/opsv-forward-runtime-core`; publish only after
-that prerequisite merges and current main is integrated. Baseline recovery
-verification is a separate proof boundary.
+Base: main after shared forward-runtime prerequisite #2494.
+Baseline recovery verification is a separate proof boundary.
 
 ## Checklist
 
