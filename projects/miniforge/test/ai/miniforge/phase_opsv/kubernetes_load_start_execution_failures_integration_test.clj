@@ -6,12 +6,29 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.effect-transaction.interface :as effect]
             [ai.miniforge.execution-grant.interface :as grant]
+            [ai.miniforge.opsv-actuation.interface :as actuation]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-effect-audit :as audit]
             [ai.miniforge.phase-opsv.kubernetes-load-start-execution-fault-fixtures :as faults]
             [ai.miniforge.phase-opsv.kubernetes-load-start-execution-fixtures :as fixtures]
             [ai.miniforge.phase-opsv.prometheus-test-support :as wire]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} check-interrupted [cleanup-failed? {:keys [host/runtime request] :as fixture}]
+  (let [failure (InterruptedException.)
+        revoke grant/revoke-stored!
+        [caught flagged?] (wire/interrupted-result
+                           #(with-redefs [audit/record! (fn [& _] (throw failure))
+                                          grant/revoke-stored! (if cleanup-failed? (constantly (faults/refusal)) revoke)]
+                              (fixtures/execute fixture)))
+        record (effect/read-record (:effects-directory runtime) (:effect/id request))
+        current (grant/current (:authority-directory runtime) (:effect/grant-id record))]
+    (is (identical? failure caught))
+    (is flagged?)
+    (is (= cleanup-failed? (nil? (:grant/revoked-at current))))
+    (is (= cleanup-failed? (boolean (some (comp anomaly/anomaly? ex-data) (.getSuppressed ^Throwable caught)))))
+    (is (true? (:stopped? (actuation/mutation-status (:fence runtime)))))))
 
 (defn- ^{:stratum 0} check-invalid [transform fixture]
   (let [[result calls] (fixtures/execute (transform fixture))]
@@ -75,6 +92,7 @@
                      #(assoc-in % [:request :serialized-authority] true)
                      #(assoc-in % [:host/runtime :current-context] (constantly nil))
                      #(assoc-in % [:host/runtime :current-context] faults/refusal)
+                     #(assoc-in % [:host/runtime :current-context] (fn [] (throw (ex-info "injected context failure" (faults/refusal)))))
                      cancelled]]
     (fixtures/with-startable (partial check-invalid transform))))
 
@@ -93,6 +111,9 @@
 
 (deftest ^{:stratum 1} changed-policy-during-readiness-publication-refuses-the-already-prepared-patch-test
   (fixtures/with-startable check-late-publication))
+
+(deftest ^{:stratum 1} interruption-after-registration-revokes-exact-grant-and-preserves-independent-cleanup-failure-test
+  (doseq [cleanup-failed? [false true]] (fixtures/with-startable (partial check-interrupted cleanup-failed?))))
 
 (comment
   (fixtures/with-startable check-unknown))

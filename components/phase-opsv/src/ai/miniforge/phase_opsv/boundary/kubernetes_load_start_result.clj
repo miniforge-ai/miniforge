@@ -3,10 +3,13 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.boundary.kubernetes-load-start-result
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.phase-opsv.effect-authority :as authority]
             [ai.miniforge.phase-opsv.messages :as msg]
-            [ai.miniforge.phase-opsv.run-control :as control]))
+            [ai.miniforge.phase-opsv.run-control :as control]
+            [ai.miniforge.resource-cleanup.interface :as cleanup]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -15,6 +18,10 @@
              (control/bound-to? (:control runtime) (get-in input [:recovery/input :load :declaration :workflow/id])
                                (:authority-directory runtime) (:fence runtime)))
     (actuation/stop-mutations! (:fence runtime))))
+
+(defn- ^{:stratum 0} revoke! [runtime issued]
+  (let [revoked (grant/revoke-stored! (:authority-directory runtime) (:grant/id issued) :revocation/superseded ((:clock runtime)))]
+    (when (anomaly/anomaly? revoked) (throw+ revoked))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -27,6 +34,14 @@
                           (if (anomaly/anomaly? result) result
                               (anomaly/anomaly :unavailable (msg/ts :experiment/native-start-unconfirmed)
                                                {:effect/transaction result}))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} complete! [runtime input issued now operation]
+  (try+ (finish! runtime input issued now (operation))
+    (catch Object _
+      (fence! runtime input)
+      (cleanup/after-failure! (:throwable &throw-context) (partial revoke! runtime issued)))))
 
 (comment
   (fence! {} {}))

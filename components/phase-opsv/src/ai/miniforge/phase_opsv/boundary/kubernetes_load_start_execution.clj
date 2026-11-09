@@ -25,7 +25,7 @@
 
 (defn- ^{:stratum 0} commit-prepared! [runtime input prepared now]
   (anomaly/let-ok [issued (issuance/issue! runtime prepared now)]
-    (result/finish! runtime input issued now (transaction/execute! runtime prepared input issued now))))
+    (result/complete! runtime input issued now (partial transaction/execute! runtime prepared input issued now))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -51,8 +51,11 @@
       (result/fence! runtime input) (.interrupt (Thread/currentThread)) (throw interrupted))
     (catch Error fatal (result/fence! runtime input) (throw fatal))
     (catch exceptions/nonfatal? _
-      (result/fence! runtime input)
-      (anomaly/anomaly :unavailable (msg/ts :experiment/native-start-unconfirmed) {:effect/id (:effect/id input)}))))
+      (let [cleanup-failures (mapv (partial anomaly/exception-anomaly :unavailable (msg/ts :experiment/native-start-unconfirmed))
+                                   (.getSuppressed ^Throwable (:throwable &throw-context)))]
+        (result/fence! runtime input)
+        (anomaly/exception-anomaly :unavailable (msg/ts :experiment/native-start-unconfirmed)
+          {:effect/id (:effect/id input) :grant/cleanup-failures cleanup-failures} (:throwable &throw-context))))))
 
 (comment
   (start! {} {}))
