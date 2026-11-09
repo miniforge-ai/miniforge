@@ -63,7 +63,8 @@
    assembled report is not a valid Report (for example no usable
    `:command`); or {:invalid-gate problems}. A scenario that throws or
    returns malformed output still yields a report: every criterion unrun,
-   verdict incomplete."
+   verdict incomplete. The build is read before and after the scenario; one
+   that changes during the run is recorded as not clean."
   [gate scenario opts]
   (run/run-gate! gate scenario opts))
 

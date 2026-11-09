@@ -37,8 +37,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} thrown-value?
-  "True for a value thrown with slingshot's throw+ that is not itself a
-   Throwable: a map from ex-info, or any other object."
+  "A value thrown with throw+ (or ex-info data), not itself a Throwable."
   [x]
   (not (instance? Throwable x)))
 
@@ -60,8 +59,7 @@
 (defn- ^{:stratum 0} now [] (str (Instant/now)))
 
 (defn- ^{:stratum 0} stable-build
-  "The build read before the scenario ran, recorded as not clean when the
-   read after it differs: the evidence then belongs to no single build."
+  "The build before the run, marked not clean if it changed during it."
   [before after]
   (if (= before after) before (assoc before :build/clean? false)))
 
@@ -69,8 +67,7 @@
   (or (ex-message throwable) (.getName (class throwable))))
 
 (defn- ^{:stratum 0} unpinned-pass?
-  "Every row passed, yet the verdict is incomplete: the evidence is not
-   pinned to a clean, identified commit."
+  "Every row passed, yet the evidence is not pinned, so incomplete."
   [report passed total]
   (and (= passed total)
        (= :verdict/incomplete (:report/verdict report))))
@@ -131,8 +128,7 @@
      {:failure (thrown-failure e)})))
 
 (defn- ^{:stratum 1} assemble-report
-  "The report for one run. Passing rows give a pass only on pinned evidence:
-   a clean, identified commit and hashed fixtures and config."
+  "The report for one run; passing rows pass only on pinned evidence."
   [gate {:keys [output failure] :as outcome} {:keys [command started-at build]}]
   (let [rows         (report-rows gate outcome)
         fixture-hash (when output (content-hash/content-hash (:scenario/fixtures output)))
@@ -155,18 +151,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} run-gate!
-  "Run `scenario`, a no-argument fn returning a ScenarioOutput, for `gate`,
-   and write the report under `out-dir` (default target/qualification).
-   `command` is the argv that repeats the run; `root` is the workspace
-   whose build is recorded, read by `build-fn` (default
-   `build/build-identity`) before and after the scenario; a build that
-   changes during the run is recorded as not clean.
-
-   Returns {:report r :paths {:edn :json}}; {:report r :write-failure
-   message} when the report could not be written; {:report r
-   :invalid-report problems}, writing nothing, when the assembled report is
-   not a valid Report (for example no usable `command`); or {:invalid-gate
-   problems} when `gate` is not a valid gate."
+  "See `interface/run-gate!`. `build-fn` reads `root` before and after
+   the scenario; a build that changes during the run is not clean."
   [gate scenario {:keys [out-dir command root build-fn]
                   :or   {out-dir  "target/qualification"
                          root     "."

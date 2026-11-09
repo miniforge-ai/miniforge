@@ -63,8 +63,7 @@
   (if (keyword? k) (subs (str k) 1) (str k)))
 
 (defn- ^{:stratum 0} real-inside?
-  "True when `path`'s parent, with symlinks resolved, is beneath `dir`,
-   with symlinks resolved. Both directories must exist."
+  "True when `path`'s existing parent resolves (symlinks too) beneath `dir`."
   [dir path]
   (let [no-opts (make-array LinkOption 0)
         base    (.toRealPath (.toPath (io/file dir)) no-opts)
@@ -72,8 +71,7 @@
     (.startsWith parent base)))
 
 (defn- ^{:stratum 0} write-new!
-  "Create `path` and write `text` to it, failing if anything, a symlink
-   included, already exists there."
+  "Create `path` with `text`; fails if anything, a symlink too, is there."
   [path text]
   (Files/write (.toPath (io/file path)) (.getBytes ^String text "UTF-8")
                ^"[Ljava.nio.file.OpenOption;"
@@ -82,16 +80,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} json-key-collision?
-  "True when some map in `x` has two keys that `json-key` writes the same,
-   such as `:sink/calls` and \"sink/calls\"; JSON would keep only one."
+  "True when a map in `x` has two keys `json-key` writes alike (`:a/b`, \"a/b\")."
   [x]
   (boolean (some #(and (map? %) (not= (count %) (count (into #{} (map json-key) (keys %)))))
                  (tree-seq coll? seq x))))
 
 (defn- ^{:stratum 1} json-text
-  "The report as JSON. Keys keep their namespaces through `json-key`;
-   cheshire writes keyword values with theirs, `:verdict/pass` →
-   \"verdict/pass\", which the writer test checks."
+  "The report as JSON; keys and keyword values keep their namespaces."
   [report]
   (json/generate-string report {:pretty true :key-fn json-key}))
 
