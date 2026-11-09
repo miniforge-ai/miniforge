@@ -93,7 +93,10 @@
 (def ^{:stratum 2} Report
   "A machine-readable qualification report, tied to the build, the fixtures
    and the config it ran with. The command's executable is nonblank; its
-   arguments may be any string. The verdict must be the one its rows give."
+   arguments may be any string. Criterion ids are unique. A report with a
+   failure has only unrun rows. The verdict is the one its rows give, and a
+   pass requires pinned evidence: a clean, identified commit and hashed
+   fixtures and config."
   [:and
    [:map {:closed true}
     [:report/version [:= vocab/report-version]]
@@ -109,12 +112,26 @@
     [:report/criteria [:vector {:min 1} Row]]
     [:report/verdict (into [:enum] vocab/verdicts)]
     [:report/failure {:optional true} Failure]]
-   [:fn {:error/message "verdict must match the criteria statuses"}
+   [:fn {:error/message "criterion ids must be unique"}
+    (fn [report]
+      (let [criteria (:report/criteria report)]
+        (or (not (and (sequential? criteria) (seq criteria)))
+            (apply distinct? (map :criterion/id criteria)))))]
+   [:fn {:error/message "a report with a failure has only unrun rows"}
+    (fn [report]
+      (let [criteria (:report/criteria report)]
+        (or (nil? (:report/failure report))
+            (not (sequential? criteria))
+            (every? #(= :status/unrun (:criterion/status %)) criteria))))]
+   [:fn {:error/message "verdict must match the criteria statuses and the build"}
     (fn [report]
       (let [criteria (:report/criteria report)]
         (or (not (sequential? criteria))
             (= (:report/verdict report)
-               (vocab/verdict-of-statuses (map :criterion/status criteria))))))]])
+               (vocab/report-verdict (map :criterion/status criteria)
+                                     (vocab/pinned? (:report/build report)
+                                                    (:report/fixture-hash report)
+                                                    (:report/config-hash report)))))))]])
 
 (comment
   (require '[malli.core :as m])

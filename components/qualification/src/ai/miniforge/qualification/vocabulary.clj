@@ -51,6 +51,15 @@
       (= #{:status/pass} status-of)      :verdict/pass
       :else                              :verdict/incomplete)))
 
+(defn ^{:stratum 0} pinned?
+  "True when the evidence is tied to an immutable build: an identified
+   commit, a clean tree, and hashed fixtures and config."
+  [build fixture-hash config-hash]
+  (and (some? (:build/git-sha build))
+       (true? (:build/clean? build))
+       (some? fixture-hash)
+       (some? config-hash)))
+
 (def ^{:stratum 0} NonBlank
   [:and :string [:fn (complement str/blank?)]])
 
@@ -60,3 +69,14 @@
 
 (def ^{:stratum 0} GitSha
   [:re #"\A[0-9a-f]{40}\z"])
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} report-verdict
+  "The verdict a report states: the statuses' verdict, except that passing
+   statuses on evidence that is not `pinned?` give `:verdict/incomplete`."
+  [statuses pinned]
+  (let [verdict (verdict-of-statuses statuses)]
+    (if (and (= :verdict/pass verdict) (not pinned))
+      :verdict/incomplete
+      verdict)))
