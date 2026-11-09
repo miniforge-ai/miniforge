@@ -28,7 +28,7 @@
             ;; Opt-in development-agent environments (#2439). No base yet, so
             ;; every brick is listed; no default project may depend on them.
             "agent-environments" {:alias "ae"
-                                  :necessary ["agent-environment" "anomaly" "content-hash"
+                                  :necessary ["agent-environment" "agent-worker" "anomaly" "content-hash"
                                               "execution-grant" "file-durability"
                                               "kubernetes-target" "messages" "tenancy"]}
             "data-foundry"   {:alias "df"}

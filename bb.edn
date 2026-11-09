@@ -825,6 +825,8 @@
                  "components/dag-primitives/src"
                  "components/dag-executor/src"
                  "components/dag-executor/resources"
+                 "components/subprocess/src"
+                 "components/subprocess/resources"
                  "components/task-executor/src"
                  "components/task-executor/resources"
                  "components/pr-lifecycle/src"

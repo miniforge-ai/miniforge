@@ -57,6 +57,11 @@
 (def ^{:stratum 0} NonBlank
   [:and :string [:fn (complement str/blank?)]])
 
+(def ^{:stratum 0} AbsolutePath
+  "A path inside the environment from its root, so a provider's commands
+   never read it as an option."
+  [:re #"\A/[^\x00]*\z"])
+
 (def ^{:stratum 0} Sha256Hex
   "Lowercase hex SHA-256, as `content-hash` produces."
   [:re #"\A[0-9a-f]{64}\z"])
@@ -79,10 +84,11 @@
    [:step/outcome (into [:enum] step-outcomes)]])
 
 (def ^{:stratum 1} Command
-  "One command. The executable must be named; later arguments may be empty
-   or whitespace, as any process argument may."
+  "One command; `:exec/stdin` is piped to it when present. The executable
+   must be named; later arguments may be empty or whitespace."
   [:map {:closed true}
    [:exec/argv [:and vector? [:cat NonBlank [:* :string]]]]
+   [:exec/stdin {:optional true} :string]
    [:exec/timeout-ms pos-int?]])
 
 (def ^{:stratum 1} Request

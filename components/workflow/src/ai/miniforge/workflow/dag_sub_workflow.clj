@@ -32,11 +32,33 @@
    multi-parent base-branch resolution."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.workflow.dag-merge :as dag-merge]
    [ai.miniforge.workflow.dag-merge-anomaly :as merge-anomaly]
-   [ai.miniforge.workflow.dag-plan :as dag-plan]))
+   [ai.miniforge.workflow.dag-plan :as dag-plan]
+   [ai.miniforge.workflow.stop-signal :as stop-signal]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} merge-parents
+  "merge-parent-branches! for a multi-parent task, unless the run is
+   stopped. The merge runs before the task's sub-workflow, so the run's
+   cancel is bound here for the resolution agent's LLM calls
+   (`llm/call-with-cancel-signal`). Git steps run to their end. A merge
+   that ends under a stopped run is the task's stop: the cancel may have
+   cut its resolution short."
+  [context task-def]
+  (let [control-state (:control-state context)
+        stopped #(when (stop-signal/stopped? control-state)
+                   (merge-anomaly/merge-stopped-anomaly (:task/id task-def)))]
+    (or (stopped)
+        (let [merged (llm/call-with-cancel-signal
+                      #(stop-signal/stopped? control-state)
+                      #(dag-merge/merge-parent-branches! context task-def))]
+          (if-let [stop (stopped)]
+            ;; The merge's own failure, if any, is kept for the operator.
+            (cond-> stop (merge-anomaly/merge-error? merged) (assoc :merge/failure merged))
+            merged)))))
 
 (defn ^{:stratum 0} task-sub-workflow
   "Build a sub-workflow config for a single DAG task.
@@ -156,8 +178,9 @@
    - Multi-dep (v2), merge succeeds → the merged ref produced by
      `merge-parent-branches!` (`:branch` set).
    - Multi-dep (v2), merge produces a typed anomaly (conflict /
-     unrelated histories / branch unresolvable / strategy unsupported)
-     → `:branch` is OMITTED and the anomaly is surfaced via
+     unrelated histories / branch unresolvable / strategy unsupported,
+     or `:anomalies/dag-merge-stopped` for a run cancelled before or
+     during the merge) → `:branch` is OMITTED and the anomaly is surfaced via
      `:dag/merge-anomaly` on opts. `run-mini-workflow` checks for this
      and short-circuits with a structured failure rather than running a
      doomed sub-workflow against a stale base.
@@ -181,7 +204,7 @@
                        nil
 
                        (dag/multi-parent? deps)
-                       (dag-merge/merge-parent-branches! context task-def)
+                       (merge-parents context task-def)
 
                        :else
                        ;; v1 single-parent path returns a branch string for
