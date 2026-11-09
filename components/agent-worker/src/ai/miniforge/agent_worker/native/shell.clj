@@ -44,6 +44,11 @@
 
 (defn ^{:stratum 0} process-ref [dir pid] (str dir "#" pid))
 
+(def ^{:stratum 0} cancel-tool
+  "What `cancel-script` signals with. It is not POSIX, so preflight requires
+   it rather than let a cancel fail once a turn runs."
+  "pkill")
+
 (defn ^{:stratum 0} split-ref
   "`[dir pid]` from a process reference; the pid follows the last `#`, so a
    workdir may contain one."
@@ -81,7 +86,7 @@
   "Signal the harness, not the wrapper, so the wrapper records its exit.
    Exits nonzero when nothing was signalled, so the request reports false."
   [pid]
-  (str "pkill -TERM -P " (quote-arg pid) " 2>/dev/null"))
+  (str cancel-tool " -TERM -P " (quote-arg pid) " 2>/dev/null"))
 
 (defn ^{:stratum 1} present-script [cmd] (str "command -v " (quote-arg cmd) " > /dev/null"))
 
