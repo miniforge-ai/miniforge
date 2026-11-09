@@ -89,11 +89,11 @@
 (def ^{:stratum 0} command-config-pattern
   "Config keys that make git run a program (hooks, fsmonitor, gc and
    pack-objects hooks, ssh, pager, editor, credential helper, filter, diff
-   and merge drivers, archive filters, signing, remote helpers, man and web viewers, gui
-   tools, trailer commands, send-email and imap-send helpers, aliases), or
-   load config that can (`include.path`, `includeIf.*.path`). Taken from
-   the keys the git 2.48.1 man pages document. Lowercase for the same
-   reason as `redirect-config-pattern`.
+   and merge drivers, archive filters, signing, remote helpers, man and web
+   viewers, gui tools, trailer commands, send-email and imap-send helpers,
+   aliases), or load config that can (`include.path`, `includeIf.*.path`).
+   Taken from the keys the git 2.48.1 man pages document. Lowercase for the
+   same reason as `redirect-config-pattern`.
 
    `submodule.<name>.update` is left out although its `!command` form runs
    a shell command: `git submodule init` copies it from `.gitmodules`, so

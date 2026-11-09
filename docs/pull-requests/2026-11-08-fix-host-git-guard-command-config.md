@@ -64,7 +64,8 @@ these keys, so a change to one counts toward `:clean?`.
    a line such as `password=<token>; ...` would have kept the token.
    A valueless key (a bare `log` under `[pager]`, which git reads as
    true) is kept as the marker `valueless-entry`, not dropped. Dropping
-   it would let a task turn on a pager or `core.fsmonitor` unseen.
+   it would let a task turn on a pager or `core.fsmonitor` unseen. One
+   trailing CR is dropped from each key, so CRLF output cannot rename one.
 6. `redirect-config` becomes `config-values`, which takes the pattern, the
    value scrubber, and the failure message. `changed-redirect-config` is
    renamed `changed-config`, since it now compares both classes.
@@ -85,8 +86,9 @@ these keys, so a change to one counts toward `:clean?`.
 
 The read takes no scope flag, as before, so the user's global config is in
 the snapshot. An operator who edits `~/.gitconfig` during a run, for example
-by adding an alias, now gets a drift verdict for the checkout. The verdict warns on later
-acquires and fails the release result. It does not refuse an acquire.
+by adding an alias, now gets a drift verdict for the checkout. The verdict
+warns on later acquires and fails the release result. It does not refuse an
+acquire.
 Before this change only a global remote URL or `insteadOf` edit did that.
 
 ## Testing Plan
@@ -110,10 +112,13 @@ Before this change only a global remote URL or `insteadOf` edit did that.
 5. `a-valueless-key-added-mid-run-is-drift-test` (real git): a bare `log`
    under `[pager]` appended to the shared config is reported in
    `:command-drift` as `:valueless`.
-6. Existing guard and guarded-executor tests pass unchanged, apart from the
+6. `config-entry-keeps-the-key-stable-test`: a CRLF between key and value
+   leaves the key name intact, a valueless entry gives `[key nil]`, and an
+   empty value stays the empty string.
+7. Existing guard and guarded-executor tests pass unchanged, apart from the
    `changed-config` rename. The fetch and force-push cases still report
    clean, so command config does not drift on an ordinary fetch.
-7. By hand: the namespace loads and snapshots this checkout under babashka,
+8. By hand: the namespace loads and snapshots this checkout under babashka,
    using the `miniforge` bb task's classpath. `java.util.HexFormat` is not
    available in babashka, so hex is built with `format`.
 
@@ -144,8 +149,8 @@ Base branch: `main`. Depends on: nothing.
    `docs/design/task-snapshot-history.md`), from the 2026-11-08
    PAODO-Workspaces comparison.
 2. Original guard: `docs/pull-requests/2026-08-06-host-git-guard.md`.
-3. Companion PR (not yet open): `archive-bundle!` runs `git add` and `git commit` with
-   hooks and fsmonitor off.
+3. Companion PR (not yet open): `archive-bundle!` runs `git status`,
+   `add`, `commit`, and `checkout -B` with hooks and fsmonitor off.
 
 ## Checklist
 
