@@ -124,6 +124,11 @@
       (is (= [state] (mapv :delivery/state (deliver-all w (clone w (take 1 fx/allowed))))))
       (is (empty? @(:opened w))))))
 
+(deftest ^{:stratum 1} test-a-failed-git-command-keeps-its-output
+  (let [missing {:exec/exit 128 :exec/stdout "" :exec/stderr "fatal: repository not found"}
+        w (fx/world nil #(if (some #{"clone"} (:exec/argv %)) missing (fx/answer-git %)))]
+    (is (= "fatal: repository not found" (get-in (clone w (take 1 fx/allowed)) [:anomaly/data :exec/stderr])))))
+
 (deftest ^{:stratum 1} test-an-unanswered-pr-stays-unresolved-and-is-not-reopened
   (doseq [port [port-down (constantly nil) (constantly {:pr/number 0 :pr/url ""})]]
     (let [w (fx/world port)

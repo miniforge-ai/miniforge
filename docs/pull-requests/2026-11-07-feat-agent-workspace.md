@@ -69,7 +69,8 @@ Over the fake environment, with git answered by a scripted exec:
 10. a grant whose `:workspace/repos` is a vector allows nothing;
 11. clone and delivery with another tenant's acting identity are refused `forged-tenant`;
 12. a push that times out or loses its connection is `:unknown-outcome`, and one reporting a
-    rejected ref is `:failed`; none opens a PR.
+    rejected ref is `:failed`; none opens a PR;
+13. a failed git command keeps its exit, stdout and stderr in the anomaly.
 
 Not verified: real git against real remotes. Git configuration inside the environment (such as
 `url.*.insteadOf`) is not neutralized. Per-repository push credentials are what bound the push

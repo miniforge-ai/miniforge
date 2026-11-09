@@ -78,7 +78,8 @@
       (zero? (:exec/exit result)) result
       :else (anomaly/sub-anomaly :fault :anomalies.agent-workspace/git-failed
                                  (msg/t :anomalies.agent-workspace/git-failed)
-                                 {:git/argv argv :exec/exit (:exec/exit result) :exec/stdout (:exec/stdout result)}))))
+                                 {:git/argv argv :exec/exit (:exec/exit result)
+                                  :exec/stdout (:exec/stdout result) :exec/stderr (:exec/stderr result)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
