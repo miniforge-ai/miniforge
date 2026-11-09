@@ -29,6 +29,9 @@ Publish protected rollback drift through the existing N3 producer and N6 event
 linkage. Keep delivery failures, including a missing stream, in the failed report.
 Native namespace and Deployment identity conflicts are drift too; transport failures
 remain acquisition failures and do not invent environment changes.
+Post-capture projection conflicts, including controller counts outside the
+declared bounds and empty or heterogeneous replica membership, also publish
+linked drift. Their bounded native capture remains in the protected failed report.
 
 Recovery population bounds permit replacement replicas and churn. Separately
 require the Deployment's desired replica count to equal the retained original;
@@ -68,6 +71,13 @@ publication. Run lint, JVM/product/package compatibility and fault checks serial
 - Identity-conflict validation passes both JVM products and source/isolated
   recovery 34/1,198. All twelve recovery faults in each environment detect
   assertion failures with zero errors, including each UID guard and transport distinction.
+- Projection-conflict validation passes both JVM products and source/isolated
+  recovery 35/1,269. All fifteen recovery faults in each environment detect
+  assertion failures with zero errors. Each missing projection-drift marker is detected.
+- The final standards pass names target admission instead of nesting the target
+  branch, and formats capture fields individually. Strict lint/true strata and a
+  rebuilt package pass; source and isolated package each pass the three affected
+  admission/success/cancelled-run tests / 114 assertions.
 
 ## Deployment Plan
 

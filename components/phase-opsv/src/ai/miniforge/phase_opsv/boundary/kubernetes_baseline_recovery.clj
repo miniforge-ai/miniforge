@@ -32,6 +32,9 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} admit-target [provider plan]
+  (when-not (target/provider-for-plan? provider plan) (refused :conflict)))
+
 (defn- ^{:stratum 1} publish! [ctx input admitted original]
   (recovery-reporting/publish! ctx input admitted original (observe! input)))
 
@@ -45,10 +48,9 @@
         (refused :invalid-input)
         (anomaly/let-ok [admitted (recovery/read! ctx (:recovery/input input) (:recovery/artifact-ref input))
                         baseline (original/read! ctx (get-in input [:recovery/input :load :request])
-                                                 (get-in input [:recovery/input :load :comparison/artifact-ref]))]
-          (if (target/provider-for-plan? (:restoration/provider input) (:recovery/plan admitted))
-            (publish! ctx input admitted baseline)
-            (refused :conflict)))))
+                                                 (get-in input [:recovery/input :load :comparison/artifact-ref]))
+                        _target (admit-target (:restoration/provider input) (:recovery/plan admitted))]
+          (publish! ctx input admitted baseline))))
     (catch InterruptedException interrupted
       (.interrupt (Thread/currentThread)) (throw interrupted))
     (catch exceptions/nonfatal? _ (refused :unavailable))))

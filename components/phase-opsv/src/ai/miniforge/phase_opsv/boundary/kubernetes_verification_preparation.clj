@@ -21,7 +21,8 @@
   (anomaly/let-ok [context (request/admit declaration value)
                   captured (client/observe-verification! overrides (:kubernetes/declaration context))]
     (let [result (project context value captured)]
-      {:preparation/capture captured :preparation/result result})))
+      {:preparation/capture captured
+       :preparation/result result})))
 
 ;------------------------------------------------------------------------------ Layer 2
 

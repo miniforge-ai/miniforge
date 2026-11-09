@@ -16,6 +16,10 @@
 (defn ^{:stratum 0} changed-routes [path value fixture]
   (assoc-in (get-in fixture [:native :routes]) path value))
 
+(defn ^{:stratum 0} outside-recovery-count [fixture]
+  (inc (get-in fixture [:input :load :request :comparison/pin :comparison/contract
+                        :comparison/replica-contract :rollback :replicas/max-count])))
+
 (defn ^{:stratum 0} template-image-routes [fixture image]
   (assoc-in (get-in fixture [:native :routes])
             [inventory/deployment-path "spec" "template" "spec" "containers" 0 "image"] image))

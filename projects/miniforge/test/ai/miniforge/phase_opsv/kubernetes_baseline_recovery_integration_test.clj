@@ -98,7 +98,9 @@
     (is (not (anomaly/anomaly? output)))
     (is (false? (:verification/passed? report)))
     (is (anomaly/anomaly? observed))
-    (is (= observed (:comparison/result report)))
+    (is (= observed (update-in (:comparison/result report) [:anomaly/data] dissoc :opsv/environment-drift)))
+    (is (= :native-projection-conflict (get-in observed [:anomaly/data :comparison/reason])))
+    (is (= 1 (count (fixtures/drift-events fixture))))
     (is (seq (:kubernetes/inventory capture)))
     (is (seq (get-in capture [:kubernetes/inventory :kubernetes/pod-inventory "items"])))
     (is (every? #(= :get (:method %)) calls))
@@ -172,8 +174,14 @@
 (deftest ^{:stratum 2} rollback-environment-drift-is-correlated-and-linked-to-the-evidence-assembly-test
   (doseq [[path value] [[[inventory/deployment-path "spec" "template" "spec" "containers" 0 "image"] foreign-template-image]
                        [[inventory/namespace-path "metadata" "uid"] "foreign-namespace-uid"]
-                       [[inventory/deployment-path "metadata" "uid"] "foreign-deployment-uid"]]]
+                       [[inventory/deployment-path "metadata" "uid"] "foreign-deployment-uid"]
+                       [[inventory/pods-path "items"] []]
+                       [[inventory/pods-path "items" 0 "status" "containerStatuses" 0 "imageID"] (fingerprint/other-image)]]]
     (fixtures/with-input (partial check-drift-event path value))))
+
+(deftest ^{:stratum 2} out-of-bounds-native-controller-count-emits-linked-drift-instead-of-only-a-failed-report-test
+  (fixtures/with-input
+    #(check-drift-event [inventory/deployment-path "spec" "replicas"] (fixtures/outside-recovery-count %) %)))
 
 (deftest ^{:stratum 2} unreadable-native-state-remains-a-transport-failure-not-invented-environment-drift-test
   (fixtures/with-input check-transport-failure))

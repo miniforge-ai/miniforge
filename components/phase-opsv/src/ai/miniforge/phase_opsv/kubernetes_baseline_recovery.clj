@@ -12,12 +12,11 @@
   (get-in observation [:environment/raw-observations :kubernetes/verification :kubernetes/source
                        :kubernetes/inventory :kubernetes/deployment "spec" "replicas"]))
 
-(defn ^{:stratum 0} observation [acquired]
-  (let [result (:preparation/result acquired)]
-    (if (anomaly/anomaly? result)
-      (assoc-in result [:anomaly/data :environment/raw-observations]
-                {:kubernetes/verification {:kubernetes/source (:preparation/capture acquired)}})
-      result)))
+(defn- ^{:stratum 0} captured-failure [acquired result]
+  (cond-> (assoc-in result [:anomaly/data :environment/raw-observations]
+                    {:kubernetes/verification {:kubernetes/source (:preparation/capture acquired)}})
+    (= :conflict (:anomaly/type result))
+    (assoc-in [:anomaly/data :comparison/reason] :native-projection-conflict)))
 
 (defn ^{:stratum 0} report [input admitted original observed comparison]
   (let [load (get-in input [:recovery/input :load])
@@ -34,6 +33,10 @@
      :comparison/result comparison}))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} observation [acquired]
+  (let [result (:preparation/result acquired)]
+    (if (anomaly/anomaly? result) (captured-failure acquired result) result)))
 
 (defn ^{:stratum 1} compare-original [pin original observed]
   ;; Population bounds allow replacement/churn, not leaving the candidate's desired count applied.
