@@ -15,8 +15,8 @@ three strata each. No behavior change.
 
 `run.clj` had no `Layer N` headings, so stratum-lint skipped it. Its call graph
 infers nine strata against rule 210's budget of three. The first edit to the
-file arms the pre-commit `stratum-lint --fix`, which then fails SL003, so no
-change to the runner can land until the file is split.
+file arms the pre-commit `stratum-lint --fix`, which then fails SL003.
+No change to the runner can land until the file is split.
 
 The next changes need it. #2422 adds a preflight to `execute-pipeline`. #2435
 asks for a stage executor callable on its own, apart from the scheduling loop.
