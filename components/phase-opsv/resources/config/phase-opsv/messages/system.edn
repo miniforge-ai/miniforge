@@ -83,6 +83,8 @@
   :event/sequence-unavailable "The recorded OPSV event has no recoverable sequence acknowledgement."
   :event/publication-failed "The OPSV event stream rejected a domain event."
   :recovery/invalid-plan "Recovery planning requires a bounded native load declaration and duration."
+  :load/start-request-refused "Load start preparation requires current recovery readiness, a distinct effect identity and an unchanged owned never-started Pod."
+  :load/invalid-start-request "Load start preparation requires a well-formed recovery reference, runtime settings and effect identity."
   :load/stop-request-refused "Load stopping requires current retained recovery intent, a distinct effect identity and an owned Pod with a bounded deadline."
   :load/invalid-stop-request "Load stop preparation requires a well-formed recovery reference, runtime settings and effect identity."
   :load/cleanup-request-refused "Load cleanup requires current retained recovery intent, a distinct effect identity and a proven quiescent owned Pod."
