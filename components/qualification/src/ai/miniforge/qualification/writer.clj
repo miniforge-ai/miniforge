@@ -22,7 +22,8 @@
    [cheshire.core :as json]
    [clojure.java.io :as io]
    [clojure.pprint :as pprint]
-   [clojure.string :as str]))
+   [clojure.string :as str])
+  (:import [java.nio.file Files LinkOption OpenOption StandardOpenOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -61,7 +62,31 @@
   [k]
   (if (keyword? k) (subs (str k) 1) (str k)))
 
+(defn- ^{:stratum 0} real-inside?
+  "True when `path`'s parent, with symlinks resolved, is beneath `dir`,
+   with symlinks resolved. Both directories must exist."
+  [dir path]
+  (let [no-opts (make-array LinkOption 0)
+        base    (.toRealPath (.toPath (io/file dir)) no-opts)
+        parent  (.toRealPath (.getParent (.toAbsolutePath (.toPath (io/file path)))) no-opts)]
+    (.startsWith parent base)))
+
+(defn- ^{:stratum 0} write-new!
+  "Create `path` and write `text` to it, failing if anything, a symlink
+   included, already exists there."
+  [path text]
+  (Files/write (.toPath (io/file path)) (.getBytes ^String text "UTF-8")
+               ^"[Ljava.nio.file.OpenOption;"
+               (into-array OpenOption [StandardOpenOption/CREATE_NEW StandardOpenOption/WRITE])))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} json-key-collision?
+  "True when some map in `x` has two keys that `json-key` writes the same,
+   such as `:sink/calls` and \"sink/calls\"; JSON would keep only one."
+  [x]
+  (boolean (some #(and (map? %) (not= (count %) (count (into #{} (map json-key) (keys %)))))
+                 (tree-seq coll? seq x))))
 
 (defn- ^{:stratum 1} json-text
   "The report as JSON. Keys keep their namespaces through `json-key`;
@@ -82,16 +107,21 @@
 
 (defn ^{:stratum 2} write-report!
   "Write `report` under `out-dir` as EDN and JSON. Returns the two paths.
-   Throws when a file cannot be written, or when a path would leave
-   `out-dir`; the caller decides what that means for the run."
+   Throws, writing neither file, when a path would leave `out-dir` (as
+   written or through a symlink), when JSON would merge two keys, or when a
+   file already exists; the caller decides what that means for the run."
   [out-dir report]
-  (let [{:keys [edn json] :as paths} (report-paths out-dir report)]
+  (let [{:keys [edn json] :as paths} (report-paths out-dir report)
+        refuse (fn [reason] (throw (ex-info reason {:out-dir out-dir :paths paths})))]
     (when-not (and (inside? out-dir edn) (inside? out-dir json))
-      (throw (ex-info "report path leaves the output directory"
-                      {:out-dir out-dir :paths paths})))
+      (refuse "report path leaves the output directory"))
+    (when (json-key-collision? report)
+      (refuse "two keys in one map would write the same JSON property"))
     (io/make-parents edn)
-    (spit edn (edn-text report))
-    (spit json (json-text report))
+    (when-not (and (real-inside? out-dir edn) (real-inside? out-dir json))
+      (refuse "report directory resolves outside the output directory"))
+    (write-new! edn (edn-text report))
+    (write-new! json (json-text report))
     paths))
 
 (comment

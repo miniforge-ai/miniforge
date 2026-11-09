@@ -99,6 +99,15 @@
       (is (= :verdict/pass (get-in result [:report :report/verdict])))
       (is (= 1 (qualification/exit-code result))))))
 
+(deftest ^{:stratum 1} test-build-that-changes-during-the-run-is-not-a-pass
+  (testing "given a different build read after the scenario → the first build, recorded as not clean, verdict incomplete"
+    (let [reads  (atom [clean-build (assoc clean-build :build/git-sha (apply str (repeat 40 "c")))])
+          next!  (fn [_] (let [[b] @reads] (swap! reads rest) b))
+          report (:report (qualification/run-gate! gate (scenario-returning all-pass)
+                                                   {:out-dir (temp-dir) :command command :build-fn next!}))]
+      (is (= (assoc clean-build :build/clean? false) (:report/build report)))
+      (is (= :verdict/incomplete (:report/verdict report))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 ;; Tests

@@ -59,6 +59,12 @@
 
 (defn- ^{:stratum 0} now [] (str (Instant/now)))
 
+(defn- ^{:stratum 0} stable-build
+  "The build read before the scenario ran, recorded as not clean when the
+   read after it differs: the evidence then belongs to no single build."
+  [before after]
+  (if (= before after) before (assoc before :build/clean? false)))
+
 (defn- ^{:stratum 0} write-failure-message [throwable]
   (or (ex-message throwable) (.getName (class throwable))))
 
@@ -127,9 +133,8 @@
 (defn- ^{:stratum 1} assemble-report
   "The report for one run. Passing rows give a pass only on pinned evidence:
    a clean, identified commit and hashed fixtures and config."
-  [gate {:keys [output failure] :as outcome} {:keys [command root started-at build-fn]}]
+  [gate {:keys [output failure] :as outcome} {:keys [command started-at build]}]
   (let [rows         (report-rows gate outcome)
-        build        (build-fn root)
         fixture-hash (when output (content-hash/content-hash (:scenario/fixtures output)))
         config-hash  (when output (content-hash/content-hash (:scenario/config output)))
         pinned       (vocab/pinned? build fixture-hash config-hash)]
@@ -154,7 +159,8 @@
    and write the report under `out-dir` (default target/qualification).
    `command` is the argv that repeats the run; `root` is the workspace
    whose build is recorded, read by `build-fn` (default
-   `build/build-identity`).
+   `build/build-identity`) before and after the scenario; a build that
+   changes during the run is recorded as not clean.
 
    Returns {:report r :paths {:edn :json}}; {:report r :write-failure
    message} when the report could not be written; {:report r
@@ -168,10 +174,11 @@
   (if-not (m/validate schema/Gate gate)
     {:invalid-gate (pr-str (me/humanize (m/explain schema/Gate gate)))}
     (let [started-at (now)
+          before     (build-fn root)
           outcome    (scenario-outcome gate scenario)
+          build      (stable-build before (build-fn root))
           report     (assemble-report gate outcome {:command    command
-                                                    :root       root
-                                                    :build-fn   build-fn
+                                                    :build      build
                                                     :started-at started-at})]
       (if-not (m/validate schema/Report report)
         {:report report :invalid-report (pr-str (me/humanize (m/explain schema/Report report)))}
