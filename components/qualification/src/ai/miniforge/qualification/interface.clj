@@ -58,16 +58,18 @@
    that repeats the run), `:root` (the workspace whose build is recorded,
    default \".\").
 
-   Returns {:report r :paths {:edn :json}}, {:report r :write-failure
-   message}, or {:invalid-gate problems}. A scenario that throws or returns
-   malformed output still yields a report: every criterion unrun, verdict
-   incomplete."
+   Returns {:report r :paths {:edn :json}}; {:report r :write-failure
+   message}; {:report r :invalid-report problems}, writing nothing, when the
+   assembled report is not a valid Report (for example no usable
+   `:command`); or {:invalid-gate problems}. A scenario that throws or
+   returns malformed output still yields a report: every criterion unrun,
+   verdict incomplete."
   [gate scenario opts]
   (run/run-gate! gate scenario opts))
 
 (defn ^{:stratum 0} exit-code
-  "0 when the run passed and its report was written, 2 for an invalid gate,
-   1 otherwise."
+  "0 when the run passed and its report was written, 2 for an invalid gate
+   or an invalid assembled report, 1 otherwise."
   [result]
   (run/exit-code result))
 
