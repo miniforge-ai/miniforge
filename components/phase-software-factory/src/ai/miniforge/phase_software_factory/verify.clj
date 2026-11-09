@@ -31,8 +31,10 @@
             [ai.miniforge.phase-software-factory.messages :as messages]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
             [ai.miniforge.phase-software-factory.verify.output :as output]
+            [ai.miniforge.phase-software-factory.verify.output-config :as output-config]
             [ai.miniforge.phase-software-factory.verify.result :as result]
             [ai.miniforge.phase-software-factory.verify.registration :as registration]
+            [ai.miniforge.subprocess.interface :as subprocess]
             [babashka.process :as process]
             [babashka.fs :as fs]
             [clojure.string :as str]))
@@ -67,6 +69,28 @@
    ~indefinite hangs seen when bb test blocks on Docker acquire or stdin.
    Override per spec via :spec/test-timeout-ms or per phase-config."
   (* 30 60 1000))
+
+(def ^{:stratum 0} ^:private output-settle-ms
+  "How long a finished test process's output readers get to reach
+   end-of-stream. A grandchild still holding a pipe must not hold the phase,
+   so past this the output read so far is used."
+  5000)
+
+(defn- ^{:stratum 0} exited-test-result
+  "Results for a test process that exited. One stopped for passing the
+   capture limit fails with a message naming the limit and showing the
+   start of its output. That failure goes back to implement: output of that
+   size comes from the code under test."
+  [cmd exit [out err :as drains]]
+  (if-let [cut (first (filter subprocess/overflowed? drains))]
+    (let [text (subprocess/drained-text out)
+          head (subs text 0 (min (count text) output-config/verify-error-preview-limit))]
+      (result/test-error-result
+       (messages/t :verify/output-limit {:bytes    (subprocess/capture-limit cut)
+                                         :test-cmd cmd
+                                         :head     head})))
+    (output/parse-test-output (str (subprocess/drained-text out) "\n" (subprocess/drained-text err))
+                              exit)))
 
 (def ^{:stratum 0} ^:private verify-rate-limit-pattern
   "Pattern for non-actionable verify failures caused by provider throttling."
@@ -279,6 +303,10 @@
    destroyed too, the interrupt flag is restored, and a failed result
    carrying `:interrupted? true` is returned.
 
+   Output past the subprocess capture limit on either stream stops the
+   process tree, and the run fails with the start of the output
+   (`exited-test-result`), a failure implement can act on.
+
    Returns parsed test results map."
   [worktree-path & {:keys [test-cmd timeout-ms]}]
   (let [cmd        (or test-cmd (infer-test-command worktree-path))
@@ -288,17 +316,20 @@
       ;; deadline; process/shell only returns after the child exits and
       ;; would block here indefinitely on a hung test command.
       (let [proc     (process/process
-                       {:dir (str worktree-path)
-                        :out :string :err :string :continue true}
+                       {:dir (str worktree-path) :continue true}
                        "sh" "-c" cmd)
+            stop!    (partial destroy-process-tree! (:proc proc))
+            drains   [(subprocess/drain-stream (:out proc) {:on-overflow stop!})
+                      (subprocess/drain-stream (:err proc) {:on-overflow stop!})]
             done-fut (future @proc)]
         ;; Plain `try`: this component has no slingshot dependency
         ;; (rule 211 exemption a).
         (try
           (if (not= ::timeout (deref done-fut timeout-ms ::timeout))
-            (let [result @done-fut]
-              (parse-test-output (str (:out result "") "\n" (:err result ""))
-                                 (:exit result 1)))
+            (let [exit (:exit @done-fut 1)]
+              (run! #(deref (:future %) output-settle-ms nil) drains)
+              (run! subprocess/cancel-drain! drains)
+              (exited-test-result cmd exit drains))
             (do
               ;; .destroyForcibly on the `sh` parent does NOT reliably kill the
               ;; test runner child (the actual JVM running `bb test`). Walk the
@@ -306,8 +337,9 @@
               ;; this is what produced the orphan polylith poly-cli process
               ;; observed on 2026-05-18.
               (destroy-process-tree! (:proc proc))
-              ;; Bounded wait for the reader threads to drain; if they don't,
-              ;; cancel the future so the thread doesn't leak across verify runs.
+              (run! subprocess/cancel-drain! drains)
+              ;; Bounded wait for the process future; if it does not settle,
+              ;; cancel it so the thread doesn't leak across verify runs.
               (when (= ::timeout (deref done-fut 5000 ::timeout))
                 (future-cancel done-fut))
               (assoc (test-error-result
@@ -320,6 +352,7 @@
             ;; release the waiting future, then restore the interrupt flag
             ;; the exception cleared so the caller still sees it.
             (destroy-process-tree! (:proc proc))
+            (run! subprocess/cancel-drain! drains)
             (future-cancel done-fut)
             (.interrupt (Thread/currentThread))
             (assoc (test-error-result
