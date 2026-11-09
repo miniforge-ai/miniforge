@@ -23,11 +23,24 @@
    shape variants, `build-review-prompt` section rendering including
    the `## Scope` boundary, and the required-scope contract."
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.reviewer.prompts :as reviewer-prompts]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private passed-verify-results
+  "Verify results as review passes them in :task/tests (built by
+   `build-verify-review-input` in phase-software-factory's review): the
+   metrics carry the test runner's raw output, as verify records it."
+  {:phase/status  :completed
+   :result/status :success
+   :summary       "All 29073 test(s) passed"
+   :metrics       {:pass-count  29073
+                   :fail-count  0
+                   :tokens      0
+                   :test-output "Ran 29073 tests containing 81234 assertions. 0 failures, 0 errors."}})
 
 ;------------------------------------------------------------------------------ format-artifact-for-review
 (deftest ^{:stratum 0} format-artifact-for-review-test
@@ -183,3 +196,17 @@
                   :task/scope ["src"]
                   :task/artifact {:code/files []}})]
     (is (not (re-find #"## Codex" prompt)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} build-review-prompt-shows-test-counts-without-runner-output-test
+  (testing "given verify results whose metrics carry the runner output → the prompt shows the outcome and counts, not the output"
+    (let [prompt (reviewer-prompts/build-review-prompt
+                  {:task/title    "T"
+                   :task/scope    ["src"]
+                   :task/artifact {:code/files []}
+                   :task/tests    passed-verify-results})]
+      (is (str/includes? prompt (:summary passed-verify-results)))
+      (is (str/includes? prompt (str ":pass-count " (get-in passed-verify-results [:metrics :pass-count]))))
+      (is (not (str/includes? prompt (get-in passed-verify-results [:metrics :test-output]))))
+      (is (not (str/includes? prompt ":test-output"))))))

@@ -33,8 +33,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} duplicate
-  [c acting request]
-  (let [env (:entry/environment (controller/entry c (lease/request-key request)))]
+  "The environment the claim decision saw; re-reading the ledger could
+   return a later generation of the same key."
+  [c acting request decision]
+  (let [env (:decision/environment decision)]
     (controller/record! c (support/subject-of acting request env) :environment/acquire :outcome/duplicate [] nil)
     env))
 
@@ -56,11 +58,20 @@
       (refusal/reason-anomaly :anomalies.agent-environment/uid-mismatch {:observed/uid (:observed/uid seen)}))))
 
 (defn- ^{:stratum 0} persisted
+  "Persist every path; the receipt has one step per path, and the caller
+   gets the references or the first failure."
   [c lease target paths]
   (let [stored (mapv #(support/persist-one c lease target %) paths)]
-    (or (first (filter anomaly/anomaly? stored))
-        {:call/value stored
-         :call/steps (mapv (constantly support/persisted-step) stored)})))
+    {:call/value (or (first (filter anomaly/anomaly? stored)) stored)
+     :call/steps (mapv support/artifact-step stored)}))
+
+(defn- ^{:stratum 0} stopped
+  "Cancel in the ledger first, so no call is admitted while the provider
+   stops running work; the receipt says what the provider confirmed."
+  [c lease target]
+  (controller/settle! c lease #(assoc % :entry/state :state/cancelled))
+  (let [steps (support/reported-steps (protocol/cancel! (support/provider c) target) :cancel/steps)]
+    {:call/value {:call/outcome (receipt/steps-outcome steps)} :call/steps steps}))
 
 (defn- ^{:stratum 0} settled
   "Move the ledger to `state` whatever the provider confirmed: the ledger
@@ -84,7 +95,7 @@
 
 (defn- ^{:stratum 1} released
   [c lease target]
-  (let [steps (:deprovision/steps (protocol/deprovision! (support/provider c) target))
+  (let [steps (support/reported-steps (protocol/deprovision! (support/provider c) target) :deprovision/steps)
         state (if (= :outcome/applied (receipt/steps-outcome steps)) :state/released :state/cleanup-uncertain)]
     (settled c lease steps state)))
 
@@ -103,7 +114,7 @@
                                          :anomalies.agent-environment/preflight-failed
                                          (mapv support/failure-step failures))
       (= :new (:decision/kind decision)) (provisioning/provision c acting request (:decision/generation decision))
-      (= :duplicate (:decision/kind decision)) (duplicate c acting request)
+      (= :duplicate (:decision/kind decision)) (duplicate c acting request decision)
       :else (controller/refuse! c subject :environment/acquire (:decision/reason decision) []))))
 
 (defn ^{:stratum 1} readiness
@@ -129,8 +140,7 @@
 
 (defn ^{:stratum 1} cancel!
   [c acting lease]
-  (leased c :environment/cancel acting lease
-          #(settled c lease (:cancel/steps (protocol/cancel! (support/provider c) %)) :state/cancelled)))
+  (leased c :environment/cancel acting lease #(stopped c lease %)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

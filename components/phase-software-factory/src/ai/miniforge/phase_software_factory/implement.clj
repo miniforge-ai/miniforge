@@ -120,6 +120,12 @@
      :rules-manifest manifest
      :codex-outcome codex-outcome}))
 
+(defn- ^{:stratum 0} run-stopped?
+  "True when the run's control state, carried in `ctx`'s execution opts,
+   is stopped. The runner records the stop when the phase returns."
+  [ctx]
+  (boolean (some-> (get-in ctx [:execution/opts :control-state]) deref :stopped)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} leave-implement
@@ -212,10 +218,14 @@
         metrics (implement-result/ensure-valid-metrics
                   (get result :metrics {:tokens 0 :duration-ms duration-ms})
                   logger)
-        cost-usd (get result :cost-usd
-                   (get metrics :cost-usd
-                     (* (get metrics :tokens 0) 0.000015)))
-        metrics (assoc metrics :cost-usd cost-usd :duration-ms duration-ms)
+        ;; The agent's cost, or nil when it is unknown (an unpriced
+        ;; model). No flat-rate guess: an unknown cost stays off the
+        ;; phase metrics, and the workflow marks its total
+        ;; :cost-unavailable? instead of showing a made-up figure. An
+        ;; agent's `:cost-usd nil` (an unpriced no-op) is dropped, not kept.
+        cost-usd (get result :cost-usd (get metrics :cost-usd))
+        metrics (cond-> (-> metrics (dissoc :cost-usd) (assoc :duration-ms duration-ms))
+                  (some? cost-usd) (assoc :cost-usd cost-usd))
         env-id (get ctx :execution/environment-id)
         curated-artifact (implement-result/successful-curated-artifact result)
         degraded-handoff? (true? (:degraded-handoff? result))
@@ -283,7 +293,7 @@
                         (assoc-in [:metrics :implementation :duration-ms] duration-ms)
                         (assoc-in [:metrics :implementation :repair-cycles] (dec iterations))
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-                        (update-in [:execution/metrics :cost-usd] (fnil + 0.0) cost-usd)
+                        (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (or cost-usd 0.0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Capture inner-loop learning when repair succeeded (iterations > 1, completed)
     (when (= :completed phase-status)
@@ -405,6 +415,8 @@
         ;; Clear any leftover interrupt flag set by the kill-fn so it does not
         ;; poison the curator run or subsequent work on this thread.
         _ (when stalled? (Thread/interrupted))
+        ;; A cancelled agent turn gets no curator; a turn that succeeded keeps its work.
+        cancelled-turn? (and (run-stopped? ctx) (response/error? impl-result))
         ;; Curator post-processes the implementer's environment writes into a
         ;; structured :code artifact. The environment is the artifact, so we
         ;; invoke the curator regardless of the implementer's self-reported
@@ -413,24 +425,26 @@
         ;; the implementer truly wrote nothing, the curator fast-fails with a
         ;; clear "no files" error instead of silently retrying.
         curator-result
-        (try
-          (agent/curate-implement-output
-           {:implementer-result impl-result
-            :env-id (get ctx :execution/environment-id)
-            ;; Capsule collection reads the capsule's checkout, not the host path.
-            :worktree-path (or (when (get ctx :execution/execute-fn)
-                                 (get ctx :execution/capsule-workdir))
-                               (impl-context/resolve-worktree-path ctx))
-            :executor (get ctx :execution/executor)
-            :execute-fn (get ctx :execution/execute-fn)
-            :pre-session-snapshot (get ctx :execution/pre-session-snapshot)
-            :base-refs (get ctx :execution/task-base-refs)
-            :intent-scope (get-in ctx [:execution/input :intent :scope])
-            :spec-description (get-in ctx [:execution/input :description])
-            :llm-client (get ctx :llm-backend)
-            :logger logger})
-          (catch Exception e
-            (response/failure e)))
+        (if cancelled-turn?
+          impl-result
+          (try
+            (agent/curate-implement-output
+             {:implementer-result impl-result
+              :env-id (get ctx :execution/environment-id)
+              ;; Capsule collection reads the capsule's checkout, not the host path.
+              :worktree-path (or (when (get ctx :execution/execute-fn)
+                                   (get ctx :execution/capsule-workdir))
+                                 (impl-context/resolve-worktree-path ctx))
+              :executor (get ctx :execution/executor)
+              :execute-fn (get ctx :execution/execute-fn)
+              :pre-session-snapshot (get ctx :execution/pre-session-snapshot)
+              :base-refs (get ctx :execution/task-base-refs)
+              :intent-scope (get-in ctx [:execution/input :intent :scope])
+              :spec-description (get-in ctx [:execution/input :description])
+              :llm-client (get ctx :llm-backend)
+              :logger logger})
+            (catch Exception e
+              (response/failure e))))
         ;; The curator's verdict is the source of truth about whether the
         ;; implementer produced useful work (the environment is the artifact).
         ;; Its terminal :code (e.g. :curator/no-files-written) carries
@@ -478,6 +492,11 @@
              (= :mcp (get-in impl-result [:error :data :artifact-source])))
         degraded-handoff? (and impl-errored? (not metadata-only-submit?))
         result (cond
+                 ;; A cancel before or during a failed curator; the agent's spend is kept.
+                 (or cancelled-turn?
+                     (and (run-stopped? ctx) (not (phase/result-succeeded? curator-result))))
+                 (merge (response/error (messages/t :implement/run-stopped) {:data {:code :run-stopped}})
+                        (select-keys impl-result [:metrics :cost-usd]))
                  ;; Stream watchdog fired: the agent stalled silently and was
                  ;; killed mid-stream, so the empty diff is a stall symptom, not
                  ;; a genuine no-files verdict. Re-code the implementer error as

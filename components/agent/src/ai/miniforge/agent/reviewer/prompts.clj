@@ -81,6 +81,17 @@
     :else
     (pr-str artifact)))
 
+(defn- ^{:stratum 0} format-test-results
+  "Test results as prompt text. A string is shown as given. A map is printed
+   without `[:metrics :test-output]`, the test runner's raw output: the prompt
+   would carry it verbatim, and a whole-suite run's output outgrows the
+   reviewer's context window."
+  [tests]
+  (if (string? tests)
+    tests
+    (pr-str (cond-> tests
+              (map? (get tests :metrics)) (update :metrics dissoc :test-output)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} create-reviewer-progress-monitor
@@ -146,8 +157,7 @@
        "has_constraints" (not (str/blank? (str constraints)))
        "artifact_text" artifact-text
        "has_tests" (some? tests)
-       "tests" (when (some? tests)
-                 (if (string? tests) tests (pr-str tests)))
+       "tests" (when (some? tests) (format-test-results tests))
        "has_codex" (not (str/blank? (str codex-landings)))
        "codex_landings" (str codex-landings)}))))
 

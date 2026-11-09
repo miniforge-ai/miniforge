@@ -20,7 +20,9 @@
    generation that only grows, and which calls each ledger state admits.
    Pure functions over ledger entries; the controller applies them."
   (:require
-   [ai.miniforge.content-hash.interface :as content-hash]))
+   [ai.miniforge.content-hash.interface :as content-hash])
+  (:import
+   [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -66,9 +68,15 @@
   [entry]
   (get-in entry [:entry/environment :environment/lease]))
 
-(defn ^{:stratum 0} expired?
-  [request now]
-  (<= (inst-ms (:environment/expires-at request)) (inst-ms now)))
+(defn ^{:stratum 0} ->instant
+  "Any `inst?` value as an Instant. Instants and Timestamps keep their
+   sub-millisecond precision; other dates (some, like java.sql.Date, refuse
+   `toInstant`) convert through their epoch millisecond."
+  ^Instant [t]
+  (cond
+    (instance? Instant t) t
+    (instance? java.sql.Timestamp t) (.toInstant ^java.sql.Timestamp t)
+    :else (Instant/ofEpochMilli (inst-ms t))))
 
 (defn ^{:stratum 0} decision
   ([kind] {:decision/kind kind})
@@ -93,6 +101,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} expired?
+  "True once `now` has reached the request's expiry."
+  [request now]
+  (not (.isAfter (->instant (:environment/expires-at request)) (->instant now))))
+
 (defn ^{:stratum 1} namespace-name
   "The namespace for `request`'s key: the same key always names the same
    namespace, across generations and controller restarts."
@@ -111,13 +124,15 @@
       (= :state/provisioned state) (decision :duplicate)
       :else (decision :refuse (state->refusal state)))))
 
-(defn ^{:stratum 1} lease-refusal
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} lease-refusal
   "Nil when `lease` is the entry's current lease, `operation` runs in the
    entry's state, and the environment has not expired at `now` (cleanup and
    audit calls run after expiry); otherwise the refusal reason."
   [entry operation lease now]
   (cond
-    (nil? entry)
+    (or (nil? entry) (nil? lease))
     :anomalies.agent-environment/unknown-lease
 
     (not= lease (current-lease entry))

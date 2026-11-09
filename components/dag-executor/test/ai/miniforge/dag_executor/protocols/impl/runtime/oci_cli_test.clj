@@ -34,6 +34,7 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.git-credentials :as oci-git]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.image :as oci-img]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.process :as oci-run]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.dag-executor.result :as result]
    [clojure.java.shell :as shell]
    [clojure.string]
@@ -140,17 +141,29 @@
 (defn- ^{:stratum 0} capture-create-container-args
   "Run create-container with `oci-run/run-runtime-process` stubbed and return
    the captured argv. Keeps the parameterized stop-timeout tests focused on
-   the assertions rather than mock plumbing."
-  [descriptor & {:as create-opts}]
+   the assertions rather than mock plumbing. `:resources` is passed as
+   create-container's resources argument; the other options are passed
+   through as its keyword options."
+  [descriptor & {:keys [resources] :as create-opts}]
   (let [captured-args (atom nil)
         stub          (fn [_descriptor args & _]
                         (reset! captured-args (vec args))
-                        {:exit 0 :out "container-id-123\n" :err ""})]
+                        {:exit 0 :out "container-id-123\n" :err ""})
+        passed-opts   (dissoc create-opts :resources)]
     (with-redefs [oci-run/run-runtime-process stub]
       (apply oci-ctr/create-container
-             descriptor "test-ctr" "alpine" "/workspace" nil nil nil
-             (mapcat identity create-opts))
+             descriptor "test-ctr" "alpine" "/workspace" nil resources nil
+             (mapcat identity passed-opts))
       @captured-args)))
+
+(defn- ^{:stratum 0} flag-value
+  [args flag]
+  (second (drop-while #(not= flag %) args)))
+
+(def ^{:stratum 0} ^:private caller-pids-limit
+  "A process limit a caller passes in :resources: any value other than the
+   registry default, so the test can tell which one reached argv."
+  512)
 
 ;; ============================================================================
 ;; acquisition timeout — production-side guard against stuck Docker
@@ -921,6 +934,18 @@
                                                    :memory-limit-mb 768})
         (is (= 1 (count (filter #{"--memory"} @captured))))
         (is (some #{"768m"} @captured))))))
+
+(deftest ^{:stratum 1} create-container-pids-limit-test
+  (testing "every container gets the registry's process limit"
+    (is (= (str (registry/default :docker :pids-limit))
+           (flag-value (capture-create-container-args (docker-descriptor))
+                       "--pids-limit"))))
+  (testing "a caller's :pids-limit replaces the default, as one argument"
+    (let [args (capture-create-container-args
+                (docker-descriptor)
+                :resources {:pids-limit caller-pids-limit})]
+      (is (= 1 (count (filter #{"--pids-limit"} args))))
+      (is (= (str caller-pids-limit) (flag-value args "--pids-limit"))))))
 
 (deftest ^{:stratum 1} create-container-plan-env-replaces-legacy-env-test
   (testing "plan env is authoritative when present; partial plans retain legacy env"
