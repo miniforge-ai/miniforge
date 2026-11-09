@@ -40,3 +40,15 @@
                                "3\thttps://x/pull/3\tOPEN\n"))))))
   (testing "lines that are not a PR are ignored"
     (is (nil? (pr-lookup/parse-lookup "warning: something\nabc\tdef\tOPEN\n")))))
+
+(deftest ^{:stratum 0} head-ref-test
+  (testing "an owner/repo URL in any push form → <owner>:<branch>"
+    (doseq [url ["git@github.com:o-1/r.git"
+                 "ssh://git@github.com/o-1/r.git"
+                 "https://github.com/o-1/r.git"
+                 "https://x-access-token@github.com/o-1/r"]]
+      (is (= "o-1:mf/x" (pr-lookup/head-ref url "mf/x")) url)))
+  (testing "no owner to read → the bare branch"
+    (doseq [url [nil "" "/srv/git/r.git" "file:///srv/git/r.git"
+                 "https://github.com/o/group/r.git" "https://github.com/-o/r.git"]]
+      (is (= "mf/x" (pr-lookup/head-ref url "mf/x")) (pr-str url)))))
