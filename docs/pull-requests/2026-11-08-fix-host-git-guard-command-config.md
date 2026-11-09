@@ -127,11 +127,13 @@ run.
 
 ## Related Issues/PRs
 
+Base branch: `main`. Depends on: nothing.
+
 1. Follow-ups 2 and 3 of the task snapshot history design (#2463,
    `docs/design/task-snapshot-history.md`), from the 2026-11-08
    PAODO-Workspaces comparison.
 2. Original guard: `docs/pull-requests/2026-08-06-host-git-guard.md`.
-3. Companion PR: `archive-bundle!` runs `git add` and `git commit` with
+3. Companion PR (not yet open): `archive-bundle!` runs `git add` and `git commit` with
    hooks and fsmonitor off.
 
 ## Checklist

@@ -1,10 +1,11 @@
 {:dag-executor.host-git-guard/system
- {;; snapshot — `git config --get-regexp` could not be read
+ {;; snapshot — `git config --null --get-regexp` for remote URLs and
+  ;; insteadOf rewrites could not be read
   :snapshot/remote-urls-failed
   "Could not read redirect config from the host checkout"
 
-  ;; snapshot — `git config --get-regexp` for keys that run commands could
-  ;; not be read
+  ;; snapshot — `git config --null --get-regexp` for keys that run commands
+  ;; could not be read
   :snapshot/command-config-failed
   "Could not read command-running config from the host checkout"
 
