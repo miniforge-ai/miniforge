@@ -3,7 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-replica-outcome
   (:require [ai.miniforge.phase-opsv.kubernetes-replica-change-schema :as replica]
-            [ai.miniforge.phase-opsv.kubernetes-replica-binding :as binding]
+            [ai.miniforge.phase-opsv.kubernetes-effect-binding :as binding]
             [ai.miniforge.phase-opsv.kubernetes-replica-payload :as wire]
             [ai.miniforge.phase-opsv.messages :as msg]
             [malli.core :as m]))
