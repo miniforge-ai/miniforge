@@ -30,6 +30,11 @@
 (defn ^{:stratum 0} ok? [result]
   (and (not (anomaly/anomaly? result)) (zero? (:kubectl/exit result))))
 
+(def ^{:stratum 0} refusal-reasons
+  "kubectl error reasons by which the API server refused a request outright,
+   so nothing was created or deleted."
+  ["(AlreadyExists)" "(Forbidden)" "(Invalid)" "(BadRequest)"])
+
 (defn ^{:stratum 0} selector-arg [selector]
   (str/join "," (map (fn [[k v]] (str k "=" v)) (sort selector))))
 
@@ -51,9 +56,22 @@
   [run namespace argv stdin]
   (run (into ["exec" "-i" "-n" namespace manifests/pod-name "-c" manifests/container-name "--"] argv) stdin))
 
+(defn ^{:stratum 0} create!
+  "Create one manifest; kubectl's result, whose output is the created object."
+  [run manifest]
+  (run ["create" "-f" "-" "-o" "json"] (json/generate-string manifest)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} parsed [result]
+(defn ^{:stratum 1} refused?
+  "The API server answered and refused. A timeout, a lost answer or an
+   unconfirmed wait is not a refusal."
+  [result]
+  (and (not (anomaly/anomaly? result))
+       (not (zero? (:kubectl/exit result)))
+       (boolean (some #(str/includes? (str (:kubectl/err result)) %) refusal-reasons))))
+
+(defn ^{:stratum 1} parsed [result]
   (when (ok? result) (json/parse-string (:kubectl/out result) true)))
 
 (defn ^{:stratum 1} runtime-class? [run class-name]
@@ -64,18 +82,18 @@
         result (run args nil)]
     (and (ok? result) (not (str/blank? (:kubectl/out result))))))
 
-(defn ^{:stratum 1} delete-namespace!
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} delete-namespace!
   "Delete `namespace` and wait: `:outcome/applied` only when it is then
-   confirmed gone, `:outcome/uncertain` when the delete was accepted but
-   not confirmed, `:outcome/failed` when it was refused."
+   confirmed gone, `:outcome/failed` when the API refused the delete, and
+   otherwise (accepted but not confirmed, timed out) `:outcome/uncertain`."
   [run namespace timeout-seconds]
   (let [deleted (run ["delete" "namespace" namespace "--wait=true" (str "--timeout=" timeout-seconds "s")] nil)]
     (cond
-      (not (ok? deleted)) :outcome/failed
       (namespace-absent? run namespace) :outcome/applied
+      (refused? deleted) :outcome/failed
       :else :outcome/uncertain)))
-
-;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} namespace-identity
   "`{:namespace/uid s :namespace/generation n-or-nil}`: the UID of
@@ -85,11 +103,6 @@
   (when-let [metadata (:metadata (parsed (run ["get" "namespace" namespace "-o" "json"] nil)))]
     {:namespace/uid (:uid metadata)
      :namespace/generation (some-> (get-in metadata [:labels :miniforge.ai/lease-generation]) parse-long)}))
-
-(defn ^{:stratum 2} create!
-  "Create one manifest; the created object, or nil when refused."
-  [run manifest]
-  (parsed (run ["create" "-f" "-" "-o" "json"] (json/generate-string manifest))))
 
 (defn ^{:stratum 2} pod-state
   "`{:pod/ready? bool :pod/runtime-class s-or-nil}` for the workload pod."

@@ -42,6 +42,8 @@
 
 (def ^{:stratum 0} not-found {:kubectl/exit 1 :kubectl/out "" :kubectl/err "Error from server (NotFound)"})
 
+(defn ^{:stratum 0} refusal [reason] {:kubectl/exit 1 :kubectl/out "" :kubectl/err (str "Error from server (" reason ")")})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} target

@@ -56,7 +56,8 @@
         dir (shell/run-dir workdir attempt turn)
         prompt (command/write! handle (shell/turn-file dir "prompt.txt") text)
         written (if (and (not (anomaly/anomaly? prompt)) (:native/settings-file? native))
-                  (command/write! handle (shell/turn-file dir "settings.json") (command/settings-json native))
+                  (anomaly/let-ok [_ (command/write! handle (shell/turn-file dir "settings.json") (command/settings-json native))]
+                    (command/write! handle (shell/turn-file dir "mcp.json") command/no-mcp-servers))
                   prompt)
         script (shell/launch-script workdir dir (command/argv native config dir native-id))
         launched (if (anomaly/anomaly? written) written (run-script! handle script))
@@ -76,7 +77,10 @@
       (conj :anomalies.agent-worker/cli-missing)
 
       (not (succeeded? (run-script! handle (shell/credential-script credentials))))
-      (conj :anomalies.agent-worker/credential-missing))))
+      (conj :anomalies.agent-worker/credential-missing)
+
+      (not (succeeded? (run-script! handle (shell/present-script shell/cancel-tool))))
+      (conj :anomalies.agent-worker/cancel-tool-missing))))
 
 (defn ^{:stratum 1} status [handle session]
   (let [[dir pid] (shell/split-ref (:session/process-ref session))

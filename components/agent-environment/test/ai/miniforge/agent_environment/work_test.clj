@@ -18,6 +18,7 @@
 (ns ai.miniforge.agent-environment.work-test
   (:require
    [ai.miniforge.agent-environment.conformance.fixtures :as fx]
+   [ai.miniforge.agent-environment.fake.world :as world]
    [ai.miniforge.agent-environment.interface :as env]
    [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.test :refer [deftest is testing]]))
@@ -35,11 +36,29 @@
 
 (defn- ^{:stratum 0} reason [result] (anomaly/subtype result))
 
+(def ^{:stratum 0} fx-ok {:exec/exit 0 :exec/stdout "" :exec/stderr ""})
+
 (def ^{:stratum 0} scripted-exit
   "A nonzero exit: a command that ran and failed is still a command that ran."
   3)
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} test-fake-writes-and-exec-registration-touch-only-their-own-namespace
+  (let [gone {:target/namespace "mf-env-gone" :target/uid "uid-1"}
+        replaced {"mf-env-gone" {:uid "uid-2"}}]
+    (is (= {} (world/with-file {} gone report-path "x")))
+    (is (= {} (world/started {} gone ["true"])))
+    (is (= replaced (world/with-file replaced gone report-path "x")))
+    (is (= replaced (world/started replaced gone ["true"])))))
+
+(defn- ^{:stratum 1} blocking-exec
+  "An exec that signals `entered`, then waits for `release` before returning."
+  [entered release]
+  (fn [_command]
+    (deliver entered true)
+    @release
+    fx-ok))
 
 (defn- ^{:stratum 1} stdin-echo
   [command]
@@ -54,6 +73,13 @@
     (is (= [:outcome/applied :outcome/applied :outcome/applied]
            (fx/outcomes w :environment/exec :environment/copy)))))
 
+(deftest ^{:stratum 1} test-file-paths-must-be-absolute
+  (let [{:keys [c a lease]} (leased-world)]
+    (doseq [path ["-n" "work/report.txt"]]
+      (is (= :invalid-input (:anomaly/type (env/write-file! c a lease path report-text))))
+      (is (= :invalid-input (:anomaly/type (env/read-file c a lease path))))
+      (is (= :invalid-input (:anomaly/type (env/persist-artifacts! c a lease [path])))))))
+
 (deftest ^{:stratum 1} test-artifacts-persist-through-the-controller-store
   (let [{:keys [c a lease]} (leased-world)]
     (env/write-file! c a lease report-path report-text)
@@ -62,7 +88,13 @@
                :artifact/location (str (:lease/environment-uid lease) ":" report-path)}]
              (env/persist-artifacts! c a lease [report-path]))))
     (testing "given a missing file → the provider's anomaly returns, not a partial list"
-      (is (= :not-found (:anomaly/type (env/persist-artifacts! c a lease ["/work/missing.txt"])))))))
+      (is (= :not-found (:anomaly/type (env/persist-artifacts! c a lease [report-path "/work/missing.txt"])))))))
+
+(deftest ^{:stratum 1} test-partial-persist-is-receipted-as-partial
+  (let [{:keys [c a lease] :as w} (leased-world)]
+    (env/write-file! c a lease report-path report-text)
+    (env/persist-artifacts! c a lease [report-path "/work/missing.txt"])
+    (is (= [:outcome/partial] (fx/outcomes w :environment/persist-artifacts)))))
 
 (deftest ^{:stratum 1} test-cancel-stops-new-work-but-keeps-audit-and-cleanup
   (let [{:keys [c a lease]} (leased-world)]
@@ -72,6 +104,14 @@
            (reason (env/exec! c a lease {:exec/argv ["true"] :exec/timeout-ms fx/exec-timeout-ms}))))
     (is (vector? (env/persist-artifacts! c a lease [report-path])))
     (is (= {:call/outcome :outcome/applied} (env/release! c a lease)))))
+
+(deftest ^{:stratum 1} test-a-provider-answer-without-steps-confirms-nothing
+  (let [w (fx/world (env/fake-provider {:fake/no-steps? true}) :isolation/shared-kernel)
+        lease (:environment/lease (fx/acquire w (:a w) (fx/request w (:a w))))]
+    (is (= {:call/outcome :outcome/uncertain} (env/cancel! (:c w) (:a w) lease)))
+    (is (= {:call/outcome :outcome/uncertain} (env/release! (:c w) (:a w) lease)))
+    (is (= :anomalies.agent-environment/cleanup-uncertain
+           (reason (fx/acquire w (:a w) (fx/request w (:a w) (:lease/task-id lease) (first fx/template-hashes))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -83,3 +123,25 @@
            (env/exec! (:c w) (:a w) (:environment/lease env-value) command)))
     (is (= [command] (env/fake-commands (:controller/provider (:c w)) (:environment/namespace env-value))))
     (is (= [:outcome/applied] (fx/outcomes w :environment/exec)))))
+
+(deftest ^{:stratum 2} test-cancel-while-an-exec-runs-is-unconfirmed
+  (let [entered (promise)
+        release (promise)
+        w (fx/world (env/fake-provider {:fake/exec-fn (blocking-exec entered release)}) :isolation/shared-kernel)
+        lease (:environment/lease (fx/acquire w (:a w) (fx/request w (:a w))))
+        running (future (env/exec! (:c w) (:a w) lease {:exec/argv ["sleep"] :exec/timeout-ms fx/exec-timeout-ms}))]
+    @entered
+    (is (= {:call/outcome :outcome/uncertain} (env/cancel! (:c w) (:a w) lease)))
+    (deliver release true)
+    (is (= fx-ok @running))))
+
+(deftest ^{:stratum 2} test-an-exec-outliving-its-environment-still-returns
+  (let [entered (promise)
+        release (promise)
+        w (fx/world (env/fake-provider {:fake/exec-fn (blocking-exec entered release)}) :isolation/shared-kernel)
+        lease (:environment/lease (fx/acquire w (:a w) (fx/request w (:a w))))
+        running (future (env/exec! (:c w) (:a w) lease {:exec/argv ["sleep"] :exec/timeout-ms fx/exec-timeout-ms}))]
+    @entered
+    (is (= {:call/outcome :outcome/applied} (env/release! (:c w) (:a w) lease)))
+    (deliver release true)
+    (is (= fx-ok @running))))

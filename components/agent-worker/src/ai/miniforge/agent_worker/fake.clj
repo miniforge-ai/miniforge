@@ -58,9 +58,10 @@
         {:status/state final :status/exit (get final-exits final)})))
   (send-input! [_ handle submission session text]
     (turns/turn! state submission (inc (:session/turn session)) text handle))
-  (request-cancel! [_ _handle session]
-    (swap! state assoc-in [(:session/process-ref session) :cancelled?] true)
-    {:cancel/requested? true})
+  (request-cancel! [this _handle session]
+    (let [requested? (not= :cancellation/none (:capabilities/cancellation (protocol/capabilities this)))]
+      (when requested? (swap! state assoc-in [(:session/process-ref session) :cancelled?] true))
+      {:cancel/requested? requested?}))
   (artifact-paths [_ _handle session]
     [(get-in @state [(:session/process-ref session) :path])])
   (usage [_ _handle _session]

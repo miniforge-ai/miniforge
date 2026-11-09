@@ -1,5 +1,10 @@
 {:phase-opsv/system
- {:replicas/unusable-original "Retained original preparation lacks usable native recovery identity or replica count."
+ {:load/invalid-provider "Native load creation requires an exact committing staging load proposal, explicit target and trusted dispatch."
+  :load/unconfirmed "Native load creation is unconfirmed; reconcile before another attempt or release."
+  :load/submission-refused "Native load creation was interrupted or its deadline elapsed before submission."
+  :load/invalid-request "Native load requests require a retained original, one HTTP destination, digest-pinned image and bounded runtime settings."
+  :load/request-mismatch "Native load request does not match its declared workflow, attempt or original target."
+  :replicas/unusable-original "Retained original preparation lacks usable native recovery identity or replica count."
   :replicas/invalid-proposal "Governed replica proposal requires retained original preparation, exact native input and explicit runtime bounds."
   :replicas/submission-refused "Native replica submission was interrupted or its deadline elapsed before the request began."
   :replicas/invalid-provider "Native replica provider requires an exact committing staging proposal, explicit target and trusted dispatch."
@@ -70,4 +75,5 @@
   :event/invalid "The projected OPSV event does not satisfy its N3 schema."
   :event/sequence-unavailable "The recorded OPSV event has no recoverable sequence acknowledgement."
   :event/publication-failed "The OPSV event stream rejected a domain event."
+  :recovery/invalid-plan "Recovery planning requires a bounded native load declaration and duration."
   :verification/retained-preparation-required "Verification requires readable, acknowledged original preparation bound to this workflow and comparison."}}

@@ -67,13 +67,17 @@
   1)
 
 (defn ^{:stratum 0} budget-refusal
-  "A cost ceiling on the grant needs a configured budget the worker can
-   enforce or at least observe; an unbounded attempt is refused."
+  "A cost ceiling on the grant needs a configured budget, and any configured
+   budget needs a worker that can enforce or at least observe it. A token
+   ceiling is refused as unenforceable: an attempt presents no token
+   reading, so authorization could not hold it to one."
   [grant config capabilities]
-  (when (some? (get-in grant [:grant/constraints :constraint/max-cost-usd]))
+  (let [constraints (:grant/constraints grant)
+        budget (:config/max-budget-usd config)]
     (cond
-      (nil? (:config/max-budget-usd config)) :anomalies.agent-worker/budget-unbounded
-      (= :budget/none (:capabilities/budget capabilities)) :anomalies.agent-worker/budget-unenforceable)))
+      (some? (:constraint/max-tokens constraints)) :anomalies.agent-worker/budget-unenforceable
+      (and (some? (:constraint/max-cost-usd constraints)) (nil? budget)) :anomalies.agent-worker/budget-unbounded
+      (and (some? budget) (= :budget/none (:capabilities/budget capabilities))) :anomalies.agent-worker/budget-unenforceable)))
 
 ;------------------------------------------------------------------------------ Layer 1
 

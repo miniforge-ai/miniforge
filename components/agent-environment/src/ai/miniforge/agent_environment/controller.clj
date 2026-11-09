@@ -40,8 +40,11 @@
   (get @(:controller/ledger controller) k))
 
 (defn ^{:stratum 0} target
+  "The provider target an entry names; before an environment exists, its
+   namespace is the one derived from the request."
   [entry]
-  {:target/namespace (get-in entry [:entry/environment :environment/namespace])
+  {:target/namespace (or (get-in entry [:entry/environment :environment/namespace])
+                         (lease/namespace-name (:entry/request entry)))
    :target/uid (get-in entry [:entry/environment :environment/uid])
    :target/generation (:entry/generation entry)})
 
@@ -53,14 +56,20 @@
       ledger)))
 
 (defn- ^{:stratum 0} settle-entry
+  "Apply `f` only while `lease` is current and the entry is not released:
+   a release, once confirmed, is never undone by a late result."
   [ledger k lease f]
-  (if (= lease (lease/current-lease (get ledger k)))
-    (update ledger k f)
-    ledger))
+  (let [entry (get ledger k)]
+    (if (and (= lease (lease/current-lease entry)) (not= :state/released (:entry/state entry)))
+      (update ledger k f)
+      ledger)))
 
 (defn- ^{:stratum 0} settle-reserved
+  "Record a provision outcome only for the reservation it answers, while
+   that reservation is still provisioning."
   [ledger k generation entry]
-  (if (= generation (get-in ledger [k :entry/generation]))
+  (if (and (= generation (get-in ledger [k :entry/generation]))
+           (= :state/provisioning (get-in ledger [k :entry/state])))
     (assoc ledger k entry)
     ledger))
 
@@ -95,14 +104,17 @@
 
 (defn ^{:stratum 1} claim!
   "Apply `request`'s acquire decision to the ledger atomically and return
-   it, carrying the reserved generation when it is `:new`."
+   it, with the reserved generation when `:new` and, when `:duplicate`, the
+   environment the decision saw (never a later entry for the same key)."
   [controller request]
   (let [k (lease/request-key request)
         [before after] (swap-vals! (:controller/ledger controller) claim-entry k request)
         decision (lease/acquire-decision (get before k) request)
         generation (get-in after [k :entry/generation])]
-    (cond-> decision
-      (= :new (:decision/kind decision)) (assoc :decision/generation generation))))
+    (case (:decision/kind decision)
+      :new (assoc decision :decision/generation generation)
+      :duplicate (assoc decision :decision/environment (get-in before [k :entry/environment]))
+      decision)))
 
 (defn ^{:stratum 1} settle!
   "Apply `f` to the entry `lease` names, only while it is still current:

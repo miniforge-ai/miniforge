@@ -18,8 +18,8 @@
 (ns ai.miniforge.agent-worker.native-fixtures
   "A fake environment that answers a native worker's shell lines: tools and
    credentials present unless a check is named missing (`:cli`,
-   `:credential`), a launch that prints a pid unless `:pid` is, and a turn
-   whose status script reports a clean exit."
+   `:credential`, `:cancel-tool`), a launch that prints a pid unless `:pid` is named missing,
+   and a turn whose status script reports a clean exit."
   (:require
    [ai.miniforge.agent-environment.interface :as env]
    [ai.miniforge.agent-worker.fixtures :as fx]
@@ -52,7 +52,7 @@
   [missing command]
   (let [script (script-of command)]
     (cond
-      (str/starts-with? script "command -v") (if (= :cli missing) not-found ok)
+      (str/starts-with? script "command -v") (if (or (= :cli missing) (and (= :cancel-tool missing) (str/includes? script "pkill"))) not-found ok)
       (str/starts-with? script "test -n") (if (= :credential missing) not-found ok)
       (str/includes? script "& echo $!") (if (= :pid missing) ok (assoc ok :exec/stdout (str harness-pid "\n")))
       (str/starts-with? script "if [ -f") (assoc ok :exec/stdout completed-exit)

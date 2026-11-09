@@ -40,9 +40,10 @@ supply compute and report what they did, so their protocol carries no tenancy, l
 
 ## Testing Plan
 
-Unit tests: step summaries, receipt validity and ownership, reason types and catalog coverage
-(every reason has a message, not its bare key name), single reservation under a second claim,
-settle refusing a stale lease, receipts emitted before refusals and results return.
+Unit tests cover step summaries, receipt validity and ownership, reason types and catalog coverage.
+Every reason has a message, not its bare key name.
+Tests also cover single reservation under a second claim and settle refusing a stale lease.
+Receipts must be emitted before refusals and results return.
 
 ## Deployment Plan
 
