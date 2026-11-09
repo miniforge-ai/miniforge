@@ -15,7 +15,8 @@
     (assoc (select-keys proposal keys)
            :workflow-run/status (get-in prepared [:context :execution/status])
            :effect/class (:effect/class proposal)
-           :effect/preflight {:preflight/type :preflight/opsv-staging-experiment :preflight/result :allow})))
+           :effect/preflight {:preflight/type :preflight/opsv-staging-experiment
+                              :preflight/result :allow})))
 
 ;------------------------------------------------------------------------------ Layer 1
 

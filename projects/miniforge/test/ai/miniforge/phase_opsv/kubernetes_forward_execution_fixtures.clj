@@ -18,6 +18,10 @@
   (evidence/get-opsv-assembly (:opsv/evidence-assembly-store ctx)
                              (get-in ctx [:execution/input :opsv/evidence-bundle-id])))
 
+(defn ^{:stratum 0} deny-policy! [fixture]
+  (swap! (:host/context fixture) assoc-in
+         [:execution/opts :opsv/governance :policy/context :opsv/allowed-environments] #{}))
+
 (defn- ^{:stratum 0} context [{:keys [ctx input]}]
   (-> ctx
       (assoc :execution/status :running)

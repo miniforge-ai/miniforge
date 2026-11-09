@@ -49,7 +49,9 @@
     (let [envelope (:opsv/experiment-decision-envelope evaluated)]
       (if-not (allowing? envelope)
         (assoc-in (refused) [:anomaly/data :opsv/experiment-admission] evaluated)
-        {:context ctx :decision envelope :recovery/plan (:recovery/plan admitted)
+        {:context ctx
+         :decision envelope
+         :recovery/plan (:recovery/plan admitted)
          :comparison/original baseline}))))
 
 (comment

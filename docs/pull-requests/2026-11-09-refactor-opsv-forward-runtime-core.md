@@ -24,6 +24,7 @@ code-owned, with named handlers and closed input validation at the existing edge
 Separate pure outcome values from transaction I/O. Preserve current N4/N8 checks,
 exact independent authority, audit acknowledgement, fencing and interrupted cleanup.
 This is restructuring, not new effect authority or a new public creation API.
+Generalize existing system diagnostic wording without changing scope or outcome semantics.
 
 ## Testing Plan
 

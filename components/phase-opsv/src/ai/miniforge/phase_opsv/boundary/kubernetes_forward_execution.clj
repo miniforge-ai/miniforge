@@ -19,6 +19,10 @@
 (defn- ^{:stratum 0} invalid []
   (anomaly/anomaly :invalid-input (msg/ts :experiment/native-start-runtime-invalid) {}))
 
+(defn- ^{:stratum 0} cleanup-failures [throwable]
+  (mapv (partial anomaly/exception-anomaly :unavailable (msg/ts :experiment/native-start-unconfirmed))
+        (.getSuppressed ^Throwable throwable)))
+
 (defn- ^{:stratum 0} commit-prepared! [kind runtime input prepared now]
   (anomaly/let-ok [issued (issuance/issue! runtime prepared now)]
     (result/complete! runtime input issued now (partial transaction/execute! kind runtime prepared input issued now))))
@@ -47,11 +51,11 @@
       (result/fence! runtime input) (.interrupt (Thread/currentThread)) (throw interrupted))
     (catch Error fatal (result/fence! runtime input) (throw fatal))
     (catch exceptions/nonfatal? _
-      (let [cleanup-failures (mapv (partial anomaly/exception-anomaly :unavailable (msg/ts :experiment/native-start-unconfirmed))
-                                   (.getSuppressed ^Throwable (:throwable &throw-context)))]
+      (let [failures (cleanup-failures (:throwable &throw-context))]
         (result/fence! runtime input)
         (anomaly/exception-anomaly :unavailable (msg/ts :experiment/native-start-unconfirmed)
-          {:effect/id ((:effect-id kind) input) :grant/cleanup-failures cleanup-failures} (:throwable &throw-context))))))
+          {:effect/id ((:effect-id kind) input)
+           :grant/cleanup-failures failures} (:throwable &throw-context))))))
 
 (comment
   (execute-forward! {} {} {}))

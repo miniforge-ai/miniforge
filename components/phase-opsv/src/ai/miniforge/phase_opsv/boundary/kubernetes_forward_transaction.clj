@@ -7,7 +7,7 @@
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.phase-opsv.boundary.kubernetes-effect-audit :as audit]
             [ai.miniforge.phase-opsv.boundary.kubernetes-forward-dispatch :as dispatch]
-            [ai.miniforge.phase-opsv.messages :as msg]))
+            [ai.miniforge.phase-opsv.kubernetes-forward-outcome :as outcome]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -35,23 +35,21 @@
 
 (defn- ^{:stratum 1} record-result! [runtime prepared id result]
   (let [audited (audit! runtime prepared id)
-        failure (cond (anomaly/anomaly? result) result
-                      (anomaly/anomaly? audited) audited
-                      (nil? result) (anomaly/anomaly :unavailable (msg/ts :experiment/native-start-unconfirmed) {}))]
-    (if-not failure audited
-      (let [record (available-record! runtime id result audited)
-            key (if (effect/valid? record) :effect/transaction :effect/read-failure)]
-        (cond-> (update failure :anomaly/data assoc :effect/id id key record)
-          (and (anomaly/anomaly? result) (anomaly/anomaly? audited))
-          (assoc-in [:anomaly/data :opsv/audit-failure] audited))))))
+        failure (outcome/failure result audited)]
+    (if failure
+      (outcome/with-record failure id (available-record! runtime id result audited) result audited)
+      audited)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} execute! [kind runtime prepared input issued now]
   (let [proposal (:proposal prepared)
         id (:effect/id proposal)
-        options {:effect-id id :effect-class (:effect/class proposal) :proposal proposal
-                 :grant-id (:grant/id issued) :envelope-id (get-in prepared [:decision :envelope/id])}]
+        options {:effect-id id
+                 :effect-class (:effect/class proposal)
+                 :proposal proposal
+                 :grant-id (:grant/id issued)
+                 :envelope-id (get-in prepared [:decision :envelope/id])}]
     (anomaly/let-ok [_proposed (effect/propose! (:effects-directory runtime) options now)
                     _audited (audit! runtime prepared id)]
       (record-result! runtime prepared id (commit! kind runtime prepared input issued id)))))

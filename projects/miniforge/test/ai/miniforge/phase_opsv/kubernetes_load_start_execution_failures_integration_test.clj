@@ -95,7 +95,7 @@
                      #(assoc-in % [:request :serialized-authority] true)
                      #(assoc-in % [:host/runtime :current-context] (constantly nil))
                      #(assoc-in % [:host/runtime :current-context] faults/refusal)
-                     #(assoc-in % [:host/runtime :current-context] (fn [] (throw (ex-info "injected context failure" (faults/refusal)))))
+                     #(assoc-in % [:host/runtime :current-context] faults/unavailable-context!)
                      cancelled]]
     (fixtures/with-startable (partial check-invalid transform))))
 

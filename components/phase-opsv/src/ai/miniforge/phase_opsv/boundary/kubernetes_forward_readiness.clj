@@ -13,7 +13,8 @@
   (let [ctx (:context ready)
         material (:material operation)
         output {(nth material 2)
-                {:effect/transaction record :opsv/commit-decision-envelope (:decision ready)
+                {:effect/transaction record
+                 :opsv/commit-decision-envelope (:decision ready)
                  :load/observation (get ready (:observation-key operation))}}]
     (anomaly/let-ok [value (artifacts/record ctx output material)]
       (confirmation/publish-with-exception-handling ctx value (artifacts/begin-publication output)))))

@@ -13,7 +13,8 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} refused [failure]
-  {:effect/outcome :failed :effect/failure (msg/ts :experiment/native-start-refused)
+  {:effect/outcome :failed
+   :effect/failure (msg/ts :experiment/native-start-refused)
    :effect/observed {:opsv/dispatch-refusal failure}})
 
 (defn- ^{:stratum 0} authorized-call! [runtime issued ready record operation]

@@ -2,7 +2,7 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.boundary.kubernetes-load-target
-  "Original physical cluster and namespace identity around an owned-resource read."
+  "Original physical cluster and namespace identity at a native load boundary."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.boundary.kubernetes-resource-reads :as reads]
             [ai.miniforge.phase-opsv.boundary.kubernetes-response :as response]
@@ -34,10 +34,16 @@
       [cluster namespace]
       (response/invalid-response))))
 
-(defn ^{:stratum 1} confirm! [settings until [cluster namespace]]
-  (anomaly/let-ok [_cluster (read-same! settings until cluster)
-                  _namespace (read-same! settings until namespace)]
-    true))
+(defn ^{:stratum 1} observe! [settings until [cluster namespace]]
+  (anomaly/let-ok [current-cluster (read-same! settings until cluster)
+                  current-namespace (read-same! settings until namespace)]
+    {:kubernetes/cluster-uid (resource/uid current-cluster)
+     :kubernetes/namespace-uid (resource/uid current-namespace)}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} confirm! [settings until roots]
+  (anomaly/let-ok [_observed (observe! settings until roots)] true))
 
 (comment
   (original {} {}))

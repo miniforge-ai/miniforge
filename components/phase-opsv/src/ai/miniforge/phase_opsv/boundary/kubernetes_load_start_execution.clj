@@ -17,7 +17,8 @@
   (proposal/prepare! (:context ready) input))
 
 (defn- ^{:stratum 0} patch! [ctx input record dispatch]
-  (native/patch! {:context ctx :input input} record dispatch))
+  (native/patch! {:context ctx
+                  :input input} record dispatch))
 
 ;------------------------------------------------------------------------------ Layer 1
 
