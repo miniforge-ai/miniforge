@@ -48,6 +48,19 @@
       (is (= :conflict (:anomaly/type result)))
       (is (= expected-calls (count calls))))))
 
+(deftest ^{:stratum 0} missing-required-roots-retain-typed-absence-and-requested-identity-before-any-inventory-lists-test
+  (doseq [[path expected-calls] [[fixtures/namespace-path 1]
+                               [fixtures/deployment-path 2]]]
+    (let [routes (dissoc (fixtures/routes) path)
+          [result calls] (fixtures/capture! routes {})
+          resource (get (fixtures/routes) path)
+          expected [(get resource "kind") (get-in resource ["metadata" "namespace"]) (get-in resource ["metadata" "name"])]]
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= expected (get-in result [:anomaly/data :kubernetes/expected-identity])))
+      (is (= :absent (get-in result [:anomaly/data :kubernetes/resource-state])))
+      (is (= expected-calls (count calls)))
+      (is (every? #(= :get (:method %)) calls)))))
+
 (deftest ^{:stratum 0} total-budget-is-reserved-before-each-list-and-never-becomes-limit-zero-test
   (doseq [[budget expected-calls] [[1 0] [2 0] [4 3] [5 4]]]
     (let [[result calls] (fixtures/capture! (fixtures/routes) {:kubernetes/max-resources budget})]

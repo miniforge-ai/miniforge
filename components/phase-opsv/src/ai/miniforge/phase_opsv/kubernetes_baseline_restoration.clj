@@ -8,15 +8,17 @@
 
 (def ^{:stratum 0 :private true} restore-parameters {:opsv/operation :restore-baseline})
 
-(defn ^{:stratum 0} configured-for-plan? [input plan]
-  (let [provider (:restoration/provider input)
-        target (get-in plan [:recovery/binding :runtime/target])]
-    (and (not= (:effect/id input) (get-in plan [:recovery/load :creation-effect/id]))
-         (= (:kubernetes/context plan) (:kubernetes/context provider))
+(defn ^{:stratum 0} provider-for-plan? [provider plan]
+  (let [target (get-in plan [:recovery/binding :runtime/target])]
+    (and (= (:kubernetes/context plan) (:kubernetes/context provider))
          (= (:cluster target) (:kubernetes/cluster-id provider))
          (= (:namespace target) (:kubernetes/namespace provider)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} configured-for-plan? [input plan]
+  (and (not= (:effect/id input) (get-in plan [:recovery/load :creation-effect/id]))
+       (provider-for-plan? (:restoration/provider input) plan)))
 
 (defn ^{:stratum 1} proposal-input [input plan capture]
   (let [native (get-in input [:recovery/input :load])

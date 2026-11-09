@@ -36,6 +36,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-controller-configuration :as controller-configuration]
    [ai.miniforge.phase-opsv.boundary.kubernetes-environment-fingerprint :as native-fingerprint]
    [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as native-preparation]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-baseline-recovery :as baseline-recovery]
    [ai.miniforge.phase-opsv.kubernetes-preparation-schema :as native-preparation-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-request :as native-replica-request]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-provider :as native-replica-provider]
@@ -83,6 +84,14 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} OPSVAdapter protocol/OPSVAdapter)
+
+(def ^{:stratum 0} verify-kubernetes-baseline-recovery!
+  "Compare fresh native configuration and replica invariants to the acknowledged original in rollback mode.
+   Input is the closed retained recovery reference and restoration/provider contract, without an effect ID.
+   Return protected, acknowledged :opsv/baseline-recovery report output, or an admission/publication anomaly.
+   A false :verification/passed? preserves the failed observation/comparison; no candidate state is adopted.
+   Proves neither load termination nor owned-resource absence, candidate SLOs, or authority to mutate."
+  baseline-recovery/verify!)
 
 (def ^{:stratum 0} observe-kubernetes-load-absence!
   "Read owned Pod presence between fresh original-cluster and namespace identity checks.

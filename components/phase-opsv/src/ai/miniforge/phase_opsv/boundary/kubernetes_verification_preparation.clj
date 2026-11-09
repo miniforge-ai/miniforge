@@ -11,10 +11,23 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} prepare! [overrides declaration value]
-  (anomaly/let-ok [context (request/admit declaration value)
-                  captured (client/observe-verification! overrides (:kubernetes/declaration context))
-                  projected (fingerprint/project captured (:comparison/bounds context))]
+(defn- ^{:stratum 0} project [context value captured]
+  (anomaly/let-ok [projected (fingerprint/project captured (:comparison/bounds context))]
     (receipt/receipt value (preparation/observation projected))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} observe! [overrides declaration value]
+  (anomaly/let-ok [context (request/admit declaration value)
+                  captured (client/observe-verification! overrides (:kubernetes/declaration context))]
+    (let [result (project context value captured)]
+      {:preparation/capture captured
+       :preparation/result result})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} prepare! [overrides declaration value]
+  (anomaly/let-ok [observed (observe! overrides declaration value)]
+    (:preparation/result observed)))
 
 (comment ::no-writes-load-or-experiment-effects)
