@@ -50,9 +50,10 @@ fresh isolated-package regressions and focused fault checks.
 All five genuinely inferred changed namespaces passed at three or fewer strata.
 Strict lint passed with zero warnings/errors, alongside both consuming JVM products and Polylith check.
 Focused source and fresh isolated-package suites passed 29 tests/345 assertions.
-Curated integration passed 158 tests/1,837 assertions; native compatibility passed 308 tests/1,903 assertions.
+Curated integration passed 166 tests/1,994 assertions; native compatibility passed 308 tests/1,903 assertions.
 All six injected faults caused assertion failures with zero errors.
 The isolated package contains no production source overlay.
+These checks passed again after integrating current main and preserving both native interface imports.
 
 ## Standards Gap Analysis
 
@@ -62,6 +63,8 @@ repository's `agents.md` merge policy (including the stricter 200/600 limits).
 Applicable foundations, Clojure, Polylith, Kubernetes, API-surface, test,
 documentation, workflow, and copyright rules were read in full.
 The owner pass decomposed the initial factory and tightened identity text types.
+The main-merge prose gate flagged thirteen long sentences in five existing PR documents.
+Split those sentences without changing their claims; the prose gate remains enabled.
 Boundary schemas precede pure transformations; storage/acknowledgement is re-read,
 errors remain anomalies, diagnostics are localized, and existing factories/types
 are shared. Independent approval, protected plan retention, exact current recovery
