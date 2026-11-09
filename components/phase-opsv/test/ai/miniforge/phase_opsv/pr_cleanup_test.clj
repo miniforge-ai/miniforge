@@ -13,28 +13,11 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(deftest ^{:stratum 0} interrupted-post-link-registration-revokes-written-authority-without-losing-interrupt-test
-  (let [{:keys [ctx runtime calls]} (fixture/setup)
-        sync durability/sync-ancestry!
-        refused? (atom false)
-        grants (str (:authority-directory runtime) "/grants")
-        [result interrupted?]
-        (try+
-          (with-redefs [durability/sync-ancestry!
-                        (fn [directory]
-                          (if (and (= grants (str directory)) (compare-and-set! refused? false true))
-                            (do (.interrupt (Thread/currentThread))
-                                (anomaly/anomaly :unavailable "interrupted post-link durability" {}))
-                            (sync directory)))]
-            [(phase/actuate ctx) (.isInterrupted (Thread/currentThread))])
-          (finally (Thread/interrupted)))
-        issued (grant/current (:authority-directory runtime) (get-in result [:anomaly/data :grant/id]))]
-    (is @refused?)
-    (is interrupted?)
-    (is (anomaly/anomaly? result))
-    (is (= :revocation/superseded (:grant/revocation-reason issued)))
-    (is (nil? (get-in result [:anomaly/data :grant/revocation-failure])))
-    (is (empty? @calls))))
+(defn- ^{:stratum 0} interrupt-after-first-link! [sync grants refused? directory]
+  (if (and (= grants (str directory)) (compare-and-set! refused? false true))
+    (do (.interrupt (Thread/currentThread))
+        (anomaly/anomaly :unavailable "interrupted post-link durability" {}))
+    (sync directory)))
 
 (deftest ^{:stratum 0} pre-dispatch-failure-revokes-newly-issued-authority-test
   (doseq [port [#'actuation/propose-pr! #'actuation/commit-pr!]]
@@ -87,6 +70,26 @@
     (is (= url (get-in transaction [:effect/observed :pr/url])))
     (is (= "revocation unconfirmed" (get-in transaction [:effect/observed :grant/revocation-failure])))
     (is (string? (:effect/failure transaction))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} interrupted-post-link-registration-revokes-written-authority-without-losing-interrupt-test
+  (let [{:keys [ctx runtime calls]} (fixture/setup)
+        sync durability/sync-ancestry!
+        refused? (atom false)
+        grants (str (:authority-directory runtime) "/grants")
+        [result interrupted?]
+        (try+
+          (with-redefs [durability/sync-ancestry! (partial interrupt-after-first-link! sync grants refused?)]
+            [(phase/actuate ctx) (.isInterrupted (Thread/currentThread))])
+          (finally (Thread/interrupted)))
+        issued (grant/current (:authority-directory runtime) (get-in result [:anomaly/data :grant/id]))]
+    (is @refused?)
+    (is interrupted?)
+    (is (anomaly/anomaly? result))
+    (is (= :revocation/superseded (:grant/revocation-reason issued)))
+    (is (nil? (get-in result [:anomaly/data :grant/revocation-failure])))
+    (is (empty? @calls))))
 
 (comment
   (fixture/setup))
