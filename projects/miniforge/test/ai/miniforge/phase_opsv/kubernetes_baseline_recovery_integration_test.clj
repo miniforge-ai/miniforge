@@ -104,8 +104,7 @@
     (check-retained fixture output)))
 
 (defn- ^{:stratum 1} check-drift-event [{:keys [ctx] :as fixture}]
-  (let [routes (assoc-in (get-in fixture [:native :routes])
-                        [inventory/deployment-path "spec" "template" "spec" "containers" 0 "image"] foreign-template-image)
+  (let [routes (fixtures/template-image-routes fixture foreign-template-image)
         [output _] (fixtures/verify fixture routes)
         observed (fixtures/drift-events fixture)
         event (first observed)
@@ -120,8 +119,7 @@
     (check-retained fixture output)))
 
 (defn- ^{:stratum 1} check-drift-delivery-failure [fixture]
-  (let [routes (assoc-in (get-in fixture [:native :routes])
-                        [inventory/deployment-path "spec" "template" "spec" "containers" 0 "image"] foreign-template-image)
+  (let [routes (fixtures/template-image-routes fixture foreign-template-image)
         failure (anomaly/anomaly :unavailable "injected drift delivery failure" {})
         [output _] (with-redefs [events/publish! (constantly failure)] (fixtures/verify fixture routes))
         report (:opsv/baseline-recovery output)]

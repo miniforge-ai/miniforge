@@ -61,6 +61,8 @@ publication. Run lint, JVM/product/package compatibility and fault checks serial
   47/629, with all eighteen relevant faults in each environment detecting assertion
   failures and zero errors. Curated integration passes 350/7,988 and native
   compatibility passes 308/1,903. Both JVM products and strict structural gates pass.
+- After test-only fixture deduplication, both source and isolated package pass
+  the two affected tests / 44 assertions and all three review-fault checks.
 
 ## Deployment Plan
 

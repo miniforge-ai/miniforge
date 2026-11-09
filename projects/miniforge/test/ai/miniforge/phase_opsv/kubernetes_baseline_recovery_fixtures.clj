@@ -2,15 +2,20 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-baseline-recovery-fixtures
-  (:require [ai.miniforge.phase-opsv.boundary.http-transport :as transport]
-            [ai.miniforge.event-stream.interface :as events]
+  (:require [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.phase-opsv.boundary.http-transport :as transport]
             [ai.miniforge.phase-opsv.interface :as phase]
             [ai.miniforge.phase-opsv.kubernetes-baseline-restoration-fixtures :as restoration]
-            [ai.miniforge.phase-opsv.kubernetes-capture-test-support :as wire]))
+            [ai.miniforge.phase-opsv.kubernetes-capture-test-support :as wire]
+            [ai.miniforge.phase-opsv.kubernetes-inventory-fixtures :as inventory]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} with-input restoration/with-input)
+
+(defn ^{:stratum 0} template-image-routes [fixture image]
+  (assoc-in (get-in fixture [:native :routes])
+            [inventory/deployment-path "spec" "template" "spec" "containers" 0 "image"] image))
 
 (defn ^{:stratum 0} drift-events [{:keys [ctx]}]
   (filterv #(= :opsv.drift/detected (:event/type %)) (events/get-events (:event-stream ctx))))
