@@ -45,9 +45,7 @@ Constructing an intent is neither permission to execute it nor verification succ
 
 ## Related Issues/PRs
 
-Depends on retained-baseline recovery verification before publication.
-The shared forward-runtime prerequisite #2494 is merged.
-The published branch will use current merged main; this is a local dependent draft.
+Base: main after retained-baseline verification #2493 and shared forward runtime #2494.
 
 ## Checklist
 
