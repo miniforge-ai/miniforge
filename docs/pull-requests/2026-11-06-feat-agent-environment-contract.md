@@ -8,22 +8,23 @@
 
 ## Overview
 
-First step of #2439 (opt-in development-agent environments): the versioned values every environment
-provider and controller will share, and the pure rules that decide admission and leases.
+First step of #2439 (opt-in development-agent environments): versioned values shared by every environment provider and controller.
+Pure rules decide admission and leases.
 API surface class 1: in-process EDN. Nothing here provisions anything.
 
 ## Layer
 
-Foundations and domain rules. Later PRs add receipts, refusals and the ledger controller (D1b),
-the lifecycle over a fake provider (D1c), and exec, file copy, artifact persistence, cancel and the
-shared provider conformance suite (D1d).
+Foundations and domain rules. Later PRs add receipts, refusals and the ledger controller (D1b).
+Then comes the lifecycle over a fake provider (D1c).
+D1d adds exec, file copy, artifact persistence, cancel and the shared provider conformance suite.
 
 ## Motivation
 
-Issue #2439 needs one tenant-bound environment contract before any provider (fake, Kubernetes) exists:
-tenant, principal, run, task, environment UID, namespace, lease generation, policy and template
-hashes, resource limits and expiry, with refusals for forged tenants, conflicting requests and
-stale leases. The rules are pure so a durable ledger can replace the in-memory one later without
+Issue #2439 needs one tenant-bound environment contract before any provider (fake, Kubernetes) exists.
+It binds tenant, principal, run, task, environment UID, namespace, lease generation, policy and template hashes,
+resource limits and expiry.
+It refuses forged tenants, conflicting requests and stale leases. The rules are pure so a durable ledger can replace the
+in-memory one later without
 changing them.
 
 ## Changes in Detail
@@ -32,14 +33,15 @@ changing them.
    1. `schema`: closed, versioned `Request`, `Lease`, `Environment`, `Capabilities`, `Receipt`,
       `Command`; isolation levels `shared-kernel` / `dedicated-kernel`; the only receipt profile is
       `:profile/unqualified`.
-   2. `admission`: the acting tenant and principal must be the ones the request names; a live root
-      `:effect/provision` grant issued to the acting principal must cover the run and task (reuses
-      `execution-grant/authorize`); declared capabilities must offer the requested isolation and
-      limits, with no weaker substitute; an expired request is refused.
-   3. `lease`: one environment per tenant/run/task key; acquire is new, duplicate or refused
-      (conflicting request, in flight, cancelled, cleanup uncertain); the generation only grows;
-      a lease that is not the entry's current one is stale; after expiry only cleanup and audit
-      calls run; namespaces are derived from the key and are valid DNS labels.
+   2. `admission`: the acting tenant and principal must be the ones the request names.
+      A live root `:effect/provision` grant issued to the acting principal must cover the run and task (reuses `execution-grant/authorize`).
+      Declared capabilities must offer the requested isolation and limits, with no weaker substitute.
+      An expired request is refused.
+   3. `lease`: one environment per tenant/run/task key.
+      Acquire is new, duplicate or refused (conflicting request, in flight, cancelled, cleanup uncertain).
+      The generation only grows; a lease that is not the entry's current one is stale.
+      After expiry only cleanup and audit calls run.
+      Namespaces are derived from the key and are valid DNS labels.
 2. New project `projects/agent-environments` so CI tests the brick; registered in `workspace.edn`
    and the root `:dev`/`:test` paths.
 3. `development/test/opt_in_profile_test.clj`: `projects/miniforge`, `projects/miniforge-core` and
