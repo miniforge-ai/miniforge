@@ -4,31 +4,29 @@
 (ns ai.miniforge.phase-opsv.boundary.kubernetes-forward-preparation
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.effect-transaction.interface :as effect]
-            [ai.miniforge.phase-opsv.boundary.kubernetes-load-start :as proposal]
-            [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-admission :as admission]
-            [ai.miniforge.phase-opsv.boundary.kubernetes-forward-admission :as common]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-forward-admission :as admission]
             [ai.miniforge.phase-opsv.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} unrecorded! [runtime input]
-  (anomaly/let-ok [existing (effect/read-record (:effects-directory runtime) (:effect/id input))]
+(defn- ^{:stratum 0} unrecorded! [runtime id]
+  (anomaly/let-ok [existing (effect/read-record (:effects-directory runtime) id)]
     (when existing
       (anomaly/anomaly :conflict (msg/ts :experiment/native-start-existing) {:effect/transaction existing}))))
 
-(defn- ^{:stratum 0} current-intent! [runtime input]
-  (anomaly/let-ok [before (admission/readiness! runtime input)
-                  intent (proposal/prepare! (:context before) input)
-                  current (admission/readiness! runtime input)]
-    (if (= (common/snapshot (:context before)) (common/snapshot (:context current)))
+(defn- ^{:stratum 0} current-intent! [operation runtime input]
+  (anomaly/let-ok [before ((:readiness operation) runtime input)
+                  intent ((:prepare operation) before input)
+                  current ((:readiness operation) runtime input)]
+    (if (= (admission/snapshot (:context before)) (admission/snapshot (:context current)))
       (assoc current :proposal intent)
-      (common/refused))))
+      (admission/refused))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} prepare! [runtime input]
-  (anomaly/let-ok [_unrecorded (unrecorded! runtime input)]
-    (current-intent! runtime input)))
+(defn ^{:stratum 1} prepare! [operation runtime input]
+  (anomaly/let-ok [_unrecorded (unrecorded! runtime ((:effect-id operation) input))]
+    (current-intent! operation runtime input)))
 
 (comment
-  (prepare! {} {}))
+  (prepare! {} {} {}))

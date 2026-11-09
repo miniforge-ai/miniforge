@@ -3,7 +3,6 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-forward-runtime-schema
   (:require [ai.miniforge.opsv-actuation.interface :as actuation]
-            [ai.miniforge.phase-opsv.kubernetes-load-stop-schema :as input]
             [ai.miniforge.phase-opsv.retained-preparation-schema :as retained]
             [ai.miniforge.phase-opsv.run-control :as control]
             [ai.miniforge.schema.interface :as schema]))
@@ -20,10 +19,6 @@
 
 (def ^{:stratum 0} Context
   [:and retained/Context [:map [:execution/status [:= :running]]]])
-
-;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} Arguments [:tuple HostRuntime input/Input])
 
 (comment
   (count HostRuntime))
