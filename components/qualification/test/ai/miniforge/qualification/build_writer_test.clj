@@ -23,7 +23,8 @@
             [ai.miniforge.qualification.writer :as writer]
             [cheshire.core :as json]
             [clojure.edn :as edn]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [clojure.java.shell :as shell])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]))
 
@@ -46,6 +47,11 @@
       (is (re-matches #"[0-9a-f]{40}" sha))
       (is (false? (build/clean? "."))))))
 
+(def ^{:stratum 0} ^:private repository-env-vars
+  "Variables that bind git to another repository; with any set, `git init`
+   in a temp directory could act on that repository instead."
+  ["GIT_DIR" "GIT_WORK_TREE" "GIT_INDEX_FILE" "GIT_COMMON_DIR" "GIT_OBJECT_DIRECTORY"])
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Tests
@@ -54,6 +60,14 @@
     (let [dir (temp-dir)]
       (is (nil? (build/git-sha dir)))
       (is (false? (build/clean? dir))))))
+
+(deftest ^{:stratum 1} test-repository-without-commit-is-not-clean
+  (testing "given an initialized repository with no commit → no commit, and not clean"
+    (when (not-any? #(System/getenv %) repository-env-vars)
+      (let [dir (temp-dir)]
+        (shell/sh "git" "init" "-q" :dir dir)
+        (is (= {:build/git-sha nil :build/clean? false}
+               (select-keys (build/build-identity dir) [:build/git-sha :build/clean?])))))))
 
 (deftest ^{:stratum 1} test-deps-hash-follows-dependency-files
   (testing "given the same files → the same hash; a changed deps.edn → a different hash"
@@ -75,6 +89,17 @@
   (testing "given no commit → the stem says so"
     (is (re-find #"no-commit\.edn$"
                  (:edn (writer/report-paths "out" (assoc-in report [:report/build :build/git-sha] nil)))))))
+
+(deftest ^{:stratum 1} test-report-paths-stay-in-the-output-directory
+  (testing "given a gate id and a commit holding path separators and .. → both files beneath the output directory"
+    (let [dir    (temp-dir)
+          hostile (-> report
+                      (assoc :report/gate-id (keyword "../.." "escape"))
+                      (assoc-in [:report/build :build/git-sha] "../../x"))
+          base   (.getCanonicalPath (io/file dir))
+          {:keys [edn json]} (writer/write-report! dir hostile)]
+      (is (.startsWith (.getCanonicalPath (io/file edn)) (str base "/")))
+      (is (.startsWith (.getCanonicalPath (io/file json)) (str base "/"))))))
 
 (deftest ^{:stratum 1} test-written-report-round-trips
   (testing "given a report → the EDN reads back equal, the JSON keeps namespaced names"

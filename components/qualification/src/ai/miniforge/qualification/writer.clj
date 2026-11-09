@@ -27,19 +27,30 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} gate-directory
-  "`:pipeline/preflight` → \"pipeline.preflight\"."
+  "`:pipeline/preflight` → \"pipeline.preflight\". Any character outside
+   letters, digits, `_` and `-` in either part becomes `_`, so a gate id
+   cannot name a path separator or a `..` component."
   [gate-id]
-  (str (namespace gate-id) "." (name gate-id)))
+  (str (str/replace (namespace gate-id) #"[^A-Za-z0-9_-]" "_")
+       "."
+       (str/replace (name gate-id) #"[^A-Za-z0-9_-]" "_")))
 
 (defn- ^{:stratum 0} run-stem
-  "The run's start time, safe in a file name, and the first 12 characters
-   of its commit, or \"no-commit\"."
+  "The run's start time and the first 12 characters of its commit, or
+   \"no-commit\", with anything outside letters, digits and `-` replaced."
   [{:report/keys [started-at build]}]
-  (str (str/replace started-at #"[^0-9A-Za-z.-]" "-")
+  (str (str/replace started-at #"[^0-9A-Za-z-]" "-")
        "-"
        (if-let [sha (not-empty (:build/git-sha build))]
-         (subs sha 0 (min 12 (count sha)))
+         (str/replace (subs sha 0 (min 12 (count sha))) #"[^0-9A-Za-z]" "-")
          "no-commit")))
+
+(defn- ^{:stratum 0} inside?
+  "True when `path` normalizes to a location beneath `dir`."
+  [dir path]
+  (let [base   (.normalize (.toAbsolutePath (.toPath (io/file dir))))
+        target (.normalize (.toAbsolutePath (.toPath (io/file path))))]
+    (and (not= base target) (.startsWith target base))))
 
 (defn- ^{:stratum 0} edn-text [report]
   (with-out-str (pprint/pprint report)))
@@ -71,10 +82,13 @@
 
 (defn ^{:stratum 2} write-report!
   "Write `report` under `out-dir` as EDN and JSON. Returns the two paths.
-   Throws when a file cannot be written; the caller decides what that
-   means for the run."
+   Throws when a file cannot be written, or when a path would leave
+   `out-dir`; the caller decides what that means for the run."
   [out-dir report]
   (let [{:keys [edn json] :as paths} (report-paths out-dir report)]
+    (when-not (and (inside? out-dir edn) (inside? out-dir json))
+      (throw (ex-info "report path leaves the output directory"
+                      {:out-dir out-dir :paths paths})))
     (io/make-parents edn)
     (spit edn (edn-text report))
     (spit json (json-text report))

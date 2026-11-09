@@ -70,11 +70,11 @@
        (= :verdict/incomplete (:report/verdict report))))
 
 (defn ^{:stratum 0} exit-code
-  "0 when the run passed and its report was written, 2 for a gate that is
-   not a valid gate, 1 otherwise."
-  [{:keys [report paths invalid-gate]}]
+  "0 when the run passed and its report was written, 2 for an invalid gate
+   or an invalid assembled report, 1 otherwise."
+  [{:keys [report paths invalid-gate invalid-report]}]
   (cond
-    invalid-gate                                               2
+    (or invalid-gate invalid-report)                           2
     (and paths (= :verdict/pass (:report/verdict report)))     0
     :else                                                      1))
 
@@ -82,9 +82,15 @@
 
 (defn ^{:stratum 1} summary-lines
   "Human-readable lines for a run result."
-  [{:keys [report paths write-failure invalid-gate]}]
-  (if invalid-gate
+  [{:keys [report paths write-failure invalid-gate invalid-report]}]
+  (cond
+    invalid-gate
     [(msg/t :summary/invalid-gate {:problems invalid-gate})]
+
+    invalid-report
+    [(msg/t :summary/invalid-report {:problems invalid-report})]
+
+    :else
     (let [rows   (:report/criteria report)
           passed (count (filter #(= :status/pass (:criterion/status %)) rows))]
       (-> [(msg/t :summary/verdict {:gate    (:report/gate-id report)
@@ -150,8 +156,10 @@
    whose build is recorded, read by `build-fn` (default
    `build/build-identity`).
 
-   Returns {:report r :paths {:edn :json}}, or {:report r :write-failure
-   message} when the report could not be written, or {:invalid-gate
+   Returns {:report r :paths {:edn :json}}; {:report r :write-failure
+   message} when the report could not be written; {:report r
+   :invalid-report problems}, writing nothing, when the assembled report is
+   not a valid Report (for example no usable `command`); or {:invalid-gate
    problems} when `gate` is not a valid gate."
   [gate scenario {:keys [out-dir command root build-fn]
                   :or   {out-dir  "target/qualification"
@@ -165,12 +173,14 @@
                                                     :root       root
                                                     :build-fn   build-fn
                                                     :started-at started-at})]
-      (try+
-       {:report report :paths (writer/write-report! out-dir report)}
-       (catch thrown-value? _
-         {:report report :write-failure (write-failure-message (:throwable &throw-context))})
-       (catch Exception e
-         {:report report :write-failure (write-failure-message e)})))))
+      (if-not (m/validate schema/Report report)
+        {:report report :invalid-report (pr-str (me/humanize (m/explain schema/Report report)))}
+        (try+
+         {:report report :paths (writer/write-report! out-dir report)}
+         (catch thrown-value? _
+           {:report report :write-failure (write-failure-message (:throwable &throw-context))})
+         (catch Exception e
+           {:report report :write-failure (write-failure-message e)}))))))
 
 (comment
   (run-gate! {:gate/id :fixture/gate :gate/title "Fixture"

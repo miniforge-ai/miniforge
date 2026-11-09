@@ -56,6 +56,13 @@ data.
 5. The assert case throws `AssertionError` explicitly, so disabled asserts
    cannot skip it.
 6. `plain-data?` drops a `map?` catch that EDN read errors never reach.
+7. `run-gate!` validates the assembled report before writing it: a run with
+   no usable repeat command (or any other invalid report) writes nothing and
+   exits 2 (`:invalid-report`).
+8. The writer replaces anything but letters, digits, `_` and `-` in the gate
+   id parts and the commit, and refuses a path outside `:out-dir`.
+9. `clean?` lists untracked files whatever `status.showUntrackedFiles` says,
+   and a build is clean only with a known commit.
 
 From the schema PR's review: the verdict is `vocabulary/report-verdict`, so
 passing rows on a dirty tree, without a commit or without hashes give
@@ -73,7 +80,7 @@ passing rows on a dirty tree, without a commit or without hashes give
    every criterion unrun; an unreported criterion is incomplete; hashes repeat
    across runs; an invalid gate exits 2; an unwritable report exits 1 even
    when every criterion passed; the summary names the verdict and each row.
-3. Locally: 31 tests, 117 assertions, 0 failures. Also covered: a pass on
+3. Locally: 34 tests, 125 assertions, 0 failures. Also covered: a pass on
    an unpinned build is incomplete and the summary says why; a short commit
    names the file.
 

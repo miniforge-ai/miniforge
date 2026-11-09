@@ -67,6 +67,17 @@
                                            :command  command
                                            :build-fn (constantly build)})))
 
+(deftest ^{:stratum 1} test-run-without-a-command-writes-nothing
+  (testing "given no repeat command → no files written, exit 2, even when every criterion passed"
+    (let [dir    (temp-dir)
+          result (qualification/run-gate! gate (scenario-returning all-pass)
+                                          {:out-dir dir :build-fn (constantly clean-build)})]
+      (is (string? (:invalid-report result)))
+      (is (nil? (:paths result)))
+      (is (empty? (.list (io/file dir))))
+      (is (= 2 (qualification/exit-code result)))
+      (is (= 1 (count (qualification/summary-lines result)))))))
+
 (deftest ^{:stratum 1} test-invalid-gate-is-refused
   (testing "given a gate without criteria → no report, exit 2"
     (let [result (qualification/run-gate! (assoc gate :gate/criteria [])

@@ -61,9 +61,10 @@
     (when (and sha (re-matches #"[0-9a-f]{40}" sha)) sha)))
 
 (defn ^{:stratum 1} clean?
-  "True only when git reports no changed or untracked files in `root`."
+  "True only when git reports no changed or untracked files in `root`.
+   Untracked files are listed whatever `status.showUntrackedFiles` says."
   [root]
-  (= "" (git-output root "status" "--porcelain")))
+  (= "" (git-output root "status" "--porcelain" "--untracked-files=all")))
 
 (defn ^{:stratum 1} deps-hash
   "Content hash of the dependency files in `root`, keyed by file name; a
@@ -76,11 +77,13 @@
 
 (defn ^{:stratum 2} build-identity
   "{:build/git-sha :build/clean? :build/deps-hash} for the workspace at
-   `root`."
+   `root`. Clean requires a known commit: an empty status in a repository
+   with no readable commit is not a clean build."
   [root]
-  {:build/git-sha   (git-sha root)
-   :build/clean?    (clean? root)
-   :build/deps-hash (deps-hash root)})
+  (let [sha (git-sha root)]
+    {:build/git-sha   sha
+     :build/clean?    (and (some? sha) (clean? root))
+     :build/deps-hash (deps-hash root)}))
 
 (comment
   (build-identity "."))

@@ -17,4 +17,5 @@
   :summary/row              "  {status} {id}: {description}"
   :summary/wrote            "Report written: {path}"
   :summary/write-failed     "The report could not be written: {message}"
-  :summary/invalid-gate     "Not a valid gate definition: {problems}"}}
+  :summary/invalid-gate     "Not a valid gate definition: {problems}"
+  :summary/invalid-report   "The run produced no valid report, so nothing was written: {problems}"}}
