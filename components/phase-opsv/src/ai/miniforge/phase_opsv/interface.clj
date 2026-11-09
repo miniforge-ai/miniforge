@@ -37,6 +37,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-environment-fingerprint :as native-fingerprint]
    [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as native-preparation]
    [ai.miniforge.phase-opsv.boundary.kubernetes-baseline-recovery :as baseline-recovery]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-replica-trial :as native-replica-trial]
    [ai.miniforge.phase-opsv.kubernetes-preparation-schema :as native-preparation-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-request :as native-replica-request]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-provider :as native-replica-provider]
@@ -84,6 +85,14 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} OPSVAdapter protocol/OPSVAdapter)
+
+(def ^{:stratum 0} prepare-kubernetes-replica-trial-proposal!
+  "Construct one exact bounded replica-trial intent from fresh unchanged-original native state.
+   Input is the closed retained recovery reference, explicit trial/provider, replica count and distinct effect ID.
+   Re-admit the independent recovery plan and original; do not accept caller current-state snapshots.
+   Return the canonical UID/resource-version conditional proposal or an anomaly, without authority or mutation.
+   Construction is not baseline adoption, trial activation, SLO success or permission to execute."
+  native-replica-trial/prepare!)
 
 (def ^{:stratum 0} verify-kubernetes-baseline-recovery!
   "Compare fresh native configuration and replica invariants to the acknowledged original in rollback mode.

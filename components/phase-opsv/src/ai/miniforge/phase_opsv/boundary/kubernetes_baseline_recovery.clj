@@ -12,7 +12,7 @@
             [ai.miniforge.phase-opsv.exception-policy :as exceptions]
             [ai.miniforge.phase-opsv.kubernetes-baseline-recovery :as model]
             [ai.miniforge.phase-opsv.kubernetes-baseline-recovery-schema :as schema]
-            [ai.miniforge.phase-opsv.kubernetes-baseline-restoration :as target]
+            [ai.miniforge.phase-opsv.kubernetes-replica-proposal :as target]
             [ai.miniforge.phase-opsv.messages :as msg]
             [malli.core :as m]
             [slingshot.slingshot :refer [try+]]))
