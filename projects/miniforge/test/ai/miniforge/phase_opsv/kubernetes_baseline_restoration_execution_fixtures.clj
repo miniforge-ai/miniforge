@@ -41,10 +41,6 @@
          [:execution/opts :opsv/governance :policy/context :opsv/recovery-effect-operations] #{})
   fixture)
 
-(defn- ^{:stratum 0} capture-issuance! [captured issue! directory request now]
-  (swap! captured conj request)
-  (issue! directory request now))
-
 (defn- ^{:stratum 0} configured [f fixture]
   (let [digest (get-in fixture [:prepared :recovery/hash])
         id (phase/recovery-effect-id digest :restore-baseline)
@@ -54,17 +50,17 @@
            [:execution/opts :opsv/governance :policy/context :opsv/recovery-effect-operations] #{:restore-baseline})
     (f (assoc fixture :request request :host/routes (:restoration/routes fixture)))))
 
+(defn ^{:stratum 0} execute-response [fixture pending on-read!]
+  (let [issued (atom [])
+        issue! grant/issue-for-effect]
+    (with-redefs [grant/issue-for-effect (partial forward/capture-issuance! issued issue!)]
+      (let [[result calls] (wire/execute-response phase/execute-kubernetes-baseline-restoration! fixture pending on-read!)]
+        [result calls @issued]))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} with-input [f]
   (restoration/with-input (partial forward/with-runtime (partial configured f))))
-
-(defn ^{:stratum 1} execute-response [fixture pending on-read!]
-  (let [issued (atom [])
-        issue! grant/issue-for-effect]
-    (with-redefs [grant/issue-for-effect (partial capture-issuance! issued issue!)]
-      (let [[result calls] (wire/execute-response phase/execute-kubernetes-baseline-restoration! fixture pending on-read!)]
-        [result calls @issued]))))
 
 (defn- ^{:stratum 1} after-forward [f fixture]
   (let [[result _calls] (trial/execute fixture)
@@ -72,13 +68,13 @@
     (is (= :succeeded (:effect/state result)))
     (configured f (assoc fixture :forward/grant-id id))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} execute
+(defn ^{:stratum 1} execute
   ([fixture] (execute fixture (constantly nil)))
   ([fixture on-read!]
    (let [pending (-> fixture provider/response json/generate-string http/response http/completed)]
      (execute-response fixture pending on-read!))))
+
+;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} with-forward-trial [f]
   (trial/with-executable (partial after-forward f)))

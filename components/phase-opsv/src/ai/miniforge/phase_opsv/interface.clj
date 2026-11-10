@@ -67,6 +67,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-provider :as native-load-start-provider]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-execution :as native-load-start-execution]
    [ai.miniforge.phase-opsv.boundary.kubernetes-load-creation-execution :as native-load-creation-execution]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-load-recovery-execution :as native-load-recovery-execution]
    [ai.miniforge.phase-opsv.boundary.environment-comparison :as environment-comparison]
    [ai.miniforge.phase-opsv.environment-comparison-schema :as environment-schema]
    [ai.miniforge.phase-opsv.environment-comparison-request-schema :as environment-request-schema]
@@ -216,6 +217,25 @@
    Requires independently admitted current authority and a six-argument pinned durable commit.
    A confirmed deadline patch does not establish actual worker termination or recovered baseline."
   native-load-stop-provider/patch!)
+
+(def ^{:stratum 0} execute-kubernetes-load-stop!
+  "Govern one exact owned-load deadline patch using independently current recovery admission and authority.
+   Runtime policy/context :opsv/recovery-effect-operations must separately permit :stop-load.
+   Use the original trusted host runtime; ownership/runtime must reference its effects directory.
+   The closed input uses the stable stop-load effect ID for the approved plan hash.
+   Recheck physical roots, durable creation receipt, live UID/revision and authority before dispatch.
+   Return the durable transaction or an anomaly, keeping forward effects fenced.
+   A successful patch does not prove worker termination; the host must separately verify it."
+  native-load-recovery-execution/stop!)
+
+(def ^{:stratum 0} execute-kubernetes-load-cleanup!
+  "Govern one exact noncascading owned-load deletion using separate current recovery authority.
+   Runtime policy/context :opsv/recovery-effect-operations must separately permit :cleanup-load.
+   Use the original trusted runtime and stable cleanup-load effect ID for the approved plan hash.
+   Require current not-started or terminated observation, proven live UID/revision and matching physical roots.
+   Return the durable transaction or an anomaly; never retry an uncertain deletion as another attempt.
+   A provider acknowledgement is not absence or recovered-baseline proof; the host must verify both."
+  native-load-recovery-execution/cleanup!)
 
 (def ^{:stratum 0} read-kubernetes-load-ownership!
   "Read the plan's durable granted creation record and fresh Pod with its provider-assigned UID.

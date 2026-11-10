@@ -13,14 +13,14 @@
 (def ^{:stratum 0} stop-deadline-seconds
   "Kubernetes accepts positive shortened deadlines; elapsed time is not termination proof." 1)
 
-(defn- ^{:stratum 0} usable? [input plan owned]
+(defn ^{:stratum 0} ready? [input plan owned]
   (let [deadline (get-in owned [:load/pod "spec" "activeDeadlineSeconds"])]
     (and (not= (:effect/id input) (get-in plan [:recovery/load :creation-effect/id]))
          (pos-int? deadline))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} request [owned]
+(defn ^{:stratum 1} request [owned]
   (let [pod (:load/pod owned)
         metadata (get pod "metadata")
         collection (get-in owned [:load/creation-record :effect/proposal :kubernetes/request :path])
@@ -36,7 +36,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} prepare [ctx input plan owned]
-  (if-not (usable? input plan owned)
+  (if-not (ready? input plan owned)
     (anomaly/anomaly :conflict (msg/ts :load/stop-request-refused) {})
     (let [payload (request owned)
           intent {:opsv/operation :stop-load
