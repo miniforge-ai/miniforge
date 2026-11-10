@@ -55,8 +55,8 @@ No live effects, credentials, cluster changes, experiments or activation.
 
 ## Related Issues/PRs
 
-Local dependent work on #2497. Integrate its merged changes and current main
-before publication.
+Builds on merged #2497. Current main integration preserves the exact proven
+production and test tree.
 
 ## Checklist
 
