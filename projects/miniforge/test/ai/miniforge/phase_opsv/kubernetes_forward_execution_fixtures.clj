@@ -23,6 +23,10 @@
   (swap! (:host/context fixture) assoc-in
          [:execution/opts :opsv/governance :policy/context :opsv/allowed-environments] #{}))
 
+(defn ^{:stratum 0} capture-issuance! [captured issue! directory request now]
+  (swap! captured conj request)
+  (issue! directory request now))
+
 (defn ^{:stratum 0} on-claim! [change! armed {:keys [host/runtime request] :as fixture} _calls _options]
   (let [record (effect/read-record (:effects-directory runtime) (:effect/id request))]
     (when (and (= :committing (:effect/state record)) (compare-and-set! armed true false))
