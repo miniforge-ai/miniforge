@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.29.1-draft
-**Date:** 2026-11-06
+**Version:** 0.30.0-draft
+**Date:** 2026-11-08
 **Status:** Living specification during OSS development
 
 ---
@@ -64,7 +64,7 @@ They use RFC 2119 terminology (MUST, SHALL, SHOULD, MAY).
 | N2 checkpoint/resume delta | Implementations that persist workflow state |
 | N5 supervisory deltas | Miniforge SDLC control-plane producers and consumers |
 | N7-N10 | Miniforge Fleet/SDLC capabilities |
-| N11 + runtime-adapter delta | Governed task runtimes in Core and consuming products |
+| N11 + runtime-adapter and egress-control deltas | Governed task runtimes in Core and consuming products |
 | N12-N13 | Miniforge agent context and policy-guidance runtime |
 | N14 | Experimental Miniforge deliberation runs, scoped by N14 §0.4 |
 | N15 | minibench/workbench evaluation protocol and N14 promotion gates |
@@ -250,6 +250,7 @@ Defines:
 | [N5-delta-3-observational-entities.md](normative/N5-delta-3-observational-entities.md) | N5 supervisory | Miniforge entity projections |
 | [N5-delta-4-automation-edge-correlator.md](normative/N5-delta-4-automation-edge-correlator.md) | N5 supervisory | Miniforge automation causality |
 | [N11-delta-runtime-adapter.md](normative/N11-delta-runtime-adapter.md) | N11 | Governed task runtimes |
+| [N11-delta-2-egress-control.md](normative/N11-delta-2-egress-control.md) | N11, N11 runtime-adapter | Governed task runtimes |
 
 ### N7 — Operational Policy Synthesis With Verification ✅
 
@@ -376,6 +377,8 @@ Defines:
 - Runtime specification, network, secret, resource, and evidence boundaries
 - TaskExecutor workspace persistence and phase continuity
 - OCI runtime abstraction through the indexed N11 runtime-adapter delta
+- Capsule egress control in the indexed N11 egress-control delta: per-capsule proxy, allowlist, destination
+  guard, credential tokens
 - **§11 renumbered** — its five subsections were numbered §10.1–§10.5, colliding with the
   TaskExecutor protocol's own subsections
 - **§11 marked informative** — it maps requirements to file/line coordinates that rot; the
@@ -672,6 +675,9 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.30.0-draft** (2026-11-08) - Indexed N11-delta-2 (egress control), draft 0.1.0: network profiles,
+  per-capsule egress proxy, exact-host allowlist, destination guard, credential tokens, per-capsule CA, and
+  Kubernetes fail-closed rule. Its events and evidence keys are proposed only, pending N3 and N6 registration.
 - **0.29.1-draft** (2026-11-06) - Clarified approved N7/N10 recovery timing:
   independently approve and retain the bounded recovery plan before trial.
   Issue exact recovery grants just in time from fresh provider preconditions
