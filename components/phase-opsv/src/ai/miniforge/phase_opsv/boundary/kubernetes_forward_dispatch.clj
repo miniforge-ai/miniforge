@@ -30,7 +30,8 @@
 (defn ^{:stratum 1} dispatch! [kind runtime issued prepared input record operation]
   (let [result (anomaly/let-ok [_committing (audit/record! (:context prepared) (:effects-directory runtime)
                                                         (:effect/id record) (:decision prepared))
-                                ready ((:readiness kind) runtime input)
+                                observed ((:readiness kind) runtime input)
+                                ready ((:admit kind) (assoc observed :proposal (:effect/proposal record)))
                                 _retained (readiness/retain! kind ready record)]
                  ((:invoke kind) runtime issued ready record operation))]
     (if (anomaly/anomaly? result) (refused result) result)))

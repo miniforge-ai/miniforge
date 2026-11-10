@@ -9,6 +9,7 @@
             [ai.miniforge.phase-opsv.boundary.kubernetes-recovery-admission :as admission]
             [ai.miniforge.phase-opsv.boundary.kubernetes-recovery-authority :as authority]
             [ai.miniforge.phase-opsv.boundary.kubernetes-recovery-dispatch :as dispatch]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-recovery-effect-admission :as effect-admission]
             [ai.miniforge.phase-opsv.kubernetes-baseline-restoration-schema :as schema]
             [ai.miniforge.phase-opsv.kubernetes-forward-operation :as kind]
             [ai.miniforge.phase-opsv.kubernetes-provider-runtime :as provider]))
@@ -29,12 +30,13 @@
     :effect-id :effect/id
     :readiness admission/restoration-readiness!
     :prepare prepare!
+    :admit effect-admission/admit!
     :native restore!
     :issue authority/issue!
     :invoke dispatch/invoke!
     :material [:native-baseline-restoration-readiness :opsv-verification-report :opsv/native-baseline-restoration-readiness]
-    :observation-key :recovery/plan
-    :material-observation-key :recovery/plan))
+    :observation-key :recovery/effect-admission
+    :material-observation-key :recovery/effect-admission))
 
 ;------------------------------------------------------------------------------ Layer 2
 

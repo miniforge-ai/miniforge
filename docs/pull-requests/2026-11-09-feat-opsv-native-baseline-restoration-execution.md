@@ -25,6 +25,13 @@ while forward mutations remain in flight. Read fresh provider preconditions
 before issuing an exact restoration grant. Keep independent current N4 admission,
 original-target binding and acknowledged N3/N6 lineage.
 
+Plan approval is not execution admission. A separate N4 gate evaluates the fresh
+restoration proposal before grant issuance and again at dispatch. Runtime-owned
+policy context must enable the operation through `:opsv/recovery-effect-operations`.
+Missing permission denies execution even when the bounded plan is approved.
+The protected commit report retains the exact proposal, current effect decision
+and gate results. Shared gate projection uses the canonical result predicate.
+
 The public recovery-effect identity factory assigns one stable durable slot per
 plan hash and recovery operation using printer-independent UTF-8 encoding.
 A different caller attempt ID cannot create
@@ -55,6 +62,14 @@ products, strict lint, inferred strata, task classpaths and a fresh CLI passed
 again. Source and rebuilt isolated package each passed the updated 12 recovery
 tests / 321 assertions and eight meaningful faults, including the reproduced
 printer-state regression. Every fault failed assertions with zero errors.
+The full review identified plan approval being reused as the execution decision.
+The separate exact-effect gate and dispatch recheck passed both consuming JVM
+products, strict lint, inferred strata, classpaths and fresh packaging.
+Source and isolated package each passed 122 tests / 3,484 assertions and
+24 meaningful faults. Every fault produced assertion failures and zero errors.
+A denial-guidance addition then passed both real denial scenarios against
+source and a fresh isolated package, with 34 assertions per mode.
+The final changes afterward only declare the two internal API surface classes.
 
 ## Deployment Plan
 

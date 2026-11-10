@@ -19,7 +19,10 @@
 
 (defn- ^{:stratum 0} check-restored [{:keys [host/runtime] :as fixture}]
   (let [[result calls requests] (fixtures/execute fixture)
-        issuance (first requests)]
+        issuance (first requests)
+        decision (:opsv/decision-envelope (last (forward/dispositions fixture)))
+        readiness (trial/material-artifact :native-baseline-restoration-readiness fixture)
+        admitted (get-in readiness [:artifact/content :recovery/effect-admission])]
     (is (not (anomaly/anomaly? result)))
     (is (= :succeeded (:effect/state result)))
     (is (= :restore-baseline (get-in result [:effect/proposal :opsv/experiment :opsv/operation])))
@@ -30,6 +33,10 @@
     (is (= 1 (count requests)))
     (is (= (:execution/status @(:host/context fixture)) (:workflow-run/status issuance)))
     (is (= (:opsv/experiment (:effect/proposal result)) (:opsv/experiment issuance)))
+    (is (= [:opsv/recovery-effect-gate] (get-in decision [:envelope/pins :pins/rule-ids])))
+    (is (= (:effect/envelope-id result) (:envelope/id decision)))
+    (is (= [true] (mapv :gate/passed? (:opsv/gate-results admitted))))
+    (is (= (:effect/proposal result) (:effect/proposal admitted)))
     (is (true? (:stopped? (actuation/mutation-status (:fence runtime)))))
     (is (not-any? #(contains? (:effect/observed result) %) [:recovery/verified? :slo/passed?]))
     result))
@@ -121,6 +128,20 @@
     (is (= expected truncated duplicated))
     (is (= (count operations) (count (set truncated))))))
 
+(defn- ^{:stratum 0} check-effect-denied [late? {:keys [host/runtime] :as fixture}]
+  (let [armed (atom true)
+        changed (if late? fixture (fixtures/deny-effect! fixture))
+        on-read! (if late? (partial forward/on-claim! fixtures/deny-effect! armed) (constantly nil))
+        [result calls requests] (fixtures/execute changed on-read!)
+        failure (if late? (get-in result [:anomaly/data :effect/transaction :effect/observed :opsv/dispatch-refusal]) result)]
+    (is (anomaly/anomaly? result))
+    (is (empty? (fixtures/mutations calls)))
+    (is (= :review-exact-recovery-admission
+           (get-in failure [:anomaly/data :recovery/effect-admission :opsv/gate-checks :results 0 :error :data :remediation :action])))
+    (is (= (if late? 1 0) (count requests)))
+    (is (= (if late? :failed nil) (get-in result [:anomaly/data :effect/transaction :effect/state])))
+    (is (true? (:stopped? (actuation/mutation-status (:fence runtime)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} check-revoked-forward [fixture]
@@ -169,6 +190,10 @@
 
 (deftest ^{:stratum 1} recovery-slots-are-operation-specific-and-independent-of-caller-printer-bindings-test
   (fixtures/with-input check-printer-independent-identities))
+
+(deftest ^{:stratum 1} approved-plan-without-separate-current-exact-effect-permission-cannot-execute-test
+  (doseq [late? [false true]]
+    (fixtures/with-input (partial check-effect-denied late?))))
 
 (deftest ^{:stratum 1} admitted-forward-effects-must-settle-before-restoration-can-acquire-compensation-authority-test
   (fixtures/with-input check-forward-in-flight))

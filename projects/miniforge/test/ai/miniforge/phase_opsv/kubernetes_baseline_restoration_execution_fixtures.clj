@@ -36,6 +36,11 @@
          [:execution/opts :opsv/recovery-plan-admission :recovery/approved-plan-hashes] #{})
   fixture)
 
+(defn ^{:stratum 0} deny-effect! [fixture]
+  (swap! (:host/context fixture) assoc-in
+         [:execution/opts :opsv/governance :policy/context :opsv/recovery-effect-operations] #{})
+  fixture)
+
 (defn- ^{:stratum 0} capture-issuance! [captured issue! directory request now]
   (swap! captured conj request)
   (issue! directory request now))
@@ -45,6 +50,8 @@
         id (phase/recovery-effect-id digest :restore-baseline)
         request (assoc (:restoration/request fixture) :effect/id id)]
     (swap! (:host/context fixture) update :execution/opts dissoc :opsv/experiment-execution)
+    (swap! (:host/context fixture) assoc-in
+           [:execution/opts :opsv/governance :policy/context :opsv/recovery-effect-operations] #{:restore-baseline})
     (f (assoc fixture :request request :host/routes (:restoration/routes fixture)))))
 
 ;------------------------------------------------------------------------------ Layer 1

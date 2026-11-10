@@ -116,6 +116,7 @@
 
 (def ^{:stratum 0} execute-kubernetes-baseline-restoration!
   "Execute exact staging compensation using independently current N4 admission and recovery authority.
+   Runtime policy/context :opsv/recovery-effect-operations must permit :restore-baseline separately from plan approval.
    Use the original trusted host runtime and closed restoration input; effect/id must equal recovery-effect-id.
    Running, paused, blocked, failed and cancelled status is preserved; safe mode does not enable forward writes.
    The forward fence stays closed, and the recovery grant is outside the stopped forward registration bag.

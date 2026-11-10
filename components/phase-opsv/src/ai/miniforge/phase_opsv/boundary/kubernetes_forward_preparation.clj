@@ -19,7 +19,7 @@
                   intent ((:prepare operation) before input)
                   current ((:readiness operation) runtime input)]
     (if (= (admission/snapshot (:context before)) (admission/snapshot (:context current)))
-      (assoc current :proposal intent)
+      ((:admit operation) (assoc current :proposal intent))
       (admission/refused))))
 
 ;------------------------------------------------------------------------------ Layer 1
