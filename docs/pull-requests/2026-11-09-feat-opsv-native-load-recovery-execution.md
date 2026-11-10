@@ -56,6 +56,35 @@ isolated-package validation, with 44 assertions per mode.
 
 No live effects, traffic, credentials, cluster access or experiment activation.
 
+## Authorization review
+
+Recovery after forward revocation implements the operator-approved N7 §5.5 and
+N10 §1.5 contract, not an exception to those gates. The opaque original control,
+authority directory, current-context reader and fence are trusted host values;
+the closed serialized input cannot replace them. Recovery closes forward
+admission and requires settled effects. It obtains a new exact N4 decision and
+grant outside the stopped forward bag. It rechecks current operation permission,
+native ownership, payload preconditions and grant validity at dispatch.
+Plan approval alone and revoked forward authority grant no recovery permission.
+
+Root traced both native operations through the actual issuer, durable claim and
+provider dispatch. Real denial tests prove zero issuance before permission or
+fresh-payload admission, and zero mutation after late permission changes.
+Counterfactual removal of each admission guard produces assertion failures, not
+errors. Private authority-directory mismatch, unproven ownership, physical-root
+drift and arbitrary operation identities also refuse. No live authorization is
+inferred from this review.
+
+Main integration preserved the signed implementation and test tree. The
+phase-opsv tree at both `969c24e7` and `0e18ae04` is
+`afe4fff0c0fd54631bb533a1b4e0bb6cfd2fe190`; review clarifications do not change it.
+The overview-review follow-up rebuilt the CLI at `0e18ae04`.
+Five focused real authority tests / 356 assertions passed in both source and the isolated package.
+No production-source overlay was used. This covers revoked forward grants,
+separate exact recovery permission, ownership/directory/slot binding and fresh
+pre-issuance payload preconditions. The tested package SHA-256 is
+`4776adeaf8738fe38534cf61e53871a049eaccde5cf01f2bce7dec6b9e7378dc`.
+
 ## Related Issues/PRs
 
 Builds on merged #2498, independently governed baseline restoration. Merged main
