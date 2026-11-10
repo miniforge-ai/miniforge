@@ -5,7 +5,6 @@
   "Internal host composition; operation functions are code-owned, never serialized authority."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.boundary.kubernetes-forward-preparation :as preparation]
-            [ai.miniforge.phase-opsv.boundary.kubernetes-forward-authority :as issuance]
             [ai.miniforge.phase-opsv.boundary.kubernetes-forward-result :as result]
             [ai.miniforge.phase-opsv.boundary.kubernetes-forward-transaction :as transaction]
             [ai.miniforge.phase-opsv.boundary.verification-reporting :as reporting]
@@ -24,7 +23,7 @@
         (.getSuppressed ^Throwable throwable)))
 
 (defn- ^{:stratum 0} commit-prepared! [kind runtime input prepared now]
-  (anomaly/let-ok [issued (issuance/issue! runtime prepared now)]
+  (anomaly/let-ok [issued ((:issue kind) runtime prepared now)]
     (result/complete! runtime input issued now (partial transaction/execute! kind runtime prepared input issued now))))
 
 ;------------------------------------------------------------------------------ Layer 1

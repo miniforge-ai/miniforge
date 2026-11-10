@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-forward-execution-fixtures
   (:require [ai.miniforge.evidence-bundle.interface :as evidence]
+            [ai.miniforge.effect-transaction.interface :as effect]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.execution-grant.opsv-scope-fixtures :as clock]
             [ai.miniforge.phase-opsv.interface :as phase]
@@ -21,6 +22,11 @@
 (defn ^{:stratum 0} deny-policy! [fixture]
   (swap! (:host/context fixture) assoc-in
          [:execution/opts :opsv/governance :policy/context :opsv/allowed-environments] #{}))
+
+(defn ^{:stratum 0} on-claim! [change! armed {:keys [host/runtime request] :as fixture} _calls _options]
+  (let [record (effect/read-record (:effects-directory runtime) (:effect/id request))]
+    (when (and (= :committing (:effect/state record)) (compare-and-set! armed true false))
+      (change! fixture))))
 
 (defn- ^{:stratum 0} context [{:keys [ctx input]}]
   (-> ctx

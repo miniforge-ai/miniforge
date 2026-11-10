@@ -8,7 +8,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} definition
-  [input-schema & {:keys [effect-id readiness prepare native material observation-key material-observation-key]
+  [input-schema & {:keys [effect-id readiness prepare native issue invoke material observation-key material-observation-key]
                    :or {material-observation-key :load/observation}}]
   (let [arguments [:tuple runtime/HostRuntime input-schema]
         validator (m/validator arguments)]
@@ -17,6 +17,8 @@
      :readiness readiness
      :prepare prepare
      :native native
+     :issue issue
+     :invoke invoke
      :material material
      :observation-key observation-key
      :material-observation-key material-observation-key}))

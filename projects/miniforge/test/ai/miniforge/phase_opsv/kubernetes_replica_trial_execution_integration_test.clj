@@ -83,11 +83,6 @@
     (is (true? (:stopped? (actuation/mutation-status (:fence runtime)))))
     (is (some? (:grant/revoked-at (fixtures/current-grant fixture))))))
 
-(defn- ^{:stratum 0} change-on-claim! [change armed fixture _calls _options]
-  (when (and (= :committing (:opsv/effect-state (last (forward/dispositions fixture))))
-             (compare-and-set! armed true false))
-    (fixtures/change! change fixture)))
-
 (defn- ^{:stratum 0} check-fenced-without-mutation [expected runtime result calls]
   (is (anomaly/anomaly? result))
   (is (= expected (get-in result [:anomaly/data :effect/transaction :effect/state])))
@@ -147,7 +142,8 @@
 
 (defn- ^{:stratum 1} check-late-refusal [change {:keys [host/runtime] :as fixture}]
   (let [armed (atom true)
-        [result calls] (fixtures/execute fixture (partial change-on-claim! change armed))]
+        change! (partial fixtures/change! change)
+        [result calls] (fixtures/execute fixture (partial forward/on-claim! change! armed))]
     (is (false? @armed))
     (check-fenced-without-mutation :failed runtime result calls)))
 

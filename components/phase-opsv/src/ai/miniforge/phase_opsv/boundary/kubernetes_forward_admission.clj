@@ -7,6 +7,7 @@
             [ai.miniforge.phase-opsv.boundary.experiment-preflight :as preflight]
             [ai.miniforge.phase-opsv.boundary.retained-preparation :as original]
             [ai.miniforge.phase-opsv.boundary.retained-recovery-plan :as recovery]
+            [ai.miniforge.phase-opsv.kubernetes-effect-readiness :as readiness]
             [ai.miniforge.phase-opsv.kubernetes-forward-runtime-schema :as schema]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.run-control :as control]
@@ -49,11 +50,7 @@
     (let [envelope (:opsv/experiment-decision-envelope evaluated)]
       (if-not (allowing? envelope)
         (assoc-in (refused) [:anomaly/data :opsv/experiment-admission] evaluated)
-        {:context ctx
-         :decision envelope
-         :recovery/plan (:recovery/plan admitted)
-         :recovery/hash (:recovery/hash admitted)
-         :comparison/original baseline}))))
+        (assoc (readiness/admitted ctx envelope admitted) :comparison/original baseline)))))
 
 (comment
   (snapshot {:execution/id (random-uuid)}))
