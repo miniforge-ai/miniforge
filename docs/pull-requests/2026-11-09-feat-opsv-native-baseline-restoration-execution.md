@@ -26,7 +26,8 @@ before issuing an exact restoration grant. Keep independent current N4 admission
 original-target binding and acknowledged N3/N6 lineage.
 
 The public recovery-effect identity factory assigns one stable durable slot per
-plan hash and recovery operation. A different caller attempt ID cannot create
+plan hash and recovery operation using printer-independent UTF-8 encoding.
+A different caller attempt ID cannot create
 another slot or retry an uncertain effect. Shared factories own readiness,
 provider-runtime and operation descriptors; shared authorization preserves the
 forward path's final stop check and uses independent recovery context.
@@ -48,6 +49,12 @@ Both consuming JVM products, structure, task classpaths, fresh CLI, strict lint
 and true inferred strata passed under the shared serial protocol.
 After a behavior-identical test-helper cleanup, the 11 recovery tests passed
 again against source and the unchanged package, with 308 assertions per run.
+Review identified caller printer bindings affecting recovery UUIDs. The encoding
+now uses the closed hash and operation vocabulary directly. Both consuming JVM
+products, strict lint, inferred strata, task classpaths and a fresh CLI passed
+again. Source and rebuilt isolated package each passed the updated 12 recovery
+tests / 321 assertions and eight meaningful faults, including the reproduced
+printer-state regression. Every fault failed assertions with zero errors.
 
 ## Deployment Plan
 

@@ -111,6 +111,16 @@
     (is (zero? (:in-flight (actuation/mutation-status (:fence runtime)))))
     (is (true? (:stopped? (actuation/mutation-status (:fence runtime)))))))
 
+(defn- ^{:stratum 0} check-printer-independent-identities [fixture]
+  (let [digest (get-in fixture [:prepared :recovery/hash])
+        operations [:stop-load :cleanup-load :restore-baseline]
+        identity-for (partial phase/recovery-effect-id digest)
+        expected (mapv identity-for operations)
+        truncated (binding [*print-length* 1 *print-level* 0] (mapv identity-for operations))
+        duplicated (binding [*print-dup* true *print-readably* false] (mapv identity-for operations))]
+    (is (= expected truncated duplicated))
+    (is (= (count operations) (count (set truncated))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} check-revoked-forward [fixture]
@@ -156,6 +166,9 @@
 
 (deftest ^{:stratum 1} stable-compensation-identities-exclude-forward-operations-and-malformed-plan-hashes-test
   (fixtures/with-input check-identities))
+
+(deftest ^{:stratum 1} recovery-slots-are-operation-specific-and-independent-of-caller-printer-bindings-test
+  (fixtures/with-input check-printer-independent-identities))
 
 (deftest ^{:stratum 1} admitted-forward-effects-must-settle-before-restoration-can-acquire-compensation-authority-test
   (fixtures/with-input check-forward-in-flight))

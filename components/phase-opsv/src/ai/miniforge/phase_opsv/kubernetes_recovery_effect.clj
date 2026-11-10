@@ -7,8 +7,14 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} identity-for [digest operation]
-  (let [identity (pr-str [:opsv/recovery digest operation])]
+(def ^{:stratum 0 :private true} identity-prefix
+  "Domain-separate closed recovery hashes and operation names without caller printer state."
+  "opsv/recovery/")
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} identity-for [digest operation]
+  (let [identity (str identity-prefix digest "/" (name operation))]
     (UUID/nameUUIDFromBytes (.getBytes identity StandardCharsets/UTF_8))))
 
 (comment ::one-durable-slot-per-operation-of-the-same-bounded-plan-not-per-caller-attempt)
