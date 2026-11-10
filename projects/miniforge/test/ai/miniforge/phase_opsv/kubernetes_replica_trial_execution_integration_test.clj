@@ -4,9 +4,14 @@
 (ns ai.miniforge.phase-opsv.kubernetes-replica-trial-execution-integration-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.effect-transaction.interface :as effect]
+            [ai.miniforge.artifact.interface :as artifact]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as acquisition]
             [ai.miniforge.decision-envelope.interface :as decision]
             [ai.miniforge.opsv-actuation.interface :as actuation]
             [ai.miniforge.phase-opsv.kubernetes-forward-execution-fixtures :as forward]
+            [ai.miniforge.phase-opsv.kubernetes-baseline-recovery-fixtures :as recovery]
+            [ai.miniforge.phase-opsv.kubernetes-environment-fingerprint-fixtures :as fingerprint]
+            [ai.miniforge.phase-opsv.kubernetes-capture-test-support :as capture]
             [ai.miniforge.phase-opsv.kubernetes-inventory-fixtures :as inventory]
             [ai.miniforge.phase-opsv.kubernetes-replica-request-fixtures :as replicas]
             [ai.miniforge.phase-opsv.kubernetes-replica-trial-execution-fault-fixtures :as faults]
@@ -90,6 +95,54 @@
   (is (empty? (fixtures/mutations calls)))
   (is (true? (:stopped? (actuation/mutation-status (:fence runtime))))))
 
+(defn- ^{:stratum 0} check-drift-evidence [{:keys [ctx] :as fixture}]
+  (let [value (fixtures/material-artifact :native-replica-trial-comparison fixture)
+        report (:artifact/content value)
+        observed (:comparison/observed report)
+        raw (if (anomaly/anomaly? observed)
+              (get-in observed [:anomaly/data :environment/raw-observations])
+              (:environment/raw-observations observed))
+        events (recovery/drift-events fixture)
+        assembly (forward/assembly fixture)]
+    (is (some? value))
+    (is (protected/valid? ctx value))
+    (is (= :native-replica-trial-comparison (:verification/kind report)))
+    (is (false? (:verification/passed? report)))
+    (is (seq raw))
+    (is (seq (get-in report [:comparison/original :environment/raw-observations])))
+    (is (anomaly/anomaly? (:comparison/result report)))
+    (is (= (get-in fixture [:prepared :recovery/hash]) (:recovery/hash report)))
+    (is (contains? (:opsv/artifact-refs assembly) (:artifact/id value)))
+    (is (= 1 (count events)))
+    (is (contains? (:opsv/event-refs assembly) (:event/id (first events))))))
+
+(defn- ^{:stratum 0} check-unavailable-capture [{:keys [ctx] :as fixture}]
+  (let [failure (anomaly/anomaly :unavailable "injected native acquisition failure" {})
+        [result calls] (with-redefs [acquisition/observe! (constantly failure)] (fixtures/execute fixture))
+        value (fixtures/material-artifact :native-replica-trial-comparison fixture)
+        report (:artifact/content value)]
+    (is (= :unavailable (:anomaly/type result)))
+    (is (empty? calls))
+    (is (false? (:verification/passed? report)))
+    (is (= failure (:comparison/result report)))
+    (is (protected/valid? ctx value))
+    (is (empty? (recovery/drift-events fixture)))
+    (is (contains? (:opsv/artifact-refs (forward/assembly fixture)) (:artifact/id value)))))
+
+(defn- ^{:stratum 0} check-drift-publication-failure [fixture]
+  (let [path [:host/routes inventory/deployment-path "spec" "replicas"]
+        changed (assoc-in fixture path replicas/trial-count)
+        failure (anomaly/anomaly :unavailable "injected comparison publication failure" {})
+        [result calls] (with-redefs [artifact/publish! (constantly failure)] (fixtures/execute changed))
+        output (get-in result [:anomaly/data :opsv/phase-output])
+        report (:opsv/native-replica-trial-comparison output)]
+    (is (anomaly/anomaly? result))
+    (is (false? (:verification/passed? report)))
+    (is (seq (get-in report [:comparison/observed :environment/raw-observations])))
+    (is (empty? (:opsv/phase-produced-artifact-refs output)))
+    (is (= 1 (count (recovery/drift-events fixture))))
+    (is (empty? (fixtures/mutations calls)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} check-late-refusal [change {:keys [host/runtime] :as fixture}]
@@ -120,6 +173,21 @@
     (is (seq (get-in returned [:comparison/observed :environment/raw-observations])))
     (check-fenced-without-mutation :failed runtime result calls)))
 
+(defn- ^{:stratum 1} check-initial-drift [path value fixture]
+  (let [changed (assoc-in fixture (into [:host/routes] path) value)
+        [result calls] (fixtures/execute changed)
+        output (get-in result [:anomaly/data :opsv/phase-output])]
+    (is (anomaly/anomaly? result))
+    (is (empty? (fixtures/mutations calls)))
+    (is (seq (:opsv/phase-produced-artifact-refs output)))
+    (check-drift-evidence fixture)))
+
+(defn- ^{:stratum 1} check-late-drift-evidence [fixture]
+  (let [path [inventory/deployment-path "spec" "replicas"]
+        [result calls] (faults/execute-with-drift path replicas/trial-count fixture)]
+    (check-fenced-without-mutation :failed (:host/runtime fixture) result calls)
+    (check-drift-evidence fixture)))
+
 (deftest ^{:stratum 1} exact-candidate-has-current-governance-authority-and-three-durable-audit-dispositions-test
   (fixtures/with-executable check-success))
 
@@ -144,6 +212,12 @@
 (deftest ^{:stratum 1} uncertain-native-candidate-is-durable-fenced-and-revoked-without-retry-test
   (fixtures/with-executable check-unknown))
 
+(deftest ^{:stratum 1} unavailable-native-acquisition-is-retained-without-inventing-environment-drift-test
+  (fixtures/with-executable check-unavailable-capture))
+
+(deftest ^{:stratum 1} failed-comparison-publication-retains-protected-failure-without-claiming-artifact-acknowledgement-test
+  (fixtures/with-executable check-drift-publication-failure))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} changed-policy-stop-revocation-and-expiry-after-claim-refuse-before-mutation-test
@@ -161,6 +235,15 @@
 
 (deftest ^{:stratum 2} revised-native-request-after-claim-refuses-without-reusing-the-old-payload-grant-test
   (fixtures/with-executable check-revised-proposal))
+
+(deftest ^{:stratum 2} initial-count-environment-and-unprojectable-native-drift-retain-linked-protected-comparison-test
+  (doseq [[path value] [[[inventory/deployment-path "spec" "replicas"] replicas/trial-count]
+                       [[capture/config-path "data" "workers"] "8"]
+                       [[inventory/pods-path "items" 0 "status" "containerStatuses" 0 "imageID"] (fingerprint/other-image)]]]
+    (fixtures/with-executable (partial check-initial-drift path value))))
+
+(deftest ^{:stratum 2} commit-time-drift-retains-linked-observations-before-returning-the-failed-transaction-test
+  (fixtures/with-executable check-late-drift-evidence))
 
 (comment
   (fixtures/with-executable check-success))

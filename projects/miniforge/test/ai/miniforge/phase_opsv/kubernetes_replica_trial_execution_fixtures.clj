@@ -22,8 +22,8 @@
 
 (defn ^{:stratum 0} mutations [calls] (filterv #(= :patch (:method %)) calls))
 
-(defn- ^{:stratum 0} readiness? [value]
-  (= :native-replica-trial-readiness (get-in value [:artifact/metadata :opsv/material-kind])))
+(defn- ^{:stratum 0} material? [kind value]
+  (= kind (get-in value [:artifact/metadata :opsv/material-kind])))
 
 (defn ^{:stratum 0} current-grant [{:keys [host/runtime] :as fixture}]
   (let [id (get-in (first (forward/dispositions fixture)) [:opsv/governed-effect :evidence/grant-id])]
@@ -47,11 +47,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} readiness-artifact [{:keys [ctx] :as fixture}]
+(defn ^{:stratum 1} material-artifact [kind {:keys [ctx] :as fixture}]
   (let [directory (get-in ctx [:execution/opts :opsv/artifact-directory])
         ids (:opsv/artifact-refs (forward/assembly fixture))
         values (map (partial artifact/read-published directory) ids)]
-    (first (filter readiness? values))))
+    (first (filter (partial material? kind) values))))
 
 (defn- ^{:stratum 1} native-response [fixture]
   (let [deployment (get-in fixture [:host/routes inventory/deployment-path])
@@ -72,6 +72,9 @@
 (defn ^{:stratum 1} with-executable [f] (trial/with-input (partial configured f)))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} readiness-artifact [fixture]
+  (material-artifact :native-replica-trial-readiness fixture))
 
 (defn ^{:stratum 2} execute
   ([fixture] (execute fixture (constantly nil)))

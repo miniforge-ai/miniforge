@@ -27,8 +27,8 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} capture-proposal! [ctx input plan retained]
-  (anomaly/let-ok [observed (observation/observe! input plan retained)]
+(defn- ^{:stratum 1} capture-proposal! [ctx input admitted retained]
+  (anomaly/let-ok [observed (observation/observe! ctx input admitted retained)]
     (proposal/prepare! ctx (model/proposal-input input
                             (get-in observed [:environment/raw-observations :kubernetes/verification :kubernetes/source])
                             (parameters input)))))
@@ -43,7 +43,7 @@
       (anomaly/let-ok [admitted (recovery/read! ctx (:recovery/input input) (:recovery/artifact-ref input))
                       retained (original/read! ctx (get-in input [:recovery/input :load :request])
                                                (get-in admitted [:recovery/plan :comparison/artifact-ref]))]
-        (capture-proposal! ctx input (:recovery/plan admitted) retained)))))
+        (capture-proposal! ctx input admitted retained)))))
 
 (comment
   (prepare! {} {}))

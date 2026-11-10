@@ -92,7 +92,8 @@
   "Construct one exact bounded replica-trial intent from fresh unchanged-original native state.
    Input is the closed retained recovery reference, explicit trial/provider, replica count and distinct effect ID.
    Re-admit the independent recovery plan and original; do not accept caller current-state snapshots.
-   Return the canonical UID/resource-version conditional proposal or an anomaly, without authority or mutation.
+   Return the canonical UID/resource-version conditional proposal or an anomaly, without authority or cluster mutation.
+   Comparison refusals retain protected observations and linked drift evidence before returning.
    Construction is not baseline adoption, trial activation, SLO success or permission to execute."
   native-replica-trial/prepare!)
 

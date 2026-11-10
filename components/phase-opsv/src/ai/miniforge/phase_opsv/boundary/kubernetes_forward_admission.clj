@@ -52,6 +52,7 @@
         {:context ctx
          :decision envelope
          :recovery/plan (:recovery/plan admitted)
+         :recovery/hash (:recovery/hash admitted)
          :comparison/original baseline}))))
 
 (comment

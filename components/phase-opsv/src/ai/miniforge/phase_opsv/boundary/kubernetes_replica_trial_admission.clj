@@ -10,7 +10,7 @@
 
 (defn ^{:stratum 0} readiness! [runtime input]
   (anomaly/let-ok [ready (admission/readiness! runtime input)
-                  observed (observation/observe! input (:recovery/plan ready) (:comparison/original ready))]
+                  observed (observation/observe! (:context ready) input ready (:comparison/original ready))]
     (assoc ready :trial/observation observed)))
 
 (comment

@@ -7,7 +7,6 @@
             [ai.miniforge.phase-opsv.artifact-model :as artifacts]
             [ai.miniforge.phase-opsv.boundary.verification-reporting :as reporting]
             [ai.miniforge.phase-opsv.kubernetes-baseline-recovery :as model]
-            [ai.miniforge.phase-opsv.kubernetes-baseline-recovery-schema :as schema]
             [ai.miniforge.phase-opsv.messages :as msg]
             [ai.miniforge.phase-opsv.runtime-context :as context]
             [ai.miniforge.phase-opsv.verification-drift :as drift]))
@@ -29,11 +28,11 @@
              (contains? details :kubernetes/expected-uid)
              (contains? details :kubernetes/observed-identity)))))
 
-(defn- ^{:stratum 0} retain! [ctx input admitted original observed compared]
-  (let [report (model/report input admitted original observed compared)
-        output {:opsv/baseline-recovery report}]
-    (anomaly/let-ok [value (artifacts/record ctx output schema/material)]
-      (let [protected-output (artifacts/recorded-output output schema/material value)]
+(defn- ^{:stratum 0} retain! [ctx input admitted original observed compared material]
+  (let [report (model/report (first material) input admitted original observed compared)
+        output {(nth material 2) report}]
+    (anomaly/let-ok [value (artifacts/record ctx output material)]
+      (let [protected-output (artifacts/recorded-output output material value)]
         (confirmation/publish-with-exception-handling ctx value (artifacts/begin-publication protected-output))))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -47,10 +46,10 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} publish! [ctx input admitted original observed]
+(defn ^{:stratum 2} publish! [ctx input admitted original observed material]
   (let [compared (comparison input original observed)]
     (anomaly/let-ok [safe (reporting/protect {:comparison/result compared})]
       (let [recorded (record-drift! ctx (:comparison/result safe))]
-        (retain! ctx input admitted original observed recorded)))))
+        (retain! ctx input admitted original observed recorded material)))))
 
 (comment ::protect-before-drift-delivery-and-retain-delivery-failures-with-comparison)

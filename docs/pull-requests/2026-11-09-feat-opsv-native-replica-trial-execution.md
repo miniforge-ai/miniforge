@@ -24,6 +24,9 @@ physical target at the commit boundary. Retain protected readiness and durable
 governed dispositions in N6 evidence. All three forward operations use the same
 descriptor factory; trial and restoration share native settings and exact-proposal
 comparison. Readiness publication failures return the actual protected content.
+Comparison refusals retain the failed native capture and protected comparison
+report with acknowledged N3 drift and N6 artifact lineage. Reuse baseline
+comparison reporting with a trial-specific material kind, not a recovery claim.
 
 This performs one candidate effect, not load creation, SLO verification, permanent
 apply or whole-trial recovery. Recovery remains separately authorized.
@@ -36,12 +39,14 @@ original and target, late policy/stop/revocation/expiry, replay, uncertainty and
 The native request is reconstructed after claiming the transaction; a changed
 resource revision cannot reuse the earlier payload grant.
 
-Strict lint has zero warnings/errors; 23 changed/dependent namespaces have at
-most three inferred strata. Structural validation, both consuming JVM products,
+Current strict lint has zero warnings/errors. Changed/dependent namespaces have
+at most three inferred strata. Structural validation, both consuming JVM products,
 task classpaths and the fresh CLI build passed under the shared serial protocol.
-Source and isolated package each passed 105 tests / 2,968 assertions and 24
+Source and isolated package each passed 109 tests / 3,111 assertions and 40
 meaningful counterfactuals, all with positive assertion failures and zero errors.
 The isolated run used the fresh package without production source overlays.
+Tests preserve drift capture, protected comparison, event and artifact acknowledgement.
+They distinguish unavailable transport from drift and retain publication failures.
 
 ## Deployment Plan
 
@@ -55,6 +60,6 @@ production or test code from the validated tree.
 ## Checklist
 
 - [x] Implement fresh exact candidate execution with shared factories and boundaries.
-- [x] Source, JVM, isolated package and fault validation.
-- [x] Owner adversarial and full applicable standards review.
+- [x] Current source, JVM, isolated package and fault validation.
+- [x] Current owner adversarial and full applicable standards review.
 - [ ] Signed commits, current-head full review, all CI and owner merge.

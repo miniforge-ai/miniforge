@@ -36,7 +36,7 @@
   (when-not (target/provider-for-plan? provider plan) (refused :conflict)))
 
 (defn- ^{:stratum 1} publish! [ctx input admitted original]
-  (recovery-reporting/publish! ctx input admitted original (observe! input)))
+  (recovery-reporting/publish! ctx input admitted original (observe! input) schema/material))
 
 ;------------------------------------------------------------------------------ Layer 2
 
