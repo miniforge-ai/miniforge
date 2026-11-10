@@ -1,5 +1,6 @@
 {:phase-opsv/system
- {:recovery/approval-required "Recovery-plan admission requires independent runtime approval of this exact bounded plan hash."
+ {:recovery/invalid-effect-identity "Recovery effect identity requires a bounded plan hash and a permitted compensation operation."
+  :recovery/approval-required "Recovery-plan admission requires independent runtime approval of this exact bounded plan hash."
   :recovery/approval-description "Approve one exact bounded staging recovery plan independently of forward effects."
   :recovery/approval-remediation "Approve this plan's exact hash in runtime-owned recovery-plan admission settings."
   :recovery/target-mismatch "Recovery-plan admission requires the declared staging target, attempt and original baseline to match."
