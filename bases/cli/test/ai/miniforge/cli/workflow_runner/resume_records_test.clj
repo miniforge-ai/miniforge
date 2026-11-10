@@ -24,6 +24,7 @@
    [ai.miniforge.operator.interface :as operator]
    [ai.miniforge.workflow.interface :as workflow]
    [cheshire.core :as json]
+   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
@@ -234,3 +235,16 @@
           (is (:resume/exited? (sut/with-child-pid record)) "a process older than the launch is not its child")
           (is (not (sut/launch-running? record 60000)))
           (finally (.destroy child)))))))
+
+(deftest ^{:stratum 1} write-edn-concurrent-writers-test
+  (with-temp-home
+    (fn []
+      (let [f (io/file (es/default-events-dir) "concurrent" "record.edn")
+            write! #'sut/write-edn!
+            writers (doall (for [n (range 16)]
+                             (future (write! f {:writer n}))))]
+        (is (every? #(not (instance? Throwable (try @% (catch Throwable t t)))) writers)
+            "no writer loses its temp file to another")
+        (is (integer? (:writer (edn/read-string (slurp f)))) "the record is whole")
+        (is (= ["record.edn"] (mapv #(.getName ^java.io.File %) (.listFiles (.getParentFile f))))
+            "no temp file is left behind")))))

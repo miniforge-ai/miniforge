@@ -78,9 +78,11 @@
     (try (edn/read-string (slurp f)) (catch Exception _ nil))))
 
 (defn- ^{:stratum 0} write-edn!
-  "Write `data` whole: a temp file, then an atomic rename."
+  "Write `data` whole: a temp file, then an atomic rename. The temp name
+   is unique per call so concurrent writers to one record cannot share,
+   interleave into, or rename away each other's temp file."
   [^java.io.File f data]
-  (let [tmp (io/file (.getParentFile f) (str (.getName f) ".tmp"))]
+  (let [tmp (io/file (.getParentFile f) (str (.getName f) "." (random-uuid) ".tmp"))]
     (io/make-parents f)
     (spit tmp (pr-str data))
     (Files/move (.toPath tmp) (.toPath f)
