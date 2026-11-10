@@ -52,6 +52,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} stop-child! [handle now]
+  (if (and (run? handle) (instance? Instant now))
+    (stop-run! now (state/record handle))
+    (boundary/failure :invalid-input :invalid-run)))
+
 (defn ^{:stratum 1} at-boundary! [handle operation]
   (if (and (run? handle) (fn? operation))
     (let [run (state/record handle)]

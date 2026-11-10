@@ -511,6 +511,13 @@
   "Stop and clean up a completed run. Retain it while cleanup or admitted effects remain."
   [handle now] (run-control/retire! handle now))
 
+(defn ^{:stratum 0} stop-run-control!
+  "Fence one opaque run, request its abort and revoke tracked forward grants; never forget its registration.
+   Accept the original control handle and current Instant. Return cleanup/mutation status or an input anomaly.
+   Siblings and parent admission remain unchanged. An abort acknowledgement does not prove recovery.
+   Keep failed recovery registered and fenced; only explicitly retire after independently verified recovery."
+  [handle now] (run-control/stop-child! handle now))
+
 (def ^{:stratum 0} phase-keys
   [:opsv/discover :opsv/plan :opsv/execute :opsv/converge
    :opsv/synthesize :opsv/verify :opsv/actuate])
