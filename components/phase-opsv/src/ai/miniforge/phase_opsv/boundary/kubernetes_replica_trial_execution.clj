@@ -4,6 +4,8 @@
 (ns ai.miniforge.phase-opsv.boundary.kubernetes-replica-trial-execution
   "API surface class 1: one governed staging candidate effect, not whole-trial success."
   (:require [ai.miniforge.phase-opsv.boundary.kubernetes-forward-execution :as execution]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-forward-authority :as authority]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-forward-dispatch :as dispatch]
             [ai.miniforge.phase-opsv.boundary.kubernetes-replica-trial :as proposal]
             [ai.miniforge.phase-opsv.boundary.kubernetes-replica-trial-admission :as admission]
             [ai.miniforge.phase-opsv.boundary.kubernetes-replica-trial-effect :as native]
@@ -23,6 +25,8 @@
     :readiness admission/readiness!
     :prepare prepare!
     :native native/patch!
+    :issue authority/issue!
+    :invoke dispatch/invoke!
     :material [:native-replica-trial-readiness :opsv-verification-report :opsv/native-replica-trial-readiness]
     :observation-key :trial/observation
     :material-observation-key :comparison/observed))

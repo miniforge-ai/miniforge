@@ -39,6 +39,8 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-baseline-recovery :as baseline-recovery]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-trial :as native-replica-trial]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-trial-execution :as native-replica-trial-execution]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-baseline-restoration-execution :as native-restoration-execution]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-recovery-identity :as recovery-identity]
    [ai.miniforge.phase-opsv.kubernetes-preparation-schema :as native-preparation-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-request :as native-replica-request]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-provider :as native-replica-provider]
@@ -105,6 +107,23 @@
    The candidate remains applied; the host must run independently authorized recovery on every trial exit.
    Does not enable experiments by default, create load, prove SLOs, restore baseline or authorize permanent apply."
   native-replica-trial-execution/apply!)
+
+(def ^{:stratum 0} recovery-effect-id
+  "Return the stable effect UUID for an approved recovery-plan hash and one recovery operation.
+   Only stop-load, cleanup-load and restore-baseline are accepted; invalid arguments return an anomaly.
+   Reusing a plan and operation reuses its durable slot, not permission to retry an uncertain effect."
+  recovery-identity/identity-for)
+
+(def ^{:stratum 0} execute-kubernetes-baseline-restoration!
+  "Execute exact staging compensation using independently current N4 admission and recovery authority.
+   Runtime policy/context :opsv/recovery-effect-operations must permit :restore-baseline separately from plan approval.
+   Use the original trusted host runtime and closed restoration input; effect/id must equal recovery-effect-id.
+   Running, paused, blocked, failed and cancelled status is preserved; safe mode does not enable forward writes.
+   The forward fence stays closed, and the recovery grant is outside the stopped forward registration bag.
+   Refuse until forward effects settle. Return the durable transaction or an anomaly; do not retry unknown outcomes.
+   The host must retain unresolved preflight failures as well as the durable effect disposition.
+   An acknowledgement is not verified recovery: the host must separately stop load, prove cleanup and verify baseline."
+  native-restoration-execution/apply!)
 
 (def ^{:stratum 0} verify-kubernetes-baseline-recovery!
   "Compare fresh native configuration and replica invariants to the acknowledged original in rollback mode.

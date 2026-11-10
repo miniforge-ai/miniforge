@@ -4,10 +4,13 @@
 (ns ai.miniforge.phase-opsv.boundary.kubernetes-load-start-execution
   "API surface class 1: trusted-host orchestration of one exact governed load start."
   (:require [ai.miniforge.phase-opsv.boundary.kubernetes-forward-execution :as execution]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-forward-authority :as authority]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-forward-dispatch :as dispatch]
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-start :as proposal]
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-admission :as admission]
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-provider :as native]
             [ai.miniforge.phase-opsv.kubernetes-forward-operation :as kind]
+            [ai.miniforge.phase-opsv.kubernetes-provider-runtime :as provider]
             [ai.miniforge.phase-opsv.kubernetes-load-stop-schema :as input]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -16,8 +19,7 @@
   (proposal/prepare! (:context ready) input))
 
 (defn- ^{:stratum 0} patch! [ctx input record dispatch]
-  (native/patch! {:context ctx
-                  :input input} record dispatch))
+  (native/patch! (provider/from-input ctx input) record dispatch))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -27,6 +29,8 @@
     :readiness admission/readiness!
     :prepare prepare!
     :native patch!
+    :issue authority/issue!
+    :invoke dispatch/invoke!
     :material [:native-load-start-readiness :opsv-verification-report :opsv/native-load-start-readiness]
     :observation-key :ownership/observation))
 

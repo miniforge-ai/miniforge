@@ -11,7 +11,7 @@
 (defn- ^{:stratum 0} registry-key [id] (keyword "opsv" (str (name id) "-gate")))
 
 (defn- ^{:stratum 0} domain-result [id result]
-  (let [passed? (true? (:passed? result))]
+  (let [passed? (gate/passed? result)]
     {:gate/id id
      :gate/passed? passed?}))
 

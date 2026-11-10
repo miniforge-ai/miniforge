@@ -4,6 +4,8 @@
 (ns ai.miniforge.phase-opsv.boundary.kubernetes-load-creation-execution
   "API surface class 1: governed inert Pod creation, never gate release or whole-trial success."
   (:require [ai.miniforge.phase-opsv.boundary.kubernetes-forward-execution :as execution]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-forward-authority :as authority]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-forward-dispatch :as dispatch]
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-creation-admission :as admission]
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-provider :as native]
             [ai.miniforge.phase-opsv.kubernetes-forward-operation :as kind]
@@ -22,6 +24,8 @@
     :readiness admission/readiness!
     :prepare admission/prepare!
     :native create-pod!
+    :issue authority/issue!
+    :invoke dispatch/invoke!
     :material [:native-load-creation-readiness :opsv-verification-report :opsv/native-load-creation-readiness]
     :observation-key :target/observation))
 

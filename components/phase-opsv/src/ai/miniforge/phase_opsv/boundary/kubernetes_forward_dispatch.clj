@@ -3,8 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.boundary.kubernetes-forward-dispatch
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.phase-opsv.boundary.kubernetes-effect-audit :as audit]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-effect-authorization :as authority]
             [ai.miniforge.phase-opsv.boundary.kubernetes-forward-admission :as admission]
             [ai.miniforge.phase-opsv.boundary.kubernetes-forward-readiness :as readiness]
             [ai.miniforge.phase-opsv.messages :as msg]
@@ -17,26 +17,23 @@
    :effect/failure (msg/ts :experiment/native-start-refused)
    :effect/observed {:opsv/dispatch-refusal failure}})
 
-(defn- ^{:stratum 0} authorized-call! [runtime issued ready record operation]
-  (anomaly/let-ok [ctx (admission/current-context! runtime)
-                  current (grant/current (:authority-directory runtime) (:grant/id issued))]
-    (if (and (= (admission/snapshot ctx) (admission/snapshot (:context ready)))
-             current
-             (grant/authorized? (grant/authorize current {:effect/scope (:effect/proposal record) :usage/count 1}
-                                                ((:clock runtime))))
-             (not (control/stopped? (:control runtime))))
-      (operation)
-      (admission/refused))))
+(defn- ^{:stratum 0} call-unless-stopped! [runtime operation]
+  (if (control/stopped? (:control runtime)) (admission/refused) (operation)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} invoke! [runtime issued ready record operation]
+  (let [current-operation (partial call-unless-stopped! runtime operation)]
+    (control/at-boundary! (:control runtime)
+      (partial authority/call! admission/current-context! runtime issued ready record current-operation))))
 
 (defn ^{:stratum 1} dispatch! [kind runtime issued prepared input record operation]
   (let [result (anomaly/let-ok [_committing (audit/record! (:context prepared) (:effects-directory runtime)
                                                         (:effect/id record) (:decision prepared))
-                                ready ((:readiness kind) runtime input)
+                                observed ((:readiness kind) runtime input)
+                                ready ((:admit kind) (assoc observed :proposal (:effect/proposal record)))
                                 _retained (readiness/retain! kind ready record)]
-                 (control/at-boundary! (:control runtime)
-                   (partial authorized-call! runtime issued ready record operation)))]
+                 ((:invoke kind) runtime issued ready record operation))]
     (if (anomaly/anomaly? result) (refused result) result)))
 
 (comment
