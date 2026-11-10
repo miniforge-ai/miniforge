@@ -23,6 +23,8 @@ Reuse the existing stop, abort confirmation and
 grant revocation vocabulary without forgetting the child or reopening fences.
 Only explicit retirement can release the registration after the host verifies
 recovery. This operation grants no recovery or provider authority.
+Validate the opaque handle and clock at the public interface; the internal
+stop operation trusts those admitted inputs.
 
 ## Testing Plan
 
@@ -38,6 +40,10 @@ The existing asynchronous guard increased from two to five seconds; test logic
 still synchronizes through explicit latches rather than scheduling delays.
 After this test-only cleanup, source and unchanged isolated package each passed
 all 15 tests / 95 assertions again. Production implementation was unchanged.
+After moving the input guard to the interface, both consuming JVM products,
+strict lint, structure, classpaths and a fresh CLI build passed again. Source
+and isolated package each passed 15 tests / 95 assertions and four meaningful
+faults with assertion failures and no errors.
 
 ## Deployment Plan
 

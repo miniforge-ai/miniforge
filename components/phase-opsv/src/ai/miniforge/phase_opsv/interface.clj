@@ -78,6 +78,7 @@
    [ai.miniforge.phase-opsv.boundary.prometheus-client :as prometheus]
    [ai.miniforge.phase-opsv.boundary.prometheus-criteria :as prometheus-criteria]
    [ai.miniforge.phase-opsv.run-control :as run-control]
+   [ai.miniforge.phase-opsv.run-control-boundary :as control-boundary]
    [ai.miniforge.phase-opsv.run-control-state :as control-state]
    [ai.miniforge.phase-opsv.protocol :as protocol]
    [ai.miniforge.phase-opsv.verification-preparation :as preparation]
@@ -516,7 +517,10 @@
    Accept the original control handle and current Instant. Return cleanup/mutation status or an input anomaly.
    Siblings and parent admission remain unchanged. An abort acknowledgement does not prove recovery.
    Keep failed recovery registered and fenced; only explicitly retire after independently verified recovery."
-  [handle now] (run-control/stop-child! handle now))
+  [handle now]
+  (if (and (run-control/run? handle) (instance? java.time.Instant now))
+    (run-control/stop-child! handle now)
+    (control-boundary/failure :invalid-input :invalid-run)))
 
 (def ^{:stratum 0} phase-keys
   [:opsv/discover :opsv/plan :opsv/execute :opsv/converge
