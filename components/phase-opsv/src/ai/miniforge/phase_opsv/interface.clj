@@ -38,6 +38,7 @@
    [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as native-preparation]
    [ai.miniforge.phase-opsv.boundary.kubernetes-baseline-recovery :as baseline-recovery]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-trial :as native-replica-trial]
+   [ai.miniforge.phase-opsv.boundary.kubernetes-replica-trial-execution :as native-replica-trial-execution]
    [ai.miniforge.phase-opsv.kubernetes-preparation-schema :as native-preparation-schema]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-request :as native-replica-request]
    [ai.miniforge.phase-opsv.boundary.kubernetes-replica-provider :as native-replica-provider]
@@ -91,9 +92,19 @@
   "Construct one exact bounded replica-trial intent from fresh unchanged-original native state.
    Input is the closed retained recovery reference, explicit trial/provider, replica count and distinct effect ID.
    Re-admit the independent recovery plan and original; do not accept caller current-state snapshots.
-   Return the canonical UID/resource-version conditional proposal or an anomaly, without authority or mutation.
+   Return the canonical UID/resource-version conditional proposal or an anomaly, without authority or cluster mutation.
+   Comparison refusals retain protected observations and linked drift evidence before returning.
    Construction is not baseline adoption, trial activation, SLO success or permission to execute."
   native-replica-trial/prepare!)
+
+(def ^{:stratum 0} execute-kubernetes-replica-trial!
+  "Execute one bounded staging replica candidate with current N4/N8 checks and exact independent authority.
+   Runtime uses trusted directories, current-context/clock readers and matching opaque control/fence handles.
+   Input is the closed retained recovery reference, explicit trial/provider, replica count and distinct effect ID.
+   Return the durable transaction or an anomaly retaining failed/uncertain disposition; do not retry uncertain effects.
+   The candidate remains applied; the host must run independently authorized recovery on every trial exit.
+   Does not enable experiments by default, create load, prove SLOs, restore baseline or authorize permanent apply."
+  native-replica-trial-execution/apply!)
 
 (def ^{:stratum 0} verify-kubernetes-baseline-recovery!
   "Compare fresh native configuration and replica invariants to the acknowledged original in rollback mode.

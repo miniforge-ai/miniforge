@@ -5,11 +5,10 @@
   "API surface class 1: read-only fresh original-bound replica intent, not trial authority."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.phase-opsv.boundary.governed-replica-proposal :as proposal]
-            [ai.miniforge.phase-opsv.boundary.kubernetes-verification-preparation :as native]
+            [ai.miniforge.phase-opsv.boundary.kubernetes-replica-trial-observation :as observation]
             [ai.miniforge.phase-opsv.boundary.retained-preparation :as original]
             [ai.miniforge.phase-opsv.boundary.retained-recovery-plan :as recovery]
             [ai.miniforge.phase-opsv.boundary.verification-reporting :as reporting]
-            [ai.miniforge.phase-opsv.kubernetes-baseline-recovery :as baseline]
             [ai.miniforge.phase-opsv.kubernetes-replica-proposal :as model]
             [ai.miniforge.phase-opsv.kubernetes-replica-trial-schema :as schema]
             [ai.miniforge.phase-opsv.messages :as msg]
@@ -28,16 +27,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} capture-proposal! [ctx input plan retained]
-  (if-not (model/configured-for-plan? (:trial/provider input) (:effect/id input) plan)
-    (refused :conflict)
-    (let [load (get-in input [:recovery/input :load])
-          provider (dissoc (:trial/provider input) :kubernetes/context)]
-      (anomaly/let-ok [observed (native/prepare! provider (:declaration load) (:request load))
-                      _original (baseline/compare-original (get-in load [:request :comparison/pin]) retained observed)]
-        (proposal/prepare! ctx (model/proposal-input input
-                                (get-in observed [:environment/raw-observations :kubernetes/verification :kubernetes/source])
-                                (parameters input)))))))
+(defn- ^{:stratum 1} capture-proposal! [ctx input admitted retained]
+  (anomaly/let-ok [observed (observation/observe! ctx input admitted retained)]
+    (proposal/prepare! ctx (model/proposal-input input
+                            (get-in observed [:environment/raw-observations :kubernetes/verification :kubernetes/source])
+                            (parameters input)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -49,7 +43,7 @@
       (anomaly/let-ok [admitted (recovery/read! ctx (:recovery/input input) (:recovery/artifact-ref input))
                       retained (original/read! ctx (get-in input [:recovery/input :load :request])
                                                (get-in admitted [:recovery/plan :comparison/artifact-ref]))]
-        (capture-proposal! ctx input (:recovery/plan admitted) retained)))))
+        (capture-proposal! ctx input admitted retained)))))
 
 (comment
   (prepare! {} {}))

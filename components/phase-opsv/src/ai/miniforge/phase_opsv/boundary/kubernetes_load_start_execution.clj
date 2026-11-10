@@ -7,9 +7,8 @@
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-start :as proposal]
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-admission :as admission]
             [ai.miniforge.phase-opsv.boundary.kubernetes-load-start-provider :as native]
-            [ai.miniforge.phase-opsv.kubernetes-forward-runtime-schema :as runtime]
-            [ai.miniforge.phase-opsv.kubernetes-load-stop-schema :as input]
-            [malli.core :as m]))
+            [ai.miniforge.phase-opsv.kubernetes-forward-operation :as kind]
+            [ai.miniforge.phase-opsv.kubernetes-load-stop-schema :as input]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -23,13 +22,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1 :private true} operation
-  {:valid-arguments? (m/validator [:tuple runtime/HostRuntime input/Input])
-   :effect-id :effect/id
-   :readiness admission/readiness!
-   :prepare prepare!
-   :native patch!
-   :material [:native-load-start-readiness :opsv-verification-report :opsv/native-load-start-readiness]
-   :observation-key :ownership/observation})
+  (kind/definition input/Input
+    :effect-id :effect/id
+    :readiness admission/readiness!
+    :prepare prepare!
+    :native patch!
+    :material [:native-load-start-readiness :opsv-verification-report :opsv/native-load-start-readiness]
+    :observation-key :ownership/observation))
 
 ;------------------------------------------------------------------------------ Layer 2
 

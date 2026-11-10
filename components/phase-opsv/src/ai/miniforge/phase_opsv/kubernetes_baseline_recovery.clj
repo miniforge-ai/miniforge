@@ -18,11 +18,11 @@
     (= :conflict (:anomaly/type result))
     (assoc-in [:anomaly/data :comparison/reason] :native-projection-conflict)))
 
-(defn ^{:stratum 0} report [input admitted original observed comparison]
+(defn ^{:stratum 0} report [kind input admitted original observed comparison]
   (let [load (get-in input [:recovery/input :load])
         pin (get-in load [:request :comparison/pin])
         passed? (not (anomaly/anomaly? comparison))]
-    {:verification/kind :baseline-recovery
+    {:verification/kind kind
      :verification/passed? passed?
      :recovery/artifact-ref (:recovery/artifact-ref input)
      :recovery/hash (:recovery/hash admitted)
@@ -47,4 +47,4 @@
     :else (comparison/compare-observation pin (:comparison/hash pin) :rollback observed)))
 
 (comment
-  (report {} {} {} {} (anomaly/anomaly :conflict "example mismatch" {})))
+  (report :baseline-recovery {} {} {} {} (anomaly/anomaly :conflict "example mismatch" {})))
