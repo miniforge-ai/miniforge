@@ -58,8 +58,8 @@ No live effects, traffic, credentials, cluster access or experiment activation.
 
 ## Related Issues/PRs
 
-Depends on #2498, independently governed baseline restoration. Its current
-signed changes are integrated. Integrate merged main before publication.
+Builds on merged #2498, independently governed baseline restoration. Merged main
+is integrated without changing the validated implementation or test tree.
 
 ## Checklist
 
