@@ -68,7 +68,7 @@
   (:import
    [java.io PushbackReader StringReader]
    [java.nio.channels FileChannel]
-   [java.nio.file Paths StandardOpenOption]
+   [java.nio.file Files Paths StandardCopyOption StandardOpenOption]
    [java.time Instant]
    [java.util.concurrent TimeUnit]
    [java.util.concurrent.locks ReentrantLock]))
@@ -151,9 +151,24 @@
    (serialised as `#inst` literals by `pr-str`), and nested maps/vectors of
    the above.  Avoid `java.nio.file.Path`, `java.io.File`, or any type not
    readable by `clojure.edn/read-string` — `pr-str` would emit output the
-   next read reports as a corrupt queue."
+   next read reports as a corrupt queue.
+
+   Written to a unique sibling temp file, then moved over `path` atomically:
+   a crash mid-write leaves the previous queue intact instead of a truncated
+   file that the next read would quarantine, dropping every pending entry.
+   The lock is held on the `.lock` sidecar, so replacing the queue file
+   does not release it."
   [path entries]
-  (spit path (pr-str (vec entries))))
+  (let [target (.toPath (io/file path))
+        tmp    (.resolveSibling target (str (.getFileName target) ".tmp-" (random-uuid)))]
+    (try
+      (spit (.toFile tmp) (pr-str (vec entries)))
+      (Files/move tmp target
+                  (into-array java.nio.file.CopyOption
+                              [StandardCopyOption/ATOMIC_MOVE
+                               StandardCopyOption/REPLACE_EXISTING]))
+      (finally
+        (Files/deleteIfExists tmp)))))
 
 (defn- ^{:stratum 0} epoch-seconds
   "Current time as seconds since the Unix epoch."

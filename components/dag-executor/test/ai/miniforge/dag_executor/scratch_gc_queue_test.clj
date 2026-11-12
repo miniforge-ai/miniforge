@@ -380,3 +380,17 @@
               (is (= 1 (count remaining)))
               (is (= "wf-stale-err" (:workflow-id (first remaining)))))))
         (finally (delete-dir-recursive! tmp-dir))))))
+
+;;------------------------------------------------------------------------------ write-gc-queue!
+(deftest ^{:stratum 0} write-gc-queue!-replaces-atomically-test
+  (testing "the queue is replaced whole and no temp sibling is left behind"
+    (let [tmp-dir  (make-temp-dir!)
+          tmp-path (str tmp-dir "/scratch-gc-queue.edn")
+          write!   @#'sut/write-gc-queue!]
+      (try
+        (write! tmp-path [{:workflow-id "wf-a"}])
+        (write! tmp-path [{:workflow-id "wf-a"} {:workflow-id "wf-b"}])
+        (is (= [{:workflow-id "wf-a"} {:workflow-id "wf-b"}] (read-raw-queue tmp-path)))
+        (is (= ["scratch-gc-queue.edn"]
+               (vec (.list (File. ^String tmp-dir)))))
+        (finally (delete-dir-recursive! tmp-dir))))))
