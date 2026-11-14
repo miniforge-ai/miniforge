@@ -46,10 +46,25 @@
   (testing "malformed path short-circuits to a 400 before touching the github component"
     (with-redefs [github/fetch-prs (fn [& _] (throw (ex-info "should not be called" {})))]
       (is (= {:status 400 :body "Invalid PR path"}
-             (sut/pr-detail "/api/pr/org%2Frepo/not-a-number"))))))
+             (sut/pr-detail "/api/pr/org%2Frepo/not-a-number" ["org/repo"]))))))
 
 (deftest ^{:stratum 0} approve-returns-bad-request-for-a-malformed-path-without-throwing-test
   (testing "malformed path short-circuits to a 400 before touching the github component"
     (with-redefs [github/approve-pr! (fn [& _] (throw (ex-info "should not be called" {})))]
       (is (= {:status 400 :body "Invalid PR path"}
-             (sut/approve "/api/pr/"))))))
+             (sut/approve "/api/pr/" ["org/repo"]))))))
+
+(deftest ^{:stratum 0} parse-configured-pr-path-accepts-only-configured-repos-test
+  (testing "a configured repo is parsed"
+    (is (= {:repo "org/repo" :number 7}
+           (sut/parse-configured-pr-path "/api/pr/org%2Frepo/7" ["org/repo"]))))
+  (testing "an unconfigured repo is rejected"
+    (is (nil? (sut/parse-configured-pr-path "/api/pr/evil%2Frepo/7" ["org/repo"]))))
+  (testing "no configured repos rejects everything"
+    (is (nil? (sut/parse-configured-pr-path "/api/pr/org%2Frepo/7" [])))))
+
+(deftest ^{:stratum 0} approve-refuses-an-unconfigured-repo-test
+  (testing "an unconfigured repo is a 400 and never reaches gh"
+    (with-redefs [github/approve-pr! (fn [& _] (throw (ex-info "should not be called" {})))]
+      (is (= {:status 400 :body "Invalid PR path"}
+             (sut/approve "/api/pr/evil%2Frepo/7" ["org/repo"]))))))
