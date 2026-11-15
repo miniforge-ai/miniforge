@@ -23,8 +23,8 @@
    §1.2 prohibits — the components stay separately visible so the absent
    one is noticeable. Every slot links its member misses (§4.2): the
    report IS the improvement agenda, and each bucket names its fix
-   channel. A rate whose denominator is not crisply defined (learning
-   latency) is reported as not-instrumented rather than approximated —
+   channel. Every rate ships beside its counts and member misses, and a
+   slot that cannot be measured says why rather than approximating —
    the vector confesses."
   (:require [ai.miniforge.codex-gap.messages :as msg]
             [ai.miniforge.codex.interface :as codex]
@@ -75,18 +75,90 @@
      :rate         rate
      :unmatched    (mapv :consultation/situation unmatched)}))
 
+(defn ^{:stratum 0} harvest-decisions
+  "The codex's harvest decisions, or nil when they cannot be read."
+  [codex-dir]
+  (:decisions (codex/harvest-decisions codex-dir)))
+
+(defn- ^{:stratum 0} miss-date [entry]
+  (let [at (:miss/at entry)]
+    (when (string? at)
+      (try (-> (java.time.Instant/parse at)
+               (.atZone java.time.ZoneOffset/UTC)
+               .toLocalDate)
+           (catch java.time.format.DateTimeParseException _ nil)))))
+
+(defn- ^{:stratum 0} earlier-date [current candidate]
+  (if (and current (not (.isAfter ^java.time.LocalDate current candidate)))
+    current
+    candidate))
+
+(defn- ^{:stratum 0} keep-earliest [acc [miss-id decided]]
+  (update acc miss-id earlier-date decided))
+
+(defn- ^{:stratum 0} decision-dates
+  "miss-id -> the earliest decision that names it."
+  [decisions]
+  (reduce keep-earliest {}
+          (for [{:keys [decided misses]} decisions, miss-id misses]
+            [miss-id decided])))
+
+(defn- ^{:stratum 0} median [xs]
+  (when (seq xs)
+    (let [v   (vec (sort xs))
+          mid (quot (count v) 2)]
+      (if (odd? (count v))
+        (double (v mid))
+        (/ (+ (v (dec mid)) (v mid)) 2.0)))))
+
+(defn- ^{:stratum 0} latency-days [dates entry]
+  (let [decided  (get dates (:miss/id entry))
+        recorded (miss-date entry)]
+    (when (and decided recorded)
+      (.between java.time.temporal.ChronoUnit/DAYS recorded decided))))
+
+(defn- ^{:stratum 0} decided-by?
+  "A decision names the miss, and the miss counts toward rates: a
+   :review-queue entry stays out of every rate until resolved (T2 §3.4)."
+  [dates entry]
+  (and (not= :review-queue (:miss/bucket entry))
+       (contains? dates (:miss/id entry))))
+
+(defn- ^{:stratum 0} learning-slot
+  "§4.1.6: median days from miss to harvest decision over decided misses,
+   and the open candidates no decision names. nil `harvest` means the
+   harvest records could not be read."
+  [entries open-candidates harvest]
+  (if (nil? harvest)
+    {:status  :harvest-unavailable
+     :open    (count open-candidates)
+     :misses  (mapv :miss/id open-candidates)}
+    (let [dates     (decision-dates harvest)
+          decided   (filter (partial decided-by? dates) entries)
+          latencies (keep (partial latency-days dates) decided)
+          undated   (- (count decided) (count latencies))
+          open      (remove (partial decided-by? dates) open-candidates)]
+      {:status         :measured
+       :decided        (count decided)
+       :undated        undated
+       :median-days    (median latencies)
+       :decided-misses (mapv :miss/id decided)
+       :open           (count open)
+       :misses         (mapv :miss/id open)})))
+
 (defn ^{:stratum 0} build-report
   "Pure: ledger entries (+ total skipped-line count, run count, the runs'
-   consultation entries) and optional anchoring stats -> the gap vector.
-   Every slot carries its member miss ids."
+   consultation entries, harvest decisions) and optional anchoring stats
+   -> the gap vector. Every slot carries its member miss ids."
   [entries {:keys [skipped run-count anchoring consultations
-                   unreadable-consultations]
+                   unreadable-consultations harvest]
             :or   {unreadable-consultations 0}}]
   (let [by-bucket (group-by :miss/bucket entries)
         ids #(mapv :miss/id (get by-bucket % []))
         delivered (get by-bucket :unheeded [])
         pin-reads (frequencies (map #(get-in % [:miss/consultation :pin-read?])
                                     delivered))
+        open-candidates (mapcat #(get by-bucket % []) [:uncovered :review-queue :novel])
         attributed (+ (count (get by-bucket :misrouted []))
                       (count (get by-bucket :undelivered []))
                       (count delivered))]
@@ -109,13 +181,7 @@
                 :misses (ids :undelivered)}
      :attention {:unheeded (count delivered)
                  :misses (ids :unheeded)}
-     :learning {:status :not-instrumented
-                :open (+ (count (get by-bucket :uncovered []))
-                         (count (get by-bucket :review-queue []))
-                         (count (get by-bucket :novel [])))
-                :misses (vec (concat (ids :uncovered)
-                                     (ids :review-queue)
-                                     (ids :novel)))}
+     :learning (learning-slot entries open-candidates harvest)
      :review-queue {:count (count (get by-bucket :review-queue []))
                     :misses (ids :review-queue)}}))
 
@@ -133,6 +199,23 @@
          (if (pos? unreadable)
            (msg/t :report/match-incomplete-suffix {:n unreadable})
            ""))))
+
+(defn- ^{:stratum 0} undated-suffix [undated]
+  (if (pos? undated)
+    (msg/t :report/learning-undated-suffix {:n undated})
+    ""))
+
+(defn- ^{:stratum 0} learning-text
+  [{:keys [status decided undated median-days open]}]
+  (cond
+    (= :harvest-unavailable status) (msg/t :report/learning-unavailable {:open open})
+    (zero? decided)                 (msg/t :report/learning-none-decided {:open open})
+    (nil? median-days)              (msg/t :report/learning-undated {:decided decided
+                                                                     :open    open})
+    :else                           (msg/t :report/learning {:decided decided
+                                                             :median  median-days
+                                                             :undated (undated-suffix undated)
+                                                             :open    open})))
 
 (defn- ^{:stratum 0} members-line [bucket ids]
   (if (seq ids)
@@ -172,7 +255,8 @@
      (members-line :undelivered (:misses delivery))
      (msg/t :report/attention {:unheeded (:unheeded attention)})
      (members-line :unheeded (:misses attention))
-     (msg/t :report/learning {:open (:open learning)})
+     (learning-text learning)
      (members-line :learning (:misses learning))
+     (members-line :decided (:decided-misses learning))
      (msg/t :report/review-queue {:count (:count review-queue)})
      (members-line :review-queue (:misses review-queue))]))
