@@ -9,13 +9,20 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} private-permissions "rwx------")
+(def ^{:stratum 0} private-permissions
+  "Owner-only directory access prevents other accounts replacing authority records."
+  "rwx------")
 
-(def ^{:stratum 0} ^:private root-owner "root")
+(def ^{:stratum 0} ^:private root-owner
+  "The privileged account may own trusted ancestors such as the filesystem root."
+  "root")
 
-(def ^{:stratum 0} ^:private sticky-bit 9)
+(def ^{:stratum 0} ^:private sticky-bit
+  "Unix mode bit 01000 limits entry replacement in shared ancestor directories."
+  9)
 
 (def ^{:stratum 0} ^:private other-writes
+  "These permissions let non-owners replace entries unless an ancestor is sticky."
   #{PosixFilePermission/GROUP_WRITE PosixFilePermission/OTHERS_WRITE})
 
 (defn ^{:stratum 0} filesystem-profile [path]

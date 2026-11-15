@@ -7,7 +7,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0 :private true} root-account "root")
+(def ^{:stratum 0 :private true} root-account
+  "Exercise coincident current-user and trusted-root identities without duplicate keys."
+  "root")
 
 ;------------------------------------------------------------------------------ Layer 1
 
