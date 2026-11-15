@@ -57,6 +57,17 @@ uses the workspace's existing Slingshot version; regressions cover both messages
 
 PR #2528 defines the approved full-stop contract; implementation verification remains pending.
 
+## Review sources
+
+The owning agent read the applicable rules in full at gitlink
+`72f451d3d7e0ad82079610bec61be0399a2b7117` before each push.
+An uninitialized review checkout does not waive that rules gate.
+The public pinned [agent guide](https://github.com/miniforge-ai/miniforge-standards/blob/72f451d3d7e0ad82079610bec61be0399a2b7117/agents.md)
+and [catalog](https://github.com/miniforge-ai/miniforge-standards/blob/72f451d3d7e0ad82079610bec61be0399a2b7117/index.mdc)
+link the complete rules at the same immutable revision.
+The effective merge gate is the complete repository-local `agents.md` section
+“PR Merge Gate”; rule 723 is absent from this pinned shared catalog.
+
 ## Checklist
 
 - [x] Adversarial standards pass complete.
