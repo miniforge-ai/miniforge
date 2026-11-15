@@ -1,0 +1,70 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
+# feat: persist monotonic run effect authority state
+
+## Overview
+
+Add the storage kernel for the operator-approved full-stop boundary in #2528.
+It does not implement full stop, authorize an intervention, or fence dispatchers.
+
+## Motivation
+
+Forward cancellation cannot stand in for an irreversible all-workload stop.
+Run authority needs a durable state that missing files cannot silently reactivate.
+
+## Changes in detail
+
+Foundation layer, dependent on the protected-directory extraction in #2529.
+Existing execution-grant owns the state; no second capability broker is added.
+API surface class 1: trusted host inputs are validated at the component interface.
+
+Run registration reserves an identity directory before create-only publication.
+Existing active records can be confirmed; missing reserved state cannot be
+registered again. Full stop atomically replaces state and can precede registration.
+There is no operation to reactivate stopped state. Reads deny missing, malformed,
+linked, mismatched, or unprotected state rather than interpreting absence as permission.
+Only qualified POSIX directories are supported; native defaults are refused.
+
+The grant reader accepts an explicit identity key, preventing confused identities.
+Run and grant records share strict UTF-8, EDN, schema, and link checks.
+
+## Testing plan
+
+Run both JVM products' complete execution-grant suites. Run the new run-state
+suite and explicit old-grant lookup regression against source and a fresh package.
+Legacy JVM fixtures use classes unavailable in Babashka, so they remain JVM tests.
+Inject faults in stopped registration, reservation retention, record identity,
+and actual publication; require assertion failures without test errors.
+Run strict lint, inferred namespace-depth checks, workspace and classpath gates.
+
+Validation completed: both JVM products passed 98 tests and 753 assertions.
+Babashka source overlays and the isolated fresh package each passed 12 tests
+and 46 assertions, including existing grant-record compatibility. Four safety
+faults produced assertion-only failures in every run. Strict lint had zero
+warnings/errors, all ten changed namespaces inferred at most three strata,
+and workspace and task-classpath checks passed.
+
+## Deployment plan
+
+No caller is wired to these storage APIs in this increment. The host admission,
+issuance, and dispatch integration follows separately, with N4 authorization,
+N3/N6 audit, and N11 owned-runtime containment. Storage success alone cannot mean
+the runtime or an already accepted external request was stopped.
+Registration is for new-run admission, not reconstruction from missing storage.
+Durable workflow identity, authority-root binding, and terminality remain the
+host's responsibility.
+
+## Related issues/PRs
+
+PR #2528 defines the approved full-stop contract, with its audit-outage decision
+still pending. PR #2529 supplies the shared protected-directory policy.
+
+## Checklist
+
+- [x] Adversarial standards pass complete.
+- [x] JVM and fresh-package proofs complete.
+- [ ] Current-head CI and Copilot review settled.
