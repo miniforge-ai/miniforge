@@ -37,8 +37,8 @@
 
 (defn- ^{:stratum 0} written
   "Publish `entry` as `k`'s next record while `revision` is still the
-   stored one, else the conflict a lost race returns. Runs under the
-   key's lock."
+   stored one and the record reads back as written; else the conflict a
+   lost race returns, or the refusal. Runs under the key's lock."
   [dir k revision entry]
   (let [target (disk/record-file dir k)
         stored (disk/read-record target)
@@ -46,9 +46,12 @@
         record {:ledger/key k :ledger/entry entry :ledger/revision next-revision}]
     (cond
       (anomaly/anomaly? stored) stored
+      (not= k (get stored :ledger/key k)) (disk/misplaced k)
       (not= revision (:ledger/revision stored)) (refusal/reason-anomaly :anomalies.agent-environment/ledger-conflict
                                                                         {:ledger/key k})
-      :else (anomaly/let-ok [_ (disk/publish! dir target record)] {:ledger/revision next-revision}))))
+      :else (anomaly/let-ok [_ (disk/round-trip-failure target record)
+                             _ (disk/publish! dir target record)]
+              {:ledger/revision next-revision}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -56,7 +59,7 @@
   ledger/LedgerStore
   (read-entry [_ k]
     (anomaly/let-ok [stored (disk/read-record (disk/record-file dir k))]
-      (select-keys stored [:ledger/entry :ledger/revision])))
+      (if (= k (get stored :ledger/key k)) (select-keys stored [:ledger/entry :ledger/revision]) (disk/misplaced k))))
   (write-entry! [_ k revision entry]
     (disk/with-lock dir k (partial written dir k revision entry)))
   (entries [_] (listed dir)))

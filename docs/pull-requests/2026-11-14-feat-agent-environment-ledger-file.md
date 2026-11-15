@@ -32,7 +32,9 @@ restart, and it asks for an existing durable-store abstraction where one fits. T
 
 1. `ledger.disk`, the file mechanics. Each operation returns a result or a `ledger-unavailable`
    anomaly that names the operation and path.
-   1. Record and lock files are named by a content hash of the key. The hash and the record bytes
+   1. Record and lock files are named by a content hash of the key's canonical EDN, which keeps
+      types apart: a UUID key and a string key that print alike name different files. A read
+      also checks the stored key equals the key asked for. The hash and the record bytes
       are printed through `ledger.printing`, which binds every printer setting (`*print-length*`,
       `*print-readably*`, `*print-dup*` and the rest), so a caller's bindings cannot rename a file
       or write bytes `clojure.edn` reads differently. Bytes are encoded and decoded with reporting
@@ -55,7 +57,10 @@ restart, and it asks for an existing durable-store abstraction where one fits. T
       one directory share it, because a JVM that already holds a file lock throws when it asks
       again.
 2. `ledger.file/FileLedger`: `write-entry!` reads the stored revision under the key's lock,
-   refuses a stale one as `ledger-conflict`, and publishes revision + 1. `read-entry` and `entries`
+   refuses a stale one as `ledger-conflict`, encodes the record and decodes it again, refusing it
+   unless it reads back equal, and publishes revision + 1. A `Timestamp` (which EDN reads back as
+   a `Date`), a value with no EDN form, or a non-map entry is refused with nothing written, never
+   acknowledged and then unreadable. `read-entry` and `entries`
    read without the lock; records are only renamed into place, so a reader sees an old record or a
    new one, never part of either.
 3. `interface/file-ledger`, validated by `LedgerDir` (a non-blank path or a `File`).
@@ -111,7 +116,9 @@ Lock files stay on disk after their key is released: one empty file per key.
 3. Each component file test runs in under 100 ms, measured locally.
 4. `file_ledger_test` also pins lossless UTF-8: an unpaired surrogate is refused with nothing
    written, and a malformed byte in a stored string is unavailable.
-5. The agent-environment suite passes: 79 tests with 293 assertions. Agent-worker and opt-in
+5. A write that would not read back (a `Timestamp`, a `File`, a non-map entry) is refused with
+   nothing written, and a UUID key and a string key that print alike keep separate records.
+6. The agent-environment suite passes: 81 tests with 301 assertions. Agent-worker and opt-in
    profile pass: 9 tests with 42 assertions. clj-kondo and stratum-lint are clean.
 
 This is local-filesystem evidence on one host. It does not qualify a shared volume, a hosted
