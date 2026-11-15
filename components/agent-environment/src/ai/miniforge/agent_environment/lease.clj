@@ -17,8 +17,9 @@
 ;; limitations under the License.
 (ns ai.miniforge.agent-environment.lease
   "The ledger's rules: one environment per tenant/run/task key, a lease
-   generation that only grows, and which calls each ledger state admits.
-   Pure functions over ledger entries; the controller applies them."
+   generation that only grows, the claim a controller holds on a
+   reservation while it provisions, and which calls each ledger state
+   admits. Pure functions over ledger entries; the controller applies them."
   (:require
    [ai.miniforge.content-hash.interface :as content-hash])
   (:import
@@ -56,6 +57,13 @@
    :state/released :anomalies.agent-environment/environment-released
    :state/cleanup-uncertain :anomalies.agent-environment/cleanup-uncertain})
 
+(def ^{:stratum 0} default-claim-ttl-ms
+  "How long a controller's claim on a reservation lasts when `:claim-ttl-ms`
+   is not given: the pilot's 15-minute readiness target. A provision still
+   running past it may be reconciled by another controller, so the value
+   must exceed the slowest provision plus its cleanup."
+  (* 15 60 1000))
+
 (defn ^{:stratum 0} request-key
   [request]
   [(:environment/tenant-id request) (:environment/run-id request) (:environment/task-id request)])
@@ -90,14 +98,20 @@
    :lease/environment-uid uid
    :lease/generation generation})
 
-(defn ^{:stratum 0} reserve
-  "The entry a `:new` decision writes: provisioning, one generation past
-   whatever the key held before."
-  [entry request]
-  {:entry/state :state/provisioning
-   :entry/generation (inc (get entry :entry/generation 0))
-   :entry/request request
-   :entry/environment nil})
+(defn ^{:stratum 0} claim
+  "Which controller is provisioning a reservation, and until when. Past
+   `expires-at` another controller may reconcile the reservation."
+  [controller-id expires-at]
+  {:claim/controller-id controller-id :claim/expires-at expires-at})
+
+(defn ^{:stratum 0} reconciled
+  "The entry a reconcile leaves: `environment`, what the provider holds for
+   the reservation's generation, adopted; or, when it holds none, the
+   reservation released so the next acquire takes a fresh generation."
+  [entry environment]
+  (if environment
+    (assoc entry :entry/state :state/provisioned :entry/environment environment :entry/claim nil)
+    (assoc entry :entry/state :state/released :entry/claim nil)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -106,6 +120,17 @@
   [request now]
   (not (.isAfter (->instant (:environment/expires-at request)) (->instant now))))
 
+(defn ^{:stratum 1} request-digest
+  "The digest a reservation keeps of its request, so a replayed request is
+   compared across restarts by content: its expiry is taken as an Instant,
+   so a Date and an Instant for one moment digest alike."
+  [request]
+  (content-hash/content-hash (update request :environment/expires-at ->instant)))
+
+(defn ^{:stratum 1} claim-expired?
+  [entry now]
+  (not (.isAfter (->instant (get-in entry [:entry/claim :claim/expires-at])) (->instant now))))
+
 (defn ^{:stratum 1} namespace-name
   "The namespace for `request`'s key: the same key always names the same
    namespace, across generations and controller restarts."
@@ -113,18 +138,34 @@
   (let [digest (content-hash/content-hash (mapv str (request-key request)))]
     (str namespace-prefix (subs digest 0 namespace-hash-chars))))
 
-(defn ^{:stratum 1} acquire-decision
-  "`:new` when the key has no live entry, `:duplicate` when the identical
-   request already holds a provisioned environment, else `:refuse`."
-  [entry request]
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} reserve
+  "The entry a `:new` decision writes: provisioning under `claim`, one
+   generation past whatever the key held before, keeping the request and
+   its digest."
+  [entry request claim]
+  (let [generation (inc (get entry :entry/generation 0))
+        digest (request-digest request)]
+    {:entry/state :state/provisioning
+     :entry/generation generation
+     :entry/request request
+     :entry/request-digest digest
+     :entry/claim claim
+     :entry/environment nil}))
+
+(defn ^{:stratum 2} acquire-decision
+  "`:new` when the key has no live entry; `:duplicate` when the same request
+   holds a provisioned environment; `:reconcile` when it holds a
+   reservation whose claim expired at `now`; else `:refuse`."
+  [entry request now]
   (let [state (:entry/state entry)]
     (cond
       (or (nil? entry) (= :state/released state)) (decision :new)
-      (not= request (:entry/request entry)) (decision :refuse :anomalies.agent-environment/conflicting-request)
+      (not= (request-digest request) (:entry/request-digest entry)) (decision :refuse :anomalies.agent-environment/conflicting-request)
       (= :state/provisioned state) (decision :duplicate)
+      (and (= :state/provisioning state) (claim-expired? entry now)) (decision :reconcile)
       :else (decision :refuse (state->refusal state)))))
-
-;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} lease-refusal
   "Nil when `lease` is the entry's current lease, `operation` runs in the
