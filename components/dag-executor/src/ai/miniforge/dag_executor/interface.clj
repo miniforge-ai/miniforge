@@ -40,6 +40,7 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree-impl]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.registry :as worktree-registry]
    [ai.miniforge.dag-executor.scratch-gc-queue :as scratch-gc-queue]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -720,7 +721,7 @@
      :created-at     Epoch ms when the worktree was acquired
      :status         :active (worktree present) or :released (worktree removed)
      :released-at    Epoch ms of release (only present when :status :released)"
-  worktree-impl/get-worktree-registry)
+  worktree-registry/get-worktree-registry)
 
 (def ^{:stratum 0} register-worktree-entry!
   "Register a new worktree entry in the lifecycle registry.
@@ -731,7 +732,7 @@
    Arguments:
    - workflow-id    Workflow identifier (used as registry key and scratch-ref suffix)
    - worktree-path  Absolute path to the scratch worktree"
-  worktree-impl/register-worktree-entry!)
+  worktree-registry/register-worktree-entry!)
 
 (def ^{:stratum 0} release-worktree-entry!
   "Mark a registry entry as :released while preserving the scratch ref.
@@ -741,7 +742,7 @@
    executor (e.g. Fleet or K8s teardown paths).
 
    The underlying git scratch ref is NOT deleted here — use gc-scratch-refs!."
-  worktree-impl/release-worktree-entry!)
+  worktree-registry/release-worktree-entry!)
 
 (def ^{:stratum 0} derive-parent-repo-path
   "Derive the parent repository path from a linked worktree path.

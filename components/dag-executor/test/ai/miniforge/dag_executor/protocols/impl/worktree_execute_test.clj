@@ -24,7 +24,7 @@
    [clojure.string :as str]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
-   [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.executor :as worktree-executor]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.subprocess.interface :as subprocess]))
 
@@ -102,7 +102,7 @@
 
 (deftest ^{:stratum 1} worktree-executor-execute-threads-timeout-test
   (testing "execute! forwards :timeout-ms so the deadline is honoured at the protocol boundary"
-    (let [exec (worktree/->WorktreeExecutor {} scratch-dir worktree/default-max-concurrent)
+    (let [exec (worktree-executor/->WorktreeExecutor {} scratch-dir worktree-executor/default-max-concurrent)
           r    (proto/execute! exec "env-timeout" outlives-deadline-cmd
                                {:workdir scratch-dir :timeout-ms aggressive-timeout-ms})]
       (is (true? (:timed-out? r)))
@@ -113,7 +113,7 @@
 (deftest ^{:stratum 2} execute-command-kills-process-tree-at-deadline-test
   (testing "a positive timeout bounds the wait, kills the tree and flags the result"
     (let [start (System/currentTimeMillis)
-          r     (worktree/execute-command scratch-dir outlives-deadline-cmd {} aggressive-timeout-ms)
+          r     (worktree-executor/execute-command scratch-dir outlives-deadline-cmd {} aggressive-timeout-ms)
           took  (- (System/currentTimeMillis) start)]
       (is (true? (:timed-out? r)) ":timed-out? must sit at the top level of the result")
       (is (= runtime-process/timeout-exit-code (:exit-code (:data r))))
@@ -123,7 +123,7 @@
 
 (deftest ^{:stratum 2} execute-command-drains-stderr-flood-without-deadlock-test
   (testing "a child that fills the stderr pipe before writing stdout still completes"
-    (let [run (future (worktree/execute-command scratch-dir stderr-flood-cmd {}))
+    (let [run (future (worktree-executor/execute-command scratch-dir stderr-flood-cmd {}))
           r   (deref run regression-guard-ms ::hung)]
       ;; On a regression, interrupt the waiter so its InterruptedException
       ;; path kills the child instead of leaving it to outlive the suite.
@@ -139,7 +139,7 @@
 (deftest ^{:stratum 2} execute-command-marks-output-cut-at-the-capture-limit-test
   (testing "stdout past the capture limit keeps its head and says it was cut"
     (with-redefs [runtime-process/drain-stream small-capture-drain]
-      (let [r              (worktree/execute-command scratch-dir oversized-cmd {})
+      (let [r              (worktree-executor/execute-command scratch-dir oversized-cmd {})
             stdout         (:stdout (:data r))
             [kept note]    (map #(apply str %) (split-at small-capture-bytes stdout))]
         (is (result/ok? r))

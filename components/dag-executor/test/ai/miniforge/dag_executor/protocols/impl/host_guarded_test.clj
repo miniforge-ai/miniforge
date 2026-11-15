@@ -29,7 +29,7 @@
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.host-guarded :as sut]
    [ai.miniforge.dag-executor.protocols.impl.host-guarded.lifecycle :as lifecycle]
-   [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.executor :as worktree-executor]
    [ai.miniforge.dag-executor.result :as result]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]])
@@ -57,7 +57,7 @@
    that skipped the reset would inherit the previous test's verdicts."
   [base-path]
   (sut/reset-guard-state!)
-  (sut/guard-host-git (worktree/create-worktree-executor {:base-path base-path})))
+  (sut/guard-host-git (worktree-executor/create-worktree-executor {:base-path base-path})))
 
 (defn- ^{:stratum 0} origin-url
   [dir]
