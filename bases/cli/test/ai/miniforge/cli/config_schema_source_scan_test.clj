@@ -45,7 +45,7 @@
    not the user config belongs here; one that is belongs in the schema."
   {"agent/budget.clj"                    "the agent's budget config"
    "config/governance.clj"               "a governance resource; [:governance k] is read from user-cfg"
-   "dag_executor/protocols/impl/worktree.clj" "the worktree executor's registry config"
+   "dag_executor/protocols/impl/worktree/executor.clj" "the worktree executor's registry config"
    "phase_deployment/provision.clj"      "the phase config"
    "phase_deployment/validate.clj"       "the phase config"
    "phase_software_factory/release.clj"  "the release phase context"

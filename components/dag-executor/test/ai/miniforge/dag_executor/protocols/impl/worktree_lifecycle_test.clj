@@ -25,6 +25,9 @@
    [clojure.test :refer [deftest is testing]]
    [clojure.string :as str]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.executor :as worktree-executor]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.paths :as worktree-paths]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.registry :as worktree-registry]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.scratch-commit :as scratch-commit]
    [ai.miniforge.dag-executor.result :as result]))
@@ -36,13 +39,13 @@
   "Reset the lifecycle registry to empty. Called in finally blocks for isolation.
    Uses @#'var to obtain the atom through its private Var, then reset! to empty it."
   []
-  (reset! @#'worktree/worktree-lifecycle-registry {}))
+  (reset! @#'worktree-registry/worktree-lifecycle-registry {}))
 
 (defn- ^{:stratum 0} snapshot-registry
   "Return a snapshot of the lifecycle registry for assertions.
    Delegates to the public get-worktree-registry accessor."
   []
-  (worktree/get-worktree-registry))
+  (worktree-registry/get-worktree-registry))
 
 ;; derive-parent-repo-path tests
 (deftest ^{:stratum 0} derive-parent-repo-path-returns-parent-of-git-common-dir-test
@@ -156,7 +159,7 @@
     ;; This is the common case when :workflow-id was not in the original env-config
     (with-redefs [worktree/run-git   (fn [& _] {:exit 0 :out "" :err ""})
                   worktree/run-shell (fn [& _] {:exit 0 :out "" :err ""})]
-      (let [executor (worktree/create-worktree-executor {:base-path "/tmp/base"})]
+      (let [executor (worktree-executor/create-worktree-executor {:base-path "/tmp/base"})]
         ;; Should complete without throwing
         (let [r (proto/release-environment! executor "no-registry-entry")]
           (is (result/ok? r)))))))
@@ -167,7 +170,7 @@
 (deftest ^{:stratum 1} register-worktree-entry!-adds-active-entry-test
   (testing "register-worktree-entry! adds an :active entry keyed by workflow-id"
     (try
-      (worktree/register-worktree-entry! "wf-reg-001" "/tmp/worktrees/task-abc")
+      (worktree-registry/register-worktree-entry! "wf-reg-001" "/tmp/worktrees/task-abc")
       (let [registry (snapshot-registry)
             entry    (get registry "wf-reg-001")]
         (is (some? entry) "entry must be present in registry")
@@ -180,8 +183,8 @@
 (deftest ^{:stratum 1} register-worktree-entry!-replaces-existing-entry-test
   (testing "register-worktree-entry! is idempotent — replaces an existing entry"
     (try
-      (worktree/register-worktree-entry! "wf-reg-002" "/tmp/worktrees/old")
-      (worktree/register-worktree-entry! "wf-reg-002" "/tmp/worktrees/new")
+      (worktree-registry/register-worktree-entry! "wf-reg-002" "/tmp/worktrees/old")
+      (worktree-registry/register-worktree-entry! "wf-reg-002" "/tmp/worktrees/new")
       (let [entry (get (snapshot-registry) "wf-reg-002")]
         (is (= "/tmp/worktrees/new" (:worktree-path entry))
             "second registration must win"))
@@ -190,14 +193,14 @@
 (deftest ^{:stratum 1} register-worktree-entry!-returns-nil-test
   (testing "register-worktree-entry! returns nil (fire-and-forget semantics)"
     (try
-      (is (nil? (worktree/register-worktree-entry! "wf-nil-ret" "/tmp/wt")))
+      (is (nil? (worktree-registry/register-worktree-entry! "wf-nil-ret" "/tmp/wt")))
       (finally (reset-registry!)))))
 
 (deftest ^{:stratum 1} register-worktree-entry!-multiple-workflows-coexist-test
   (testing "multiple workflow entries coexist in the registry"
     (try
-      (worktree/register-worktree-entry! "wf-multi-a" "/tmp/worktrees/a")
-      (worktree/register-worktree-entry! "wf-multi-b" "/tmp/worktrees/b")
+      (worktree-registry/register-worktree-entry! "wf-multi-a" "/tmp/worktrees/a")
+      (worktree-registry/register-worktree-entry! "wf-multi-b" "/tmp/worktrees/b")
       (let [registry (snapshot-registry)]
         (is (= 2 (count registry)))
         (is (= "/tmp/worktrees/a" (:worktree-path (get registry "wf-multi-a"))))
@@ -208,8 +211,8 @@
 (deftest ^{:stratum 1} release-worktree-entry!-marks-entry-released-test
   (testing "release-worktree-entry! transitions an active entry to :released"
     (try
-      (worktree/register-worktree-entry! "wf-rel-001" "/tmp/worktrees/rel")
-      (worktree/release-worktree-entry! "wf-rel-001")
+      (worktree-registry/register-worktree-entry! "wf-rel-001" "/tmp/worktrees/rel")
+      (worktree-registry/release-worktree-entry! "wf-rel-001")
       (let [entry (get (snapshot-registry) "wf-rel-001")]
         (is (= :released (:status entry)))
         (is (pos? (:released-at entry)) ":released-at must be set to epoch ms")
@@ -224,23 +227,23 @@
   (testing "release-worktree-entry! is a no-op when workflow-id is not in registry"
     (try
       ;; Should not throw; registry remains empty
-      (worktree/release-worktree-entry! "wf-unknown")
+      (worktree-registry/release-worktree-entry! "wf-unknown")
       (is (empty? (snapshot-registry)))
       (finally (reset-registry!)))))
 
 (deftest ^{:stratum 1} release-worktree-entry!-returns-nil-test
   (testing "release-worktree-entry! returns nil (fire-and-forget semantics)"
     (try
-      (worktree/register-worktree-entry! "wf-nil-rel" "/tmp/wt")
-      (is (nil? (worktree/release-worktree-entry! "wf-nil-rel")))
+      (worktree-registry/register-worktree-entry! "wf-nil-rel" "/tmp/wt")
+      (is (nil? (worktree-registry/release-worktree-entry! "wf-nil-rel")))
       (finally (reset-registry!)))))
 
 ;; get-worktree-registry tests
 (deftest ^{:stratum 1} get-worktree-registry-returns-snapshot-test
   (testing "get-worktree-registry returns the current registry contents"
     (try
-      (worktree/register-worktree-entry! "wf-snap" "/tmp/snap")
-      (let [snap (worktree/get-worktree-registry)]
+      (worktree-registry/register-worktree-entry! "wf-snap" "/tmp/snap")
+      (let [snap (worktree-registry/get-worktree-registry)]
         (is (map? snap))
         (is (contains? snap "wf-snap")))
       (finally (reset-registry!)))))
@@ -250,7 +253,7 @@
     (try
       ;; Reset first to guarantee isolation
       (reset-registry!)
-      (is (= {} (worktree/get-worktree-registry)))
+      (is (= {} (worktree-registry/get-worktree-registry)))
       (finally (reset-registry!)))))
 
 ;; WorktreeExecutor lifecycle-hook integration tests
@@ -259,8 +262,8 @@
     (try
       (with-redefs [worktree/run-git       (fn [& _] {:exit 0 :out "" :err ""})
                     worktree/run-shell     (fn [& _] {:exit 0 :out "" :err ""})
-                    worktree/ensure-directory (fn [_] nil)]
-        (let [executor (worktree/create-worktree-executor {:base-path "/tmp/base"})
+                    worktree-paths/ensure-directory (fn [_] nil)]
+        (let [executor (worktree-executor/create-worktree-executor {:base-path "/tmp/base"})
               ;; task-id must be at least 8 chars; executor takes (subs task-id 0 8)
               task-id  "abcd1234efgh"]
           (proto/acquire-environment! executor task-id
@@ -280,8 +283,8 @@
     (try
       (with-redefs [worktree/run-git       (fn [& _] {:exit 0 :out "" :err ""})
                     worktree/run-shell     (fn [& _] {:exit 0 :out "" :err ""})
-                    worktree/ensure-directory (fn [_] nil)]
-        (let [executor (worktree/create-worktree-executor {:base-path "/tmp/base"})]
+                    worktree-paths/ensure-directory (fn [_] nil)]
+        (let [executor (worktree-executor/create-worktree-executor {:base-path "/tmp/base"})]
           (proto/acquire-environment! executor "abcd1234efgh"
                                       {:repo-path "/tmp/repo" :branch "main"})
           ;; No :workflow-id → registry stays empty
@@ -296,9 +299,9 @@
         ;; Pre-seed the registry matching the path the executor will derive.
         ;; executor base-path=/tmp/base + environment-id=task-00000000
         ;; → worktree-path = /tmp/base/task-00000000
-        (worktree/register-worktree-entry! "wf-lifecycle-rel"
+        (worktree-registry/register-worktree-entry! "wf-lifecycle-rel"
                                            "/tmp/base/task-00000000")
-        (let [executor (worktree/create-worktree-executor {:base-path "/tmp/base"})]
+        (let [executor (worktree-executor/create-worktree-executor {:base-path "/tmp/base"})]
           (proto/release-environment! executor "task-00000000")
           (let [entry (get (snapshot-registry) "wf-lifecycle-rel")]
             (is (some? entry))

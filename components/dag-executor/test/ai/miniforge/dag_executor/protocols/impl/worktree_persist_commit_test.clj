@@ -20,6 +20,7 @@
    must never depend on the operator's signing agent."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.dag-executor.protocols.impl.worktree :as wt]
+            [ai.miniforge.dag-executor.protocols.impl.worktree.archive-steps :as worktree-archive-steps]
             [ai.miniforge.dag-executor.result :as result]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -28,7 +29,7 @@
   (let [calls (atom [])]
     (with-redefs [wt/run-git (fn [& args] (swap! calls conj (vec args)) {:exit 0 :out "" :err ""})]
       (testing "the commit carries -c commit.gpgsign=false ahead of the subcommand"
-        (is (result/ok? (#'wt/commit-staged! "/tmp/wt" "implement phase completed")))
+        (is (result/ok? (#'worktree-archive-steps/commit-staged! "/tmp/wt" "implement phase completed")))
         (let [args (first @calls)
               i (.indexOf ^java.util.List args "commit")]
           (is (= ["-c" "commit.gpgsign=false"] (subvec args (- i 2) i)))
@@ -36,6 +37,6 @@
 
 (deftest ^{:stratum 0} persist-commit-failure-is-a-result-test
   (with-redefs [wt/run-git (fn [& _] {:exit 128 :out "" :err "error: 1Password: failed to fill whole buffer"})]
-    (let [r (#'wt/commit-staged! "/tmp/wt" "m")]
+    (let [r (#'worktree-archive-steps/commit-staged! "/tmp/wt" "m")]
       (is (result/err? r))
       (is (= :archive-commit-failed (get-in r [:error :code]))))))
