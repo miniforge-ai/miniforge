@@ -16,8 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.agent-environment.file-ledger-processes
-  "Drives file ledger writer JVMs for the cross-process tests, released to
-   write over stdin once every one has read; none outlives its test."
+  "Drives the cross-process tests' writer JVMs; none outlives its test."
   (:require
    [clojure.edn :as edn])
   (:import
@@ -86,15 +85,16 @@
   "Start `n` writers on `dir`, let all write once every one has read, and
    return their reads, results and exit codes; every writer is killed after."
   [dir n]
-  (let [writers (vec (repeatedly n #(start-writer "race" dir)))]
+  (let [started (atom [])]
     (try
-      (let [readers (mapv reader-of writers)
+      (let [writers (vec (repeatedly n #(last (swap! started conj (start-writer "race" dir)))))
+            readers (mapv reader-of writers)
             reads (mapv next-value readers)
             _ (run! release! writers)
             results (mapv next-value readers)
             exits (mapv exit-code writers)]
         {:reads reads :results results :exits exits})
-      (finally (run! destroy! writers)))))
+      (finally (run! destroy! @started)))))
 
 (defn ^{:stratum 2} read-in-fresh-process
   "What a fresh writer process reads from `dir`, with its exit code."
