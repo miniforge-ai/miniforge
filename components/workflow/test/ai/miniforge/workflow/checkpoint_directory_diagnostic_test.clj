@@ -19,23 +19,24 @@
   "Diagnostic evidence must identify this refused ancestor, not the request."
   "requested")
 
-(defn- ^{:stratum 0} io-failure [& _]
-  (anomaly/anomaly :fault "injected I/O failure" {}))
-
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} io-failure [& _]
+  (anomaly/anomaly :fault (messages/system :checkpoint/directory-io-failed {:path requested-path}) {}))
 
 (defn- ^{:stratum 1} policy-refusal [& _]
   (anomaly/sub-anomaly :unauthorized :anomalies.file-durability/unsafe-directory
-                       "injected policy refusal" {:durability/path unsafe-ancestor}))
+                       (messages/system :checkpoint/unsafe-directory {:path unsafe-ancestor})
+                       {:durability/path unsafe-ancestor}))
 
-(deftest ^{:stratum 1} ordinary-io-failures-do-not-prescribe-permission-changes
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} ordinary-io-failures-do-not-prescribe-permission-changes
   (with-redefs [durability/resolve-protected-directory io-failure]
     (is (thrown-with-msg? IOException
                          (re-pattern (java.util.regex.Pattern/quote
                                       (messages/system :checkpoint/directory-io-failed {:path requested-path})))
                          (directory/existing! requested-path)))))
-
-;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} policy-refusals-identify-the-offending-ancestor
   (with-redefs [durability/prepare-protected-directory! policy-refusal]

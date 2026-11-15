@@ -36,8 +36,8 @@ Validation completed:
 
 - Both JVM products, fresh CLI source overlays, and isolated package:
   85 tests, 295 assertions per run, plus four assertion-only safety faults.
-- Strict lint: zero warnings/errors. Actual strata: 17 namespaces, at most
-  three. Workspace and task-classpath checks passed.
+- Strict lint: zero warnings/errors. Actual strata remain at most three per
+  changed namespace. Workspace and task-classpath checks passed.
 
 ## Deployment plan
 
