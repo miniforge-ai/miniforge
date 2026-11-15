@@ -6,8 +6,8 @@
 
 # Normative Spec Extension: Phase Checkpoint, Machine Snapshot & Resume
 
-**Version:** 0.2.0-draft
-**Date:** 2026-04-22
+**Version:** 0.3.0-draft
+**Date:** 2026-11-15
 **Status:** Draft
 **Conformance:** MUST (on any implementation that persists to disk)
 
@@ -38,9 +38,8 @@ resumability load-bearing, not optional:
    tool-call collapse, etc. A mid-workflow provider bug should fail
    forward, not fail backward.
 
-Resumability also supports the dogfood iteration loop: when fixing a
-bug in one phase, engineers should not re-run earlier phases to get
-back to the broken one.
+Resumability also supports the dogfood iteration loop. When fixing one phase,
+engineers should not re-run earlier phases to reach the broken one.
 
 ## Conformance Requirements
 
@@ -56,12 +55,15 @@ They extend N2's families; IDs are never reused.
 | N2D.CK.5 | MUST | Emit the checkpoint and resume events of N3 §3.21 at the points §9 defines. |
 | N2D.CK.6 | MUST | Honor the checkpoint store location and retention rules of §3 and §7. |
 | N2D.CK.7 | MUST | Force a write's checkpoint files to disk before publishing the manifest that names them, and hold the run's checkpoint lock while writing (§1). |
+| N2D.CK.8 | MUST | Recover a full-stopped run only into a fresh run after checkpoint validation and external-effect reconciliation (§11). |
 
 ### Test Obligations
 
 1. A crash after phase N resumes at phase N+1 with no re-execution of N.
 2. A spec edit between run and resume produces the drift error, not a resume.
 3. Every checkpoint write has a corresponding N3 §3.21 event.
+4. Full-stop recovery rejects unknown effects, unsafe/corrupt checkpoints,
+   stale authority, old capsule identities, and attempts to reopen the old run.
 
 ---
 
@@ -81,10 +83,9 @@ They extend N2's families; IDs are never reused.
   workspace-level resume (recover uncommitted files after process
   death).
 
-The three layers compose: a mid-stream provider hang triggers the
-watchdog; if session-resume succeeds, the phase completes; if the phase
-completes, its result is checkpointed; if the whole process dies, the
-next `miniforge resume` restores from checkpoints and recreates the
+The three layers compose. A mid-stream provider hang triggers the watchdog.
+Successful session-resume lets the phase complete and checkpoint its result.
+After process death, `miniforge resume` restores checkpoints and recreates the
 worktree from its scratch ref.
 
 ## Spec metadata
@@ -97,10 +98,9 @@ worktree from its scratch ref.
 - **Phase checkpoint** — A durable serialization of a phase's output
   sufficient to reconstruct that phase's contribution to the execution
   context without re-running the phase.
-- **Execution-machine snapshot** — A durable serialization of the
-  authoritative workflow machine state, machine context, and resume
-  metadata required to continue execution without rebuilding control
-  flow from ad hoc phase indexes.
+- **Execution-machine snapshot** — Durable authoritative machine state,
+  context, and resume metadata. It supports continued execution without
+  rebuilding control flow from ad hoc phase indexes.
 - **Workflow manifest** — A per-workflow index file describing the
   workflow's identity, spec provenance, completed phases, and resume
   metadata.
@@ -124,12 +124,11 @@ The write MUST be atomic (write to a temp file in the same directory,
 then rename). A partial or corrupt checkpoint MUST NOT be observable by
 a later resume.
 
-The files of one write MUST be forced to disk before the manifest that
-names them is published (§2); the manifest is the commit point, so a
-write that stops before it leaves the previous checkpoint whole. The
-reference implementation writes each checkpoint's snapshot and phase
-files into a new generation directory under the run's directory, and
-first removes the generations the current manifest does not name.
+The files of one write MUST be forced to disk before publishing their
+manifest (§2). The manifest is the commit point. An interrupted write
+leaves the previous checkpoint whole. The reference implementation first
+removes generations not named by the current manifest. It then writes
+snapshot and phase files into a new generation under the run directory.
 A write MUST hold the run's checkpoint lock, which pinning and checkpoint
 GC also take.
 
@@ -173,6 +172,10 @@ default retention window (see §7).
 
 ### §4. Resume from authoritative machine snapshot
 
+Before resuming, implementations MUST reject a full-stopped or terminal
+run under N2's terminality contract. Full-stop checkpoint recovery follows §11,
+not same-run resume; neither `--force` nor `--from-phase` overrides that fence.
+
 A user-invoked `miniforge resume <workflow-id>` command MUST:
 
 1. Locate the manifest under the checkpoint store for that id
@@ -194,17 +197,15 @@ A user-invoked `miniforge resume <workflow-id>` command MUST:
      :from-phase <phase-or-nil>
      :skipping <vector-of-skipped-phases>}`
 
-If the hash does NOT match and `--force` is NOT passed, the command
-MUST error with a message that identifies the drift and lists the
-`--force` override. The command MUST NOT silently resume on drifted
+If the hash differs and `--force` is absent, the command MUST report the
+drift and list the `--force` override. The command MUST NOT silently resume on drifted
 specs.
 
 ### §5. Explicit phase override
 
-`miniforge resume <id> --from-phase <phase>` MUST discard any
-checkpoints for `<phase>` and any later phases, truncate
-`:workflow/phases-completed`, rebuild the execution-machine snapshot to
-the last state before `<phase>`, and resume from `<phase>`. This
+`miniforge resume <id> --from-phase <phase>` MUST discard checkpoints for
+`<phase>` and later phases and truncate `:workflow/phases-completed`.
+It MUST rebuild the snapshot to the last state before `<phase>` and resume there. This
 supports the case where a bug is discovered in a specific phase but
 earlier phases are still valid.
 
@@ -234,11 +235,10 @@ invocation, not on every command.
 ### §8. Integration with worktree persistence
 
 When a resume begins, the runner MUST verify the worktree still
-exists. If not, and if a scratch branch exists for the workflow (per
-`worktree-persistence-scratch-branch`), the runner MUST recreate the
-worktree from that branch. If neither the worktree nor a scratch
-branch is available, the runner MUST error with a clear message —
-further phases cannot run safely without the workspace state.
+exists. If missing, the runner MUST recreate it from the workflow's scratch
+branch when available (per `worktree-persistence-scratch-branch`). If neither the worktree nor a scratch
+branch is available, the runner MUST report that workspace state is missing.
+Further phases cannot run safely without it.
 
 ### §9. Event emission
 
@@ -271,11 +271,38 @@ by the restored snapshot. In particular:
 The goal is straightforward: the user pays for the work they get, not
 for the work they lost.
 
+### §11. Recovery after full stop
+
+After N8 §3.5 full stop, checkpoint recovery MUST require explicit operator
+authorization and create a new run. Existing N6 provenance MUST link it to the
+stopped run and selected checkpoint. The stopped run MUST
+remain terminal; its durable fence and effect history MUST NOT be reset.
+
+The selected checkpoint MUST be the latest durable pre-stop checkpoint whose
+integrity, provenance, workspace digest, and machine state are verified for
+the requested recovery. Latest timestamp alone MUST
+NOT establish safety. Suspect capsule output or an uncommitted checkpoint
+generation MUST NOT be promoted as a safe recovery point. If no checkpoint
+can be shown safe, recovery MUST remain blocked rather than silently replay.
+
+Before any new workload effects, the controller MUST reconcile durable effect
+history and fresh provider observations. This includes requests accepted after
+the checkpoint or with unknown outcomes at shutdown. Restoring local state
+MUST NOT be treated as undoing external effects or authorizing replay. Unresolved effects MUST
+block dependent forward and recovery writes. Any needed compensation MUST be
+separately authorized in the new run under N10, never under the stopped run.
+
+The new run MUST acquire a fresh capsule under N11 §4.4 and fresh current
+authority. Restoration MUST exclude runtime handles, leases, credentials,
+grants, and queued/in-flight commands. Spec drift handling, revalidation,
+postconditions, and N3/N6 audit obligations MUST remain in force; a spec-hash
+override MUST NOT waive containment, reconciliation, or authority checks.
+
 ## Conformance Levels
 
 - **MUST** — §1 (checkpoint and machine snapshot after `:leave`), §2
   (manifest), §4 (resume from authoritative machine snapshot), §9
-  (event emission), §10 (no re-execute).
+  (event emission), §10 (no re-execute), §11 (full-stop recovery).
 - **SHOULD** — §5 (`--from-phase`), §6 (`list --resumable`), §7 (GC
   policy), §8 (worktree integration).
 - **MAY** — Cross-workflow replay (`miniforge replay <old-id> --into
@@ -320,7 +347,11 @@ directory. Post-mortem readers see the full history.
 
 **Version History:**
 
-- 0.2.0-draft (2026-08-10): Spec-completion pass — metadata moved from a bulleted `## Spec metadata` block to the
-  header form
-  used by N1–N15; `N2D.CK.*` conformance requirement IDs and test
+- 0.3.0-draft (2026-11-15): Operator-approved known-safe checkpoint recovery
+  after full stop: new run/runtime/authority and external-effect reconciliation,
+  never reopening the stopped run or blindly replaying accepted requests.
+
+- 0.2.0-draft (2026-08-10): Spec-completion pass. Metadata moved from a bulleted
+  `## Spec metadata` block to the N1–N15 header form.
+  `N2D.CK.*` conformance requirement IDs and test
   obligations added.
