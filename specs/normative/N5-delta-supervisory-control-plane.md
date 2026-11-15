@@ -6,8 +6,8 @@
 
 # N5 Delta — Supervisory Control Plane
 
-**Version:** 0.4.0-draft
-**Date:** 2026-10-04
+**Version:** 0.4.1-draft
+**Date:** 2026-11-15
 **Status:** Draft
 **Conformance:** MUST
 
@@ -482,6 +482,7 @@ The TUI MUST support a bounded set of supervisory interventions. These extend N5
 | `pause` | WorkflowRun (running) | Suspends execution |
 | `resume` | WorkflowRun (paused) | Resumes execution |
 | `cancel` | WorkflowRun (active) | Terminates execution |
+| `full-stop` | WorkflowRun | Irreversibly fences workload effects and destroys only its owned runtime (N8 §3.5) |
 | `request-replan` | WorkflowRun | Requests a new planning pass or workflow-selection pass |
 | `waive` | PolicyEvaluation | Creates a Waiver record with reason |
 | `re-evaluate` | PullRequest | Triggers a new PolicyEvaluation |
@@ -680,6 +681,9 @@ through without error. Required keys MUST be present and correctly typed.
 ---
 
 **Version History:**
+
+0.4.1-draft (2026-11-15): Add the separately authorized `full-stop`
+intervention, whose containment contract is owned by N8 §3.5.
 
 0.4.0-draft (2026-10-04): Added the Spec projection of N1's Work Specification
 and clarified intervention admission, lifecycle facts, and snapshot ownership.
