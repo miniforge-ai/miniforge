@@ -41,6 +41,9 @@ dominant fence. N5 references the control surface. Existing N3/N6 audit contract
 remain authoritative; no new event or artifact family is introduced.
 The normal hook required prose-lint cleanup in N4, N11, and the N2 delta;
 those sentence splits preserve existing requirements and historical records.
+The first automatic review found unconditional N7 exit-test wording. The
+requirements now distinguish ordinary compensation from full-stop containment,
+including guardrail abort and permanent-apply postcondition failure.
 
 ## Testing plan
 

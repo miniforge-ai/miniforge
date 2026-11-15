@@ -14,7 +14,7 @@
 _v0.7.0-draft unifies the severity vocabulary, adds pack resolution and gate binding
 (§5.3–§5.5), check-function execution semantics (§3.5), taxonomy compatibility
 (§2.1.1), and signature canonicalization (§8.1.1). It adds the override/waiver contract
-(§6.3.1), and conformance requirement IDs (§9.4)._
+(§6.3.1) and conformance requirement IDs (§9.4)._
 
 ---
 
@@ -2164,7 +2164,7 @@ contract the code already satisfies:
   `require-signature-verification`, `enforce-publisher-allowlist`, and
   `enforce-minimum-trust-level`. The shipped pack uses the `:trust/*` IDs
   above. Since §1.1 makes rule IDs the durable anchor, the two should agree.
-  a reader matching §5.1.8 against the pack finds neither set of names in the
+  A reader matching §5.1.8 against the pack finds neither set of names in the
   other.
 
 ### A.5 Gate-Readiness Calibration — implemented, unspecified

@@ -373,7 +373,7 @@ Success, failure, abort, timeout, emergency stop, and safe-mode entry MUST termi
 load and trigger the separately authorized cleanup and baseline-recovery path.
 N8 MUST fence new forward effects without granting unrestricted recovery powers.
 An active N8 §3.5 full stop MUST supersede this compensation requirement.
-recovery remains unresolved until separately authorized in a fresh run under
+Recovery remains unresolved until separately authorized in a fresh run under
 the N2 checkpoint delta §11.
 Cleanup MUST target only proven experiment-owned resources; uncertainty MUST
 require reconciliation, never deletion of an unproven resource.
@@ -476,6 +476,9 @@ All changes MUST be emitted as artifacts with provenance per N6:
 MUST execute as N10-governed effects with verified rollback and postcondition
 monitoring. A failed postcondition MUST trigger the declared rollback and record
 both the apply and rollback outcomes as artifacts, events, and evidence.
+N8 §3.5 full stop MUST supersede workload rollback here, as in §5.5.
+The runtime MUST retain unresolved rollback disposition instead of executing
+or claiming recovery under the stopped run.
 
 ## 8. CLI/TUI extensions (N5 extension)
 
@@ -499,23 +502,24 @@ IDs are never reused; a withdrawn requirement is marked withdrawn.
 | ID | Level | Requirement |
 |----|-------|-------------|
 | N7.EX.1 | MUST | Record an environment fingerprint for every experiment run (§3, §4). |
-| N7.EX.2 | MUST | Abort on guardrail breach and execute the declared rollback (§5). |
+| N7.EX.2 | MUST | Abort on guardrail breach and separately authorize rollback, unless full stop requires containment without compensation (§5, N8 §3.5). |
 | N7.EX.3 | MUST | Bound convergence by the declared iteration and budget limits (§3). |
 | N7.EX.4 | MUST | Emit the §3.14 event family of N3 for every lifecycle transition. |
 | N7.EX.5 | MUST | Default temporary experiments off and require separate staging authority before each effect (§5.5, N10 §1.5). |
-| N7.EX.6 | MUST | Terminate load and separately authorize, execute, and verify cleanup and baseline recovery on every trial exit (§5.5). |
+| N7.EX.6 | MUST | Separately authorize and verify load termination, cleanup, and baseline recovery on ordinary trial exits; full stop prohibits workload compensation (§5.5, N8 §3.5). |
 | N7.VF.1 | MUST | Evaluate verification against pre-declared criteria, not criteria chosen after the run (§6). |
 | N7.VF.2 | MUST | Link every OPSV event and artifact to its evidence bundle per N6 (§4, §7.1). |
 | N7.VF.3 | MUST | Bind permitted environment differences before effects and reject unrelated drift (§6.3). |
 | N7.VF.4 | MUST | Preserve the original baseline and verify recovery against its declared invariants (§6.3). |
 | N7.AC.1 | MUST | Default effective actuation to `:recommend-only`; PR emission and direct apply require the respective §5.4 authority checks (§5.3, §7.2, §7.3, §9). |
 | N7.AC.2 | MUST | Execute apply actions as N10-governed effects with verified rollback (§7.3). |
-| N7.AC.3 | MUST | Record both apply and rollback outcomes as artifacts, events, and evidence on postcondition failure (§7.3). |
+| N7.AC.3 | MUST | Record apply and performed or unresolved rollback outcomes as artifacts, events, and evidence on postcondition failure (§7.3). |
 | N7.AC.4 | MUST | Include the evidence bundle reference and rollback instructions in every emitted PR body (§7.2). |
 
 ### 8.5.1 Test Obligations
 
-1. A guardrail breach aborts the experiment and the rollback runs, both observable
+1. A guardrail breach aborts the experiment and separately authorized rollback
+   runs, unless full stop prohibits compensation. Both outcomes are observable
    on the stream (N7.EX.2).
 2. A run's environment fingerprint is sufficient to detect drift on re-run
    (N7.EX.1).
@@ -532,8 +536,10 @@ IDs are never reused; a withdrawn requirement is marked withdrawn.
    disabled, stale, foreign-target, and changed-payload grants refuse before mutation (N7.EX.5).
 9. An admitted staging trial can precede candidate verification without enabling
    production trials, PR emission, or permanent apply (N7.EX.5).
-10. Every exit stops load and verifies owned-resource cleanup and original-baseline
-    recovery; revoking forward grants does not bypass recovery authorization (N7.EX.6).
+10. Ordinary exits stop load and verify owned-resource cleanup and original-baseline
+    recovery. Forward-grant revocation does not bypass recovery authorization.
+    Full-stop exits instead fence all workload effects and retain unresolved
+    recovery; existing recovery grants cannot bypass containment (N7.EX.6, N8 §3.5).
 11. Uncertain effect or recovery outcomes remain explicit and prevent success
     and new forward effects (N7.EX.6).
 12. A separately approved, retained bounded recovery plan precedes the trial;
