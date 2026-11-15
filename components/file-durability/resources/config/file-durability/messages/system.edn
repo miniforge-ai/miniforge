@@ -1,3 +1,4 @@
 {:file-durability/messages
  {:file/io-failed "File durability operation failed."
-  :file/invalid-input "File durability operation received invalid arguments."}}
+  :file/invalid-input "File durability operation received invalid arguments."
+  :file/unsafe-directory "Unsafe storage directory {path}: trusted ownership and protection from entry replacement are required."}}

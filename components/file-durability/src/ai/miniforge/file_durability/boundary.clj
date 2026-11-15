@@ -4,7 +4,8 @@
 (ns ai.miniforge.file-durability.boundary
   "Convert filesystem failures to data without claiming successful durability."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.messages.interface :as messages]))
+            [ai.miniforge.messages.interface :as messages])
+  (:import [java.io IOException]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -13,6 +14,9 @@
                               :file-durability/messages))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} refuse-directory! [path]
+  (throw (IOException. ^String (t :file/unsafe-directory {:path (str path)}))))
 
 (defn ^{:stratum 1} invalid-input [operation]
   (anomaly/anomaly :invalid-input (t :file/invalid-input)
