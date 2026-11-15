@@ -34,10 +34,8 @@ in #2528. This PR does not implement full stop or authorize any live operation.
 
 Validation completed:
 
-- Both JVM products: 83 tests, 291 assertions each before the probe hint;
-  targeted owner-lock delta afterward: 11 tests, 46 assertions each.
-- Fresh CLI, source overlays, and isolated package: 83 tests, 292 assertions
-  per Babashka run, plus four assertion-only safety faults in each run.
+- Both JVM products, fresh CLI source overlays, and isolated package:
+  85 tests, 295 assertions per run, plus four assertion-only safety faults.
 - Strict lint: zero warnings/errors. Actual strata: 17 namespaces, at most
   three. Workspace and task-classpath checks passed.
 
@@ -50,6 +48,10 @@ during extraction is closed and has a regression test.
 Packaged regressions also exposed an untyped owner-lock probe release that
 Babashka rejects. It now uses the same AutoCloseable hint as the existing
 release path; repeated probes verify that the temporary lock is released.
+Review also found that the adapter conflated I/O failures with policy refusals.
+Typed policy refusals now preserve the offending ancestor, while ordinary I/O
+failures retain a separate checkpoint diagnostic. Structured boundary signaling
+uses the workspace's existing Slingshot version; regressions cover both messages.
 
 ## Related issues/PRs
 
