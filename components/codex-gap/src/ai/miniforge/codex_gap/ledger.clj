@@ -90,6 +90,10 @@
    :miss/bucket bucket
    :miss/attribution attribution})
 
+(defn ^{:stratum 0} incomplete-read? [read-result]
+  (or (some? (:codex-gap/anomaly read-result))
+      (pos? (get read-result :skipped 0))))
+
 (defn- ^{:stratum 0} write-anomaly [dir e]
   {:codex-gap/anomaly :ledger-write-failed
    :codex-gap/reason (ex-message e)

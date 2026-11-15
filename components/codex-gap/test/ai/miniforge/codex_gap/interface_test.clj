@@ -337,6 +337,11 @@
     (is (re-find #"no consultation attempted, INCOMPLETE"
                  (gap/render-report (gap/build-report [] {:unreadable-consultations 1}))))))
 
+(deftest ^{:stratum 1} a-read-that-lost-entries-is-incomplete
+  (is (true? (gap/incomplete-read? {:entries [pinned] :skipped 1})))
+  (is (true? (gap/incomplete-read? {:codex-gap/anomaly :ledger-read-failed})))
+  (is (false? (gap/incomplete-read? {:entries [pinned] :skipped 0}))))
+
 (deftest ^{:stratum 1} recorded-consultations-feed-the-coverage-rate
   ;; The bb codex-gap-report path: entries recorded per run, read back, reported.
   (let [dir (str (java.nio.file.Files/createTempDirectory

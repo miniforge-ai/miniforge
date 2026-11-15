@@ -79,6 +79,12 @@
   [dir]
   (ledger/read-consultations dir))
 
+(defn ^{:stratum 0} incomplete-read?
+  "True when a read-ledger / read-consultations result lost entries: the
+   read failed outright, or it skipped unreadable lines."
+  [read-result]
+  (ledger/incomplete-read? read-result))
+
 (defn ^{:stratum 0} read-ledger
   "All ledger entries under `dir`, oldest first:
    {:entries [..] :skipped n-unreadable-lines}, or

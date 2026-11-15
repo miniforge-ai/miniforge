@@ -41,8 +41,9 @@ a situation with no board looked the same, so no honest rate was possible.
 - `bb.edn` `codex-gap-report`: reads each run directory's consultations
   next to its ledger and passes them in. Their unreadable lines are added
   to the report's skipped-line count. A run whose consultation file cannot
-  be read at all is counted, and the rate is marked INCOMPLETE rather than
-  reported over the remaining runs as if whole.
+  be read, or lost any line to corruption (`incomplete-read?`), is counted,
+  and the rate is marked INCOMPLETE rather than reported over the rest as
+  if whole.
 - `work/`: the spec moves to `work/done/`. `QUEUE.md` loses its row, by
   hand, because `bb work:queue` could not run here; the result matches
   what the generator would produce.
@@ -62,7 +63,7 @@ a situation with no board looked the same, so no honest rate was possible.
     `read-consultations` produce the rate, which is the path the bb task
     takes.
 - Ran locally on a hand-built classpath: every codex-gap and codex test
-  namespace, 67 tests, 0 failures. `bb` is not installed here, so the bb
+  namespace, 68 tests, 0 failures. `bb` is not installed here, so the bb
   task itself and lint run in CI only.
 
 ## Deployment Plan
