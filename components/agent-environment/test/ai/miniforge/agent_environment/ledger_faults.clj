@@ -34,6 +34,13 @@
 
 (defn- ^{:stratum 0} tally! [calls op] (swap! calls update op (fnil inc 0)))
 
+(defn- ^{:stratum 0} run-interposed!
+  "Run, once, the `:before-write` fn a test left in `faults`: another
+   controller's write landing between this read and this write."
+  [faults]
+  (when-let [interpose (:before-write (first (swap-vals! faults dissoc :before-write)))]
+    (interpose)))
+
 (defn- ^{:stratum 0} writable!
   "True while writes remain, spending one: nil `:writes` never runs out."
   [faults]
@@ -58,12 +65,15 @@
     (deprovision! [_ target] (tally! calls :deprovision!) (protocol/deprovision! inner target))))
 
 (defn ^{:stratum 1} flaky
-  "`inner` with reads failing while `:reads?` is false and writes failing
-   once `:writes` is spent."
+  "`inner` with reads failing while `:reads?` is false, writes failing once
+   `:writes` is spent, and a one-shot `:before-write` fn run ahead of the
+   next write."
   [inner faults]
   (reify store/LedgerStore
     (read-entry [_ k] (if (:reads? @faults) (store/read-entry inner k) down))
-    (write-entry! [_ k revision entry] (if (writable! faults) (store/write-entry! inner k revision entry) down))
+    (write-entry! [_ k revision entry]
+      (run-interposed! faults)
+      (if (writable! faults) (store/write-entry! inner k revision entry) down))
     (entries [_] (store/entries inner))))
 
 ;------------------------------------------------------------------------------ Layer 2

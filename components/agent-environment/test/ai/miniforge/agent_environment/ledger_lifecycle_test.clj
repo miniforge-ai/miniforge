@@ -59,6 +59,26 @@
     (is (= [:outcome/refused unavailable] (last-receipt w)))
     (is (= [] (states w)))))
 
+(deftest ^{:stratum 1} test-a-ledger-refusal-keeps-the-ledger-anomaly
+  (let [w (outage-world)
+        current (:environment/lease (acquire w))]
+    (swap! (:faults w) assoc :writes 0)
+    (let [refused (acquire w)]
+      (is (= "down" (:anomaly/message refused)))
+      (is (= (:receipt/id (last @(:receipts w))) (get-in refused [:anomaly/data :receipt/id]))))
+    (testing "given another tenant's lease while the ledger is unreadable → the forged tenant is refused first"
+      (swap! (:faults w) assoc :reads? false)
+      (is (= :anomalies.agent-environment/forged-tenant (reason (env/readiness (:c w) (:b w) current)))))))
+
+(deftest ^{:stratum 1} test-a-cancel-whose-lease-was-released-never-reaches-the-provider
+  (let [w (outage-world)
+        current (:environment/lease (acquire w))
+        rival (second-controller w)]
+    (swap! (:faults w) assoc :before-write #(env/release! rival (:a w) current))
+    (is (= :anomalies.agent-environment/environment-released (reason (env/cancel! (:c w) (:a w) current))))
+    (is (nil? (:cancel! @(:calls w))))
+    (is (= [:state/released] (states w)))))
+
 (deftest ^{:stratum 1} test-a-provision-the-ledger-misses-hands-out-no-lease
   (let [w (outage-world)
         req (fx/request w (:a w))]

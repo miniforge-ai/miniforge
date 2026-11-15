@@ -107,29 +107,29 @@
   {:exec/argv ["true"] :exec/timeout-ms exec-timeout-ms})
 
 (defn ^{:stratum 1} world
-  "A fresh controller over `provider` and `ledger-store` (by default an
-   empty memory ledger), two tenants, and a receipt log."
-  ([provider isolation] (world provider isolation (memory-ledger/create)))
-  ([provider isolation ledger-store]
-   (let [now (Instant/now)
-         receipts (atom [])
-         c (controller/create {:provider provider
-                               :clock #(Instant/now)
-                               :emit! #(swap! receipts conj %)
-                               :persist! memory-persister
-                               :ledger ledger-store})
-         a (acting-for "conformance-tenant-a" now)
-         b (acting-for "conformance-tenant-b" now)
-         expires-at (.plusSeconds now grant-ttl-seconds)]
-     {:c c
-      :leases (atom [])
-      :now now
-      :expires-at expires-at
-      :receipts receipts
-      :isolation isolation
-      :run-id (random-uuid)
-      :a a
-      :b b})))
+  "A fresh controller over `provider`, two tenants, and a receipt log. The
+   controller keeps leases in `ledger-store`, or an empty memory ledger."
+  [provider isolation & [ledger-store]]
+  (let [now (Instant/now)
+        receipts (atom [])
+        store (or ledger-store (memory-ledger/create))
+        c (controller/create {:provider provider
+                              :clock #(Instant/now)
+                              :emit! #(swap! receipts conj %)
+                              :persist! memory-persister
+                              :ledger store})
+        a (acting-for "conformance-tenant-a" now)
+        b (acting-for "conformance-tenant-b" now)
+        expires-at (.plusSeconds now grant-ttl-seconds)]
+    {:c c
+     :leases (atom [])
+     :now now
+     :expires-at expires-at
+     :receipts receipts
+     :isolation isolation
+     :run-id (random-uuid)
+     :a a
+     :b b}))
 
 (defn ^{:stratum 1} request
   ([w acting] (request w acting (random-uuid) (first template-hashes)))

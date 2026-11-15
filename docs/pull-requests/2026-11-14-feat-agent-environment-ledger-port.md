@@ -47,12 +47,15 @@ intent records and the reconciler each land against one fixed contract.
    `ledger/change!` and return its anomaly when the store fails. The pure entry transitions
    (`claimed`, `settled`, `reserved-settled`) are the old map-level ones applied to one entry.
 5. `lifecycle`:
-   1. Acquire refuses with the ledger's reason when the claim is not stored. The provider is never
-      called.
-   2. Leased calls refuse when the entry cannot be read.
-   3. Cancel writes the cancelled state before calling the provider. If that write fails, the
-      provider is not called.
-   4. Release runs the provider's deletes, then records the state. If the record fails, the receipt
+   1. Acquire refuses when the claim is not stored. The provider is never called.
+   2. Leased calls refuse when the entry cannot be read. A forged tenant is refused first, so a
+      caller without the tenant never sees storage details.
+   3. Both refusals return the ledger's own anomaly, message and data included, with the refusal
+      receipt's id added.
+   4. Cancel writes the cancelled state before calling the provider. If that write fails, or the
+      entry it leaves no longer admits the lease (another controller released or replaced it between
+      the read and the write), the provider is not called.
+   5. Release runs the provider's deletes, then records the state. If the record fails, the receipt
       says what applied, with reason `ledger-unavailable`, and the caller gets the ledger's anomaly.
       A retry deletes again and records; the fake reports an absent namespace as already gone.
 6. `provisioning`: a provision the ledger does not record hands out no lease. The environment
@@ -120,11 +123,15 @@ These are the later issue #2506 PRs, in order:
    2. A provision the ledger misses hands out no lease, and the same request is never provisioned
       twice.
    3. Leased calls make zero `exec!` or `deprovision!` calls while the ledger is unreadable.
-   4. An unrecorded cancel makes zero `cancel!` calls.
-   5. A release the ledger misses is receipted with its reason and then retried.
-   6. Two controllers sharing one ledger share leases, and two racing acquires provision once.
+   4. An unrecorded cancel makes zero `cancel!` calls, and so does a cancel whose lease a rival
+      controller released between its read and its write. This test fails without the fix.
+   5. A ledger refusal keeps the store's message and carries the receipt id; a forged tenant is
+      refused before the unreadable ledger is consulted.
+   6. A release the ledger misses is receipted with its reason and then retried.
+   7. Two controllers sharing one ledger share leases, and two racing acquires provision once.
 3. The existing agent-environment, agent-worker and opt-in profile tests pass: 67 tests with 257
-   assertions, and 9 tests with 42 assertions.
+   assertions before the review fixes, 69 tests with 263 after; agent-worker and opt-in profile, 9
+   tests with 42 assertions.
 4. clj-kondo and stratum-lint are clean on the component.
 
 All of this is unit and fake evidence. None of it qualifies a real provider, a durable store or a
