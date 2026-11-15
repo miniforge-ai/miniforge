@@ -55,15 +55,16 @@ They extend N2's families; IDs are never reused.
 | N2D.CK.5 | MUST | Emit the checkpoint and resume events of N3 §3.21 at the points §9 defines. |
 | N2D.CK.6 | MUST | Honor the checkpoint store location and retention rules of §3 and §7. |
 | N2D.CK.7 | MUST | Force a write's checkpoint files to disk before publishing the manifest that names them, and hold the run's checkpoint lock while writing (§1). |
-| N2D.CK.8 | MUST | Recover a full-stopped run only into a fresh run after checkpoint validation and external-effect reconciliation (§11). |
+| N2D.CK.8 | MUST | Recover a full-stopped run only into a fresh run after confirmed containment/termination, durable fencing, checkpoint validation, and external-effect reconciliation (§11). |
 
 ### Test Obligations
 
 1. A crash after phase N resumes at phase N+1 with no re-execution of N.
 2. A spec edit between run and resume produces the drift error, not a resume.
 3. Every checkpoint write has a corresponding N3 §3.21 event.
-4. Full-stop recovery rejects unknown effects, unsafe/corrupt checkpoints,
-   stale authority, old capsule identities, and attempts to reopen the old run.
+4. Full-stop recovery rejects unconfirmed containment, unknown effects,
+   unsafe/corrupt checkpoints, stale authority, old capsule identities, and
+   attempts to reopen the old run.
 
 ---
 
@@ -285,7 +286,13 @@ NOT establish safety. Suspect capsule output or an uncommitted checkpoint
 generation MUST NOT be promoted as a safe recovery point. If no checkpoint
 can be shown safe, recovery MUST remain blocked rather than silently replay.
 
-Before any new workload effects, the controller MUST reconcile durable effect
+Before any new-run workload effects, the controller MUST confirm N8 §3.5's
+durable fence and provider-confirmed containment and termination of the old
+runtime. Unresolved credential or egress exposure MUST keep those effects
+blocked; reconciling past requests cannot establish safety while the old
+runtime can still issue competing effects.
+
+The controller MUST also reconcile durable effect
 history and fresh provider observations. This includes requests accepted after
 the checkpoint or with unknown outcomes at shutdown. Restoring local state
 MUST NOT be treated as undoing external effects or authorizing replay. Unresolved effects MUST

@@ -44,6 +44,8 @@ those sentence splits preserve existing requirements and historical records.
 The first automatic review found unconditional N7 exit-test wording. The
 requirements now distinguish ordinary compensation from full-stop containment,
 including guardrail abort and permanent-apply postcondition failure.
+The second review tightened restart admission: old-runtime containment and
+termination and the durable stop fence are confirmed before new-run effects.
 
 ## Testing plan
 
