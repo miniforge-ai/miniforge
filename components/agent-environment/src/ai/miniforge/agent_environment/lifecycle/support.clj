@@ -62,6 +62,21 @@
   [outcome environment]
   (if (and (nil? environment) (= :outcome/applied outcome)) :outcome/uncertain outcome))
 
+(defn ^{:stratum 0} ledger-reason
+  "The ledger's reason when a ledger read or change returned its anomaly,
+   else nil."
+  [result]
+  (when (anomaly/anomaly? result)
+    (anomaly/subtype result)))
+
+(defn ^{:stratum 0} recorded-call
+  "The call result for provider `steps` the ledger was asked to record:
+   `value` when it did, else its anomaly, with the reason on the receipt."
+  [recorded value steps]
+  (if (anomaly/anomaly? recorded)
+    {:call/value recorded :call/steps steps :call/reason (anomaly/subtype recorded)}
+    {:call/value value :call/steps steps}))
+
 (defn ^{:stratum 0} subject-of
   [acting request environment]
   (if environment

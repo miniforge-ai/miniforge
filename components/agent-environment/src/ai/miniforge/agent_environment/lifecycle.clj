@@ -45,6 +45,7 @@
   (let [subject (receipt/lease-subject acting lease)
         entry (controller/entry c (lease/lease-key lease))
         refusal (or (admission/tenant-refusal acting (:lease/tenant-id lease))
+                    (support/ledger-reason entry)
                     (lease/lease-refusal entry operation lease (support/now c)))]
     (if refusal
       (controller/refuse! c subject operation refusal [])
@@ -67,18 +68,21 @@
 
 (defn- ^{:stratum 0} stopped
   "Cancel in the ledger first, so no call is admitted while the provider
-   stops running work; the receipt says what the provider confirmed."
+   stops running work; the receipt says what the provider confirmed. A
+   cancel the ledger did not record never reaches the provider."
   [c lease target]
-  (controller/settle! c lease #(assoc % :entry/state :state/cancelled))
-  (let [steps (support/reported-steps (protocol/cancel! (support/provider c) target) :cancel/steps)]
-    {:call/value {:call/outcome (receipt/steps-outcome steps)} :call/steps steps}))
+  (anomaly/let-ok [_ (controller/settle! c lease #(assoc % :entry/state :state/cancelled))]
+    (let [steps (support/reported-steps (protocol/cancel! (support/provider c) target) :cancel/steps)]
+      {:call/value {:call/outcome (receipt/steps-outcome steps)} :call/steps steps})))
 
 (defn- ^{:stratum 0} settled
   "Move the ledger to `state` whatever the provider confirmed: the ledger
-   stops admitting work on request, and the receipt says what applied."
+   stops admitting work on request, and the receipt says what applied. When
+   the ledger does not take the move, the caller gets its anomaly instead
+   of an outcome the ledger does not show."
   [c lease steps state]
-  (controller/settle! c lease #(assoc % :entry/state state))
-  {:call/value {:call/outcome (receipt/steps-outcome steps)} :call/steps steps})
+  (let [recorded (controller/settle! c lease #(assoc % :entry/state state))]
+    (support/recorded-call recorded {:call/outcome (receipt/steps-outcome steps)} steps)))
 
 (defn ^{:stratum 0} preflight
   [c acting request]
@@ -113,6 +117,7 @@
       (seq failures) (controller/refuse! c subject :environment/acquire
                                          :anomalies.agent-environment/preflight-failed
                                          (mapv support/failure-step failures))
+      (anomaly/anomaly? decision) (controller/refuse! c subject :environment/acquire (anomaly/subtype decision) [])
       (= :new (:decision/kind decision)) (provisioning/provision c acting request (:decision/generation decision))
       (= :duplicate (:decision/kind decision)) (duplicate c acting request decision)
       :else (controller/refuse! c subject :environment/acquire (:decision/reason decision) []))))

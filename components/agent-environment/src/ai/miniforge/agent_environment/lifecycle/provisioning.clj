@@ -26,13 +26,25 @@
    [ai.miniforge.agent-environment.lease :as lease]
    [ai.miniforge.agent-environment.lifecycle.support :as support]
    [ai.miniforge.agent-environment.receipt :as receipt]
-   [ai.miniforge.agent-environment.refusal :as refusal]))
+   [ai.miniforge.agent-environment.refusal :as refusal]
+   [ai.miniforge.anomaly.interface :as anomaly]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} maybe-created
   "Step outcomes after which something may exist to recover."
   #{:outcome/applied :outcome/uncertain})
+
+(defn- ^{:stratum 0} adopted
+  "Record a complete provision as the key's environment and return it.
+   When the ledger does not take it, no lease is handed out: the
+   environment exists, the reservation stays provisioning as an unknown
+   outcome to reconcile, and the caller gets the ledger's anomaly."
+  [c acting request generation env steps]
+  (let [recorded (controller/settle-provision! c request generation :state/provisioned env)
+        reason (support/ledger-reason recorded)]
+    (controller/record! c (support/subject-of acting request env) :environment/acquire :outcome/applied steps reason)
+    (if reason recorded env)))
 
 (defn- ^{:stratum 0} cleanup!
   [c subject target uid]
@@ -65,11 +77,14 @@
                   (cleanup! c subject target (:environment/uid environment)))
         state (if (or (= :outcome/failed outcome) (= :outcome/applied (:receipt/outcome cleaned)))
                 :state/released
-                :state/cleanup-uncertain)]
-    (controller/settle-provision! c request (:target/generation target) state environment)
-    (refusal/reason-anomaly :anomalies.agent-environment/provisioning-failed
-                            {:receipt/ids (filterv some? [(:receipt/id acquired) (:receipt/id cleaned)])
-                             :environment/lease (:environment/lease environment)})))
+                :state/cleanup-uncertain)
+        recorded (controller/settle-provision! c request (:target/generation target) state environment)
+        receipt-ids (filterv some? [(:receipt/id acquired) (:receipt/id cleaned)])]
+    (if (anomaly/anomaly? recorded)
+      recorded
+      (refusal/reason-anomaly :anomalies.agent-environment/provisioning-failed
+                              {:receipt/ids receipt-ids
+                               :environment/lease (:environment/lease environment)}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -82,7 +97,5 @@
         steps (support/reported-steps provisioned :provision/steps)
         env (support/environment request target (or (:provision/uid provisioned) (recovered-uid c target steps)))]
     (if (and env (= :outcome/applied (receipt/steps-outcome steps)))
-      (do (controller/settle-provision! c request generation :state/provisioned env)
-          (controller/record! c (support/subject-of acting request env) :environment/acquire :outcome/applied steps nil)
-          env)
+      (adopted c acting request generation env steps)
       (provision-failed c acting request target env steps))))
