@@ -86,6 +86,18 @@
       (is (= [entry] entries))
       (is (= 0 skipped)))))
 
+(defn- ^{:stratum 0} miss-at
+  "A ledger miss in the producer's shape, recorded at `instant`."
+  [bucket instant]
+  (assoc (gap/build-entry {:run-id "r" :phase :implement :signal drift-signal
+                           :situation nil :consultation nil
+                           :bucket bucket :attribution nil})
+         :miss/at instant))
+
+;; The shape codex/harvest-decisions returns.
+(defn- ^{:stratum 0} decision [date outcome & miss-ids]
+  {:decided (java.time.LocalDate/parse date) :outcome outcome :misses (vec miss-ids)})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} no-situation-classifies-uncovered-first
@@ -279,3 +291,37 @@
         (is (re-find #"routing: 1 of 4" text))
         (is (re-find #"anchoring: 22 problems, 4 unanchored, 5 speculative" text))
         (is (re-find #"review queue: 1" text))))))
+
+(deftest ^{:stratum 1} learning-pairs-a-miss-with-its-harvest-decision
+  (let [miss (miss-at :uncovered "2026-09-01T10:00:00Z")
+        r    (gap/build-report [miss] {:harvest [(decision "2026-09-04" :admitted (:miss/id miss))]})]
+    (is (= {:status :measured :decided 1 :median-days 3.0 :open 0}
+           (select-keys (:learning r) [:status :decided :median-days :open])))
+    (is (re-find #"learning: 1 miss\(es\) decided, median 3.0 day" (gap/render-report r)))))
+
+(deftest ^{:stratum 1} learning-counts-a-refusal-as-a-decision
+  (let [miss (miss-at :uncovered "2026-09-01T10:00:00Z")
+        r    (gap/build-report [miss] {:harvest [(decision "2026-09-02" :refused (:miss/id miss))]})]
+    (is (= 1 (get-in r [:learning :decided])))
+    (is (= 1.0 (get-in r [:learning :median-days])))))
+
+(deftest ^{:stratum 1} learning-uses-the-earliest-decision-naming-a-miss
+  (let [miss (miss-at :uncovered "2026-09-01T10:00:00Z")
+        r    (gap/build-report [miss] {:harvest [(decision "2026-09-10" :admitted (:miss/id miss))
+                                                 (decision "2026-09-05" :refused (:miss/id miss))]})]
+    (is (= 4.0 (get-in r [:learning :median-days])))))
+
+(deftest ^{:stratum 1} learning-keeps-unnamed-misses-open
+  (let [named   (miss-at :uncovered "2026-09-01T10:00:00Z")
+        unnamed (miss-at :uncovered "2026-09-02T10:00:00Z")
+        r       (gap/build-report [named unnamed]
+                                  {:harvest [(decision "2026-09-04" :admitted (:miss/id named))]})]
+    (is (= 1 (get-in r [:learning :open])))
+    (is (= [(:miss/id unnamed)] (get-in r [:learning :misses])))))
+
+(deftest ^{:stratum 1} learning-without-harvest-records-reports-unavailable
+  (let [r (gap/build-report [(miss-at :uncovered "2026-09-01T10:00:00Z")] {})]
+    (is (= :harvest-unavailable (get-in r [:learning :status])))
+    (is (nil? (get-in r [:learning :median-days])))
+    (is (re-find #"learning: harvest records unavailable; 1 open" (gap/render-report r)))))
+
