@@ -34,7 +34,12 @@
 (def ^{:stratum 0} down
   (anomaly/sub-anomaly :unavailable :anomalies.agent-environment/ledger-unavailable "down" {}))
 
-(defn- ^{:stratum 0} tally! [calls op] (swap! calls update op (fnil inc 0)))
+(defn- ^{:stratum 0} intercepted
+  "Count a provider call by `op` in `calls`, then answer it with the hook a
+   test left for `op` in `hooks` when that returns a value, else `delegate`."
+  [calls hooks op delegate]
+  (swap! calls update op (fnil inc 0))
+  (or (when-let [hook (get @hooks op)] (hook)) (delegate)))
 
 (defn- ^{:stratum 0} run-interposed!
   "Run, once, the `:before-write` fn a test left in `faults`: another
@@ -52,10 +57,11 @@
 
 (defn ^{:stratum 0} controller-over
   "Another controller over `w`'s provider and receipt log, keeping leases
-   in `ledger-store`: a restarted or concurrent controller process."
-  [w ledger-store]
+   in `ledger-store`, on `clock` when given: a restarted or concurrent
+   controller process."
+  [w ledger-store & [clock]]
   (env/create-controller {:provider (get-in w [:c :controller/provider])
-                          :clock #(Instant/now)
+                          :clock (or clock #(Instant/now))
                           :emit! #(swap! (:receipts w) conj %)
                           :persist! fx/memory-persister
                           :ledger ledger-store}))
@@ -63,18 +69,20 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} counting
-  "`inner` with every provider call counted by operation in `calls`."
-  [inner calls]
+  "`inner` with every provider call counted by operation in `calls`; a fn a
+   test puts under an operation in the `hooks` atom runs first, and its
+   value, when not nil, answers in the provider's place."
+  [inner calls hooks]
   (reify protocol/EnvironmentProvider
     (capabilities [_] (protocol/capabilities inner))
-    (probe [_ request] (tally! calls :probe) (protocol/probe inner request))
-    (provision! [_ target request] (tally! calls :provision!) (protocol/provision! inner target request))
-    (observe [_ target] (tally! calls :observe) (protocol/observe inner target))
-    (exec! [_ target command] (tally! calls :exec!) (protocol/exec! inner target command))
-    (write-file! [_ target path text] (tally! calls :write-file!) (protocol/write-file! inner target path text))
-    (read-file [_ target path] (tally! calls :read-file) (protocol/read-file inner target path))
-    (cancel! [_ target] (tally! calls :cancel!) (protocol/cancel! inner target))
-    (deprovision! [_ target] (tally! calls :deprovision!) (protocol/deprovision! inner target))))
+    (probe [_ request] (intercepted calls hooks :probe #(protocol/probe inner request)))
+    (provision! [_ target request] (intercepted calls hooks :provision! #(protocol/provision! inner target request)))
+    (observe [_ target] (intercepted calls hooks :observe #(protocol/observe inner target)))
+    (exec! [_ target command] (intercepted calls hooks :exec! #(protocol/exec! inner target command)))
+    (write-file! [_ target path text] (intercepted calls hooks :write-file! #(protocol/write-file! inner target path text)))
+    (read-file [_ target path] (intercepted calls hooks :read-file #(protocol/read-file inner target path)))
+    (cancel! [_ target] (intercepted calls hooks :cancel! #(protocol/cancel! inner target)))
+    (deprovision! [_ target] (intercepted calls hooks :deprovision! #(protocol/deprovision! inner target)))))
 
 (defn ^{:stratum 1} flaky
   "`inner` with reads failing while `:reads?` is false, writes failing once
@@ -92,12 +100,14 @@
 
 (defn ^{:stratum 2} outage-world
   "A conformance world over a counted fake provider and a flaky memory
-   ledger, plus `:fake`, `:calls`, `:inner` (the store underneath) and
-   `:faults` (the switch: `:reads?` and `:writes` left, nil for no limit)."
+   ledger, plus `:fake`, `:calls`, `:hooks` (provider call hooks), `:inner`
+   (the store underneath) and `:faults` (the switch: `:reads?` and
+   `:writes` left, nil for no limit)."
   []
   (let [inner (memory-ledger/create)
         faults (atom {:reads? true :writes nil})
         fake (env/fake-provider)
         calls (atom {})
-        w (fx/world (counting fake calls) :isolation/shared-kernel (flaky inner faults))]
-    (assoc w :inner inner :faults faults :fake fake :calls calls)))
+        hooks (atom {})
+        w (fx/world (counting fake calls hooks) :isolation/shared-kernel (flaky inner faults))]
+    (assoc w :inner inner :faults faults :fake fake :calls calls :hooks hooks)))
