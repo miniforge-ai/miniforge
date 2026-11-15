@@ -9,7 +9,8 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} instant-keys
-  [:grant/issued-at :grant/expires-at :grant/revoked-at])
+  [:grant/issued-at :grant/expires-at :grant/revoked-at
+   :authority/created-at :authority/stopped-at])
 
 (defn- ^{:stratum 0} encode-instant
   [record k]

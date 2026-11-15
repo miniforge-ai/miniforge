@@ -4,6 +4,13 @@
 
 {:execution-grant/messages
  {:store/invalid "Grant store inputs failed validation"
+  :run/invalid "Run authority storage inputs failed validation"
+  :run/read-failed "Run authority state could not be read or validated"
+  :run/write-failed "Run authority state could not be durably persisted"
+  :run/id-conflict "Run identity was concurrently registered or stopped; read its current state"
+  :run/not-registered "Run authority state is absent; effect permission cannot be inferred"
+  :run/stopped "This run is fully stopped and cannot be registered again"
+  :run/protection-unqualified "Run authority storage requires qualified POSIX directory protection"
   :store/read-failed "Durable grant authority could not be read or validated"
   :store/write-failed "Durable grant authority could not be persisted"
   :store/id-conflict "This authority record already exists and cannot be replaced"

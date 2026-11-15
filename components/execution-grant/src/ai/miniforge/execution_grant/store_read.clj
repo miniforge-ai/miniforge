@@ -35,9 +35,9 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} checked-record
-  [encoded id record-schema on-error]
+  [encoded identity-key id record-schema on-error]
   (let [value (decode-record encoded)]
-    (if (and (m/validate record-schema value) (= id (:grant/id value)))
+    (if (and (m/validate record-schema value) (= id (get value identity-key)))
       value
       (on-error))))
 
@@ -51,17 +51,20 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} read-record
-  ([file id record-schema on-error]
-   (read-record file id record-schema on-error true))
-  ([file id record-schema on-error may-retry?]
+  ([file identity-key id record-schema on-error]
+   (read-record file identity-key id record-schema on-error true))
+  ([file identity-key id record-schema on-error may-retry?]
    (try
      (if-not (path/safe? file)
        (on-error)
-       (checked-record (read-text file) id record-schema on-error))
+       (checked-record (read-text file) identity-key id record-schema on-error))
      (catch NoSuchFileException _
        (cond (absent? file) nil
-             may-retry? (read-record file id record-schema on-error false)
+             may-retry? (read-record file identity-key id record-schema on-error false)
              :else (on-error)))
+     (catch InterruptedException _
+       (.interrupt (Thread/currentThread))
+       (on-error))
      (catch Exception _ (on-error)))))
 
 (comment

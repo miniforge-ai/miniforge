@@ -45,7 +45,7 @@
 
 (defn ^{:stratum 2} read-record
   [dir id kind record-schema]
-  (reader/read-record (record-file dir id kind) id record-schema
+  (reader/read-record (record-file dir id kind) :grant/id id record-schema
                       (partial failure :fault :store/read-failed id kind)))
 
 (defn ^{:stratum 2} confirm!
