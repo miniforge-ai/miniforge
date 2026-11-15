@@ -149,10 +149,14 @@
 (defn ^{:stratum 0} build-report
   "Pure: ledger entries (+ total skipped-line count, run count, the runs'
    consultation entries, harvest decisions) and optional anchoring stats
-   -> the gap vector. Every slot carries its member miss ids."
+   -> the gap vector. Every slot carries its member miss ids.
+   :unreadable-ledgers counts runs whose miss ledger was not fully read;
+   it sits at the top level because every slot is computed from those
+   entries, so the whole report, not one slot, is incomplete."
   [entries {:keys [skipped run-count anchoring consultations
-                   unreadable-consultations harvest]
-            :or   {unreadable-consultations 0}}]
+                   unreadable-consultations unreadable-ledgers harvest]
+            :or   {unreadable-consultations 0
+                   unreadable-ledgers       0}}]
   (let [by-bucket (group-by :miss/bucket entries)
         ids #(mapv :miss/id (get by-bucket % []))
         delivered (get by-bucket :unheeded [])
@@ -165,6 +169,7 @@
     {:entry-count (count entries)
      :run-count (or run-count 1)
      :skipped (or skipped 0)
+     :unreadable-ledgers unreadable-ledgers
      :coverage {:covered (count (remove #(= :uncovered (:miss/bucket %)) entries))
                 :total (count entries)
                 :consultation-match (consultation-match consultations
@@ -205,6 +210,14 @@
     (msg/t :report/learning-undated-suffix {:n undated})
     ""))
 
+(defn- ^{:stratum 0} ledger-incomplete-suffix
+  "Runs whose miss ledger was not fully read: every slot below is computed
+   over the entries that were, so the header says the report is partial."
+  [unreadable-ledgers]
+  (if (pos? unreadable-ledgers)
+    (msg/t :report/ledger-incomplete-suffix {:n unreadable-ledgers})
+    ""))
+
 (defn- ^{:stratum 0} learning-text
   [{:keys [status decided undated median-days open]}]
   (cond
@@ -228,15 +241,17 @@
 (defn ^{:stratum 1} render-report
   "The gap vector as catalog-backed text, one slot per line, member miss
    ids beneath the slots that carry them."
-  [{:keys [entry-count run-count skipped coverage routing anchoring
-           delivery attention learning review-queue]}]
+  [{:keys [entry-count run-count skipped unreadable-ledgers coverage routing
+           anchoring delivery attention learning review-queue]
+    :or   {unreadable-ledgers 0}}]
   (str/join "\n"
     [(msg/t :report/header
             {:entry-count entry-count
              :run-count run-count
              :skipped (if (pos? skipped)
                         (msg/t :report/skipped-suffix {:n skipped})
-                        "")})
+                        "")
+             :incomplete (ledger-incomplete-suffix unreadable-ledgers)})
      (msg/t :report/coverage {:covered (:covered coverage)
                               :total (:total coverage)
                               :match (match-text (:consultation-match coverage))})
