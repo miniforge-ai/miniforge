@@ -12,11 +12,14 @@
 (defn ^{:stratum 0} admit! [ready]
   (let [ctx (:context ready)
         policy (get-in ctx [:execution/opts :opsv/governance])
-        policy (assoc-in policy [:policy/context :opsv/recovery-plan] (:recovery/plan ready))
+        policy (update policy :policy/context assoc :opsv/recovery-plan (:recovery/plan ready)
+                       :opsv/recovery-ownership (:ownership/observation ready))
         evaluated (evaluation/evaluate [:recovery-effect] ctx (:proposal ready) {} policy)
         decision (:opsv/decision-envelope evaluated)
         evidence (assoc evaluated :effect/proposal (:proposal ready)
-                        :recovery/hash (:recovery/hash ready) :recovery/plan (:recovery/plan ready))]
+                        :recovery/hash (:recovery/hash ready) :recovery/plan (:recovery/plan ready))
+        evidence (cond-> evidence (contains? ready :ownership/observation)
+                         (assoc :ownership/observation (:ownership/observation ready)))]
     (if (= :allow (:envelope/decision decision))
       (assoc ready :decision decision :recovery/effect-admission evidence)
       (assoc-in (forward/refused) [:anomaly/data :recovery/effect-admission] evaluated))))

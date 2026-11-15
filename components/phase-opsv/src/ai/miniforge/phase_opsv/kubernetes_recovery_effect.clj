@@ -17,4 +17,9 @@
   (let [identity (str identity-prefix digest "/" (name operation))]
     (UUID/nameUUIDFromBytes (.getBytes identity StandardCharsets/UTF_8))))
 
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} matches? [input reference operation]
+  (= (:effect/id input) (identity-for (:recovery/hash reference) operation)))
+
 (comment ::one-durable-slot-per-operation-of-the-same-bounded-plan-not-per-caller-attempt)

@@ -14,13 +14,13 @@
 (def ^{:stratum 0 :private true} cleanup-propagation-policy
   "Only the Pod UID is proven owned; never cascade deletion into unproven dependents." "Orphan")
 
-(defn- ^{:stratum 0} usable? [input plan owned]
+(defn ^{:stratum 0} ready? [input plan owned]
   (and (not= (:effect/id input) (get-in plan [:recovery/load :creation-effect/id]))
        (contains? #{:not-started :terminated} (:load/quiescence owned))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} request [owned]
+(defn ^{:stratum 1} request [owned]
   (let [metadata (get-in owned [:load/pod "metadata"])
         collection (get-in owned [:load/creation-record :effect/proposal :kubernetes/request :path])
         path (str collection "/" (get metadata "name"))
@@ -40,7 +40,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} prepare [ctx input plan owned]
-  (if-not (usable? input plan owned)
+  (if-not (ready? input plan owned)
     (anomaly/anomaly :conflict (msg/ts :load/cleanup-request-refused) {})
     (let [payload (request owned)
           intent {:opsv/operation cleanup-operation

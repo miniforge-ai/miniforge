@@ -31,7 +31,7 @@
 
 (defn ^{:stratum 2} restoration-readiness! [runtime input]
   (anomaly/let-ok [admitted (readiness! runtime input)]
-    (if (= (:effect/id input) (identity/identity-for (:recovery/hash admitted) :restore-baseline))
+    (if (identity/matches? input admitted :restore-baseline)
       admitted
       (forward/refused))))
 
