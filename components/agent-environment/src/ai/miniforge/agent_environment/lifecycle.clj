@@ -44,12 +44,13 @@
   [c operation acting lease call]
   (let [subject (receipt/lease-subject acting lease)
         entry (controller/entry c (lease/lease-key lease))
-        refusal (or (admission/tenant-refusal acting (:lease/tenant-id lease))
-                    (support/ledger-reason entry)
-                    (lease/lease-refusal entry operation lease (support/now c)))]
-    (if refusal
-      (controller/refuse! c subject operation refusal [])
-      (controller/finish! c subject operation (call (controller/target entry))))))
+        forged (admission/tenant-refusal acting (:lease/tenant-id lease))
+        refusal (when-not (anomaly/anomaly? entry) (lease/lease-refusal entry operation lease (support/now c)))]
+    (cond
+      forged (controller/refuse! c subject operation forged [])
+      (anomaly/anomaly? entry) (controller/refuse-anomaly! c subject operation entry)
+      refusal (controller/refuse! c subject operation refusal [])
+      :else (controller/finish! c subject operation (call (controller/target entry))))))
 
 (defn- ^{:stratum 0} observed
   [c lease target]
@@ -68,10 +69,11 @@
 
 (defn- ^{:stratum 0} stopped
   "Cancel in the ledger first, so no call is admitted while the provider
-   stops running work; the receipt says what the provider confirmed. A
-   cancel the ledger did not record never reaches the provider."
+   stops running work. A cancel the ledger did not record for this lease
+   never reaches the provider."
   [c lease target]
-  (anomaly/let-ok [_ (controller/settle! c lease #(assoc % :entry/state :state/cancelled))]
+  (anomaly/let-ok [changed (controller/settle! c lease #(assoc % :entry/state :state/cancelled))
+                   _ (support/lost-lease changed lease :environment/cancel (support/now c))]
     (let [steps (support/reported-steps (protocol/cancel! (support/provider c) target) :cancel/steps)]
       {:call/value {:call/outcome (receipt/steps-outcome steps)} :call/steps steps})))
 
@@ -117,7 +119,7 @@
       (seq failures) (controller/refuse! c subject :environment/acquire
                                          :anomalies.agent-environment/preflight-failed
                                          (mapv support/failure-step failures))
-      (anomaly/anomaly? decision) (controller/refuse! c subject :environment/acquire (anomaly/subtype decision) [])
+      (anomaly/anomaly? decision) (controller/refuse-anomaly! c subject :environment/acquire decision)
       (= :new (:decision/kind decision)) (provisioning/provision c acting request (:decision/generation decision))
       (= :duplicate (:decision/kind decision)) (duplicate c acting request decision)
       :else (controller/refuse! c subject :environment/acquire (:decision/reason decision) []))))

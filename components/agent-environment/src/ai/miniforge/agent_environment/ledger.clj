@@ -44,8 +44,7 @@
     {:ledger/before before :ledger/after after}))
 
 (def ^{:stratum 0} ledger-reasons
-  "The only reasons a ledger failure carries; a store anomaly with any other
-   is reported as the ledger being unavailable."
+  "The only reasons a ledger failure carries; any other is unavailability."
   #{:anomalies.agent-environment/ledger-conflict :anomalies.agent-environment/ledger-unavailable})
 
 (defn- ^{:stratum 0} lost-race?
