@@ -6,7 +6,8 @@
   (:require [ai.miniforge.file-durability.boundary :as boundary]
             [ai.miniforge.file-durability.boundary.directory-policy :as policy]
             [ai.miniforge.file-durability.boundary.directory-path :as path-policy]
-            [babashka.fs :as fs])
+            [babashka.fs :as fs]
+            [slingshot.slingshot :refer [try+]])
   (:import [java.nio.file FileAlreadyExistsException]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -30,7 +31,7 @@
 
 (defn- ^{:stratum 1} create-private! [directory [segment leaf?]]
   (let [path (fs/path directory segment)]
-    (try
+    (try+
       (fs/create-dir path {:posix-file-permissions policy/private-permissions})
       (catch FileAlreadyExistsException _ nil))
     (path-policy/check! path leaf?)

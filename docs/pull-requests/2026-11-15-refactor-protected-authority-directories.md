@@ -34,12 +34,10 @@ in #2528. This PR does not implement full stop or authorize any live operation.
 
 Validation completed:
 
-- Both JVM products: 83 tests, 291 assertions each before the probe hint;
-  targeted owner-lock delta afterward: 11 tests, 46 assertions each.
-- Fresh CLI, source overlays, and isolated package: 83 tests, 292 assertions
-  per Babashka run, plus four assertion-only safety faults in each run.
-- Strict lint: zero warnings/errors. Actual strata: 17 namespaces, at most
-  three. Workspace and task-classpath checks passed.
+- Both JVM products, fresh CLI source overlays, and isolated package:
+  85 tests, 295 assertions per run, plus four assertion-only safety faults.
+- Strict lint: zero warnings/errors. Actual strata remain at most three per
+  changed namespace. Workspace and task-classpath checks passed.
 
 ## Deployment plan
 
@@ -50,10 +48,25 @@ during extraction is closed and has a regression test.
 Packaged regressions also exposed an untyped owner-lock probe release that
 Babashka rejects. It now uses the same AutoCloseable hint as the existing
 release path; repeated probes verify that the temporary lock is released.
+Review also found that the adapter conflated I/O failures with policy refusals.
+Typed policy refusals now preserve the offending ancestor, while ordinary I/O
+failures retain a separate checkpoint diagnostic. Structured boundary signaling
+uses the workspace's existing Slingshot version; regressions cover both messages.
 
 ## Related issues/PRs
 
 PR #2528 defines the approved full-stop contract; implementation verification remains pending.
+
+## Review sources
+
+The owning agent read the applicable rules in full at gitlink
+`72f451d3d7e0ad82079610bec61be0399a2b7117` before each push.
+An uninitialized review checkout does not waive that rules gate.
+The public pinned [agent guide](https://github.com/miniforge-ai/miniforge-standards/blob/72f451d3d7e0ad82079610bec61be0399a2b7117/agents.md)
+and [catalog](https://github.com/miniforge-ai/miniforge-standards/blob/72f451d3d7e0ad82079610bec61be0399a2b7117/index.mdc)
+link the complete rules at the same immutable revision.
+The effective merge gate is the complete repository-local `agents.md` section
+“PR Merge Gate”; rule 723 is absent from this pinned shared catalog.
 
 ## Checklist
 

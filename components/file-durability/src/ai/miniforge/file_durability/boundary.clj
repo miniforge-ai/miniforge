@@ -4,8 +4,8 @@
 (ns ai.miniforge.file-durability.boundary
   "Convert filesystem failures to data without claiming successful durability."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.messages.interface :as messages])
-  (:import [java.io IOException]))
+            [ai.miniforge.messages.interface :as messages]
+            [slingshot.slingshot :refer [try+ throw+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -16,7 +16,9 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} refuse-directory! [path]
-  (throw (IOException. ^String (t :file/unsafe-directory {:path (str path)}))))
+  (throw+ (anomaly/sub-anomaly :unauthorized :anomalies.file-durability/unsafe-directory
+                              (t :file/unsafe-directory {:path (str path)})
+                              {:durability/path (str path)})))
 
 (defn ^{:stratum 1} invalid-input [operation]
   (anomaly/anomaly :invalid-input (t :file/invalid-input)
@@ -32,12 +34,13 @@
   ([operation file action]
    (call-with-exception-handling operation file action (constantly file)))
   ([operation file action completed-value]
-   (try
+   (try+
      (completed-value (action))
      (catch InterruptedException _
        (let [result (failure operation file)]
          (.interrupt (Thread/currentThread))
          result))
+     (catch anomaly/anomaly? result result)
      (catch Exception _ (failure operation file)))))
 
 (comment
