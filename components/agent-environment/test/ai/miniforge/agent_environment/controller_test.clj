@@ -19,6 +19,7 @@
   (:require
    [ai.miniforge.agent-environment.controller :as controller]
    [ai.miniforge.agent-environment.lease :as lease]
+   [ai.miniforge.agent-environment.ledger.memory :as memory-ledger]
    [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.test :refer [deftest is testing]])
   (:import
@@ -55,7 +56,10 @@
 (defn- ^{:stratum 1} fresh
   []
   (let [receipts (atom [])
-        c (controller/create {:provider nil :clock (constantly now) :emit! (partial collect! receipts)})]
+        c (controller/create {:provider nil
+                              :clock (constantly now)
+                              :emit! (partial collect! receipts)
+                              :ledger (memory-ledger/create)})]
     {:c c :receipts receipts}))
 
 (defn- ^{:stratum 1} provisioned!
