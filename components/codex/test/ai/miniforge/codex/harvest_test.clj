@@ -74,3 +74,12 @@
 
 (deftest ^{:stratum 1} a-codex-without-harvest-logs-has-no-decisions
   (is (= {:decisions []} (codex/harvest-decisions (temp-codex {"nodes/a.md" "# a\n"})))))
+
+(deftest ^{:stratum 1} a-symlink-back-to-the-root-is-not-followed
+  (let [dir (temp-codex {"HARVEST-2026-09.md" harvest-log})]
+    (doseq [link ["loop-a" "loop-b"]]
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath (io/file dir link)) (.toPath (io/file dir))
+       (into-array java.nio.file.attribute.FileAttribute [])))
+    (is (= 2 (count (:decisions (codex/harvest-decisions dir)))))))
+

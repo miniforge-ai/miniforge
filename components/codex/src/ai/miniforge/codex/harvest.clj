@@ -65,6 +65,18 @@
     (when (and date kind (seq miss-ids))
       {:decided date :outcome kind :misses miss-ids})))
 
+(defn- ^{:stratum 0} symlink? [^java.io.File f]
+  (java.nio.file.Files/isSymbolicLink (.toPath f)))
+
+(defn- ^{:stratum 0} child-kind
+  "Symlinked directories are skipped: a link back to an ancestor would
+   re-enqueue the tree without end."
+  [^java.io.File f]
+  (cond
+    (symlink? f)      (if (.isDirectory f) :skip :file)
+    (.isDirectory f)  :dir
+    :else             :file))
+
 (defn- ^{:stratum 1} list-tree
   "Every file under `root`, or {:unlistable dir} for the first directory
    that cannot be listed: file-seq would skip it silently."
@@ -72,7 +84,7 @@
   (loop [dirs [root] files []]
     (if-let [^java.io.File d (first dirs)]
       (if-let [children (.listFiles d)]
-        (let [{subdirs true leaves false} (group-by #(.isDirectory ^java.io.File %) children)]
+        (let [{subdirs :dir leaves :file} (group-by child-kind children)]
           (recur (into (vec (rest dirs)) subdirs) (into files leaves)))
         {:unlistable (str d)})
       {:files files})))

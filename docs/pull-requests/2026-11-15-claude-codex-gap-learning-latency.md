@@ -39,7 +39,8 @@ decision that closed it.
   the logs and return `{:decisions [...]}`, or a `:codex-unreadable`
   anomaly when the directory is missing, unreadable, or has a
   subdirectory that cannot be listed. `file-seq` would skip such a
-  subdirectory silently, so the reader walks the tree itself. The codex
+  subdirectory silently, so the reader walks the tree itself, skipping
+  symlinked directories so a link back to an ancestor cannot loop. The codex
   stays read-only.
 - `codex-gap/report.clj`:
   - `harvest-decisions` reads the decisions through the codex interface,
@@ -82,7 +83,7 @@ decision that closed it.
   - a decided miss with a non-string timestamp counts as decided and
     undated, without crashing the report.
 - Ran locally on a hand-built classpath: every codex and codex-gap test
-  namespace, 72 tests, 0 failures. The unlistable-directory path has no test: this
+  namespace, 73 tests, 0 failures. The unlistable-directory path has no test: this
   container runs as root, which can list a `chmod 000` directory, so the
   case cannot be reproduced here. `bb` is not installed here, so the bb
   task and lint run in CI only.
