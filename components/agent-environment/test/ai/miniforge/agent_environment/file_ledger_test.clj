@@ -63,12 +63,14 @@
 
 (defn- ^{:stratum 0} bump [existing] (update existing :count (fnil inc 0)))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} sibling
+(def ^{:stratum 0} sibling
   "Another task of `k`'s tenant and run: a key printed with `*print-length*`
    1 would look the same as `k`."
-  (assoc k 2 #uuid "00000000-0000-0000-0000-00000000000d"))
+  [#uuid "00000000-0000-0000-0000-00000000000a"
+   #uuid "00000000-0000-0000-0000-00000000000b"
+   #uuid "00000000-0000-0000-0000-00000000000d"])
+
+;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} entry
   {:entry/state :state/provisioning
@@ -100,6 +102,14 @@
     (is (= acquired (env/acquire! restarted (:a w) (fx/provision-grant w (:a w)) req)))
     (is (= {:call/outcome :outcome/applied} (env/release! restarted (:a w) current)))
     (is (= :anomalies.agent-environment/environment-released (reason (env/readiness (:c w) (:a w) current))))))
+
+(defn- ^{:stratum 1} written-dir
+  "A fresh store directory holding `value` under `k` and under `sibling`."
+  [value]
+  (let [dir (temp-dir)]
+    (store/write-entry! (env/file-ledger dir) k nil value)
+    (store/write-entry! (env/file-ledger dir) sibling nil value)
+    dir))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -144,22 +154,22 @@
     (is (= unavailable (reason (store/read-entry under-a-file k))))
     (is (= unavailable (reason (store/entries (env/file-ledger blocker)))))))
 
-(deftest ^{:stratum 2} test-file-names-ignore-printer-settings
-  (let [dir (temp-dir)]
-    (binding [*print-length* 1]
-      (store/write-entry! (env/file-ledger dir) k nil entry)
-      (store/write-entry! (env/file-ledger dir) sibling nil entry))
+(deftest ^{:stratum 2} test-names-and-records-ignore-printer-settings
+  (let [dir (temp-dir)
+        noted (assoc entry :entry/note "a string")]
+    (binding [*print-length* 1 *print-readably* false]
+      (store/write-entry! (env/file-ledger dir) k nil noted)
+      (store/write-entry! (env/file-ledger dir) sibling nil noted))
     (is (= 2 (count (store/entries (env/file-ledger dir)))))
-    (is (= 1 (:ledger/revision (store/read-entry (env/file-ledger dir) sibling))))))
+    (is (= {:ledger/entry noted :ledger/revision 1} (store/read-entry (env/file-ledger dir) sibling)))))
 
 (deftest ^{:stratum 2} test-a-misplaced-or-trailing-record-is-corrupt
-  (let [dir (temp-dir)
-        s (env/file-ledger dir)
-        own (disk/record-file (io/file dir) k)]
-    (store/write-entry! s k nil entry)
-    (store/write-entry! s sibling nil entry)
-    (spit own (str (slurp own) "{:ledger/key []}"))
-    (is (= unavailable (reason (store/read-entry s k))))
-    (testing "given another key's record copied over this key's file → refused, not read as this key's"
-      (io/copy (disk/record-file (io/file dir) sibling) own)
-      (is (= unavailable (reason (store/read-entry s k)))))))
+  (testing "given another key's record copied over this key's file → refused, not read as this key's"
+    (let [dir (written-dir entry)]
+      (io/copy (disk/record-file (io/file dir) sibling) (disk/record-file (io/file dir) k))
+      (is (= unavailable (reason (store/read-entry (env/file-ledger dir) k))))))
+  (doseq [trailing ["{:ledger/key []}" " :ai.miniforge.agent-environment.ledger.disk/eof"]]
+    (testing (str "given " trailing " after the record → refused as trailing content")
+      (let [dir (written-dir entry)]
+        (spit (disk/record-file (io/file dir) k) trailing :append true)
+        (is (= unavailable (reason (store/read-entry (env/file-ledger dir) k))))))))

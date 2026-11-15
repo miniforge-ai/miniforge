@@ -24,9 +24,9 @@
    before it returns, and a lock held against other threads and processes."
   (:require
    [ai.miniforge.agent-environment.interface.ledger :as ledger]
+   [ai.miniforge.agent-environment.ledger.printing :as printing]
    [ai.miniforge.agent-environment.refusal :as refusal]
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.file-durability.interface :as durability]
    [clojure.edn :as edn]
    [clojure.walk :as walk]
@@ -79,8 +79,7 @@
   "The file name stem for key `k`: one key names the same files in every
    process, whatever printer settings the caller has bound."
   [k]
-  (binding [*print-length* nil *print-level* nil *print-meta* false *print-namespace-maps* false]
-    (content-hash/content-hash (mapv str k))))
+  (printing/plain-content-hash (mapv str k)))
 
 (defn- ^{:stratum 0} read-text
   "The UTF-8 text of `file`, or nil only when it does not exist; any other
@@ -123,8 +122,7 @@
 
 (defn- ^{:stratum 1} encode
   ^bytes [record]
-  (binding [*print-length* nil *print-level* nil *print-meta* false *print-namespace-maps* false]
-    (.getBytes ^String (pr-str (walk/postwalk tagged record)) "UTF-8")))
+  (.getBytes ^String (printing/plain-pr-str (walk/postwalk tagged record)) "UTF-8"))
 
 (defn- ^{:stratum 1} with-io-failure
   "Run `thunk` at the store's file I/O boundary: a thrown exception becomes
@@ -166,13 +164,14 @@
    file's name is corrupt."
   [^File file text]
   (with-open [reader (PushbackReader. (StringReader. text))]
-    (let [options {:eof ::eof :readers {'mf/instant parse-instant}}
+    (let [eof (Object.)
+          options {:eof eof :readers {'mf/instant parse-instant}}
           record (edn/read options reader)
           trailing (edn/read options reader)
           explained (m/explain StoredRecord record)
           misplaced? (and (nil? explained) (not= (.getName file) (str (key-name (:ledger/key record)) record-suffix)))]
       (cond
-        (not= ::eof trailing) (unavailable :decode file :ledger/trailing-content)
+        (not (identical? eof trailing)) (unavailable :decode file :ledger/trailing-content)
         explained (unavailable :decode file (error-paths explained))
         misplaced? (unavailable :decode file :ledger/misplaced-record)
         :else record))))
