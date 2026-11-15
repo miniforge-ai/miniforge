@@ -658,8 +658,9 @@
                dirs (when (fs/directory? root)
                       (sort (filter fs/directory? (fs/list-dir root))))
                reads (map (fn [d] (codex-gap/read-ledger (str d))) dirs)
+               consults (map (fn [d] (codex-gap/read-consultations (str d))) dirs)
                entries (vec (mapcat :entries reads))
-               skipped (reduce + 0 (keep :skipped reads))
+               skipped (reduce + 0 (keep :skipped (concat reads consults)))
                codex-dir (System/getenv "MINIFORGE_CODEX_PATH")
                anchoring (some-> codex-dir codex-gap/codex-anchoring-stats)
                harvest (some-> codex-dir codex-gap/harvest-decisions)]
@@ -668,7 +669,9 @@
                       entries {:skipped skipped
                                :run-count (count (filter (fn [r] (seq (:entries r))) reads))
                                :anchoring anchoring
-                               :harvest harvest}))))}
+                               :harvest harvest
+                               :consultations (vec (mapcat :entries consults))
+                               :unreadable-consultations (count (filter codex-gap/incomplete-read? consults))}))))}
 
   mcp-context-server
   {:doc     "Run MCP context server (JSON-RPC 2.0 over stdin/stdout)"
