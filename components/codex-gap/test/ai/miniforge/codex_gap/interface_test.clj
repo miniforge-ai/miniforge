@@ -86,6 +86,24 @@
       (is (= [entry] entries))
       (is (= 0 skipped)))))
 
+(def ^{:stratum 0} unmatched-situation "about-to-commit-consequential")
+
+;; Built through the producer, from the summary shape codex-pin emits.
+(defn- ^{:stratum 0} consultation [status anomaly situation]
+  (gap/build-consultation-entry
+   {:run-id "run-1" :phase :plan
+    :consultation {:status status :anomaly anomaly :situation situation}}))
+
+(def ^{:stratum 0} pinned
+  (consultation :pinned nil "changing-one-side-of-a-boundary"))
+
+;; 3 matched, 1 unmatched attempt, then an unreadable codex and 2 unmapped phases.
+(def ^{:stratum 0} mixed-consultations
+  (concat (repeat 3 pinned)
+          [(consultation :skipped :situation-unmatched unmatched-situation)
+           (consultation :skipped :codex-unreadable "s")]
+          (repeat 2 (consultation :unmapped nil nil))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} no-situation-classifies-uncovered-first
@@ -279,3 +297,45 @@
         (is (re-find #"routing: 1 of 4" text))
         (is (re-find #"anchoring: 22 problems, 4 unanchored, 5 speculative" text))
         (is (re-find #"review queue: 1" text))))))
+
+(deftest ^{:stratum 1} consultation-entry-records-the-skip-cause
+  (is (= :situation-unmatched
+         (:consultation/anomaly
+          (consultation :skipped :situation-unmatched unmatched-situation))))
+  (is (nil? (:consultation/anomaly pinned))))
+
+(deftest ^{:stratum 1} coverage-reports-matched-of-attempted-consultations
+  (let [r     (gap/build-report [] {:consultations mixed-consultations})
+        match (get-in r [:coverage :consultation-match])
+        text  (gap/render-report r)]
+    (testing "an unreadable codex and an unmapped phase are not attempts"
+      (is (= 3 (:matched match)))
+      (is (= 4 (:attempted match)))
+      (is (= 0.75 (:rate match))))
+    (testing "the unmatched attempt's situation is the slot's member"
+      (is (= [unmatched-situation] (:unmatched match)))
+      (is (re-find (re-pattern (str "unmatched: " unmatched-situation)) text)))
+    (is (re-find #"3 of 4 attempted consultations matched a situation \(75%\)" text))))
+
+(deftest ^{:stratum 1} coverage-sets-pre-anomaly-skips-apart
+  (let [r     (gap/build-report [] {:consultations [pinned (consultation :skipped nil "s")]})
+        match (get-in r [:coverage :consultation-match])]
+    (is (= {:matched 1 :attempted 1 :unclassified 1}
+           (select-keys match [:matched :attempted :unclassified])))
+    (is (re-find #"1 older skipped consultation\(s\) unclassified" (gap/render-report r)))))
+
+(deftest ^{:stratum 1} coverage-with-no-attempts-reports-no-rate
+  (let [r (gap/build-report [] {:consultations [(consultation :unconfigured nil nil)]})]
+    (is (nil? (get-in r [:coverage :consultation-match :rate])))
+    (is (re-find #"no consultation attempted" (gap/render-report r)))))
+
+(deftest ^{:stratum 1} recorded-consultations-feed-the-coverage-rate
+  ;; The bb codex-gap-report path: entries recorded per run, read back, reported.
+  (let [dir (str (java.nio.file.Files/createTempDirectory
+                   "codex-gap-match-"
+                   (into-array java.nio.file.attribute.FileAttribute [])))]
+    (gap/record-consultation! dir pinned)
+    (gap/record-consultation! dir (consultation :skipped :situation-ambiguous unmatched-situation))
+    (let [consultations (:entries (gap/read-consultations dir))
+          text (gap/render-report (gap/build-report [] {:consultations consultations}))]
+      (is (re-find #"1 of 2 attempted consultations matched a situation \(50%\)" text)))))

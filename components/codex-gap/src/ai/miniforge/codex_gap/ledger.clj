@@ -60,6 +60,7 @@
    :consultation/phase phase
    :consultation/situation (get consultation :situation)
    :consultation/status (get consultation :status)
+   :consultation/anomaly (get consultation :anomaly)
    :consultation/pin-read? (get consultation :pin-read?)
    :consultation/answer-log (get consultation :answer-log)
    :consultation/pegs (get consultation :pegs)
