@@ -38,7 +38,9 @@ for consultation files with `incomplete-read?` and
     it affects every slot;
   - `ledger-incomplete-suffix` renders the marker when the count is
     positive;
-  - `render-report` appends that suffix to the header line.
+  - `render-report` appends that suffix to the header line. It treats a
+    report map without `:unreadable-ledgers` as 0, so a map built before
+    this change still renders (found in Copilot review).
 - `messages/en-US.edn`: the header gains an `{incomplete}` placeholder,
   and `:report/ledger-incomplete-suffix` reads
   ", INCOMPLETE: miss ledger not fully read in {n} run(s)". "Not fully
@@ -56,10 +58,11 @@ for consultation files with `incomplete-read?` and
   - a lossy read (a torn line) keeps its readable entries and marks the
     header INCOMPLETE for 1 run;
   - a failed and a lossy run together count as 2 runs;
-  - a clean read shows no marker, and the option defaults to 0.
+  - a clean read shows no marker, and the option defaults to 0;
+  - a report map without the count renders unmarked instead of throwing.
 - With `report.clj` reverted to `main`, the new test fails 6 assertions.
 - Ran locally on a hand-built classpath: every codex-gap and codex test
-  namespace, 82 tests, 0 failures. clj-kondo on the changed files:
+  namespace, 82 tests (267 assertions), 0 failures. clj-kondo on the changed files:
   0 errors, 0 warnings.
 
 ## Deployment Plan

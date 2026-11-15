@@ -242,7 +242,8 @@
   "The gap vector as catalog-backed text, one slot per line, member miss
    ids beneath the slots that carry them."
   [{:keys [entry-count run-count skipped unreadable-ledgers coverage routing
-           anchoring delivery attention learning review-queue]}]
+           anchoring delivery attention learning review-queue]
+    :or   {unreadable-ledgers 0}}]
   (str/join "\n"
     [(msg/t :report/header
             {:entry-count entry-count

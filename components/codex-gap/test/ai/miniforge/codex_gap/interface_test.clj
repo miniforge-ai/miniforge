@@ -398,7 +398,10 @@
         (is (= 0 (:unreadable-ledgers r)))
         (is (not (re-find #"INCOMPLETE" (gap/render-report r))))))
     (testing "the option defaults to zero"
-      (is (= 0 (:unreadable-ledgers (gap/build-report [] {})))))))
+      (is (= 0 (:unreadable-ledgers (gap/build-report [] {})))))
+    (testing "a report map without the count still renders, unmarked"
+      (let [r (dissoc (report-over-runs [clean]) :unreadable-ledgers)]
+        (is (not (re-find #"INCOMPLETE" (gap/render-report r))))))))
 
 (deftest ^{:stratum 1} recorded-consultations-feed-the-coverage-rate
   ;; The bb codex-gap-report path: entries recorded per run, read back, reported.
