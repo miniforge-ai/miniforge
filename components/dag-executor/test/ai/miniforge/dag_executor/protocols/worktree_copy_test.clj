@@ -20,7 +20,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.java.io :as io]
-   [ai.miniforge.dag-executor.protocols.impl.worktree :as sut]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.files :as worktree-files]
    [ai.miniforge.dag-executor.result :as result]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -50,11 +50,11 @@
         src-dir  (make-temp-dir! "wt-src-")
         src-file (write-temp-file! (str src-dir "/payload.txt") "secret")]
     (testing "../../etc/passwd escapes the worktree root → :path-traversal"
-      (let [r (sut/copy-file-to worktree src-file "../../etc/passwd")]
+      (let [r (worktree-files/copy-file-to worktree src-file "../../etc/passwd")]
         (is (result/err? r))
         (is (= :path-traversal (error-code r)))))
     (testing "../ escapes the worktree root → :path-traversal"
-      (let [r (sut/copy-file-to worktree src-file "../escaped.txt")]
+      (let [r (worktree-files/copy-file-to worktree src-file "../escaped.txt")]
         (is (result/err? r))
         (is (= :path-traversal (error-code r)))))))
 
@@ -63,7 +63,7 @@
         src-dir  (make-temp-dir! "wt-src-ok-")
         src-file (write-temp-file! (str src-dir "/hello.txt") "hello")]
     (testing "a simple nested path inside the worktree succeeds"
-      (let [r (sut/copy-file-to worktree src-file "subdir/hello.txt")]
+      (let [r (worktree-files/copy-file-to worktree src-file "subdir/hello.txt")]
         (is (result/ok? r))
         (is (pos? (:copied-bytes (:data r))))))))
 
@@ -72,12 +72,12 @@
   (let [worktree (make-temp-dir! "wt-copy-from-")
         dest-dir (make-temp-dir! "wt-dest-")]
     (testing "../../etc/shadow escapes the worktree root → :path-traversal"
-      (let [r (sut/copy-file-from worktree "../../etc/shadow"
+      (let [r (worktree-files/copy-file-from worktree "../../etc/shadow"
                                   (str dest-dir "/out.txt"))]
         (is (result/err? r))
         (is (= :path-traversal (error-code r)))))
     (testing "../escaped.txt escapes the worktree root → :path-traversal"
-      (let [r (sut/copy-file-from worktree "../escaped.txt"
+      (let [r (worktree-files/copy-file-from worktree "../escaped.txt"
                                   (str dest-dir "/out2.txt"))]
         (is (result/err? r))
         (is (= :path-traversal (error-code r)))))))
@@ -88,7 +88,7 @@
         _         (io/make-parents (str worktree "/subdir/result.txt"))
         _         (write-temp-file! (str worktree "/subdir/result.txt") "done")]
     (testing "a valid nested path inside the worktree is copied out"
-      (let [r (sut/copy-file-from worktree "subdir/result.txt"
+      (let [r (worktree-files/copy-file-from worktree "subdir/result.txt"
                                   (str dest-dir "/result.txt"))]
         (is (result/ok? r))
         (is (pos? (:copied-bytes (:data r))))))))

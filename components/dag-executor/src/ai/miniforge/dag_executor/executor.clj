@@ -30,7 +30,7 @@
    - protocols/executor.clj - Protocol definition
    - protocols/impl/runtime/oci_cli.clj - OCI-CLI implementation (Docker / Podman)
    - protocols/impl/kubernetes.clj - Kubernetes implementation
-   - protocols/impl/worktree.clj - Worktree fallback implementation
+   - protocols/impl/worktree/executor.clj - Worktree fallback implementation
    - protocols/impl/host_guarded.clj - Host-git invariant wrapper"
   (:require
    [ai.miniforge.dag-executor.result :as result]
@@ -42,7 +42,7 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes :as k8s]
    [ai.miniforge.dag-executor.protocols.impl.unavailable :as unavailable]
-   [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]))
+   [ai.miniforge.dag-executor.protocols.impl.worktree.executor :as worktree-executor]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -140,7 +140,7 @@
      8+ minutes of working code to a tmpfs cleanup. Opt in via this
      key for ephemeral runs.
    - :max-concurrent - Max concurrent worktrees (default: 4)"
-  worktree/create-worktree-executor)
+  worktree-executor/create-worktree-executor)
 
 ;; ============================================================================
 ;; OCI Image Management
