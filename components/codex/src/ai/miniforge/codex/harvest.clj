@@ -38,9 +38,10 @@
        (str/ends-with? (.getName f) ".md")))
 
 (defn- ^{:stratum 0} sections
-  "Section texts, each starting at a markdown heading."
+  "Section texts, each starting at a markdown ATX heading: up to three
+   leading spaces, 1-6 `#`, then whitespace. A `#tag` line is not one."
   [text]
-  (str/split text #"(?m)^(?=#)"))
+  (str/split text #"(?m)^(?= {0,3}#{1,6}(?:[ \t]|$))"))
 
 (defn- ^{:stratum 0} field-pair [line]
   (some-> (re-matches field-re line) rest vec))

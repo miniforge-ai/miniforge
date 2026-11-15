@@ -83,3 +83,18 @@
        (into-array java.nio.file.attribute.FileAttribute [])))
     (is (= 2 (count (:decisions (codex/harvest-decisions dir)))))))
 
+(deftest ^{:stratum 1} indented-headings-and-tags-split-sections-correctly
+  (let [log (str "## half entry\n"
+                 "decided:: 2026-09-04\n"
+                 "  ## other half, indented heading\n"
+                 "outcome:: admitted\n"
+                 "misses:: " miss-a "\n"
+                 "## whole entry\n"
+                 "#harvest is a tag, not a heading\n"
+                 "decided:: 2026-09-06\n"
+                 "outcome:: refused\n"
+                 "misses:: " miss-b "\n")
+        {:keys [decisions]} (codex/harvest-decisions (temp-codex {"HARVEST-x.md" log}))]
+    (testing "two incomplete sections do not merge into a decision"
+      (is (= [miss-b] (mapcat :misses decisions))))))
+

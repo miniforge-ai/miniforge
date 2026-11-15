@@ -32,7 +32,9 @@ decision that closed it.
   - `outcome::` (`admitted` or `refused`);
   - `misses::` (comma-separated `:miss/id` UUIDs).
 
-  A field line may start with `- `. A section without all three, or with
+  A section starts at a markdown heading: up to three leading spaces, one
+  to six `#`, then a space, so a `#tag` line does not split a section. A
+  field line may start with `- `. A section without all three, or with
   an unparseable date or outcome, decides nothing. Invalid miss ids in a
   list are dropped.
 - `codex/harvest.clj` (new) and `codex.interface/harvest-decisions`: read
@@ -73,7 +75,10 @@ decision that closed it.
   - incomplete sections and non-harvest files don't;
   - bad ids are dropped;
   - a missing directory is an anomaly;
-  - a codex without logs has no decisions.
+  - a codex without logs has no decisions;
+  - an indented heading splits sections and a `#tag` line does not, so two
+    incomplete halves never merge into one decision;
+  - a symlink back to the root is not followed.
 - `codex_gap/interface_test.clj`, one test per acceptance criterion:
   - 3-day admission;
   - refusal counts;
@@ -85,7 +90,7 @@ decision that closed it.
   - a decided miss with a non-string timestamp counts as decided and
     undated, without crashing the report.
 - Ran locally on a hand-built classpath: every codex and codex-gap test
-  namespace, 80 tests after merging main with #2519, 0 failures. The unlistable-directory path has no test: this
+  namespace, 81 tests after merging main with #2519, 0 failures. The unlistable-directory path has no test: this
   container runs as root, which can list a `chmod 000` directory, so the
   case cannot be reproduced here. `bb` is not installed here, so the bb
   task and lint run in CI only.
