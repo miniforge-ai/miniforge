@@ -32,9 +32,10 @@
    [clojure.walk :as walk]
    [malli.core :as m])
   (:import
-   [java.io File]
+   [java.io File PushbackReader StringReader]
    [java.nio.channels FileChannel]
-   [java.nio.file Files StandardCopyOption StandardOpenOption]
+   [java.nio.charset StandardCharsets]
+   [java.nio.file Files NoSuchFileException Path StandardCopyOption StandardOpenOption]
    [java.nio.file.attribute FileAttribute]
    [java.time Instant]))
 
@@ -76,9 +77,27 @@
 
 (defn- ^{:stratum 0} key-name
   "The file name stem for key `k`: one key names the same files in every
-   process."
+   process, whatever printer settings the caller has bound."
   [k]
-  (content-hash/content-hash (pr-str k)))
+  (binding [*print-length* nil *print-level* nil *print-meta* false *print-namespace-maps* false]
+    (content-hash/content-hash (mapv str k))))
+
+(defn- ^{:stratum 0} read-text
+  "The UTF-8 text of `file`, or nil only when it does not exist; any other
+   failure to read it throws to the I/O boundary."
+  [^File file]
+  (try
+    (String. (Files/readAllBytes (.toPath file)) StandardCharsets/UTF_8)
+    (catch NoSuchFileException _ nil)))
+
+(defn- ^{:stratum 0} directory-files
+  "The files in `dir`, or none only when it does not exist; a directory
+   that cannot be listed throws to the I/O boundary."
+  [^File dir]
+  (try
+    (with-open [stream (Files/newDirectoryStream (.toPath dir))]
+      (mapv (fn [^Path path] (.toFile path)) stream))
+    (catch NoSuchFileException _ [])))
 
 (defn- ^{:stratum 0} unavailable
   [operation ^File file detail]
@@ -132,27 +151,39 @@
 (defn- ^{:stratum 1} lock-file ^File [dir k] (File. ^File dir (str (key-name k) lock-suffix)))
 
 (defn- ^{:stratum 1} monitor-for
+  "The stripe for a lock file, chosen by its key-hash name so every path
+   alias of one directory picks the same monitor."
   [^File file]
-  (nth lock-stripes (mod (hash (.getAbsolutePath file)) (count lock-stripes))))
+  (nth lock-stripes (mod (hash (.getName file)) (count lock-stripes))))
 
 (defn- ^{:stratum 1} record-file?
   [^File file]
   (.endsWith (.getName file) record-suffix))
 
 (defn- ^{:stratum 1} decode
-  "The record `text` holds, or the store's anomaly when it is not one."
+  "The one record `text` holds, or the store's anomaly: trailing content, a
+   value that is not a `StoredRecord`, or a record for another key than the
+   file's name is corrupt."
   [^File file text]
-  (let [record (edn/read-string {:readers {'mf/instant parse-instant}} text)]
-    (if-let [explained (m/explain StoredRecord record)]
-      (unavailable :decode file (error-paths explained))
-      record)))
+  (with-open [reader (PushbackReader. (StringReader. text))]
+    (let [options {:eof ::eof :readers {'mf/instant parse-instant}}
+          record (edn/read options reader)
+          trailing (edn/read options reader)
+          explained (m/explain StoredRecord record)
+          misplaced? (and (nil? explained) (not= (.getName file) (str (key-name (:ledger/key record)) record-suffix)))]
+      (cond
+        (not= ::eof trailing) (unavailable :decode file :ledger/trailing-content)
+        explained (unavailable :decode file (error-paths explained))
+        misplaced? (unavailable :decode file :ledger/misplaced-record)
+        :else record))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} record-files
-  "Every record file under `dir`; none before the first write."
+  "Every record file under `dir`; none before the first write, and the
+   store's anomaly when the directory cannot be listed."
   [^File dir]
-  (with-io-failure :list dir #(filterv record-file? (or (.listFiles dir) []))))
+  (with-io-failure :list dir #(filterv record-file? (directory-files dir))))
 
 (defn ^{:stratum 2} publish!
   "Write `record` as `target`, forced to stable storage with its directory
@@ -173,4 +204,4 @@
   "The record in `file`, or the store's absent value when there is none.
    Records are only renamed into place, so a read sees a whole one."
   [^File file]
-  (with-io-failure :read file #(if (.exists file) (decode file (slurp file :encoding "UTF-8")) ledger/absent)))
+  (with-io-failure :read file #(if-let [text (read-text file)] (decode file text) ledger/absent)))

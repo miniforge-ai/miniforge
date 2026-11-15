@@ -32,18 +32,22 @@ restart, and it asks for an existing durable-store abstraction where one fits. T
 
 1. `ledger.disk`, the file mechanics. Each operation returns a result or a `ledger-unavailable`
    anomaly that names the operation and path.
-   1. Record and lock files are named by a content hash of the key.
+   1. Record and lock files are named by a content hash of the key, computed with the printer
+      settings bound, so a caller's `*print-length*` cannot make two keys share a file.
    2. Records are EDN. Instants are written under `#mf/instant` because `#inst` reads back as a
       `Date`, which does not equal the stored `Instant`; after a restart every stored request
       would look changed and be refused as conflicting.
-   3. A read decodes the whole record and checks it against `StoredRecord`. A file that does not
-      match is corrupt, and the ledger reports itself unavailable instead of guessing.
+   3. A read decodes exactly one form and checks it against `StoredRecord` and against its own file
+      name. Trailing content, a malformed record, or another key's record is corrupt, and the
+      ledger reports itself unavailable instead of guessing. Only a missing file reads as absent,
+      and only a missing directory lists as empty. Any other I/O failure is `ledger-unavailable`.
    4. A write goes to a temporary file in the same directory. `file-durability/publish-bytes!`
       forces the bytes, the atomic rename, and the directory entries before the write is
       acknowledged.
    5. Every write to a key holds that key's file lock, which excludes other processes. It first
-      takes one of 64 striped monitors, because a JVM that already holds a file lock throws when
-      it asks again.
+      takes one of 64 striped monitors, chosen by the lock file's key-hash name so path aliases of
+      one directory share it, because a JVM that already holds a file lock throws when it asks
+      again.
 2. `ledger.file/FileLedger`: `write-entry!` reads the stored revision under the key's lock,
    refuses a stale one as `ledger-conflict`, and publishes revision + 1. `read-entry` and `entries`
    read without the lock; records are only renamed into place, so a reader sees an old record or a
@@ -77,15 +81,18 @@ Lock files stay on disk after their key is released: one empty file per key.
    1. A fresh store reads what an earlier one wrote: entry, revision and listing, with a
       nanosecond `Instant` and a `Date` both round-tripping.
    2. A write naming a stale revision is a conflict.
-   3. Two stores race on one directory: a barrier makes both read the same revision first. Both
-      changes land, the final revision is 2, and the loser retried against the winner's entry.
-   4. A corrupt record makes reads, writes and listing unavailable.
-   5. A directory that cannot be created is unavailable.
-   6. A restarted controller over a fresh store on the same directory sees the earlier lease as
+   3. Two stores race on one directory, the second through a `/.` alias. Each takes its read
+      before a barrier, so both hold the same revision. Both changes land, the final revision is 2,
+      and the loser retried against the winner's entry.
+   4. A corrupt record makes reads, writes and listing unavailable, and so do trailing content and
+      another key's record copied over this key's file.
+   5. A store under a regular file is unavailable for writes, reads and listing, never empty.
+   6. Keys written under `*print-length*` 1 get separate files.
+   7. A restarted controller over a fresh store on the same directory sees the earlier lease as
       ready, returns the same environment for the same request, and releases it. The original
       controller then sees the lease as released.
 2. Each file test runs in under 100 ms, measured locally.
-3. The agent-environment suite passes: 73 tests with 273 assertions. Agent-worker and opt-in
+3. The agent-environment suite passes: 78 tests with 289 assertions. Agent-worker and opt-in
    profile pass: 9 tests with 42 assertions. clj-kondo and stratum-lint are clean.
 
 This is local-filesystem evidence on one host. It does not qualify a shared volume, a hosted
