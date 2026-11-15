@@ -82,10 +82,9 @@ None.
 
 ## Related Issues/PRs
 
-Base branch: `refactor/split-worktree-executor` (#2526), which this
-change needs: on `main`, `worktree.clj` is over the stratum budget and no
-commit to it passes the hook. Retarget to `main` once #2525 and #2526
-merge.
+Base branch: `main`. Depends on #2525 (stratum annotation) and #2526 (the
+split), both merged: before the split, `worktree.clj` was over the stratum
+budget and no commit to it passed the hook.
 
 1. Follow-up 3 of the task snapshot history design (#2463,
    `docs/design/task-snapshot-history.md`).
