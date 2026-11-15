@@ -16,10 +16,8 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.agent-environment.ledger
-  "The controller's access to its ledger store: read one entry, change one
-   by compare-and-set, list them all. A lost race is retried against the
-   entry that won it. A store failure without a ledger reason is reported
-   as the ledger being unavailable."
+  "The controller's access to its ledger store: read an entry, change one by
+   compare-and-set (retrying a lost race), list them all."
   (:require
    [ai.miniforge.agent-environment.interface.ledger :as store]
    [ai.miniforge.agent-environment.refusal :as refusal]
@@ -78,9 +76,7 @@
 
 (defn ^{:stratum 2} change!
   "Apply `f` to `k`'s entry by compare-and-set, retrying a lost race against
-   the entry that won it; `f` returns its argument unchanged to write
-   nothing. Returns `{:ledger/before e :ledger/after e'}` or the ledger's
-   anomaly."
+   the winner. Returns `{:ledger/before :ledger/after}` or the ledger's anomaly."
   [ledger k f]
   (loop [attempt 1]
     (let [result (change-once ledger k f)]

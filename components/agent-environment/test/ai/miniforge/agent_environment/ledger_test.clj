@@ -34,7 +34,6 @@
 (defn- ^{:stratum 0} reason [result] (anomaly/subtype result))
 
 (defn- ^{:stratum 0} failing
-  "A store answering every call with `failure`."
   [failure]
   (reify store/LedgerStore
     (read-entry [_ _] failure)
@@ -50,8 +49,7 @@
     ours))
 
 (defn- ^{:stratum 1} raced
-  "A memory store where a rival writes first, at the revision every write
-   names, for the first `races` writes."
+  "A memory store where a rival writes first for the first `races` writes."
   [races]
   (let [inner (memory-ledger/create)
         left (atom races)]

@@ -20,6 +20,8 @@
    [ai.miniforge.agent-environment.conformance.fixtures :as fx]
    [ai.miniforge.agent-environment.fake :as fake]
    [ai.miniforge.agent-environment.interface :as env]
+   [ai.miniforge.agent-environment.interface.ledger :as store]
+   [ai.miniforge.agent-environment.lease :as lease]
    [ai.miniforge.agent-environment.ledger :as ledger]
    [ai.miniforge.agent-environment.ledger-faults :refer [outage-world]]
    [ai.miniforge.anomaly.interface :as anomaly]
@@ -34,8 +36,6 @@
 (defn- ^{:stratum 0} reason [result] (anomaly/subtype result))
 
 (defn- ^{:stratum 0} second-controller
-  "Another controller over `w`'s provider and ledger, as a restarted or
-   concurrent controller process would be."
   [w]
   (env/create-controller {:provider (get-in w [:c :controller/provider])
                           :clock #(Instant/now)
@@ -48,6 +48,12 @@
 (defn- ^{:stratum 0} states [w] (mapv :entry/state (ledger/all-entries (:inner w))))
 
 (defn- ^{:stratum 0} last-receipt [w] ((juxt :receipt/outcome :receipt/reason) (last @(:receipts w))))
+
+(defn- ^{:stratum 0} mark-uncertain!
+  [inner current]
+  (let [k (lease/lease-key current)
+        {:ledger/keys [entry revision]} (store/read-entry inner k)]
+    (store/write-entry! inner k revision (assoc entry :entry/state :state/cleanup-uncertain))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -78,6 +84,14 @@
     (is (= :anomalies.agent-environment/environment-released (reason (env/cancel! (:c w) (:a w) current))))
     (is (nil? (:cancel! @(:calls w))))
     (is (= [:state/released] (states w)))))
+
+(deftest ^{:stratum 1} test-a-cancel-never-overwrites-an-unconfirmed-release
+  (let [w (outage-world)
+        current (:environment/lease (acquire w))]
+    (swap! (:faults w) assoc :before-write #(mark-uncertain! (:inner w) current))
+    (is (= :anomalies.agent-environment/cleanup-uncertain (reason (env/cancel! (:c w) (:a w) current))))
+    (is (nil? (:cancel! @(:calls w))))
+    (is (= [:state/cleanup-uncertain] (states w)))))
 
 (deftest ^{:stratum 1} test-a-provision-the-ledger-misses-hands-out-no-lease
   (let [w (outage-world)

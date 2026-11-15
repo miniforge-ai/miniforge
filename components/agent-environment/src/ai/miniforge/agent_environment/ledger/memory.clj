@@ -16,10 +16,8 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.agent-environment.ledger.memory
-  "A ledger store held in one atom. It keeps the compare-and-set and
-   revision guarantees, but only for its process's lifetime: it is for
-   tests and fake-backed runs, never a controller that must survive a
-   restart."
+  "A ledger store in one atom: the compare-and-set and revision guarantees for
+   one process's lifetime, so for tests and fakes, never a restartable controller."
   (:require
    [ai.miniforge.agent-environment.interface.ledger :as ledger]
    [ai.miniforge.agent-environment.refusal :as refusal]))
@@ -31,8 +29,6 @@
   {:ledger/entry nil :ledger/revision nil})
 
 (defn- ^{:stratum 0} written
-  "The stored map after writing `entry` under `k`; unchanged when `revision`
-   is no longer the key's."
   [stored k revision entry]
   (if (= revision (get-in stored [k :ledger/revision]))
     (assoc stored k {:ledger/entry entry :ledger/revision ((fnil inc 0) revision)})
