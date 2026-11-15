@@ -20,6 +20,8 @@
    A world is one fresh controller with its own receipt log."
   (:require
    [ai.miniforge.agent-environment.controller :as controller]
+   [ai.miniforge.agent-environment.ledger :as ledger]
+   [ai.miniforge.agent-environment.ledger.memory :as memory-ledger]
    [ai.miniforge.agent-environment.lifecycle :as lifecycle]
    [ai.miniforge.agent-environment.schema :as schema]
    [ai.miniforge.anomaly.interface :as anomaly]
@@ -91,6 +93,13 @@
   "Release refusals meaning the check itself already released that lease."
   #{:anomalies.agent-environment/environment-released :anomalies.agent-environment/stale-lease})
 
+(defn ^{:stratum 0} all-released?
+  "True when `entries` is a ledger listing, not its anomaly, and every entry
+   in it is released."
+  [entries]
+  (and (not (anomaly/anomaly? entries))
+       (every? #(= :state/released (:entry/state %)) entries)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} probe-command
@@ -98,26 +107,29 @@
   {:exec/argv ["true"] :exec/timeout-ms exec-timeout-ms})
 
 (defn ^{:stratum 1} world
-  "A fresh controller over `provider`, two tenants, and a receipt log."
-  [provider isolation]
-  (let [now (Instant/now)
-        receipts (atom [])
-        c (controller/create {:provider provider
-                              :clock #(Instant/now)
-                              :emit! #(swap! receipts conj %)
-                              :persist! memory-persister})
-        a (acting-for "conformance-tenant-a" now)
-        b (acting-for "conformance-tenant-b" now)
-        expires-at (.plusSeconds now grant-ttl-seconds)]
-    {:c c
-     :leases (atom [])
-     :now now
-     :expires-at expires-at
-     :receipts receipts
-     :isolation isolation
-     :run-id (random-uuid)
-     :a a
-     :b b}))
+  "A fresh controller over `provider` and `ledger-store` (by default an
+   empty memory ledger), two tenants, and a receipt log."
+  ([provider isolation] (world provider isolation (memory-ledger/create)))
+  ([provider isolation ledger-store]
+   (let [now (Instant/now)
+         receipts (atom [])
+         c (controller/create {:provider provider
+                               :clock #(Instant/now)
+                               :emit! #(swap! receipts conj %)
+                               :persist! memory-persister
+                               :ledger ledger-store})
+         a (acting-for "conformance-tenant-a" now)
+         b (acting-for "conformance-tenant-b" now)
+         expires-at (.plusSeconds now grant-ttl-seconds)]
+     {:c c
+      :leases (atom [])
+      :now now
+      :expires-at expires-at
+      :receipts receipts
+      :isolation isolation
+      :run-id (random-uuid)
+      :a a
+      :b b})))
 
 (defn ^{:stratum 1} request
   ([w acting] (request w acting (random-uuid) (first template-hashes)))
@@ -154,10 +166,10 @@
 
 (defn ^{:stratum 2} release-all!
   "Release every lease `w` acquired; true only when each is confirmed gone
-   and no ledger entry is left anything but released, so a leak with no
-   lease to retry still fails."
+   and the ledger shows no entry left anything but released, so a leak with
+   no lease to retry still fails."
   [w]
   (let [released (mapv #(cleaned? w %) @(:leases w))
-        entries (vals @(:controller/ledger (:c w)))]
+        entries (ledger/all-entries (:controller/ledger (:c w)))]
     (and (every? true? released)
-         (every? #(= :state/released (:entry/state %)) entries))))
+         (all-released? entries))))
