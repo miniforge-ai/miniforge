@@ -20,6 +20,8 @@
    [ai.miniforge.agent-environment.conformance.fixtures :as fx]
    [ai.miniforge.agent-environment.fake :as fake]
    [ai.miniforge.agent-environment.interface :as env]
+   [ai.miniforge.agent-environment.interface.ledger :as store]
+   [ai.miniforge.agent-environment.lease :as lease]
    [ai.miniforge.agent-environment.ledger :as ledger]
    [ai.miniforge.agent-environment.ledger-faults :as faults :refer [outage-world]]
    [ai.miniforge.anomaly.interface :as anomaly]
@@ -41,6 +43,12 @@
 
 (defn- ^{:stratum 0} last-receipt [w] ((juxt :receipt/outcome :receipt/reason) (last @(:receipts w))))
 
+(defn- ^{:stratum 0} mark-uncertain!
+  [inner current]
+  (let [k (lease/lease-key current)
+        {:ledger/keys [entry revision]} (store/read-entry inner k)]
+    (store/write-entry! inner k revision (assoc entry :entry/state :state/cleanup-uncertain))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} test-an-unrecorded-claim-never-reaches-the-provider
@@ -58,9 +66,10 @@
     (let [refused (acquire w)]
       (is (= "down" (:anomaly/message refused)))
       (is (= (:receipt/id (last @(:receipts w))) (get-in refused [:anomaly/data :receipt/id]))))
-    (testing "given another tenant's lease while the ledger is unreadable → the forged tenant is refused first"
-      (swap! (:faults w) assoc :reads? false)
-      (is (= :anomalies.agent-environment/forged-tenant (reason (env/readiness (:c w) (:b w) current)))))))
+    (testing "given another tenant's lease → refused as forged without reading the ledger"
+      (swap! (:faults w) assoc :reads? false :read-count 0)
+      (is (= :anomalies.agent-environment/forged-tenant (reason (env/readiness (:c w) (:b w) current))))
+      (is (zero? (:read-count @(:faults w)))))))
 
 (deftest ^{:stratum 1} test-a-cancel-whose-lease-was-released-never-reaches-the-provider
   (let [w (outage-world)
@@ -70,6 +79,14 @@
     (is (= :anomalies.agent-environment/environment-released (reason (env/cancel! (:c w) (:a w) current))))
     (is (nil? (:cancel! @(:calls w))))
     (is (= [:state/released] (states w)))))
+
+(deftest ^{:stratum 1} test-a-cancel-never-overwrites-an-unconfirmed-release
+  (let [w (outage-world)
+        current (:environment/lease (acquire w))]
+    (swap! (:faults w) assoc :before-write #(mark-uncertain! (:inner w) current))
+    (is (= :anomalies.agent-environment/cleanup-uncertain (reason (env/cancel! (:c w) (:a w) current))))
+    (is (nil? (:cancel! @(:calls w))))
+    (is (= [:state/cleanup-uncertain] (states w)))))
 
 (deftest ^{:stratum 1} test-a-provision-the-ledger-misses-hands-out-no-lease
   (let [w (outage-world)

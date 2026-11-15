@@ -16,9 +16,8 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.agent-environment.ledger-faults
-  "Fault injection for lifecycle tests under ledger outages: a fake
-   provider that counts every call, and a ledger store whose reads and
-   writes can be switched off."
+  "Fault injection for lifecycle tests: a fake provider that counts its calls
+   and a ledger store whose reads and writes can be switched off."
   (:require
    [ai.miniforge.agent-environment.conformance.fixtures :as fx]
    [ai.miniforge.agent-environment.interface :as env]
@@ -42,14 +41,11 @@
   (or (when-let [hook (get @hooks op)] (hook)) (delegate)))
 
 (defn- ^{:stratum 0} run-interposed!
-  "Run, once, the `:before-write` fn a test left in `faults`: another
-   controller's write landing between this read and this write."
   [faults]
   (when-let [interpose (:before-write (first (swap-vals! faults dissoc :before-write)))]
     (interpose)))
 
 (defn- ^{:stratum 0} writable!
-  "True while writes remain, spending one: nil `:writes` never runs out."
   [faults]
   (let [[before _] (swap-vals! faults update :writes #(some-> % dec))
         left (:writes before)]
@@ -69,9 +65,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} counting
-  "`inner` with every provider call counted by operation in `calls`; a fn a
-   test puts under an operation in the `hooks` atom runs first, and its
-   value, when not nil, answers in the provider's place."
+  "Every call counted in `calls`; a non-nil value from a `hooks` fn answers in the provider's place."
   [inner calls hooks]
   (reify protocol/EnvironmentProvider
     (capabilities [_] (protocol/capabilities inner))
@@ -85,12 +79,10 @@
     (deprovision! [_ target] (intercepted calls hooks :deprovision! #(protocol/deprovision! inner target)))))
 
 (defn ^{:stratum 1} flaky
-  "`inner` with reads failing while `:reads?` is false, writes failing once
-   `:writes` is spent, and a one-shot `:before-write` fn run ahead of the
-   next write."
+  "`inner` failing reads while `:reads?` is false and writes once `:writes` is spent."
   [inner faults]
   (reify store/LedgerStore
-    (read-entry [_ k] (if (:reads? @faults) (store/read-entry inner k) down))
+    (read-entry [_ k] (swap! faults update :read-count (fnil inc 0)) (if (:reads? @faults) (store/read-entry inner k) down))
     (write-entry! [_ k revision entry]
       (run-interposed! faults)
       (if (writable! faults) (store/write-entry! inner k revision entry) down))
@@ -99,10 +91,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} outage-world
-  "A conformance world over a counted fake provider and a flaky memory
-   ledger, plus `:fake`, `:calls`, `:hooks` (provider call hooks), `:inner`
-   (the store underneath) and `:faults` (the switch: `:reads?` and
-   `:writes` left, nil for no limit)."
+  "A world over a counted fake provider (`:hooks` intercepts calls) and a flaky ledger;
+   `:faults` holds `:reads?`, `:writes`, `:before-write`."
   []
   (let [inner (memory-ledger/create)
         faults (atom {:reads? true :writes nil})
