@@ -30,6 +30,7 @@
    [ai.miniforge.phase.interface.task-base :as task-base]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.boundary.environment :as boundary]
+   [ai.miniforge.workflow.checkpoint-branch :as checkpoint-branch]
    [ai.miniforge.workflow.context :as context]
    [ai.miniforge.workflow.environment-notifications :as notifications]
    [ai.miniforge.workflow.environment-records :as records]
@@ -220,6 +221,34 @@
                               :execution-mode execution-mode
                               :config/key [:llm :codex :network-access?]})))
 
+(defn- ^{:stratum 0} pin-checkpoint-commit!
+  "For a CHECKPOINT that recorded its commit, the result of putting its
+   branch at that commit; otherwise RESTORED, the bundle restore's result.
+   The bundle's tip is the task's latest persist, which on a rewind is work
+   the re-run must not start from. The pin runs whether or not the restore
+   worked: it needs only the commit, which the host repo often holds."
+  [repo-path {:keys [branch commit-sha]} restored]
+  (if commit-sha
+    (checkpoint-branch/pin-branch! (or repo-path ".") branch commit-sha)
+    restored))
+
+(defn- ^{:stratum 0} restore-refusal
+  "A `:conflict` anomaly when CHECKPOINT recorded its commit and RESULT,
+   what `restore-local-workspace-checkpoint!` returned for it, is a
+   failure; nil otherwise, including when no restore ran. A checkpoint
+   without a commit has nothing to hold the branch to, so its failed
+   restore only warns, as before."
+  [{:keys [branch commit-sha bundle-path]} result]
+  (when (and commit-sha (some? result) (not (dag/ok? result)))
+    (anomaly/anomaly :conflict
+                     (messages/t :env/restore-refused {:branch     branch
+                                                       :commit-sha commit-sha
+                                                       :error      (get-in result [:error :message])})
+                     {:workspace/branch      branch
+                      :workspace/commit-sha  commit-sha
+                      :workspace/bundle-path bundle-path
+                      :restore/error         (:error result)})))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} restore-local-workspace-checkpoint!
@@ -228,7 +257,11 @@
    Local resume must make the last persisted branch visible before
    `git worktree add` runs. Governed runtimes restore inside the capsule;
    local worktrees are acquired from a host ref, so the host ref has to
-   exist first."
+   exist first. A checkpoint that recorded its commit then has the branch
+   put at it (`pin-checkpoint-commit!`).
+
+   Returns that result, an error result when it threw, or nil when there is
+   nothing to restore."
   [executor repo-path {:keys [bundle-path branch] :as checkpoint}]
   (when (and executor bundle-path branch)
     (try
@@ -242,14 +275,14 @@
                     {:message (messages/t :env/restore-failed
                                           {:error (str result)})
                      :data checkpoint}))
-        result)
+        (pin-checkpoint-commit! repo-path checkpoint result))
       (catch Exception e
         (boundary/preserve-critical! e)
         (log/warn env-logger :workflow :workflow/restore-failed
                   {:message (messages/t :env/restore-failed
                                         {:error (ex-message e)})
                    :data checkpoint})
-        nil))))
+        (dag/err :archive-restore-failed (str (ex-message e)))))))
 
 (defn ^{:stratum 1} persist-workspace-at-phase-boundary!
   "Persist workspace at phase completion.
@@ -388,47 +421,60 @@
    Returns env map, or nil (local) / throws (governed) on failure. Governed
    acquisition failure deliberately escalates for legacy runner callers that
    rely on try+ exception flow; prefer anomaly-returning helpers such as
-   `check-executor-for-mode` for non-boundary branching.
+   `check-executor-for-mode` for non-boundary branching. A local resume whose
+   checkpoint commit cannot be restored (`restore-refusal`) throws
+   `:anomalies.executor/acquisition-failed` and acquires nothing: a
+   worktree cut from the branch as it stands would start from the wrong
+   commit.
 
    `runner-preparation/acquire-environment`, its only caller, runs
    `refuse-local-when-governed-required!` first."
   [workflow-id {:keys [repo-url branch repo-path execution-mode executor-config
                        runtime-config resume-workspace]}]
-  (let [mode (get {:governed :governed} execution-mode :local)]
-    (try
-      (let [fns      (dag-executor-fns)
-            config   (with-runtime-config (registry-config-for-mode mode executor-config)
-                                          runtime-config)
-            registry ((:create-registry fns) config)
-            executor (select-capsule-executor registry mode fns)
-            branch   (or (:branch resume-workspace) branch)
-            env-config (cond-> {}
-                         repo-url (assoc :repo-url repo-url)
-                         branch   (assoc :branch branch)
-                         repo-path (assoc :repo-path repo-path))]
-        (when-let [a (check-executor-for-mode
-                      executor mode
-                      (when-not executor (runtime-selection-failure registry fns)))]
-          ;; Boundary throw: acquire-execution-environment! is the
-          ;; runner's escalation point for governed-mode unavailability.
-          ;; The slingshot shape preserves the contract that legacy
-          ;; try+ callers above this layer rely on.
-          (response/throw-anomaly! :anomalies.executor/unavailable
-                                   (:anomaly/message a)
-                                   (merge {:anomaly.executor/mode (get-in a [:anomaly/data :mode])
-                                           :hint (get-in a [:anomaly/data :hint])}
-                                          (select-keys (:anomaly/data a) [:runtime-selection]))))
-        (when (= :local mode)
-          (restore-local-workspace-checkpoint! executor repo-path resume-workspace))
-        (when executor
-          (if (= :governed mode)
-            (governed/acquire! executor workflow-id mode env-config fns)
-            (build-env-record executor workflow-id mode env-config fns))))
-      (catch Exception e
-        (boundary/preserve-critical! e)
-        (when (= :governed mode) (throw e))
-        (log/warn env-logger :workflow :workflow/env-acquisition-failed
-                  {:message (messages/t :env/acquisition-failed {:error (ex-message e)})})
-        nil))))
+  (let [mode (get {:governed :governed} execution-mode :local)
+        acquired
+        (try
+          (let [fns      (dag-executor-fns)
+                config   (with-runtime-config (registry-config-for-mode mode executor-config)
+                                              runtime-config)
+                registry ((:create-registry fns) config)
+                executor (select-capsule-executor registry mode fns)
+                branch   (or (:branch resume-workspace) branch)
+                env-config (cond-> {}
+                             repo-url (assoc :repo-url repo-url)
+                             branch   (assoc :branch branch)
+                             repo-path (assoc :repo-path repo-path))]
+            (when-let [a (check-executor-for-mode
+                          executor mode
+                          (when-not executor (runtime-selection-failure registry fns)))]
+              ;; Boundary throw: acquire-execution-environment! is the
+              ;; runner's escalation point for governed-mode unavailability.
+              ;; The slingshot shape preserves the contract that legacy
+              ;; try+ callers above this layer rely on.
+              (response/throw-anomaly! :anomalies.executor/unavailable
+                                       (:anomaly/message a)
+                                       (merge {:anomaly.executor/mode (get-in a [:anomaly/data :mode])
+                                               :hint (get-in a [:anomaly/data :hint])}
+                                              (select-keys (:anomaly/data a) [:runtime-selection]))))
+            ;; A refused restore stops here, before a worktree is cut.
+            (or (when (= :local mode)
+                  (restore-refusal resume-workspace
+                                   (restore-local-workspace-checkpoint! executor repo-path resume-workspace)))
+                (when executor
+                  (if (= :governed mode)
+                    (governed/acquire! executor workflow-id mode env-config fns)
+                    (build-env-record executor workflow-id mode env-config fns)))))
+          (catch Exception e
+            (boundary/preserve-critical! e)
+            (when (= :governed mode) (throw e))
+            (log/warn env-logger :workflow :workflow/env-acquisition-failed
+                      {:message (messages/t :env/acquisition-failed {:error (ex-message e)})})
+            nil))]
+    ;; Thrown outside the try, whose local-mode catch only warns.
+    (when (anomaly/anomaly? acquired)
+      (response/throw-anomaly! :anomalies.executor/acquisition-failed
+                               (:anomaly/message acquired)
+                               (:anomaly/data acquired)))
+    acquired))
 
 (comment ::workflow-environment-lifetime)

@@ -4,4 +4,6 @@
 {:workflow/system-messages
  {:env/persisted "Workspace persisted: {reference}"
   :checkpoint/unsafe-directory "Unsafe checkpoint directory {path}: trusted ownership and protection from entry replacement are required."
-  :checkpoint/unsafe-history "Checkpoint audit history must be a regular file: {path}."}}
+  :checkpoint/unsafe-history "Checkpoint audit history must be a regular file: {path}."
+  :checkpoint-branch/commit-missing "Checkpoint commit {commit-sha} is not a commit in {repo}"
+  :checkpoint-branch/move-failed "git branch -f {branch} {sha} failed"}}
