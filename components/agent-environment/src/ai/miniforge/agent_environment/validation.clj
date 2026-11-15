@@ -19,6 +19,7 @@
   "Boundary validation for the interface: an invalid input is an
    `:invalid-input` anomaly naming the schema it failed, and no receipt."
   (:require
+   [ai.miniforge.agent-environment.interface.ledger :as ledger]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]
    [ai.miniforge.agent-environment.messages :as msg]
    [ai.miniforge.anomaly.interface :as anomaly]
@@ -31,6 +32,10 @@
 (defn- ^{:stratum 0} provider?
   [x]
   (satisfies? protocol/EnvironmentProvider x))
+
+(defn- ^{:stratum 0} ledger?
+  [x]
+  (satisfies? ledger/LedgerStore x))
 
 (defn- ^{:stratum 0} invalid
   [schema value]
@@ -50,7 +55,8 @@
    [:provider [:fn provider?]]
    [:clock fn?]
    [:emit! fn?]
-   [:persist! fn?]])
+   [:persist! fn?]
+   [:ledger [:fn ledger?]]])
 
 (defn- ^{:stratum 1} pair-failure
   [[schema value]]

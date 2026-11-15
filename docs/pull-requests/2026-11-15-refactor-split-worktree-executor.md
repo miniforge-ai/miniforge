@@ -58,7 +58,10 @@ commit.
 5. Callers point at the new namespaces, with no re-export shims:
    `executor.clj`, `interface.clj`, the REPL comment in `host_guarded.clj`,
    and seven test files. `executor.clj`'s namespace docstring names the new
-   file.
+   file. The CLI config-schema source scan excludes the executor's own
+   config by file path, so its `not-user-config` entry now names
+   `worktree/executor.clj`, where the `:archive-dir` read moved; a comment
+   in a release-executor integration test names that file too.
 6. Comments: the `;; ===` section banners are dropped, since each section
    is now a namespace. The note on `legacy-tmp-warned?` names the alias the
    tests use. The archive steps' note on returning a result for every exit,

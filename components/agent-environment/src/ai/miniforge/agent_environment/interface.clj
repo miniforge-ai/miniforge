@@ -24,6 +24,7 @@
    [ai.miniforge.agent-environment.conformance :as conformance]
    [ai.miniforge.agent-environment.controller :as controller]
    [ai.miniforge.agent-environment.fake :as fake]
+   [ai.miniforge.agent-environment.ledger.memory :as memory-ledger]
    [ai.miniforge.agent-environment.lifecycle :as lifecycle]
    [ai.miniforge.agent-environment.schema :as schema]
    [ai.miniforge.agent-environment.validation :as v]))
@@ -51,10 +52,13 @@
 (def ^{:stratum 0} Command "One command to run inside an environment." schema/Command)
 
 (defn ^{:stratum 0} create-controller
-  "A controller over `:provider` with an empty in-memory ledger. `:clock`
-   returns the current Instant, `:emit!` receives every receipt, and
-   `:persist!` stores one artifact `(persist! lease path text)` outside
-   the environment, returning its reference or an anomaly."
+  "A controller over `:provider` that keeps its leases in `:ledger`, a
+   `LedgerStore` (see `interface.ledger`); controllers sharing one store
+   share its leases. `:clock` returns the current Instant, `:emit!`
+   receives every receipt, and `:persist!` stores one artifact `(persist!
+   lease path text)` outside the environment, returning its reference or
+   an anomaly. A call the ledger cannot record is refused or returns the
+   ledger's anomaly, never a result the ledger does not show."
   [opts]
   (or (v/check v/ControllerOptions opts) (controller/create opts)))
 
@@ -118,6 +122,12 @@
    cleanup-uncertain and a later release retries."
   [c acting lease]
   (or (v/check v/Acting acting schema/Lease lease) (lifecycle/release! c acting lease)))
+
+(defn ^{:stratum 0} memory-ledger
+  "An empty ledger store held in memory. It does not survive its process:
+   use it for tests and fake-backed runs only."
+  []
+  (memory-ledger/create))
 
 (defn ^{:stratum 0} fake-provider
   "An in-memory provider; `ai.miniforge.agent-environment.fake` documents
