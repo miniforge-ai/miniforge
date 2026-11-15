@@ -671,7 +671,8 @@
                                :anchoring anchoring
                                :harvest harvest
                                :consultations (vec (mapcat :entries consults))
-                               :unreadable-consultations (count (filter codex-gap/incomplete-read? consults))}))))}
+                               :unreadable-consultations (count (filter codex-gap/incomplete-read? consults))
+                               :unreadable-ledgers (count (filter codex-gap/incomplete-read? reads))}))))}
 
   mcp-context-server
   {:doc     "Run MCP context server (JSON-RPC 2.0 over stdin/stdout)"

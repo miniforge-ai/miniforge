@@ -116,6 +116,20 @@
 (defn- ^{:stratum 0} decision [date outcome & miss-ids]
   {:decided (java.time.LocalDate/parse date) :outcome outcome :misses (vec miss-ids)})
 
+(defn- ^{:stratum 0} temp-run-dir []
+  (str (java.nio.file.Files/createTempDirectory
+         "codex-gap-test-"
+         (into-array java.nio.file.attribute.FileAttribute []))))
+
+(defn- ^{:stratum 0} report-over-runs
+  "The bb codex-gap-report aggregation: every run's ledger is read, the
+   entries pooled, and incomplete reads counted rather than dropped."
+  [dirs]
+  (let [reads      (map gap/read-ledger dirs)
+        entries    (vec (mapcat :entries reads))
+        unreadable (count (filter gap/incomplete-read? reads))]
+    (gap/build-report entries {:unreadable-ledgers unreadable})))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} no-situation-classifies-uncovered-first
@@ -353,6 +367,38 @@
   (is (true? (gap/incomplete-read? {:entries [pinned] :skipped 1})))
   (is (true? (gap/incomplete-read? {:codex-gap/anomaly :ledger-read-failed})))
   (is (false? (gap/incomplete-read? {:entries [pinned] :skipped 0}))))
+
+(deftest ^{:stratum 1} incomplete-miss-ledgers-mark-the-report-incomplete
+  (let [[clean lossy failed] (repeatedly 3 temp-run-dir)
+        miss (miss-at :uncovered "2026-09-01T10:00:00Z")]
+    (gap/record-miss! clean miss)
+    (gap/record-miss! lossy miss)
+    (spit (io/file lossy "codex-gap-ledger.edn") "{torn\n" :append true)
+    ;; a directory where the ledger file belongs: opening it is an IOException
+    (.mkdirs (io/file failed "codex-gap-ledger.edn"))
+    (testing "a failed read is an anomaly with no entries"
+      (let [result (gap/read-ledger failed)]
+        (is (= :ledger-read-failed (:codex-gap/anomaly result)))
+        (is (nil? (:entries result)))))
+    (testing "a failed read marks the header incomplete"
+      (let [r (report-over-runs [clean failed])]
+        (is (= 1 (:unreadable-ledgers r)))
+        (is (re-find #"INCOMPLETE: miss ledger not fully read in 1 run"
+                     (gap/render-report r)))))
+    (testing "a lossy read marks the header incomplete"
+      (let [r (report-over-runs [clean lossy])]
+        (is (= 2 (:entry-count r)) "the readable entries are still reported")
+        (is (re-find #"INCOMPLETE: miss ledger not fully read in 1 run"
+                     (gap/render-report r)))))
+    (testing "both kinds are counted per run"
+      (is (re-find #"INCOMPLETE: miss ledger not fully read in 2 run"
+                   (gap/render-report (report-over-runs [clean lossy failed])))))
+    (testing "a clean read shows no marker"
+      (let [r (report-over-runs [clean])]
+        (is (= 0 (:unreadable-ledgers r)))
+        (is (not (re-find #"INCOMPLETE" (gap/render-report r))))))
+    (testing "the option defaults to zero"
+      (is (= 0 (:unreadable-ledgers (gap/build-report [] {})))))))
 
 (deftest ^{:stratum 1} recorded-consultations-feed-the-coverage-rate
   ;; The bb codex-gap-report path: entries recorded per run, read back, reported.
