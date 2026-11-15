@@ -157,7 +157,6 @@ Measure how far the codex runs actually get falls short of the ideal
 
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
-| medium | ● | codex-gap | `codex-gap-consultation-match-rate.spec.edn` — Codex gap report — measure the consultation match rate | observation |
 | low | ● | codex-gap | `codex-gap-learning-latency.spec.edn` — Codex gap report — measure learning latency from miss to harvest decision | observation |
 
 ## Theme — unassigned (`unassigned`, status: planned)
