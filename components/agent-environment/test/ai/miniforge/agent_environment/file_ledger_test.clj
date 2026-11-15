@@ -55,6 +55,17 @@
 
 (def ^{:stratum 0} unavailable :anomalies.agent-environment/ledger-unavailable)
 
+(defn- ^{:stratum 0} malformed-at
+  "`bytes` with the first byte of ASCII `marker` replaced by a lone UTF-8
+   lead byte, which no decoder may accept."
+  ^bytes [^bytes bytes marker]
+  (let [at (.indexOf (String. bytes "ISO-8859-1") ^String marker)
+        copy (aclone bytes)]
+    (aset-byte copy at (unchecked-byte 0xC3))
+    copy))
+
+(defn- ^{:stratum 0} spit-bytes! [file ^bytes bytes] (Files/write (.toPath (io/file file)) bytes (into-array java.nio.file.OpenOption [])))
+
 (defn- ^{:stratum 0} temp-dir
   []
   (str (.toFile (Files/createTempDirectory "ledger-test" (into-array FileAttribute [])))))
@@ -162,6 +173,19 @@
       (store/write-entry! (env/file-ledger dir) sibling nil noted))
     (is (= 2 (count (store/entries (env/file-ledger dir)))))
     (is (= {:ledger/entry noted :ledger/revision 1} (store/read-entry (env/file-ledger dir) sibling)))))
+
+(deftest ^{:stratum 2} test-text-that-is-not-lossless-utf-8-is-refused
+  (testing "given a string with an unpaired surrogate → refused before anything is written"
+    (let [s (env/file-ledger (temp-dir))]
+      (is (= unavailable (reason (store/write-entry! s k nil (assoc entry :entry/note "\uD800")))))
+      (is (= {:ledger/entry nil :ledger/revision nil} (store/read-entry s k)))))
+  (testing "given malformed UTF-8 inside a stored string → unavailable, not a replacement character"
+    (let [dir (temp-dir)
+          s (env/file-ledger dir)
+          file (disk/record-file (io/file dir) k)]
+      (store/write-entry! s k nil (assoc entry :entry/note "abc"))
+      (spit-bytes! file (malformed-at (Files/readAllBytes (.toPath file)) "abc"))
+      (is (= unavailable (reason (store/read-entry s k)))))))
 
 (deftest ^{:stratum 2} test-a-misplaced-or-trailing-record-is-corrupt
   (testing "given another key's record copied over this key's file → refused, not read as this key's"

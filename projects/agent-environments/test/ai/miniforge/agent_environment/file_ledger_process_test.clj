@@ -29,10 +29,12 @@
 
 (deftest ^{:stratum 0} test-processes-racing-on-one-revision-write-once
   (let [dir (processes/temp-dir)
-        {:keys [reads results]} (processes/race! dir 2)]
+        {:keys [reads results exits]} (processes/race! dir 2)]
+    (is (= [0 0] exits))
     (is (= [{:read nil} {:read nil}] reads))
     (is (= #{{:ledger/revision 1} :anomalies.agent-environment/ledger-conflict} (set results)))
     (testing "given the loser retries against the winner's revision → its write lands"
       (is (= {:ledger/revision 2} (store/write-entry! (env/file-ledger dir) processes/k 1 {:entry/writer "retry"}))))
     (testing "given a fresh process after the writers exit → it reads the acknowledged write"
-      (is (= {:ledger/entry {:entry/writer "retry"} :ledger/revision 2} (processes/read-in-fresh-process dir))))))
+      (is (= {:value {:ledger/entry {:entry/writer "retry"} :ledger/revision 2} :exit 0}
+             (processes/read-in-fresh-process dir))))))
