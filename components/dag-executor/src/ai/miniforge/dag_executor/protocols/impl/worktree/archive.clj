@@ -124,7 +124,7 @@
 
    Pipeline: resolve current branch -> check for dirty changes or commits
    ahead of base-ref -> if clean, return no-changes; otherwise stage,
-   commit on the task branch with --no-verify, and write a bundle of
+   commit on the task branch with hooks and fsmonitor off, and write a bundle of
    `base-ref..HEAD` to <archive-dir>/<task-id>.bundle.
 
    Arguments:

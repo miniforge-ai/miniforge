@@ -23,6 +23,7 @@
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]
+   [ai.miniforge.dag-executor.protocols.impl.worktree-git-mock :as git-mock]
    [ai.miniforge.dag-executor.protocols.impl.worktree.archive :as worktree-archive]
    [ai.miniforge.dag-executor.protocols.impl.worktree.archive-steps :as worktree-archive-steps]
    [ai.miniforge.dag-executor.protocols.impl.worktree.executor :as worktree-executor]
@@ -58,7 +59,7 @@
     (let [add-args (atom nil)]
       (with-redefs [worktree/run-git
                     (fn [& args]
-                      (let [tail (drop 2 args)]
+                      (let [tail (git-mock/subcommand args)]
                         (cond
                           (= ["rev-parse" "main"] tail)
                           {:exit 0 :out "abc1234deadbeef\n" :err ""}
@@ -164,7 +165,7 @@
           status-calls (atom 0)]
       (with-redefs [worktree/run-git
                     (fn [& args]
-                      (let [tail (drop 2 args)]
+                      (let [tail (git-mock/subcommand args)]
                         (cond
                           ;; Scratch is detached — abbrev-ref returns the literal "HEAD"
                           (= ["rev-parse" "--abbrev-ref" "HEAD"] tail)
@@ -223,7 +224,7 @@
     (let [checkout-args (atom nil)]
       (with-redefs [worktree/run-git
                     (fn [& args]
-                      (let [tail (drop 2 args)]
+                      (let [tail (git-mock/subcommand args)]
                         (cond
                           (= ["rev-parse" "--abbrev-ref" "HEAD"] tail)
                           {:exit 0 :out "HEAD\n" :err ""}
@@ -251,10 +252,10 @@
                       (swap! calls conj (vec args))
                       (cond
                         ;; rev-parse --abbrev-ref HEAD → some branch name
-                        (= ["rev-parse" "--abbrev-ref" "HEAD"] (drop 2 args))
+                        (= ["rev-parse" "--abbrev-ref" "HEAD"] (git-mock/subcommand args))
                         {:exit 0 :out "task-1\n" :err ""}
                         ;; status --porcelain → empty (clean)
-                        (= ["status" "--porcelain"] (drop 2 args))
+                        (= ["status" "--porcelain"] (git-mock/subcommand args))
                         {:exit 0 :out "" :err ""}
                         ;; rev-list --count → 0 (no commits ahead of base)
                         (= "rev-list" (nth args 2))
@@ -273,7 +274,7 @@
           bundle-args (atom nil)]
       (with-redefs [worktree/run-git
                     (fn [& args]
-                      (let [tail (drop 2 args)]
+                      (let [tail (git-mock/subcommand args)]
                         (cond
                           (= ["rev-parse" "--abbrev-ref" "HEAD"] tail)
                           {:exit 0 :out "task-1\n" :err ""}
@@ -341,7 +342,7 @@
       (with-redefs [worktree/run-git
                     (fn [& args]
                       (swap! calls conj (vec args))
-                      (let [tail (drop 2 args)]
+                      (let [tail (git-mock/subcommand args)]
                         (cond
                           (= ["fetch" "/tmp/checkpoints/env-1.bundle" "task-1:task-1"] tail)
                           {:exit 128
@@ -383,7 +384,7 @@
       (with-redefs [worktree/run-git
                     (fn [& args]
                       (swap! calls conj (vec args))
-                      (let [tail (drop 2 args)]
+                      (let [tail (git-mock/subcommand args)]
                         (cond
                           (= ["fetch" "/tmp/checkpoints/env-1.bundle" "task-1:task-1"] tail)
                           {:exit 128
@@ -416,7 +417,7 @@
       (with-redefs [worktree/run-git
                     (fn [& args]
                       (swap! calls conj (vec args))
-                      (let [tail (drop 2 args)]
+                      (let [tail (git-mock/subcommand args)]
                         (cond
                           (= ["fetch" "/tmp/checkpoints/env-1.bundle" "task-1:task-1"] tail)
                           {:exit 128
@@ -463,7 +464,7 @@
           rev-list-args (atom nil)]
       (with-redefs [worktree/run-git
                     (fn [& args]
-                      (let [tail (drop 2 args)]
+                      (let [tail (git-mock/subcommand args)]
                         (cond
                           (= ["rev-parse" "--abbrev-ref" "HEAD"] tail)
                           {:exit 0 :out "task-1\n" :err ""}
@@ -498,7 +499,7 @@
   (testing "git status failure returns result/err — not a silent no-changes"
     (with-redefs [worktree/run-git
                   (fn [& args]
-                    (let [tail (drop 2 args)]
+                    (let [tail (git-mock/subcommand args)]
                       (cond
                         (= ["rev-parse" "--abbrev-ref" "HEAD"] tail)
                         {:exit 0 :out "task-1\n" :err ""}
@@ -520,7 +521,7 @@
   (testing "git rev-list failure returns result/err — not a silent zero"
     (with-redefs [worktree/run-git
                   (fn [& args]
-                    (let [tail (drop 2 args)]
+                    (let [tail (git-mock/subcommand args)]
                       (cond
                         (= ["rev-parse" "--abbrev-ref" "HEAD"] tail)
                         {:exit 0 :out "task-1\n" :err ""}
@@ -544,7 +545,7 @@
   (testing "archive-bundle! returns an err result when git bundle fails"
     (with-redefs [worktree/run-git
                   (fn [& args]
-                    (let [tail (drop 2 args)]
+                    (let [tail (git-mock/subcommand args)]
                       (cond
                         (= ["rev-parse" "--abbrev-ref" "HEAD"] tail)
                         {:exit 0 :out "task-1\n" :err ""}
