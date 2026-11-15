@@ -45,7 +45,7 @@
   (Instant/parse "2026-11-14T00:00:00.123456789Z"))
 
 (def ^{:stratum 0} writers
-  "Stores racing over one directory."
+  "Stores racing over one directory, the second through a `/.` alias of it."
   2)
 
 (def ^{:stratum 0} barrier-timeout-ms
@@ -65,21 +65,27 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(def ^{:stratum 1} sibling
+  "Another task of `k`'s tenant and run: a key printed with `*print-length*`
+   1 would look the same as `k`."
+  (assoc k 2 #uuid "00000000-0000-0000-0000-00000000000d"))
+
 (def ^{:stratum 1} entry
   {:entry/state :state/provisioning
    :entry/generation 1
    :entry/request {:environment/expires-at expires-at :legacy/at (Date. 0)}})
 
 (defn- ^{:stratum 1} meeting-first-read
-  "`inner` whose first read waits at `barrier`, so racing stores both read
-   the same revision before either writes."
+  "`inner` whose first read, once taken, waits at `barrier`, so racing
+   stores both hold the same revision before either writes."
   [inner ^CyclicBarrier barrier]
   (let [waited? (atom false)]
     (reify store/LedgerStore
       (read-entry [_ key]
-        (when (compare-and-set! waited? false true)
-          (.await barrier barrier-timeout-ms TimeUnit/MILLISECONDS))
-        (store/read-entry inner key))
+        (let [seen (store/read-entry inner key)]
+          (when (compare-and-set! waited? false true)
+            (.await barrier barrier-timeout-ms TimeUnit/MILLISECONDS))
+          seen))
       (write-entry! [_ key revision changed] (store/write-entry! inner key revision changed))
       (entries [_] (store/entries inner)))))
 
@@ -113,7 +119,7 @@
 (deftest ^{:stratum 2} test-racing-stores-lose-no-write
   (let [dir (temp-dir)
         barrier (CyclicBarrier. writers)
-        stores (repeatedly writers #(meeting-first-read (env/file-ledger dir) barrier))
+        stores (mapv #(meeting-first-read (env/file-ledger %) barrier) [dir (str dir "/.")])
         results (mapv deref (mapv #(future (ledger/change! % k bump)) stores))
         stored (store/read-entry (env/file-ledger dir) k)]
     (is (not-any? anomaly/anomaly? results))
@@ -130,7 +136,30 @@
     (is (= unavailable (reason (store/write-entry! s k 1 entry))))
     (is (= unavailable (reason (store/entries s))))))
 
-(deftest ^{:stratum 2} test-a-directory-it-cannot-create-is-unavailable
-  (let [blocker (io/file (temp-dir) "a-file")]
+(deftest ^{:stratum 2} test-a-directory-it-cannot-reach-is-unavailable-not-empty
+  (let [blocker (io/file (temp-dir) "a-file")
+        under-a-file (env/file-ledger (io/file blocker "ledger"))]
     (spit blocker "")
-    (is (= unavailable (reason (store/write-entry! (env/file-ledger (io/file blocker "ledger")) k nil entry))))))
+    (is (= unavailable (reason (store/write-entry! under-a-file k nil entry))))
+    (is (= unavailable (reason (store/read-entry under-a-file k))))
+    (is (= unavailable (reason (store/entries (env/file-ledger blocker)))))))
+
+(deftest ^{:stratum 2} test-file-names-ignore-printer-settings
+  (let [dir (temp-dir)]
+    (binding [*print-length* 1]
+      (store/write-entry! (env/file-ledger dir) k nil entry)
+      (store/write-entry! (env/file-ledger dir) sibling nil entry))
+    (is (= 2 (count (store/entries (env/file-ledger dir)))))
+    (is (= 1 (:ledger/revision (store/read-entry (env/file-ledger dir) sibling))))))
+
+(deftest ^{:stratum 2} test-a-misplaced-or-trailing-record-is-corrupt
+  (let [dir (temp-dir)
+        s (env/file-ledger dir)
+        own (disk/record-file (io/file dir) k)]
+    (store/write-entry! s k nil entry)
+    (store/write-entry! s sibling nil entry)
+    (spit own (str (slurp own) "{:ledger/key []}"))
+    (is (= unavailable (reason (store/read-entry s k))))
+    (testing "given another key's record copied over this key's file → refused, not read as this key's"
+      (io/copy (disk/record-file (io/file dir) sibling) own)
+      (is (= unavailable (reason (store/read-entry s k)))))))
