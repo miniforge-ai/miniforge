@@ -6,8 +6,8 @@
 
 # N11 — Task Capsule Isolation
 
-**Version:** 0.3.0-draft
-**Date:** 2026-08-10
+**Version:** 0.4.0-draft
+**Date:** 2026-11-15
 **Status:** Draft
 **Conformance:** MUST
 **Amends:** N2-workflows §13.4, N10-governed-tool-execution §7
@@ -21,8 +21,8 @@
 
 This replaces the implicit execution model in which the agent subprocess runs on the
 host and only shell/git commands are dispatched into the executor environment. Under
-that model, the agent wrote files to `user.dir` on the host, the executor ran tests
-and git operations in an isolated container, and no single boundary enclosed both.
+that model, the agent wrote files to `user.dir` on the host. The executor ran tests
+and git operations in an isolated container. No single boundary enclosed both.
 The result was a provenance gap: the agent's file writes were unattested host-side
 mutations, not bounded capsule outputs.
 
@@ -163,8 +163,8 @@ verify phase reads files written by implement. The release phase commits the wor
 that verify validated. Separate capsules per phase would require explicit artifact
 handoff between phases and destroy the natural git working-tree model.
 
-The C4 diagram in the ADR document (plan / implement / verify / review as separate
-nodes) depicts concurrent DAG tasks, not separate capsules per phase of a single task.
+The C4 diagram's separate plan / implement / verify / review nodes depict concurrent
+DAG tasks, not separate capsules per phase of one task.
 Each node in that diagram is a different task, each in its own capsule.
 
 ### 3.3 Multi-Task Concurrency
@@ -173,9 +173,8 @@ When a DAG run dispatches multiple tasks concurrently:
 
 - Each task gets its own capsule.
 - Capsules for concurrent tasks MUST NOT share a mutable filesystem.
-- The repo snapshot injected into each capsule MUST be consistent: all concurrent
-  capsules for the same run SHOULD start from the same commit or explicitly declared
-  base reference.
+- The repo snapshot injected into each capsule MUST be consistent. Concurrent
+  capsules for one run SHOULD start from the same commit or explicitly declared base.
 
 ---
 
@@ -191,7 +190,7 @@ When a DAG run dispatches multiple tasks concurrently:
 5. DESTROY   — capsule and all mutable state destroyed
 ```
 
-All five phases MUST be executed in order. A capsule that fails during BOOTSTRAP or
+Except for full stop (§4.4), all five phases MUST be executed in order. A capsule that fails during BOOTSTRAP or
 EXECUTE MUST still proceed through EXPORT (for evidence capture) and DESTROY.
 
 ### 4.2 Bootstrap Requirements
@@ -215,7 +214,7 @@ specification:
 
 ### 4.3 Export Requirements
 
-Before destroying the capsule, the executor MUST:
+Before ordinary capsule destruction, the executor MUST:
 
 1. Export each declared artifact to the artifact store.
 2. Export the evidence record to the evidence bundle store.
@@ -224,6 +223,41 @@ Before destroying the capsule, the executor MUST:
 Implicit host-side file writes are prohibited in governed execution mode. The agent
 MUST NOT assume that files written to its workspace are accessible on the host after
 the capsule exits. All outputs that must persist MUST be explicitly exported.
+
+### 4.4 Full-Stop Containment
+
+N8 §3.5 full stop MUST be executed by a control plane outside the target capsule.
+The containment authority MUST bind the run, substrate, environment identity,
+and generation. The provider MUST verify immutable identity/ownership before
+each destructive action; a matching name alone MUST NOT authorize termination.
+For Kubernetes this includes the Pod/Job UID and its proven ownership chain;
+replacement resources MUST NOT be deleted under an old identity.
+
+Containment MUST stop new work admission and isolate the owned runtime from
+workload egress. It MUST revoke or quarantine workload credential authority
+through available external controls and force termination of owned processes.
+The controller MUST attempt independently available containment steps even if
+another fails; it MUST report each actual result and any remaining exposure.
+A provider lacking an enforceable containment control MUST NOT report it as
+successful. A termination request acknowledgment is not confirmed termination.
+
+For Kubernetes, cordoning the run means fencing its own admission and isolating
+its owned Pod/Job, not cordoning a shared Node. For VM substrates it means the
+owned VM, not its host. Shared nodes, unrelated namespaces, other runs, and
+external target services MUST NOT be affected by full-stop authority. Resources
+outside the run's proven isolation boundary require separate operator authority.
+
+Full stop MUST bypass the ordinary export-before-destroy gates (§4.1, §4.3,
+§9.2, N11.CP.5). A hung or suspect capsule MUST NOT delay containment by trying
+to export or persist a new workspace. The control plane MUST retain available
+external evidence, missing-export disposition, and the last pre-stop durable
+checkpoint. A fresh snapshot of suspect state MUST NOT be labeled known-safe.
+Uncertain provider results MUST remain unresolved under N8 §3.5, including
+effects accepted outside the capsule before shutdown.
+
+Restart MUST use a fresh environment identity/generation and fresh authority
+under the N2 checkpoint delta §11. The old lease, grants, secrets, and in-flight
+commands MUST NOT be restored from the checkpoint or revived by a late result.
 
 ---
 
@@ -324,9 +358,8 @@ This exec-fn is passed to `records/create-client` and takes the place of
 
 ### 6.3 MCP Server Inside the Capsule
 
-If the agent process runs inside the capsule, the MCP server it connects to MUST
-also run inside the capsule (or be reachable from inside via a declared network
-endpoint).
+When the agent runs inside the capsule, its MCP server MUST also run there
+or be reachable through a declared network endpoint.
 
 The preferred approach for local-dev and Docker is to run the MCP server as a
 sidecar process inside the capsule:
@@ -407,10 +440,9 @@ If governed mode is required and no conformant capsule substrate is available, t
 task MUST fail with `:execution/error :no-conformant-capsule`. The failure MUST be
 logged and included in the evidence record.
 
-The rationale: silent downgrade destroys the trust model. A PR that was validated
-in governed mode (inside a capsule) and a PR that was validated in local mode (on the
-host) are different things from a compliance perspective, and MUST NOT be treated
-identically.
+The rationale: silent downgrade destroys the trust model. Governed-mode validation
+runs inside a capsule; local-mode validation runs on the host. Implementations
+MUST NOT treat these as equivalent for compliance.
 
 ### 7.4 Runtime Substrate Priority
 
@@ -439,12 +471,10 @@ Secret **values** MUST NOT be:
 - Present in any exported artifact
 - Logged, emitted on the event stream, or included in evidence records
 
-The last of these is **N3 §8's contract**, inherited here rather than restated:
-N3 §8.1 forbids emitting a credential at all, §8.2 fixes the `"[REDACTED]"`
-marker, and N6 §7.2 applies both to bundles. This section adds only the
-capsule-specific rule that a secret's *name* and *scope* MAY be recorded — the
-prohibition above is on values, not on the fact that a secret was granted, so
-an auditor can see which secrets a capsule held without seeing any of them.
+The last prohibition inherits **N3 §8's contract**. N3 §8.1 forbids emitting a
+credential; §8.2 fixes the `"[REDACTED]"` marker. N6 §7.2 applies both to bundles.
+A secret's *name* and *scope* MAY be recorded, but not its value.
+An auditor can see which secrets a capsule held without seeing their values.
 
 Capsule teardown at DESTROY time MUST ensure:
 
@@ -475,10 +505,9 @@ for any task that requires them.
 ### 9.1 What Must be Recorded
 
 Each task capsule MUST produce an evidence record. The keys below are **not
-yet N6 artifact fields** — N6 §3.1.1 enumerates artifact types and none carries
-this shape — so registering them there is a prerequisite to producing this
-record conformantly, on the same principle as N10 §12.2: N6 owns the evidence
-schema.
+yet N6 artifact fields**; no N6 §3.1.1 artifact type carries this shape.
+Registering them there is a prerequisite to producing this record conformantly.
+As with N10 §12.2, N6 owns the evidence schema.
 
 Until then, capsule execution is recorded through the evidence N6 already
 defines, correlated by the workflow and task identifiers.
@@ -500,7 +529,7 @@ defines, correlated by the workflow and task identifiers.
 
 ### 9.2 Artifact Export Gate
 
-Before DESTROY, the executor MUST verify that all `:required? true` artifacts in
+Except for full stop (§4.4), before DESTROY, the executor MUST verify that all `:required? true` artifacts in
 `:artifacts-out` were successfully exported. If a required artifact was not produced,
 the task MUST be marked failed with `:export/missing-required-artifact`.
 
@@ -516,9 +545,8 @@ workspace directory during BOOTSTRAP.
 ## 10. TaskExecutor Protocol
 
 Task capsules are created and managed via a pluggable backend protocol. The
-**TaskExecutor** protocol is the normative contract between the workflow
-runner (which requests a capsule per task) and the concrete substrate
-implementation (Docker, Kubernetes, or worktree fallback).
+**TaskExecutor** protocol binds the workflow runner to its substrate implementation
+(Docker, Kubernetes, or worktree fallback). The runner requests a capsule per task.
 
 The protocol is intentionally substrate-agnostic. Downstream products may add
 substrate implementations or persistence kinds; the protocol itself MUST
@@ -635,9 +663,9 @@ workspace (via `:workspace/mode :checkout`) MUST fail with
 
 **Workspace persistence kinds.**
 
-- `:git` — push the workspace to a task branch via `git push`; restore via
-  `git fetch` + checkout. Required for all substrates as a baseline (works
-  even in worktree fallback).
+`:git` pushes the workspace to a task branch via `git push`; restore uses
+`git fetch` + checkout. It is required for all substrates as a baseline,
+including worktree fallback.
 
 Implementations MAY support additional persistence kinds (e.g., object-store
 backends for distributed substrates) but MUST support at least `:git` for all
@@ -704,10 +732,9 @@ workspace state between capsules).
 ### 10.5 Substrate Extensibility
 
 Implementations MAY define additional substrates and additional persistence
-kinds beyond `:git`. Cross-node capsule binding (where `restore-workspace!`
-on one node consumes state produced by `persist-workspace!` on another) is
-out of scope for the OSS contract — substrates that support it MUST document
-their own binding semantics and reachability requirements.
+kinds beyond `:git`. Cross-node capsule binding consumes state persisted on
+another node. It is out of scope for the OSS contract. Substrates supporting it
+MUST document their binding semantics and reachability requirements.
 
 OSS callers MUST NOT assume cross-node capsule binding; only the per-substrate
 `:git` baseline is portable.
@@ -720,8 +747,8 @@ OSS callers MUST NOT assume cross-node capsule binding; only the per-substrate
 the codebase as it stood when written and identifies a minimum change set. It
 carries no MUST/SHOULD of its own; where it appears to, §1–§10 govern.
 
-File and line citations below are a snapshot and rot as the tree moves — the
-`docker.clj` cited in §11.1 no longer exists at that path, for instance. Treat
+File and line citations below are a snapshot and rot as the tree moves.
+The `docker.clj` cited in §11.1 no longer exists at that path. Treat
 them as pointers to the shape of the change, not as current coordinates.
 
 ### 11.1 Immediate Gaps
@@ -808,7 +835,9 @@ The following are already conformant with this spec or are in the right directio
 | N11.CP.2 | MUST | Capsule MUST enforce filesystem, network, time, and resource bounds |
 | N11.CP.3 | MUST | Capsule MUST be destroyed after task completion or failure |
 | N11.CP.4 | MUST | Secrets MUST NOT persist in exported artifacts or evidence records |
-| N11.CP.5 | MUST | Required artifacts MUST be exported before capsule destruction |
+| N11.CP.5 | MUST | Required artifacts MUST be exported before ordinary capsule destruction; full stop follows §4.4 |
+| N11.CP.6 | MUST | Full stop MUST isolate and terminate only proven run-owned isolation, without waiting for capsule export (§4.4) |
+| N11.CP.7 | MUST | Unconfirmed containment/termination MUST remain unresolved; checkpoint recovery MUST use fresh identity and authority (§4.4) |
 | N11.PS.1 | MUST | All phases of a task MUST execute within the same task capsule |
 | N11.PS.2 | MUST | Concurrent tasks MUST execute in separate capsules |
 | N11.MD.1 | MUST | Governed tasks MUST fail, not downgrade, when no conformant capsule is available |
@@ -818,12 +847,18 @@ The following are already conformant with this spec or are in the right directio
 | N11.EV.1 | SHOULD | Evidence records SHOULD include `:evidence/image-digest` for container substrates |
 | N11.LM.1 | MAY | Local mode MAY use worktree-only execution for Class A tasks |
 
+Full-stop conformance tests MUST cover unresponsive capsules, partial failures,
+UID/name reuse, sibling survival, and late responses. They MUST verify no export
+or workload compensation runs during shutdown.
+Provider conformance MUST exercise actual containment controls; a fake-provider
+pass alone MUST NOT establish deployment isolation or credential revocation.
+
 ---
 
 ## 13. New Definitions
 
-**Task Capsule** — A bounded, destroyable runtime environment that contains the full
-execution context of a DAG task (agent process, tools, filesystem, git, secrets).
+**Task Capsule** — A bounded, destroyable runtime containing a DAG task's full
+execution context: agent, tools, filesystem, git, and secrets.
 
 **Governed Execution Mode** — An execution mode in which task isolation, policy
 enforcement, evidence capture, and explicit artifact discipline are mandatory.
@@ -833,17 +868,14 @@ Required for Class B+ actions and all production runs.
 execution is permitted. Evidence is recorded but marked `:local`. Not suitable for
 production or compliance contexts.
 
-**Runtime Specification** — A declarative description of the environment required
-to execute a task capsule, including image, network policy, secrets, resources,
-workspace bootstrap method, and artifact output declarations.
+**Runtime Specification** — A declarative capsule environment description:
+image, network policy, secrets, resources, workspace bootstrap, and artifact outputs.
 
-**Capsule Bootstrap** — The initialization phase of a task capsule in which the repo
-is checked out, credentials are injected, and the MCP server and governance hooks are
-started inside the capsule.
+**Capsule Bootstrap** — Capsule initialization: repo checkout, credential
+injection, and startup of the MCP server and governance hooks inside the capsule.
 
-**No Silent Downgrade** — The property that a task configured for governed execution
-will fail rather than execute in a less-isolated substrate (e.g., worktree-only or
-host process) when no conformant capsule substrate is available.
+**No Silent Downgrade** — Governed execution fails when no conformant capsule is
+available, rather than using a less-isolated worktree or host process.
 
 ---
 
@@ -854,7 +886,7 @@ diverges from the contract above, as of 2026-08-10.
 
 ### A.1 Implemented
 
-- **TaskExecutor protocol (§10).** `components/dag-executor` provides the
+**TaskExecutor protocol (§10).** `components/dag-executor` provides the
   protocol and three implementations: `worktree.clj`, `host_guarded.clj`, and
   `kubernetes.clj`.
 
@@ -893,7 +925,7 @@ diverges from the contract above, as of 2026-08-10.
 - **N6** — Evidence provenance (evidence record structure)
 - **N4** — Policy packs (action classification: Class A / B / B+ / C)
 - `components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/docker.clj` — Docker executor
-  (acquire-environment! extension point)
+  (`acquire-environment!` extension point)
 - `components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/kubernetes.clj` — K8s executor (same)
 - `components/dag-executor/resources/executor/docker/Dockerfile.task-runner-clojure` — Recommended base image (includes
   bb, clj, gh CLI)
@@ -908,9 +940,13 @@ diverges from the contract above, as of 2026-08-10.
 
 **Version History:**
 
+- 0.4.0-draft (2026-11-15): Operator-approved full-stop containment and
+  run-owned destruction; bypass normal export gates, retain uncertainty, and
+  require fresh identity and authority on checkpoint recovery.
+
 - 0.3.0-draft (2026-08-10): Spec-completion pass. §11's five subsections were
   numbered §10.1–§10.5, colliding with the TaskExecutor protocol's own
-  subsections — renumbered to §11.x; the two inbound `N11 §10` references both
+  subsections. Renumbered to §11.x; the two inbound `N11 §10` references both
   mean the protocol and are unaffected. §11 marked informative: it maps
   requirements to file and line coordinates that rot, and the `docker.clj` it
   cites no longer exists. §8.1's secret rules deferred to N3 §8, keeping only
@@ -918,9 +954,9 @@ diverges from the contract above, as of 2026-08-10.
   recorded. §9.1's evidence keys are not N6 artifact fields and are now gated
   on registering them there. Annex A records implementation divergence.
 
-- 0.2.0-draft (2026-04-23): TaskExecutor Protocol normative amendment — §10 hoists
-  the TaskExecutor protocol from informative docs to normative, defining the
-  pluggable substrate contract (acquire/execute/copy/release) plus
+- 0.2.0-draft (2026-04-23): TaskExecutor Protocol normative amendment.
+  §10 hoists the protocol from informative docs to normative.
+  It defines acquire/execute/copy/release plus
   `persist-workspace!` / `restore-workspace!` for workspace handoff between
   capsules with reproducible digests. `:git` is the required baseline persistence
   kind; additional kinds and substrate extensibility are deployment decisions

@@ -6,8 +6,8 @@
 
 # N7 — Operational Policy Synthesis With Verification
 
-**Version:** 0.4.1-draft
-**Date:** 2026-11-06
+**Version:** 0.4.2-draft
+**Date:** 2026-11-15
 **Status:** Complete
 **Conformance:** MUST
 **Class:** Extension spec (N7+)
@@ -316,6 +316,9 @@ active experiments at the next safe boundary, and revoke their mutation grants.
 It MUST invoke verified rollback through the separately authorized recovery path and
 record the disposition in N3/N6. Safe mode MUST set effective actuation to
 `:none` per N8's A0 posture.
+An operator full stop MUST instead follow N8 §3.5: its dominant workload fence
+MUST prohibit recovery as well as forward effects. It MUST NOT invoke this
+section's rollback exception or claim baseline recovery from runtime destruction.
 
 ### 5.4 Effective actuation decision
 
@@ -369,6 +372,9 @@ authorize PR creation or leaving candidate configuration permanently applied.
 Success, failure, abort, timeout, emergency stop, and safe-mode entry MUST terminate
 load and trigger the separately authorized cleanup and baseline-recovery path.
 N8 MUST fence new forward effects without granting unrestricted recovery powers.
+An active N8 §3.5 full stop MUST supersede this compensation requirement.
+recovery remains unresolved until separately authorized in a fresh run under
+the N2 checkpoint delta §11.
 Cleanup MUST target only proven experiment-owned resources; uncertainty MUST
 require reconciliation, never deletion of an unproven resource.
 
@@ -605,6 +611,9 @@ depends on machinery that is not there.
 ---
 
 **Version History:**
+
+- 0.4.2-draft (2026-11-15): Full stop supersedes the compensation exception;
+  its authority and containment contract is owned by N8 §3.5.
 
 - 0.4.1-draft (2026-11-06): Clarified operator-approved recovery timing:
   retain an independently approved bounded plan before trial.
