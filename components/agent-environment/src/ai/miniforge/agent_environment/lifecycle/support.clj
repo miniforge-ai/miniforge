@@ -71,17 +71,14 @@
     (anomaly/subtype result)))
 
 (defn ^{:stratum 0} lost-lease
-  "Nil while the entry a settle left still admits `operation` under
-   `lease`, else that refusal as an anomaly: another controller can move
-   the entry between the read and the write, and the settle then changes
-   nothing."
+  "Nil while the entry a settle left still admits `operation` under `lease`,
+   else that refusal: another controller may have moved it first."
   [changed lease operation now]
   (when-let [reason (lease/lease-refusal (:ledger/after changed) operation lease now)]
     (refusal/reason-anomaly reason {})))
 
 (defn ^{:stratum 0} recorded-call
-  "The call result for provider `steps` the ledger was asked to record:
-   `value` when it did, else its anomaly, with the reason on the receipt."
+  "`value` for provider `steps` the ledger recorded, else its anomaly and reason."
   [recorded value steps]
   (if (anomaly/anomaly? recorded)
     {:call/value recorded :call/steps steps :call/reason (anomaly/subtype recorded)}

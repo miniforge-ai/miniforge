@@ -36,10 +36,9 @@
   #{:outcome/applied :outcome/uncertain})
 
 (defn- ^{:stratum 0} adopted
-  "Record a complete provision as the key's environment and return it.
-   When the ledger does not take it, no lease is handed out: the
-   environment exists, the reservation stays provisioning as an unknown
-   outcome to reconcile, and the caller gets the ledger's anomaly."
+  "Record a complete provision as the key's environment and return it. If
+   the ledger does not take it, no lease is handed out: the reservation
+   stays provisioning, an unknown outcome, and the caller gets the anomaly."
   [c acting request generation env steps]
   (let [recorded (controller/settle-provision! c request generation :state/provisioned env)
         reason (support/ledger-reason recorded)]

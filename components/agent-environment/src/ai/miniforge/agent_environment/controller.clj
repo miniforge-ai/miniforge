@@ -107,8 +107,7 @@
     (refusal/reason-anomaly reason {:receipt/id (:receipt/id refused)})))
 
 (defn ^{:stratum 1} refuse-anomaly!
-  "Receipt `result`, a ledger anomaly, as a refusal and return it with the
-   receipt's id, keeping its message and data."
+  "Receipt ledger anomaly `result` as a refusal; return it with the receipt id."
   [controller subject operation result]
   (let [refused (record! controller subject operation :outcome/refused [] (anomaly/subtype result))]
     (assoc-in result [:anomaly/data :receipt/id] (:receipt/id refused))))

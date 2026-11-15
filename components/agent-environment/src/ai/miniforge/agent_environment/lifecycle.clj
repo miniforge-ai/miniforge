@@ -69,9 +69,8 @@
 
 (defn- ^{:stratum 0} stopped
   "Cancel in the ledger first, so no call is admitted while the provider
-   stops running work; the receipt says what the provider confirmed. A
-   cancel the ledger did not record for this lease never reaches the
-   provider, including one another controller's release beat."
+   stops running work. A cancel the ledger did not record for this lease
+   never reaches the provider."
   [c lease target]
   (anomaly/let-ok [changed (controller/settle! c lease #(assoc % :entry/state :state/cancelled))
                    _ (support/lost-lease changed lease :environment/cancel (support/now c))]
