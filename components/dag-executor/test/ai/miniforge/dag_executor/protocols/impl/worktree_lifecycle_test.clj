@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-executor.protocols.impl.worktree-lifecycle-test
   "Tests for worktree lifecycle registry, derive-parent-repo-path, and
    the notify-file-written! scratch-commit hook.
@@ -30,116 +29,23 @@
    [ai.miniforge.dag-executor.scratch-commit :as scratch-commit]
    [ai.miniforge.dag-executor.result :as result]))
 
-;;------------------------------------------------------------------------------ Registry helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- reset-registry!
+;; Registry helpers
+(defn- ^{:stratum 0} reset-registry!
   "Reset the lifecycle registry to empty. Called in finally blocks for isolation.
    Uses @#'var to obtain the atom through its private Var, then reset! to empty it."
   []
   (reset! @#'worktree/worktree-lifecycle-registry {}))
 
-(defn- snapshot-registry
+(defn- ^{:stratum 0} snapshot-registry
   "Return a snapshot of the lifecycle registry for assertions.
    Delegates to the public get-worktree-registry accessor."
   []
   (worktree/get-worktree-registry))
 
-;;------------------------------------------------------------------------------ register-worktree-entry! tests
-
-(deftest register-worktree-entry!-adds-active-entry-test
-  (testing "register-worktree-entry! adds an :active entry keyed by workflow-id"
-    (try
-      (worktree/register-worktree-entry! "wf-reg-001" "/tmp/worktrees/task-abc")
-      (let [registry (snapshot-registry)
-            entry    (get registry "wf-reg-001")]
-        (is (some? entry) "entry must be present in registry")
-        (is (= :active (:status entry)))
-        (is (= "/tmp/worktrees/task-abc" (:worktree-path entry)))
-        (is (= (scratch-commit/scratch-ref-name "wf-reg-001") (:scratch-ref entry)))
-        (is (pos? (:created-at entry)) ":created-at must be a positive epoch ms"))
-      (finally (reset-registry!)))))
-
-(deftest register-worktree-entry!-replaces-existing-entry-test
-  (testing "register-worktree-entry! is idempotent — replaces an existing entry"
-    (try
-      (worktree/register-worktree-entry! "wf-reg-002" "/tmp/worktrees/old")
-      (worktree/register-worktree-entry! "wf-reg-002" "/tmp/worktrees/new")
-      (let [entry (get (snapshot-registry) "wf-reg-002")]
-        (is (= "/tmp/worktrees/new" (:worktree-path entry))
-            "second registration must win"))
-      (finally (reset-registry!)))))
-
-(deftest register-worktree-entry!-returns-nil-test
-  (testing "register-worktree-entry! returns nil (fire-and-forget semantics)"
-    (try
-      (is (nil? (worktree/register-worktree-entry! "wf-nil-ret" "/tmp/wt")))
-      (finally (reset-registry!)))))
-
-(deftest register-worktree-entry!-multiple-workflows-coexist-test
-  (testing "multiple workflow entries coexist in the registry"
-    (try
-      (worktree/register-worktree-entry! "wf-multi-a" "/tmp/worktrees/a")
-      (worktree/register-worktree-entry! "wf-multi-b" "/tmp/worktrees/b")
-      (let [registry (snapshot-registry)]
-        (is (= 2 (count registry)))
-        (is (= "/tmp/worktrees/a" (:worktree-path (get registry "wf-multi-a"))))
-        (is (= "/tmp/worktrees/b" (:worktree-path (get registry "wf-multi-b")))))
-      (finally (reset-registry!)))))
-
-;;------------------------------------------------------------------------------ release-worktree-entry! tests
-
-(deftest release-worktree-entry!-marks-entry-released-test
-  (testing "release-worktree-entry! transitions an active entry to :released"
-    (try
-      (worktree/register-worktree-entry! "wf-rel-001" "/tmp/worktrees/rel")
-      (worktree/release-worktree-entry! "wf-rel-001")
-      (let [entry (get (snapshot-registry) "wf-rel-001")]
-        (is (= :released (:status entry)))
-        (is (pos? (:released-at entry)) ":released-at must be set to epoch ms")
-        ;; Critical: the scratch-ref and worktree-path are PRESERVED after release
-        (is (= (scratch-commit/scratch-ref-name "wf-rel-001") (:scratch-ref entry))
-            "scratch-ref must be preserved after release")
-        (is (= "/tmp/worktrees/rel" (:worktree-path entry))
-            "worktree-path must be preserved after release"))
-      (finally (reset-registry!)))))
-
-(deftest release-worktree-entry!-no-op-for-unknown-workflow-test
-  (testing "release-worktree-entry! is a no-op when workflow-id is not in registry"
-    (try
-      ;; Should not throw; registry remains empty
-      (worktree/release-worktree-entry! "wf-unknown")
-      (is (empty? (snapshot-registry)))
-      (finally (reset-registry!)))))
-
-(deftest release-worktree-entry!-returns-nil-test
-  (testing "release-worktree-entry! returns nil (fire-and-forget semantics)"
-    (try
-      (worktree/register-worktree-entry! "wf-nil-rel" "/tmp/wt")
-      (is (nil? (worktree/release-worktree-entry! "wf-nil-rel")))
-      (finally (reset-registry!)))))
-
-;;------------------------------------------------------------------------------ get-worktree-registry tests
-
-(deftest get-worktree-registry-returns-snapshot-test
-  (testing "get-worktree-registry returns the current registry contents"
-    (try
-      (worktree/register-worktree-entry! "wf-snap" "/tmp/snap")
-      (let [snap (worktree/get-worktree-registry)]
-        (is (map? snap))
-        (is (contains? snap "wf-snap")))
-      (finally (reset-registry!)))))
-
-(deftest get-worktree-registry-returns-empty-map-when-clean-test
-  (testing "get-worktree-registry returns {} when nothing is registered"
-    (try
-      ;; Reset first to guarantee isolation
-      (reset-registry!)
-      (is (= {} (worktree/get-worktree-registry)))
-      (finally (reset-registry!)))))
-
-;;------------------------------------------------------------------------------ derive-parent-repo-path tests
-
-(deftest derive-parent-repo-path-returns-parent-of-git-common-dir-test
+;; derive-parent-repo-path tests
+(deftest ^{:stratum 0} derive-parent-repo-path-returns-parent-of-git-common-dir-test
   (testing "returns the directory containing the .git folder for an absolute common-dir"
     (with-redefs [worktree/run-git
                   (fn [& _]
@@ -150,7 +56,7 @@
         (is (= "/home/user/main-repo"
                (:parent-repo-path (result/unwrap r))))))))
 
-(deftest derive-parent-repo-path-handles-relative-git-common-dir-test
+(deftest ^{:stratum 0} derive-parent-repo-path-handles-relative-git-common-dir-test
   (testing "resolves relative --git-common-dir paths against the worktree directory"
     ;; For a plain (non-linked) repo, git returns the relative path ".git"
     (with-redefs [worktree/run-git
@@ -163,7 +69,7 @@
         (is (= "/tmp/my-repo"
                (:parent-repo-path (result/unwrap r))))))))
 
-(deftest derive-parent-repo-path-returns-err-when-git-fails-test
+(deftest ^{:stratum 0} derive-parent-repo-path-returns-err-when-git-fails-test
   (testing "returns result/err when git rev-parse --git-common-dir exits non-zero"
     (with-redefs [worktree/run-git
                   (fn [& _]
@@ -172,7 +78,7 @@
         (is (result/err? r))
         (is (= :derive-parent-repo-failed (get-in r [:error :code])))))))
 
-(deftest derive-parent-repo-path-rejects-unusable-output-test
+(deftest ^{:stratum 0} derive-parent-repo-path-rejects-unusable-output-test
   (testing "successful git execution without a usable common-dir returns an error"
     (doseq [output [nil false :not-a-path 42 " \n"]]
       (with-redefs [worktree/run-git
@@ -182,9 +88,8 @@
           (is (result/err? r) (str "rejected " (pr-str output)))
           (is (= :derive-parent-repo-failed (get-in r [:error :code]))))))))
 
-;;------------------------------------------------------------------------------ notify-file-written! tests
-
-(deftest notify-file-written!-calls-scratch-commit-with-parent-repo-test
+;; notify-file-written! tests
+(deftest ^{:stratum 0} notify-file-written!-calls-scratch-commit-with-parent-repo-test
   (testing "notify-file-written! derives parent path and delegates to scratch-commit!"
     (let [scratch-args (atom nil)]
       (with-redefs [worktree/run-git
@@ -214,7 +119,7 @@
           (is (= "/tmp/worktrees/task-abc/components/foo/src/bar.clj"
                  (:file-path @scratch-args))))))))
 
-(deftest notify-file-written!-short-circuits-when-derive-fails-test
+(deftest ^{:stratum 0} notify-file-written!-short-circuits-when-derive-fails-test
   (testing "notify-file-written! returns err without calling scratch-commit! on git failure"
     (let [scratch-called? (atom false)]
       (with-redefs [worktree/run-git
@@ -231,7 +136,7 @@
           (is (false? @scratch-called?)
               "scratch-commit! must NOT be called when parent-repo derivation fails"))))))
 
-(deftest notify-file-written!-returns-result-from-scratch-commit-test
+(deftest ^{:stratum 0} notify-file-written!-returns-result-from-scratch-commit-test
   (testing "notify-file-written! propagates the scratch-commit! result to caller"
     (with-redefs [worktree/run-git
                   (fn [& _]
@@ -245,9 +150,111 @@
         (is (result/err? r))
         (is (= :scratch-commit/hash-object-failed (get-in r [:error :code])))))))
 
-;;------------------------------------------------------------------------------ WorktreeExecutor lifecycle-hook integration tests
+;; WorktreeExecutor lifecycle-hook integration tests
+(deftest ^{:stratum 0} release-environment-without-matching-registry-entry-is-safe-test
+  (testing "release-environment! does not throw when no registry entry matches"
+    ;; This is the common case when :workflow-id was not in the original env-config
+    (with-redefs [worktree/run-git   (fn [& _] {:exit 0 :out "" :err ""})
+                  worktree/run-shell (fn [& _] {:exit 0 :out "" :err ""})]
+      (let [executor (worktree/create-worktree-executor {:base-path "/tmp/base"})]
+        ;; Should complete without throwing
+        (let [r (proto/release-environment! executor "no-registry-entry")]
+          (is (result/ok? r)))))))
 
-(deftest acquire-environment-registers-workflow-when-id-provided-test
+;------------------------------------------------------------------------------ Layer 1
+
+;; register-worktree-entry! tests
+(deftest ^{:stratum 1} register-worktree-entry!-adds-active-entry-test
+  (testing "register-worktree-entry! adds an :active entry keyed by workflow-id"
+    (try
+      (worktree/register-worktree-entry! "wf-reg-001" "/tmp/worktrees/task-abc")
+      (let [registry (snapshot-registry)
+            entry    (get registry "wf-reg-001")]
+        (is (some? entry) "entry must be present in registry")
+        (is (= :active (:status entry)))
+        (is (= "/tmp/worktrees/task-abc" (:worktree-path entry)))
+        (is (= (scratch-commit/scratch-ref-name "wf-reg-001") (:scratch-ref entry)))
+        (is (pos? (:created-at entry)) ":created-at must be a positive epoch ms"))
+      (finally (reset-registry!)))))
+
+(deftest ^{:stratum 1} register-worktree-entry!-replaces-existing-entry-test
+  (testing "register-worktree-entry! is idempotent — replaces an existing entry"
+    (try
+      (worktree/register-worktree-entry! "wf-reg-002" "/tmp/worktrees/old")
+      (worktree/register-worktree-entry! "wf-reg-002" "/tmp/worktrees/new")
+      (let [entry (get (snapshot-registry) "wf-reg-002")]
+        (is (= "/tmp/worktrees/new" (:worktree-path entry))
+            "second registration must win"))
+      (finally (reset-registry!)))))
+
+(deftest ^{:stratum 1} register-worktree-entry!-returns-nil-test
+  (testing "register-worktree-entry! returns nil (fire-and-forget semantics)"
+    (try
+      (is (nil? (worktree/register-worktree-entry! "wf-nil-ret" "/tmp/wt")))
+      (finally (reset-registry!)))))
+
+(deftest ^{:stratum 1} register-worktree-entry!-multiple-workflows-coexist-test
+  (testing "multiple workflow entries coexist in the registry"
+    (try
+      (worktree/register-worktree-entry! "wf-multi-a" "/tmp/worktrees/a")
+      (worktree/register-worktree-entry! "wf-multi-b" "/tmp/worktrees/b")
+      (let [registry (snapshot-registry)]
+        (is (= 2 (count registry)))
+        (is (= "/tmp/worktrees/a" (:worktree-path (get registry "wf-multi-a"))))
+        (is (= "/tmp/worktrees/b" (:worktree-path (get registry "wf-multi-b")))))
+      (finally (reset-registry!)))))
+
+;; release-worktree-entry! tests
+(deftest ^{:stratum 1} release-worktree-entry!-marks-entry-released-test
+  (testing "release-worktree-entry! transitions an active entry to :released"
+    (try
+      (worktree/register-worktree-entry! "wf-rel-001" "/tmp/worktrees/rel")
+      (worktree/release-worktree-entry! "wf-rel-001")
+      (let [entry (get (snapshot-registry) "wf-rel-001")]
+        (is (= :released (:status entry)))
+        (is (pos? (:released-at entry)) ":released-at must be set to epoch ms")
+        ;; Critical: the scratch-ref and worktree-path are PRESERVED after release
+        (is (= (scratch-commit/scratch-ref-name "wf-rel-001") (:scratch-ref entry))
+            "scratch-ref must be preserved after release")
+        (is (= "/tmp/worktrees/rel" (:worktree-path entry))
+            "worktree-path must be preserved after release"))
+      (finally (reset-registry!)))))
+
+(deftest ^{:stratum 1} release-worktree-entry!-no-op-for-unknown-workflow-test
+  (testing "release-worktree-entry! is a no-op when workflow-id is not in registry"
+    (try
+      ;; Should not throw; registry remains empty
+      (worktree/release-worktree-entry! "wf-unknown")
+      (is (empty? (snapshot-registry)))
+      (finally (reset-registry!)))))
+
+(deftest ^{:stratum 1} release-worktree-entry!-returns-nil-test
+  (testing "release-worktree-entry! returns nil (fire-and-forget semantics)"
+    (try
+      (worktree/register-worktree-entry! "wf-nil-rel" "/tmp/wt")
+      (is (nil? (worktree/release-worktree-entry! "wf-nil-rel")))
+      (finally (reset-registry!)))))
+
+;; get-worktree-registry tests
+(deftest ^{:stratum 1} get-worktree-registry-returns-snapshot-test
+  (testing "get-worktree-registry returns the current registry contents"
+    (try
+      (worktree/register-worktree-entry! "wf-snap" "/tmp/snap")
+      (let [snap (worktree/get-worktree-registry)]
+        (is (map? snap))
+        (is (contains? snap "wf-snap")))
+      (finally (reset-registry!)))))
+
+(deftest ^{:stratum 1} get-worktree-registry-returns-empty-map-when-clean-test
+  (testing "get-worktree-registry returns {} when nothing is registered"
+    (try
+      ;; Reset first to guarantee isolation
+      (reset-registry!)
+      (is (= {} (worktree/get-worktree-registry)))
+      (finally (reset-registry!)))))
+
+;; WorktreeExecutor lifecycle-hook integration tests
+(deftest ^{:stratum 1} acquire-environment-registers-workflow-when-id-provided-test
   (testing "acquire-environment! registers worktree in lifecycle registry when :workflow-id is in env-config"
     (try
       (with-redefs [worktree/run-git       (fn [& _] {:exit 0 :out "" :err ""})
@@ -268,7 +275,7 @@
                 "worktree-path must include the truncated task-id prefix"))))
       (finally (reset-registry!)))))
 
-(deftest acquire-environment-skips-registry-without-workflow-id-test
+(deftest ^{:stratum 1} acquire-environment-skips-registry-without-workflow-id-test
   (testing "acquire-environment! does not add a registry entry when :workflow-id is absent"
     (try
       (with-redefs [worktree/run-git       (fn [& _] {:exit 0 :out "" :err ""})
@@ -281,7 +288,7 @@
           (is (empty? (snapshot-registry)))))
       (finally (reset-registry!)))))
 
-(deftest release-environment-marks-registry-released-test
+(deftest ^{:stratum 1} release-environment-marks-registry-released-test
   (testing "release-environment! transitions the matching registry entry to :released"
     (try
       (with-redefs [worktree/run-git   (fn [& _] {:exit 0 :out "" :err ""})
@@ -301,13 +308,3 @@
             (is (= (scratch-commit/scratch-ref-name "wf-lifecycle-rel")
                    (:scratch-ref entry))))))
       (finally (reset-registry!)))))
-
-(deftest release-environment-without-matching-registry-entry-is-safe-test
-  (testing "release-environment! does not throw when no registry entry matches"
-    ;; This is the common case when :workflow-id was not in the original env-config
-    (with-redefs [worktree/run-git   (fn [& _] {:exit 0 :out "" :err ""})
-                  worktree/run-shell (fn [& _] {:exit 0 :out "" :err ""})]
-      (let [executor (worktree/create-worktree-executor {:base-path "/tmp/base"})]
-        ;; Should complete without throwing
-        (let [r (proto/release-environment! executor "no-registry-entry")]
-          (is (result/ok? r)))))))
