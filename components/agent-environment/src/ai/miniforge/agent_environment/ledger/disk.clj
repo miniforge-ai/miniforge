@@ -34,7 +34,8 @@
   (:import
    [java.io File PushbackReader StringReader]
    [java.nio.channels FileChannel]
-   [java.nio.charset StandardCharsets]
+   [java.nio ByteBuffer CharBuffer]
+   [java.nio.charset CodingErrorAction StandardCharsets]
    [java.nio.file Files NoSuchFileException Path StandardCopyOption StandardOpenOption]
    [java.nio.file.attribute FileAttribute]
    [java.time Instant]))
@@ -82,12 +83,28 @@
   (printing/plain-content-hash (mapv str k)))
 
 (defn- ^{:stratum 0} read-text
-  "The UTF-8 text of `file`, or nil only when it does not exist; any other
-   failure to read it throws to the I/O boundary."
+  "The UTF-8 text of `file`, or nil only when it does not exist. Malformed
+   UTF-8 throws to the I/O boundary rather than reading as replacement
+   characters, as does any other failure to read it."
   [^File file]
   (try
-    (String. (Files/readAllBytes (.toPath file)) StandardCharsets/UTF_8)
+    (let [decoder (-> StandardCharsets/UTF_8 .newDecoder
+                      (.onMalformedInput CodingErrorAction/REPORT)
+                      (.onUnmappableCharacter CodingErrorAction/REPORT))]
+      (str (.decode decoder (ByteBuffer/wrap (Files/readAllBytes (.toPath file))))))
     (catch NoSuchFileException _ nil)))
+
+(defn- ^{:stratum 0} utf8-bytes
+  "`text` as UTF-8, throwing rather than writing `?` for a character that
+   has no UTF-8 form, such as an unpaired surrogate."
+  ^bytes [^String text]
+  (let [encoder (-> StandardCharsets/UTF_8 .newEncoder
+                    (.onMalformedInput CodingErrorAction/REPORT)
+                    (.onUnmappableCharacter CodingErrorAction/REPORT))
+        encoded (.encode encoder (CharBuffer/wrap text))
+        out (byte-array (.remaining encoded))]
+    (.get encoded out)
+    out))
 
 (defn- ^{:stratum 0} directory-files
   "The files in `dir`, or none only when it does not exist; a directory
@@ -122,7 +139,7 @@
 
 (defn- ^{:stratum 1} encode
   ^bytes [record]
-  (.getBytes ^String (printing/plain-pr-str (walk/postwalk tagged record)) "UTF-8"))
+  (utf8-bytes (printing/plain-pr-str (walk/postwalk tagged record))))
 
 (defn- ^{:stratum 1} with-io-failure
   "Run `thunk` at the store's file I/O boundary: a thrown exception becomes
@@ -186,9 +203,10 @@
 
 (defn ^{:stratum 2} publish!
   "Write `record` as `target`, forced to stable storage with its directory
-   entry before `record` is returned."
+   entry before `record` is returned. A record that cannot be encoded
+   losslessly is refused before anything is written."
   [^File dir ^File target record]
-  (with-io-failure :write target (partial written-via-temp! dir target (encode record) record)))
+  (with-io-failure :write target #(written-via-temp! dir target (encode record) record)))
 
 (defn ^{:stratum 2} with-lock
   "Run `thunk` holding key `k`'s lock in `dir` against every other writer,

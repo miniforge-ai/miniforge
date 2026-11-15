@@ -35,7 +35,10 @@ restart, and it asks for an existing durable-store abstraction where one fits. T
    1. Record and lock files are named by a content hash of the key. The hash and the record bytes
       are printed through `ledger.printing`, which binds every printer setting (`*print-length*`,
       `*print-readably*`, `*print-dup*` and the rest), so a caller's bindings cannot rename a file
-      or write bytes `clojure.edn` reads differently.
+      or write bytes `clojure.edn` reads differently. Bytes are encoded and decoded with reporting
+      UTF-8 coders: a string with no UTF-8 form, such as an unpaired surrogate, is refused before
+      anything is written, and malformed UTF-8 on disk is `ledger-unavailable` rather than
+      replacement characters.
    2. Records are EDN. Instants are written under `#mf/instant` because `#inst` reads back as a
       `Date`, which does not equal the stored `Instant`; after a restart every stored request
       would look changed and be refused as conflicting.
@@ -101,11 +104,14 @@ Lock files stay on disk after their key is released: one empty file per key.
       ready, returns the same environment for the same request, and releases it. The original
       controller then sees the lease as released.
 2. `file_ledger_process_test` (integration, about 6 s): exactly one of the two writer processes
-   lands revision 1 and the other gets `ledger-conflict`. The loser's retry against revision 1
+   lands revision 1 and the other gets `ledger-conflict`. Both exit 0; a writer that has not exited
+   by the step timeout is killed and fails the test. The loser's retry against revision 1
    lands, and a fresh process started after the writers exit reads it. With the file lock removed,
    the test failed 3 of 3 runs.
 3. Each component file test runs in under 100 ms, measured locally.
-4. The agent-environment suite passes: 78 tests with 290 assertions. Agent-worker and opt-in
+4. `file_ledger_test` also pins lossless UTF-8: an unpaired surrogate is refused with nothing
+   written, and a malformed byte in a stored string is unavailable.
+5. The agent-environment suite passes: 79 tests with 293 assertions. Agent-worker and opt-in
    profile pass: 9 tests with 42 assertions. clj-kondo and stratum-lint are clean.
 
 This is local-filesystem evidence on one host. It does not qualify a shared volume, a hosted

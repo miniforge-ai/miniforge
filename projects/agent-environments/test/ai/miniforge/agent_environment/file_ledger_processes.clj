@@ -69,25 +69,34 @@
   [^BufferedReader reader]
   (edn/read-string (deref (future (.readLine reader)) step-timeout-ms timed-out)))
 
-(defn- ^{:stratum 1} finished? [^Process p] (.waitFor p step-timeout-ms TimeUnit/MILLISECONDS))
+(defn- ^{:stratum 1} exit-code
+  "`p`'s exit code once it exits within the step timeout. A writer still
+   running then is killed and reported as `:writer/timed-out`, so a hung
+   writer fails the test rather than passing it."
+  [^Process p]
+  (if (.waitFor p step-timeout-ms TimeUnit/MILLISECONDS)
+    (.exitValue p)
+    (do (.destroyForcibly p) :writer/timed-out)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} race!
   "Start `n` writers on `dir`; once every one has read, let all of them
-   write. Returns what each read and what each write returned."
+   write. Returns what each read, what each write returned, and each
+   writer's exit code, waited for before returning."
   [dir n]
   (let [writers (vec (repeatedly n #(start-writer "race" dir)))
         readers (mapv reader-of writers)
         reads (mapv next-value readers)
         _ (run! release! writers)
-        results (mapv next-value readers)]
-    (run! finished? writers)
-    {:reads reads :results results}))
+        results (mapv next-value readers)
+        exits (mapv exit-code writers)]
+    {:reads reads :results results :exits exits}))
 
 (defn ^{:stratum 2} read-in-fresh-process
+  "What a fresh writer process reads from `dir`, with its exit code."
   [dir]
   (let [p (start-writer "read" dir)
-        value (next-value (reader-of p))]
-    (finished? p)
-    value))
+        value (next-value (reader-of p))
+        exit (exit-code p)]
+    {:value value :exit exit}))
