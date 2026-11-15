@@ -26,10 +26,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} absent
-  "What a read of a key with no entry returns."
-  {:ledger/entry nil :ledger/revision nil})
-
 (defn- ^{:stratum 0} written
   "The stored map after writing `entry` under `k`; unchanged when `revision`
    is no longer the key's."
@@ -47,7 +43,7 @@
 (defrecord ^{:stratum 1} MemoryLedger [state]
   ledger/LedgerStore
   (read-entry [_ k]
-    (get @state k absent))
+    (get @state k ledger/absent))
   (write-entry! [_ k revision entry]
     (let [[before after] (swap-vals! state written k revision entry)]
       (if (= revision (get-in before [k :ledger/revision]))

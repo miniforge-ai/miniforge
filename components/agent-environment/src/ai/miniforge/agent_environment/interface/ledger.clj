@@ -28,6 +28,10 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} absent
+  "What `read-entry` returns for a key with no entry."
+  {:ledger/entry nil :ledger/revision nil})
+
 (defprotocol ^{:stratum 0} LedgerStore
   (read-entry [store k]
     "`{:ledger/entry entry-or-nil :ledger/revision n-or-nil}` for key `k`.")
