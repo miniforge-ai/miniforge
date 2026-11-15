@@ -16,13 +16,12 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.agent-environment.file-ledger-processes
-  "Drives file ledger writer processes for the cross-process tests: each
-   is its own JVM on this classpath, released to write over stdin once
-   every one of them has read."
+  "Drives file ledger writer JVMs for the cross-process tests, released to
+   write over stdin once every one has read; none outlives its test."
   (:require
    [clojure.edn :as edn])
   (:import
-   [java.io BufferedReader InputStreamReader]
+   [java.io BufferedReader IOException InputStreamReader]
    [java.lang ProcessBuilder$Redirect]
    [java.nio.file Files]
    [java.nio.file.attribute FileAttribute]
@@ -51,13 +50,17 @@
 (defn- ^{:stratum 0} reader-of ^BufferedReader [^Process p] (BufferedReader. (InputStreamReader. (.getInputStream p))))
 
 (defn- ^{:stratum 0} release!
+  "Let `p` write; a writer that already exited is skipped, its exit code reporting it."
   [^Process p]
-  (doto (.getOutputStream p) (.write (.getBytes "go\n")) (.flush)))
+  (try
+    (doto (.getOutputStream p) (.write (.getBytes "go\n")) (.flush))
+    (catch IOException _ nil)))
+
+(defn- ^{:stratum 0} destroy! [^Process p] (.destroyForcibly p))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} start-writer
-  "A writer JVM on this test's classpath, running `mode` over `dir`."
   ^Process [mode dir]
   (let [java (str (System/getProperty "java.home") "/bin/java")
         command [java "-cp" (System/getProperty "java.class.path") "clojure.main" "-m" writer-ns mode dir (pr-str k)]]
@@ -70,9 +73,8 @@
   (edn/read-string (deref (future (.readLine reader)) step-timeout-ms timed-out)))
 
 (defn- ^{:stratum 1} exit-code
-  "`p`'s exit code once it exits within the step timeout. A writer still
-   running then is killed and reported as `:writer/timed-out`, so a hung
-   writer fails the test rather than passing it."
+  "`p`'s exit code within the step timeout; a writer still running then is
+   killed and reported as `:writer/timed-out`, failing the test."
   [^Process p]
   (if (.waitFor p step-timeout-ms TimeUnit/MILLISECONDS)
     (.exitValue p)
@@ -81,22 +83,25 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} race!
-  "Start `n` writers on `dir`; once every one has read, let all of them
-   write. Returns what each read, what each write returned, and each
-   writer's exit code, waited for before returning."
+  "Start `n` writers on `dir`, let all write once every one has read, and
+   return their reads, results and exit codes; every writer is killed after."
   [dir n]
-  (let [writers (vec (repeatedly n #(start-writer "race" dir)))
-        readers (mapv reader-of writers)
-        reads (mapv next-value readers)
-        _ (run! release! writers)
-        results (mapv next-value readers)
-        exits (mapv exit-code writers)]
-    {:reads reads :results results :exits exits}))
+  (let [writers (vec (repeatedly n #(start-writer "race" dir)))]
+    (try
+      (let [readers (mapv reader-of writers)
+            reads (mapv next-value readers)
+            _ (run! release! writers)
+            results (mapv next-value readers)
+            exits (mapv exit-code writers)]
+        {:reads reads :results results :exits exits})
+      (finally (run! destroy! writers)))))
 
 (defn ^{:stratum 2} read-in-fresh-process
   "What a fresh writer process reads from `dir`, with its exit code."
   [dir]
-  (let [p (start-writer "read" dir)
-        value (next-value (reader-of p))
-        exit (exit-code p)]
-    {:value value :exit exit}))
+  (let [p (start-writer "read" dir)]
+    (try
+      (let [value (next-value (reader-of p))
+            exit (exit-code p)]
+        {:value value :exit exit})
+      (finally (destroy! p)))))

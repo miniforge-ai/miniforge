@@ -60,9 +60,8 @@ restart, and it asks for an existing durable-store abstraction where one fits. T
    refuses a stale one as `ledger-conflict`, encodes the record and decodes it again, refusing it
    unless it reads back equal, and publishes revision + 1. A `Timestamp` (which EDN reads back as
    a `Date`), a value with no EDN form, or a non-map entry is refused with nothing written, never
-   acknowledged and then unreadable. `read-entry` and `entries`
-   read without the lock; records are only renamed into place, so a reader sees an old record or a
-   new one, never part of either.
+   acknowledged and then unreadable. `read-entry` and `entries` read without the lock; records
+   are only renamed into place, so a reader sees an old record or a new one, never part of either.
 3. `interface/file-ledger`, validated by `LedgerDir` (a non-blank path or a `File`).
 4. `interface.ledger/absent`: the absent-read value, now shared by both stores.
 5. Tests: the shared `controller-over` helper moves into `ledger-faults`.
@@ -84,9 +83,9 @@ The easy option was one EDN file holding the whole ledger, rewritten on every ch
 rejected because every write would contend for the same lock and rewrite every other key's lease.
 One file per key keeps writes independent and leaves the compare-and-set check local to one record.
 
-A `java.sql.Timestamp` in a request is written as `#inst` and reads back as a `Date`. After a
-restart, that request looks changed and is refused as conflicting, a fail-closed outcome. Requests
-built by the conformance fixtures and the pilot use `Instant`.
+A `java.sql.Timestamp` in an entry would be written as `#inst` and read back as a `Date`, so the
+round-trip check refuses that write with `ledger-unavailable` before anything is published; the
+lease is never acknowledged. Requests built by the conformance fixtures and the pilot use `Instant`.
 
 Lock files stay on disk after their key is released: one empty file per key.
 
