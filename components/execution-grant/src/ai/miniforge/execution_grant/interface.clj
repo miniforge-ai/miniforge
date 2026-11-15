@@ -32,6 +32,8 @@
    [ai.miniforge.execution-grant.messages :as msg]
    [ai.miniforge.execution-grant.opsv-scope-schema :as opsv-schema]
    [ai.miniforge.execution-grant.revocation :as revocation]
+   [ai.miniforge.execution-grant.run-authority :as run-authority]
+   [ai.miniforge.execution-grant.run-schema :as run-schema]
    [ai.miniforge.execution-grant.schema :as schema]
    [ai.miniforge.execution-grant.store :as store]
    [ai.miniforge.execution-grant.store-schema :as store-schema]
@@ -164,6 +166,35 @@
   issuance-boundary/issue-for-effect)
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} register-run-authority!
+  "Reserve a fresh run identity, or confirm its existing active record.
+   Missing state in a reserved directory and full stop cannot be re-registered.
+   POSIX protection is required. This is storage, not authorization or dispatch."
+  [dir id now]
+  (let [args [dir id now]]
+    (if (valid-input? run-schema/RegisterArguments args)
+      (run-authority/register! dir id now)
+      (invalid :run/invalid run-schema/RegisterArguments args))))
+
+(defn ^{:stratum 1} read-run-authority
+  "Return the current :active/:full-stop record, or an anomaly; never infer
+   permission from missing state. Consumers must check this again at dispatch."
+  [dir id]
+  (let [args [dir id]]
+    (if (valid-input? run-schema/LookupArguments args)
+      (run-authority/current dir id)
+      (invalid :run/invalid run-schema/LookupArguments args))))
+
+(defn ^{:stratum 1} full-stop-run-authority!
+  "Persist a dominant irreversible stop, including before late registration.
+   The trusted host must first authorize and audit the intervention. This does
+   not stop a runtime, recall requests, or itself fence existing dispatchers."
+  [dir request]
+  (let [args [dir request]]
+    (if (valid-input? run-schema/StopArguments args)
+      (run-authority/stop! dir request)
+      (invalid :run/invalid run-schema/StopArguments args))))
 
 (defn ^{:stratum 1} register!
   "API surface class 1: register a runtime-issued grant in trusted local storage.
