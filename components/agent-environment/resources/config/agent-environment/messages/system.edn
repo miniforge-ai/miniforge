@@ -30,5 +30,6 @@
   :anomalies.agent-environment/provisioning-failed "Provisioning stopped before the environment was complete"
   :anomalies.agent-environment/ledger-unavailable "The lease ledger store did not answer; the ledger does not record this call"
   :anomalies.agent-environment/ledger-conflict "The ledger entry changed under every write attempt; retry the call"
+  :anomalies.agent-environment/claim-lost "Another controller reconciled this acquisition first; what this call created was deleted"
   :fake/target-missing "The fake provider holds no environment with this namespace and UID"
   :fake/file-missing "The fake environment holds no file at this path"}}

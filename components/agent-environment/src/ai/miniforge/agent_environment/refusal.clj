@@ -39,7 +39,7 @@
                :anomalies.agent-environment/environment-expired :anomalies.agent-environment/cleanup-uncertain
                :anomalies.agent-environment/unknown-lease :anomalies.agent-environment/stale-lease
                :anomalies.agent-environment/uid-mismatch :anomalies.agent-environment/operation-not-admitted
-               :anomalies.agent-environment/ledger-conflict}
+               :anomalies.agent-environment/ledger-conflict :anomalies.agent-environment/claim-lost}
    :unavailable #{:anomalies.agent-environment/ledger-unavailable}})
 
 (def ^{:stratum 0} refusal-types
