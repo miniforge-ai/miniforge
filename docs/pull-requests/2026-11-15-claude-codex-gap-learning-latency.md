@@ -61,8 +61,10 @@ decision that closed it.
   decided, unavailable), and two codex anomaly reasons.
 - `bb.edn` `codex-gap-report`: passes the harvest decisions when
   `MINIFORGE_CODEX_PATH` is set.
-- `work/`: the spec moves to `work/done/`. Its `QUEUE.md` row is removed by
-  hand, because `bb work:queue` could not run here.
+- `work/`: the spec moves to `work/done/`. With #2519 merged, the codex-gap
+  theme has no queued spec left: `QUEUE.md` loses its section (by hand,
+  because `bb work:queue` could not run here), and `themes.edn` marks the
+  theme `:complete` with a completion note.
 
 ## Testing Plan
 
@@ -83,7 +85,7 @@ decision that closed it.
   - a decided miss with a non-string timestamp counts as decided and
     undated, without crashing the report.
 - Ran locally on a hand-built classpath: every codex and codex-gap test
-  namespace, 73 tests, 0 failures. The unlistable-directory path has no test: this
+  namespace, 80 tests after merging main with #2519, 0 failures. The unlistable-directory path has no test: this
   container runs as root, which can list a `chmod 000` directory, so the
   case cannot be reproduced here. `bb` is not installed here, so the bb
   task and lint run in CI only.
