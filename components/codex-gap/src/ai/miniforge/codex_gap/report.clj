@@ -49,11 +49,12 @@
   (:decisions (codex/harvest-decisions codex-dir)))
 
 (defn- ^{:stratum 0} miss-date [entry]
-  (try (some-> (:miss/at entry)
-               java.time.Instant/parse
+  (let [at (:miss/at entry)]
+    (when (string? at)
+      (try (-> (java.time.Instant/parse at)
                (.atZone java.time.ZoneOffset/UTC)
                .toLocalDate)
-       (catch java.time.format.DateTimeParseException _ nil)))
+           (catch java.time.format.DateTimeParseException _ nil)))))
 
 (defn- ^{:stratum 0} earlier-date [current candidate]
   (if (and current (not (.isAfter ^java.time.LocalDate current candidate)))
@@ -84,6 +85,13 @@
     (when (and decided recorded)
       (.between java.time.temporal.ChronoUnit/DAYS recorded decided))))
 
+(defn- ^{:stratum 0} decided-by?
+  "A decision names the miss, and the miss counts toward rates: a
+   :review-queue entry stays out of every rate until resolved (T2 §3.4)."
+  [dates entry]
+  (and (not= :review-queue (:miss/bucket entry))
+       (contains? dates (:miss/id entry))))
+
 (defn- ^{:stratum 0} learning-slot
   "§4.1.6: median days from miss to harvest decision over decided misses,
    and the open candidates no decision names. nil `harvest` means the
@@ -94,13 +102,17 @@
      :open    (count open-candidates)
      :misses  (mapv :miss/id open-candidates)}
     (let [dates     (decision-dates harvest)
-          latencies (keep (partial latency-days dates) entries)
-          open      (remove #(contains? dates (:miss/id %)) open-candidates)]
-      {:status      :measured
-       :decided     (count latencies)
-       :median-days (median latencies)
-       :open        (count open)
-       :misses      (mapv :miss/id open)})))
+          decided   (filter (partial decided-by? dates) entries)
+          latencies (keep (partial latency-days dates) decided)
+          undated   (- (count decided) (count latencies))
+          open      (remove (partial decided-by? dates) open-candidates)]
+      {:status         :measured
+       :decided        (count decided)
+       :undated        undated
+       :median-days    (median latencies)
+       :decided-misses (mapv :miss/id decided)
+       :open           (count open)
+       :misses         (mapv :miss/id open)})))
 
 (defn ^{:stratum 0} build-report
   "Pure: ledger entries (+ total skipped-line count and run count) and
@@ -138,13 +150,21 @@
      :review-queue {:count (count (get by-bucket :review-queue []))
                     :misses (ids :review-queue)}}))
 
+(defn- ^{:stratum 0} undated-suffix [undated]
+  (if (pos? undated)
+    (msg/t :report/learning-undated-suffix {:n undated})
+    ""))
+
 (defn- ^{:stratum 0} learning-text
-  [{:keys [status decided median-days open]}]
+  [{:keys [status decided undated median-days open]}]
   (cond
     (= :harvest-unavailable status) (msg/t :report/learning-unavailable {:open open})
     (zero? decided)                 (msg/t :report/learning-none-decided {:open open})
+    (nil? median-days)              (msg/t :report/learning-undated {:decided decided
+                                                                     :open    open})
     :else                           (msg/t :report/learning {:decided decided
                                                              :median  median-days
+                                                             :undated (undated-suffix undated)
                                                              :open    open})))
 
 (defn- ^{:stratum 0} members-line [bucket ids]
@@ -185,5 +205,6 @@
      (members-line :unheeded (:misses attention))
      (learning-text learning)
      (members-line :learning (:misses learning))
+     (members-line :decided (:decided-misses learning))
      (msg/t :report/review-queue {:count (:count review-queue)})
      (members-line :review-queue (:misses review-queue))]))

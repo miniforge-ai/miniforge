@@ -325,3 +325,22 @@
     (is (nil? (get-in r [:learning :median-days])))
     (is (re-find #"learning: harvest records unavailable; 1 open" (gap/render-report r)))))
 
+(deftest ^{:stratum 1} learning-lists-the-decided-misses
+  (let [miss (miss-at :uncovered "2026-09-01T10:00:00Z")
+        r    (gap/build-report [miss] {:harvest [(decision "2026-09-04" :admitted (:miss/id miss))]})]
+    (is (= [(:miss/id miss)] (get-in r [:learning :decided-misses])))
+    (is (re-find (re-pattern (str "decided: " (:miss/id miss))) (gap/render-report r)))))
+
+(deftest ^{:stratum 1} learning-keeps-review-queue-misses-out-of-the-rate
+  (let [queued (miss-at :review-queue "2026-09-01T10:00:00Z")
+        r      (gap/build-report [queued] {:harvest [(decision "2026-09-04" :admitted (:miss/id queued))]})]
+    (is (= 0 (get-in r [:learning :decided])))
+    (is (= [(:miss/id queued)] (get-in r [:learning :misses])))))
+
+(deftest ^{:stratum 1} learning-counts-a-decided-miss-without-a-usable-timestamp
+  (let [miss (assoc (miss-at :uncovered "unused") :miss/at #inst "2026-09-01")
+        r    (gap/build-report [miss] {:harvest [(decision "2026-09-04" :admitted (:miss/id miss))]})]
+    (is (= {:decided 1 :undated 1 :median-days nil :open 0}
+           (select-keys (:learning r) [:decided :undated :median-days :open])))
+    (is (re-find #"1 miss\(es\) decided, none with a usable timestamp" (gap/render-report r)))))
+

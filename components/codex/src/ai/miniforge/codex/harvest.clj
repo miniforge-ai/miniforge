@@ -65,6 +65,18 @@
     (when (and date kind (seq miss-ids))
       {:decided date :outcome kind :misses miss-ids})))
 
+(defn- ^{:stratum 1} list-tree
+  "Every file under `root`, or {:unlistable dir} for the first directory
+   that cannot be listed: file-seq would skip it silently."
+  [^java.io.File root]
+  (loop [dirs [root] files []]
+    (if-let [^java.io.File d (first dirs)]
+      (if-let [children (.listFiles d)]
+        (let [{subdirs true leaves false} (group-by #(.isDirectory ^java.io.File %) children)]
+          (recur (into (vec (rest dirs)) subdirs) (into files leaves)))
+        {:unlistable (str d)})
+      {:files files})))
+
 (defn- ^{:stratum 1} file-decisions [f]
   (keep (comp fields->decision section-fields) (sections (slurp f))))
 
@@ -81,8 +93,12 @@
       {:codex/anomaly :codex-unreadable
        :codex/reason (msg/t :anomaly/no-codex-dir {:dir codex-dir})}
       (try
-        (let [logs (filter harvest-file? (file-seq dir))]
-          {:decisions (vec (mapcat file-decisions logs))})
+        (let [{:keys [files unlistable]} (list-tree dir)
+              logs (filter harvest-file? files)]
+          (if unlistable
+            {:codex/anomaly :codex-unreadable
+             :codex/reason (msg/t :anomaly/unlistable-dir {:dir unlistable})}
+            {:decisions (vec (mapcat file-decisions logs))}))
         (catch java.io.IOException e
           {:codex/anomaly :codex-unreadable
            :codex/reason (msg/t :anomaly/harvest-read-failed {:dir codex-dir :error (ex-message e)})})

@@ -37,8 +37,10 @@ decision that closed it.
   list are dropped.
 - `codex/harvest.clj` (new) and `codex.interface/harvest-decisions`: read
   the logs and return `{:decisions [...]}`, or a `:codex-unreadable`
-  anomaly when the directory is missing or unreadable. The codex stays
-  read-only.
+  anomaly when the directory is missing, unreadable, or has a
+  subdirectory that cannot be listed. `file-seq` would skip such a
+  subdirectory silently, so the reader walks the tree itself. The codex
+  stays read-only.
 - `codex-gap/report.clj`:
   - `harvest-decisions` reads the decisions through the codex interface,
     or returns nil;
@@ -47,6 +49,11 @@ decision that closed it.
     `:open` and the open members, or `:harvest-unavailable` when there are
     no harvest records;
   - a miss named by several decisions pairs with the earliest one;
+  - a `:review-queue` miss never counts as decided, so it stays out of
+    every rate until its attribution is resolved;
+  - `:decided` counts the misses a decision names, listed under
+    `:decided-misses`; the median uses those with a usable `:miss/at`, and
+    the rest are counted as undated;
   - latency is whole days between the miss's UTC date and the decision
     date.
 - Message catalogs: the learning line in three forms (measured, none
@@ -69,9 +76,15 @@ decision that closed it.
   - refusal counts;
   - earliest decision wins;
   - an unnamed miss stays open;
-  - no harvest records reports unavailable.
+  - no harvest records reports unavailable;
+  - decided misses are listed;
+  - a `:review-queue` miss stays out of the rate;
+  - a decided miss with a non-string timestamp counts as decided and
+    undated, without crashing the report.
 - Ran locally on a hand-built classpath: every codex and codex-gap test
-  namespace, 69 tests, 0 failures. `bb` is not installed here, so the bb
+  namespace, 72 tests, 0 failures. The unlistable-directory path has no test: this
+  container runs as root, which can list a `chmod 000` directory, so the
+  case cannot be reproduced here. `bb` is not installed here, so the bb
   task and lint run in CI only.
 
 ## Deployment Plan
