@@ -27,6 +27,8 @@
   :anomaly/no-nodes-dir        "no nodes/ directory under {dir}"
   :anomaly/read-failed         "failed reading a node under {dir}: {error}"
   :anomaly/access-denied       "access denied under {dir}: {error}"
+  :anomaly/no-codex-dir        "no codex directory at {dir}"
+  :anomaly/harvest-read-failed "failed reading harvest logs under {dir}: {error}"
   :anomaly/unmatched           "no situation matches '{text}'"
   :anomaly/ambiguous           "'{text}' matches {count} situations"
   :anomaly/unconfigured        "no codex_path argument and MINIFORGE_CODEX_PATH is unset — cannot consult a codex that has no location"

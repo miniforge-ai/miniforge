@@ -1,0 +1,91 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.codex.harvest
+  "HARVEST-*.md logs -> dated harvest decisions (Codex SPEC T1 §8.4).
+   An entry is a markdown section; it decides misses only when it carries
+   `decided::`, `outcome::` and `misses::`. Read-only."
+  (:require [ai.miniforge.codex.messages :as msg]
+            [clojure.java.io :as io]
+            [clojure.string :as str]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private field-re
+  #"^\s*(?:-\s+)?(decided|outcome|misses)::\s*(.*?)\s*$")
+
+(def ^{:stratum 0} outcomes
+  "The two decisions T1 §5.6/§6.4 allow a harvest entry to record."
+  {"admitted" :admitted "refused" :refused})
+
+(defn- ^{:stratum 0} harvest-file? [^java.io.File f]
+  (and (.isFile f)
+       (str/starts-with? (.getName f) "HARVEST-")
+       (str/ends-with? (.getName f) ".md")))
+
+(defn- ^{:stratum 0} sections
+  "Section texts, each starting at a markdown heading."
+  [text]
+  (str/split text #"(?m)^(?=#)"))
+
+(defn- ^{:stratum 0} field-pair [line]
+  (some-> (re-matches field-re line) rest vec))
+
+(defn- ^{:stratum 0} section-fields [section]
+  (into {} (keep field-pair) (str/split-lines section)))
+
+(defn- ^{:stratum 0} parse-date [s]
+  (try (java.time.LocalDate/parse s)
+       (catch java.time.format.DateTimeParseException _ nil)))
+
+(defn- ^{:stratum 0} parse-miss-ids [s]
+  (vec (keep (comp parse-uuid str/trim) (str/split s #","))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} fields->decision
+  [{:strs [decided outcome misses]}]
+  (let [date     (some-> decided parse-date)
+        kind     (get outcomes (some-> outcome str/lower-case))
+        miss-ids (some-> misses parse-miss-ids)]
+    (when (and date kind (seq miss-ids))
+      {:decided date :outcome kind :misses miss-ids})))
+
+(defn- ^{:stratum 1} file-decisions [f]
+  (keep (comp fields->decision section-fields) (sections (slurp f))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} harvest-decisions
+  "Every complete harvest decision under `codex-dir`, as
+   {:decisions [{:decided LocalDate :outcome :admitted|:refused
+   :misses [uuid ..]}]}, or {:codex/anomaly :codex-unreadable ...} when the
+   directory is missing or cannot be read."
+  [codex-dir]
+  (let [dir (io/file codex-dir)]
+    (if-not (.isDirectory dir)
+      {:codex/anomaly :codex-unreadable
+       :codex/reason (msg/t :anomaly/no-codex-dir {:dir codex-dir})}
+      (try
+        (let [logs (filter harvest-file? (file-seq dir))]
+          {:decisions (vec (mapcat file-decisions logs))})
+        (catch java.io.IOException e
+          {:codex/anomaly :codex-unreadable
+           :codex/reason (msg/t :anomaly/harvest-read-failed {:dir codex-dir :error (ex-message e)})})
+        (catch SecurityException e
+          {:codex/anomaly :codex-unreadable
+           :codex/reason (msg/t :anomaly/access-denied {:dir codex-dir :error (ex-message e)})})))))
