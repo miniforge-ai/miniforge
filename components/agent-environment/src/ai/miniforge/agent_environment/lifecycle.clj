@@ -43,8 +43,8 @@
 (defn- ^{:stratum 0} leased
   [c operation acting lease call]
   (let [subject (receipt/lease-subject acting lease)
-        entry (controller/entry c (lease/lease-key lease))
         forged (admission/tenant-refusal acting (:lease/tenant-id lease))
+        entry (when-not forged (controller/entry c (lease/lease-key lease)))
         refusal (when-not (anomaly/anomaly? entry) (lease/lease-refusal entry operation lease (support/now c)))]
     (cond
       forged (controller/refuse! c subject operation forged [])
@@ -72,10 +72,11 @@
    stops running work. A cancel the ledger did not record for this lease
    never reaches the provider."
   [c lease target]
-  (anomaly/let-ok [changed (controller/settle! c lease #(assoc % :entry/state :state/cancelled))
-                   _ (support/lost-lease changed lease :environment/cancel (support/now c))]
-    (let [steps (support/reported-steps (protocol/cancel! (support/provider c) target) :cancel/steps)]
-      {:call/value {:call/outcome (receipt/steps-outcome steps)} :call/steps steps})))
+  (let [now (support/now c)]
+    (anomaly/let-ok [changed (controller/settle! c lease (partial support/cancelled lease now))
+                     _ (support/lost-lease changed lease :environment/cancel now)]
+      (let [steps (support/reported-steps (protocol/cancel! (support/provider c) target) :cancel/steps)]
+        {:call/value {:call/outcome (receipt/steps-outcome steps)} :call/steps steps}))))
 
 (defn- ^{:stratum 0} settled
   "Move the ledger to `state` whatever the provider confirmed: the ledger

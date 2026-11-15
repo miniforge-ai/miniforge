@@ -70,6 +70,12 @@
   (when (anomaly/anomaly? result)
     (anomaly/subtype result)))
 
+(defn ^{:stratum 0} cancelled
+  "`entry` cancelled, or unchanged when it no longer admits a cancel under
+   `lease`: a rival's unconfirmed release is never overwritten."
+  [lease now entry]
+  (if (lease/lease-refusal entry :environment/cancel lease now) entry (assoc entry :entry/state :state/cancelled)))
+
 (defn ^{:stratum 0} lost-lease
   "Nil while the entry a settle left still admits `operation` under `lease`,
    else that refusal: another controller may have moved it first."
