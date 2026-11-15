@@ -22,6 +22,7 @@
    [ai.miniforge.agent-environment.interface.ledger :as ledger]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]
    [ai.miniforge.agent-environment.messages :as msg]
+   [ai.miniforge.agent-environment.schema :as schema]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.execution-grant.interface :as grant]
    [ai.miniforge.tenancy.interface :as tenancy]
@@ -48,7 +49,15 @@
 
 (def ^{:stratum 0} MaybeGrant [:maybe grant/ExecutionGrant])
 
+(defn- ^{:stratum 0} file?
+  [x]
+  (instance? java.io.File x))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} LedgerDir
+  "A ledger store directory: a non-blank path or a File."
+  [:or schema/NonBlank [:fn file?]])
 
 (def ^{:stratum 1} ControllerOptions
   [:map

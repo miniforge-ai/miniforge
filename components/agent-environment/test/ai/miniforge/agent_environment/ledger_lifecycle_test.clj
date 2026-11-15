@@ -21,11 +21,9 @@
    [ai.miniforge.agent-environment.fake :as fake]
    [ai.miniforge.agent-environment.interface :as env]
    [ai.miniforge.agent-environment.ledger :as ledger]
-   [ai.miniforge.agent-environment.ledger-faults :refer [outage-world]]
+   [ai.miniforge.agent-environment.ledger-faults :as faults :refer [outage-world]]
    [ai.miniforge.anomaly.interface :as anomaly]
-   [clojure.test :refer [deftest is testing]])
-  (:import
-   [java.time Instant]))
+   [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -34,14 +32,8 @@
 (defn- ^{:stratum 0} reason [result] (anomaly/subtype result))
 
 (defn- ^{:stratum 0} second-controller
-  "Another controller over `w`'s provider and ledger, as a restarted or
-   concurrent controller process would be."
   [w]
-  (env/create-controller {:provider (get-in w [:c :controller/provider])
-                          :clock #(Instant/now)
-                          :emit! #(swap! (:receipts w) conj %)
-                          :persist! fx/memory-persister
-                          :ledger (get-in w [:c :controller/ledger])}))
+  (faults/controller-over w (get-in w [:c :controller/ledger])))
 
 (defn- ^{:stratum 0} acquire [w] (fx/acquire w (:a w) (fx/request w (:a w))))
 

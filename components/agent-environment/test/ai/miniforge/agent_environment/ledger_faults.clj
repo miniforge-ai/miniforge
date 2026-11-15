@@ -25,7 +25,9 @@
    [ai.miniforge.agent-environment.interface.ledger :as store]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]
    [ai.miniforge.agent-environment.ledger.memory :as memory-ledger]
-   [ai.miniforge.anomaly.interface :as anomaly]))
+   [ai.miniforge.anomaly.interface :as anomaly])
+  (:import
+   [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -40,6 +42,16 @@
   (let [[before _] (swap-vals! faults update :writes #(some-> % dec))
         left (:writes before)]
     (or (nil? left) (pos? left))))
+
+(defn ^{:stratum 0} controller-over
+  "Another controller over `w`'s provider and receipt log, keeping leases
+   in `ledger-store`: a restarted or concurrent controller process."
+  [w ledger-store]
+  (env/create-controller {:provider (get-in w [:c :controller/provider])
+                          :clock #(Instant/now)
+                          :emit! #(swap! (:receipts w) conj %)
+                          :persist! fx/memory-persister
+                          :ledger ledger-store}))
 
 ;------------------------------------------------------------------------------ Layer 1
 
