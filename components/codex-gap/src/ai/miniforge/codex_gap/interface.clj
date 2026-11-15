@@ -79,6 +79,12 @@
   [dir]
   (ledger/read-consultations dir))
 
+(defn ^{:stratum 0} incomplete-read?
+  "True when a read-ledger / read-consultations result lost entries: the
+   read failed outright, or it skipped unreadable lines."
+  [read-result]
+  (ledger/incomplete-read? read-result))
+
 (defn ^{:stratum 0} read-ledger
   "All ledger entries under `dir`, oldest first:
    {:entries [..] :skipped n-unreadable-lines}, or
@@ -102,7 +108,8 @@
   (retrodict/retrodict entries codex-dir phase->situation))
 
 (defn ^{:stratum 0} build-report
-  "Ledger entries + {:skipped :run-count :anchoring} -> the T2 §4 gap
+  "Ledger entries + {:skipped :run-count :anchoring :consultations
+   :unreadable-consultations :harvest} -> the T2 §4 gap
    VECTOR. Every slot carries its member miss ids; no scalar rollup
    exists or may be derived."
   [entries opts]
@@ -112,6 +119,12 @@
   "The gap vector as catalog-backed text."
   [report-map]
   (report/render-report report-map))
+
+(defn ^{:stratum 0} harvest-decisions
+  "The codex's dated harvest decisions (T1 §8.4) for the learning slot,
+   or nil when they cannot be read."
+  [codex-dir]
+  (report/harvest-decisions codex-dir))
 
 (defn ^{:stratum 0} codex-anchoring-stats
   "The §4.1.3 anchoring slot from the codex graph, or nil when unreadable."
