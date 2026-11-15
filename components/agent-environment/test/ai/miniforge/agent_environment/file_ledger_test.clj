@@ -187,6 +187,21 @@
       (spit-bytes! file (malformed-at (Files/readAllBytes (.toPath file)) "abc"))
       (is (= unavailable (reason (store/read-entry s k)))))))
 
+(deftest ^{:stratum 2} test-a-write-that-would-not-read-back-is-refused
+  (doseq [[label unreadable] [["a Timestamp, read back as a Date" (assoc entry :entry/at (java.sql.Timestamp. 0))]
+                              ["a value with no EDN form" (assoc entry :entry/file (io/file "x"))]
+                              ["an entry that is not a map" [:not-a-map]]]]
+    (testing (str "given " label " → refused, nothing written")
+      (let [s (env/file-ledger (temp-dir))]
+        (is (= unavailable (reason (store/write-entry! s k nil unreadable))))
+        (is (= {:ledger/entry nil :ledger/revision nil} (store/read-entry s k)))))))
+
+(deftest ^{:stratum 2} test-keys-that-print-alike-keep-separate-records
+  (let [s (env/file-ledger (temp-dir))]
+    (store/write-entry! s k nil entry)
+    (is (= {:ledger/revision 1} (store/write-entry! s (mapv str k) nil entry)))
+    (is (= 2 (count (store/entries s))))))
+
 (deftest ^{:stratum 2} test-a-misplaced-or-trailing-record-is-corrupt
   (testing "given another key's record copied over this key's file → refused, not read as this key's"
     (let [dir (written-dir entry)]

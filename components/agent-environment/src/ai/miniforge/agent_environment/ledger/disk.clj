@@ -80,7 +80,7 @@
   "The file name stem for key `k`: one key names the same files in every
    process, whatever printer settings the caller has bound."
   [k]
-  (printing/plain-content-hash (mapv str k)))
+  (printing/plain-content-hash k))
 
 (defn- ^{:stratum 0} read-text
   "The UTF-8 text of `file`, or nil only when it does not exist. Malformed
@@ -120,6 +120,12 @@
   (refusal/reason-anomaly :anomalies.agent-environment/ledger-unavailable
                           {:ledger/operation operation :ledger/path (.getPath file) :ledger/detail detail}))
 
+(defn ^{:stratum 0} misplaced
+  "The refusal for a record that does not hold key `k`."
+  [k]
+  (refusal/reason-anomaly :anomalies.agent-environment/ledger-unavailable
+                          {:ledger/key k :ledger/detail :ledger/misplaced-record}))
+
 (defn- ^{:stratum 0} move-into-place!
   ^File [^File tmp ^File target]
   (Files/move (.toPath tmp) (.toPath target)
@@ -136,6 +142,13 @@
     (thunk)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} mismatch
+  [^File target record decoded]
+  (cond
+    (anomaly/anomaly? decoded) decoded
+    (not= record decoded) (unavailable :encode target :ledger/round-trip-mismatch)
+    :else nil))
 
 (defn- ^{:stratum 1} encode
   ^bytes [record]
@@ -200,6 +213,14 @@
    store's anomaly when the directory cannot be listed."
   [^File dir]
   (with-io-failure :list dir #(filterv record-file? (directory-files dir))))
+
+(defn ^{:stratum 2} round-trip-failure
+  "Nil when `record` encodes to bytes that decode back to an equal record
+   for `target`, else the store's refusal: an acknowledged write must read
+   back as written, so a value with no EDN form, or one EDN reads back as
+   another type, is refused before anything is written."
+  [^File target record]
+  (with-io-failure :encode target #(mismatch target record (decode target (String. (encode record) StandardCharsets/UTF_8)))))
 
 (defn ^{:stratum 2} publish!
   "Write `record` as `target`, forced to stable storage with its directory
