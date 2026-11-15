@@ -48,8 +48,9 @@ intent records and the reconciler each land against one fixed contract.
    (`claimed`, `settled`, `reserved-settled`) are the old map-level ones applied to one entry.
 5. `lifecycle`:
    1. Acquire refuses when the claim is not stored. The provider is never called.
-   2. Leased calls refuse when the entry cannot be read. A forged tenant is refused first, so a
-      caller without the tenant never sees storage details.
+   2. Leased calls refuse when the entry cannot be read. A forged tenant is refused before the
+      ledger is read at all, so a caller without the tenant never reads, waits on or sees another
+      tenant's entry.
    3. Both refusals return the ledger's own anomaly, message and data included, with the refusal
       receipt's id added.
    4. Cancel writes the cancelled state before calling the provider. The state change is applied
@@ -129,11 +130,11 @@ These are the later issue #2506 PRs, in order:
       controller released between its read and its write, or left `cleanup-uncertain`, which stays
       as it was. Both tests fail without their fixes.
    5. A ledger refusal keeps the store's message and carries the receipt id; a forged tenant is
-      refused before the unreadable ledger is consulted.
+      refused with zero ledger reads.
    6. A release the ledger misses is receipted with its reason and then retried.
    7. Two controllers sharing one ledger share leases, and two racing acquires provision once.
 3. The existing agent-environment, agent-worker and opt-in profile tests pass: 67 tests with 257
-   assertions before the review fixes, 70 tests with 266 after; agent-worker and opt-in profile, 9
+   assertions before the review fixes, 70 tests with 267 after; agent-worker and opt-in profile, 9
    tests with 42 assertions.
 4. clj-kondo and stratum-lint are clean on the component.
 

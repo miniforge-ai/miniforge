@@ -43,8 +43,8 @@
 (defn- ^{:stratum 0} leased
   [c operation acting lease call]
   (let [subject (receipt/lease-subject acting lease)
-        entry (controller/entry c (lease/lease-key lease))
         forged (admission/tenant-refusal acting (:lease/tenant-id lease))
+        entry (when-not forged (controller/entry c (lease/lease-key lease)))
         refusal (when-not (anomaly/anomaly? entry) (lease/lease-refusal entry operation lease (support/now c)))]
     (cond
       forged (controller/refuse! c subject operation forged [])

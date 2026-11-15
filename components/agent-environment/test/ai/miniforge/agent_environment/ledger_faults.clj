@@ -63,7 +63,7 @@
   "`inner` failing reads while `:reads?` is false and writes once `:writes` is spent."
   [inner faults]
   (reify store/LedgerStore
-    (read-entry [_ k] (if (:reads? @faults) (store/read-entry inner k) down))
+    (read-entry [_ k] (swap! faults update :read-count (fnil inc 0)) (if (:reads? @faults) (store/read-entry inner k) down))
     (write-entry! [_ k revision entry]
       (run-interposed! faults)
       (if (writable! faults) (store/write-entry! inner k revision entry) down))

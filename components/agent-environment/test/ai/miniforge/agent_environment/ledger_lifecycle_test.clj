@@ -72,9 +72,10 @@
     (let [refused (acquire w)]
       (is (= "down" (:anomaly/message refused)))
       (is (= (:receipt/id (last @(:receipts w))) (get-in refused [:anomaly/data :receipt/id]))))
-    (testing "given another tenant's lease while the ledger is unreadable → the forged tenant is refused first"
-      (swap! (:faults w) assoc :reads? false)
-      (is (= :anomalies.agent-environment/forged-tenant (reason (env/readiness (:c w) (:b w) current)))))))
+    (testing "given another tenant's lease → refused as forged without reading the ledger"
+      (swap! (:faults w) assoc :reads? false :read-count 0)
+      (is (= :anomalies.agent-environment/forged-tenant (reason (env/readiness (:c w) (:b w) current))))
+      (is (zero? (:read-count @(:faults w)))))))
 
 (deftest ^{:stratum 1} test-a-cancel-whose-lease-was-released-never-reaches-the-provider
   (let [w (outage-world)
