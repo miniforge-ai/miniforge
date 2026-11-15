@@ -54,7 +54,9 @@
         _hop (fs/create-sym-link (fs/path unsafe "hop") target)
         alias (fs/create-sym-link (fs/path root "alias") (fs/path "unsafe" "hop"))]
     (fs/set-posix-file-permissions unsafe unsafe-mode)
-    (is (anomaly/anomaly? (durability/prepare-protected-directory! (fs/file alias "new"))))
+    (let [failure (durability/prepare-protected-directory! (fs/file alias "new"))]
+      (is (= :anomalies.file-durability/unsafe-directory (anomaly/subtype failure)))
+      (is (= (str unsafe) (get-in failure [:anomaly/data :durability/path]))))
     (is (anomaly/anomaly? (durability/resolve-protected-directory (fs/file alias))))
     (is (= unsafe-mode (mode unsafe)))
     (is (empty? (fs/list-dir target)))))

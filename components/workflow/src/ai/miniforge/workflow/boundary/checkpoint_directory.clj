@@ -16,7 +16,10 @@
 
 (defn- ^{:stratum 0} checkpoint-path [directory result]
   (if (anomaly/anomaly? result)
-    (throw (IOException. ^String (messages/system :checkpoint/unsafe-directory {:path (str directory)})))
+    (let [unsafe? (= :anomalies.file-durability/unsafe-directory (anomaly/subtype result))
+          path (get-in result [:anomaly/data :durability/path] (str directory))
+          message-key (if unsafe? :checkpoint/unsafe-directory :checkpoint/directory-io-failed)]
+      (throw (IOException. ^String (messages/system message-key {:path path}))))
     result))
 
 ;------------------------------------------------------------------------------ Layer 1

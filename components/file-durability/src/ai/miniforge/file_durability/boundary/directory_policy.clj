@@ -4,7 +4,8 @@
 (ns ai.miniforge.file-durability.boundary.directory-policy
   "POSIX directory ownership and entry-replacement protection."
   (:require [ai.miniforge.file-durability.boundary :as boundary]
-            [babashka.fs :as fs])
+            [babashka.fs :as fs]
+            [slingshot.slingshot :refer [try+]])
   (:import [java.nio.file.attribute PosixFilePermission]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -26,8 +27,7 @@
   #{PosixFilePermission/GROUP_WRITE PosixFilePermission/OTHERS_WRITE})
 
 (defn ^{:stratum 0} filesystem-profile [path]
-  ;; This leaf component has no Slingshot dependency; only Java failures cross here.
-  (try
+  (try+
     (fs/posix-file-permissions path {:nofollow-links true})
     :posix
     (catch UnsupportedOperationException _ :native-defaults)))

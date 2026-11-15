@@ -2,5 +2,6 @@
  :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
         ai.miniforge/messages {:local/root "../messages"}
         metosin/malli {:mvn/version "0.16.4"}
-        babashka/fs {:mvn/version "0.5.34"}}
+        babashka/fs {:mvn/version "0.5.34"}
+        slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases {:test {:extra-paths ["test"] :extra-deps {}}}}
