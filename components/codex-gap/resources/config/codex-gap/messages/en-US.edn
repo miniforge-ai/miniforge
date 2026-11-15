@@ -6,6 +6,7 @@
   :report/match-rate        "{matched} of {attempted} attempted consultations matched a situation ({percent}%)"
   :report/match-none        "no consultation attempted"
   :report/match-unclassified-suffix ", {n} older skipped consultation(s) unclassified"
+  :report/match-incomplete-suffix ", INCOMPLETE: consultations unreadable in {n} run(s)"
   :report/routing           "routing: {misrouted} of {attributed} attributed misses landed on problems the entered board cannot reach"
   :report/anchoring         "anchoring: {problems} problems, {unanchored} unanchored, {speculative} speculative"
   :report/anchoring-unavailable "anchoring: codex unavailable at report time"

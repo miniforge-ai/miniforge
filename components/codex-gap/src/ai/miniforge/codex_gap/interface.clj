@@ -102,7 +102,8 @@
   (retrodict/retrodict entries codex-dir phase->situation))
 
 (defn ^{:stratum 0} build-report
-  "Ledger entries + {:skipped :run-count :anchoring :consultations} -> the T2 §4 gap
+  "Ledger entries + {:skipped :run-count :anchoring :consultations
+   :unreadable-consultations} -> the T2 §4 gap
    VECTOR. Every slot carries its member miss ids; no scalar rollup
    exists or may be derived."
   [entries opts]

@@ -668,7 +668,8 @@
                       entries {:skipped skipped
                                :run-count (count (filter (fn [r] (seq (:entries r))) reads))
                                :anchoring anchoring
-                               :consultations (vec (mapcat :entries consults))}))))}
+                               :consultations (vec (mapcat :entries consults))
+                               :unreadable-consultations (count (filter :codex-gap/anomaly consults))}))))}
 
   mcp-context-server
   {:doc     "Run MCP context server (JSON-RPC 2.0 over stdin/stdout)"

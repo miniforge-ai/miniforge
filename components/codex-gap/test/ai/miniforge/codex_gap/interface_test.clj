@@ -329,6 +329,14 @@
     (is (nil? (get-in r [:coverage :consultation-match :rate])))
     (is (re-find #"no consultation attempted" (gap/render-report r)))))
 
+(deftest ^{:stratum 1} unreadable-consultations-mark-the-rate-incomplete
+  (let [r (gap/build-report [] {:consultations [pinned] :unreadable-consultations 2})]
+    (is (= 2 (get-in r [:coverage :consultation-match :unreadable])))
+    (is (re-find #"INCOMPLETE: consultations unreadable in 2 run" (gap/render-report r))))
+  (testing "nothing attempted but files unreadable is still flagged"
+    (is (re-find #"no consultation attempted, INCOMPLETE"
+                 (gap/render-report (gap/build-report [] {:unreadable-consultations 1}))))))
+
 (deftest ^{:stratum 1} recorded-consultations-feed-the-coverage-rate
   ;; The bb codex-gap-report path: entries recorded per run, read back, reported.
   (let [dir (str (java.nio.file.Files/createTempDirectory

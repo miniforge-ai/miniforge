@@ -59,8 +59,10 @@
 
 (defn- ^{:stratum 0} consultation-match
   "§4.1.1 match rate. :rate is nil when nothing was attempted; a :skipped
-   entry with no recorded anomaly is :unclassified, never an attempt."
-  [consultations]
+   entry with no recorded anomaly is :unclassified, never an attempt.
+   :unreadable counts runs whose consultations could not be read, so a
+   rate over the rest is marked incomplete rather than passed as whole."
+  [consultations unreadable]
   (let [by-kind   (group-by consultation-kind consultations)
         matched   (count (get by-kind :matched))
         unmatched (get by-kind :unmatched [])
@@ -69,6 +71,7 @@
     {:matched      matched
      :attempted    attempted
      :unclassified (count (get by-kind :unclassified))
+     :unreadable   unreadable
      :rate         rate
      :unmatched    (mapv :consultation/situation unmatched)}))
 
@@ -76,7 +79,9 @@
   "Pure: ledger entries (+ total skipped-line count, run count, the runs'
    consultation entries) and optional anchoring stats -> the gap vector.
    Every slot carries its member miss ids."
-  [entries {:keys [skipped run-count anchoring consultations]}]
+  [entries {:keys [skipped run-count anchoring consultations
+                   unreadable-consultations]
+            :or   {unreadable-consultations 0}}]
   (let [by-bucket (group-by :miss/bucket entries)
         ids #(mapv :miss/id (get by-bucket % []))
         delivered (get by-bucket :unheeded [])
@@ -90,7 +95,8 @@
      :skipped (or skipped 0)
      :coverage {:covered (count (remove #(= :uncovered (:miss/bucket %)) entries))
                 :total (count entries)
-                :consultation-match (consultation-match consultations)
+                :consultation-match (consultation-match consultations
+                                                        unreadable-consultations)
                 :misses (ids :uncovered)}
      :routing {:misrouted (count (get by-bucket :misrouted []))
                :attributed attributed
@@ -114,7 +120,7 @@
                     :misses (ids :review-queue)}}))
 
 (defn- ^{:stratum 0} match-text
-  [{:keys [matched attempted unclassified rate]}]
+  [{:keys [matched attempted unclassified unreadable rate]}]
   (let [percent (some-> rate (* 100.0) Math/round)]
     (str (if rate
            (msg/t :report/match-rate {:matched   matched
@@ -123,6 +129,9 @@
            (msg/t :report/match-none))
          (if (pos? unclassified)
            (msg/t :report/match-unclassified-suffix {:n unclassified})
+           "")
+         (if (pos? unreadable)
+           (msg/t :report/match-incomplete-suffix {:n unreadable})
            ""))))
 
 (defn- ^{:stratum 0} members-line [bucket ids]
