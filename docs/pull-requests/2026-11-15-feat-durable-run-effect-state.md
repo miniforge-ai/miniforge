@@ -60,8 +60,8 @@ host's responsibility.
 
 ## Related issues/PRs
 
-PR #2528 defines the approved full-stop contract, with its audit-outage decision
-still pending. PR #2529 supplies the shared protected-directory policy.
+PR #2528 defines the approved full-stop contract, including containment-only
+audit-outage handling. Merged PR #2529 supplies the protected-directory policy.
 
 ## Checklist
 

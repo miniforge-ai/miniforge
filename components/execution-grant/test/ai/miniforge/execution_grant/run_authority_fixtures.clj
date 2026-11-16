@@ -6,7 +6,8 @@
             [ai.miniforge.execution-grant.interface :as grant]
             [ai.miniforge.execution-grant.messages :as msg]
             [ai.miniforge.file-durability.interface :as durability]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [clojure.test :refer [is]])
   (:import [java.nio.file Files]
            [java.nio.file.attribute FileAttribute]
            [java.time Instant]))
@@ -46,16 +47,31 @@
       (finally
         (doseq [file (reverse (file-seq root))] (.delete ^java.io.File file))))))
 
+(defn ^{:stratum 0} stop-before-registration! [root request write! directory record replace?]
+  (when (= :active (:authority/state record))
+    (is (= :full-stop (:authority/state (grant/full-stop-run-authority! root request)))))
+  (write! directory record replace?))
+
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} publish-then-fail [publish! & args]
+  (apply publish! args)
+  (io-failure))
+
 (defn ^{:stratum 1} issued-grant []
-  (grant/issue {:principal principal :effect-class :effect/pr-create
-                :scope {:effect/id (random-uuid)} :constraints {:constraint/max-count 1}
-                :delegable? false :expires-at (.plusSeconds now grant-lifetime-seconds)} now))
+  (let [expires-at (.plusSeconds now grant-lifetime-seconds)]
+    (grant/issue {:principal principal
+                 :effect-class :effect/pr-create
+                 :scope {:effect/id (random-uuid)}
+                 :constraints {:constraint/max-count 1}
+                 :delegable? false
+                 :expires-at expires-at} now)))
 
 (defn ^{:stratum 1} stop-request [id]
-  {:workflow-run/id id :intervention/id (random-uuid)
-   :authority/stopped-at now :authority/reason reason})
+  {:workflow-run/id id
+   :intervention/id (random-uuid)
+   :authority/stopped-at now
+   :authority/reason reason})
 
 ;------------------------------------------------------------------------------ Layer 2
 

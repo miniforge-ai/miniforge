@@ -30,7 +30,9 @@
       current (storage/confirm! directory current)
       (not reserved) (storage/failure id :unauthorized :run/not-registered)
       :else (publication/write-with-exception-handling!
-             directory (codec/normalize {:workflow-run/id id :authority/state :active :authority/created-at now}) false))))
+             directory (codec/normalize {:workflow-run/id id
+                                         :authority/state :active
+                                         :authority/created-at now}) false))))
 
 (defn- ^{:stratum 0} stop-at! [request directory]
   (let [reserved (storage/reserve-with-exception-handling! directory (:workflow-run/id request))

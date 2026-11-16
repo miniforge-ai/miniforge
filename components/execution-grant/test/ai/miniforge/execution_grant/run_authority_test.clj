@@ -59,7 +59,7 @@
   (let [id (random-uuid)
         publish! durability/publish-bytes!]
     (grant/register-run-authority! root id fixture/now)
-    (with-redefs [durability/publish-bytes! (fn [& args] (apply publish! args) (fixture/io-failure))]
+    (with-redefs [durability/publish-bytes! (partial fixture/publish-then-fail publish!)]
       (is (anomaly/anomaly? (grant/full-stop-run-authority! root (fixture/stop-request id)))))
     (is (= :full-stop (:authority/state (grant/read-run-authority root id))))
     (is (anomaly/anomaly? (grant/register-run-authority! root id fixture/now)))))
@@ -86,10 +86,7 @@
         request (fixture/stop-request id)
         write! publication/write-with-exception-handling!]
     (with-redefs [publication/write-with-exception-handling!
-                  (fn [directory record replace?]
-                    (when (= :active (:authority/state record))
-                      (is (= :full-stop (:authority/state (grant/full-stop-run-authority! root request)))))
-                    (write! directory record replace?))]
+                  (partial fixture/stop-before-registration! root request write!)]
       (is (anomaly/anomaly? (grant/register-run-authority! root id fixture/now))))
     (is (= :full-stop (:authority/state (grant/read-run-authority root id))))))
 
