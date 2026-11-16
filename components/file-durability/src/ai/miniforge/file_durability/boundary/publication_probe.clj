@@ -7,6 +7,7 @@
             [ai.miniforge.file-durability.boundary.atomic-publication :as atomic]
             [ai.miniforge.file-durability.io :as file-io]
             [ai.miniforge.file-durability.boundary.directory-policy :as directory-policy]
+            [ai.miniforge.file-durability.boundary.macos-acl :as macos-acl]
             [babashka.fs :as fs]
             [slingshot.slingshot :refer [try+]])
   (:import [java.io File]
@@ -69,6 +70,7 @@
 (defn ^{:stratum 2} check! [^Path directory]
   (when-not (= :posix (directory-policy/filesystem-profile directory))
     (boundary/refuse-directory! directory))
+  (macos-acl/check! directory)
   (let [work (fs/create-temp-dir {:dir directory :prefix probe-prefix
                                   :posix-file-permissions directory-policy/private-permissions})
         candidate (.toFile (fs/path work candidate-name))

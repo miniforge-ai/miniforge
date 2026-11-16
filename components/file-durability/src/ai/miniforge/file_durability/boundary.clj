@@ -24,6 +24,12 @@
   (anomaly/anomaly :invalid-input (t :file/invalid-input)
                    {:durability/operation operation}))
 
+(defn ^{:stratum 1} refuse-acl! [path]
+  (let [location (str path)]
+    (throw+ (anomaly/sub-anomaly :unauthorized :anomalies.file-durability/unsafe-acl
+                                (t :file/unsafe-acl {:path location})
+                                {:durability/path location}))))
+
 (defn ^{:stratum 1} unverified-publication [path]
   (let [location (str path)]
     (anomaly/anomaly :fault (t :file/unverified-publication {:path location})
