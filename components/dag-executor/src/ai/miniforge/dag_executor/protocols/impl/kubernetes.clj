@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-executor.protocols.impl.kubernetes
   "Kubernetes executor implementation.
 
@@ -29,6 +28,8 @@
    The canonical job configuration is documented in:
    resources/executor/kubernetes/job-template.yaml"
   (:require
+   [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
+   [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources :as resources]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
@@ -37,75 +38,22 @@
    [clojure.string :as str]
    [cheshire.core :as json]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Configuration
 ;; ============================================================================
+(def ^{:stratum 0} default-namespace "default")
 
-(def default-namespace "default")
-(def default-image "alpine:latest")
-(def default-workdir "/workspace")
-(def pod-ready-timeout-ms 120000)
-(def pod-ready-poll-interval-ms 2000)
-
-;; Default resource limits (matches job-template.yaml)
-(def default-resources
-  {:limits {:memory "512Mi" :cpu "500m"}
-   :requests {:memory "256Mi" :cpu "100m"}})
+(def ^{:stratum 0} default-image "alpine:latest")
 
 ;; Resource path for job template (for documentation/reference)
-(def job-template-resource "executor/kubernetes/job-template.yaml")
-
-;; ============================================================================
-;; Helper Functions
-;; ============================================================================
-
-(defn kubectl-cmd
-  "Build kubectl command with optional custom path."
-  [kubectl-path & args]
-  (apply vector (or kubectl-path "kubectl") args))
-
-(defn run-kubectl
-  "Execute a kubectl command and return the result."
-  [kubectl-path & args]
-  (try
-    (apply shell/sh (apply kubectl-cmd kubectl-path args))
-    (catch Exception e
-      {:exit 1 :err (.getMessage e) :out ""})))
-
-(defn build-env-vars
-  "Build K8s env var specs from a map."
-  [env-map]
-  (mapv (fn [[k v]] {:name (name k) :value (str v)}) env-map))
-
-(defn build-resource-spec
-  "Build K8s resource limits/requests spec.
-   Merges provided resources with defaults."
-  [resources]
-  (let [merged (merge-with merge default-resources resources)]
-    {:limits (cond-> {}
-               (get-in merged [:limits :memory])
-               (assoc :memory (get-in merged [:limits :memory]))
-               (get-in merged [:limits :cpu])
-               (assoc :cpu (str (get-in merged [:limits :cpu]))))
-     :requests (cond-> {}
-                 (get-in merged [:requests :memory])
-                 (assoc :memory (get-in merged [:requests :memory]))
-                 (get-in merged [:requests :cpu])
-                 (assoc :cpu (str (get-in merged [:requests :cpu]))))}))
-
-(defn load-job-template
-  "Load the job template YAML from resources.
-   Returns the template string or nil if not found.
-   Useful for documentation and debugging."
-  []
-  (when-let [resource (io/resource job-template-resource)]
-    (slurp resource)))
+(def ^{:stratum 0} job-template-resource "executor/kubernetes/job-template.yaml")
 
 ;; ============================================================================
 ;; Job Spec Generation
 ;; ============================================================================
-
-(defn build-job-spec
+(defn ^{:stratum 0} build-job-spec
   "Build a Kubernetes Job spec for task execution.
 
    Creates a Job with a single container that runs 'sleep infinity' to keep
@@ -137,10 +85,10 @@
                   [{:name "task"
                     :image image
                     :imagePullPolicy "IfNotPresent"
-                    :workingDir (or workdir default-workdir)
+                    :workingDir (or workdir resources/default-workdir)
                     :command ["sh" "-c" "trap 'exit 0' TERM; sleep infinity & wait"]
-                    :env (build-env-vars env-map)
-                    :resources (build-resource-spec resources)
+                    :env (resources/build-env-vars env-map)
+                    :resources (resources/build-resource-spec resources)
                     :securityContext {:runAsNonRoot false
                                       :readOnlyRootFilesystem false
                                       :allowPrivilegeEscalation false
@@ -153,18 +101,17 @@
 ;; ============================================================================
 ;; Kubernetes Operations
 ;; ============================================================================
-
-(defn cluster-info
+(defn ^{:stratum 0} cluster-info
   "Get Kubernetes cluster info."
   [kubectl-path]
-  (let [result (run-kubectl kubectl-path "cluster-info" "--request-timeout=5s")]
+  (let [result (client/run-kubectl kubectl-path "cluster-info" "--request-timeout=5s")]
     (if (zero? (:exit result))
       {:available? true
        :cluster-info (subs (:out result) 0 (min 200 (count (:out result))))}
       {:available? false
        :reason (:err result)})))
 
-(defn apply-job
+(defn ^{:stratum 0} apply-job
   "Create a Job from a spec using kubectl apply."
   [kubectl-path namespace job-spec]
   (let [spec-json (json/generate-string job-spec)
@@ -175,49 +122,7 @@
       (result/ok {:applied true})
       (result/err :job-apply-failed (:err result)))))
 
-(defn get-pod-for-job
-  "Get the pod name for a job."
-  [kubectl-path namespace job-name]
-  (let [result (run-kubectl kubectl-path
-                            "get" "pods" "-n" namespace
-                            "-l" (str "job-name=" job-name)
-                            "-o" "jsonpath={.items[0].metadata.name}")]
-    (if (and (zero? (:exit result)) (not (str/blank? (:out result))))
-      (result/ok {:pod-name (str/trim (:out result))})
-      (result/err :pod-not-found (get result :err "No pod found for job")))))
-
-(defn wait-for-pod-ready
-  "Wait for pod to be in Running state with containers ready."
-  [kubectl-path namespace job-name timeout-ms]
-  (let [start-time (System/currentTimeMillis)
-        deadline (+ start-time timeout-ms)]
-    (loop []
-      (if (> (System/currentTimeMillis) deadline)
-        (result/err :pod-timeout "Timed out waiting for pod to be ready")
-        (let [pod-result (get-pod-for-job kubectl-path namespace job-name)]
-          (if (result/err? pod-result)
-            ;; Pod not created yet, wait and retry
-            (do
-              (Thread/sleep pod-ready-poll-interval-ms)
-              (recur))
-            ;; Check pod status
-            (let [pod-name (:pod-name (:data pod-result))
-                  status-result (run-kubectl kubectl-path
-                                             "get" "pod" pod-name "-n" namespace
-                                             "-o" "jsonpath={.status.phase}")]
-              (cond
-                (= "Running" (str/trim (:out status-result)))
-                (result/ok {:pod-name pod-name :status :running})
-
-                (contains? #{"Failed" "Succeeded"} (str/trim (:out status-result)))
-                (result/err :pod-failed (str "Pod ended with status: " (:out status-result)))
-
-                :else
-                (do
-                  (Thread/sleep pod-ready-poll-interval-ms)
-                  (recur))))))))))
-
-(defn exec-in-pod
+(defn ^{:stratum 0} exec-in-pod
   "Execute a command in a pod."
   [kubectl-path namespace pod-name command _opts]
   (let [cmd-args (if (string? command)
@@ -226,43 +131,43 @@
         full-args (concat ["exec" pod-name "-n" namespace "--"]
                           cmd-args)
         start-time (System/currentTimeMillis)
-        result (apply run-kubectl kubectl-path full-args)]
+        result (apply client/run-kubectl kubectl-path full-args)]
     (result/ok {:exit-code (:exit result)
                 :stdout (:out result)
                 :stderr (:err result)
                 :duration-ms (- (System/currentTimeMillis) start-time)})))
 
-(defn copy-to-pod
+(defn ^{:stratum 0} copy-to-pod
   "Copy files from host to pod."
   [kubectl-path namespace pod-name local-path remote-path]
-  (let [result (run-kubectl kubectl-path "cp" local-path
+  (let [result (client/run-kubectl kubectl-path "cp" local-path
                             (str namespace "/" pod-name ":" remote-path))]
     (if (zero? (:exit result))
       (result/ok {:copied-bytes -1})
       (result/err :copy-failed (:err result)))))
 
-(defn copy-from-pod
+(defn ^{:stratum 0} copy-from-pod
   "Copy files from pod to host."
   [kubectl-path namespace pod-name remote-path local-path]
-  (let [result (run-kubectl kubectl-path "cp"
+  (let [result (client/run-kubectl kubectl-path "cp"
                             (str namespace "/" pod-name ":" remote-path)
                             local-path)]
     (if (zero? (:exit result))
       (result/ok {:copied-bytes -1})
       (result/err :copy-failed (:err result)))))
 
-(defn delete-job
+(defn ^{:stratum 0} delete-job
   "Delete a job and its pods."
   [kubectl-path namespace job-name]
-  (let [result (run-kubectl kubectl-path
+  (let [result (client/run-kubectl kubectl-path
                             "delete" "job" job-name "-n" namespace
                             "--grace-period=5")]
     (result/ok {:released? (zero? (:exit result))})))
 
-(defn get-job-status
+(defn ^{:stratum 0} get-job-status
   "Get the status of a job."
   [kubectl-path namespace job-name]
-  (let [result (run-kubectl kubectl-path
+  (let [result (client/run-kubectl kubectl-path
                             "get" "job" job-name "-n" namespace
                             "-o" "jsonpath={.status.conditions[0].type}")]
     (if (zero? (:exit result))
@@ -274,11 +179,23 @@
                   :raw (:out result)})
       (result/ok {:status :unknown :error (:err result)}))))
 
+;------------------------------------------------------------------------------ Layer 1
+
+;; ============================================================================
+;; Helper Functions
+;; ============================================================================
+(defn ^{:stratum 1} load-job-template
+  "Load the job template YAML from resources.
+   Returns the template string or nil if not found.
+   Useful for documentation and debugging."
+  []
+  (when-let [resource (io/resource job-template-resource)]
+    (slurp resource)))
+
 ;; ============================================================================
 ;; KubernetesExecutor Record
 ;; ============================================================================
-
-(defrecord KubernetesExecutor [config namespace image kubectl-path
+(defrecord ^{:stratum 1} KubernetesExecutor [config namespace image kubectl-path
                                ;; Runtime state: job-name -> pod-name mapping
                                pod-cache]
   proto/TaskExecutor
@@ -301,8 +218,8 @@
           apply-result (apply-job kubectl-path namespace job-spec)]
       (if (result/err? apply-result)
         apply-result
-        (let [wait-result (wait-for-pod-ready kubectl-path namespace job-name
-                                              pod-ready-timeout-ms)]
+        (let [wait-result (client/wait-for-pod-ready kubectl-path namespace job-name
+                                                   client/pod-ready-timeout-ms)]
           (if (result/err? wait-result)
             (do
               (delete-job kubectl-path namespace job-name)
@@ -321,7 +238,7 @@
       (if-let [pod-name (get @pod-cache environment-id)]
         (exec-in-pod kubectl-path namespace pod-name command opts)
         ;; Pod name not in cache, try to look it up
-        (let [pod-result (get-pod-for-job kubectl-path namespace environment-id)]
+        (let [pod-result (client/get-pod-for-job kubectl-path namespace environment-id)]
           (if (result/ok? pod-result)
             (let [pod-name (:pod-name (:data pod-result))]
               (swap! pod-cache assoc environment-id pod-name)
@@ -372,11 +289,12 @@
                                           {:workdir (get opts :workdir "/workspace")}))]
       (workspace/git-restore! exec! opts))))
 
+;------------------------------------------------------------------------------ Layer 2
+
 ;; ============================================================================
 ;; Factory
 ;; ============================================================================
-
-(defn create-kubernetes-executor
+(defn ^{:stratum 2} create-kubernetes-executor
   "Create a Kubernetes executor.
 
    Config:
