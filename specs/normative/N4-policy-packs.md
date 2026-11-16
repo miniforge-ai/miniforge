@@ -796,9 +796,9 @@ were never reached, so a partial gate is distinguishable from a complete one.
 #### 3.5.3 Isolation
 
 Check functions run with the privileges of the workflow. Implementations
-SHOULD restrict execution of rules from packs below `:trusted`. This context
-SHOULD deny network access, filesystem writes outside a scratch path, and ability
-to invoke connectors or tools.
+SHOULD execute rules from packs below `:trusted` in a restricted context.
+That context denies network access, filesystem writes outside a scratch path,
+and the ability to invoke connectors or tools.
 
 §3.1.1 already requires check functions to be pure and side-effect free, so a
 conformant rule loses nothing under these restrictions. A rule that breaks when
