@@ -19,17 +19,18 @@ not establish their operation on the selected store.
 ## Changes in detail
 
 Foundation layer; depends on #2529, merged. The internal API (surface class 1)
-reuses the existing forcing primitives. It verifies create-only collision
-refusal, successful replacement, and expected bytes. It never creates a
+reuses the existing forcing primitives. It checks collision refusal and
+preservation of the original destination before testing replacement. It never creates a
 missing authority root or changes existing records.
 
 ## Testing plan
 
 Run file-durability suites in both JVM products, Babashka source, and a fresh
 packaged CLI. Inject omitted replacement and check that the positive test
-fails an assertion. Also exercise directory sync failure and link collisions.
+fails an assertion. Exercise directory sync failure and both silent and
+destructive link collisions.
 
-Local results: 17 tests and 90 assertions passed in each of the four runs.
+Local results: 18 tests and 92 assertions passed in each of the four runs.
 The omitted-replacement fault failed an assertion in each run, without
 runtime errors. Strict lint, namespace depth, Polylith, and classpaths passed.
 

@@ -10,7 +10,7 @@
             [babashka.fs :as fs]
             [clojure.test :refer [deftest is]])
   (:import [java.io IOException]
-           [java.nio.file Files]))
+           [java.nio.file FileAlreadyExistsException Files]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -20,6 +20,11 @@
 
 (defn- ^{:stratum 0} allow-collision! [link! candidate destination]
   (Files/deleteIfExists (.toPath ^java.io.File destination))
+  (link! candidate destination))
+
+(defn- ^{:stratum 0} destructive-collision! [link! candidate destination]
+  (when (Files/deleteIfExists (.toPath ^java.io.File destination))
+    (throw (FileAlreadyExistsException. (str destination))))
   (link! candidate destination))
 
 (defn- ^{:stratum 0} probe-and-check-cleanup! [root]
@@ -60,6 +65,12 @@
   (support/with-root
    (fn [root]
      (with-redefs [atomic/link! (partial allow-collision! atomic/link!)]
+       (is (anomaly/anomaly? (probe-and-check-cleanup! root)))))))
+
+(deftest ^{:stratum 1} a-collision-must-preserve-the-existing-destination
+  (support/with-root
+   (fn [root]
+     (with-redefs [atomic/link! (partial destructive-collision! atomic/link!)]
        (is (anomaly/anomaly? (probe-and-check-cleanup! root)))))))
 
 (comment (clojure.test/run-tests 'ai.miniforge.file-durability.publication-probe-test))

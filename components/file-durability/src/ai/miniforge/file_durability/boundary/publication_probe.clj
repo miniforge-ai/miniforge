@@ -57,8 +57,8 @@
     (file-io/write-new-text! candidate initial)
     (atomic/link! candidate destination)
     (file-io/confirm! destination)
-    (and (bytes-match? destination initial)
-         (refuses-relink? candidate destination)
+    (and (refuses-relink? candidate destination)
+         (bytes-match? destination initial)
          (replace-candidate! candidate destination replacement)
          (bytes-match? destination replacement))))
 
