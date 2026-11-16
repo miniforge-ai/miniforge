@@ -7,6 +7,7 @@
             [ai.miniforge.file-durability.boundary :as boundary]
             [ai.miniforge.file-durability.boundary.local-store :as store]
             [ai.miniforge.file-durability.boundary.lock-probe :as lock]
+            [ai.miniforge.file-durability.boundary.macos-acl :as macos-acl]
             [ai.miniforge.file-durability.boundary.protected-directory :as directory]
             [ai.miniforge.file-durability.boundary.publication-probe :as publication]
             [ai.miniforge.file-durability.boundary.root-identity :as identity]))
@@ -19,7 +20,8 @@
   (let [expected (:storage/root observation)
         actual (directory/existing! expected)
         ids (select-keys observation [:storage/device-number :storage/inode])]
-    (when (and (= expected actual) (= ids (identity/read-identity actual))) actual)))
+    (when (and (= expected actual) (= ids (identity/read-identity actual)))
+      (macos-acl/check! actual))))
 
 (defn ^{:stratum 0} qualify! [root profile peer]
   (anomaly/let-ok [observation (store/observe profile root)
@@ -27,7 +29,8 @@
     (if (and (= :publication-verified published) (lock/check! (:storage/root observation) peer))
       (anomaly/let-ok [current (store/observe profile root)]
         (if (= observation current)
-          (QualifiedRoot. observation)
+          (do (macos-acl/check! (:storage/root observation))
+              (QualifiedRoot. observation))
           (boundary/unqualified-store root profile)))
       (boundary/unqualified-store root profile))))
 

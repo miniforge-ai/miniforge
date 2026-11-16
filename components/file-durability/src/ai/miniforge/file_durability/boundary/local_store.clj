@@ -8,7 +8,8 @@
             [ai.miniforge.file-durability.boundary.linux-store :as linux]
             [ai.miniforge.file-durability.boundary.mac-store :as mac]
             [ai.miniforge.file-durability.boundary.protected-directory :as directory]
-            [ai.miniforge.file-durability.boundary.root-identity :as identity]))
+            [ai.miniforge.file-durability.boundary.root-identity :as identity])
+  (:import [java.io File]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -26,10 +27,11 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} observe [profile root]
+(defn ^{:stratum 1} observe [profile ^File root]
   (if-let [native-probe (get observers [profile (System/getProperty "os.name")])]
     (let [path (directory/existing! root)
-          evidence (when (= :posix (permissions/filesystem-profile path))
+          evidence (when (and (= path (.toPath root))
+                              (= :posix (permissions/filesystem-profile path)))
                      (observe-root native-probe path))]
       (or evidence (boundary/unqualified-store root profile)))
     (boundary/unqualified-store root profile)))

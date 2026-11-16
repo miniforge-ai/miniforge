@@ -27,19 +27,22 @@ The approved boundary needs implementation and evidence, not an approval bypass.
 
 ## Changes in detail
 
-Foundation layer in file-durability; publication primitives are in #2532.
+Foundation layer in file-durability; publication and ACL probes are in
+PRs #2532 and #2533.
 The internal API (surface class 1) requires a supported profile, an existing
-protected root, and the other installed runtime's absolute launcher and classpath.
+canonical protected root, and the other runtime's absolute launcher and classpath.
 There is no fallback based on POSIX permissions alone.
 
 Linux accepts an unambiguous writable ext4 or XFS mount with a non-virtual block
-device and no known unsafe flags. macOS accepts writable APFS with an observed
-internal Apple Fabric backing device. Unknown or unsupported topology refuses.
-The host must configure storage retained across restarts.
+device and no known unsafe flags. macOS requires writable APFS, enabled volume
+ownership, verified non-granting ACLs, and internal Apple Fabric backing.
+Unknown or unsupported topology refuses. The host must configure storage
+retained across restarts; workloads must not control the volume or its ownership.
 
 Both runtimes must verify forced publication on the root. The probe verifies
 mutual lock exclusion in both directions, then reacquires the lock after clean
 peer exit. The opaque handle binds to one root and its device and inode.
+Resolving the handle and attaching a direct child recheck macOS ACLs.
 The kernel adoption is separate. No broker or effect authority is added.
 
 ## Testing plan
@@ -49,8 +52,9 @@ ambiguous mount data, no peer proof, and root replacement. Test actual
 JVM/Babashka peers and forced publication on disposable files. Bound native
 storage metadata to a shared process/read deadline and a fixed output limit.
 
-Local macOS proof passed in JVM, Babashka source, and fresh packaged Babashka.
-Each run passed 12 tests and 28 assertions plus positive APFS qualification.
+Local macOS proof passed in both JVM products, Babashka source, and the
+fresh package. Each run passed 17 tests and 44 assertions. Each also
+qualified a disposable APFS root with real JVM/Babashka lock peers.
 The Linux mount policy has fixture coverage. This is not power-loss certification.
 
 ## Deployment plan
@@ -66,5 +70,5 @@ PR #2530 consumes this prerequisite. PR #2528 owns the full-stop contract.
 ## Checklist
 
 - [ ] Implementation and adversarial standards pass complete.
-- [ ] Serial qualification and packaged proofs complete.
+- [x] Serial qualification and packaged proofs complete.
 - [ ] Current-head CI and full review settled.

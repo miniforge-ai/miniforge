@@ -4,6 +4,7 @@
 (ns ai.miniforge.file-durability.boundary.attached-directory
   "Prove a canonical protected child remains on its parent's device."
   (:require [ai.miniforge.file-durability.boundary :as boundary]
+            [ai.miniforge.file-durability.boundary.macos-acl :as macos-acl]
             [ai.miniforge.file-durability.boundary.protected-directory :as directory]
             [ai.miniforge.file-durability.boundary.root-identity :as identity])
   (:import [java.io File]
@@ -17,5 +18,5 @@
     (if (and (= anchor (.toPath parent) (.getParent attached))
              (= attached (.toPath child))
              (identity/same-device? anchor attached))
-      attached
+      (macos-acl/check! attached)
       (boundary/unqualified-store child :storage/attached-directory))))

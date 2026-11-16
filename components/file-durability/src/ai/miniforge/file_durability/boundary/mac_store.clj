@@ -58,6 +58,7 @@
     (when (and (= identifier (:DeviceIdentifier volume))
                (= "APFS" (:FilesystemName volume))
                (true? (:WritableVolume volume))
+               (true? (:GlobalPermissionsEnabled volume))
                (false? (:APFSSnapshot volume))
                (string? mount) (fs/absolute? mount)
                (identity/same-device? root (fs/real-path mount))

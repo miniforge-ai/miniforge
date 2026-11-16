@@ -5,6 +5,8 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.file-durability.boundary.local-store :as store]
             [ai.miniforge.file-durability.boundary.lock-probe :as locks]
+            [ai.miniforge.file-durability.boundary.macos-acl :as acl]
+            [ai.miniforge.file-durability.boundary.native-probe :as probe]
             [ai.miniforge.file-durability.boundary.publication-probe :as publication]
             [ai.miniforge.file-durability.boundary.root-identity :as identity]
             [ai.miniforge.file-durability.interface :as durability]
@@ -66,7 +68,31 @@
            (durability/prepare-protected-directory! root)
            (is (anomaly/anomaly? (durability/resolve-qualified-root handle)))))))))
 
+(deftest ^{:stratum 0} a-handle-and-child-must-retain-verifiable-access-controls
+  (support/with-root
+   (fn [root]
+     (when (support/posix? root)
+       (let [parent (fs/file (fs/real-path root))
+             child (fs/file parent "child")
+             handle (fixtures/qualify! parent)]
+         (durability/prepare-protected-directory! child)
+         (with-redefs [acl/macos? (constantly true) probe/read-output (constantly nil)]
+           (is (= :unauthorized (:anomaly/type (durability/resolve-qualified-root handle))))
+           (is (= :unauthorized (:anomaly/type (durability/verify-attached-directory parent child))))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} a-storage-alias-is-rejected-before-native-observation
+  (support/with-root
+   (fn [root]
+     (when (support/posix? root)
+       (let [parent (fs/file (fs/real-path root))
+             child (fs/file parent "child")
+             alias (fs/file parent "alias")]
+         (durability/prepare-protected-directory! child)
+         (fs/create-sym-link alias child)
+         (with-redefs [store/observers {[fixtures/profile (System/getProperty "os.name")] reject-probe!}]
+           (is (anomaly/anomaly? (durability/qualify-local-root! alias fixtures/profile (fixtures/peer parent))))))))))
 
 (deftest ^{:stratum 1} unsupported-store-does-not-start-a-publication-or-lock-probe
   (support/with-root
