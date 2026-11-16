@@ -54,6 +54,11 @@ checkpoint/control-surface integration in separate bounded PRs. No live actions.
 - #2499: separately authorized OPSV recovery; conditional human approval.
 - #2500 (merged): child stop retains registration, not an all-writes stop.
 
+The owner read the pinned rules in full. Review checkouts can use the immutable
+[agent guide](https://github.com/miniforge-ai/miniforge-standards/blob/72f451d3d7e0ad82079610bec61be0399a2b7117/agents.md)
+and [catalog](https://github.com/miniforge-ai/miniforge-standards/blob/72f451d3d7e0ad82079610bec61be0399a2b7117/index.mdc).
+Repository `agents.md` supplies absent shared merge rule 723.
+
 ## Checklist
 
 - [x] Cross-contract trace and standards review complete.
