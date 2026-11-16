@@ -7,6 +7,7 @@
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation :as creation]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources :as resources]
+            [ai.miniforge.dag-executor.protocols.impl.kubernetes-pod-observation :as observation]
             [ai.miniforge.dag-executor.result :as result]
             [cheshire.core :as json]
             [clojure.java.shell :as shell]
@@ -22,6 +23,9 @@
 
 (defn- ^{:stratum 0} readiness [& _]
   (result/ok {:pod-name "mock-capsule-pod"}))
+
+(defn- ^{:stratum 0} observed [& _]
+  (result/ok {:pod-name "mock-capsule-pod" :pod-uid "observed-pod-uid"}))
 
 (defn- ^{:stratum 0} reject-io! [& _] (throw (AssertionError.)))
 
@@ -56,6 +60,7 @@
                                    (get-in (requested args) [:spec :activeDeadlineSeconds])))
                             (response args identity))
                   client/wait-for-pod-ready readiness
+                  observation/verify! observed
                   kubernetes/delete-job reject-io!]
       (let [acquired (executor/acquire-environment! instance (random-uuid) {})
             metadata (get-in acquired [:data :metadata])]
@@ -63,7 +68,8 @@
         (is (= 1 @submitted))
         (is (= (:uid identity-metadata) (:job-uid metadata)))
         (is (= (:resourceVersion identity-metadata) (:job-creation-resource-version metadata)))
-        (is (= "capsules" (:namespace metadata)))))))
+        (is (= "capsules" (:namespace metadata)))
+        (is (= "observed-pod-uid" (:pod-uid metadata)))))))
 
 (deftest ^{:stratum 2} uncertain-job-creation-is-never-adopted-or-cleaned-up-by-name
   (let [instance (kubernetes/create-kubernetes-executor {:namespace "capsules"})
@@ -73,11 +79,24 @@
                    #(assoc-in % [:metadata :namespace] "another-namespace")
                    #(assoc-in % [:spec :activeDeadlineSeconds] 7200)
                    #(assoc % :kind "Pod")]]
-    (with-redefs [client/wait-for-pod-ready reject-io! kubernetes/delete-job reject-io!]
+    (with-redefs [client/wait-for-pod-ready reject-io!
+                  observation/verify! reject-io!
+                  kubernetes/delete-job reject-io!]
       (doseq [reply (concat (map (fn [altered] (fn [& args] (response args altered))) mutations)
                             [(constantly {:exit 1 :err "AlreadyExists"})
                              (constantly {:exit 0 :out "not-json"})])]
         (with-redefs [shell/sh reply]
           (is (result/err? (executor/acquire-environment! instance (random-uuid) {}))))))))
+
+(deftest ^{:stratum 2} failed-pod-proof-does-not-delete-by-reusable-job-name
+  (let [instance (kubernetes/create-kubernetes-executor {:namespace "capsules"})
+        refused (result/err :pod-owner-unconfirmed "fixture refusal")]
+    (doseq [[wait! verify!] [[readiness (constantly refused)]
+                            [(constantly refused) reject-io!]]]
+      (with-redefs [shell/sh (fn [& args] (response args identity))
+                    client/wait-for-pod-ready wait!
+                    observation/verify! verify!
+                    kubernetes/delete-job reject-io!]
+        (is (= refused (executor/acquire-environment! instance (random-uuid) {})))))))
 
 (comment (clojure.test/run-tests 'ai.miniforge.dag-executor.kubernetes-job-creation-test))

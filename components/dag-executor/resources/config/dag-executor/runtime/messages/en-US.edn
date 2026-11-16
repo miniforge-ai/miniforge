@@ -12,6 +12,7 @@
   :selector/executable-requires-kind  "An :executable/:docker-path override requires an explicit :runtime-kind."
 
   :kubernetes/job-creation-unconfirmed "Kubernetes did not confirm creation of the exact Job. Reconcile its identity before retrying."
+  :kubernetes/pod-owner-unconfirmed "Kubernetes did not confirm that the candidate Pod belongs to the Job created for this capsule."
   :kubernetes/pod-not-found "No Pod was found for the Job."
   :kubernetes/pod-timeout "Timed out waiting for the Pod to become ready."
   :kubernetes/pod-ended "The Pod ended with status {phase}."

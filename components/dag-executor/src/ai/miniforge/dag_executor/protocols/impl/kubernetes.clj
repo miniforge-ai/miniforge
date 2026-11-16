@@ -31,6 +31,7 @@
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation :as job-creation]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources :as resources]
+   [ai.miniforge.dag-executor.protocols.impl.kubernetes-pod-observation :as observation]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
@@ -204,21 +205,18 @@
                                    (:env env-config)
                                    (:resources env-config)
                                    task-id)
-          creation (job-creation/create! kubectl-path job-spec)]
-      (if (result/err? creation)
-        creation
-        (let [wait-result (client/wait-for-pod-ready kubectl-path namespace job-name
-                                                   client/pod-ready-timeout-ms)]
-          (if (result/err? wait-result)
-            (do
-              (delete-job kubectl-path namespace job-name)
-              wait-result)
-            (let [pod-name (:pod-name (:data wait-result))]
-              (swap! pod-cache assoc job-name pod-name)
-              (result/ok (proto/create-environment-record
-                          job-name :kubernetes task-id workdir
-                          (assoc env-config
-                                 :metadata (assoc (:data creation) :pod-name pod-name))))))))))
+          creation (job-creation/create! kubectl-path job-spec)
+          observed (result/and-then creation
+                                    (fn [job]
+                                      (result/and-then
+                                       (client/wait-for-pod-ready kubectl-path namespace job-name
+                                                                  client/pod-ready-timeout-ms)
+                                       (partial observation/verify! kubectl-path job))))]
+      (result/map-ok observed
+                     (fn [pod]
+                       (swap! pod-cache assoc job-name (:pod-name pod))
+                       (proto/create-environment-record job-name :kubernetes task-id workdir
+                                                        (assoc env-config :metadata (merge (:data creation) pod)))))))
 
   (execute! [_this environment-id command opts]
     (try
