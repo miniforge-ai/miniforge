@@ -87,8 +87,8 @@
         write! publication/write-with-exception-handling!]
     (with-redefs [publication/write-with-exception-handling!
                   (partial fixture/stop-before-registration! root request write!)]
-      (is (anomaly/anomaly? (grant/register-run-authority! root id fixture/now))))
-    (is (= :full-stop (:authority/state (grant/read-run-authority root id))))))
+      (is (= :active (:authority/state (grant/register-run-authority! root id fixture/now)))))
+    (is (= :full-stop (:authority/state (grant/full-stop-run-authority! root request))))))
 
 (defn- ^{:stratum 0} verify-parallel-admission [root]
   (let [id (random-uuid)
@@ -97,7 +97,8 @@
         stopped (future @ready (grant/full-stop-run-authority! root (fixture/stop-request id)))]
     (deliver ready true)
     (is (map? (deref registration fixture/wait-ms nil)))
-    (is (= :full-stop (:authority/state (deref stopped fixture/wait-ms nil))))
+    (is (map? (deref stopped fixture/wait-ms nil)))
+    (is (= :full-stop (:authority/state (grant/full-stop-run-authority! root (fixture/stop-request id)))))
     (is (= :full-stop (:authority/state (grant/read-run-authority root id))))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -147,7 +148,7 @@
 
 (deftest ^{:stratum 1} linked-state-cannot-be-used-or-overwritten (fixture/call-with-root verify-linked-state))
 
-(deftest ^{:stratum 1} full-stop-between-read-and-create-wins (fixture/call-with-root verify-admission-race))
+(deftest ^{:stratum 1} competing-stop-is-refused-during-admission (fixture/call-with-root verify-admission-race))
 
 (deftest ^{:stratum 1} simultaneous-stop-and-admission-cannot-reopen (fixture/call-with-root verify-parallel-admission))
 

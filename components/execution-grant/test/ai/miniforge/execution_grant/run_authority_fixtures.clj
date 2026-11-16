@@ -49,7 +49,7 @@
 
 (defn ^{:stratum 0} stop-before-registration! [root request write! directory record replace?]
   (when (= :active (:authority/state record))
-    (is (= :full-stop (:authority/state (grant/full-stop-run-authority! root request)))))
+    (is (anomaly/anomaly? (grant/full-stop-run-authority! root request))))
   (write! directory record replace?))
 
 ;------------------------------------------------------------------------------ Layer 1

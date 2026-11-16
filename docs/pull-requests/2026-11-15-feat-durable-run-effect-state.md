@@ -41,12 +41,18 @@ Inject faults in stopped registration, reservation retention, record identity,
 and actual publication; require assertion failures without test errors.
 Run strict lint, inferred namespace-depth checks, workspace and classpath gates.
 
-Validation completed: both JVM products passed 98 tests and 753 assertions.
-Babashka source overlays and the isolated fresh package each passed 12 tests
-and 46 assertions, including existing grant-record compatibility. Four safety
-faults produced assertion-only failures in every run. Strict lint had zero
-warnings/errors, all ten changed namespaces inferred at most three strata,
-and workspace and task-classpath checks passed.
+Review fixes add cross-process transition serialization, protected file contents,
+reservation-before-publication forcing, and lossless printer-independent UTF-8.
+Busy transitions return conflict; retry confirms the first acknowledged stop.
+Tests cover concurrent distinct requests, another process holding the OS lock,
+writable records, failed reservation forcing, malformed Unicode, and printer bindings.
+
+Validation: both JVM products passed 102 tests and 769 assertions.
+The real-process integration test passed four assertions. Babashka source and
+isolated fresh package each passed 16 tests and 62 assertions, including old
+grant lookup. Eight safety faults produced assertion-only failures in every
+runtime. Strict lint, inferred namespace-depth, workspace and task-classpath
+gates passed, including the final codec and transition-lock decomposition.
 
 ## Deployment plan
 
