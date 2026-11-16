@@ -24,6 +24,9 @@
   (anomaly/anomaly :invalid-input (t :file/invalid-input)
                    {:durability/operation operation}))
 
+(defn ^{:stratum 1} unverified-publication [path]
+  (anomaly/anomaly :fault (t :file/unverified-publication) {:durability/path (str path)}))
+
 (defn- ^{:stratum 1} failure [operation file]
   (anomaly/anomaly :fault (t :file/io-failed)
                    {:durability/operation operation :durability/path (str file)}))
