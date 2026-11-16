@@ -9,20 +9,11 @@
             [ai.miniforge.file-durability.boundary.root-identity :as identity]
             [ai.miniforge.file-durability.interface :as durability]
             [ai.miniforge.file-durability.publication-support :as support]
+            [ai.miniforge.file-durability.qualification-fixtures :as fixtures]
             [babashka.fs :as fs]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0 :private true} profile :macos-apfs-internal)
-
-(defn- ^{:stratum 0} candidate [profile directory]
-  (let [root (fs/real-path directory)]
-    (assoc (identity/read-identity root) :storage/root root :storage/backend profile)))
-
-(defn- ^{:stratum 0} peer [root]
-  {:peer/executable (fs/file root "intentionally-not-launched")
-   :peer/classpath (str root)})
 
 (defn- ^{:stratum 0} reject-probe! [& _] (throw (AssertionError.)))
 
@@ -40,51 +31,49 @@
          (with-redefs [identity/same-device? (constantly false)]
            (is (anomaly/anomaly? (durability/verify-attached-directory parent child)))))))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(deftest ^{:stratum 1} unsupported-store-does-not-start-a-publication-or-lock-probe
+(deftest ^{:stratum 0} an-observation-and-publication-without-peer-proof-are-not-qualification
   (support/with-root
    (fn [root]
-     (with-redefs [publication/check! reject-probe! locks/check! reject-probe!]
-       (let [result (durability/qualify-local-root! root :unknown (peer root))]
-         (is (= :unavailable (:anomaly/type result)))
-         (is (empty? (fs/list-dir root))))))))
-
-(deftest ^{:stratum 1} an-observation-and-publication-without-peer-proof-are-not-qualification
-  (support/with-root
-   (fn [root]
-     (with-redefs [store/observe candidate
+     (with-redefs [store/observe fixtures/candidate
                    publication/check! (constantly :publication-verified)
                    locks/check! (constantly false)]
-       (is (anomaly/anomaly? (durability/qualify-local-root! root profile (peer root))))))))
+       (is (anomaly/anomaly? (durability/qualify-local-root! root fixtures/profile (fixtures/peer root))))))))
 
-(deftest ^{:stratum 1} a-map-cannot-be-used-in-place-of-a-qualified-root
+(deftest ^{:stratum 0} a-map-cannot-be-used-in-place-of-a-qualified-root
   (support/with-root
    (fn [root]
-     (is (= :invalid-input (:anomaly/type (durability/resolve-qualified-root (peer root))))))))
+     (is (= :invalid-input (:anomaly/type (durability/resolve-qualified-root (fixtures/peer root))))))))
 
-(deftest ^{:stratum 1} relative-executable-or-classpath-is-rejected
+(deftest ^{:stratum 0} relative-executable-or-classpath-is-rejected
   (support/with-root
    (fn [root]
      (doseq [[field unsafe] [[:peer/executable (fs/file "bb")]
                              [:peer/classpath "."]]]
        (is (= :invalid-input
-              (:anomaly/type (durability/qualify-local-root! root profile (assoc (peer root) field unsafe)))))))))
+              (:anomaly/type (durability/qualify-local-root!
+                              root fixtures/profile (assoc (fixtures/peer root) field unsafe)))))))))
 
-(deftest ^{:stratum 1} replacing-a-protected-root-invalidates-its-handle
+(deftest ^{:stratum 0} replacing-a-protected-root-invalidates-its-handle
   (support/with-root
    (fn [parent]
      (when (support/posix? parent)
        (let [root (fs/file parent "qualified")
              previous (fs/path parent "previous")]
          (durability/prepare-protected-directory! root)
-         (with-redefs [store/observe candidate
-                       publication/check! (constantly :publication-verified)
-                       locks/check! (constantly true)]
-           (let [handle (durability/qualify-local-root! root profile (peer parent))]
-             (is (= (fs/real-path root) (durability/resolve-qualified-root handle)))
-             (fs/move root previous)
-             (durability/prepare-protected-directory! root)
-             (is (anomaly/anomaly? (durability/resolve-qualified-root handle))))))))))
+         (let [handle (fixtures/qualify! root)]
+           (is (= (fs/real-path root) (durability/resolve-qualified-root handle)))
+           (fs/move root previous)
+           (durability/prepare-protected-directory! root)
+           (is (anomaly/anomaly? (durability/resolve-qualified-root handle)))))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} unsupported-store-does-not-start-a-publication-or-lock-probe
+  (support/with-root
+   (fn [root]
+     (with-redefs [publication/check! reject-probe! locks/check! reject-probe!]
+       (let [result (durability/qualify-local-root! root :unknown (fixtures/peer root))]
+         (is (= :unavailable (:anomaly/type result)))
+         (is (empty? (fs/list-dir root))))))))
 
 (comment (clojure.test/run-tests 'ai.miniforge.file-durability.qualification-test))
