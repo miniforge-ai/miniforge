@@ -26,6 +26,20 @@
 
 (defn- ^{:stratum 0} reject-probe! [& _] (throw (AssertionError.)))
 
+(deftest ^{:stratum 0} an-attached-directory-cannot-cross-a-store-or-alias-boundary
+  (support/with-root
+   (fn [root]
+     (when (support/posix? root)
+       (let [parent (fs/file (fs/real-path root))
+             child (fs/file parent "child")
+             alias (fs/file parent "alias")
+             path (durability/prepare-protected-directory! child)]
+         (is (= path (durability/verify-attached-directory parent child)))
+         (fs/create-sym-link alias child)
+         (is (anomaly/anomaly? (durability/verify-attached-directory parent alias)))
+         (with-redefs [identity/same-device? (constantly false)]
+           (is (anomaly/anomaly? (durability/verify-attached-directory parent child)))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} unsupported-store-does-not-start-a-publication-or-lock-probe

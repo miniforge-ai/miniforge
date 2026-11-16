@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.core
   (:require [ai.miniforge.file-durability.boundary :as boundary]
+            [ai.miniforge.file-durability.boundary.attached-directory :as attached]
             [ai.miniforge.file-durability.io :as file-io]
             [ai.miniforge.file-durability.boundary.directory-policy :as directory-policy]
             [ai.miniforge.file-durability.boundary.protected-directory :as directory]
@@ -33,6 +34,10 @@
     (boundary/call-with-exception-handling :resolve-qualified-root nil
                                           (partial qualified-root/resolve-root root) identity)
     (boundary/invalid-input :resolve-qualified-root)))
+
+(defn ^{:stratum 0} verify-attached-directory [parent child]
+  (boundary/call-with-exception-handling :verify-attached-directory child
+                                        (partial attached/check! parent child) identity))
 
 (defn ^{:stratum 0} write-new-text! [file encoded]
   (boundary/call-with-exception-handling :write-new file

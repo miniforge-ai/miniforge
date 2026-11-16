@@ -34,3 +34,5 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (def ^{:stratum 2} QualificationArguments [:tuple DirectoryFile :keyword Peer])
+
+(def ^{:stratum 2} AttachedDirectoryArguments [:tuple DirectoryFile DirectoryFile])

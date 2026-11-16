@@ -60,6 +60,14 @@
   [root]
   (core/resolve-qualified-root root))
 
+(defn ^{:stratum 0} verify-attached-directory
+  "Return a canonical protected direct child on the parent's device, or refuse.
+   The caller must already have established qualification of the parent store."
+  [parent child]
+  (if (m/validate spec/AttachedDirectoryArguments [parent child])
+    (core/verify-attached-directory parent child)
+    (boundary/invalid-input :verify-attached-directory)))
+
 (defn ^{:stratum 0} write-new-text!
   "Create and force a new UTF-8 file without replacing existing files or links."
   [file text]
