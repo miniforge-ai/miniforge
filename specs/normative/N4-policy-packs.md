@@ -6,8 +6,8 @@
 
 # N4 — Policy Packs & Gates Standard
 
-**Version:** 0.8.0-draft
-**Date:** 2026-08-10
+**Version:** 0.8.1-draft
+**Date:** 2026-11-15
 **Status:** Draft
 **Conformance:** MUST
 
@@ -1178,7 +1178,8 @@ Rules:
 
 - `require-rbac-authorization` (severity: critical)
   - FAIL if control action requester lacks required RBAC role for the action type
-  - MUST validate against RBAC schema (see N8 §2.3)
+  - MUST validate the RBAC role schema below and enforce the additional
+    constraints in N8 §2.3
 - `require-multi-party-approval` (severity: critical)
   - FAIL if High/Critical risk actions proceed without configured number of approvers
   - Requester MUST NOT be their own approver (when `require-different-principal?` is true)
@@ -1194,7 +1195,8 @@ RBAC role schema for control action governance:
 {:rbac/role keyword
  :rbac/permissions
  {:workflows {:pause boolean :resume boolean :retry boolean
-              :cancel boolean :rollback boolean :force-complete boolean}
+              :cancel boolean :rollback boolean :force-complete boolean
+              :full-stop boolean}
   :agents {:quarantine boolean :adjust-budget boolean :inject-context boolean}
   :fleet {:emergency-stop boolean :drain boolean :scale boolean}
   :approvals {:gate-override boolean :budget-escalation boolean}}
@@ -2208,6 +2210,9 @@ the meantime.
 ---
 
 **Version History:**
+
+- 0.8.1-draft (2026-11-15): Add an explicit run-scoped full-stop permission
+  under N8 §3.5; cancellation or experiment authority does not imply it.
 
 - 0.8.0-draft (2026-08-10): Absorbed the two novel contracts from the former
   N4-delta, now informative: `:rule/provenance` (§2.3.3) and

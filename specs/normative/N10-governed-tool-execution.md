@@ -6,8 +6,8 @@
 
 # N10 — Governed Tool Execution
 
-**Version:** 0.5.1-draft
-**Date:** 2026-11-06
+**Version:** 0.5.2-draft
+**Date:** 2026-11-15
 **Status:** Draft
 **Conformance:** MUST
 
@@ -123,6 +123,14 @@ grants, and durable transactions. Recovery authority MUST remain independent of
 revoked or expired forward grants and MUST NOT permit new trials. Cleanup MUST
 bind proven resource identity and provider preconditions; a reused resource name
 MUST NOT authorize deletion of a different resource.
+
+Independence from forward-grant revocation MUST NOT bypass an N8 §3.5 full stop.
+The adopted Ariadne issuer and commit/dispatch boundaries MUST enforce that
+durable run fence for recovery as well as forward effects, across restarts.
+Only exact control-plane containment and audit operations remain available;
+full-stop authority MUST NOT authorize workload compensation. Requests already
+accepted outside the capsule MUST retain their uncertain disposition until
+reconciled under the N2 checkpoint delta §11, not be silently retried.
 
 Before a trial's first effect, the runtime MUST independently approve and retain
 the bounded recovery plan required by N7 §5.5. This approval MUST NOT be an
@@ -1198,6 +1206,9 @@ guarantees and are currently assertions.
 ---
 
 **Version History:**
+
+- 0.5.2-draft (2026-11-15): Require adopted Ariadne boundaries to honor the
+  dominant N8 §3.5 full-stop fence, including recovery effects and restarts.
 
 - 0.5.1-draft (2026-11-06): Clarified operator-approved pretrial recovery-plan
   approval versus just-in-time exact recovery decisions and grants; unknown

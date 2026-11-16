@@ -41,10 +41,10 @@ commit.
    | `worktree.files` | `copy-file-to` and `copy-file-from` with the path-escape check | 3 |
    | `worktree.drain` | stdout/stderr drain settling for a deadline-bounded `execute-command` | 3 |
 
-   The git plumbing keeps the `worktree` namespace name, so its callers do
-   not change: `scratch_gc_queue.clj` (at 4 strata on `main`, so any edit
-   to it would fail the hook too) and every test that redefines
-   `worktree/run-git`.
+   The git plumbing keeps the `worktree` namespace name. The scratch GC
+   queue and tests that redefine `worktree/run-git` keep their imports.
+   The scratch GC queue has four strata on `main`, so editing it would
+   fail the hook.
 2. `execute-command` lives with the executor, not with the drain helpers.
    Together with them it is a 4-stratum chain.
 3. Deleted, no callers anywhere in the repository: `create-worktree!` and
@@ -59,9 +59,9 @@ commit.
    `executor.clj`, `interface.clj`, the REPL comment in `host_guarded.clj`,
    and seven test files. `executor.clj`'s namespace docstring names the new
    file. The CLI config-schema source scan excludes the executor's own
-   config by file path, so its `not-user-config` entry now names
-   `worktree/executor.clj`, where the `:archive-dir` read moved; a comment
-   in a release-executor integration test names that file too.
+   config by file path. Its `not-user-config` entry now names
+   `worktree/executor.clj`, where the `:archive-dir` read moved.
+   A comment in a release-executor integration test names that file too.
 6. Comments: the `;; ===` section banners are dropped, since each section
    is now a namespace. The note on `legacy-tmp-warned?` names the alias the
    tests use. The archive steps' note on returning a result for every exit,
@@ -106,8 +106,8 @@ Base branch: `chore/annotate-dag-executor-strata` (#2525), which lands the
 stratum annotation of three files this PR edits. Retarget to `main` once it
 merges.
 
-1. Step 2 of 3. Next: `archive-bundle!` runs git with hooks and fsmonitor
-   off (follow-up 3 of #2463).
+This is step 2 of 3. Next: `archive-bundle!` runs git with hooks and
+fsmonitor off (follow-up 3 of #2463).
 
 ## Checklist
 
