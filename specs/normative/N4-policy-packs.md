@@ -2067,7 +2067,7 @@ implementation conforms to it, not the reverse.
 
 Each row is work, not an exemption. A row that has been closed says so and
 names the change, rather than being deleted. The annex records what
-the gap was, not only of what remains.
+the gap was, not only what remains.
 
 ### A.1 Type Divergences
 
