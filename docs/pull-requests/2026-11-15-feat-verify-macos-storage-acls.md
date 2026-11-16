@@ -36,6 +36,10 @@ reject missing and malformed acknowledgements before creating scratch files.
 Verify that timed-out children terminate, a timed-out capture is cancelled,
 and a failed child never yields an acknowledgement.
 
+A scoped GitHub-hosted macOS job checks out the exact PR head.
+It runs the native fixtures in both JVM products, Babashka source,
+and the fresh package. Run the task locally with `bb test:darwin-storage`.
+
 Local results: 27 tests and 112 assertions passed in each of the four runs.
 Disabling the ACL guard, child deadline or capture cancellation failed the
 corresponding assertions without runtime errors. Strict lint, inferred
