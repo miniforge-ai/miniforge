@@ -2,7 +2,7 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-inventory-partition
-  (:require [ai.miniforge.phase-opsv.kubernetes-controller-reference :as ownership]
+  (:require [ai.miniforge.kubernetes-target.interface :as ownership]
             [ai.miniforge.phase-opsv.kubernetes-inventory-links :as links]
             [ai.miniforge.phase-opsv.kubernetes-list-model :as lists]
             [ai.miniforge.phase-opsv.kubernetes-membership :as membership]
