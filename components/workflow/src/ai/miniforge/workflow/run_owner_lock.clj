@@ -209,7 +209,7 @@
           (try+
             (with-open [channel (open-channel path false)]
               (if-let [lock (try-lock channel)]
-                (do (.close lock) nil)
+                (do (.close ^java.lang.AutoCloseable lock) nil)
                 (read-owner channel)))
             (catch java.nio.file.NoSuchFileException _ nil)
             (catch Exception e

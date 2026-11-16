@@ -5,6 +5,8 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.file-durability.interface :as durability]
             [ai.miniforge.file-durability.core :as core]
+            [ai.miniforge.file-durability.boundary.directory-policy :as directory-policy]
+            [ai.miniforge.file-durability.boundary.protected-directory :as directory]
             [ai.miniforge.file-durability.io :as file-io]
             [clojure.test :refer [deftest is]])
   (:import [java.io File IOException]))
@@ -24,14 +26,23 @@
                 core/write-temporary-bytes! fatal
                 core/publish-bytes! fatal
                 core/sync-ancestry! fatal
-                core/confirm! fatal]
+                core/confirm! fatal
+                core/prepare-protected-directory! fatal
+                core/resolve-protected-directory fatal
+                core/filesystem-profile fatal]
     (doseq [file [nil "not-a-file" {}]]
       (doseq [result [(durability/write-new-text! file "text")
                       (durability/write-temporary-bytes! file (byte-array 0))
                       (durability/publish-bytes! file (byte-array 0) identity)
                       (durability/sync-ancestry! file)
-                      (durability/confirm! file)]]
+                      (durability/confirm! file)
+                      (durability/prepare-protected-directory! file)
+                      (durability/resolve-protected-directory file)
+                      (durability/filesystem-profile file)]]
         (is (= :invalid-input (:anomaly/type result)))))
+    (doseq [operation [durability/prepare-protected-directory!
+                       durability/resolve-protected-directory durability/filesystem-profile]]
+      (is (= :invalid-input (:anomaly/type (operation (File. ""))))))
     (doseq [payload [nil 42 []]]
       (is (= :invalid-input (:anomaly/type (durability/write-new-text! (File. "unused") payload))))
       (is (= :invalid-input (:anomaly/type (durability/publish-bytes! (File. "unused") payload identity))))
@@ -43,12 +54,18 @@
                   file-io/write-temporary-bytes! io-failure
                   file-io/publish-bytes! io-failure
                   file-io/sync-ancestry! io-failure
-                  file-io/confirm! io-failure]
+                  file-io/confirm! io-failure
+                  directory/prepare! io-failure
+                  directory/existing! io-failure
+                  directory-policy/filesystem-profile io-failure]
       (doseq [result [(durability/write-new-text! file "")
                       (durability/write-temporary-bytes! file (byte-array 0))
                       (durability/publish-bytes! file (byte-array 0) identity)
                       (durability/sync-ancestry! file)
-                      (durability/confirm! file)]]
+                      (durability/confirm! file)
+                      (durability/prepare-protected-directory! file)
+                      (durability/resolve-protected-directory file)
+                      (durability/filesystem-profile file)]]
         (is (anomaly/anomaly? result))
         (is (= "unused" (get-in result [:anomaly/data :durability/path])))))))
 
