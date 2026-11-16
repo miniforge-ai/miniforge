@@ -19,17 +19,11 @@ Terminating a capsule cannot recall an externally accepted request.
 
 ## Approval record
 
-On 2026-11-15 the operator approved the recovery-after-cancellation boundary
-contingent on verifying the recommended all-writes stop, and requested:
-
-> As for dispatched requests that we cannot recall, we should have the ability
-> to cordon the isolated run and spin the vm (or pod) down (i.e, a "full stop!"
-> instruction). Recovery from checkpoint can then restart from the last known
-> safe checkpoint.
-
-This authorizes implementation, not live experiments, credential operations,
-cluster access, or shutdown of real resources. The approval contingency remains
-open until implementation verification; this specification does not satisfy it.
+On 2026-11-15 the operator requested run-owned isolation shutdown and safe
+checkpoint restart, contingent on verifying the recommended all-writes stop.
+They also approved containment-only audit-outage handling with authorization,
+failure reporting, and audit obligations intact. No live actions are authorized.
+The recovery approval contingency remains open until implementation verification.
 
 ## Changes in detail
 
@@ -37,15 +31,11 @@ Contract layer; base branch `main`, no prerequisite PRs.
 N8 owns the full-stop command and its dominant fence; N11 owns containment and
 termination; the N2 checkpoint delta owns safe restart. N4 registers the
 distinct permission. N7/N10 reference the
-dominant fence. N5 references the control surface. Existing N3/N6 audit contracts
-remain authoritative; no new event or artifact family is introduced.
-The normal hook required prose-lint cleanup in N4, N11, and the N2 delta;
-those sentence splits preserve existing requirements and historical records.
-The first automatic review found unconditional N7 exit-test wording. The
-requirements now distinguish ordinary compensation from full-stop containment,
-including guardrail abort and permanent-apply postcondition failure.
-The second review tightened restart admission: old-runtime containment and
-termination and the durable stop fence are confirmed before new-run effects.
+dominant fence. N3/N5 coordinate the narrow audit-outage exception; N6 remains
+authoritative. No event or artifact family is added. Review fixes distinguish
+ordinary compensation from full stop and require confirmed old-runtime
+containment, termination, and durable fencing before fresh-run effects.
+Hook-required prose cleanup preserves existing requirements and historical records.
 
 ## Testing plan
 

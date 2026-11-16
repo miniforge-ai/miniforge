@@ -503,8 +503,8 @@ Success MUST require a durable fence and provider-confirmed containment and
 termination. A partial failure MUST retain every applied fence and containment
 step; implementations MUST NOT roll them back to satisfy §12.2's ordinary
 failed-action rule. If persistence fails, the controller MUST still locally
-fence the run and attempt authorized containment, report failure, and MUST NOT
-claim a restart-safe stop. Retrying containment MUST remain run/identity-bound
+fence the run and attempt authorized containment under N3 §9.1.1.
+It MUST report failure and MUST NOT claim a restart-safe stop. Retrying containment MUST remain run/identity-bound
 and idempotent, never recreate the environment or admit workload execution.
 
 Recovery MUST use a fresh run and the known-safe checkpoint rules in the N2

@@ -501,6 +501,9 @@ Every intervention MUST produce:
 Human-triggered interventions that carry material risk MAY require a
 `pending-human` approval step before dispatch, even when the request was created
 from a UX surface.
+Only authorized full-stop containment MAY proceed during audit outage under N3 §9.1.1.
+Its unavailable durable request or lifecycle record MUST NOT be fabricated; the intervention MUST report failure, not
+successful admission or completion.
 
 ### 7.3 Command/query separation
 
@@ -683,7 +686,7 @@ through without error. Required keys MUST be present and correctly typed.
 **Version History:**
 
 0.4.1-draft (2026-11-15): Add the separately authorized `full-stop`
-intervention, whose containment contract is owned by N8 §3.5.
+intervention, whose containment contract is owned by N8 §3.5, including N3 §9.1.1 audit-outage handling.
 
 0.4.0-draft (2026-10-04): Added the Spec projection of N1's Work Specification
 and clarified intervention admission, lifecycle facts, and snapshot ownership.

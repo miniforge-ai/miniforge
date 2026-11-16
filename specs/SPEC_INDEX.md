@@ -242,7 +242,7 @@ Defines:
 
 ### Indexed normative amendments
 
-Full-stop decision source (N8 §3.5, N11 §4.4, N2 checkpoint delta §11,
+Full-stop decision source (N3 §9.1.1, N8 §3.5, N11 §4.4, N2 checkpoint delta §11,
 and their N5/N7/N10 references):
 [operator approval and implementation contingency](../docs/pull-requests/2026-11-15-docs-run-full-stop-contract.md#approval-record).
 
@@ -678,7 +678,7 @@ Normative specs are enforced by:
 
 - **0.29.2-draft** (2026-11-15) - Operator-approved full-stop containment
   contract across N8/N11 and safe checkpoint recovery in the N2 delta, with
-  N5/N7/N10 references. Implementation verification remains a separate gate;
+  N3/N5 containment-only audit-outage handling and N7/N10 references. Implementation verification remains a separate gate;
   no live actions are authorized.
 
 - **0.29.1-draft** (2026-11-06) - Clarified approved N7/N10 recovery timing:
