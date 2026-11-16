@@ -17,7 +17,8 @@
 ;; limitations under the License.
 (ns ai.miniforge.dag-executor.protocols.impl.kubernetes-client
   "Run legacy Kubernetes transport and observe Pod readiness."
-  (:require [ai.miniforge.dag-executor.result :as result]
+  (:require [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
+            [ai.miniforge.dag-executor.result :as result]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [slingshot.slingshot :refer [try+]]))
@@ -46,7 +47,7 @@
                      "-l" (str "job-name=" job-name) "-o" "jsonpath={.items[0].metadata.name}")]
     (if (and (zero? exit) (not (str/blank? out)))
       (result/ok {:pod-name (str/trim out)})
-      (result/err :pod-not-found (get reply :err "No pod found for job")))))
+      (result/err :pod-not-found (get reply :err (messages/t :kubernetes/pod-not-found))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -54,12 +55,12 @@
   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
     (loop []
       (if (> (System/currentTimeMillis) deadline)
-        (result/err :pod-timeout "Timed out waiting for pod to be ready")
+        (result/err :pod-timeout (messages/t :kubernetes/pod-timeout))
         (let [pod-name (get-in (get-pod-for-job kubectl-path namespace job-name) [:data :pod-name])
               out (when pod-name (:out (run-kubectl kubectl-path "get" "pod" pod-name "-n" namespace
                                                      "-o" "jsonpath={.status.phase}")))
               phase (some-> out str/trim)]
           (cond
             (= "Running" phase) (result/ok {:pod-name pod-name :status :running})
-            (contains? #{"Failed" "Succeeded"} phase) (result/err :pod-failed (str "Pod ended with status: " out))
+            (contains? #{"Failed" "Succeeded"} phase) (result/err :pod-failed (messages/t :kubernetes/pod-ended {:phase phase}))
             :else (do (Thread/sleep pod-ready-poll-interval-ms) (recur))))))))

@@ -23,6 +23,8 @@ metadata:
     miniforge.ai/task-id: "{{TASK_ID}}"
     miniforge.ai/created-by: dag-executor
 spec:
+  # N11 §5.3 default task budget also bounds a Job whose receipt was lost.
+  activeDeadlineSeconds: 3600
   # Cleanup completed jobs after 5 minutes
   ttlSecondsAfterFinished: 300
   # No retries - we handle retries at the DAG scheduler level

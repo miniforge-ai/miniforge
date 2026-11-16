@@ -29,14 +29,13 @@
    resources/executor/kubernetes/job-template.yaml"
   (:require
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
+   [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation :as job-creation]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources :as resources]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [clojure.java.io :as io]
-   [clojure.java.shell :as shell]
-   [clojure.string :as str]
-   [cheshire.core :as json]))
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -62,8 +61,8 @@
    The spec matches the canonical template at:
    resources/executor/kubernetes/job-template.yaml"
   [job-name namespace image workdir env-map resources task-id]
-  {:apiVersion "batch/v1"
-   :kind "Job"
+  {:apiVersion job-creation/api-version
+   :kind job-creation/resource-kind
    :metadata {:name job-name
               :namespace namespace
               :labels {:app "miniforge"
@@ -72,6 +71,7 @@
               :annotations {:miniforge.ai/task-id (str task-id)
                             :miniforge.ai/created-by "dag-executor"}}
    :spec {:ttlSecondsAfterFinished 300  ; Cleanup completed jobs after 5 min
+          :activeDeadlineSeconds job-creation/default-deadline-seconds
           :backoffLimit 0               ; No retries - handled at DAG scheduler level
           :completions 1
           :parallelism 1
@@ -110,17 +110,6 @@
        :cluster-info (subs (:out result) 0 (min 200 (count (:out result))))}
       {:available? false
        :reason (:err result)})))
-
-(defn ^{:stratum 0} apply-job
-  "Create a Job from a spec using kubectl apply."
-  [kubectl-path namespace job-spec]
-  (let [spec-json (json/generate-string job-spec)
-        result (shell/sh (or kubectl-path "kubectl")
-                         "apply" "-n" namespace "-f" "-"
-                         :in spec-json)]
-    (if (zero? (:exit result))
-      (result/ok {:applied true})
-      (result/err :job-apply-failed (:err result)))))
 
 (defn ^{:stratum 0} exec-in-pod
   "Execute a command in a pod."
@@ -215,9 +204,9 @@
                                    (:env env-config)
                                    (:resources env-config)
                                    task-id)
-          apply-result (apply-job kubectl-path namespace job-spec)]
-      (if (result/err? apply-result)
-        apply-result
+          creation (job-creation/create! kubectl-path job-spec)]
+      (if (result/err? creation)
+        creation
         (let [wait-result (client/wait-for-pod-ready kubectl-path namespace job-name
                                                    client/pod-ready-timeout-ms)]
           (if (result/err? wait-result)
@@ -229,9 +218,7 @@
               (result/ok (proto/create-environment-record
                           job-name :kubernetes task-id workdir
                           (assoc env-config
-                                 :metadata {:job-name job-name
-                                            :pod-name pod-name
-                                            :namespace namespace})))))))))
+                                 :metadata (assoc (:data creation) :pod-name pod-name))))))))))
 
   (execute! [_this environment-id command opts]
     (try
