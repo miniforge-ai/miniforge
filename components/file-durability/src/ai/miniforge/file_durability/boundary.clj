@@ -25,7 +25,9 @@
                    {:durability/operation operation}))
 
 (defn ^{:stratum 1} unverified-publication [path]
-  (anomaly/anomaly :fault (t :file/unverified-publication) {:durability/path (str path)}))
+  (let [location (str path)]
+    (anomaly/anomaly :fault (t :file/unverified-publication {:path location})
+                     {:durability/path location})))
 
 (defn- ^{:stratum 1} failure [operation file]
   (anomaly/anomaly :fault (t :file/io-failed)
