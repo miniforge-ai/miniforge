@@ -18,9 +18,11 @@ cannot qualify macOS storage for a durable run fence.
 
 ## Changes in detail
 
-Foundation layer, building on #2532. Use a bounded, read-only native listing
-without shell interpolation. Refuse additive ACLs, missing or malformed results,
-and incomplete listings; accept deny-only ACLs. The check supplements POSIX
+Foundation layer, building on #2532. Use bounded, read-only Darwin filesec
+queries through the system script runner, with paths passed as arguments.
+A successful metadata query must confirm absence or read and check every ACE.
+Refuse additive ACLs, native read errors, or an absent or malformed
+acknowledgement. The check supplements POSIX
 policy. It does not change permissions or establish volume ownership, persistence,
 or cross-process locking.
 
@@ -29,13 +31,13 @@ or cross-process locking.
 Run the file-durability suites in both JVM products, Babashka source, and a
 fresh package. A disposable macOS fixture verifies that adding an allow ACE
 without changing the POSIX mode changes the probe's result. Omitting the ACL
-check must make this regression fail. Portable tests cover unreadable and
-malformed metadata.
+check must make this regression fail. Exercise a real native read error and
+reject missing and malformed acknowledgements before creating scratch files.
 
-Local results: 25 tests and 113 assertions passed in each runtime. Removing
-the ACL guard failed the real macOS assertion in all four runs, without
-runtime errors. Strict lint, inferred namespace depths, Polylith, and Babashka
-classpaths passed.
+Local results: 24 tests and 106 assertions passed in each of the four runs.
+Removing the ACL guard failed the real macOS regression without a runtime
+error in all four. Strict lint, inferred namespace depths, Polylith, and
+Babashka classpaths passed.
 
 ## Deployment plan
 
