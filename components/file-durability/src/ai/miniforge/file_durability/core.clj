@@ -6,7 +6,8 @@
             [ai.miniforge.file-durability.io :as file-io]
             [ai.miniforge.file-durability.boundary.directory-policy :as directory-policy]
             [ai.miniforge.file-durability.boundary.protected-directory :as directory]
-            [ai.miniforge.file-durability.boundary.publication-probe :as publication-probe]))
+            [ai.miniforge.file-durability.boundary.publication-probe :as publication-probe]
+            [ai.miniforge.file-durability.boundary.qualified-root :as qualified-root]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -22,6 +23,16 @@
 (defn ^{:stratum 0} verify-publication! [root]
   (boundary/call-with-exception-handling :verify-publication root
                                         #(publication-probe/check! (directory/existing! root)) identity))
+
+(defn ^{:stratum 0} qualify-local-root! [root profile peer]
+  (boundary/call-with-exception-handling :qualify-local-root root
+                                        (partial qualified-root/qualify! root profile peer) identity))
+
+(defn ^{:stratum 0} resolve-qualified-root [root]
+  (if (qualified-root/qualified? root)
+    (boundary/call-with-exception-handling :resolve-qualified-root nil
+                                          (partial qualified-root/resolve-root root) identity)
+    (boundary/invalid-input :resolve-qualified-root)))
 
 (defn ^{:stratum 0} write-new-text! [file encoded]
   (boundary/call-with-exception-handling :write-new file

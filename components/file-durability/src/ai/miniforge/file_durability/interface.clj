@@ -46,6 +46,20 @@
     (core/verify-publication! root)
     (boundary/invalid-input :verify-publication)))
 
+(defn ^{:stratum 0} qualify-local-root!
+  "Return an opaque, process-local root or an anomaly. Call from trusted host
+   configuration with the other installed runtime and its absolute classpath.
+   The host must separately establish persistence of the configured store."
+  [root profile peer]
+  (if (m/validate spec/QualificationArguments [root profile peer])
+    (core/qualify-local-root! root profile peer)
+    (boundary/invalid-input :qualify-local-root)))
+
+(defn ^{:stratum 0} resolve-qualified-root
+  "Return the unchanged protected root as a Path, or an anomaly."
+  [root]
+  (core/resolve-qualified-root root))
+
 (defn ^{:stratum 0} write-new-text!
   "Create and force a new UTF-8 file without replacing existing files or links."
   [file text]
