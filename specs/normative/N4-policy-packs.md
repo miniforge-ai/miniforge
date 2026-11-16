@@ -13,8 +13,8 @@
 
 _v0.7.0-draft unifies the severity vocabulary, adds pack resolution and gate binding
 (§5.3–§5.5), check-function execution semantics (§3.5), taxonomy compatibility
-(§2.1.1), signature canonicalization (§8.1.1), the override/waiver contract
-(§6.3.1), and conformance requirement IDs (§9.4)._
+(§2.1.1), and signature canonicalization (§8.1.1). It adds the override/waiver contract
+(§6.3.1) and conformance requirement IDs (§9.4)._
 
 ---
 
@@ -207,7 +207,7 @@ There is **one severity vocabulary** in miniforge, ordered most to least severe:
 
 It is used by `:rule/severity` (§2.3), `:violation/severity` (§3.3), and every
 downstream projection — supervisory attention, dashboards, reports. A rule's
-severity is what its violations carry, so a second vocabulary for rules would
+severity is what its violations carry. A second vocabulary for rules would
 require a lossy translation at exactly the boundary where enforcement is
 decided.
 
@@ -255,7 +255,7 @@ Severity and enforceability are orthogonal: a `:critical` `:advisory` rule says
 "this matters a great deal and a human must decide", not "this blocks".
 
 **Relationship to gate-readiness.** Enforceability is a _declaration_. Whether
-a semantic rule is reliable enough to gate in practice is _measured_ — see
+a semantic rule is reliable enough to gate in practice is _measured_. See
 Annex A, which records that the implementation carries a calibration mechanism
 this spec does not yet describe. Where both exist, the measurement governs: a
 rule declaring `:executable` that fails calibration does not gate.
@@ -280,7 +280,7 @@ Two rules govern it:
 
 1. A derived rule MUST retain the provenance of every source that materially
    contributed. Where several sources are merged into one rule, provenance MUST
-   NOT collapse to a single pointer — an auditor asking "why does this rule
+   NOT collapse to a single pointer. An auditor asking "why does this rule
    exist" needs all of them.
 2. Provenance MUST survive promotion. Renaming fields to fit this schema is
    permitted; dropping the record is not.
@@ -675,13 +675,12 @@ its two forms (`:diff` and `:replacement`). A machine-readable repair that
 arrives as an opaque string is not machine-readable.
 
 `:violation/rule-id` is a keyword, matching `:rule/id` (§2.3). A violation that
-cannot name its rule as a keyword cannot be joined back to the pack that
-produced it, which is what §5.3 resolution and every downstream report depend
-on.
+cannot name its rule as a keyword cannot be joined back to its pack.
+Resolution (§5.3) and downstream reports depend on that join.
 
 `:violation/pack-id` is REQUIRED because a rule ID alone does not identify
-which pack in the resolved set produced the finding once overlays (§2.5) and
-severity overrides are in play. Two packs may legitimately surface the same
+which resolved pack produced the finding after overlays (§2.5) and severity
+overrides. Two packs may legitimately surface the same
 inherited rule at different severities.
 
 **This section is the single definition of the violation schema.** Other specs
@@ -702,10 +701,10 @@ Three fields are unknowable to a check function:
 | `:violation/gate-id` | The gate invokes the rule; the rule does not know which one |
 | `:violation/pack-id` | Determined by §5.3 resolution, which happens above the rule |
 
-A check function therefore returns **findings**: violation maps carrying every
-field it can know — at minimum `:violation/rule-id`, `:violation/severity`,
+A check function therefore returns **findings** carrying every known field.
+Required fields are `:violation/rule-id`, `:violation/severity`,
 `:violation/message`, `:violation/auto-fixable?`, and
-`:violation/remediation`, plus `:violation/location` where applicable.
+`:violation/remediation`. Add `:violation/location` where applicable.
 
 The gate runtime MUST complete each finding into a conformant violation before
 recording it, supplying the three fields above. A finding is not a violation
@@ -754,16 +753,16 @@ which validation layer each rule targets.
 ### 3.5 Check Function Execution Semantics
 
 §3.1.1 states what a conformant check function does. This section states what
-the runtime does when one does not — which matters because a policy pack is
+the runtime does when one does not. This matters because a policy pack is
 **code**, third parties author packs (§10), and §2.7.1 already assumes
 untrusted material reaches the system.
 
 #### 3.5.1 Fail-Closed
 
-A check function that throws, times out, or returns a value not matching the
-§3.1 shape MUST be treated as a **failure of that rule**, not as a pass and not
-as an absent rule. The runtime MUST synthesize a **complete** violation per
-§3.3 — it is the gate runtime, so unlike a check function it knows all three
+A check that throws, times out, or returns data outside §3.1's shape MUST count
+as a **rule failure**, never a pass or absent rule.
+The runtime MUST synthesize a **complete** violation per
+§3.3. Unlike a check function, the gate runtime knows all three
 fields of §3.3.1. The following §3.3 fields take specific values in this case:
 
 - `:violation/rule-id` — the rule that failed to execute
@@ -774,12 +773,11 @@ fields of §3.3.1. The following §3.3 fields take specific values in this case:
 - `:violation/message` — naming the execution failure rather than a policy finding
 
 Treating an erroring check as a pass converts every crash into a silent
-approval, which is the failure mode a policy gate exists to prevent. A rule
+approval. A policy gate exists to prevent that failure. A rule
 that cannot run has not been satisfied.
 
-The synthesized violation MUST NOT be auto-repairable: a repair function keyed
-to a rule whose check did not complete has no verified precondition to repair
-against.
+The synthesized violation MUST NOT be auto-repairable. A repair function has
+no verified precondition when its check did not complete.
 
 #### 3.5.2 Resource Bounds
 
@@ -789,7 +787,7 @@ Implementations MUST bound check function execution:
   §9.1 p99 target). Exceeding it is a §3.5.1 failure with
   `:failure.class/timeout`.
 - **Total gate budget** — a limit across all rules in a gate. Exhausting it
-  fails the gate; it MUST NOT silently truncate the rule set, because a
+  fails the gate. It MUST NOT silently truncate the rule set, because a
   truncated gate reports a pass it did not evaluate.
 
 Implementations MUST record which rules ran, which failed to run, and which
@@ -798,9 +796,9 @@ were never reached, so a partial gate is distinguishable from a complete one.
 #### 3.5.3 Isolation
 
 Check functions run with the privileges of the workflow. Implementations
-SHOULD execute rules from packs below `:trusted` in a restricted context with
-no network access, no filesystem writes outside a scratch path, and no ability
-to invoke connectors or tools.
+SHOULD execute rules from packs below `:trusted` in a restricted context.
+That context denies network access, filesystem writes outside a scratch path,
+and the ability to invoke connectors or tools.
 
 §3.1.1 already requires check functions to be pure and side-effect free, so a
 conformant rule loses nothing under these restrictions. A rule that breaks when
@@ -1040,7 +1038,7 @@ continuity with earlier drafts. It is a label, not the identifier.
 
 That is: a standard pack's `:pack/id` is `:miniforge/<short-name>`, and its
 rules are `:mf.rule/<rule-name>`, per §2.2 and §2.3. Short names are display
-sugar in this section only; a pack that ships bare strings as identifiers is
+sugar here only; a pack that ships bare strings as identifiers is
 non-conformant.
 
 Because §2.3 makes rule IDs **globally unique**, a rule name may appear in at
@@ -1071,7 +1069,7 @@ Foundry packs in one section rather than four subsections.
 
 The **Status** column is normative and states when a pack is obligatory rather
 than optional. A pack marked REQUIRED for a context MUST be bound (§5.4) to the
-gates of that context; per N4.RB.5 an unbound gate fails closed, so omitting a
+gates of that context. Per N4.RB.5 an unbound gate fails closed, so omitting a
 required pack does not yield a silent pass.
 
 The **Defined by** column names the spec that owns each pack's rule semantics.
@@ -1386,7 +1384,7 @@ miniforge policy show terraform-aws
 
 A gate rarely runs one pack. Overlays (§2.5), bundled packs, repo-local packs,
 and organization packs can all bind to the same gate and disagree about a rule.
-This section fixes what the gate actually executes.
+This section fixes what the gate executes.
 
 #### 5.3.1 The Resolved Rule Set
 
@@ -1418,11 +1416,11 @@ When one `:rule/id` resolves from multiple packs:
 Severity escalates and never de-escalates across packs. An organization pack
 that raises `:medium` to `:critical` takes effect; one that lowers `:critical`
 to `:low` does not. Overlay `:pack/overrides` (§2.5) are the sanctioned way to
-lower a severity, and apply only within their own pack's expansion — an overlay
+lower a severity, and apply only within their own pack's expansion. An overlay
 cannot weaken a rule for a pack it does not extend.
 
-Resolution is field-by-field, so "which pack won" has no single answer: an
-organization pack may supply the severity while the owning pack supplies the
+Resolution is field-by-field, so "which pack won" has no single answer.
+An organization pack may supply severity while the owning pack supplies the
 check function. `:violation/pack-id` (§3.3) therefore records the **owning
 pack** — the one whose `:rule/check-fn` executed. That is the pack whose code
 produced the finding, and the only one a reader can use to reproduce it.
@@ -1435,8 +1433,8 @@ visible there, not in `:violation/pack-id`.
 
 If two bound packs require incompatible versions of the same extended pack,
 resolution MUST fail with a violation naming both requirements. Implementations
-MUST NOT silently pick one. This is the same failure the `pack-dependency-validation`
-rule detects at load time (§2.7.2); §5.3 restates it as a resolution obligation
+MUST NOT silently pick one. The `pack-dependency-validation`
+rule detects this failure at load time (§2.7.2). §5.3 adds a resolution obligation
 because binding can introduce a conflict that neither pack exhibits alone.
 
 ### 5.4 Gate Binding
@@ -1486,9 +1484,9 @@ gate execution:
 3. Each pack's content hash, so a later reader can verify which bytes ran.
 4. Any override or waiver, with its justification (§6.3).
 
-A gate result that cannot be reproduced from its evidence — because a version
-range was recorded rather than a resolved version, or because a pack hash is
-absent — does not satisfy this section.
+A gate result MUST be reproducible from its evidence to satisfy this section.
+A version range instead of a resolved version, or an absent pack hash,
+prevents reproducibility.
 
 ---
 
@@ -1606,8 +1604,8 @@ implementations MUST reject it.
 
 Per that spec, a Waiver MUST NOT mutate the original evaluation. The gate
 result stays failed and the violation stays present; the waiver records that
-someone accepted it. Implementations MUST NOT report a waived gate as passing,
-in evidence, in events, or in any projection — "waived" and "passed" are
+someone accepted it. Implementations MUST NOT report a waived gate as passing
+in evidence, events, or projections. "Waived" and "passed" are
 different facts, and collapsing them destroys the audit trail the waiver exists
 to create.
 
@@ -1665,10 +1663,10 @@ validation. The algorithm is Ed25519; a future algorithm change is a MAJOR
 pack-format change, not a per-pack field.
 
 **`:pack/signed-by` is an identifier, never a key.** It names which trusted
-publisher key to verify against — a key id or fingerprint the verifier
-resolves through its configured trust roots (§8.2.1). Carrying the public key
-itself would let a pack nominate the key that verifies it, which verifies
-nothing: an attacker who modifies a pack re-signs it with their own key, writes
+publisher key to verify against. The verifier resolves that key id or
+fingerprint through configured trust roots (§8.2.1). Carrying the public key
+itself would let a pack nominate the key that verifies it. That verifies
+nothing: an attacker modifies a pack, re-signs it with their own key, writes
 their own public key into the field, and passes.
 
 #### 8.1.1 What Is Signed
@@ -1690,7 +1688,7 @@ identical bytes, so the rendering is fixed:
   with an absent namespace sorting before any present one. Byte-wise
   comparison of the UTF-8 key strings.
 - **Recursively** — every map at every depth is ordered this way, not only the
-  top level. A pack's `:pack/metadata` and each rule map are nested maps; if
+  top level. A pack's `:pack/metadata` and each rule map are nested maps. If
   only the outer map is sorted, nested key order falls to the host's map
   implementation and stops being reproducible above the small-map threshold.
 - **Whitespace** — one space between a key and its value and between
@@ -1705,7 +1703,7 @@ identical bytes, so the rendering is fixed:
 These rules govern the **rendering** of the signed bytes, not what a pack
 author may write. `#inst "2026-01-23"` is valid EDN and a pack may contain it;
 the canonicalizer renders it as `#inst "2026-01-23T00:00:00.000Z"`. Examples
-in this spec show the canonical form so that copying one does not introduce a
+in this spec use canonical form. Copying one does not introduce a
 difference between what a reader sees and what gets signed.
 
 The pack **content hash** referenced by §5.5 and N1 §2.10.4.1 is a digest of
@@ -1720,7 +1718,7 @@ or signatures will not survive the trip between them.
 `:rule/check-fn` and `:rule/repair-fn` are functions. Where a pack is
 distributed as data, these are references (symbols or pack-relative paths) and
 serialize as such. A pack whose signed form cannot round-trip to the executed
-form is non-conformant — signing the manifest while shipping unsigned code
+form is non-conformant. Signing the manifest while shipping unsigned code
 verifies nothing that matters.
 
 ### 8.2 Verification Protocol
@@ -1736,7 +1734,7 @@ Before executing policy pack:
 6. Warn on unsigned packs, or fail where policy requires signatures
 
 Verification failure MUST prevent execution of the pack. Implementations MUST
-NOT execute a pack whose signature is present and invalid — a broken signature
+NOT execute a pack whose signature is present and invalid. A broken signature
 is a stronger signal than no signature, and MUST NOT be downgraded to the
 unsigned path.
 
@@ -1795,14 +1793,14 @@ Conformance tests MUST verify correct detection:
 Conformance tests MUST verify:
 
 1. **Idempotence** - Repairing twice produces same result
-2. **Correctness** - Repair actually fixes violation
+2. **Correctness** - Repair fixes violation
 3. **Provenance** - Repaired artifact links to original
 
 ### 9.4 Conformance Requirements
 
-Requirement IDs are stable identifiers for the normative statements of this
-spec, so a conformance suite can cite what it tests and a gap analysis can cite
-what is missing. IDs are never reused; a withdrawn requirement is marked
+Requirement IDs identify this spec's normative statements. A conformance suite
+can cite what it tests; a gap analysis can cite what is missing.
+IDs are never reused; a withdrawn requirement is marked
 withdrawn, not deleted.
 
 #### Pack and rule structure
@@ -1876,7 +1874,7 @@ A conformance suite MUST cover, at minimum:
    lowering it outside its own overlay does not (N4.RB.3).
 5. **Fail-closed execution** — with a check function forced to throw and
    another to hang, the gate fails, both rules report violations carrying
-   `:failure/class`, and neither is auto-repaired (N4.EX.2, N4.EX.3, N4.EX.4).
+   `:failure/class`. Neither is auto-repaired (N4.EX.2, N4.EX.3, N4.EX.4).
 6. **Unbound gate** — a policy gate with no binding fails rather than passing
    (N4.RB.5).
 7. **Waiver visibility** — a waived gate reports as waived, not passing, in
@@ -1970,8 +1968,8 @@ third-party pack, not a standard one. It is not in the §5.1 registry, and its
 name deliberately does not collide with the standard `:miniforge/terraform-aws`.
 
 This example is schema-valid against §2.2 and §2.3 as written. Earlier drafts
-of this section used a `:policy-pack/*` key namespace and a `:rule/name` field
-that §2.2 and §2.3 never defined; anything copied from those drafts will fail
+of this section used an undefined `:policy-pack/*` key namespace and `:rule/name`
+field. Anything copied from those drafts will fail
 pack validation.
 
 ---
@@ -2063,12 +2061,12 @@ Research directions:
 
 This annex is **informative**. It records where the miniforge implementation
 currently diverges from the contract above, as of 2026-08-10. It is not a
-relaxation of any requirement in §1–§14: the spec is normative and the
+relaxation of any requirement in §1–§14. The spec is normative and the
 implementation conforms to it, not the reverse.
 
 Each row is work, not an exemption. A row that has been closed says so and
-names the change, rather than being deleted — the annex is the record of what
-the gap was, not only of what remains.
+names the change, rather than being deleted. The annex records what
+the gap was, not only what remains.
 
 ### A.1 Type Divergences
 
@@ -2107,8 +2105,8 @@ Recorded because they were previously unspecified and this revision writes the
 contract the code already satisfies:
 
 - **Signature canonicalization (§8.1.1).** `policy-pack/canonical-edn` renders
-  the §8.1.1 rules directly rather than deferring to `pr-str`: recursive map
-  key ordering, sets as sorted vectors, sequences in declared order, instants
+  the §8.1.1 rules directly rather than deferring to `pr-str`. These include recursive map
+  key ordering, sorted-vector sets, declared-order sequences, instants
   as millisecond-precision UTC, and single-space separation, with the
   comparator in `policy-pack/canonical-order`. A value with no EDN reader form
   — a live `:rule/check-fn` rather than the symbol §8.1.1 requires — throws
@@ -2116,7 +2114,7 @@ contract the code already satisfies:
 
   The earlier `(pr-str (into (sorted-map) …))` sorted the top level only, left
   sets in iteration order, and printed a `java.time.Instant` with an identity
-  hash, so the same pack could serialize to different bytes across runs. That
+  hash. The same pack could serialize to different bytes across runs. That
   interoperability bug is closed (PR #1669); signatures produced against the
   old bytes do not verify, and none could reliably have.
 - **Legacy severity normalization (§2.3.1).** `schema/normalize-severity`
@@ -2127,35 +2125,34 @@ contract the code already satisfies:
 
 - **Self-certifying signature verification — closed (PR #1669).**
   `verify-signature` previously read the verification key from the pack being
-  verified, so an attacker could modify a pack, sign it with their own key,
+  verified. An attacker could modify a pack, sign it with their own key,
   write that public key into `:pack/signed-by`, and pass.
 
   It now resolves `:pack/signed-by` as a key identifier against a configured
   trust-root store and fails when it resolves to nothing (§8.2.1). The store
-  loads from `config/policy-pack/trust-roots.edn` on the classpath overlaid
-  with `~/.miniforge/config.edn` under `[:policy-pack :trust-roots]`; the
+  loads from classpath resource `config/policy-pack/trust-roots.edn`.
+  It overlays `[:policy-pack :trust-roots]` from `~/.miniforge/config.edn`. The
   shipped resource is empty, so a deployment that configures nothing trusts
   nothing.
 
-  Two adjacent defects closed with it: `verify-ed25519` could not decode the
+  Two adjacent defects closed with it. `verify-ed25519` could not decode the
   RFC 8032 raw public-key encoding at all (it read the bytes big-endian and
-  took x as always even), and the canonical serialization was not
+  took x as always even). The canonical serialization was not
   reproducible — see A.3.
 
-  **Still open.** §8.2 steps 4 and 5 — checking the signature timestamp
-  against a key validity window, and confirming the publisher is permitted for
-  the pack (§5.1.8) — are unimplemented.
+  **Still open.** §8.2 steps 4 and 5 are unimplemented: timestamp validation
+  against the key validity window, and publisher permission for the pack (§5.1.8).
 
   So is the path from the pack-trust gate to the verifier. The shipped
   `miniforge/pack-trust` pack declares its three rules —
   `:trust/require-signature`, `:trust/publisher-allowlist`, and
   `:trust/minimum-trust-level` — with `:rule/detection {:type :custom}` and no
-  `:custom-fn`. Per `policy-pack/compiler/resolve-detector`, a `:custom` rule
-  with no `:custom-fn` binds to `:semantic`, the LLM-as-judge mechanism. The
+  `:custom-fn`. The compiler's `resolve-detector` binds a `:custom` rule
+  without `:custom-fn` to the `:semantic` LLM-as-judge mechanism. The
   rules therefore do compile and do run; what they do not do is call
   `verify-signature`. Its only callers are the policy-pack component's own
   tests, and it is not among the names `policy-pack.interface.registry`
-  exports, so no production code outside the component can reach it at all.
+  exports. No production code outside the component can reach it.
 
   A model judging whether a pack looks signed is not a signature check.
   `:trust/require-signature` in particular asserts a cryptographic property
@@ -2165,22 +2162,20 @@ contract the code already satisfies:
 - **Pack-trust rule naming (§5.1.8).** §5.1.8 lists that pack's rules as
   `require-signature-verification`, `enforce-publisher-allowlist`, and
   `enforce-minimum-trust-level`. The shipped pack uses the `:trust/*` IDs
-  above. Since §1.1 makes rule IDs the durable anchor, the two should agree —
-  a reader matching §5.1.8 against the pack finds neither set of names in the
+  above. Since §1.1 makes rule IDs the durable anchor, the two should agree.
+  A reader matching §5.1.8 against the pack finds neither set of names in the
   other.
 
 ### A.5 Gate-Readiness Calibration — implemented, unspecified
 
-The implementation carries a mechanism this spec does not describe at all: N4
-mentions calibration zero times.
+The implementation carries a calibration mechanism whose contract is not
+specified by the normative model above.
 
-`components/policy-calibration` decides whether a semantic rule is reliable
-enough to be a hard gate, by measuring a judge's false-positive and recall
-rates over a seeded corpus across independent runs. `gate_check.clj` then
-refuses to ship: a rule whose enforcement action is acting
-(`:hard-halt` or `:require-approval`) **and** whose detector is `:semantic`
-must hold a passing `:gate-ready?` calibration record, or it is reported as
-ungated.
+`components/policy-calibration` measures a judge's false-positive and recall
+rates over a seeded corpus across independent runs. This determines whether
+a semantic rule is reliable enough to gate. `gate_check.clj` reports an acting
+semantic rule as ungated unless it has a passing `:gate-ready?` calibration record.
+Acting means `:hard-halt` or `:require-approval`. Any ungated rule fails that check.
 
 Two consequences for this spec:
 
@@ -2222,34 +2217,34 @@ the meantime.
 
 - 0.7.0-draft (2026-08-06): Annex A only, no normative change. A.4's
   self-certifying verification and A.3's canonicalization gap are closed by
-  PR #1669 and now read as closed, naming what remains: §8.2 steps 4 and 5,
+  PR #1669 and now read as closed. What remains: §8.2 steps 4 and 5,
   and the §5.1.8 gate that would call the verifier at all. Records a new
   divergence — §5.1.8's rule names and the shipped pack's `:trust/*` rule IDs
   do not match.
 - 0.7.0-draft (2026-08-05): Spec-completion pass.
-  **Contract fixes:** one severity vocabulary — §2.3.1 rewritten from
+  **Contract fixes:** one severity vocabulary. §2.3.1 rewritten from
   `:error`/`:warning`/`:info` to the canonical `:critical :high :medium :low
-  :info` used by §3.3, all of §5.1, and §6.3, with normalization for the
-  withdrawn values; `:violation/rule-id` typed keyword to match §2.3;
-  `:violation/pack-id` added; §11.1's example rewritten from the pre-0.6
-  `:policy-pack/*` namespace to the §2.2 schema; §8.1 signature key
-  namespace aligned to `:pack/signature`; §5.1.7's result schema keys
-  aligned; `require-capability-declaration` split into
+  :info` used by §3.3, §5.1, and §6.3, with normalization for the
+  withdrawn values. `:violation/rule-id` typed keyword to match §2.3.
+  `:violation/pack-id` added. §11.1's example rewritten from the pre-0.6
+  `:policy-pack/*` namespace to the §2.2 schema. §8.1 signature key
+  namespace aligned to `:pack/signature`. §5.1.7's result schema keys
+  aligned. `require-capability-declaration` split into
   `require-task-capability-declaration` (§5.1.4) and
   `require-pack-capability-declaration` (§5.1.9), which collided under the
   global-uniqueness rule of §2.3.
   **New normative sections:** check-function execution semantics — fail-closed,
-  resource bounds, isolation, determinism (§3.5); taxonomy compatibility
-  (§2.1.1); standard pack registry and identifier convention (§5.1); pack
-  resolution and precedence (§5.3); gate binding (§5.4); events and evidence
-  obligations (§5.5); override and waiver (§6.3.1); signature canonicalization
+  resource bounds, isolation, determinism (§3.5). Taxonomy compatibility
+  (§2.1.1). Standard pack registry and identifier convention (§5.1). Pack
+  resolution and precedence (§5.3). Gate binding (§5.4). Events and evidence
+  obligations (§5.5). Override and waiver (§6.3.1). Signature canonicalization
   and trust roots (§8.1.1, §8.2.1); conformance requirement IDs and test
   obligations (§9.4–§9.5).
   Annex A records implementation divergence as tracked work.
-- 0.6.0-draft (2026-04-05): Four-artifact model — independently versioned
+- 0.6.0-draft (2026-04-05): Four-artifact model. Independently versioned
   taxonomy artifact (§2.1), taxonomy reference on packs (§2.2), plural
   `:rule/categories` (§2.3), mapping artifact (§2.4), overlay pack with
-  resolution rules (§2.5); knowledge-safety content renumbered to §2.7
+  resolution rules (§2.5). Knowledge-safety content renumbered to §2.7
 - 0.5.0-draft (2026-03-08): Reliability Nines amendments — Validation Layer Taxonomy
   (§3.4) with 5-layer model and ordering invariant
 - 0.4.0-draft (2026-02-16): Added Pack Trust Gate (§5.1.8), Capability Grant Gate
