@@ -188,6 +188,7 @@
 
 (defn ^{:stratum 1} full-stop-run-authority!
   "Persist a dominant irreversible stop, including before late registration.
+   Concurrent transitions return conflict; retry confirms the retained stop.
    The trusted host must first authorize and audit the intervention. This does
    not stop a runtime, recall requests, or itself fence existing dispatchers."
   [dir request]

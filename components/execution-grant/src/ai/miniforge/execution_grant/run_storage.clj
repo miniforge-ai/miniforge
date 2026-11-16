@@ -5,6 +5,7 @@
   "Reserved run directories and monotonic state: admission creates; full stop replaces."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.execution-grant.messages :as msg]
+            [ai.miniforge.execution-grant.run-file-policy :as policy]
             [ai.miniforge.execution-grant.run-schema :as schema]
             [ai.miniforge.execution-grant.store-read :as reader]
             [ai.miniforge.file-durability.interface :as durability]
@@ -31,7 +32,17 @@
 (defn ^{:stratum 0} failure [id type message-key]
   (anomaly/anomaly type (msg/t message-key) {:workflow-run/id id}))
 
+(defn- ^{:stratum 0} confirm-record! [file record]
+  (let [confirmed (durability/confirm! file)]
+    (if (anomaly/anomaly? confirmed) confirmed record)))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} reserve! [file]
+  (try
+    (Files/createDirectory (.toPath file) private-directory-permissions)
+    true
+    (catch FileAlreadyExistsException _ false)))
 
 (defn ^{:stratum 1} record-file ^File [directory id]
   (io/file directory (str id) record-name))
@@ -55,16 +66,18 @@
         protected (durability/resolve-protected-directory (.getParentFile target))]
     (if (anomaly/anomaly? protected) protected
         (reader/read-record target :workflow-run/id id schema/Record
-                            #(failure id :fault :run/read-failed)))))
+                            #(failure id :fault :run/read-failed) true policy/protected?))))
 
 (defn ^{:stratum 2} reserve-with-exception-handling! [directory id]
   ;; Only Java filesystem failures cross this boundary; the component has no Slingshot dependency.
   (try
-    (Files/createDirectory (.toPath (.getParentFile (record-file directory id))) private-directory-permissions)
-    true
-    (catch FileAlreadyExistsException _ false)
+    (let [file (.getParentFile (record-file directory id))
+          created? (reserve! file)]
+      (anomaly/let-ok [_ (durability/sync-ancestry! file)] created?))
     (catch Exception _ (failure id :fault :run/write-failed))))
 
 (defn ^{:stratum 2} confirm! [directory record]
-  (let [confirmed (durability/confirm! (record-file directory (:workflow-run/id record)))]
-    (if (anomaly/anomaly? confirmed) confirmed record)))
+  (let [file (record-file directory (:workflow-run/id record))]
+    (if (policy/protected? file)
+      (confirm-record! file record)
+      (failure (:workflow-run/id record) :fault :run/read-failed))))

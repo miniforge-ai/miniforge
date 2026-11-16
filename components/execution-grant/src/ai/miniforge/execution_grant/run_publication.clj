@@ -8,7 +8,6 @@
             [ai.miniforge.execution-grant.store-codec :as codec]
             [ai.miniforge.file-durability.interface :as durability])
   (:import [java.io File]
-           [java.nio.charset StandardCharsets]
            [java.nio.file CopyOption FileAlreadyExistsException Files StandardCopyOption]
            [java.nio.file.attribute FileAttribute PosixFilePermissions]))
 
@@ -22,6 +21,9 @@
 (def ^{:stratum 0 :private true} temporary-suffix
   "Unpublished sibling files are never interpreted as authoritative state."
   ".tmp")
+
+(defn- ^{:stratum 0} encode [record]
+  (-> record codec/->wire codec/wire-text codec/strict-utf8))
 
 (defn- ^{:stratum 0} publish! [^File temporary ^File target replace?]
   (if replace?
@@ -37,7 +39,7 @@
         temporary (.toFile (Files/createTempFile (.toPath (.getParentFile target))
                                                 (.getName target) temporary-suffix private-file-permissions))]
     (try
-      (let [encoded (.getBytes (pr-str (codec/->wire record)) StandardCharsets/UTF_8)
+      (let [encoded (encode record)
             result (durability/publish-bytes! temporary encoded #(publish! temporary target replace?))]
         (if (anomaly/anomaly? result) result record))
       (finally (.delete temporary)))))

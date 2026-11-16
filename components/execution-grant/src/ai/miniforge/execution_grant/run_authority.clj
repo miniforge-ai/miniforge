@@ -6,13 +6,15 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.execution-grant.run-publication :as publication]
             [ai.miniforge.execution-grant.run-storage :as storage]
+            [ai.miniforge.execution-grant.run-transition :as transition]
             [ai.miniforge.execution-grant.store-codec :as codec]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} with-directory [root create? id operation]
   (let [directory (storage/directory root create? id)]
-    (if (anomaly/anomaly? directory) directory (operation directory))))
+    (if (anomaly/anomaly? directory) directory
+        (transition/call-with-exception-handling! directory id operation))))
 
 (defn- ^{:stratum 0} admitted [id current]
   (cond

@@ -52,15 +52,15 @@
 
 (defn ^{:stratum 2} read-record
   ([file identity-key id record-schema on-error]
-   (read-record file identity-key id record-schema on-error true))
-  ([file identity-key id record-schema on-error may-retry?]
+   (read-record file identity-key id record-schema on-error true (constantly true)))
+  ([file identity-key id record-schema on-error may-retry? protected?]
    (try
-     (if-not (path/safe? file)
+     (if-not (and (path/safe? file) (protected? file))
        (on-error)
        (checked-record (read-text file) identity-key id record-schema on-error))
      (catch NoSuchFileException _
        (cond (absent? file) nil
-             may-retry? (read-record file identity-key id record-schema on-error false)
+             may-retry? (read-record file identity-key id record-schema on-error false protected?)
              :else (on-error)))
      (catch InterruptedException _
        (.interrupt (Thread/currentThread))
