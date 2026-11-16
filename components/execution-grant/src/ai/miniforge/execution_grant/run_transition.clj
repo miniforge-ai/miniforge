@@ -48,7 +48,7 @@
 (defn- ^{:stratum 1} locked-call! [directory id operation]
   (let [file (io/file directory (str id lock-suffix))]
     (with-open [channel (FileChannel/open (.toPath file) options permissions)]
-      (if-not (true? (durability/protected-regular-file? file))
+      (if-not (true? (durability/file-protection file))
         (storage/failure id :fault :run/write-failed)
         (held-call! channel directory id operation)))))
 

@@ -29,7 +29,7 @@
                 core/confirm! fatal
                 core/prepare-protected-directory! fatal
                 core/resolve-protected-directory fatal
-                core/protected-regular-file? fatal
+                core/file-protection fatal
                 core/filesystem-profile fatal]
     (doseq [file [nil "not-a-file" {}]]
       (doseq [result [(durability/write-new-text! file "text")
@@ -39,11 +39,11 @@
                       (durability/confirm! file)
                       (durability/prepare-protected-directory! file)
                       (durability/resolve-protected-directory file)
-                      (durability/protected-regular-file? file)
+                      (durability/file-protection file)
                       (durability/filesystem-profile file)]]
         (is (= :invalid-input (:anomaly/type result)))))
     (doseq [operation [durability/prepare-protected-directory!
-                       durability/resolve-protected-directory durability/protected-regular-file? durability/filesystem-profile]]
+                       durability/resolve-protected-directory durability/file-protection durability/filesystem-profile]]
       (is (= :invalid-input (:anomaly/type (operation (File. ""))))))
     (doseq [payload [nil 42 []]]
       (is (= :invalid-input (:anomaly/type (durability/write-new-text! (File. "unused") payload))))
@@ -68,7 +68,7 @@
                       (durability/confirm! file)
                       (durability/prepare-protected-directory! file)
                       (durability/resolve-protected-directory file)
-                      (durability/protected-regular-file? file)
+                      (durability/file-protection file)
                       (durability/filesystem-profile file)]]
         (is (anomaly/anomaly? result))
         (is (= "unused" (get-in result [:anomaly/data :durability/path])))))))

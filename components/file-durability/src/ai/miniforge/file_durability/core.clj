@@ -18,7 +18,7 @@
 (defn ^{:stratum 0} filesystem-profile [file]
   (boundary/call-with-exception-handling :filesystem-profile file (partial directory-policy/filesystem-profile file) identity))
 
-(defn ^{:stratum 0} protected-regular-file? [file]
+(defn ^{:stratum 0} file-protection [file]
   (boundary/call-with-exception-handling :file-protection file (partial directory-policy/protected-regular-file? file) identity))
 
 (defn ^{:stratum 0} write-new-text! [file encoded]

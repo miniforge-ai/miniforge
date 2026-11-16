@@ -65,7 +65,7 @@
         protected (durability/resolve-protected-directory (.getParentFile target))]
     (if (anomaly/anomaly? protected) protected
         (reader/read-record target :workflow-run/id id schema/Record
-                            #(failure id :fault :run/read-failed) true (comp true? durability/protected-regular-file?)))))
+                            #(failure id :fault :run/read-failed) true (comp true? durability/file-protection)))))
 
 (defn ^{:stratum 2} reserve-with-exception-handling! [directory id]
   ;; Only Java filesystem failures cross this boundary; the component has no Slingshot dependency.
@@ -77,6 +77,6 @@
 
 (defn ^{:stratum 2} confirm! [directory record]
   (let [file (record-file directory (:workflow-run/id record))]
-    (if (true? (durability/protected-regular-file? file))
+    (if (true? (durability/file-protection file))
       (confirm-record! file record)
       (failure (:workflow-run/id record) :fault :run/read-failed))))

@@ -37,11 +37,11 @@
     (core/filesystem-profile file)
     (boundary/invalid-input :filesystem-profile)))
 
-(defn ^{:stratum 0} protected-regular-file?
+(defn ^{:stratum 0} file-protection
   "Return boolean or anomaly: existing regular file, trusted owner, no non-owner writes; no-follow POSIX attributes."
   [file]
   (if (m/validate spec/DirectoryFile file)
-    (core/protected-regular-file? file)
+    (core/file-protection file)
     (boundary/invalid-input :file-protection)))
 
 (defn ^{:stratum 0} write-new-text!
