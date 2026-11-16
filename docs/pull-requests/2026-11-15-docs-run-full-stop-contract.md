@@ -25,9 +25,13 @@ They also approved containment-only audit-outage handling with authorization,
 failure reporting, and audit obligations intact. No live actions are authorized.
 The recovery approval contingency remains open until implementation verification.
 
+The [owner confirmation recorded in review](https://github.com/miniforge-ai/miniforge/pull/2528#issuecomment-6906568919)
+preserves N4 authority, required Critical approval, and N11 ownership proof.
+The exception cannot authorize unsafe destruction or a successful restart.
+
 ## Changes in detail
 
-Contract layer; base branch `main`, no prerequisite PRs.
+Contract layer; base branch `main`. The N4 prose prerequisite #2531 is merged.
 N8 owns the full-stop command and its dominant fence; N11 owns containment and
 termination; the N2 checkpoint delta owns safe restart. N4 registers the
 distinct permission. N7/N10 reference the

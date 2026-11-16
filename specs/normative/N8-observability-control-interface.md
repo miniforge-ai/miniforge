@@ -504,8 +504,12 @@ termination. A partial failure MUST retain every applied fence and containment
 step; implementations MUST NOT roll them back to satisfy §12.2's ordinary
 failed-action rule. If persistence fails, the controller MUST still locally
 fence the run and attempt authorized containment under N3 §9.1.1.
-It MUST report failure and MUST NOT claim a restart-safe stop. Retrying containment MUST remain run/identity-bound
-and idempotent, never recreate the environment or admit workload execution.
+An outage MUST NOT waive run-scoped authorization, required Critical approval,
+or N11 ownership and identity verification. An unverifiable prerequisite MUST
+block the affected destructive action. The controller MUST report persistence
+failure and MUST NOT claim a restart-safe stop. Retrying containment MUST
+remain run/identity-bound and idempotent, never recreate the environment or
+admit workload execution.
 
 Recovery MUST use a fresh run and the known-safe checkpoint rules in the N2
 checkpoint delta §11. There is no full-stop exit action for the old run.
@@ -995,7 +999,7 @@ deleted.
 
 | ID | Level | Requirement |
 |----|-------|-------------|
-| N8.CTL.1 | MUST | Emit `control-action/requested` and `control-action/executed` per N3 §3.15 for every action. |
+| N8.CTL.1 | MUST | Emit `control-action/requested` and `control-action/executed` per N3 §3.15 for every action. Authorized audit-outage containment retains these obligations under N3 §9.1.1. |
 | N8.CTL.2 | MUST | Require approval for High and Critical actions where configured (§3). |
 | N8.CTL.3 | MUST | Record every control action in the evidence bundle (N6 §2.1, §11). |
 | N8.CTL.4 | MUST NOT | Modify workflow state when an ordinary action fails; a partial full stop retains applied safety restrictions (§3.5, §12.2). |
