@@ -4,13 +4,15 @@
 (ns ai.miniforge.file-durability.publication-probe-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.file-durability.boundary.atomic-publication :as atomic]
+            [ai.miniforge.file-durability.boundary.directory-policy :as policy]
             [ai.miniforge.file-durability.interface :as durability]
             [ai.miniforge.file-durability.io :as file-io]
             [ai.miniforge.file-durability.publication-support :as support]
             [babashka.fs :as fs]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]])
   (:import [java.io IOException]
-           [java.nio.file Files]))
+           [java.nio.file FileAlreadyExistsException Files]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -18,8 +20,16 @@
 
 (defn- ^{:stratum 0} ignore-replacement! [_ destination] destination)
 
-(defn- ^{:stratum 0} allow-collision! [link! candidate destination]
-  (Files/deleteIfExists (.toPath ^java.io.File destination))
+(defn- ^{:stratum 0} overwrite-from-distinct-source! [link! ^java.io.File candidate ^java.io.File destination]
+  (when (and (.exists destination) (not (Files/isSameFile (.toPath candidate) (.toPath destination))))
+    (Files/delete (.toPath destination)))
+  (link! candidate destination))
+
+(defn- ^{:stratum 0} reject-temp-workspace! [& _] (throw (AssertionError.)))
+
+(defn- ^{:stratum 0} destructive-collision! [link! candidate destination]
+  (when (Files/deleteIfExists (.toPath ^java.io.File destination))
+    (throw (FileAlreadyExistsException. (str destination))))
   (link! candidate destination))
 
 (defn- ^{:stratum 0} probe-and-check-cleanup! [root]
@@ -59,7 +69,23 @@
 (deftest ^{:stratum 1} a-provider-that-allows-a-link-collision-cannot-verify-publication
   (support/with-root
    (fn [root]
-     (with-redefs [atomic/link! (partial allow-collision! atomic/link!)]
+     (when (support/posix? root)
+       (with-redefs [atomic/link! (partial overwrite-from-distinct-source! atomic/link!)]
+         (let [result (probe-and-check-cleanup! root)]
+           (is (anomaly/anomaly? result))
+           (is (str/includes? (str (:anomaly/message result)) (str (fs/real-path root))))))))))
+
+(deftest ^{:stratum 1} a-collision-must-preserve-the-existing-destination
+  (support/with-root
+   (fn [root]
+     (with-redefs [atomic/link! (partial destructive-collision! atomic/link!)]
+       (is (anomaly/anomaly? (probe-and-check-cleanup! root)))))))
+
+(deftest ^{:stratum 1} unsupported-native-providers-never-create-a-probe-directory
+  (support/with-root
+   (fn [root]
+     (with-redefs [policy/filesystem-profile (constantly :native-defaults)
+                   fs/create-temp-dir reject-temp-workspace!]
        (is (anomaly/anomaly? (probe-and-check-cleanup! root)))))))
 
 (comment (clojure.test/run-tests 'ai.miniforge.file-durability.publication-probe-test))

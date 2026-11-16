@@ -2,5 +2,6 @@
  {:file/io-failed "File durability operation failed."
   :file/invalid-input "File durability operation received invalid arguments."
   :file/unsafe-directory "Unsafe storage directory {path}: trusted ownership and protection from entry replacement are required."
-  :file/unverified-publication "Storage publication could not verify exclusive creation and atomic replacement."
+  :file/unverified-publication "Storage publication at {path} could not verify exclusive creation and atomic replacement."
+  :file/unsafe-acl "Storage protection at {path} requires readable access controls that do not grant additional permissions."
   :file/unqualified-store "Storage does not match an explicitly selected supported local profile."}}

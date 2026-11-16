@@ -20,7 +20,6 @@
   65536)
 
 (defn ^{:stratum 0} stop! [child]
-  (process/destroy-tree child)
   (when-let [^Process worker (:proc child)]
     (when (.isAlive worker) (.destroyForcibly worker))))
 

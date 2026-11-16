@@ -7,12 +7,12 @@
             [ai.miniforge.file-durability.boundary.atomic-publication :as atomic]
             [ai.miniforge.file-durability.io :as file-io]
             [ai.miniforge.file-durability.boundary.directory-policy :as directory-policy]
+            [ai.miniforge.file-durability.boundary.macos-acl :as macos-acl]
             [babashka.fs :as fs]
             [slingshot.slingshot :refer [try+]])
   (:import [java.io File]
            [java.nio.charset StandardCharsets]
            [java.nio.file FileAlreadyExistsException Files LinkOption Path]
-           [java.nio.file.attribute FileAttribute]
            [java.util Arrays UUID]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -41,10 +41,12 @@
     false
     (catch FileAlreadyExistsException _ true)))
 
-(defn- ^{:stratum 0} replace-candidate! [^File candidate destination ^String replacement]
-  ;; A different inode is required to demonstrate replacement.
+(defn- ^{:stratum 0} create-distinct-candidate! [^File candidate replacement]
+  ;; The first inode remains at the destination, so the contender must be distinct.
   (Files/delete (.toPath candidate))
-  (Files/createFile (.toPath candidate) (make-array FileAttribute 0))
+  (file-io/write-new-text! candidate replacement))
+
+(defn- ^{:stratum 0} replace-candidate! [^File candidate destination ^String replacement]
   (file-io/publish-bytes! candidate (.getBytes replacement StandardCharsets/UTF_8)
                           (partial atomic/replace! candidate destination))
   (Files/notExists (.toPath candidate) (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])))
@@ -57,8 +59,9 @@
     (file-io/write-new-text! candidate initial)
     (atomic/link! candidate destination)
     (file-io/confirm! destination)
-    (and (bytes-match? destination initial)
-         (refuses-relink? candidate destination)
+    (create-distinct-candidate! candidate replacement)
+    (and (refuses-relink? candidate destination)
+         (bytes-match? destination initial)
          (replace-candidate! candidate destination replacement)
          (bytes-match? destination replacement))))
 
@@ -67,6 +70,7 @@
 (defn ^{:stratum 2} check! [^Path directory]
   (when-not (= :posix (directory-policy/filesystem-profile directory))
     (boundary/refuse-directory! directory))
+  (macos-acl/check! directory)
   (let [work (fs/create-temp-dir {:dir directory :prefix probe-prefix
                                   :posix-file-permissions directory-policy/private-permissions})
         candidate (.toFile (fs/path work candidate-name))
