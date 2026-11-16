@@ -31,6 +31,7 @@ Only qualified POSIX directories are supported; native defaults are refused.
 
 The grant reader accepts an explicit identity key, preventing confused identities.
 Run and grant records share strict UTF-8, EDN, schema, and link checks.
+Record-file protection reuses the shared directory policy's owner and write checks.
 
 ## Testing plan
 
@@ -47,9 +48,9 @@ Busy transitions return conflict; retry confirms the first acknowledged stop.
 Tests cover concurrent distinct requests, another process holding the OS lock,
 writable records, failed reservation forcing, malformed Unicode, and printer bindings.
 
-Validation: both JVM products passed 102 tests and 769 assertions.
+Validation: both JVM products passed 105 tests and 830 assertions.
 The real-process integration test passed four assertions. Babashka source and
-isolated fresh package each passed 16 tests and 62 assertions, including old
+isolated fresh package each passed 19 tests and 123 assertions, including old
 grant lookup. Eight safety faults produced assertion-only failures in every
 runtime. Strict lint, inferred namespace-depth, workspace and task-classpath
 gates passed, including the final codec and transition-lock decomposition.

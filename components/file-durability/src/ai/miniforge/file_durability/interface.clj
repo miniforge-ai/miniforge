@@ -37,6 +37,13 @@
     (core/filesystem-profile file)
     (boundary/invalid-input :filesystem-profile)))
 
+(defn ^{:stratum 0} protected-regular-file?
+  "Return boolean or anomaly: existing regular file, trusted owner, no non-owner writes; no-follow POSIX attributes."
+  [file]
+  (if (m/validate spec/DirectoryFile file)
+    (core/protected-regular-file? file)
+    (boundary/invalid-input :file-protection)))
+
 (defn ^{:stratum 0} write-new-text!
   "Create and force a new UTF-8 file without replacing existing files or links."
   [file text]

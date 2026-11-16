@@ -3,7 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.execution-grant.run-transition
   "Nonblocking per-run process locks cover the complete read/confirm/publish transition."
-  (:require [ai.miniforge.execution-grant.run-file-policy :as policy]
+  (:require [ai.miniforge.file-durability.interface :as durability]
             [ai.miniforge.execution-grant.run-storage :as storage]
             [clojure.java.io :as io])
   (:import [java.nio.channels FileChannel]
@@ -48,7 +48,7 @@
 (defn- ^{:stratum 1} locked-call! [directory id operation]
   (let [file (io/file directory (str id lock-suffix))]
     (with-open [channel (FileChannel/open (.toPath file) options permissions)]
-      (if-not (policy/protected? file)
+      (if-not (true? (durability/protected-regular-file? file))
         (storage/failure id :fault :run/write-failed)
         (held-call! channel directory id operation)))))
 

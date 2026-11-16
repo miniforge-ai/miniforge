@@ -45,6 +45,11 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} protected-regular-file? [path]
+  (let [attributes (fs/read-attributes path "posix:*" {:nofollow-links true})]
+    (and (:isRegularFile attributes) (trusted-owner? (:owner attributes))
+         (not (writable-by-others? attributes)))))
+
 (defn ^{:stratum 2} check! [path leaf?]
   (let [attributes (fs/read-attributes path "posix:*" {:nofollow-links true})
         protected? (or (not (writable-by-others? attributes))

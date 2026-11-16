@@ -55,7 +55,7 @@
    (read-record file identity-key id record-schema on-error true (constantly true)))
   ([file identity-key id record-schema on-error may-retry? protected?]
    (try
-     (if-not (and (path/safe? file) (protected? file))
+     (if-not (and (path/safe? file) (or (absent? file) (protected? file)))
        (on-error)
        (checked-record (read-text file) identity-key id record-schema on-error))
      (catch NoSuchFileException _

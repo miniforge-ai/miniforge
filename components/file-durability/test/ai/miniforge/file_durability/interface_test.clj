@@ -29,6 +29,7 @@
                 core/confirm! fatal
                 core/prepare-protected-directory! fatal
                 core/resolve-protected-directory fatal
+                core/protected-regular-file? fatal
                 core/filesystem-profile fatal]
     (doseq [file [nil "not-a-file" {}]]
       (doseq [result [(durability/write-new-text! file "text")
@@ -38,10 +39,11 @@
                       (durability/confirm! file)
                       (durability/prepare-protected-directory! file)
                       (durability/resolve-protected-directory file)
+                      (durability/protected-regular-file? file)
                       (durability/filesystem-profile file)]]
         (is (= :invalid-input (:anomaly/type result)))))
     (doseq [operation [durability/prepare-protected-directory!
-                       durability/resolve-protected-directory durability/filesystem-profile]]
+                       durability/resolve-protected-directory durability/protected-regular-file? durability/filesystem-profile]]
       (is (= :invalid-input (:anomaly/type (operation (File. ""))))))
     (doseq [payload [nil 42 []]]
       (is (= :invalid-input (:anomaly/type (durability/write-new-text! (File. "unused") payload))))
@@ -57,6 +59,7 @@
                   file-io/confirm! io-failure
                   directory/prepare! io-failure
                   directory/existing! io-failure
+                  directory-policy/protected-regular-file? io-failure
                   directory-policy/filesystem-profile io-failure]
       (doseq [result [(durability/write-new-text! file "")
                       (durability/write-temporary-bytes! file (byte-array 0))
@@ -65,6 +68,7 @@
                       (durability/confirm! file)
                       (durability/prepare-protected-directory! file)
                       (durability/resolve-protected-directory file)
+                      (durability/protected-regular-file? file)
                       (durability/filesystem-profile file)]]
         (is (anomaly/anomaly? result))
         (is (= "unused" (get-in result [:anomaly/data :durability/path])))))))
