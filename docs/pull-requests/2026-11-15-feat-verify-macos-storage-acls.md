@@ -33,11 +33,13 @@ fresh package. A disposable macOS fixture verifies that adding an allow ACE
 without changing the POSIX mode changes the probe's result. Omitting the ACL
 check must make this regression fail. Exercise a real native read error and
 reject missing and malformed acknowledgements before creating scratch files.
+Verify that timed-out children terminate, a timed-out capture is cancelled,
+and a failed child never yields an acknowledgement.
 
-Local results: 24 tests and 106 assertions passed in each of the four runs.
-Removing the ACL guard failed the real macOS regression without a runtime
-error in all four. Strict lint, inferred namespace depths, Polylith, and
-Babashka classpaths passed.
+Local results: 27 tests and 112 assertions passed in each of the four runs.
+Disabling the ACL guard, child deadline or capture cancellation failed the
+corresponding assertions without runtime errors. Strict lint, inferred
+namespace depths, Polylith, and Babashka classpaths passed.
 
 ## Deployment plan
 
