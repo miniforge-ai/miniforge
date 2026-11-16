@@ -887,8 +887,8 @@ diverges from the contract above, as of 2026-08-10.
 ### A.1 Implemented
 
 **TaskExecutor protocol (§10).** `components/dag-executor` provides the
-  protocol and three implementations: `worktree.clj`, `host_guarded.clj`, and
-  `kubernetes.clj`.
+protocol and three implementations: `worktree.clj`, `host_guarded.clj`, and
+`kubernetes.clj`.
 
 ### A.2 Specified, Not Implemented
 

@@ -165,17 +165,14 @@ Implementations MUST enforce capability levels:
 
 ### 2.3 RBAC Requirements
 
-CONTROL capability MUST integrate with RBAC:
+CONTROL capability MUST integrate with RBAC. The workflow permission map is
+defined in N4 §5.1.6. Authorizing any workflow control action requires its
+corresponding permission, including rollback, force-complete, and full stop.
 
 ```clojure
 {:rbac/role keyword                   ; Role identifier
  :rbac/permissions
- {:workflows                          ; Workflow-level permissions
-  {:pause boolean
-   :resume boolean
-   :retry boolean
-   :cancel boolean
-   :full-stop boolean}
+ {:workflows workflow-permissions    ; Canonical workflow map from N4 §5.1.6
 
   :agents                             ; Agent-level permissions
   {:quarantine boolean

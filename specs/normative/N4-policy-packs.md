@@ -1178,7 +1178,8 @@ Rules:
 
 - `require-rbac-authorization` (severity: critical)
   - FAIL if control action requester lacks required RBAC role for the action type
-  - MUST validate against RBAC schema (see N8 §2.3)
+  - MUST validate the RBAC role schema below and enforce the additional
+    constraints in N8 §2.3
 - `require-multi-party-approval` (severity: critical)
   - FAIL if High/Critical risk actions proceed without configured number of approvers
   - Requester MUST NOT be their own approver (when `require-different-principal?` is true)
