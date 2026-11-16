@@ -37,6 +37,15 @@
     (core/filesystem-profile file)
     (boundary/invalid-input :filesystem-profile)))
 
+(defn ^{:stratum 0} verify-publication!
+  "Probe a protected, existing POSIX root for forced create-only and atomic replacement.
+   Returns :publication-verified or an anomaly. Does not establish backend
+   persistence or interoperability with another process."
+  [root]
+  (if (m/validate spec/DirectoryFile root)
+    (core/verify-publication! root)
+    (boundary/invalid-input :verify-publication)))
+
 (defn ^{:stratum 0} write-new-text!
   "Create and force a new UTF-8 file without replacing existing files or links."
   [file text]
