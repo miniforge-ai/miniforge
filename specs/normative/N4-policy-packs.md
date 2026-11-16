@@ -2169,16 +2169,14 @@ contract the code already satisfies:
 
 ### A.5 Gate-Readiness Calibration — implemented, unspecified
 
-The implementation carries a mechanism this spec does not describe at all: N4
-mentions calibration zero times.
+The implementation carries a calibration mechanism whose contract is not
+specified by the normative model above.
 
 `components/policy-calibration` measures a judge's false-positive and recall
 rates over a seeded corpus across independent runs. This determines whether
-a semantic rule is reliable enough to gate. `gate_check.clj` then
-refuses to ship: a rule whose enforcement action is acting
-(`:hard-halt` or `:require-approval`) **and** whose detector is `:semantic`.
-That rule must hold a passing `:gate-ready?` calibration record, or it is reported as
-ungated.
+a semantic rule is reliable enough to gate. `gate_check.clj` reports an acting
+semantic rule as ungated unless it has a passing `:gate-ready?` calibration record.
+Acting means `:hard-halt` or `:require-approval`. Any ungated rule fails that check.
 
 Two consequences for this spec:
 
