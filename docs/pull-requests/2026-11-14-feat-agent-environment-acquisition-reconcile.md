@@ -155,11 +155,12 @@ trigger a reconcile.
    3. A cleanup left without a UID is reconciled and the key reused.
    4. A late owner's unconfirmed delete stays `cleanup-uncertain`, and the next acquire deletes it.
    5. A rival that reconciled and provisioned the next generation between the owner's claim and its
-      dispatch: the owner gets `claim-lost`, and the rival's is the only `provision!` call. With the
-      dispatch check removed, this test fails.
-4. Each of the six review findings has a test that failed with its fix removed. This was checked on
-   the rework before the split; the code of those fixes is unchanged since.
-5. The agent-environment suite passes: 103 tests with 376 assertions. clj-kondo and stratum-lint are
+      dispatch: the owner gets `claim-lost`, and the rival's is the only `provision!` call.
+   6. A provision that ends unconfirmed after a rival adopted its environment deletes nothing: the
+      owner's cleanup intent is not taken, and the entry stays provisioned.
+4. Each of the six review findings has a test that fails with its fix removed, checked by mutation on
+   this version. The test for finding 3 is new in this version.
+5. The agent-environment suite passes: 104 tests with 380 assertions. clj-kondo and stratum-lint are
    clean.
 
 All of this is fake-provider evidence. A real provider's `observe` must be authoritative for the

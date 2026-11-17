@@ -38,6 +38,10 @@
   "The generation a key's first reservation takes."
   1)
 
+(def ^{:stratum 0} unconfirmed-provision
+  "A provider's answer to a provision whose last step it could not confirm."
+  {:provision/steps [{:step/name :step/workload :step/outcome :outcome/uncertain}]})
+
 (def ^{:stratum 0} unconfirmed-delete
   "A provider's answer to a delete it accepted but has not confirmed."
   {:deprovision/steps [{:step/name :step/namespace-deleted :step/outcome :outcome/uncertain}]})
@@ -60,16 +64,25 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} cancel-adopted!
+(defn- ^{:stratum 1} rival-adopted!
   "Write the reservation as a rival that adopted the environment the fake
-   just made and then cancelled it would."
-  [w req]
+   just made, leaving it in `state`, would."
+  [w req state]
   (let [k (lease/request-key req)
         space (first (fake/live-namespaces (:fake w)))
         uid (get-in @(:state (:fake w)) [space :uid])
         adopted (support/environment req (target-of req first-generation) uid)
         {:ledger/keys [entry revision]} (store/read-entry (:inner w) k)]
-    (store/write-entry! (:inner w) k revision (assoc entry :entry/state :state/cancelled :entry/environment adopted :entry/claim nil))))
+    (store/write-entry! (:inner w) k revision (assoc entry :entry/state state :entry/environment adopted :entry/claim nil))))
+
+(defn- ^{:stratum 1} unconfirmed-after
+  "A `provision!` hook: the fake provisions, `rival!` runs, and the owner
+   hears back only an unconfirmed provision."
+  [w req rival!]
+  (fn []
+    (protocol/provision! (:fake w) (target-of req first-generation) req)
+    (rival!)
+    unconfirmed-provision))
 
 (deftest ^{:stratum 1} test-a-partial-environment-is-deleted-not-adopted
   (let [w (outage-world {:fake/fail-step :step/workload})
@@ -119,7 +132,17 @@
 (deftest ^{:stratum 2} test-a-late-owner-gets-the-adopted-environments-refusal
   (let [w (outage-world)
         req (fx/request w (:a w))]
-    (swap! (:hooks w) assoc :provision! (faults/at-record w #(cancel-adopted! w req)))
+    (swap! (:hooks w) assoc :provision! (faults/at-record w #(rival-adopted! w req :state/cancelled)))
     (is (= :anomalies.agent-environment/environment-cancelled (reason (fx/acquire w (:a w) req))))
     (is (nil? (:deprovision! @(:calls w))))
     (is (= 1 (count (fake/live-namespaces (:fake w)))))))
+
+(deftest ^{:stratum 2} test-a-failed-provision-never-deletes-what-a-rival-adopted
+  (let [w (outage-world)
+        req (fx/request w (:a w))]
+    (swap! (:hooks w) assoc :provision! (unconfirmed-after w req #(rival-adopted! w req :state/provisioned)))
+    (is (= :anomalies.agent-environment/provisioning-failed (reason (fx/acquire w (:a w) req))))
+    (testing "given the rival adopted the environment first → the owner's cleanup intent is not taken"
+      (is (nil? (:deprovision! @(:calls w))))
+      (is (= 1 (count (fake/live-namespaces (:fake w)))))
+      (is (= :state/provisioned (:entry/state (stored w req)))))))
