@@ -212,7 +212,8 @@
                                        (fn [job]
                                          (result/and-then
                                           (client/wait-for-pod-ready kubectl-path namespace job-name config)
-                                          (partial observation/verify! kubectl-path job))))]
+                                          (partial observation/verify! kubectl-path job
+                                                   (:kubernetes/pod-observation-request-timeout-ms config)))))]
          (result/map-ok observed
                         (fn [pod]
                           (swap! pod-cache assoc job-name (:pod-name pod))
@@ -289,6 +290,7 @@
    - :kubectl-path - Path to kubectl binary
    - :resources/timeout-seconds - Capsule budget; a task can override it in :resources
    - :kubernetes/creation-request-timeout-ms - Timeout for the create request
+   - :kubernetes/pod-observation-request-timeout-ms - Timeout for Pod identity readback
    - :kubernetes/pod-ready-timeout-ms, :kubernetes/pod-ready-poll-interval-ms - Readiness polling"
   [config]
   (map->KubernetesExecutor

@@ -24,6 +24,8 @@ and its controller's complete identity, and reject terminating or
 non-Running observations. Keep the observed Pod UID and version in
 the environment record. An acquisition with missing evidence does not
 issue a name-only delete; the Job's admitted deadline remains in force.
+The Pod identity read has its own validated timeout, independent of the
+Job creation request and the ongoing readiness polling.
 
 ## Testing plan
 
@@ -32,10 +34,11 @@ an invalid controller, a different scope, a terminating Pod, and an
 unconfirmed identity. Verify that acquisition errors do not delete any
 resource by name.
 
-Both JVM products, Babashka source, and the fresh package passed 7 tests
-and 33 assertions each. Omitting controller validation failed three targeted
-assertions without runtime errors. Strict lint, namespace depths, Polylith,
-and Babashka classpaths passed.
+Both JVM products, Babashka source, and the fresh package passed 11 tests
+and 77 assertions each. Omitting controller validation failed three targeted
+assertions, and ignoring the read timeout failed one. Neither caused
+runtime errors. Strict lint, namespace depths, Polylith, and Babashka
+classpaths passed.
 
 ## Deployment plan
 

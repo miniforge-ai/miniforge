@@ -67,6 +67,7 @@
 (deftest ^{:stratum 1} invalid-transport-budgets-are-rejected-at-configuration
   (with-redefs [shell/sh reject-io!]
     (doseq [key [:kubernetes/creation-request-timeout-ms
+                 :kubernetes/pod-observation-request-timeout-ms
                  :kubernetes/pod-ready-timeout-ms
                  :kubernetes/pod-ready-poll-interval-ms]
             invalid [nil false 0 1.5 (inc Integer/MAX_VALUE)]]
@@ -110,6 +111,7 @@
 
 (deftest ^{:stratum 2} executor-transport-budgets-reach-their-own-boundaries
   (let [settings {:kubernetes/creation-request-timeout-ms 4500
+                  :kubernetes/pod-observation-request-timeout-ms 7000
                   :kubernetes/pod-ready-timeout-ms 16000
                   :kubernetes/pod-ready-poll-interval-ms 500}
         instance (kubernetes/create-kubernetes-executor settings)]
@@ -120,7 +122,10 @@
                   client/wait-for-pod-ready (fn [_ _ _ effective]
                                               (is (= settings (select-keys effective (keys settings))))
                                               (readiness))
-                  observation/verify! observed]
+                  observation/verify! (fn [_ _ timeout-ms _]
+                                        (is (= (:kubernetes/pod-observation-request-timeout-ms settings)
+                                               timeout-ms))
+                                        (observed))]
       (is (result/ok? (executor/acquire-environment! instance (random-uuid) {}))))))
 
 (deftest ^{:stratum 2} uncertain-job-creation-is-never-adopted-or-cleaned-up-by-name

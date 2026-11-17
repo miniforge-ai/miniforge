@@ -14,8 +14,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0 :private true} request-timeout "--request-timeout=5s")
-
 (defn- ^{:stratum 0} parent [{:keys [job-name namespace job-uid]}]
   {"apiVersion" job-creation/api-version
    "kind" job-creation/resource-kind
@@ -41,13 +39,14 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} verify! [executable job {:keys [pod-name]}]
+(defn ^{:stratum 2} verify! [executable job request-timeout-ms {:keys [pod-name]}]
   (if-not (every? (partial m/validate target/IdentityText)
                   [pod-name (:namespace job) (:job-name job) (:job-uid job)])
     (unconfirmed)
     (try+
       (let [{:keys [exit out]} (client/run-kubectl executable "get" "pod" "-n" (:namespace job)
-                                                    "-o" "json" request-timeout "--" pod-name)
+                                                    "-o" "json" (str "--request-timeout=" request-timeout-ms "ms")
+                                                    "--" pod-name)
             observed (when (= 0 exit) (retain job pod-name (json/parse-string-strict out)))]
         (if observed (result/ok observed) (unconfirmed)))
       (catch Exception e

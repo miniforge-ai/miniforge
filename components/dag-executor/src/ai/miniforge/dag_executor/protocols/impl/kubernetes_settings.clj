@@ -23,6 +23,7 @@
 (def ^{:stratum 1 :private true} executor-schema
   (conj capsule-budget-schema
         [:kubernetes/creation-request-timeout-ms millis-schema]
+        [:kubernetes/pod-observation-request-timeout-ms millis-schema]
         [:kubernetes/pod-ready-timeout-ms millis-schema]
         [:kubernetes/pod-ready-poll-interval-ms millis-schema]))
 

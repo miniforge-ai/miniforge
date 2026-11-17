@@ -14,6 +14,8 @@
 
 (def ^{:stratum 0 :private true} candidate {:pod-name "candidate"})
 
+(def ^{:stratum 0 :private true} observation-timeout-ms 6500)
+
 (defn- ^{:stratum 0} pod [{:keys [job-name job-uid namespace]} pod-name]
   {"apiVersion" "v1"
    "kind" "Pod"
@@ -31,10 +33,11 @@
 
 (deftest ^{:stratum 2} exact-observed-pod-identity-is-retained
   (with-redefs [client/run-kubectl (fn [& args]
+                                    (is (some #{"--request-timeout=6500ms"} args))
                                     (is (= ["--" (:pod-name candidate)] (take-last 2 args)))
                                     (reply identity))]
     (is (= (assoc candidate :pod-uid "pod-uid" :pod-observed-resource-version "pod-version")
-           (:data (observation/verify! nil retained candidate))))))
+           (:data (observation/verify! nil retained observation-timeout-ms candidate))))))
 
 (deftest ^{:stratum 2} name-and-status-cannot-substitute-for-current-ownership
   (doseq [change [#(assoc-in % ["metadata" "ownerReferences" 0 "uid"] "replacement-job")
@@ -46,6 +49,6 @@
                   #(assoc-in % ["status" "phase"] "Failed")]]
     (with-redefs [client/run-kubectl (constantly (reply change))]
       (is (= :pod-owner-unconfirmed
-             (get-in (observation/verify! nil retained candidate) [:error :code]))))))
+             (get-in (observation/verify! nil retained observation-timeout-ms candidate) [:error :code]))))))
 
 (comment (clojure.test/run-tests 'ai.miniforge.dag-executor.kubernetes-pod-observation-test))

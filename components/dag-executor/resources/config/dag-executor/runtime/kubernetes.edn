@@ -1,5 +1,6 @@
 ;; N11 §5.3: default execution budget for a native capsule.
 {:resources/timeout-seconds 3600
  :kubernetes/creation-request-timeout-ms 30000
+ :kubernetes/pod-observation-request-timeout-ms 5000
  :kubernetes/pod-ready-timeout-ms 120000
  :kubernetes/pod-ready-poll-interval-ms 2000}
