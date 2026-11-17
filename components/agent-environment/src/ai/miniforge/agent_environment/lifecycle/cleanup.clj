@@ -55,6 +55,11 @@
   [entry environment cleanup]
   (assoc entry :entry/state :state/releasing :entry/environment environment :entry/cleanup cleanup))
 
+(defn- ^{:stratum 0} abandoned?
+  "True for a reservation a reconcile released with no environment."
+  [entry]
+  (and (= :state/released (:entry/state entry)) (nil? (:entry/environment entry))))
+
 (defn- ^{:stratum 0} outcome-recorded
   "The entry once `cleanup`'s deletes ran: released when they applied and
    the UID is verified gone, else cleanup-uncertain to retry. Unchanged when
@@ -91,18 +96,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} for-reservation
-  "Ownership for a partial provision's cleanup: the reservation at
-   `generation`, while still provisioning."
+  "Ownership for what a reservation's own provision created: the
+   reservation at `generation` while still provisioning, or after a
+   reconcile released it with no environment. Never an adopted environment
+   or a newer generation."
   [generation environment cleanup entry]
-  (if (and (= generation (:entry/generation entry)) (= :state/provisioning (:entry/state entry)))
-    (releasing entry environment cleanup)
-    entry))
-
-(defn ^{:stratum 1} for-abandoned
-  "Ownership for a late owner's cleanup: the reservation at `generation`
-   that a reconcile released with no environment."
-  [generation environment cleanup entry]
-  (if (and (= generation (:entry/generation entry)) (= :state/released (:entry/state entry)) (nil? (:entry/environment entry)))
+  (if (and (= generation (:entry/generation entry))
+           (or (= :state/provisioning (:entry/state entry)) (abandoned? entry)))
     (releasing entry environment cleanup)
     entry))
 

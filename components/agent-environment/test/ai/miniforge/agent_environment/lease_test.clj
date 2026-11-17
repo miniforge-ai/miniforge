@@ -98,7 +98,9 @@
       (is (not (lease/claim-held? held controller-id 2 now)))
       (is (not (lease/claim-held? held (random-uuid) 1 now)))
       (is (not (lease/claim-held? held controller-id 1 expires-at)))
-      (is (not (lease/claim-held? (lease/reconciled held nil) controller-id 1 now))))))
+      (is (not (lease/claim-held? (lease/reconciled held nil) controller-id 1 now))))
+    (testing "given a cleanup that kept the claim → not held"
+      (is (not (lease/claim-held? (assoc held :entry/state :state/releasing) controller-id 1 now))))))
 
 (deftest ^{:stratum 2} test-an-expired-claim-is-reconciled
   (let [provisioning (entry :state/provisioning (request))]

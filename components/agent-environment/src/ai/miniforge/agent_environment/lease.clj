@@ -148,6 +148,7 @@
    have reconciled it."
   [entry controller-id generation now]
   (and (= generation (:entry/generation entry))
+       (= :state/provisioning (:entry/state entry))
        (= controller-id (get-in entry [:entry/claim :claim/controller-id]))
        (not (claim-expired? entry now))))
 

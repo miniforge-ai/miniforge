@@ -73,6 +73,14 @@
   (let [at (assoc (controller/target stale) :target/generation (get-in environment [:environment/lease :lease/generation]))]
     (:cleanup/recorded (cleanup/cleaned-under! c subject request at environment (partial cleanup/for-stale stale) nil))))
 
+(defn- ^{:stratum 0} leftover-call
+  "The call result for a reconcile that deleted what the key left behind:
+   abandoned once the cleanup is verified and recorded, else uncertain."
+  [recorded]
+  (let [released? (= :state/released (get-in recorded [:ledger/after :entry/state]))
+        step {:step/name :step/abandoned :step/outcome (if released? :outcome/applied :outcome/uncertain)}]
+    (if (anomaly/anomaly? recorded) recorded {:call/value recorded :call/steps [step]})))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} settled!
@@ -83,7 +91,7 @@
         leftover (when-not (or (anomaly/anomaly? seen) adopted) (doomed stale target seen))]
     (cond
       (anomaly/anomaly? seen) (controller/finish! c subject :environment/reconcile seen)
-      leftover (cleaned! c subject request stale leftover)
+      leftover (controller/finish! c subject :environment/reconcile (leftover-call (cleaned! c subject request stale leftover)))
       :else (controller/finish! c subject :environment/reconcile
                                 (reconcile-call adopted (controller/settle-reconciled! c stale adopted))))))
 

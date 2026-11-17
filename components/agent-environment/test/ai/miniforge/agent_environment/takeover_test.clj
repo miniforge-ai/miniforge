@@ -92,7 +92,8 @@
     (is (= :anomalies.agent-environment/provisioning-failed (reason (faults/reacquire w (faults/late-controller w) req))))
     (testing "given the crashed owner's namespace without its workload → deleted before the next generation"
       (is (empty? (fake/live-namespaces (:fake w))))
-      (is (= [:outcome/applied :outcome/applied] (release-outcomes w))))))
+      (is (= [:outcome/applied :outcome/applied] (release-outcomes w)))
+      (is (= [:outcome/applied] (fx/outcomes w :environment/reconcile))))))
 
 (deftest ^{:stratum 1} test-a-cleanup-left-without-a-uid-is-reconciled
   (let [w (outage-world)
@@ -126,6 +127,15 @@
     (testing "given a rival that reconciled and provisioned the next generation first → only the rival provisions"
       (is (= 1 (:provision! @(:calls w))))
       (is (= [:state/provisioned 2] ((juxt :entry/state :entry/generation) (stored w req)))))))
+
+(deftest ^{:stratum 1} test-a-late-owners-partial-provision-is-deleted
+  (let [w (outage-world {:fake/fail-step :step/workload})
+        req (fx/request w (:a w))]
+    (swap! (:hooks w) assoc :provision! (faults/at-record w #(faults/abandon! w req)))
+    (is (= :anomalies.agent-environment/provisioning-failed (reason (fx/acquire w (:a w) req))))
+    (testing "given a rival abandoned the reservation before the owner's cleanup → the owner still deletes"
+      (is (empty? (fake/live-namespaces (:fake w))))
+      (is (= :state/released (:entry/state (stored w req)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

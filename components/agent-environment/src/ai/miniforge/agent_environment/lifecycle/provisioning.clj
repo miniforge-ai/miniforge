@@ -69,7 +69,7 @@
    discovery."
   [c subject request target env]
   (let [cleaned (cleanup/cleaned-under! c subject request target env
-                                        (partial cleanup/for-abandoned (:target/generation target))
+                                        (partial cleanup/for-reservation (:target/generation target))
                                         :anomalies.agent-environment/claim-lost)
         receipt-ids (filterv some? [(get-in cleaned [:cleanup/receipt :receipt/id])])]
     (refusal/reason-anomaly :anomalies.agent-environment/claim-lost
