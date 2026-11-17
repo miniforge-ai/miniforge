@@ -27,6 +27,9 @@ Executor configuration can set `:resources/timeout-seconds`; a task can
 override it under `:resources`. Explicit nonpositive or noninteger values
 are rejected before submission, not replaced with the default. The receipt
 must confirm the effective deadline, including any override.
+The create-request timeout and Pod readiness timings are independent
+executor options with validated packaged defaults; changing either
+does not change the Job deadline.
 
 Separate the existing transport polling and resource projection into
 bounded namespaces. Preserve running and terminal readiness outcomes.
@@ -39,12 +42,14 @@ Refuse missing and mismatched identity, changed deadline, malformed
 output, and nonzero exit without readiness or cleanup calls.
 Exercise the default, both levels of override, and invalid values; check
 that a provider response reverting an override to the default is rejected.
+Verify the create-request and readiness options reach their own boundaries
+without changing the capsule budget.
 
-Both JVM products, Babashka source, and the fresh package passed 6 tests
-and 38 assertions each. The old acquisition path failed four receipt
-assertions. Deliberately ignoring the task override failed its budget
-assertion without a runtime error. Strict lint, namespace depths,
-Polylith, and Babashka classpaths passed.
+Both JVM products, Babashka source, and the fresh package passed 8 tests
+and 58 assertions each. The old acquisition path failed four receipt
+assertions. Deliberately ignoring the task or request-timeout override
+failed the corresponding assertion without a runtime error. Strict lint,
+namespace depths, Polylith, and Babashka classpaths passed.
 
 ## Deployment plan
 

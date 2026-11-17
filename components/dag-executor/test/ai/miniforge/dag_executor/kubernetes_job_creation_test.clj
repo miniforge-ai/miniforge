@@ -24,6 +24,11 @@
 
 (defn- ^{:stratum 0} reject-io! [& _] (throw (AssertionError.)))
 
+(defn- ^{:stratum 0} invalid-setting [options]
+  (try
+    (kubernetes/create-kubernetes-executor options)
+    (catch clojure.lang.ExceptionInfo e (:config/key (ex-data e)))))
+
 (deftest ^{:stratum 0} resource-projection-preserves-defaults-and-stringifies-cpu
   (is (= {:limits {:memory "1Gi" :cpu "2"}
           :requests {:memory "256Mi" :cpu "100m"}}
@@ -33,7 +38,9 @@
   (doseq [[phase success?] [["Running" true] ["Failed" false] ["Succeeded" false]]]
     (with-redefs [shell/sh (fn [& [_ _ kind]]
                             {:exit 0 :out (if (= "pods" kind) "mock-capsule-pod" phase)})]
-      (let [observed (client/wait-for-pod-ready nil "capsules" "job" 1000)]
+      (let [observed (client/wait-for-pod-ready nil "capsules" "job"
+                                               {:kubernetes/pod-ready-timeout-ms 1000
+                                                :kubernetes/pod-ready-poll-interval-ms 20})]
         (is (= success? (result/ok? observed)))
         (when-not success? (is (= :pod-failed (get-in observed [:error :code]))))))))
 
@@ -48,13 +55,18 @@
     (with-redefs [shell/sh reject-io!]
       (doseq [invalid [nil false "3600" 3600.0 0 -1 (inc' Long/MAX_VALUE)]
               :let [budget {:resources/timeout-seconds invalid}]]
-        (is (= :resources/timeout-seconds
-               (try
-                 (kubernetes/create-kubernetes-executor budget)
-                 (catch clojure.lang.ExceptionInfo e (:config/key (ex-data e))))))
+        (is (= :resources/timeout-seconds (invalid-setting budget)))
         (is (= :invalid-capsule-deadline
                (get-in (executor/acquire-environment! instance (random-uuid) {:resources budget})
                        [:error :code])))))))
+
+(deftest ^{:stratum 1} invalid-transport-budgets-are-rejected-at-configuration
+  (with-redefs [shell/sh reject-io!]
+    (doseq [key [:kubernetes/creation-request-timeout-ms
+                 :kubernetes/pod-ready-timeout-ms
+                 :kubernetes/pod-ready-poll-interval-ms]
+            invalid [nil false 0 1.5 (inc Integer/MAX_VALUE)]]
+      (is (= key (invalid-setting {key invalid}))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -64,6 +76,7 @@
     (with-redefs [shell/sh (fn [& args]
                             (swap! submitted inc)
                             (is (= "create" (second args)))
+                            (is (some #{"--request-timeout=30000ms"} args))
                             (is (= 3600 (get-in (requested args) [:spec :activeDeadlineSeconds])))
                             (response args identity))
                   client/wait-for-pod-ready readiness
@@ -87,6 +100,20 @@
       (is (result/ok? (executor/acquire-environment! instance (random-uuid)
                                                      {:resources {:resources/timeout-seconds 7200}})))
       (is (= [5400 7200] @submitted)))))
+
+(deftest ^{:stratum 2} executor-transport-budgets-reach-their-own-boundaries
+  (let [settings {:kubernetes/creation-request-timeout-ms 4500
+                  :kubernetes/pod-ready-timeout-ms 16000
+                  :kubernetes/pod-ready-poll-interval-ms 500}
+        instance (kubernetes/create-kubernetes-executor settings)]
+    (with-redefs [shell/sh (fn [& args]
+                            (is (some #{"--request-timeout=4500ms"} args))
+                            (is (= 3600 (get-in (requested args) [:spec :activeDeadlineSeconds])))
+                            (response args identity))
+                  client/wait-for-pod-ready (fn [_ _ _ effective]
+                                              (is (= settings (select-keys effective (keys settings))))
+                                              (readiness))]
+      (is (result/ok? (executor/acquire-environment! instance (random-uuid) {}))))))
 
 (deftest ^{:stratum 2} uncertain-job-creation-is-never-adopted-or-cleaned-up-by-name
   (let [instance (kubernetes/create-kubernetes-executor {:namespace "capsules"
