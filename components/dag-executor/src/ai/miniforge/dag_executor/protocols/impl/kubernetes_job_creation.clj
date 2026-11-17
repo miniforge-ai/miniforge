@@ -16,13 +16,34 @@
 
 (def ^{:stratum 0} resource-kind "Job")
 
+(def ^{:stratum 0 :private true} provider-reasons
+  [[#"\AError from server \(AlreadyExists\):" :already-exists]
+   [#"\AError from server \(Forbidden\):" :forbidden]
+   [#"\A(?:Error from server \(Unauthorized\):|error: You must be logged in to the server \()" :unauthorized]
+   [#"\A(?:Error from server \(Invalid\):|The (?:request|Job [^\r\n]+) is invalid(?=[:\r\n]|\z))" :invalid-job]])
+
 (defn- ^{:stratum 0} present-text? [value]
   (and (string? value) (not (str/blank? value))))
 
-(defn- ^{:stratum 0} unconfirmed []
-  (result/err :job-creation-unconfirmed (messages/t :kubernetes/job-creation-unconfirmed)))
+(defn- ^{:stratum 0} unconfirmed [reason exit-code]
+  (result/err :job-creation-unconfirmed
+              (messages/t :kubernetes/job-creation-unconfirmed)
+              (cond-> {:reason reason}
+                (int? exit-code) (assoc :exit-code exit-code))))
+
+(defn- ^{:stratum 0} parse-reply [out]
+  (try+
+    (json/parse-string-strict out)
+    (catch InterruptedException e (throw e))
+    (catch Exception _ ::malformed-response)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} command-reason [stderr]
+  ;; Only exact CLI headers can contribute a reason; never keep provider text.
+  (or (when (string? stderr)
+        (some (fn [[header reason]] (when (re-find header stderr) reason)) provider-reasons))
+      :provider-command-failed))
 
 (defn- ^{:stratum 1} receipt [job response]
   (let [{:keys [name namespace]} (:metadata job)
@@ -43,13 +64,21 @@
 (defn ^{:stratum 2} create! [executable job request-timeout-ms]
   (try+
     (let [requested (:metadata job)
-          {:keys [exit out]} (shell/sh (or executable "kubectl")
+          {:keys [exit out err]} (shell/sh (or executable "kubectl")
                                       "create" "-n" (:namespace requested) "-f" "-" "-o" "json"
                                       (str "--request-timeout=" request-timeout-ms "ms")
-                                      :in (json/generate-string job))
-          created (when (= 0 exit) (receipt job (json/parse-string-strict out)))]
-      (if created (result/ok created) (unconfirmed)))
+                                      :in (json/generate-string job))]
+      (if (= 0 exit)
+        (let [observed (parse-reply out)]
+          (if (= ::malformed-response observed)
+            (unconfirmed :malformed-response exit)
+            (if-let [created (receipt job observed)]
+              (result/ok created)
+              (unconfirmed :receipt-mismatch exit))))
+        (unconfirmed (command-reason err) exit)))
     (catch InterruptedException _
-      (.interrupt (Thread/currentThread))
-      (unconfirmed))
-    (catch Exception _ (unconfirmed))))
+      (let [failure (unconfirmed :interrupted nil)]
+        (.interrupt (Thread/currentThread))
+        failure))
+    (catch java.io.IOException _ (unconfirmed :command-io-failed nil))
+    (catch Exception _ (unconfirmed :command-failed nil))))
