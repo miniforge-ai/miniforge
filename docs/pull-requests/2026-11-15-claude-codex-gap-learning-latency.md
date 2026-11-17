@@ -34,7 +34,7 @@ decision that closed it.
 
   A section starts at a markdown heading: up to three leading spaces, one
   to six `#`, then a space, so a `#tag` line does not split a section. A
-  field line may start with `- `. A section without all three, or with
+  field line may start with `-`. A section without all three, or with
   an unparseable date or outcome, decides nothing. Invalid miss ids in a
   list are dropped.
 - `codex/harvest.clj` (new) and `codex.interface/harvest-decisions`: read
