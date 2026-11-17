@@ -20,7 +20,27 @@
   "File writing for JSON and EDN formats."
   (:require [cheshire.core :as json]
             [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io])
+  (:import [java.nio.file Files StandardCopyOption]))
+
+(defn- ^{:stratum 0} write-atomically!
+  "Write the output of `write-fn` (called with a Writer) to `path` by writing a
+   sibling temp file and renaming it over the target, so a crash mid-write never
+   leaves a truncated or half-written file where earlier records used to be."
+  [path write-fn]
+  (let [target (.getAbsoluteFile (io/file path))
+        tmp    (io/file (.getParentFile target)
+                        (str (.getName target) "." (random-uuid) ".tmp"))]
+    (io/make-parents target)
+    (try
+      (with-open [wtr (io/writer tmp)]
+        (write-fn wtr))
+      (Files/move (.toPath tmp) (.toPath target)
+                  (into-array java.nio.file.CopyOption
+                              [StandardCopyOption/ATOMIC_MOVE
+                               StandardCopyOption/REPLACE_EXISTING]))
+      (finally
+        (Files/deleteIfExists (.toPath tmp))))))
 
 (defn write-json
   "Write records as JSON array to file."
@@ -31,9 +51,7 @@
         all-records (if existing
                       (into (vec existing) records)
                       (vec records))]
-    (io/make-parents path)
-    (with-open [wtr (io/writer path)]
-      (json/generate-stream all-records wtr))
+    (write-atomically! path #(json/generate-stream all-records %))
     (count records)))
 
 (defn write-edn
@@ -44,8 +62,7 @@
         all-records (if existing
                       (into (vec existing) records)
                       (vec records))]
-    (io/make-parents path)
-    (spit path (pr-str all-records))
+    (write-atomically! path #(.write ^java.io.Writer % ^String (pr-str all-records)))
     (count records)))
 
 (defn write-file

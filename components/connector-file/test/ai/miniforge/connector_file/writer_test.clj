@@ -71,3 +71,12 @@
         (is (= payload (slurp path)))
         (finally
           (System/clearProperty read-eval-probe))))))
+
+(deftest ^{:stratum 1} write-failure-keeps-existing-file-test
+  (testing "a write that fails leaves the earlier records intact and no temp file"
+    (let [path (tmp-edn-path)
+          dir  (.getParentFile (io/file path))]
+      (sut/write-edn path [{:id 1}] :overwrite)
+      (is (thrown? Exception (sut/write-json path [{:bad (Object.)}] :overwrite)))
+      (is (= [{:id 1}] (edn/read-string (slurp path))))
+      (is (= ["out.edn"] (mapv #(.getName ^java.io.File %) (.listFiles dir)))))))
