@@ -1,0 +1,2 @@
+;; N11 §5.3: default execution budget for a native capsule.
+{:resources/timeout-seconds 3600}

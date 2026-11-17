@@ -16,10 +16,6 @@
 
 (def ^{:stratum 0} resource-kind "Job")
 
-(def ^{:stratum 0} default-deadline-seconds
-  "N11 §5.3's default capsule budget also bounds an unacknowledged Job."
-  3600)
-
 (def ^{:stratum 0 :private true} creation-timeout "--request-timeout=30s")
 
 (defn- ^{:stratum 0} present-text? [value]

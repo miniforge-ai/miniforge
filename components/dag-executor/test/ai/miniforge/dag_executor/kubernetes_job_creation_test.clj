@@ -5,7 +5,6 @@
   (:require [ai.miniforge.dag-executor.protocols.executor :as executor]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes :as kubernetes]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
-            [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation :as creation]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources :as resources]
             [ai.miniforge.dag-executor.result :as result]
             [cheshire.core :as json]
@@ -44,6 +43,19 @@
   (let [job (update (requested args) :metadata merge identity-metadata)]
     {:exit 0 :out (json/generate-string (altered job))}))
 
+(deftest ^{:stratum 1} invalid-capsule-budgets-fail-before-provider-io
+  (let [instance (kubernetes/create-kubernetes-executor {})]
+    (with-redefs [shell/sh reject-io!]
+      (doseq [invalid [nil false "3600" 3600.0 0 -1 (inc' Long/MAX_VALUE)]
+              :let [budget {:resources/timeout-seconds invalid}]]
+        (is (= :resources/timeout-seconds
+               (try
+                 (kubernetes/create-kubernetes-executor budget)
+                 (catch clojure.lang.ExceptionInfo e (:config/key (ex-data e))))))
+        (is (= :invalid-capsule-deadline
+               (get-in (executor/acquire-environment! instance (random-uuid) {:resources budget})
+                       [:error :code])))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} acquire-creates-once-and-retains-the-exact-job-receipt
@@ -52,8 +64,7 @@
     (with-redefs [shell/sh (fn [& args]
                             (swap! submitted inc)
                             (is (= "create" (second args)))
-                            (is (= creation/default-deadline-seconds
-                                   (get-in (requested args) [:spec :activeDeadlineSeconds])))
+                            (is (= 3600 (get-in (requested args) [:spec :activeDeadlineSeconds])))
                             (response args identity))
                   client/wait-for-pod-ready readiness
                   kubernetes/delete-job reject-io!]
@@ -65,13 +76,26 @@
         (is (= (:resourceVersion identity-metadata) (:job-creation-resource-version metadata)))
         (is (= "capsules" (:namespace metadata)))))))
 
+(deftest ^{:stratum 2} explicit-capsule-budgets-are-submitted-and-confirmed
+  (let [instance (kubernetes/create-kubernetes-executor {:resources/timeout-seconds 5400})
+        submitted (atom [])]
+    (with-redefs [shell/sh (fn [& args]
+                            (swap! submitted conj (get-in (requested args) [:spec :activeDeadlineSeconds]))
+                            (response args identity))
+                  client/wait-for-pod-ready readiness]
+      (is (result/ok? (executor/acquire-environment! instance (random-uuid) {})))
+      (is (result/ok? (executor/acquire-environment! instance (random-uuid)
+                                                     {:resources {:resources/timeout-seconds 7200}})))
+      (is (= [5400 7200] @submitted)))))
+
 (deftest ^{:stratum 2} uncertain-job-creation-is-never-adopted-or-cleaned-up-by-name
-  (let [instance (kubernetes/create-kubernetes-executor {:namespace "capsules"})
+  (let [instance (kubernetes/create-kubernetes-executor {:namespace "capsules"
+                                                         :resources/timeout-seconds 5400})
         mutations [#(update % :metadata dissoc :uid)
                    #(assoc-in % [:metadata :resourceVersion] "")
                    #(assoc-in % [:metadata :name] "another-job")
                    #(assoc-in % [:metadata :namespace] "another-namespace")
-                   #(assoc-in % [:spec :activeDeadlineSeconds] 7200)
+                   #(assoc-in % [:spec :activeDeadlineSeconds] 3600)
                    #(assoc % :kind "Pod")]]
     (with-redefs [client/wait-for-pod-ready reject-io! kubernetes/delete-job reject-io!]
       (doseq [reply (concat (map (fn [altered] (fn [& args] (response args altered))) mutations)

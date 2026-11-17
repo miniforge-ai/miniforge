@@ -22,7 +22,11 @@ Runtime boundary. Never overwrite an existing Job through acquisition.
 Retain the returned UID and creation resource version in the environment
 record. The creation version is historical, not a fresh precondition.
 An unconfirmed request must not trigger readiness checks or name-only
-cleanup. N11 §5.3's default deadline bounds a normally admitted Job.
+cleanup. The Job deadline uses N11 §5.3's packaged 3600-second default.
+Executor configuration can set `:resources/timeout-seconds`; a task can
+override it under `:resources`. Explicit nonpositive or noninteger values
+are rejected before submission, not replaced with the default. The receipt
+must confirm the effective deadline, including any override.
 
 Separate the existing transport polling and resource projection into
 bounded namespaces. Preserve running and terminal readiness outcomes.
@@ -33,11 +37,14 @@ Put relocated operator messages in the runtime catalog.
 Mock the provider. Check the creation command and retained receipt.
 Refuse missing and mismatched identity, changed deadline, malformed
 output, and nonzero exit without readiness or cleanup calls.
+Exercise the default, both levels of override, and invalid values; check
+that a provider response reverting an override to the default is rejected.
 
-Both JVM products, Babashka source, and the fresh package passed 4 tests
-and 21 assertions each. The receipt regression failed four assertions on
-the old acquisition path without a runtime error. Strict lint, namespace
-depths, Polylith, and Babashka classpaths passed.
+Both JVM products, Babashka source, and the fresh package passed 6 tests
+and 38 assertions each. The old acquisition path failed four receipt
+assertions. Deliberately ignoring the task override failed its budget
+assertion without a runtime error. Strict lint, namespace depths,
+Polylith, and Babashka classpaths passed.
 
 ## Deployment plan
 
