@@ -159,7 +159,9 @@
                                    (get phase->secondary-situations phase))
                  content (str/join "\n\n" (cons (:content entry) (map :content secondaries)))
                  pegs (into (vec (:pegs entry)) (mapcat :pegs secondaries))]
-             {:entry {:path (:path entry) :content content} :status :pinned
+             ;; :keep-inline? so a shedding planner (N12 §6) still sees the pin.
+             {:entry {:path (:path entry) :content content :keep-inline? true}
+              :status :pinned
               :anomaly nil :situation situation :pegs (not-empty pegs)})))))))
 
 (defn ^{:stratum 1} landings-outcome

@@ -103,4 +103,14 @@
     (doseq [request [no-policy forged]]
       (is (= :deny (get-in (fixtures/evaluate request) [:opsv/experiment-decision-envelope :envelope/decision]))))))
 
+(deftest ^{:stratum 0} runtime-declaration-name-must-match-observed-deployment-in-multi-service-pack-test
+  (let [other-service "catalog-shadow"
+        input (fixtures/input #(update-in % [:experiment-pack/targets :services] conj other-service))
+        changed (assoc-in input [:ctx :execution/opts :opsv/experiment-execution :experiment/declaration
+                                 :kubernetes/deployment-name] other-service)]
+    (is (seq (:http-calls input)))
+    (is (contains? (set (get-in input [:request :experiment-pack :experiment-pack/targets :services])) other-service))
+    (is (= :allow (get-in (fixtures/evaluate input) [:opsv/experiment-decision-envelope :envelope/decision])))
+    (is (= :deny (get-in (fixtures/evaluate changed) [:opsv/experiment-decision-envelope :envelope/decision])))))
+
 (comment ::temporary-gate-decision-is-never-final-apply-or-provider-permission)

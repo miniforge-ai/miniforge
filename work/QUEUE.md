@@ -54,8 +54,10 @@ Make miniforge capable of running miniforge without paying for
 | blocker | ● | dogfood-resilience | `worktree-persistence-scratch-branch.spec.edn` — Persist worktrees outside /tmp + scratch-branch commits on every write | dogfoodenabler |
 | high | ● | dogfood-resilience | `pedestal-interceptor-chain.spec.edn` — Pedestal-style interceptor chain for phase lifecycle | correctness+dogfoodenabler |
 | high | ● | dogfood-resilience | `phase-transition-graph-validator.spec.edn` — Phase transition graph validator — static checks over phase EDN configs | correctness+observation+dogfoodenabler |
+| high | ● | dogfood-resilience | `spec-kanban-thrown-run.spec.edn` — A work spec whose run throws moves to work/failed instead of staying in work/in-progress | correctness+dogfoodenabler |
 | high | ● | dogfood-resilience | `tech-registry-doctor-repo-scoped-bootstrap.spec.edn` — Tech-registry-driven runtime bootstrap — repo-scoped, print-don't-install | correctness+ux+dogfoodenabler |
 | high | ○ | dogfood-resilience | `workflow-dependency-declarations.spec.edn` — Workflow dependency declarations — supervisor sequencing + DAG dependencies | dogfoodenabler |
+| high | ● | dogfood-resilience | `workflow-resume-emits-resumed-event.spec.edn` — Workflow resume — emit :workflow/resumed naming the phase it resumes from and the phases it skips | observation+dogfoodenabler |
 | blocker | ○ | dogfood-resilience | `workflow-phase-checkpoint-and-resume.spec.edn` — Workflow phase checkpoint + resume | tokenconservation+dogfoodenabler |
 | blocker | ○ | dogfood-resilience | `workflow-resume-fsm-advance-investigation.spec.edn` — Workflow resume — make FSM advance from production checkpoints, not just synthetic ones | observation+tokenconservation+dogfoodenabler |
 | high | ○ | dogfood-resilience | `phase-boundary-contracts.spec.edn` — Phase boundary contracts — declare + enforce :phase/input/:output (Ixi pattern, re-derived) | correctness+observation+dogfoodenabler |
@@ -141,22 +143,6 @@ Step 3 of the ratified Ariadne adoption order. Identity stops being
 | high | ● | ariadne-tenancy | `ariadne-attested-contracts.spec.edn` — Ariadne step 3e: content-addressed, attested contracts | correctness+observation+governancecredibility |
 | blocker | ○ | ariadne-tenancy | `ariadne-owned-records.spec.edn` — Ariadne step 3c: every record is born owned | correctness+scale+governancecredibility |
 | high | ○ | ariadne-tenancy | `ariadne-engagement.spec.edn` — Ariadne step 3d: engagement as a relation, not containment | correctness+scale+governancecredibility |
-
-## Theme — Codex gap measurement (`codex-gap`, status: in-flight)
-
-Measure how far the codex runs actually get falls short of the ideal
-   one. Every in-run failure becomes a miss-ledger entry, classified at the
-   first rung that leaked (coverage, routing, anchoring, delivery,
-   attention, learning), and the gap report shows each rung beside its
-   member misses. The ledger, classifier, phase wiring and report are on
-   main; two report slots are not yet measured.
-
-**Informative spec:** `work/done/codex-gap-instrument.spec.edn`
-
-| tier | r | theme | spec | axes |
-|---|---|---|---|---|
-| medium | ● | codex-gap | `codex-gap-consultation-match-rate.spec.edn` — Codex gap report — measure the consultation match rate | observation |
-| low | ● | codex-gap | `codex-gap-learning-latency.spec.edn` — Codex gap report — measure learning latency from miss to harvest decision | observation |
 
 ## Theme — unassigned (`unassigned`, status: planned)
 

@@ -36,6 +36,7 @@
         ai.miniforge/redaction                 {:local/root "../../components/redaction"}
         ai.miniforge/cursor-store              {:local/root "../../components/cursor-store"}
         ai.miniforge/dag-executor              {:local/root "../../components/dag-executor"}
+        ai.miniforge/subprocess                {:local/root "../../components/subprocess"}
         ai.miniforge/dag-primitives            {:local/root "../../components/dag-primitives"}
         ai.miniforge/data-quality              {:local/root "../../components/data-quality"}
         ai.miniforge/event-stream              {:local/root "../../components/event-stream"}

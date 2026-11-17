@@ -6,6 +6,16 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} recovery-cases
+  "Independent expected compensation operations and their required effect classes."
+  [[:restore-baseline :effect/deploy]
+   [:stop-load :effect/load-test]
+   [:cleanup-load :effect/load-test]])
+
+(def ^{:stratum 0} stopped-statuses
+  "An interrupted trial can still require separately authorized compensation."
+  [:paused :blocked :failed :cancelled])
+
 (def ^{:stratum 0} maximum-duration-ms
   "The existing thirty-minute runtime ceiling, pinned independently for boundary tests."
   (* 30 60 1000))

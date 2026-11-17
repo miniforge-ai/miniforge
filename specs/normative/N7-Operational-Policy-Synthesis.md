@@ -6,8 +6,8 @@
 
 # N7 — Operational Policy Synthesis With Verification
 
-**Version:** 0.4.0-draft
-**Date:** 2026-11-04
+**Version:** 0.4.2-draft
+**Date:** 2026-11-15
 **Status:** Complete
 **Conformance:** MUST
 **Class:** Extension spec (N7+)
@@ -316,6 +316,9 @@ active experiments at the next safe boundary, and revoke their mutation grants.
 It MUST invoke verified rollback through the separately authorized recovery path and
 record the disposition in N3/N6. Safe mode MUST set effective actuation to
 `:none` per N8's A0 posture.
+An operator full stop MUST instead follow N8 §3.5: its dominant workload fence
+MUST prohibit recovery as well as forward effects. It MUST NOT invoke this
+section's rollback exception or claim baseline recovery from runtime destruction.
 
 ### 5.4 Effective actuation decision
 
@@ -346,9 +349,20 @@ or mismatched authority MUST prevent mutation. Candidate SLO verification succes
 MUST NOT be a prerequisite for these trial effects; all other safety checks MUST remain.
 
 Before the first effect, the runtime MUST retain the §6.3 comparison contract
-and original baseline. It MUST verify a viable recovery plan and establish
-separate authority for stopping load, cleaning up owned experiment resources,
-and restoring that baseline. Forward authority MUST NOT implicitly authorize recovery.
+and original baseline. It MUST independently approve and retain a viable bounded
+plan for stopping load, cleaning up owned experiment resources, and restoring
+that baseline. The plan MUST bind the attempt, original baseline, exact staging
+target, permitted recovery operations, ownership rules, and recovery limits.
+Plan approval MUST NOT itself authorize execution or substitute for an exact
+recovery DecisionEnvelope, ExecutionGrant, or durable transaction.
+
+Immediately before each recovery effect, the runtime MUST obtain a current
+allowing decision and matching exact grant under N10 §1.5. It MUST first read
+fresh provider preconditions and prove the identity of affected resources,
+including a newly created Job's UID before cleanup. Provider-assigned identities
+and post-trial resource versions need not be known at pretrial plan approval.
+They MUST NOT be replaced by wildcard grants or inferred from a resource name.
+Forward authority MUST NOT implicitly authorize recovery.
 
 Effects MUST stay within predeclared payloads, resources, traffic destinations,
 load limits, durations, and iteration budgets. Changing a payload or candidate
@@ -358,6 +372,9 @@ authorize PR creation or leaving candidate configuration permanently applied.
 Success, failure, abort, timeout, emergency stop, and safe-mode entry MUST terminate
 load and trigger the separately authorized cleanup and baseline-recovery path.
 N8 MUST fence new forward effects without granting unrestricted recovery powers.
+An active N8 §3.5 full stop MUST supersede this compensation requirement.
+Recovery remains unresolved until separately authorized in a fresh run under
+the N2 checkpoint delta §11.
 Cleanup MUST target only proven experiment-owned resources; uncertainty MUST
 require reconciliation, never deletion of an unproven resource.
 
@@ -459,6 +476,9 @@ All changes MUST be emitted as artifacts with provenance per N6:
 MUST execute as N10-governed effects with verified rollback and postcondition
 monitoring. A failed postcondition MUST trigger the declared rollback and record
 both the apply and rollback outcomes as artifacts, events, and evidence.
+N8 §3.5 full stop MUST supersede workload rollback here, as in §5.5.
+The runtime MUST retain unresolved rollback disposition instead of executing
+or claiming recovery under the stopped run.
 
 ## 8. CLI/TUI extensions (N5 extension)
 
@@ -482,23 +502,24 @@ IDs are never reused; a withdrawn requirement is marked withdrawn.
 | ID | Level | Requirement |
 |----|-------|-------------|
 | N7.EX.1 | MUST | Record an environment fingerprint for every experiment run (§3, §4). |
-| N7.EX.2 | MUST | Abort on guardrail breach and execute the declared rollback (§5). |
+| N7.EX.2 | MUST | Abort on guardrail breach and separately authorize rollback, unless full stop requires containment without compensation (§5, N8 §3.5). |
 | N7.EX.3 | MUST | Bound convergence by the declared iteration and budget limits (§3). |
 | N7.EX.4 | MUST | Emit the §3.14 event family of N3 for every lifecycle transition. |
 | N7.EX.5 | MUST | Default temporary experiments off and require separate staging authority before each effect (§5.5, N10 §1.5). |
-| N7.EX.6 | MUST | Terminate load and separately authorize, execute, and verify cleanup and baseline recovery on every trial exit (§5.5). |
+| N7.EX.6 | MUST | Separately authorize and verify load termination, cleanup, and baseline recovery on ordinary trial exits; full stop prohibits workload compensation (§5.5, N8 §3.5). |
 | N7.VF.1 | MUST | Evaluate verification against pre-declared criteria, not criteria chosen after the run (§6). |
 | N7.VF.2 | MUST | Link every OPSV event and artifact to its evidence bundle per N6 (§4, §7.1). |
 | N7.VF.3 | MUST | Bind permitted environment differences before effects and reject unrelated drift (§6.3). |
 | N7.VF.4 | MUST | Preserve the original baseline and verify recovery against its declared invariants (§6.3). |
 | N7.AC.1 | MUST | Default effective actuation to `:recommend-only`; PR emission and direct apply require the respective §5.4 authority checks (§5.3, §7.2, §7.3, §9). |
 | N7.AC.2 | MUST | Execute apply actions as N10-governed effects with verified rollback (§7.3). |
-| N7.AC.3 | MUST | Record both apply and rollback outcomes as artifacts, events, and evidence on postcondition failure (§7.3). |
+| N7.AC.3 | MUST | Record apply and performed or unresolved rollback outcomes as artifacts, events, and evidence on postcondition failure (§7.3). |
 | N7.AC.4 | MUST | Include the evidence bundle reference and rollback instructions in every emitted PR body (§7.2). |
 
 ### 8.5.1 Test Obligations
 
-1. A guardrail breach aborts the experiment and the rollback runs, both observable
+1. A guardrail breach aborts the experiment and separately authorized rollback
+   runs, unless full stop prohibits compensation. Both outcomes are observable
    on the stream (N7.EX.2).
 2. A run's environment fingerprint is sufficient to detect drift on re-run
    (N7.EX.1).
@@ -515,10 +536,17 @@ IDs are never reused; a withdrawn requirement is marked withdrawn.
    disabled, stale, foreign-target, and changed-payload grants refuse before mutation (N7.EX.5).
 9. An admitted staging trial can precede candidate verification without enabling
    production trials, PR emission, or permanent apply (N7.EX.5).
-10. Every exit stops load and verifies owned-resource cleanup and original-baseline
-    recovery; revoking forward grants does not bypass recovery authorization (N7.EX.6).
+10. Ordinary exits stop load and verify owned-resource cleanup and original-baseline
+    recovery. Forward-grant revocation does not bypass recovery authorization.
+    Full-stop exits instead fence all workload effects and retain unresolved
+    recovery; existing recovery grants cannot bypass containment (N7.EX.6, N8 §3.5).
 11. Uncertain effect or recovery outcomes remain explicit and prevent success
     and new forward effects (N7.EX.6).
+12. A separately approved, retained bounded recovery plan precedes the trial;
+    exact recovery grants use fresh post-trial preconditions and proven resource
+    identity. Plan approval alone cannot authorize recovery, and a refused
+    recovery grant leaves forward effects fenced with unresolved disposition
+    evidence (N7.EX.6).
 
 ---
 
@@ -590,6 +618,12 @@ depends on machinery that is not there.
 
 **Version History:**
 
+- 0.4.2-draft (2026-11-15): Full stop supersedes the compensation exception;
+  its authority and containment contract is owned by N8 §3.5.
+
+- 0.4.1-draft (2026-11-06): Clarified operator-approved recovery timing:
+  retain an independently approved bounded plan before trial.
+  Obtain exact recovery grants just in time from fresh preconditions and proven identities.
 - 0.4.0-draft (2026-11-04): Added operator-approved separate temporary staging
   experiment authority, with default-off execution and separately authorized,
   verified cleanup and baseline recovery. Final-actuation gates remain unchanged.

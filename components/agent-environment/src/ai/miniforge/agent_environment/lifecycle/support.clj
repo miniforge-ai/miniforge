@@ -1,0 +1,116 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.agent-environment.lifecycle.support
+  "Small pieces every lifecycle call shares: the controller's provider and
+   clock, step and call shapes, and the receipt subject for a request."
+  (:require
+   [ai.miniforge.agent-environment.admission :as admission]
+   [ai.miniforge.agent-environment.interface.protocol :as protocol]
+   [ai.miniforge.agent-environment.lease :as lease]
+   [ai.miniforge.agent-environment.receipt :as receipt]
+   [ai.miniforge.agent-environment.refusal :as refusal]
+   [ai.miniforge.anomaly.interface :as anomaly]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} provider [c] (:controller/provider c))
+
+(defn ^{:stratum 0} now [c] ((:controller/clock c)))
+
+(defn ^{:stratum 0} failure-step [reason] {:step/name reason :step/outcome :outcome/failed})
+
+(def ^{:stratum 0} unreported-step
+  "What a provider response without steps confirms: nothing."
+  {:step/name :step/unreported :step/outcome :outcome/uncertain})
+
+(defn ^{:stratum 0} artifact-step
+  [stored]
+  {:step/name :artifact/persisted
+   :step/outcome (if (anomaly/anomaly? stored) :outcome/failed :outcome/applied)})
+
+(defn ^{:stratum 0} as-call
+  [result]
+  (if (anomaly/anomaly? result)
+    result
+    {:call/value result :call/steps []}))
+
+(defn ^{:stratum 0} environment
+  [request target uid]
+  (when uid
+    {:environment/request request
+     :environment/uid uid
+     :environment/namespace (:target/namespace target)
+     :environment/lease (lease/lease-for request uid (:target/generation target))}))
+
+(defn ^{:stratum 0} unconfirmed-if-anonymous
+  "A provision whose steps all applied but that reported no UID cannot be
+   confirmed as any environment."
+  [outcome environment]
+  (if (and (nil? environment) (= :outcome/applied outcome)) :outcome/uncertain outcome))
+
+(defn ^{:stratum 0} ledger-reason
+  "The ledger's reason when a ledger read or change returned its anomaly,
+   else nil."
+  [result]
+  (when (anomaly/anomaly? result)
+    (anomaly/subtype result)))
+
+(defn ^{:stratum 0} cancelled
+  "`entry` cancelled, or unchanged when it no longer admits a cancel under
+   `lease`: a rival's unconfirmed release is never overwritten."
+  [lease now entry]
+  (if (lease/lease-refusal entry :environment/cancel lease now) entry (assoc entry :entry/state :state/cancelled)))
+
+(defn ^{:stratum 0} lost-lease
+  "Nil while the entry a settle left still admits `operation` under `lease`,
+   else that refusal: another controller may have moved it first."
+  [changed lease operation now]
+  (when-let [reason (lease/lease-refusal (:ledger/after changed) operation lease now)]
+    (refusal/reason-anomaly reason {})))
+
+(defn ^{:stratum 0} recorded-call
+  "`value` for provider `steps` the ledger recorded, else its anomaly and reason."
+  [recorded value steps]
+  (if (anomaly/anomaly? recorded)
+    {:call/value recorded :call/steps steps :call/reason (anomaly/subtype recorded)}
+    {:call/value value :call/steps steps}))
+
+(defn ^{:stratum 0} subject-of
+  [acting request environment]
+  (if environment
+    (receipt/lease-subject acting (:environment/lease environment))
+    (receipt/request-subject acting request)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} reported-steps
+  "The steps under `k` in a provider response. A response without any, such
+   as an anomaly, is one unconfirmed step, never an empty success."
+  [response k]
+  (let [steps (get response k)]
+    (if (and (vector? steps) (seq steps)) steps [unreported-step])))
+
+(defn ^{:stratum 1} preflight-failures
+  [c request]
+  (let [declared (admission/capability-failures (protocol/capabilities (provider c)) request)]
+    (if (seq declared) declared (protocol/probe (provider c) request))))
+
+(defn ^{:stratum 1} persist-one
+  [c lease target path]
+  (anomaly/let-ok [text (protocol/read-file (provider c) target path)]
+    ((:controller/persist! c) lease path text)))

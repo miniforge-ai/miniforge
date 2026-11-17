@@ -610,7 +610,26 @@
         (is (= :completed (get-in final-result [:phase :status])))
         (is (number? (get-in final-result [:execution/metrics :tokens]))
             "nil agent tokens accumulate as 0, not a throw")
-        (is (number? (get-in final-result [:phase :metrics :cost-usd])))))))
+        (is (not (contains? (get-in final-result [:phase :metrics]) :cost-usd))
+            "no agent cost: the phase reports none rather than a guess")))))
+
+(deftest ^{:stratum 2} leave-implement-drops-a-nil-agent-cost-test
+  (testing "an agent result whose metrics carry :cost-usd nil (the
+            implementer's already-implemented response on an unpriced model)
+            leaves no :cost-usd in the phase metrics: schema/Metrics allows
+            the key only as a number"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                (response/success nil {:tokens 10 :duration-ms 100}))
+                  agent/curate-implement-output mock-curator-success]
+      (let [ctx (assoc (create-base-context) :execution/environment-id (random-uuid))
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) (assoc ctx :phase-config {:phase :implement}))
+            nil-cost (assoc-in enter-result [:phase :result :metrics]
+                               {:tokens 10 :duration-ms 100 :cost-usd nil})
+            final-result ((:leave interceptor) nil-cost)]
+        (is (not (contains? (get-in final-result [:phase :metrics]) :cost-usd)))
+        (is (= 10 (get-in final-result [:phase :metrics :tokens])))))))
 
 (deftest ^{:stratum 2} leave-implement-boundary-coerces-raw-invalid-metrics-test
   (testing "metrics that bypass the response builders (raw nil :tokens) are
@@ -630,7 +649,7 @@
             final-result ((:leave interceptor) tampered)]
         (is (number? (get-in final-result [:execution/metrics :tokens]))
             "boundary coerced the invalid metrics; no NPE")
-        (is (number? (get-in final-result [:phase :metrics :cost-usd]))))))
+        (is (number? (get-in final-result [:execution/metrics :cost-usd]))))))
   (testing "a non-map :metrics (wrong shape entirely) is coerced, not thrown"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (fn [_ _ _]
@@ -834,11 +853,11 @@
         (is (= 1500 (get-in final-result [:phase :metrics :tokens]))
             "Token metrics should be recorded")
 
-        (is (= (* 1500 0.000015) (get-in final-result [:phase :metrics :cost-usd]))
-            "Cost-usd should be estimated from token count")
+        (is (not (contains? (get-in final-result [:phase :metrics]) :cost-usd))
+            "an agent that reported no cost gets no made-up cost")
 
-        (is (= (* 1500 0.000015) (get-in final-result [:execution/metrics :cost-usd]))
-            "Cost-usd should be merged into execution metrics")
+        (is (= 0.0 (get-in final-result [:execution/metrics :cost-usd]))
+            "unknown cost adds nothing to the execution total")
 
         (is (= :implement (first (get-in final-result [:execution :phases-completed])))
             "Implement should be added to phases-completed")))))
@@ -1157,6 +1176,48 @@
       (let [final-ctx (implement/leave-implement (ctx-at 3))]
         (is (= :failed (get-in final-ctx [:phase :status])))
         (is (= :implement/backend-timeout (get-in final-ctx [:phase :verdict])))))))
+
+(deftest ^{:stratum 2} a-cancelled-run-skips-the-curator-test
+  (testing "a cancelled agent turn gets no curator"
+    (let [curated (atom false)]
+      (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                    agent/invoke (fn [_ _ _] (response/failure (ex-info "run cancelled" {})))
+                    agent/curate-implement-output (fn [m] (reset! curated true) (mock-curator-success m))]
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :implement})
+                      (assoc-in [:execution/opts :control-state] (doto (es/create-control-state) es/cancel!)))
+              result ((:enter (phase/get-phase-interceptor {:phase :implement})) ctx)]
+          (is (false? @curated))
+          (is (= :run-stopped (get-in result [:phase :result :error :data :code])))))))
+  (testing "an agent turn that succeeded before the cancel is still curated, so its work is kept"
+    (let [curated (atom false)]
+      (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                    agent/invoke (fn [_ _ _] (response/success nil {:tokens 800 :duration-ms 1500}))
+                    agent/curate-implement-output (fn [m] (reset! curated true) (mock-curator-success m))]
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :implement})
+                      (assoc-in [:execution/opts :control-state] (doto (es/create-control-state) es/cancel!)))
+              result ((:enter (phase/get-phase-interceptor {:phase :implement})) ctx)]
+          (is (true? @curated))
+          (is (not= :run-stopped (get-in result [:phase :result :error :data :code]))))))))
+
+(deftest ^{:stratum 2} a-cancel-during-the-curator-is-recorded-with-the-agents-spend-test
+  (let [enter (fn [curate]
+                (let [cs (es/create-control-state)]
+                  (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                                agent/invoke (fn [_ _ _] (response/success nil {:tokens 800 :duration-ms 1500}))
+                                agent/curate-implement-output (fn [m] (es/cancel! cs) (curate m))]
+                    ((:enter (phase/get-phase-interceptor {:phase :implement}))
+                     (-> (create-base-context)
+                         (assoc :phase-config {:phase :implement})
+                         (assoc-in [:execution/opts :control-state] cs))))))]
+    (testing "a curator that fails after the cancel ends the phase as stopped, keeping the agent's spend"
+      (let [result (enter mock-curator-error)]
+        (is (= :run-stopped (get-in result [:phase :result :error :data :code])))
+        (is (= 800 (get-in result [:phase :result :metrics :tokens])))))
+    (testing "a curator that succeeded keeps its work: the cancel came after it was done"
+      (let [result (enter mock-curator-success)]
+        (is (not= :run-stopped (get-in result [:phase :result :error :data :code])))))))
 
 (use-fixtures :each
   (fn [f]

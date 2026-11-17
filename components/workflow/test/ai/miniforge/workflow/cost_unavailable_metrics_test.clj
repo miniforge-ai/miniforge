@@ -20,13 +20,14 @@
    :cost-unavailable?, through phase merges, DAG roll-ups and a real
    pipeline run, so the summed :cost-usd is not read as the measured cost."
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [clojure.test :refer [deftest testing is use-fixtures]]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.workflow.context :as context]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
    [ai.miniforge.workflow.dag-plan :as dag-plan]
    [ai.miniforge.workflow.execution-dag :as execution-dag]
+   [ai.miniforge.workflow.isolation-test-support :as isolation]
    [ai.miniforge.workflow.runner :as runner]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -106,3 +107,5 @@
 (phase/register-phase-defaults! :unpriced-spend-probe
                                 {:phase :unpriced-spend-probe :agent :workflow-tester
                                  :gates [] :budget probe-budget})
+
+(use-fixtures :once isolation/with-isolated-host)

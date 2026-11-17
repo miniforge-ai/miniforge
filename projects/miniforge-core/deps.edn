@@ -44,6 +44,7 @@
         ai.miniforge/gate {:local/root "../../components/gate"}
         ai.miniforge/evidence-bundle {:local/root "../../components/evidence-bundle"}
         ai.miniforge/dag-executor {:local/root "../../components/dag-executor"}
+        ai.miniforge/subprocess {:local/root "../../components/subprocess"}
         ai.miniforge/policy-pack {:local/root "../../components/policy-pack"}
         ai.miniforge/tool-registry {:local/root "../../components/tool-registry"}
         ai.miniforge/operator {:local/root "../../components/operator"}

@@ -18,6 +18,7 @@
   :oci/command-interrupted   "Runtime command interrupted"
   :oci/command-timeout       "Runtime command exceeded {ms}ms deadline — process destroyed"
   :oci/command-timeout-log   "[oci-cli] runtime command timeout {ms}ms exceeded; destroying process tree."
+  :oci/output-limit          "Runtime command output passed the {bytes}-byte capture limit — process stopped"
   :oci/command-failed        "Command failed"
   :oci/command-failed-detail "{prefix}: {command}{stderr}"
   :oci/bootstrap-failed      "Workspace bootstrap failed"

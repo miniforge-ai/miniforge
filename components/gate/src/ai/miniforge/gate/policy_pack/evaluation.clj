@@ -24,6 +24,7 @@
    [ai.miniforge.gate.policy-pack.checks :as checks]
    [ai.miniforge.gate.policy-pack.packs :as packs]
    [ai.miniforge.gate.policy-pack.rules :as rules]
+   [ai.miniforge.gate.policy-pack.scope :as scope]
    [ai.miniforge.policy-pack.interface :as policy-pack]
    [clojure.string]))
 
@@ -87,10 +88,12 @@
   (let [compile-results (compile-pack-results packs)]
     (if-let [anomaly (first (filter compile-anomaly? compile-results))]
       (compile-anomaly-result anomaly)
-      (let [violations (vec (checks/run-compiled-rules
-                             (rules/phase-compiled-rules compile-results phase)
-                             artifact
-                             context))
+      (let [violations (scope/scope-violations
+                        artifact context
+                        (vec (checks/run-compiled-rules
+                              (rules/phase-compiled-rules compile-results phase)
+                              artifact
+                              context)))
             classified (policy-pack/classify-violations violations)
             {:keys [blocking require-approval warnings audits unknown]} classified
             envelope   (decide/decide classified (pack-pins packs))]

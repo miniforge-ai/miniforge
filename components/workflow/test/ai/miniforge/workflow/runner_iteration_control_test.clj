@@ -90,7 +90,7 @@
                                                   (let [result (f)]
                                                     (swap! seen conj (cancelled?))
                                                     result))
-                    phase-step/execute-phase (fn [_ context _]
+                    phase-step/execute-phase (fn [_ context _ _control-state]
                                                (swap! control-state assoc :stopped true)
                                                context)]
         (runner/execute-single-iteration [] (test-context) {} 1 control-state)

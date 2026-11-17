@@ -119,6 +119,15 @@
   :policy-pack/compile-error
   "Policy pack compilation failed: {message}"
 
+  ;; Policy-pack gate — judge findings outside the forms the change edits.
+  ;; {message} is the rule's message; {sites} lists file:line per finding.
+  :policy-pack/outside-change
+  "Outside the forms this change edits, so not blocking: {message} ({sites})"
+
+  ;; Edited-forms — content that cannot be read as Clojure forms.
+  :edited-forms/unreadable
+  "Content cannot be read as Clojure forms"
+
   :opsv/instrumentation-description "Validates required OPSV signals"
   :opsv/instrumentation-failed "Required instrumentation is unavailable or unreliable"
   :opsv/instrumentation-remediation "Configure and verify every required signal before execution"

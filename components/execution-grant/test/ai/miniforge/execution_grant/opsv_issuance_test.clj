@@ -85,4 +85,20 @@
     (is (valid-arguments? [request scope/now]))
     (is (false? (policy/admissible-request? request (:opsv/experiment grant/issuance-policies))))))
 
+(deftest ^{:stratum 1} stopped-trials-admit-only-named-compensation-test
+  (doseq [[operation class] fixtures/recovery-cases
+          status fixtures/stopped-statuses]
+    (let [request (assoc (fixtures/request class operation) :workflow-run/status status)]
+      (is (valid-arguments? [request scope/now]))))
+  (doseq [[operation class] [[:trial-apply :effect/deploy] [:start-load :effect/load-test]]
+          status fixtures/stopped-statuses]
+    (let [request (assoc (fixtures/request class operation) :workflow-run/status status)]
+      (is (false? (valid-arguments? [request scope/now]))))))
+
+(deftest ^{:stratum 1} recovery-does-not-admit-unstarted-completed-or-unknown-runs-test
+  (doseq [[operation class] fixtures/recovery-cases
+          status [:queued :completed :unknown nil]]
+    (let [request (assoc (fixtures/request class operation) :workflow-run/status status)]
+      (is (false? (valid-arguments? [request scope/now]))))))
+
 (comment (clojure.test/run-tests 'ai.miniforge.execution-grant.opsv-issuance-test))

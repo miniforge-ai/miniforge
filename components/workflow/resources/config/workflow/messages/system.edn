@@ -4,4 +4,5 @@
 {:workflow/system-messages
  {:env/persisted "Workspace persisted: {reference}"
   :checkpoint/unsafe-directory "Unsafe checkpoint directory {path}: trusted ownership and protection from entry replacement are required."
+  :checkpoint/directory-io-failed "Checkpoint directory {path} could not be accessed or prepared due to an I/O failure."
   :checkpoint/unsafe-history "Checkpoint audit history must be a regular file: {path}."}}

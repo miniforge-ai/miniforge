@@ -211,8 +211,9 @@ jobs:
           fi
           echo "::endgroup::"
 
-      # Every *_test.clj under projects/miniforge/{test,integration} and
-      # projects/miniforge-core/test, on pull requests and main alike.
+      # Every *_test.clj under projects/miniforge/{test,integration},
+      # projects/miniforge-core/test and projects/agent-environments/test,
+      # on pull requests and main alike.
       # Polylith never runs these (they are not on the projects' :test
       # paths), so this step is their only CI coverage. It replaces the
       # per-namespace OPSV, gate-journal and failure-publication steps that

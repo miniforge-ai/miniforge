@@ -34,7 +34,11 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.git-credentials :as oci-git]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.image :as oci-img]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.process :as oci-run]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as runtime-messages]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.dag-executor.result :as result]
+   [ai.miniforge.subprocess.interface :as subprocess]
    [clojure.java.shell :as shell]
    [clojure.string]
    [clojure.test :refer [deftest is testing]]))
@@ -140,17 +144,29 @@
 (defn- ^{:stratum 0} capture-create-container-args
   "Run create-container with `oci-run/run-runtime-process` stubbed and return
    the captured argv. Keeps the parameterized stop-timeout tests focused on
-   the assertions rather than mock plumbing."
-  [descriptor & {:as create-opts}]
+   the assertions rather than mock plumbing. `:resources` is passed as
+   create-container's resources argument; the other options are passed
+   through as its keyword options."
+  [descriptor & {:keys [resources] :as create-opts}]
   (let [captured-args (atom nil)
         stub          (fn [_descriptor args & _]
                         (reset! captured-args (vec args))
-                        {:exit 0 :out "container-id-123\n" :err ""})]
+                        {:exit 0 :out "container-id-123\n" :err ""})
+        passed-opts   (dissoc create-opts :resources)]
     (with-redefs [oci-run/run-runtime-process stub]
       (apply oci-ctr/create-container
-             descriptor "test-ctr" "alpine" "/workspace" nil nil nil
-             (mapcat identity create-opts))
+             descriptor "test-ctr" "alpine" "/workspace" nil resources nil
+             (mapcat identity passed-opts))
       @captured-args)))
+
+(defn- ^{:stratum 0} flag-value
+  [args flag]
+  (second (drop-while #(not= flag %) args)))
+
+(def ^{:stratum 0} ^:private caller-pids-limit
+  "A process limit a caller passes in :resources: any value other than the
+   registry default, so the test can tell which one reached argv."
+  512)
 
 ;; ============================================================================
 ;; acquisition timeout — production-side guard against stuck Docker
@@ -483,6 +499,35 @@
         (let [exec (oci-cli/create-oci-cli-executor
                     {:runtime-kind kind :image "test:latest"})]
           (is (= kind (proto/executor-type exec))))))))
+
+(def ^{:stratum 0} ^:private small-capture-bytes
+  "A capture limit `yes` passes with its first write."
+  1024)
+
+(def ^{:stratum 0} ^:private endless-writer
+  "A runtime executable that writes to stdout until it is stopped."
+  {:runtime/executable "/usr/bin/yes"})
+
+(def ^{:stratum 0} ^:private stop-deadline-ms
+  "Deadline for the endless writer. `yes` passes the small limit within
+   milliseconds, so reaching this (exit 124) means it was never stopped."
+  10000)
+
+(def ^{:stratum 0} ^:private term-ignoring-writer-args
+  "Arguments to `sh` for a writer only SIGKILL stops. It ignores SIGTERM,
+   and SIGPIPE too and loops on past failed writes, because Process.destroy
+   closes its stdout: a writer that died of the closed pipe would let the
+   test pass without the SIGKILL escalation."
+  ["-c" "trap '' TERM PIPE; while :; do echo y; done"])
+
+(def ^{:stratum 0} ^:private shell-runtime
+  "A runtime executable the arguments above run under."
+  {:runtime/executable "/bin/sh"})
+
+(def ^{:stratum 0} ^:private kill-escalation-slack-ms
+  "Wall-clock allowance for stopping a SIGTERM-resistant writer: the
+   one-second grace before SIGKILL, plus scheduling."
+  5000)
 
 ;; ============================================================================
 ;; run-runtime-timed / run-runtime-process-timed — per-subprocess deadline
@@ -848,6 +893,12 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} small-capture-drain
+  "A drain with `small-capture-bytes` as its limit. Calls the component
+   directly: the runtime-process name it stands in for is redefined."
+  [stream opts]
+  (subprocess/drain-stream stream (assoc opts :max-bytes small-capture-bytes)))
+
 (deftest ^{:stratum 1} bootstrap-workspace-returns-the-url-it-cloned-test
   (testing "bootstrap reports the URL it cloned: :https-url with a credential,
             the given :repo-url without one"
@@ -921,6 +972,18 @@
                                                    :memory-limit-mb 768})
         (is (= 1 (count (filter #{"--memory"} @captured))))
         (is (some #{"768m"} @captured))))))
+
+(deftest ^{:stratum 1} create-container-pids-limit-test
+  (testing "every container gets the registry's process limit"
+    (is (= (str (registry/default :docker :pids-limit))
+           (flag-value (capture-create-container-args (docker-descriptor))
+                       "--pids-limit"))))
+  (testing "a caller's :pids-limit replaces the default, as one argument"
+    (let [args (capture-create-container-args
+                (docker-descriptor)
+                :resources {:pids-limit caller-pids-limit})]
+      (is (= 1 (count (filter #{"--pids-limit"} args))))
+      (is (= (str caller-pids-limit) (flag-value args "--pids-limit"))))))
 
 (deftest ^{:stratum 1} create-container-plan-env-replaces-legacy-env-test
   (testing "plan env is authoritative when present; partial plans retain legacy env"
@@ -1213,6 +1276,34 @@
                                           "BANNER=hi\nGIT_CONFIG_COUNT=7"))]
         (is (= 1 ((private-fn 'container-git-count) (docker-descriptor) "c1")))
         (is (= ["inspect" "--format" "{{range .Config.Env}}{{json .}}{{println}}{{end}}" "c1"] @args))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} runtime-runners-stop-a-child-past-the-capture-limit-test
+  (testing "a child that writes without end is stopped once a stream passes
+            the capture limit, and both runners fail with the output-limit
+            exit code instead of returning cut output"
+    (with-redefs [runtime-process/drain-stream small-capture-drain]
+      (let [expected-err (runtime-messages/t :oci/output-limit
+                                             {:bytes small-capture-bytes})
+            text-result  ((private-fn 'run-runtime-timed) stop-deadline-ms endless-writer)
+            bytes-result ((private-fn 'run-runtime-process-timed) stop-deadline-ms endless-writer [])]
+        (doseq [r [text-result bytes-result]]
+          (is (= runtime-process/output-limit-exit-code (:exit r)))
+          (is (= "" (:out r)))
+          (is (= expected-err (:err r))))
+        (is (zero? (alength ^bytes (:out-bytes bytes-result))))))))
+
+(deftest ^{:stratum 2} runtime-runner-kills-a-term-ignoring-child-past-the-capture-limit-test
+  (testing "a writer that ignores SIGTERM is still stopped at the capture
+            limit, by the SIGKILL that follows the grace period"
+    (with-redefs [runtime-process/drain-stream small-capture-drain]
+      (let [started (System/currentTimeMillis)
+            result  (apply (private-fn 'run-runtime-timed)
+                           stop-deadline-ms shell-runtime term-ignoring-writer-args)
+            took    (- (System/currentTimeMillis) started)]
+        (is (= runtime-process/output-limit-exit-code (:exit result)))
+        (is (< took kill-escalation-slack-ms) (str "returned after " took "ms"))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

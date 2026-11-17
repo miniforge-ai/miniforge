@@ -17,6 +17,10 @@
    :stop-load :effect/load-test
    :cleanup-load :effect/load-test})
 
+(def ^{:stratum 0} recovery-operations
+  "Compensation never starts a trial or new load."
+  #{:restore-baseline :stop-load :cleanup-load})
+
 (def ^{:stratum 0} Hash [:re #"\A[0-9a-f]{64}\z"])
 
 (def ^{:stratum 0} Resource

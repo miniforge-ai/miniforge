@@ -16,12 +16,12 @@ This PR moves its forms, unchanged, into seven namespaces under
 ## Motivation
 
 The pre-commit hook fails SL003 on any staged copy of a file over the layer
-budget, so no change to the policy gate could be committed. The next PR needs
-one: it scopes the gate's LLM-judge findings to the forms a change edits, so
-dogfood runs stop failing on older findings elsewhere in the files they touch.
+budget. No change to the policy gate could be committed. The next PR needs
+one. It scopes the gate's LLM-judge findings to the forms a change edits.
+Dogfood runs stop failing on older findings elsewhere in the files they touch.
 
-A split of an over-budget file cannot be sliced into smaller commits: every
-intermediate `policy_pack.clj` still has more than three layers and fails the
+A split of an over-budget file cannot be sliced into smaller commits.
+Every intermediate `policy_pack.clj` still has more than three layers and fails the
 same hook. It lands as one commit, over the commit and PR line budgets.
 
 MINIFORGE_PR_BUDGET_OVERRIDE: mechanical SL003 namespace split of one file; every moved form is byte-identical apart
@@ -71,8 +71,7 @@ No deployment step. The gate's behaviour and public vars are unchanged.
 
 ## Related Issues/PRs
 
-1. Unblocks the change-scoped judge findings PR
-   (`work/policy-judge-edited-forms.spec.edn`).
+Unblocks the change-scoped judge findings PR (`work/policy-judge-edited-forms.spec.edn`).
 
 ## Checklist
 

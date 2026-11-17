@@ -66,6 +66,48 @@
   [s]
   (str "'" (str/replace s "'" "'\"'\"'") "'"))
 
+(defn ^{:stratum 0} stopping-drains
+  "Drains for `process`'s stdout and stderr. A stream that passes the
+   capture limit stops the runtime CLI's process tree, since output cut
+   short is not a result a runtime call can return. A command it runs
+   inside a container is not in that tree and runs on until the container
+   is released, as on a timeout."
+  [^Process process]
+  (let [opts {:on-overflow (partial runtime-process/destroy-process-tree! process)}]
+    [(runtime-process/drain-stream (.getInputStream process) opts)
+     (runtime-process/drain-stream (.getErrorStream process) opts)]))
+
+(defn ^{:stratum 0} exited-text-result
+  "Result of a runtime call whose process has exited. A process stopped for
+   passing the capture limit is a failure, and its cut output is dropped."
+  [^Process process [stdout stderr :as drains]]
+  (if-let [cut (first (filter runtime-process/overflowed? drains))]
+    (let [err (messages/t :oci/output-limit {:bytes (runtime-process/capture-limit cut)})]
+      {:exit runtime-process/output-limit-exit-code
+       :out  ""
+       :err  err})
+    {:exit (.exitValue process)
+     :out  (runtime-process/drained-text stdout)
+     :err  (runtime-process/drained-text stderr)}))
+
+(defn ^{:stratum 0} exited-bytes-result
+  "`exited-text-result` with the raw bytes of each stream as well."
+  [^Process process [stdout stderr :as drains]]
+  (if-let [cut (first (filter runtime-process/overflowed? drains))]
+    (let [err (messages/t :oci/output-limit {:bytes (runtime-process/capture-limit cut)})]
+      {:exit      runtime-process/output-limit-exit-code
+       :out       ""
+       :out-bytes (byte-array 0)
+       :err       err
+       :err-bytes (byte-array 0)})
+    (let [stdout-bytes (runtime-process/drained-bytes stdout)
+          stderr-bytes (runtime-process/drained-bytes stderr)]
+      {:exit      (.exitValue process)
+       :out-bytes stdout-bytes
+       :err-bytes stderr-bytes
+       :out       (String. ^bytes stdout-bytes "UTF-8")
+       :err       (String. ^bytes stderr-bytes "UTF-8")})))
+
 (defn ^{:stratum 0} await-output!
   "After a runtime process exits: wait for its `drain-stream` handles to
    finish, until `deadline-ns` when one is given (`settle-drains!`, which
@@ -97,9 +139,7 @@
           timed?   (and timeout-ms (pos? timeout-ms))
           deadline (when timed? (+ (System/nanoTime) (* timeout-ms 1000000)))
           process  (.start pb)
-          drains   [(runtime-process/drain-stream (.getInputStream process))
-                    (runtime-process/drain-stream (.getErrorStream process))]
-          [stdout stderr] drains]
+          drains   (stopping-drains process)]
       (try
         (let [completed? (and (if timed?
                                 (.waitFor process timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)
@@ -114,9 +154,7 @@
               {:exit 124
                :out  ""
                :err  (messages/t :oci/command-timeout {:ms timeout-ms})})
-            {:exit (.exitValue process)
-             :out  (runtime-process/drained-text stdout)
-             :err  (runtime-process/drained-text stderr)}))
+            (exited-text-result process drains)))
         (catch InterruptedException e
           (runtime-process/destroy-process-tree! process)
           (run! runtime-process/cancel-drain! drains)
@@ -139,9 +177,7 @@
           timed?   (and timeout-ms (pos? timeout-ms))
           deadline (when timed? (+ (System/nanoTime) (* timeout-ms 1000000)))
           process  (.start pb)
-          drains   [(runtime-process/drain-stream (.getInputStream process))
-                    (runtime-process/drain-stream (.getErrorStream process))]
-          [stdout stderr] drains
+          drains   (stopping-drains process)
           stdin-fut  (when stdin-bytes
                        (let [s (.getOutputStream process)]
                          (future
@@ -165,13 +201,7 @@
                :out-bytes (byte-array 0)
                :err       (messages/t :oci/command-timeout {:ms timeout-ms})
                :err-bytes (byte-array 0)})
-            (let [stdout-bytes (runtime-process/drained-bytes stdout)
-                  stderr-bytes (runtime-process/drained-bytes stderr)]
-              {:exit      (.exitValue process)
-               :out-bytes stdout-bytes
-               :err-bytes stderr-bytes
-               :out       (String. ^bytes stdout-bytes "UTF-8")
-               :err       (String. ^bytes stderr-bytes "UTF-8")})))
+            (exited-bytes-result process drains)))
         (catch InterruptedException e
           (when stdin-fut (future-cancel stdin-fut))
           (runtime-process/destroy-process-tree! process)

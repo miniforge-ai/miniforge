@@ -20,7 +20,8 @@
   (:require
    [ai.miniforge.execution-grant.issuance.selection :as selection]
    [ai.miniforge.execution-grant.opsv-scope-schema :as opsv]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [malli.util :as mu]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -31,6 +32,14 @@
 (def ^{:stratum 0} GitObjectId
   "A full SHA-1 or SHA-256 commit id; abbreviated ids can match many commits."
   [:re #"\A(?:[0-9a-f]{40}|[0-9a-f]{64})\z"])
+
+(def ^{:stratum 0 :private true} OpsvWorkflowStatus
+  "Stopped trials may need compensation; unstarted and completed runs cannot issue."
+  [:enum :running :paused :blocked :failed :cancelled])
+
+(defn- ^{:stratum 0} running-or-recovery? [request]
+  (or (= :running (:workflow-run/status request))
+      (contains? opsv/recovery-operations (get-in request [:opsv/experiment :opsv/operation]))))
 
 (defn- ^{:stratum 0} request-schema
   [class-schema preflight-type target-fields]
@@ -117,10 +126,13 @@
     [:deployment-name NonBlankString]]))
 
 (def ^{:stratum 1} OpsvExperimentRequest
-  (request-schema
-   [:enum :effect/deploy :effect/load-test]
-   :preflight/opsv-staging-experiment
-   [[:opsv/experiment opsv/Binding]]))
+  [:and
+   (mu/assoc (request-schema
+              [:enum :effect/deploy :effect/load-test]
+              :preflight/opsv-staging-experiment
+              [[:opsv/experiment opsv/Binding]])
+             :workflow-run/status OpsvWorkflowStatus)
+   [:fn running-or-recovery?]])
 
 ;------------------------------------------------------------------------------ Layer 2
 

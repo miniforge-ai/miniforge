@@ -23,6 +23,11 @@
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.archive :as worktree-archive]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.archive-steps :as worktree-archive-steps]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.executor :as worktree-executor]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.paths :as worktree-paths]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.provision :as worktree-provision]
    [ai.miniforge.dag-executor.result :as result]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -41,9 +46,9 @@
   (testing "returns ok with worktree-path when git worktree add -b succeeds immediately"
     (with-redefs [worktree/run-git     (fn [& _] {:exit 0 :out "" :err ""})
                   worktree/run-shell   (fn [& _] {:exit 0 :out "" :err ""})
-                  worktree/ensure-directory (fn [_] nil)
-                  worktree/check-legacy-tmp-worktrees! (fn [] nil)]
-      (let [r (worktree/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")]
+                  worktree-paths/ensure-directory (fn [_] nil)
+                  worktree-paths/check-legacy-tmp-worktrees! (fn [] nil)]
+      (let [r (worktree-provision/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")]
         (is (result/ok? r))
         (is (= "/tmp/base/task-abc" (:worktree-path (:data r))))))))
 
@@ -68,9 +73,9 @@
 
                           :else {:exit 0 :out "" :err ""})))
                     worktree/run-shell        (fn [& _] {:exit 0 :out "" :err ""})
-                    worktree/ensure-directory (fn [_] nil)
-                    worktree/check-legacy-tmp-worktrees! (fn [] nil)]
-        (worktree/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")
+                    worktree-paths/ensure-directory (fn [_] nil)
+                    worktree-paths/check-legacy-tmp-worktrees! (fn [] nil)]
+        (worktree-provision/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")
         ;; Final positional arg of `worktree add` should be the resolved sha,
         ;; not the literal branch name. Without this, `git worktree add -b
         ;; new path main` fails when main is already checked out in another
@@ -92,9 +97,9 @@
                             {:exit 0 :out "" :err ""}))
                         {:exit 0 :out "" :err ""}))
                     worktree/run-shell        (fn [& _] {:exit 0 :out "" :err ""})
-                    worktree/ensure-directory (fn [_] nil)
-                    worktree/check-legacy-tmp-worktrees! (fn [] nil)]
-        (let [r (worktree/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")]
+                    worktree-paths/ensure-directory (fn [_] nil)
+                    worktree-paths/check-legacy-tmp-worktrees! (fn [] nil)]
+        (let [r (worktree-provision/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")]
           (is (result/ok? r))
           (is (= "/tmp/base/task-abc" (:worktree-path (:data r)))))))))
 
@@ -115,9 +120,9 @@
                         :else
                         {:exit 0 :out "" :err ""}))
                     worktree/run-shell        (fn [& _] {:exit 0 :out "" :err ""})
-                    worktree/ensure-directory (fn [_] nil)
-                    worktree/check-legacy-tmp-worktrees! (fn [] nil)]
-        (let [r (worktree/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")]
+                    worktree-paths/ensure-directory (fn [_] nil)
+                    worktree-paths/check-legacy-tmp-worktrees! (fn [] nil)]
+        (let [r (worktree-provision/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")]
           (is (result/ok? r))
           (is (= "/tmp/base/task-abc" (:worktree-path (:data r))))
           ;; Verify --detach was attempted
@@ -131,16 +136,16 @@
                       {:exit 1 :out "" :err "fatal: cannot create worktree"}
                       {:exit 0 :out "" :err ""}))
                   worktree/run-shell        (fn [& _] {:exit 0 :out "" :err ""})
-                  worktree/ensure-directory (fn [_] nil)
-                  worktree/check-legacy-tmp-worktrees! (fn [] nil)]
-      (let [r (worktree/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")]
+                  worktree-paths/ensure-directory (fn [_] nil)
+                  worktree-paths/check-legacy-tmp-worktrees! (fn [] nil)]
+      (let [r (worktree-provision/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")]
         (is (not (result/ok? r)))
         (is (= :worktree-create-failed (get-in r [:error :code])))))))
 
 (deftest ^{:stratum 0} worktree-lock-is-present-test
   (testing "worktree-lock is an Object used to serialize concurrent git add calls"
-    (is (some? @#'worktree/worktree-lock))
-    (is (instance? Object @#'worktree/worktree-lock))))
+    (is (some? @#'worktree-provision/worktree-lock))
+    (is (instance? Object @#'worktree-provision/worktree-lock))))
 
 ;; ============================================================================
 ;; persist-workspace! / restore-workspace! (no-op for worktree)
@@ -191,8 +196,8 @@
                               {:exit 0 :out "" :err ""})
 
                           :else {:exit 0 :out "" :err ""})))
-                    worktree/ensure-archive-dir (fn [d] d)]
-        (let [r (worktree/archive-bundle! "/tmp/scratch"
+                    worktree-archive-steps/ensure-archive-dir (fn [d] d)]
+        (let [r (worktree-archive/archive-bundle! "/tmp/scratch"
                                           {:archive-dir "/tmp/test-archive"
                                            :task-id     "abc"
                                            :base-ref    "main"})]
@@ -229,8 +234,8 @@
                               {:exit 0 :out "" :err ""})
 
                           :else {:exit 0 :out "" :err ""})))
-                    worktree/ensure-archive-dir (fn [d] d)]
-        (worktree/archive-bundle! "/tmp/scratch"
+                    worktree-archive-steps/ensure-archive-dir (fn [d] d)]
+        (worktree-archive/archive-bundle! "/tmp/scratch"
                                   {:archive-dir "/tmp/test-archive"
                                    :task-id     "task-already-prefixed"
                                    :base-ref    "main"})
@@ -239,7 +244,7 @@
 
 (deftest ^{:stratum 0} persist-workspace-clean-worktree-no-changes-test
   (testing "persist-workspace! reports no-changes when the scratch worktree is clean"
-    (let [executor (worktree/create-worktree-executor {})
+    (let [executor (worktree-executor/create-worktree-executor {})
           calls (atom [])]
       (with-redefs [worktree/run-git
                     (fn [& args]
@@ -263,7 +268,7 @@
 
 (deftest ^{:stratum 0} persist-workspace-dirty-bundles-test
   (testing "persist-workspace! commits dirty changes and writes a bundle"
-    (let [executor (worktree/create-worktree-executor {})
+    (let [executor (worktree-executor/create-worktree-executor {})
           status-calls (atom 0)
           bundle-args (atom nil)]
       (with-redefs [worktree/run-git
@@ -291,7 +296,7 @@
                               {:exit 0 :out "" :err ""})
 
                           :else {:exit 0 :out "" :err ""})))
-                    worktree/ensure-archive-dir
+                    worktree-archive-steps/ensure-archive-dir
                     (fn [d] d)]
         (let [r (proto/persist-workspace!
                  executor "env-1"
@@ -310,7 +315,7 @@
 
 (deftest ^{:stratum 0} restore-workspace-fetches-from-bundle-test
   (testing "restore-workspace! fetches the branch back into the host repo"
-    (let [executor (worktree/create-worktree-executor {})
+    (let [executor (worktree-executor/create-worktree-executor {})
           fetch-args (atom nil)]
       (with-redefs [worktree/run-git
                     (fn [& args]
@@ -331,7 +336,7 @@
 
 (deftest ^{:stratum 0} restore-workspace-accepts-already-checked-out-branch-test
   (testing "restore succeeds when the checked-out branch already contains the bundled commit"
-    (let [executor (worktree/create-worktree-executor {})
+    (let [executor (worktree-executor/create-worktree-executor {})
           calls (atom [])]
       (with-redefs [worktree/run-git
                     (fn [& args]
@@ -373,7 +378,7 @@
 
 (deftest ^{:stratum 0} restore-workspace-surfaces-resume-fetch-failure-test
   (testing "checked-out branch fallback reports resume-ref fetch failures and cleans up"
-    (let [executor (worktree/create-worktree-executor {})
+    (let [executor (worktree-executor/create-worktree-executor {})
           calls (atom [])]
       (with-redefs [worktree/run-git
                     (fn [& args]
@@ -406,7 +411,7 @@
 
 (deftest ^{:stratum 0} restore-workspace-errors-when-checked-out-branch-lacks-bundle-tip-test
   (testing "checked-out branch fallback rejects stale branches and cleans up"
-    (let [executor (worktree/create-worktree-executor {})
+    (let [executor (worktree-executor/create-worktree-executor {})
           calls (atom [])]
       (with-redefs [worktree/run-git
                     (fn [& args]
@@ -454,7 +459,7 @@
     ;; which made commits-ahead compute task-branch..HEAD = 0, silently
     ;; skipping bundle creation when callers passed :branch but not
     ;; :base-branch. The current chain stops at default-base-ref ('main').
-    (let [executor (worktree/create-worktree-executor {})
+    (let [executor (worktree-executor/create-worktree-executor {})
           rev-list-args (atom nil)]
       (with-redefs [worktree/run-git
                     (fn [& args]
@@ -477,7 +482,7 @@
                           {:exit 0 :out "" :err ""}
 
                           :else {:exit 0 :out "" :err ""})))
-                    worktree/ensure-archive-dir (fn [d] d)]
+                    worktree-archive-steps/ensure-archive-dir (fn [d] d)]
         (proto/persist-workspace! executor "env-1"
                                   ;; Caller passes :branch but no :base-branch
                                   ;; — the executor must NOT use task-1 as base.
@@ -502,7 +507,7 @@
                         {:exit 128 :out "" :err "fatal: not a git repository"}
 
                         :else {:exit 0 :out "" :err ""})))]
-      (let [r (worktree/archive-bundle! "/tmp/scratch"
+      (let [r (worktree-archive/archive-bundle! "/tmp/scratch"
                                         {:archive-dir "/tmp/test-archive"
                                          :task-id     "env-1"
                                          :base-ref    "main"})]
@@ -527,7 +532,7 @@
                         {:exit 128 :out "" :err "fatal: bad revision"}
 
                         :else {:exit 0 :out "" :err ""})))]
-      (let [r (worktree/archive-bundle! "/tmp/scratch"
+      (let [r (worktree-archive/archive-bundle! "/tmp/scratch"
                                         {:archive-dir "/tmp/test-archive"
                                          :task-id     "env-1"
                                          :base-ref    "main"})]
@@ -554,8 +559,8 @@
                         {:exit 128 :out "" :err "fatal: refusing to create empty bundle"}
 
                         :else {:exit 0 :out "" :err ""})))
-                  worktree/ensure-archive-dir (fn [d] d)]
-      (let [r (worktree/archive-bundle! "/tmp/scratch"
+                  worktree-archive-steps/ensure-archive-dir (fn [d] d)]
+      (let [r (worktree-archive/archive-bundle! "/tmp/scratch"
                                         {:archive-dir "/tmp/test-archive"
                                          :task-id     "env-1"
                                          :base-ref    "main"})]
@@ -572,54 +577,54 @@
   ;; default sits under the miniforge home, next to checkpoints.
   (with-redefs [config/miniforge-home (constantly "/mf-home")]
     (testing "default-base-path is <miniforge-home>/worktrees"
-      (is (= "/mf-home/worktrees" (worktree/default-base-path))))))
+      (is (= "/mf-home/worktrees" (worktree-paths/default-base-path))))))
 
 (deftest ^{:stratum 0} default-base-path-without-miniforge-home-is-under-user-home-test
   (testing "with MINIFORGE_HOME unset, the home is <user.home>/.miniforge"
     (with-redefs [config/miniforge-home-override (constantly nil)]
       (is (= (str (System/getProperty "user.home") "/.miniforge/worktrees")
-             (worktree/default-base-path))))))
+             (worktree-paths/default-base-path))))))
 
 (deftest ^{:stratum 0} default-base-path-reads-workflow-worktree-root-from-config-test
   (testing "default-base-path with config map returns :workflow/worktree-root when present"
     (let [custom "/custom/worktrees"
-          p (worktree/default-base-path {:workflow/worktree-root custom})]
+          p (worktree-paths/default-base-path {:workflow/worktree-root custom})]
       (is (= custom p)
           "config :workflow/worktree-root overrides the miniforge-home default")))
 
   (with-redefs [config/miniforge-home (constantly "/mf-home")]
     (testing "default-base-path with empty config falls back to <miniforge-home>/worktrees"
-      (is (= "/mf-home/worktrees" (worktree/default-base-path {}))))
+      (is (= "/mf-home/worktrees" (worktree-paths/default-base-path {}))))
 
     (testing "default-base-path with nil :workflow/worktree-root falls back the same way"
-      (is (= "/mf-home/worktrees" (worktree/default-base-path {:workflow/worktree-root nil}))))))
+      (is (= "/mf-home/worktrees" (worktree-paths/default-base-path {:workflow/worktree-root nil}))))))
 
 (deftest ^{:stratum 0} default-base-path-tmp-opt-in-via-config-test
   (testing "/tmp-rooted path is valid when explicitly set via :workflow/worktree-root"
     (let [tmp-path "/tmp/miniforge-worktrees-ci"
-          p (worktree/default-base-path {:workflow/worktree-root tmp-path})]
+          p (worktree-paths/default-base-path {:workflow/worktree-root tmp-path})]
       (is (= tmp-path p)
           "/tmp opt-in works when caller sets :workflow/worktree-root explicitly"))))
 
 (deftest ^{:stratum 0} create-worktree-executor-uses-new-default-test
   (testing "create-worktree-executor with no :base-path picks up the home default"
-    (let [exec (worktree/create-worktree-executor {})]
-      (is (= (worktree/default-base-path) (:base-path exec)))))
+    (let [exec (worktree-executor/create-worktree-executor {})]
+      (is (= (worktree-paths/default-base-path) (:base-path exec)))))
 
   (testing "explicit :base-path override still works (CI ephemeral runs opt in)"
-    (let [exec (worktree/create-worktree-executor
+    (let [exec (worktree-executor/create-worktree-executor
                 {:base-path "/tmp/miniforge-worktrees-ci"})]
       (is (= "/tmp/miniforge-worktrees-ci" (:base-path exec))))))
 
 (deftest ^{:stratum 0} create-worktree-executor-reads-workflow-worktree-root-test
   (testing ":workflow/worktree-root in config is used as base-path when :base-path absent"
-    (let [exec (worktree/create-worktree-executor
+    (let [exec (worktree-executor/create-worktree-executor
                 {:workflow/worktree-root "/configured/worktrees"})]
       (is (= "/configured/worktrees" (:base-path exec))
           "executor picks up :workflow/worktree-root from user config")))
 
   (testing ":base-path takes priority over :workflow/worktree-root"
-    (let [exec (worktree/create-worktree-executor
+    (let [exec (worktree-executor/create-worktree-executor
                 {:base-path "/explicit/override"
                  :workflow/worktree-root "/configured/worktrees"})]
       (is (= "/explicit/override" (:base-path exec))
@@ -631,17 +636,17 @@
 (deftest ^{:stratum 0} check-legacy-tmp-worktrees-does-not-throw-test
   (testing "check-legacy-tmp-worktrees! is safe to call regardless of filesystem state"
     ;; No assertion on output — just verify it never throws.
-    (is (nil? (worktree/check-legacy-tmp-worktrees!)))))
+    (is (nil? (worktree-paths/check-legacy-tmp-worktrees!)))))
 
 (deftest ^{:stratum 0} create-worktree-calls-legacy-check-test
   (testing "create-worktree invokes check-legacy-tmp-worktrees! as advisory step"
     (let [check-called? (atom false)]
-      (with-redefs [worktree/check-legacy-tmp-worktrees!
+      (with-redefs [worktree-paths/check-legacy-tmp-worktrees!
                     (fn [] (reset! check-called? true))
                     worktree/run-git        (fn [& _] {:exit 0 :out "" :err ""})
                     worktree/run-shell      (fn [& _] {:exit 0 :out "" :err ""})
-                    worktree/ensure-directory (fn [_] nil)]
-        (worktree/create-worktree "/base" "/repo" "task-x" "main")
+                    worktree-paths/ensure-directory (fn [_] nil)]
+        (worktree-provision/create-worktree "/base" "/repo" "task-x" "main")
         (is @check-called?
             "create-worktree must delegate to check-legacy-tmp-worktrees!")))))
 
@@ -650,7 +655,7 @@
     ;; No mock needed: just runs against real FS. /tmp/miniforge-worktrees
     ;; almost certainly does not exist in CI — but even if it does, the
     ;; function only reads and emits a warning; it never throws.
-    (is (nil? (worktree/check-legacy-tmp-worktrees!))
+    (is (nil? (worktree-paths/check-legacy-tmp-worktrees!))
         "must return nil (not throw) in any filesystem state")))
 
 ;; ============================================================================
@@ -659,13 +664,13 @@
 (deftest ^{:stratum 0} default-base-path-expands-tilde-test
   (testing "leading ~/ in :workflow/worktree-root is expanded to user home"
     (let [home (System/getProperty "user.home")
-          p    (worktree/default-base-path
+          p    (worktree-paths/default-base-path
                 {:workflow/worktree-root "~/.miniforge/worktrees"})]
       (is (= (str home "/.miniforge/worktrees") p)
           "tilde must be substituted with the actual home directory")))
 
   (testing "absolute path in :workflow/worktree-root is returned unchanged"
-    (let [p (worktree/default-base-path
+    (let [p (worktree-paths/default-base-path
              {:workflow/worktree-root "/absolute/custom/path"})]
       (is (= "/absolute/custom/path" p)
           "absolute path must pass through without modification"))))
@@ -677,10 +682,10 @@
   (testing "warning message includes legacy path, migration key, and cleanup command"
     (let [warnings (atom [])]
       ;; Reset the one-shot dedup atom so this test is independent of execution order.
-      (reset! worktree/legacy-tmp-warned? false)
-      (with-redefs [worktree/legacy-tmp-worktrees-exist? (constantly true)]
-        (binding [worktree/*warn-fn* (fn [msg] (swap! warnings conj msg))]
-          (worktree/check-legacy-tmp-worktrees!)
+      (reset! worktree-paths/legacy-tmp-warned? false)
+      (with-redefs [worktree-paths/legacy-tmp-worktrees-exist? (constantly true)]
+        (binding [worktree-paths/*warn-fn* (fn [msg] (swap! warnings conj msg))]
+          (worktree-paths/check-legacy-tmp-worktrees!)
           (is (= 1 (count @warnings))
               "exactly one warning is emitted")
           (is (str/includes? (first @warnings) "WARNING")
@@ -695,9 +700,9 @@
 (deftest ^{:stratum 0} check-legacy-tmp-worktrees-silent-when-absent-test
   (testing "no warning is emitted when the legacy directory does not exist"
     (let [warnings (atom [])]
-      (with-redefs [worktree/legacy-tmp-worktrees-exist? (constantly false)]
-        (binding [worktree/*warn-fn* (fn [msg] (swap! warnings conj msg))]
-          (worktree/check-legacy-tmp-worktrees!)
+      (with-redefs [worktree-paths/legacy-tmp-worktrees-exist? (constantly false)]
+        (binding [worktree-paths/*warn-fn* (fn [msg] (swap! warnings conj msg))]
+          (worktree-paths/check-legacy-tmp-worktrees!)
           (is (zero? (count @warnings))
               "warning must not fire when legacy path is absent"))))))
 
@@ -706,14 +711,14 @@
     ;; Graceful coexistence constraint: a warning is emitted but the worktree
     ;; is still created at the new configured base-path without any error.
     ;; Reset the one-shot dedup atom so this test is independent of execution order.
-    (reset! worktree/legacy-tmp-warned? false)
+    (reset! worktree-paths/legacy-tmp-warned? false)
     (let [warned? (atom false)]
-      (with-redefs [worktree/legacy-tmp-worktrees-exist? (constantly true)
+      (with-redefs [worktree-paths/legacy-tmp-worktrees-exist? (constantly true)
                     worktree/run-git          (fn [& _] {:exit 0 :out "" :err ""})
                     worktree/run-shell        (fn [& _] {:exit 0 :out "" :err ""})
-                    worktree/ensure-directory (fn [_] nil)]
-        (binding [worktree/*warn-fn* (fn [_] (reset! warned? true))]
-          (let [r (worktree/create-worktree
+                    worktree-paths/ensure-directory (fn [_] nil)]
+        (binding [worktree-paths/*warn-fn* (fn [_] (reset! warned? true))]
+          (let [r (worktree-provision/create-worktree
                    "/home/user/.miniforge/worktrees"
                    "/repo" "task-coexist" "main")]
             (is (result/ok? r)

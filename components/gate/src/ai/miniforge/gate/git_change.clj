@@ -17,8 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.gate.git-change
   "What a change does to a file, read from git: the base and diff helpers
-   of the :no-secrets gate, kept apart so other gates can measure a change
-   the same way.
+   the :no-secrets and policy-pack gates share.
 
    Every git call is built by `git-argv` (--literal-pathspecs, unquoted
    paths, and for diff --no-textconv --no-ext-diff --text --no-color
@@ -115,13 +114,22 @@
                     not-empty)))
         (filter #(and (string? %) (not (str/blank? %))) candidates)))
 
-(defn ^{:stratum 1} version-diff
+(defn ^{:stratum 1} base-text
+  "PATH's content at BASE, or nil when BASE has no blob at PATH or git
+   cannot read it."
+  [ctx base path]
+  (when (and base path)
+    (run ctx (git-argv "cat-file" "blob" (str base ":" path)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} version-diff
   "The zero-context diff of TEXT, the artifact's version of PATH, against
    PATH's blob at BASE (against nothing when there is no base blob), or
    nil when git cannot diff them. Both versions are written under DIR as
    NAME and NAME-base and diffed on the host."
   [ctx base path text dir name]
-  (let [shown (when (and base path) (run ctx (git-argv "cat-file" "blob" (str base ":" path))))
+  (let [shown (base-text ctx base path)
         old   (if shown (doto (io/file dir (str name "-base")) (spit shown)) (io/file "/dev/null"))
         new   (doto (io/file dir name) (spit text))]
     (run {} (git-argv "diff" "--no-index" "-U0" "--" (str old) (str new)) #{0 1})))

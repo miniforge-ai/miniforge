@@ -17,7 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.gate.git-change-test
   "The shared git helpers read a zero-context diff into added lines and
-   measure from the task base, never HEAD."
+   base text, and measure from the task base, never HEAD."
   (:require [ai.miniforge.gate.git-change :as git-change]
             [babashka.fs :as fs]
             [clojure.test :refer [deftest is]]))
@@ -47,6 +47,9 @@
       (is (= [[1 "a"] [2 "b"]]
              (git-change/added-lines (git-change/version-diff {} nil "new.clj" "a\nb\n" dir "0"))))
       (finally (fs/delete-tree dir)))))
+
+(deftest ^{:stratum 0} base-text-without-a-base-is-nil-test
+  (is (nil? (git-change/base-text {} nil "src/a.clj"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.29.0-draft
-**Date:** 2026-11-04
+**Version:** 0.29.2-draft
+**Date:** 2026-11-15
 **Status:** Living specification during OSS development
 
 ---
@@ -242,6 +242,10 @@ Defines:
 
 ### Indexed normative amendments
 
+Full-stop decision source (N3 §9.1.1, N8 §3.5, N11 §4.4, N2 checkpoint delta §11,
+and their N5/N7/N10 references):
+[operator approval and implementation contingency](../docs/pull-requests/2026-11-15-docs-run-full-stop-contract.md#approval-record).
+
 | File | Base contract | Applicability |
 |------|---------------|---------------|
 | [N2-delta-phase-checkpoint-and-resume.md](normative/N2-delta-phase-checkpoint-and-resume.md) | N2 | Persisted workflow state |
@@ -273,6 +277,9 @@ Decision source for §6.3:
 
 Decision source for §5.5 and N10 §1.5:
 [temporary staging authority approval](../docs/pull-requests/2026-11-04-docs-opsv-staging-experiment-authority.md#approval-record).
+
+Recovery timing clarification for §5.5 and N10 §1.5:
+[bounded plan and just-in-time exact grants approval](../docs/pull-requests/2026-11-06-docs-opsv-recovery-authority-timing.md#approval-record).
 
 ### N8 — Observability Control Interface 🆕
 
@@ -669,6 +676,15 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.29.2-draft** (2026-11-15) - Operator-approved full-stop containment
+  contract across N8/N11 and safe checkpoint recovery in the N2 delta, with
+  N3/N5 containment-only audit-outage handling and N7/N10 references. Implementation verification remains a separate gate;
+  no live actions are authorized.
+
+- **0.29.1-draft** (2026-11-06) - Clarified approved N7/N10 recovery timing:
+  independently approve and retain the bounded recovery plan before trial.
+  Issue exact recovery grants just in time from fresh provider preconditions
+  and proven resource identities. No live-experiment authority.
 - **0.29.0-draft** (2026-11-04) - Approved separate temporary staging experiment
   authority: N7 0.4.0 and N10 0.5.0, with N1 0.9.1 and N8 0.5.0 recovery alignment.
   Existing N3/N6 wire contracts and final PR/permanent-apply gates are unchanged.

@@ -18,13 +18,11 @@
 (ns ai.miniforge.gate.policy-pack
   "Phase-scoped policy-pack gate.
 
-   Closes PR #979's enforcement gap: the only pack-derived gate (`:behavioral`)
-   was wired solely into the `:observe` phase, so a normal canonical-sdlc run
-   NEVER evaluated the standards pack on the path a PR actually takes. This
-   gate runs the shipped standards pack's enabled rules — those whose
-   `:applies-to {:phases}` includes the current phase — against the phase
-   artifact, and BLOCKS on `:hard-halt` enforcement (a failed gate routes to
-   the existing repair/redirect path via `apply-gate-validation`).
+   Evaluates the standards pack on the path a PR takes: the shipped pack's
+   enabled rules — those whose `:applies-to {:phases}` includes the current
+   phase — run against the phase artifact, and the gate BLOCKS on
+   `:hard-halt` enforcement (a failed gate routes to the existing
+   repair/redirect path via `apply-gate-validation`).
 
    Registered as two phase-baked gates, `:policy-verify` and `:policy-review`,
    so the generic `apply-gate-validation` path runs the right rule subset per
@@ -53,9 +51,13 @@
    finding. Until a semantic rule is classified to an acting action, the seam
    is wired but dormant.
 
+   Change scope: the judge sees each changed file whole, but only its
+   findings inside the top-level forms the change edits block. Findings
+   elsewhere in a touched file predate the change; they are recorded as
+   warnings and do not block (`policy-pack.scope`).
+
    Fail-safe: a check that throws is converted to a failed gate by
-   `gate.interface/check-gate` (mirrors the reviewer fix in #977) — never a
-   silent pass."
+   `gate.interface/check-gate` — never a silent pass."
   (:require
    ;; Registers mechanical capability checks before compiled pack evaluation.
    [ai.miniforge.gate.capabilities]
