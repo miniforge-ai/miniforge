@@ -574,8 +574,9 @@ This annex is **informative**, recording implementation state as of 2026-11-17.
 
 ### A.1 Implemented
 
-The nine `opsv.*` event types in N3 §3.14 are registered and emitted, with
-coverage in `phase-opsv` and `event-stream`.
+N3 §3.14's OPSV event family is registered and has tested emitters, including
+`opsv.actuation/disposition` for governed effect outcomes. The scheduled
+drift producer remains open.
 
 `components/opsv` implements canonical contracts and hashing, risk scoring,
 bounded convergence, verification, and effective-actuation decisions. The
