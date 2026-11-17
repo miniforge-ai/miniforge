@@ -53,13 +53,15 @@
 
 (defn ^{:stratum 0} controller-over
   "Another controller over `w`'s provider and receipt log, keeping leases
-   in `ledger-store`: a restarted or concurrent controller process."
-  [w ledger-store]
-  (env/create-controller {:provider (get-in w [:c :controller/provider])
-                          :clock #(Instant/now)
-                          :emit! #(swap! (:receipts w) conj %)
-                          :persist! fx/memory-persister
-                          :ledger ledger-store}))
+   in `ledger-store`, with `options` (such as `:clock`) over the defaults:
+   a restarted or concurrent controller process."
+  [w ledger-store & [options]]
+  (env/create-controller (merge {:provider (get-in w [:c :controller/provider])
+                                 :clock #(Instant/now)
+                                 :emit! #(swap! (:receipts w) conj %)
+                                 :persist! fx/memory-persister
+                                 :ledger ledger-store}
+                                options)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
