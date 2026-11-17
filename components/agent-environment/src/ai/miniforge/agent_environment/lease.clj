@@ -43,7 +43,7 @@
    :environment/copy #{:state/provisioned}
    :environment/persist-artifacts #{:state/provisioned :state/cancelled}
    :environment/cancel #{:state/provisioned :state/cancelled}
-   :environment/release #{:state/provisioned :state/cancelled :state/cleanup-uncertain}})
+   :environment/release #{:state/provisioned :state/cancelled :state/cleanup-uncertain :state/releasing}})
 
 (def ^{:stratum 0} cleanup-operations
   "Calls still admitted after an environment expires: audit and cleanup."
@@ -54,7 +54,8 @@
   {:state/provisioning :anomalies.agent-environment/acquire-in-flight
    :state/cancelled :anomalies.agent-environment/environment-cancelled
    :state/released :anomalies.agent-environment/environment-released
-   :state/cleanup-uncertain :anomalies.agent-environment/cleanup-uncertain})
+   :state/cleanup-uncertain :anomalies.agent-environment/cleanup-uncertain
+   :state/releasing :anomalies.agent-environment/environment-releasing})
 
 (defn ^{:stratum 0} request-key
   [request]

@@ -118,16 +118,14 @@
     (is (nil? (:cancel! @(:calls w))))
     (is (= [:state/provisioned] (states w)))))
 
-(deftest ^{:stratum 1} test-a-release-the-ledger-misses-is-not-reported-done
+(deftest ^{:stratum 1} test-a-release-the-ledger-cannot-record-deletes-nothing
   (let [w (outage-world)
         current (:environment/lease (acquire w))]
     (swap! (:faults w) assoc :writes 0)
     (is (= unavailable (reason (env/release! (:c w) (:a w) current))))
-    (testing "given a delete the ledger misses → the receipt says it applied and why the ledger does not show it"
-      (is (= [:outcome/applied unavailable] (last-receipt w)))
-      (is (empty? (fake/live-namespaces (:fake w))))
-      (is (= [:state/provisioned] (states w))))
-    (testing "given the ledger back → the release is retried and recorded"
+    (is (nil? (:deprovision! @(:calls w))))
+    (is (= [:state/provisioned] (states w)))
+    (testing "given the ledger back → the release is recorded and runs"
       (swap! (:faults w) assoc :writes nil)
       (is (= {:call/outcome :outcome/applied} (env/release! (:c w) (:a w) current)))
       (is (= [:state/released] (states w))))))

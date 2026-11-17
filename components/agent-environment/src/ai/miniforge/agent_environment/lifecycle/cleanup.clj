@@ -1,0 +1,137 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.agent-environment.lifecycle.cleanup
+  "Deleting an environment through the ledger. The intent (the UID and
+   generation to delete, and when it was requested) is written by
+   compare-and-set before any delete, and only the caller whose intent the
+   ledger took sends it. Its outcome is recorded against that intent:
+   applied when the provider confirms the deletes, verified when the target
+   no longer shows the UID. Only a verified cleanup releases the entry."
+  (:require
+   [ai.miniforge.agent-environment.controller :as controller]
+   [ai.miniforge.agent-environment.interface.protocol :as protocol]
+   [ai.miniforge.agent-environment.lease :as lease]
+   [ai.miniforge.agent-environment.lifecycle.support :as support]
+   [ai.miniforge.agent-environment.receipt :as receipt]
+   [ai.miniforge.agent-environment.refusal :as refusal]
+   [ai.miniforge.anomaly.interface :as anomaly]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} intent
+  [uid generation requested-at]
+  {:cleanup/uid uid
+   :cleanup/generation generation
+   :cleanup/requested-at requested-at
+   :cleanup/applied? false
+   :cleanup/verified? false})
+
+(defn- ^{:stratum 0} requested-under-lease
+  "`entry` releasing under `cleanup`, unless it no longer admits a release under `lease`."
+  [lease now cleanup entry]
+  (if (lease/lease-refusal entry :environment/release lease now)
+    entry
+    (assoc entry :entry/state :state/releasing :entry/cleanup cleanup)))
+
+(defn- ^{:stratum 0} requested-for-reservation
+  "The reservation at `generation`, while still provisioning, releasing
+   `environment` under `cleanup`; any other entry unchanged."
+  [generation environment cleanup entry]
+  (if (and (= generation (:entry/generation entry)) (= :state/provisioning (:entry/state entry)))
+    (assoc entry :entry/state :state/releasing :entry/environment environment :entry/cleanup cleanup)
+    entry))
+
+(defn- ^{:stratum 0} outcome-recorded
+  "The entry once `cleanup`'s deletes ran: released when verified, else
+   cleanup-uncertain to retry. Unchanged when it no longer holds `cleanup`,
+   as when a later release replaced it."
+  [cleanup applied? verified? entry]
+  (let [state (if verified? :state/released :state/cleanup-uncertain)
+        recorded (assoc cleanup :cleanup/applied? applied? :cleanup/verified? verified?)]
+    (if (= cleanup (:entry/cleanup entry))
+      (assoc entry :entry/state state :entry/cleanup recorded)
+      entry)))
+
+(defn- ^{:stratum 0} owns?
+  [cleanup changed]
+  (= cleanup (get-in changed [:ledger/after :entry/cleanup])))
+
+(defn- ^{:stratum 0} gone?
+  "True when observing `target` no longer finds `uid`. An observation that
+   fails verifies nothing."
+  [c target uid]
+  (let [seen (protocol/observe (support/provider c) target)]
+    (and (not (anomaly/anomaly? seen)) (not= uid (:observed/uid seen)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} unowned
+  "Nil when the change recorded `cleanup`, else why it did not."
+  [cleanup changed lease now]
+  (when-not (owns? cleanup changed)
+    (refusal/reason-anomaly (or (lease/lease-refusal (:ledger/after changed) :environment/release lease now)
+                                :anomalies.agent-environment/environment-releasing)
+                            {})))
+
+(defn- ^{:stratum 1} deleted
+  "Send `cleanup`'s deletes at `target` and verify them: the steps, with
+   whether the deletes applied and whether the UID is gone."
+  [c target cleanup]
+  (let [uid (:cleanup/uid cleanup)
+        at (assoc target :target/uid uid)
+        steps (support/reported-steps (protocol/deprovision! (support/provider c) at) :deprovision/steps)
+        verified? (gone? c at uid)
+        verify-outcome (if verified? :outcome/applied :outcome/uncertain)]
+    {:steps (conj steps {:step/name :step/verified :step/outcome verify-outcome})
+     :applied? (= :outcome/applied (receipt/steps-outcome steps))
+     :verified? verified?}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} released!
+  "Release `lease`'s environment at `target` under a cleanup intent. The
+   call result for its receipt, applied only when the deletes are verified;
+   or, when the ledger did not take the intent, its anomaly, and nothing
+   was deleted."
+  [c lease target]
+  (let [now (support/now c)
+        cleanup (intent (:lease/environment-uid lease) (:lease/generation lease) now)]
+    (anomaly/let-ok [changed (controller/settle! c lease (partial requested-under-lease lease now cleanup))
+                     _ (unowned cleanup changed lease now)]
+      (let [{:keys [steps applied? verified?]} (deleted c target cleanup)
+            recorded (controller/settle! c lease (partial outcome-recorded cleanup applied? verified?))]
+        (support/recorded-call recorded {:call/outcome (receipt/steps-outcome steps)} steps)))))
+
+(defn ^{:stratum 2} reservation-cleaned!
+  "Delete a partial provision's `environment` under a cleanup intent on its
+   reservation. Returns `{:cleanup/receipt r :cleanup/recorded change}`;
+   when the ledger did not take the intent, nothing is deleted and the
+   receipt is nil."
+  [c subject request target environment]
+  (let [k (lease/request-key request)
+        generation (:target/generation target)
+        cleanup (intent (:environment/uid environment) generation (support/now c))
+        changed (controller/change-entry! c k (partial requested-for-reservation generation environment cleanup))]
+    (if (or (anomaly/anomaly? changed) (not (owns? cleanup changed)))
+      {:cleanup/receipt nil :cleanup/recorded changed}
+      (let [{:keys [steps applied? verified?]} (deleted c target cleanup)
+            recorded (controller/change-entry! c k (partial outcome-recorded cleanup applied? verified?))
+            outcome (receipt/steps-outcome steps)
+            cleaned (controller/record! c subject :environment/release outcome steps
+                                        :anomalies.agent-environment/provisioning-failed)]
+        {:cleanup/receipt cleaned :cleanup/recorded recorded}))))
