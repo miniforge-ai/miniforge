@@ -16,7 +16,8 @@ value, contradict the schema is then a lint error in the editor and in
 `bb lint:clj:all`. CI runs `bb lint:malli-types:check`, which fails when the
 committed types differ from the current schemas.
 
-Stacked on #2297, which declares the first schemas (the gate interface).
+Builds on #2297 (merged), which declares the first schemas (the gate
+interface).
 
 ## Motivation
 
@@ -35,13 +36,12 @@ mistakes in calls no test reaches, at lint time: a gate named by string
    declares one); `emit!` writes it to `config-path` itself rather than through
    `malli.clj-kondo/save!`, whose path differs between Malli versions;
    `check!` exits 1 when the committed file is missing or reads as different
-   data.
+   data. The messages both print come from
+   `development/resources/config/malli-types/messages/system.edn`, which
+   `deps.edn` adds to the `:dev` classpath.
 2. `bb.edn`: `lint:malli-types` and `lint:malli-types:check` (JVM, `-X:dev`,
    about 26 s locally).
-3. `ci.yml`: the Test job runs the check after the development tests and
-   uploads its log. It runs there, not in Lint, because the `:dev` classpath
-   includes the private `workbench-contract` git dependency, which only the
-   Test job has access to.
+3. `ci.yml`: the Lint job runs the check after clj-kondo and uploads its log.
 4. `.clj-kondo/metosin/malli-types-clj/config.edn`: generated from the gate
    interface's schemas.
 5. `gate/interface_schema_test.clj`: the one deliberate wrong-type call (it
@@ -58,7 +58,8 @@ mistakes in calls no test reaches, at lint time: a gate named by string
    any alias (`m/=>`, `malli.core/=>`), with spacing after the paren, or
    referred bare, and ignores a schema value that only contains `:=>`;
    `current?` is false for a missing or different file and true after
-   `write-config!`.
+   `write-config!`; each printed message resolves from the catalog and names
+   the path, and fails as a bare key name when the catalog is missing.
 2. `bb lint:malli-types:check` passes on the committed file and exits 1 after
    the file is replaced with an empty config.
 3. A probe calling `check-gate` with a string, `check-gates` with a keyword,
@@ -72,7 +73,7 @@ Development and CI only.
 
 ## Related Issues/PRs
 
-1. #2297 (gate function schemas and test instrumentation).
+1. #2297 (gate function schemas and test instrumentation), merged.
 
 ## Checklist
 

@@ -21,6 +21,7 @@
    loads on its own; `check!` exits 1 when the committed file differs from
    what `emit!` would write."
   (:require
+   [ai.miniforge.messages.interface :as messages]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.pprint :as pprint]
@@ -38,6 +39,17 @@
    `.clj-kondo/<org>/<lib>/config.edn`. Fixed here, not left to
    `malli.clj-kondo/save!`, whose path differs between Malli versions."
   ".clj-kondo/metosin/malli-types-clj/config.edn")
+
+(def ^{:stratum 0} config-print-width
+  "Right margin for the written config: wider than pprint's default 72 so
+   most type entries fit on one line."
+  100)
+
+(def ^{:stratum 0} t
+  "Translate a malli-types system message."
+  (messages/create-translator
+   "config/malli-types/messages/system.edn"
+   :malli-types/messages))
 
 (defn ^{:stratum 0} clojure-source?
   [^java.io.File f]
@@ -59,14 +71,6 @@
     (mi/collect! {:ns nss}))
   (mc/linter-config (mapcat mc/collect nss)))
 
-(defn ^{:stratum 0} write-config!
-  "Write `config` to `path` as EDN, creating parent directories."
-  [path config]
-  (io/make-parents path)
-  (spit path (with-out-str
-               (binding [pprint/*print-right-margin* 100]
-                 (pprint/pprint config)))))
-
 (defn ^{:stratum 0} current?
   "True when the file at `path` exists and reads as `expected`."
   [path expected]
@@ -84,6 +88,14 @@
   (boolean (re-find #":malli/schema|\(\s*(?:[^\s()/]+/)?=>\s" text)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} write-config!
+  "Write `config` to `path` as EDN, creating parent directories."
+  [path config]
+  (io/make-parents path)
+  (spit path (with-out-str
+               (binding [pprint/*print-right-margin* config-print-width]
+                 (pprint/pprint config)))))
 
 (defn ^{:stratum 1} schema-namespaces
   "Every namespace in a brick `src` tree under `base` (default the working
@@ -107,13 +119,13 @@
    function schema."
   [_opts]
   (write-config! config-path (kondo-config (schema-namespaces)))
-  (println "Wrote" config-path))
+  (println (t :log/types-written {:path config-path})))
 
 (defn ^{:stratum 2} check!
   "Exec fn: exit 1 when `config-path` is missing or differs from what
    `emit!` would write."
   [_opts]
   (if (current? config-path (kondo-config (schema-namespaces)))
-    (println config-path "is current")
-    (do (println config-path "is stale; run `bb lint:malli-types` and commit it")
+    (println (t :log/types-current {:path config-path}))
+    (do (println (t :log/types-stale {:path config-path}))
         (System/exit 1))))

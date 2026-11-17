@@ -20,6 +20,7 @@
    brick sources that declare them, and the check compares data."
   (:require
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.malli-types :as malli-types]))
 
@@ -58,6 +59,11 @@
       (is (malli-types/declares-function-schema? text) text)))
   (testing "a schema value that only uses :=> declares nothing"
     (is (not (malli-types/declares-function-schema? "(def S [:=> [:cat :int] :int])")))))
+
+(deftest ^{:stratum 0} messages-come-from-the-system-catalog-test
+  (testing "each printed message resolves from the catalog and names the path; a missing entry renders the bare key"
+    (doseq [k [:log/types-written :log/types-current :log/types-stale]]
+      (is (str/includes? (malli-types/t k {:path "types.edn"}) "types.edn") (str k)))))
 
 (deftest ^{:stratum 0} kondo-config-without-namespaces-test
   (testing "no declaring namespaces yields a config with no types, not an error"
