@@ -34,6 +34,10 @@
   "An hour after `now`: inside it the environment is live, past it expired."
   (Instant/parse "2026-11-06T01:00:00Z"))
 
+(def ^{:stratum 0} controller-id
+  "The controller these entries' claims name."
+  #uuid "00000000-0000-0000-0000-0000000000c1")
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} request
@@ -47,10 +51,15 @@
 
 (defn- ^{:stratum 1} entry
   [state req & {:keys [generation] :or {generation 1}}]
-  {:entry/state state
-   :entry/generation generation
-   :entry/request req
-   :entry/environment {:environment/lease (lease/lease-for req uid generation)}})
+  (let [digest (lease/request-digest req)
+        current (lease/lease-for req uid generation)
+        claim (lease/claim controller-id expires-at)]
+    {:entry/state state
+     :entry/generation generation
+     :entry/request req
+     :entry/request-digest digest
+     :entry/claim claim
+     :entry/environment {:environment/lease current}}))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -71,8 +80,15 @@
            (:decision/reason (lease/acquire-decision (entry :state/cleanup-uncertain (request)) (request)))))))
 
 (deftest ^{:stratum 2} test-reserve-advances-generation-past-released
-  (is (= 1 (:entry/generation (lease/reserve nil (request)))))
-  (is (= 4 (:entry/generation (lease/reserve (entry :state/released (request) :generation 3) (request))))))
+  (let [claim (lease/claim controller-id expires-at)]
+    (is (= 1 (:entry/generation (lease/reserve nil (request) claim))))
+    (is (= 4 (:entry/generation (lease/reserve (entry :state/released (request) :generation 3) (request) claim))))))
+
+(deftest ^{:stratum 2} test-requests-compare-by-digest
+  (testing "given the same moment as a Date → the same request, a duplicate"
+    (let [as-date (request :environment/expires-at (java.util.Date/from expires-at))
+          decision (lease/acquire-decision (entry :state/provisioned (request)) as-date)]
+      (is (= :duplicate (:decision/kind decision))))))
 
 (deftest ^{:stratum 2} test-lease-refusal
   (let [current (lease/lease-for (request) uid 2)
