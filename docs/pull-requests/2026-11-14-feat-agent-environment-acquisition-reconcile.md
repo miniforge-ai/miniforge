@@ -160,8 +160,8 @@ trigger a reconcile.
       owner's cleanup intent is not taken, and the entry stays provisioned.
 4. Each of the six review findings has a test that fails with its fix removed, checked by mutation on
    this version. The test for finding 3 is new in this version.
-5. The agent-environment suite passes: 104 tests with 380 assertions. clj-kondo and stratum-lint are
-   clean.
+5. The agent-environment suite passes: 107 tests with 391 assertions, including the base PRs'
+   review fixes merged in. clj-kondo and stratum-lint are clean.
 
 All of this is fake-provider evidence. A real provider's `observe` must be authoritative for the
 generation and readiness it reports, and that is not shown here. Receipts stay
