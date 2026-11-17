@@ -70,6 +70,17 @@
       (assoc entry :entry/state state :entry/cleanup recorded)
       entry)))
 
+(defn- ^{:stratum 0} superseded
+  "Nil when `recorded` holds this attempt's outcome or left the entry
+   released, else the entry's refusal: another attempt replaced this
+   intent before its outcome, so the release is not done."
+  [cleanup recorded]
+  (let [after (:ledger/after recorded)
+        own? (= (:cleanup/attempt cleanup) (get-in after [:entry/cleanup :cleanup/attempt]))
+        reason (get lease/state->refusal (:entry/state after) :anomalies.agent-environment/ledger-conflict)]
+    (when-not (or (anomaly/anomaly? recorded) own? (= :state/released (:entry/state after)))
+      (refusal/reason-anomaly reason {}))))
+
 (defn- ^{:stratum 0} owns?
   [cleanup changed]
   (= cleanup (get-in changed [:ledger/after :entry/cleanup])))
@@ -117,8 +128,9 @@
     (anomaly/let-ok [changed (controller/settle! c lease (partial requested-under-lease lease now cleanup))
                      _ (unowned cleanup changed lease now)]
       (let [{:keys [steps applied? verified?]} (deleted c target cleanup)
-            recorded (controller/settle! c lease (partial outcome-recorded cleanup applied? verified?))]
-        (support/recorded-call recorded {:call/outcome (receipt/steps-outcome steps)} steps)))))
+            recorded (controller/settle! c lease (partial outcome-recorded cleanup applied? verified?))
+            settled (or (superseded cleanup recorded) recorded)]
+        (support/recorded-call settled {:call/outcome (receipt/steps-outcome steps)} steps)))))
 
 (defn ^{:stratum 2} reservation-cleaned!
   "Delete a partial provision's `environment` under a cleanup intent on its
