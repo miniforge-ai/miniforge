@@ -21,6 +21,7 @@
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-file.writer :as sut])
   (:import [java.nio.file Files]
+           [java.nio.file.attribute PosixFilePermissions]
            [java.nio.file.attribute FileAttribute]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -80,3 +81,13 @@
       (is (thrown? Exception (sut/write-json path [{:bad (Object.)}] :overwrite)))
       (is (= [{:id 1}] (edn/read-string (slurp path))))
       (is (= ["out.edn"] (mapv #(.getName ^java.io.File %) (.listFiles dir)))))))
+
+(deftest ^{:stratum 1} write-keeps-owner-only-permissions-test
+  (testing "replacing an owner-only file does not loosen its permissions"
+    (let [path  (tmp-edn-path)
+          p     (.toPath (io/file path))
+          owner (PosixFilePermissions/fromString "rw-------")]
+      (sut/write-edn path [{:id 1}] :overwrite)
+      (Files/setPosixFilePermissions p owner)
+      (sut/write-edn path [{:id 2}] :append)
+      (is (= owner (Files/getPosixFilePermissions p (make-array java.nio.file.LinkOption 0)))))))

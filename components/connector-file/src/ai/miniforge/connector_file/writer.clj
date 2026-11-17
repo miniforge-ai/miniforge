@@ -21,7 +21,25 @@
   (:require [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io])
-  (:import [java.nio.file Files StandardCopyOption]))
+  (:import [java.nio.file Files Path StandardCopyOption]
+           [java.nio.file.attribute FileAttribute PosixFilePermissions]))
+
+(defn- ^{:stratum 0} posix?
+  "True when the filesystem holding `path` supports POSIX permissions."
+  [^Path path]
+  (contains? (.supportedFileAttributeViews (.getFileSystem path)) "posix"))
+
+(defn- ^{:stratum 0} create-temp-like!
+  "Create the empty temp file at `tmp`. When `target` exists and the filesystem
+   is POSIX, the temp file gets exactly the target's permissions from creation,
+   so the atomic replace neither loosens an owner-only file nor exposes its
+   records while they are being written."
+  [^Path tmp ^Path target]
+  (if (and (posix? tmp) (Files/exists target (into-array java.nio.file.LinkOption [])))
+    (let [perms (Files/getPosixFilePermissions target (into-array java.nio.file.LinkOption []))]
+      (Files/createFile tmp (into-array FileAttribute [(PosixFilePermissions/asFileAttribute perms)]))
+      (Files/setPosixFilePermissions tmp perms))
+    (Files/createFile tmp (into-array FileAttribute []))))
 
 (defn- ^{:stratum 0} write-atomically!
   "Write the output of `write-fn` (called with a Writer) to `path` by writing a
@@ -33,6 +51,7 @@
                         (str (.getName target) "." (random-uuid) ".tmp"))]
     (io/make-parents target)
     (try
+      (create-temp-like! (.toPath tmp) (.toPath target))
       (with-open [wtr (io/writer tmp)]
         (write-fn wtr))
       (Files/move (.toPath tmp) (.toPath target)
