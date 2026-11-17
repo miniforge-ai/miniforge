@@ -46,7 +46,12 @@
    sibling temp file and renaming it over the target, so a crash mid-write never
    leaves a truncated or half-written file where earlier records used to be."
   [path write-fn]
-  (let [target (.getAbsoluteFile (io/file path))
+  (let [given  (.getAbsoluteFile (io/file path))
+        ;; An existing symlink is followed, so the replace updates the file it
+        ;; points at instead of swapping the link itself for a regular file.
+        target (if (.exists given)
+                 (.toFile (.toRealPath (.toPath given) (into-array java.nio.file.LinkOption [])))
+                 given)
         tmp    (io/file (.getParentFile target)
                         (str (.getName target) "." (random-uuid) ".tmp"))]
     (io/make-parents target)
