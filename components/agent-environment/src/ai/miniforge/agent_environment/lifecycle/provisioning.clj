@@ -77,9 +77,10 @@
         cleaned (when cleanup? (cleanup/reservation-cleaned! c subject request target environment))
         recorded (if cleanup? (:cleanup/recorded cleaned) (uncleaned! c request target environment outcome))
         receipt-ids (filterv some? [(:receipt/id acquired) (get-in cleaned [:cleanup/receipt :receipt/id])])
-        known {:receipt/ids receipt-ids :environment/lease (:environment/lease environment)}]
+        known {:receipt/ids receipt-ids :environment/lease (:environment/lease environment)}
+        retry (when (:cleanup/receipt cleaned) (select-keys known [:environment/lease]))]
     (if (anomaly/anomaly? recorded)
-      (update recorded :anomaly/data merge known)
+      (update recorded :anomaly/data merge (select-keys known [:receipt/ids]) retry)
       (refusal/reason-anomaly :anomalies.agent-environment/provisioning-failed known))))
 
 ;------------------------------------------------------------------------------ Layer 2

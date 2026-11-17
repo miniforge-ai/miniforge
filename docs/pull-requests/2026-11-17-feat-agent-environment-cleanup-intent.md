@@ -48,15 +48,21 @@ and a durable record that survives a crash between the delete and its outcome.
       verified, otherwise `:state/cleanup-uncertain` to retry. A UID that is gone does not release
       an entry whose deletes the provider reported failed, since its delete may cover more than the
       namespace. The receipt adds a `:step/verified` step, so a release is
-      `:outcome/applied` only when its deletes are verified.
+      `:outcome/applied` only when its deletes are verified. If another attempt replaced the intent
+      before this one recorded its outcome, and the entry is not released, the call returns the
+      entry's refusal (`environment-releasing` or `cleanup-uncertain`), so it is retried rather
+      than reported done.
    4. `reservation-cleaned!` does the same for a partial provision. The intent goes on the
       reservation and applies only while that generation is still provisioning. It records the
       environment, so its lease can retry the release.
 2. `lifecycle`: `release!` uses `cleanup/released!`. The old delete-then-settle path is removed.
 3. `lifecycle.provisioning`: `provision-failed` cleans up through `reservation-cleaned!`. When nothing
    is to be deleted, `uncleaned!` records released (every step failed) or cleanup-uncertain. When the
-   ledger does not record the outcome, its anomaly still carries the environment's lease and the
-   receipt ids, so the caller can retry the release.
+   ledger does not record the outcome, its anomaly still carries the receipt ids, and the
+   environment's lease when the cleanup intent was stored, so the caller can retry the release. When
+   the intent was not stored, no lease is offered: the entry holds no environment, so the lease
+   could not be used. That reservation stays provisioning until PR #2524's reconcile deletes the
+   partial environment.
 4. `lease`: release is admitted in `:state/releasing`, so a release interrupted between its delete
    and its outcome can be retried. Every other call, and acquire, is refused as
    `environment-releasing`.
@@ -111,12 +117,15 @@ the namespace is gone. That is the intended reading of an unconfirmed delete.
    7. A delete the provider reports failed, with the UID gone, leaves `:state/cleanup-uncertain`; a
       retry whose delete applies releases.
    8. A partial provision whose cleanup outcome the ledger misses returns the lease in the ledger's
-      anomaly, and releasing that lease finishes the cleanup.
+      anomaly, and releasing that lease finishes the cleanup. One whose intent the ledger misses
+      offers no lease.
+   9. A release whose intent an overlapping attempt replaced, and which that attempt left releasing,
+      returns `environment-releasing`; a retry releases.
 2. `ledger_lifecycle_test`: a release the ledger cannot record now deletes nothing (no
    `deprovision!` call). It replaces #2521's test that pinned the old delete-then-record gap.
 3. The first five `cleanup_test` tests fail against `main`'s lifecycle (16 assertions) and pass here.
-   Tests 6 to 8, added for review, each fail with their fix removed.
-4. The agent-environment suite passes: 89 tests with 334 assertions. clj-kondo and stratum-lint are
+   Tests 6 to 9, added for review, each fail with their fix removed.
+4. The agent-environment suite passes: 90 tests with 339 assertions. clj-kondo and stratum-lint are
    clean.
 
 Fake-provider evidence only. A real provider's observe must be authoritative for the UID it reports.
