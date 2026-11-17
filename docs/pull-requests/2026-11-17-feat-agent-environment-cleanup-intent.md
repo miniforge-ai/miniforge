@@ -36,27 +36,33 @@ and a durable record that survives a crash between the delete and its outcome.
 ## Changes in Detail
 
 1. `lifecycle.cleanup`, new:
-   1. `intent`: `{:cleanup/uid :cleanup/generation :cleanup/requested-at :cleanup/applied?
-      :cleanup/verified?}`.
+   1. `intent`: `{:cleanup/attempt :cleanup/uid :cleanup/generation :cleanup/requested-at
+      :cleanup/applied? :cleanup/verified?}`. Each attempt gets a random id, so two attempts at one
+      clock instant hold different intents, and each owns only the intent its own write recorded.
    2. `released!` writes the intent under the caller's lease. The write moves the entry to the new
       `:state/releasing` only while that entry still admits a release under the lease. A caller
       whose intent the ledger did not take is refused, and nothing is deleted.
    3. It then deletes by UID and observes the target. The delete is verified when the UID is no
       longer there, and an observation that fails verifies nothing. The outcome is written only to
-      an entry that still holds this intent: `:state/released` when verified, otherwise
-      `:state/cleanup-uncertain` to retry. The receipt adds a `:step/verified` step, so a release is
+      an entry that still holds this intent: `:state/released` only when the deletes applied and are
+      verified, otherwise `:state/cleanup-uncertain` to retry. A UID that is gone does not release
+      an entry whose deletes the provider reported failed, since its delete may cover more than the
+      namespace. The receipt adds a `:step/verified` step, so a release is
       `:outcome/applied` only when its deletes are verified.
    4. `reservation-cleaned!` does the same for a partial provision. The intent goes on the
       reservation and applies only while that generation is still provisioning. It records the
       environment, so its lease can retry the release.
 2. `lifecycle`: `release!` uses `cleanup/released!`. The old delete-then-settle path is removed.
 3. `lifecycle.provisioning`: `provision-failed` cleans up through `reservation-cleaned!`. When nothing
-   is to be deleted, `uncleaned!` records released (every step failed) or cleanup-uncertain.
+   is to be deleted, `uncleaned!` records released (every step failed) or cleanup-uncertain. When the
+   ledger does not record the outcome, its anomaly still carries the environment's lease and the
+   receipt ids, so the caller can retry the release.
 4. `lease`: release is admitted in `:state/releasing`, so a release interrupted between its delete
    and its outcome can be retried. Every other call, and acquire, is refused as
    `environment-releasing`.
 5. `controller/change-entry!`: a compare-and-set by key, for the reservation path.
 6. A message and a refusal type for `environment-releasing`.
+7. Test helpers: `ledger-faults/controller-over` takes an optional map of controller options.
 
 Import graph (arrows point down; no cycles):
 
@@ -101,10 +107,16 @@ the namespace is gone. That is the intended reading of an unconfirmed delete.
    4. A partial provision is cleaned up under an intent and released when verified. When the ledger
       cannot take the intent, nothing is deleted and the reservation stays provisioning.
    5. Acquire is refused while a release is pending.
+   6. A retry at the same clock instant writes and settles its own intent, not the first attempt's.
+   7. A delete the provider reports failed, with the UID gone, leaves `:state/cleanup-uncertain`; a
+      retry whose delete applies releases.
+   8. A partial provision whose cleanup outcome the ledger misses returns the lease in the ledger's
+      anomaly, and releasing that lease finishes the cleanup.
 2. `ledger_lifecycle_test`: a release the ledger cannot record now deletes nothing (no
    `deprovision!` call). It replaces #2521's test that pinned the old delete-then-record gap.
-3. All five `cleanup_test` tests fail against `main`'s lifecycle (16 assertions) and pass here.
-4. The agent-environment suite passes: 86 tests with 323 assertions. clj-kondo and stratum-lint are
+3. The first five `cleanup_test` tests fail against `main`'s lifecycle (16 assertions) and pass here.
+   Tests 6 to 8, added for review, each fail with their fix removed.
+4. The agent-environment suite passes: 89 tests with 334 assertions. clj-kondo and stratum-lint are
    clean.
 
 Fake-provider evidence only. A real provider's observe must be authoritative for the UID it reports.

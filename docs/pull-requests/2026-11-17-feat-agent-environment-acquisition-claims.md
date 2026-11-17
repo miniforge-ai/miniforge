@@ -52,8 +52,7 @@ Issue #2506 asks for submission identity and digests persisted before provider d
    3. Either way, nothing is sent to the provider.
 4. `validation`: `:claim-ttl-ms` is an optional positive integer.
 5. A message and a refusal type (`:conflict`) for `claim-lost`.
-6. Test helpers in `ledger-faults`: `later`, `reacquire` and `restarted`. `controller-over` takes an
-   optional map of controller options.
+6. Test helpers in `ledger-faults`: `later`, `reacquire` and `restarted`.
 
 No new namespace dependencies in `src`.
 
@@ -99,8 +98,8 @@ intent keeps its claim. Only the provisioning state reads the claim.
       call, and the reservation stays provisioning.
 2. `lease_test`: `reserve` takes a claim, and a `Date` and an `Instant` for the same expiry are one
    request, a duplicate.
-3. The agent-environment suite passes: 91 tests with 334 assertions. clj-kondo and stratum-lint are
-   clean.
+3. The agent-environment suite passes: 94 tests with 345 assertions, including PR #2539's review
+   fixes merged in. clj-kondo and stratum-lint are clean.
 
 Fake-provider evidence only. Receipts stay `:profile/unqualified`.
 

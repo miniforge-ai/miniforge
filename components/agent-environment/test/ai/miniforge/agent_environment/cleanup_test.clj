@@ -20,11 +20,14 @@
    [ai.miniforge.agent-environment.conformance.fixtures :as fx]
    [ai.miniforge.agent-environment.fake :as fake]
    [ai.miniforge.agent-environment.interface :as env]
+   [ai.miniforge.agent-environment.interface.protocol :as protocol]
    [ai.miniforge.agent-environment.lease :as lease]
    [ai.miniforge.agent-environment.ledger :as ledger]
-   [ai.miniforge.agent-environment.ledger-faults :refer [outage-world]]
+   [ai.miniforge.agent-environment.ledger-faults :as faults :refer [outage-world]]
    [ai.miniforge.anomaly.interface :as anomaly]
-   [clojure.test :refer [deftest is testing]]))
+   [clojure.test :refer [deftest is testing]])
+  (:import
+   [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -32,7 +35,20 @@
 
 (defn- ^{:stratum 0} reason [result] (anomaly/subtype result))
 
+(def ^{:stratum 0} failed-delete
+  "A provider's answer to a delete it reports as failed."
+  {:deprovision/steps [{:step/name :step/namespace-deleted :step/outcome :outcome/failed}]})
+
 (defn- ^{:stratum 0} acquired [w] (fx/acquire w (:a w) (fx/request w (:a w))))
+
+(defn- ^{:stratum 0} frozen
+  "A controller over `w`'s ledger whose clock never moves, so two attempts share one instant."
+  [w]
+  (faults/controller-over w (get-in w [:c :controller/ledger]) {:clock (constantly (Instant/now))}))
+
+(defn- ^{:stratum 0} target-of
+  [req lease]
+  {:target/namespace (lease/namespace-name req) :target/uid (:lease/environment-uid lease) :target/generation (:lease/generation lease)})
 
 (defn- ^{:stratum 0} stored
   "The one entry `w`'s ledger holds."
@@ -48,6 +64,14 @@
   (constantly {:observed/uid uid :observed/generation generation :observed/ready? false}))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} failed-after-deleting
+  "A `deprovision!` hook: the fake deletes `target`, but the provider reports
+   the delete failed, as one that left other resources behind would."
+  [w target]
+  (fn []
+    (protocol/deprovision! (:fake w) target)
+    failed-delete))
 
 (deftest ^{:stratum 1} test-a-release-records-its-intent-before-any-delete
   (let [w (outage-world)
@@ -103,3 +127,43 @@
     (swap! (:faults w) assoc :writes nil)
     (is (= :anomalies.agent-environment/environment-releasing (reason (fx/acquire w (:a w) req))))
     (is (= :state/releasing (:entry/state (ledger/entry (:inner w) (lease/request-key req)))))))
+
+(deftest ^{:stratum 1} test-each-release-attempt-holds-its-own-intent
+  (let [w (outage-world)
+        current (:environment/lease (acquired w))
+        c (frozen w)]
+    (swap! (:faults w) assoc :writes 1)
+    (env/release! c (:a w) current)
+    (let [first-attempt (get-in (stored w) [:entry/cleanup :cleanup/attempt])]
+      (swap! (:faults w) assoc :writes nil)
+      (is (= {:call/outcome :outcome/applied} (env/release! c (:a w) current)))
+      (testing "given a retry at the same instant → it writes and settles its own intent"
+        (is (some? first-attempt))
+        (is (not= first-attempt (get-in (stored w) [:entry/cleanup :cleanup/attempt])))))))
+
+(deftest ^{:stratum 1} test-an-unrecorded-partial-cleanup-keeps-its-lease
+  (let [w (outage-world {:fake/fail-step :step/workload})]
+    (swap! (:faults w) assoc :writes 2)
+    (let [refused (acquired w)
+          kept (get-in refused [:anomaly/data :environment/lease])]
+      (is (= unavailable (reason refused)))
+      (is (= :state/releasing (:entry/state (stored w))))
+      (testing "given the ledger back → releasing the kept lease finishes the cleanup"
+        (swap! (:faults w) assoc :writes nil)
+        (is (= {:call/outcome :outcome/applied} (env/release! (:c w) (:a w) kept)))
+        (is (= :state/released (:entry/state (stored w))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} test-a-delete-reported-failed-is-not-a-release
+  (let [w (outage-world)
+        req (fx/request w (:a w))
+        current (:environment/lease (fx/acquire w (:a w) req))]
+    (swap! (:hooks w) assoc :deprovision! (failed-after-deleting w (target-of req current)))
+    (is (= {:call/outcome :outcome/partial} (env/release! (:c w) (:a w) current)))
+    (testing "given the UID gone but the delete reported failed → kept to retry"
+      (is (= [:state/cleanup-uncertain false true] (stages (stored w)))))
+    (testing "given a retry whose delete applies → released"
+      (swap! (:hooks w) dissoc :deprovision!)
+      (is (= {:call/outcome :outcome/applied} (env/release! (:c w) (:a w) current)))
+      (is (= :state/released (:entry/state (stored w)))))))

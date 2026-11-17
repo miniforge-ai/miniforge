@@ -98,12 +98,11 @@
         cleanup? (and environment (not= :outcome/failed outcome))
         cleaned (when cleanup? (reservation-cleaned! c subject request target environment))
         recorded (if cleanup? (:cleanup/recorded cleaned) (uncleaned! c request target environment outcome))
-        receipt-ids (filterv some? [(:receipt/id acquired) (get-in cleaned [:cleanup/receipt :receipt/id])])]
+        receipt-ids (filterv some? [(:receipt/id acquired) (get-in cleaned [:cleanup/receipt :receipt/id])])
+        known {:receipt/ids receipt-ids :environment/lease (:environment/lease environment)}]
     (if (anomaly/anomaly? recorded)
-      recorded
-      (refusal/reason-anomaly :anomalies.agent-environment/provisioning-failed
-                              {:receipt/ids receipt-ids
-                               :environment/lease (:environment/lease environment)}))))
+      (update recorded :anomaly/data merge known)
+      (refusal/reason-anomaly :anomalies.agent-environment/provisioning-failed known))))
 
 (defn- ^{:stratum 1} adopted
   "Record a complete provision as the key's environment and return it. If
