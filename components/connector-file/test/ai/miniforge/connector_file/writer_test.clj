@@ -21,6 +21,7 @@
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-file.writer :as sut])
   (:import [java.nio.file Files]
+           [java.nio.file.attribute PosixFilePermissions]
            [java.nio.file.attribute FileAttribute]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -71,3 +72,46 @@
         (is (= payload (slurp path)))
         (finally
           (System/clearProperty read-eval-probe))))))
+
+(deftest ^{:stratum 1} write-failure-keeps-existing-file-test
+  (testing "a write that fails leaves the earlier records intact and no temp file"
+    (let [path (tmp-edn-path)
+          dir  (.getParentFile (io/file path))]
+      (sut/write-edn path [{:id 1}] :overwrite)
+      (is (thrown? Exception (sut/write-json path [{:bad (Object.)}] :overwrite)))
+      (is (= [{:id 1}] (edn/read-string (slurp path))))
+      (is (= ["out.edn"] (mapv #(.getName ^java.io.File %) (.listFiles dir)))))))
+
+(defn- ^{:stratum 0} posix-fs?
+  "True when the temp directory's filesystem supports POSIX permissions and
+   symlinks, so the tests that rely on them can run (not on native Windows)."
+  []
+  (-> (Files/createTempDirectory "connector-file-posix-probe" (make-array FileAttribute 0))
+      .getFileSystem
+      .supportedFileAttributeViews
+      (contains? "posix")))
+
+(deftest ^{:stratum 1} write-keeps-owner-only-permissions-test
+  (when (posix-fs?)
+    (testing "replacing an owner-only file does not loosen its permissions"
+      (let [path  (tmp-edn-path)
+            p     (.toPath (io/file path))
+            owner (PosixFilePermissions/fromString "rw-------")]
+        (sut/write-edn path [{:id 1}] :overwrite)
+        (Files/setPosixFilePermissions p owner)
+        (sut/write-edn path [{:id 2}] :append)
+        (is (= owner (Files/getPosixFilePermissions p (make-array java.nio.file.LinkOption 0))))))))
+
+(deftest ^{:stratum 1} write-through-symlink-updates-target-test
+  (when (posix-fs?)
+    (testing "appending through a symlink updates the linked file and keeps the link"
+      (let [real (tmp-edn-path)
+            dir  (.getParentFile (io/file real))
+            link (io/file dir "link.edn")]
+        (.deleteOnExit link)
+        (sut/write-edn real [{:id 1}] :overwrite)
+        (Files/createSymbolicLink (.toPath link) (.toPath (io/file real))
+                                  (make-array FileAttribute 0))
+        (sut/write-edn (str link) [{:id 2}] :append)
+        (is (Files/isSymbolicLink (.toPath link)))
+        (is (= [{:id 1} {:id 2}] (edn/read-string (slurp real))))))))
