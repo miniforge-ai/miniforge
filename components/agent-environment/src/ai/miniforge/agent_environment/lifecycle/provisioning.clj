@@ -24,6 +24,7 @@
    [ai.miniforge.agent-environment.controller :as controller]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]
    [ai.miniforge.agent-environment.lease :as lease]
+   [ai.miniforge.agent-environment.lifecycle.cleanup :as cleanup]
    [ai.miniforge.agent-environment.lifecycle.support :as support]
    [ai.miniforge.agent-environment.receipt :as receipt]
    [ai.miniforge.agent-environment.refusal :as refusal]
@@ -35,23 +36,22 @@
   "Step outcomes after which something may exist to recover."
   #{:outcome/applied :outcome/uncertain})
 
-(defn- ^{:stratum 0} cleanup!
-  [c subject target uid reason]
-  (let [steps (support/reported-steps (protocol/deprovision! (support/provider c) (assoc target :target/uid uid))
-                                      :deprovision/steps)]
-    (controller/record! c subject :environment/release (receipt/steps-outcome steps) steps reason)))
+(defn- ^{:stratum 0} adopted
+  "Record a complete provision as the key's environment and return it. If
+   the ledger does not take it, no lease is handed out: the reservation
+   stays provisioning, an unknown outcome, and the caller gets the anomaly."
+  [c acting request generation env steps]
+  (let [recorded (controller/settle-provision! c request generation :state/provisioned env)
+        reason (support/ledger-reason recorded)]
+    (controller/record! c (support/subject-of acting request env) :environment/acquire :outcome/applied steps reason)
+    (if reason recorded env)))
 
-(defn- ^{:stratum 0} lost-claim-reason
-  "Why a recorded provision is not this caller's: the ledger's entry no
-   longer holds `env`'s lease, because another controller reconciled the
-   reservation after its claim expired."
-  [recorded env]
-  (when (not= (:environment/lease env) (lease/current-lease (:ledger/after recorded)))
-    :anomalies.agent-environment/claim-lost))
-
-(defn- ^{:stratum 0} claim-lost
-  [cleaned]
-  (refusal/reason-anomaly :anomalies.agent-environment/claim-lost {:receipt/ids [(:receipt/id cleaned)]}))
+(defn- ^{:stratum 0} uncleaned!
+  "Record a failed provision nothing is deleted for: released when every
+   step failed, so nothing exists, else cleanup-uncertain."
+  [c request target environment outcome]
+  (let [state (if (= :outcome/failed outcome) :state/released :state/cleanup-uncertain)]
+    (controller/settle-provision! c request (:target/generation target) state environment)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -73,34 +73,15 @@
         outcome (support/unconfirmed-if-anonymous (receipt/steps-outcome steps) environment)
         acquired (controller/record! c subject :environment/acquire outcome steps
                                      :anomalies.agent-environment/provisioning-failed)
-        cleaned (when (and environment (not= :outcome/failed outcome))
-                  (cleanup! c subject target (:environment/uid environment) :anomalies.agent-environment/provisioning-failed))
-        state (if (or (= :outcome/failed outcome) (= :outcome/applied (:receipt/outcome cleaned)))
-                :state/released
-                :state/cleanup-uncertain)
-        recorded (controller/settle-provision! c request (:target/generation target) state environment)
-        receipt-ids (filterv some? [(:receipt/id acquired) (:receipt/id cleaned)])]
+        cleanup? (and environment (not= :outcome/failed outcome))
+        cleaned (when cleanup? (cleanup/reservation-cleaned! c subject request target environment))
+        recorded (if cleanup? (:cleanup/recorded cleaned) (uncleaned! c request target environment outcome))
+        receipt-ids (filterv some? [(:receipt/id acquired) (get-in cleaned [:cleanup/receipt :receipt/id])])]
     (if (anomaly/anomaly? recorded)
       recorded
       (refusal/reason-anomaly :anomalies.agent-environment/provisioning-failed
                               {:receipt/ids receipt-ids
                                :environment/lease (:environment/lease environment)}))))
-
-(defn- ^{:stratum 1} adopted
-  "Record a complete provision as the key's environment and return it. If
-   the ledger does not take it, no lease is handed out: the reservation
-   stays provisioning, an unknown outcome, and the caller gets the anomaly.
-   If another controller reconciled the reservation first, what this call
-   created is deleted by its UID and the caller gets `claim-lost`."
-  [c acting request target env steps]
-  (let [recorded (controller/settle-provision! c request (:target/generation target) :state/provisioned env)
-        reason (or (support/ledger-reason recorded) (lost-claim-reason recorded env))
-        subject (support/subject-of acting request env)]
-    (controller/record! c subject :environment/acquire :outcome/applied steps reason)
-    (cond
-      (nil? reason) env
-      (anomaly/anomaly? recorded) recorded
-      :else (claim-lost (cleanup! c subject target (:environment/uid env) reason)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -113,5 +94,5 @@
         steps (support/reported-steps provisioned :provision/steps)
         env (support/environment request target (or (:provision/uid provisioned) (recovered-uid c target steps)))]
     (if (and env (= :outcome/applied (receipt/steps-outcome steps)))
-      (adopted c acting request target env steps)
+      (adopted c acting request generation env steps)
       (provision-failed c acting request target env steps))))

@@ -6,8 +6,8 @@
 
 # N5 — Interface Standard: CLI/TUI/API
 
-**Version:** 0.5.1-draft
-**Date:** 2026-10-04
+**Version:** 0.5.2-draft
+**Date:** 2026-11-15
 **Status:** Draft
 **Conformance:** MUST
 
@@ -244,6 +244,7 @@ mf workflow pause WORKFLOW_ID          # Pause workflow execution
 mf workflow resume WORKFLOW_ID         # Resume paused workflow
 mf workflow retry WORKFLOW_ID          # Retry current phase
 mf workflow rollback WORKFLOW_ID       # Rollback to checkpoint
+mf workflow full-stop WORKFLOW_ID --reason="..." # Fence and destroy owned runtime (N8 §3.5)
 
 # Agent control actions
 mf agent quarantine AGENT_ID           # Quarantine agent
@@ -257,6 +258,11 @@ mf gate override GATE_ID --reason=     # Override gate failure
 mf fleet emergency-stop                # Emergency stop all workflows
 mf fleet drain                         # Drain fleet (stop accepting, complete existing)
 ```
+
+Full stop MUST follow N8 §3.5 rather than safe-mode's recovery exception.
+The control panel MUST distinguish full stop from cancel and safe mode and display
+partial/uncertain containment honestly. It MUST NOT offer same-run resume for a
+full-stopped run. Checkpoint recovery MUST follow the N2 checkpoint delta §11.
 
 ##### External PR Commands (N9)
 
@@ -1969,6 +1975,9 @@ any requirement in §1–§13.
 ---
 
 **Version History:**
+
+- 0.5.2-draft (2026-11-15): Reference N8's distinct full-stop command and
+  checkpoint recovery into a fresh run, without reopening stopped authority.
 
 - 0.5.1-draft (2026-10-04): Align stream subscriptions with N3's chain-run scope.
 

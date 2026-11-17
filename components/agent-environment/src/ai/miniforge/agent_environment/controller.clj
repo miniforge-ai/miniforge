@@ -40,6 +40,11 @@
    :controller/ledger ledger
    :controller/claim-ttl-ms claim-ttl-ms})
 
+(defn ^{:stratum 0} change-entry!
+  "Apply `f` to key `k`'s entry by compare-and-set: the ledger's change or anomaly."
+  [controller k f]
+  (ledger/change! (:controller/ledger controller) k f))
+
 (defn ^{:stratum 0} entry
   [controller k]
   (ledger/entry (:controller/ledger controller) k))
@@ -55,9 +60,9 @@
 
 (defn- ^{:stratum 0} claimed
   "The entry a claim leaves: a reservation under `claim` when `request`'s
-   decision against `existing` at `now` is `:new`, else `existing`."
-  [request claim now existing]
-  (if (= :new (:decision/kind (lease/acquire-decision existing request now)))
+   decision against `existing` is `:new`, else `existing`."
+  [request claim existing]
+  (if (= :new (:decision/kind (lease/acquire-decision existing request)))
     (lease/reserve existing request claim)
     existing))
 
@@ -78,22 +83,15 @@
     (merge existing outcome)
     existing))
 
-(defn- ^{:stratum 0} reconciled-from
-  "Reconcile `stale` only while it is still the key's exact entry: two
-   controllers reconciling at once settle it once."
-  [stale environment existing]
-  (if (= stale existing) (lease/reconciled existing environment) existing))
-
 (defn- ^{:stratum 0} decided
   "The acquire decision a claim change made, with the reserved generation
-   when `:new`, the environment the decision saw when `:duplicate` (never a
-   later entry for the same key), and the stale entry when `:reconcile`."
-  [request now {:ledger/keys [before after]}]
-  (let [decision (lease/acquire-decision before request now)]
+   when `:new` and the environment the decision saw when `:duplicate`
+   (never a later entry for the same key)."
+  [request {:ledger/keys [before after]}]
+  (let [decision (lease/acquire-decision before request)]
     (case (:decision/kind decision)
       :new (assoc decision :decision/generation (:entry/generation after))
       :duplicate (assoc decision :decision/environment (:entry/environment before))
-      :reconcile (assoc decision :decision/entry before)
       decision)))
 
 (defn- ^{:stratum 0} failure-reason
@@ -148,21 +146,14 @@
         claim (claim-for controller now)]
     (anomaly/let-ok [changed (ledger/change! (:controller/ledger controller)
                                              (lease/request-key request)
-                                             (partial claimed request claim now))]
-      (decided request now changed))))
+                                             (partial claimed request claim))]
+      (decided request changed))))
 
 (defn ^{:stratum 1} settle!
   "Apply `f` to the entry `lease` names, only while it is still current:
    a stale holder can never move a replacement environment."
   [controller lease f]
   (ledger/change! (:controller/ledger controller) (lease/lease-key lease) (partial settled lease f)))
-
-(defn ^{:stratum 1} settle-reconciled!
-  "Settle the stale reservation `stale` with what the provider holds for it."
-  [controller stale environment]
-  (ledger/change! (:controller/ledger controller)
-                  (lease/request-key (:entry/request stale))
-                  (partial reconciled-from stale environment)))
 
 (defn ^{:stratum 1} settle-provision!
   "Record the provision outcome for the generation `claim!` reserved."

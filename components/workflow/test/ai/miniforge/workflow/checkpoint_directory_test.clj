@@ -3,7 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.checkpoint-directory-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.workflow.boundary.checkpoint-directory-policy :as policy]
+            [ai.miniforge.workflow.boundary.checkpoint-directory :as directory]
             [ai.miniforge.workflow.boundary.checkpoint-file :as checkpoint-file]
             [ai.miniforge.workflow.checkpoint-directory-support :as directories]
             [ai.miniforge.workflow.checkpoint-store :as store]
@@ -52,7 +52,7 @@
 (defn- ^{:stratum 0} verify-untrusted-owner [root]
   (let [attributes (assoc (fs/read-attributes root "posix:*") :owner "untrusted-account")]
     (with-redefs [fs/read-attributes (constantly attributes)]
-      (is (thrown? IOException (policy/check! root true))))))
+      (is (thrown? IOException (directory/existing! root))))))
 
 (defn- ^{:stratum 0} verify-lock-directories [root]
   (let [directory (fs/path root "lock-root")

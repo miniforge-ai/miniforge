@@ -36,6 +36,7 @@
                  :anomalies.agent-environment/limits-exceeded}
    :conflict #{:anomalies.agent-environment/conflicting-request :anomalies.agent-environment/acquire-in-flight
                :anomalies.agent-environment/environment-cancelled :anomalies.agent-environment/environment-released
+               :anomalies.agent-environment/environment-releasing
                :anomalies.agent-environment/environment-expired :anomalies.agent-environment/cleanup-uncertain
                :anomalies.agent-environment/unknown-lease :anomalies.agent-environment/stale-lease
                :anomalies.agent-environment/uid-mismatch :anomalies.agent-environment/operation-not-admitted

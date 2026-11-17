@@ -32,4 +32,24 @@
     (doseq [text ["\u2003" "\t\n" ""]]
       (is (not (m/validate target/IdentityText text))))))
 
+(deftest ^{:stratum 0} exact-job-controller-is-not-an-authority-or-name-match
+  (let [job (fixtures/job)
+        reference (fixtures/job-reference)
+        pod (fixtures/pod [reference])]
+    (is (= reference (target/controller pod)))
+    (is (target/owns? job pod))
+    (is (not (target/owns? (assoc-in job ["metadata" "uid"] "replacement-job-uid") pod)))
+    (is (not (target/owns? job (assoc-in pod ["metadata" "namespace"] "unrelated"))))))
+
+(deftest ^{:stratum 0} missing-or-ambiguous-native-identities-cannot-establish-ownership
+  (let [job (fixtures/job)
+        reference (fixtures/job-reference)
+        pod (fixtures/pod [reference])]
+    (is (not (target/identifies? {} {})))
+    (is (not (target/identifies? (update job "metadata" dissoc "uid") (dissoc reference "uid"))))
+    (is (not (target/owns? (update job "metadata" dissoc "namespace")
+                           (update pod "metadata" dissoc "namespace"))))
+    (is (nil? (target/controller (fixtures/pod [reference reference]))))
+    (is (nil? (target/controller (fixtures/pod {"invalid" true}))))))
+
 (comment (clojure.test/run-tests 'ai.miniforge.kubernetes-target.interface-test))

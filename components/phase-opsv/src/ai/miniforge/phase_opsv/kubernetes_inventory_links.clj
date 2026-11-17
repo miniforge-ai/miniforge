@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.phase-opsv.kubernetes-inventory-links
-  (:require [ai.miniforge.phase-opsv.kubernetes-controller-reference :as ownership]
+  (:require [ai.miniforge.kubernetes-target.interface :as ownership]
+            [ai.miniforge.phase-opsv.kubernetes-replica-set-reference :as replicas]
             [ai.miniforge.phase-opsv.kubernetes-resource :as resource]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -19,7 +20,7 @@
         owner-uid (get reference "uid")]
     (cond
       (= deployment-uid owner-uid) false
-      (ownership/native-replica-set? reference)
+      (replicas/native-replica-set? reference)
       (contains? by-uid owner-uid)
       :else true)))
 

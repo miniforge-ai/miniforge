@@ -34,7 +34,9 @@
   "An hour after `now`: inside it the environment is live, past it expired."
   (Instant/parse "2026-11-06T01:00:00Z"))
 
-(def ^{:stratum 0} controller-id #uuid "00000000-0000-0000-0000-0000000000c1")
+(def ^{:stratum 0} controller-id
+  "The controller these entries' claims name."
+  #uuid "00000000-0000-0000-0000-0000000000c1")
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -63,20 +65,19 @@
 
 (deftest ^{:stratum 2} test-acquire-decision-per-ledger-state
   (testing "given no entry or a released one → a new generation"
-    (is (= :new (:decision/kind (lease/acquire-decision nil (request) now))))
-    (is (= :new (:decision/kind (lease/acquire-decision (entry :state/released (request)) (request) now)))))
+    (is (= :new (:decision/kind (lease/acquire-decision nil (request)))))
+    (is (= :new (:decision/kind (lease/acquire-decision (entry :state/released (request)) (request))))))
   (testing "given the identical request provisioned → duplicate"
-    (is (= :duplicate (:decision/kind (lease/acquire-decision (entry :state/provisioned (request)) (request) now)))))
+    (is (= :duplicate (:decision/kind (lease/acquire-decision (entry :state/provisioned (request)) (request))))))
   (testing "given a different request for the same key → conflict"
     (is (= :anomalies.agent-environment/conflicting-request
            (:decision/reason (lease/acquire-decision (entry :state/provisioned (request))
-                                                     (request :environment/template-hash "other")
-                                                     now)))))
+                                                     (request :environment/template-hash "other"))))))
   (testing "given an in-flight or uncertain entry → refused with the state's reason"
     (is (= :anomalies.agent-environment/acquire-in-flight
-           (:decision/reason (lease/acquire-decision (entry :state/provisioning (request)) (request) now))))
+           (:decision/reason (lease/acquire-decision (entry :state/provisioning (request)) (request)))))
     (is (= :anomalies.agent-environment/cleanup-uncertain
-           (:decision/reason (lease/acquire-decision (entry :state/cleanup-uncertain (request)) (request) now))))))
+           (:decision/reason (lease/acquire-decision (entry :state/cleanup-uncertain (request)) (request)))))))
 
 (deftest ^{:stratum 2} test-reserve-advances-generation-past-released
   (let [claim (lease/claim controller-id expires-at)]
@@ -85,19 +86,9 @@
 
 (deftest ^{:stratum 2} test-requests-compare-by-digest
   (testing "given the same moment as a Date → the same request, a duplicate"
-    (is (= :duplicate (:decision/kind (lease/acquire-decision (entry :state/provisioned (request))
-                                                              (request :environment/expires-at (java.util.Date/from expires-at))
-                                                              now))))))
-
-(deftest ^{:stratum 2} test-an-expired-claim-is-reconciled
-  (let [provisioning (entry :state/provisioning (request))]
-    (testing "given the claim's end has passed → reconcile, not in flight"
-      (is (= :reconcile (:decision/kind (lease/acquire-decision provisioning (request) expires-at)))))
-    (testing "given a provisioned entry past the claim's end → still a duplicate"
-      (is (= :duplicate (:decision/kind (lease/acquire-decision (entry :state/provisioned (request)) (request) expires-at)))))
-    (testing "given an environment → adopted; none → the reservation released"
-      (is (= [:state/provisioned nil] ((juxt :entry/state :entry/claim) (lease/reconciled provisioning {:environment/uid uid}))))
-      (is (= :state/released (:entry/state (lease/reconciled provisioning nil)))))))
+    (let [as-date (request :environment/expires-at (java.util.Date/from expires-at))
+          decision (lease/acquire-decision (entry :state/provisioned (request)) as-date)]
+      (is (= :duplicate (:decision/kind decision))))))
 
 (deftest ^{:stratum 2} test-lease-refusal
   (let [current (lease/lease-for (request) uid 2)
@@ -138,9 +129,9 @@
 (deftest ^{:stratum 2} test-a-cleanup-with-no-uid-keeps-holding-the-key
   (let [uncertain (assoc (entry :state/cleanup-uncertain (request)) :entry/environment nil)]
     (is (= :anomalies.agent-environment/cleanup-uncertain
-           (:decision/reason (lease/acquire-decision uncertain (request) now))))
+           (:decision/reason (lease/acquire-decision uncertain (request)))))
     (is (= :anomalies.agent-environment/conflicting-request
-           (:decision/reason (lease/acquire-decision uncertain (request :environment/template-hash "other") now))))
+           (:decision/reason (lease/acquire-decision uncertain (request :environment/template-hash "other")))))
     (is (= :anomalies.agent-environment/unknown-lease
            (lease/lease-refusal uncertain :environment/release nil now)))))
 

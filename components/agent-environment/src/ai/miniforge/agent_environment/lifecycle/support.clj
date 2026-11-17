@@ -34,8 +34,6 @@
 
 (defn ^{:stratum 0} failure-step [reason] {:step/name reason :step/outcome :outcome/failed})
 
-(defn ^{:stratum 0} applied-step [step-name] {:step/name step-name :step/outcome :outcome/applied})
-
 (def ^{:stratum 0} unreported-step
   "What a provider response without steps confirms: nothing."
   {:step/name :step/unreported :step/outcome :outcome/uncertain})

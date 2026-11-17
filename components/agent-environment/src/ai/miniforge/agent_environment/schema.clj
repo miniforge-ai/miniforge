@@ -43,7 +43,7 @@
   "The lifecycle operations a receipt can record."
   [:environment/preflight :environment/acquire :environment/readiness
    :environment/exec :environment/copy :environment/persist-artifacts
-   :environment/cancel :environment/release :environment/reconcile])
+   :environment/cancel :environment/release])
 
 (def ^{:stratum 0} outcomes
   "`:outcome/uncertain` means requested but not verified, never applied."

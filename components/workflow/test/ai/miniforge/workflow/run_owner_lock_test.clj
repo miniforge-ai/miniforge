@@ -27,6 +27,7 @@
    [babashka.fs :as fs]
    [babashka.process :as bp]
    [clojure.java.io :as io]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [slingshot.slingshot :refer [try+]]))
 
@@ -66,6 +67,7 @@
         (finally (owner/release! held)))
       (testing "released: no owner, and the run can be claimed again"
         (is (nil? (owner/owner root id)))
+        (is (nil? (owner/owner root id)) "the probe also releases its temporary lock")
         (let [next-claim (owner/acquire! root id)]
           (is (not (anomaly/anomaly? next-claim)))
           (owner/release! next-claim))))))
@@ -206,7 +208,7 @@
 (defn- ^{:stratum 1} other-process-sees
   "What a separate bb process finds when it tries `file`'s lock."
   [file]
-  (clojure.string/trim (:out (bp/shell {:out :string :err :inherit} "bb" "-e" probe-script (str file)))))
+  (str/trim (:out (bp/shell {:out :string :err :inherit} "bb" "-e" probe-script (str file)))))
 
 (deftest ^{:stratum 1} owner-lock-held-by-another-process-test
   (when (is (fs/which "bb") bb-required)

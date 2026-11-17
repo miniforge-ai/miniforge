@@ -44,7 +44,7 @@
    :environment/copy #{:state/provisioned}
    :environment/persist-artifacts #{:state/provisioned :state/cancelled}
    :environment/cancel #{:state/provisioned :state/cancelled}
-   :environment/release #{:state/provisioned :state/cancelled :state/cleanup-uncertain}})
+   :environment/release #{:state/provisioned :state/cancelled :state/cleanup-uncertain :state/releasing}})
 
 (def ^{:stratum 0} cleanup-operations
   "Calls still admitted after an environment expires: audit and cleanup."
@@ -55,13 +55,14 @@
   {:state/provisioning :anomalies.agent-environment/acquire-in-flight
    :state/cancelled :anomalies.agent-environment/environment-cancelled
    :state/released :anomalies.agent-environment/environment-released
-   :state/cleanup-uncertain :anomalies.agent-environment/cleanup-uncertain})
+   :state/cleanup-uncertain :anomalies.agent-environment/cleanup-uncertain
+   :state/releasing :anomalies.agent-environment/environment-releasing})
 
 (def ^{:stratum 0} default-claim-ttl-ms
   "How long a controller's claim on a reservation lasts when `:claim-ttl-ms`
    is not given: the pilot's 15-minute readiness target. A provision still
-   running past it may be reconciled by another controller, so the value
-   must exceed the slowest provision plus its cleanup."
+   running past it no longer holds the reservation, so the value must exceed
+   the slowest provision plus its cleanup."
   (* 15 60 1000))
 
 (defn ^{:stratum 0} request-key
@@ -100,18 +101,9 @@
 
 (defn ^{:stratum 0} claim
   "Which controller is provisioning a reservation, and until when. Past
-   `expires-at` another controller may reconcile the reservation."
+   `expires-at` the claim no longer lets that controller start provisioning."
   [controller-id expires-at]
   {:claim/controller-id controller-id :claim/expires-at expires-at})
-
-(defn ^{:stratum 0} reconciled
-  "The entry a reconcile leaves: `environment`, what the provider holds for
-   the reservation's generation, adopted; or, when it holds none, the
-   reservation released so the next acquire takes a fresh generation."
-  [entry environment]
-  (if environment
-    (assoc entry :entry/state :state/provisioned :entry/environment environment :entry/claim nil)
-    (assoc entry :entry/state :state/released :entry/claim nil)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -155,16 +147,14 @@
      :entry/environment nil}))
 
 (defn ^{:stratum 2} acquire-decision
-  "`:new` when the key has no live entry; `:duplicate` when the same request
-   holds a provisioned environment; `:reconcile` when it holds a
-   reservation whose claim expired at `now`; else `:refuse`."
-  [entry request now]
+  "`:new` when the key has no live entry, `:duplicate` when the same request
+   (by digest) holds a provisioned environment, else `:refuse`."
+  [entry request]
   (let [state (:entry/state entry)]
     (cond
       (or (nil? entry) (= :state/released state)) (decision :new)
       (not= (request-digest request) (:entry/request-digest entry)) (decision :refuse :anomalies.agent-environment/conflicting-request)
       (= :state/provisioned state) (decision :duplicate)
-      (and (= :state/provisioning state) (claim-expired? entry now)) (decision :reconcile)
       :else (decision :refuse (state->refusal state)))))
 
 (defn ^{:stratum 2} lease-refusal

@@ -23,10 +23,11 @@
    [ai.miniforge.agent-environment.interface :as env]
    [ai.miniforge.agent-environment.interface.ledger :as store]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]
+   [ai.miniforge.agent-environment.lease :as lease]
    [ai.miniforge.agent-environment.ledger.memory :as memory-ledger]
    [ai.miniforge.anomaly.interface :as anomaly])
   (:import
-   [java.time Instant]))
+   [java.time Duration Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -51,18 +52,32 @@
         left (:writes before)]
     (or (nil? left) (pos? left))))
 
+(defn ^{:stratum 0} later
+  "A clock reading past every claim made now."
+  []
+  (.plus (Instant/now) (Duration/ofMillis (inc lease/default-claim-ttl-ms))))
+
+(defn ^{:stratum 0} reacquire [w c req] (env/acquire! c (:a w) (fx/provision-grant w (:a w)) req))
+
 (defn ^{:stratum 0} controller-over
   "Another controller over `w`'s provider and receipt log, keeping leases
-   in `ledger-store`, on `clock` when given: a restarted or concurrent
-   controller process."
-  [w ledger-store & [clock]]
-  (env/create-controller {:provider (get-in w [:c :controller/provider])
-                          :clock (or clock #(Instant/now))
-                          :emit! #(swap! (:receipts w) conj %)
-                          :persist! fx/memory-persister
-                          :ledger ledger-store}))
+   in `ledger-store`, with `options` (such as `:clock`) over the defaults:
+   a restarted or concurrent controller process."
+  [w ledger-store & [options]]
+  (env/create-controller (merge {:provider (get-in w [:c :controller/provider])
+                                 :clock #(Instant/now)
+                                 :emit! #(swap! (:receipts w) conj %)
+                                 :persist! fx/memory-persister
+                                 :ledger ledger-store}
+                                options)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} restarted
+  "A controller over `w`'s provider and ledger on `clock`: a restarted or
+   concurrent controller process."
+  [w clock]
+  (controller-over w (get-in w [:c :controller/ledger]) {:clock clock}))
 
 (defn ^{:stratum 1} counting
   "Every call counted in `calls`; a non-nil value from a `hooks` fn answers in the provider's place."
@@ -92,12 +107,13 @@
 
 (defn ^{:stratum 2} outage-world
   "A world over a counted fake provider (`:hooks` intercepts calls) and a flaky ledger;
-   `:faults` holds `:reads?`, `:writes`, `:before-write`."
-  []
-  (let [inner (memory-ledger/create)
-        faults (atom {:reads? true :writes nil})
-        fake (env/fake-provider)
-        calls (atom {})
-        hooks (atom {})
-        w (fx/world (counting fake calls hooks) :isolation/shared-kernel (flaky inner faults))]
-    (assoc w :inner inner :faults faults :fake fake :calls calls :hooks hooks)))
+   `:faults` holds `:reads?`, `:writes`, `:before-write`. `fake-options` configure the fake."
+  ([] (outage-world {}))
+  ([fake-options]
+   (let [inner (memory-ledger/create)
+         faults (atom {:reads? true :writes nil})
+         fake (env/fake-provider fake-options)
+         calls (atom {})
+         hooks (atom {})
+         w (fx/world (counting fake calls hooks) :isolation/shared-kernel (flaky inner faults))]
+     (assoc w :inner inner :faults faults :fake fake :calls calls :hooks hooks))))
