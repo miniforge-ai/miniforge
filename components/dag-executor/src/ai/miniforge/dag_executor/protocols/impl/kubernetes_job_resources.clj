@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources
-  "Project legacy task environment and resource settings into Job data.")
+  "Project task resources into a Kubernetes Job.")
 
 ;------------------------------------------------------------------------------ Layer 0
 

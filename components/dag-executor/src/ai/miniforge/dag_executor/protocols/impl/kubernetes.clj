@@ -32,6 +32,7 @@
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation :as job-creation]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources :as resources]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-pod-observation :as observation]
+   [ai.miniforge.dag-executor.protocols.impl.kubernetes-settings :as settings]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
@@ -72,7 +73,7 @@
               :annotations {:miniforge.ai/task-id (str task-id)
                             :miniforge.ai/created-by "dag-executor"}}
    :spec {:ttlSecondsAfterFinished 300  ; Cleanup completed jobs after 5 min
-          :activeDeadlineSeconds job-creation/default-deadline-seconds
+          :activeDeadlineSeconds (:resources/timeout-seconds resources)
           :backoffLimit 0               ; No retries - handled at DAG scheduler level
           :completions 1
           :parallelism 1
@@ -199,24 +200,24 @@
         (result/ok {:available? false :reason (.getMessage e)}))))
 
   (acquire-environment! [_this task-id env-config]
-    (let [job-name (str "miniforge-task-" (subs (str task-id) 0 8))
-          workdir (get env-config :workdir "/workspace")
-          job-spec (build-job-spec job-name namespace image workdir
-                                   (:env env-config)
-                                   (:resources env-config)
-                                   task-id)
-          creation (job-creation/create! kubectl-path job-spec)
-          observed (result/and-then creation
-                                    (fn [job]
-                                      (result/and-then
-                                       (client/wait-for-pod-ready kubectl-path namespace job-name
-                                                                  client/pod-ready-timeout-ms)
-                                       (partial observation/verify! kubectl-path job))))]
-      (result/map-ok observed
-                     (fn [pod]
-                       (swap! pod-cache assoc job-name (:pod-name pod))
-                       (proto/create-environment-record job-name :kubernetes task-id workdir
-                                                        (assoc env-config :metadata (merge (:data creation) pod)))))))
+    (result/and-then
+     (settings/task-resources config (:resources env-config))
+     (fn [task-resources]
+       (let [job-name (str "miniforge-task-" (subs (str task-id) 0 8))
+             workdir (get env-config :workdir resources/default-workdir)
+             job-spec (build-job-spec job-name namespace image workdir
+                                      (:env env-config) task-resources task-id)
+             creation (job-creation/create! kubectl-path job-spec (:kubernetes/creation-request-timeout-ms config))
+             observed (result/and-then creation
+                                       (fn [job]
+                                         (result/and-then
+                                          (client/wait-for-pod-ready kubectl-path namespace job-name config)
+                                          (partial observation/verify! kubectl-path job))))]
+         (result/map-ok observed
+                        (fn [pod]
+                          (swap! pod-cache assoc job-name (:pod-name pod))
+                          (proto/create-environment-record job-name :kubernetes task-id workdir
+                                                           (assoc env-config :metadata (merge (:data creation) pod)))))))))
 
   (execute! [_this environment-id command opts]
     (try
@@ -285,10 +286,13 @@
    Config:
    - :namespace - K8s namespace (default: 'default')
    - :image - Container image for tasks (default: alpine:latest)
-   - :kubectl-path - Path to kubectl binary"
+   - :kubectl-path - Path to kubectl binary
+   - :resources/timeout-seconds - Capsule budget; a task can override it in :resources
+   - :kubernetes/creation-request-timeout-ms - Timeout for the create request
+   - :kubernetes/pod-ready-timeout-ms, :kubernetes/pod-ready-poll-interval-ms - Readiness polling"
   [config]
   (map->KubernetesExecutor
-   {:config config
+   {:config (settings/configure config)
     :namespace (get config :namespace default-namespace)
     :image (get config :image default-image)
     :kubectl-path (:kubectl-path config)

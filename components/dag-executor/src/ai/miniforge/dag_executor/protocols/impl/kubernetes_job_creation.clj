@@ -16,12 +16,6 @@
 
 (def ^{:stratum 0} resource-kind "Job")
 
-(def ^{:stratum 0} default-deadline-seconds
-  "N11 §5.3's default capsule budget also bounds an unacknowledged Job."
-  3600)
-
-(def ^{:stratum 0 :private true} creation-timeout "--request-timeout=30s")
-
 (defn- ^{:stratum 0} present-text? [value]
   (and (string? value) (not (str/blank? value))))
 
@@ -46,12 +40,13 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} create! [executable job]
+(defn ^{:stratum 2} create! [executable job request-timeout-ms]
   (try+
     (let [requested (:metadata job)
           {:keys [exit out]} (shell/sh (or executable "kubectl")
                                       "create" "-n" (:namespace requested) "-f" "-" "-o" "json"
-                                      creation-timeout :in (json/generate-string job))
+                                      (str "--request-timeout=" request-timeout-ms "ms")
+                                      :in (json/generate-string job))
           created (when (= 0 exit) (receipt job (json/parse-string-strict out)))]
       (if created (result/ok created) (unconfirmed)))
     (catch InterruptedException _

@@ -25,10 +25,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} pod-ready-timeout-ms 120000)
-
-(def ^{:stratum 0 :private true} pod-ready-poll-interval-ms 2000)
-
 (defn ^{:stratum 0} run-kubectl
   "Execute a kubectl command and return the result."
   [kubectl-path & args]
@@ -51,8 +47,9 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} wait-for-pod-ready [kubectl-path namespace job-name timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+(defn ^{:stratum 2} wait-for-pod-ready
+  [kubectl-path namespace job-name {:kubernetes/keys [pod-ready-timeout-ms pod-ready-poll-interval-ms]}]
+  (let [deadline (+ (System/currentTimeMillis) pod-ready-timeout-ms)]
     (loop []
       (if (> (System/currentTimeMillis) deadline)
         (result/err :pod-timeout (messages/t :kubernetes/pod-timeout))
