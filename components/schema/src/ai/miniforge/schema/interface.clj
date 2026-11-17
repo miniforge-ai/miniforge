@@ -24,6 +24,7 @@
    [malli.error :as me]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.schema.core :as core]
+   [ai.miniforge.schema.instrument :as instrument]
    [ai.miniforge.schema.vocab :as vocab]
    [ai.miniforge.schema.logging :as logging]
    [ai.miniforge.schema.logging-vocab :as logging-vocab]
@@ -492,6 +493,15 @@
    (invalid-with-errors errors nil))
   ([errors opts]
    (merge {:valid? false :errors errors} opts)))
+
+;; Function-schema instrumentation
+(def ^{:stratum 0} instrument-fixture
+  "clojure.test fixture that checks every function schema declared in the
+   given namespaces (`:malli/schema` var metadata or `m/=>`) while the
+   wrapped tests run. Args: & ns-syms.
+   A call or return value that breaks its schema throws ex-info with
+   `:type` `:malli.core/invalid-input` or `:malli.core/invalid-output`."
+  instrument/instrument-fixture)
 
 ;------------------------------------------------------------------------------ Layer 1
 
