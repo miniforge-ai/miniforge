@@ -34,8 +34,11 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} intent
-  [uid generation requested-at]
-  {:cleanup/uid uid
+  "What a cleanup deletes and which attempt owns it. The attempt id keeps
+   two attempts at one instant apart, so ownership and outcomes never cross."
+  [attempt uid generation requested-at]
+  {:cleanup/attempt attempt
+   :cleanup/uid uid
    :cleanup/generation generation
    :cleanup/requested-at requested-at
    :cleanup/applied? false
@@ -57,11 +60,11 @@
     entry))
 
 (defn- ^{:stratum 0} outcome-recorded
-  "The entry once `cleanup`'s deletes ran: released when verified, else
-   cleanup-uncertain to retry. Unchanged when it no longer holds `cleanup`,
-   as when a later release replaced it."
+  "The entry once `cleanup`'s deletes ran: released when they applied and
+   the UID is verified gone, else cleanup-uncertain to retry. Unchanged when
+   it no longer holds `cleanup`, as when a later release replaced it."
   [cleanup applied? verified? entry]
-  (let [state (if verified? :state/released :state/cleanup-uncertain)
+  (let [state (if (and applied? verified?) :state/released :state/cleanup-uncertain)
         recorded (assoc cleanup :cleanup/applied? applied? :cleanup/verified? verified?)]
     (if (= cleanup (:entry/cleanup entry))
       (assoc entry :entry/state state :entry/cleanup recorded)
@@ -110,7 +113,7 @@
    was deleted."
   [c lease target]
   (let [now (support/now c)
-        cleanup (intent (:lease/environment-uid lease) (:lease/generation lease) now)]
+        cleanup (intent (random-uuid) (:lease/environment-uid lease) (:lease/generation lease) now)]
     (anomaly/let-ok [changed (controller/settle! c lease (partial requested-under-lease lease now cleanup))
                      _ (unowned cleanup changed lease now)]
       (let [{:keys [steps applied? verified?]} (deleted c target cleanup)
@@ -125,7 +128,7 @@
   [c subject request target environment]
   (let [k (lease/request-key request)
         generation (:target/generation target)
-        cleanup (intent (:environment/uid environment) generation (support/now c))
+        cleanup (intent (random-uuid) (:environment/uid environment) generation (support/now c))
         changed (controller/change-entry! c k (partial requested-for-reservation generation environment cleanup))]
     (if (or (anomaly/anomaly? changed) (not (owns? cleanup changed)))
       {:cleanup/receipt nil :cleanup/recorded changed}
