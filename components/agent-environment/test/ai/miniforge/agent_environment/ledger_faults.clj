@@ -42,8 +42,9 @@
   (or (when-let [hook (get @hooks op)] (hook)) (delegate)))
 
 (defn- ^{:stratum 0} run-interposed!
-  [faults]
-  (when-let [interpose (:before-write (first (swap-vals! faults dissoc :before-write)))]
+  "Run and clear the one-shot fn a test left under `hook` in `faults`."
+  [faults hook]
+  (when-let [interpose (get (first (swap-vals! faults dissoc hook)) hook)]
     (interpose)))
 
 (defn- ^{:stratum 0} writable!
@@ -58,6 +59,22 @@
   (.plus (Instant/now) (Duration/ofMillis (inc lease/default-claim-ttl-ms))))
 
 (defn ^{:stratum 0} reacquire [w c req] (env/acquire! c (:a w) (fx/provision-grant w (:a w)) req))
+
+(defn ^{:stratum 0} abandon!
+  "Release `req`'s reservation in `w`'s ledger as a rival that reconciled
+   it after its claim expired and found nothing would."
+  [w req]
+  (let [k (lease/request-key req)
+        {:ledger/keys [entry revision]} (store/read-entry (:inner w) k)]
+    (store/write-entry! (:inner w) k revision (lease/reconciled entry nil))))
+
+(defn ^{:stratum 0} at-record
+  "A `provision!` hook that runs `rival!` just before the owner records its
+   provision; it returns nil, so the provider still answers."
+  [w rival!]
+  (fn []
+    (swap! (:faults w) assoc :before-write rival!)
+    nil))
 
 (defn ^{:stratum 0} controller-over
   "Another controller over `w`'s provider and receipt log, keeping leases
@@ -97,17 +114,26 @@
   "`inner` failing reads while `:reads?` is false and writes once `:writes` is spent."
   [inner faults]
   (reify store/LedgerStore
-    (read-entry [_ k] (swap! faults update :read-count (fnil inc 0)) (if (:reads? @faults) (store/read-entry inner k) down))
+    (read-entry [_ k]
+      (run-interposed! faults :before-read)
+      (swap! faults update :read-count (fnil inc 0))
+      (if (:reads? @faults) (store/read-entry inner k) down))
     (write-entry! [_ k revision entry]
-      (run-interposed! faults)
+      (run-interposed! faults :before-write)
       (if (writable! faults) (store/write-entry! inner k revision entry) down))
     (entries [_] (store/entries inner))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} late-controller
+  "A controller over `w`'s ledger started after every claim made now expired."
+  [w]
+  (restarted w later))
+
 (defn ^{:stratum 2} outage-world
   "A world over a counted fake provider (`:hooks` intercepts calls) and a flaky ledger;
-   `:faults` holds `:reads?`, `:writes`, `:before-write`. `fake-options` configure the fake."
+   `:faults` holds `:reads?`, `:writes`, and the one-shot `:before-write` and
+   `:before-read`. `fake-options` configure the fake."
   ([] (outage-world {}))
   ([fake-options]
    (let [inner (memory-ledger/create)

@@ -61,8 +61,8 @@
 (def ^{:stratum 0} default-claim-ttl-ms
   "How long a controller's claim on a reservation lasts when `:claim-ttl-ms`
    is not given: the pilot's 15-minute readiness target. A provision still
-   running past it no longer holds the reservation, so the value must exceed
-   the slowest provision plus its cleanup."
+   running past it may be reconciled by another controller, so the value
+   must exceed the slowest provision plus its cleanup."
   (* 15 60 1000))
 
 (defn ^{:stratum 0} request-key
@@ -101,9 +101,18 @@
 
 (defn ^{:stratum 0} claim
   "Which controller is provisioning a reservation, and until when. Past
-   `expires-at` the claim no longer lets that controller start provisioning."
+   `expires-at` another controller may reconcile the reservation."
   [controller-id expires-at]
   {:claim/controller-id controller-id :claim/expires-at expires-at})
+
+(defn ^{:stratum 0} reconciled
+  "The entry a reconcile leaves: `environment`, what the provider holds for
+   the reservation's generation, adopted; or, when it holds none, the
+   reservation released so the next acquire takes a fresh generation."
+  [entry environment]
+  (if environment
+    (assoc entry :entry/state :state/provisioned :entry/environment environment :entry/claim nil)
+    (assoc entry :entry/state :state/released :entry/claim nil)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -132,6 +141,15 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} claim-held?
+  "True while `entry` is still the reservation at `generation` under
+   `controller-id`'s unexpired claim; false once another controller may
+   have reconciled it."
+  [entry controller-id generation now]
+  (and (= generation (:entry/generation entry))
+       (= controller-id (get-in entry [:entry/claim :claim/controller-id]))
+       (not (claim-expired? entry now))))
+
 (defn ^{:stratum 2} reserve
   "The entry a `:new` decision writes: provisioning under `claim`, one
    generation past whatever the key held before, keeping the request and
@@ -147,14 +165,18 @@
      :entry/environment nil}))
 
 (defn ^{:stratum 2} acquire-decision
-  "`:new` when the key has no live entry, `:duplicate` when the same request
-   (by digest) holds a provisioned environment, else `:refuse`."
-  [entry request]
+  "`:new` when the key has no live entry; `:duplicate` when the same request
+   holds a provisioned environment; `:reconcile` when it holds a
+   reservation whose claim expired at `now`, or a cleanup left uncertain;
+   else `:refuse`."
+  [entry request now]
   (let [state (:entry/state entry)]
     (cond
       (or (nil? entry) (= :state/released state)) (decision :new)
       (not= (request-digest request) (:entry/request-digest entry)) (decision :refuse :anomalies.agent-environment/conflicting-request)
       (= :state/provisioned state) (decision :duplicate)
+      (and (= :state/provisioning state) (claim-expired? entry now)) (decision :reconcile)
+      (= :state/cleanup-uncertain state) (decision :reconcile)
       :else (decision :refuse (state->refusal state)))))
 
 (defn ^{:stratum 2} lease-refusal
