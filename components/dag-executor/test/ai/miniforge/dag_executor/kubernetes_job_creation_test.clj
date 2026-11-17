@@ -10,6 +10,7 @@
             [ai.miniforge.dag-executor.result :as result]
             [cheshire.core :as json]
             [clojure.java.shell :as shell]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -72,6 +73,43 @@
                  :kubernetes/pod-ready-poll-interval-ms]
             invalid [nil false 0 1.5 (inc Integer/MAX_VALUE)]]
       (is (= key (invalid-setting {key invalid}))))))
+
+(deftest ^{:stratum 1} creation-diagnostics-classify-without-copying-provider-or-exception-text
+  (let [instance (kubernetes/create-kubernetes-executor {})
+        fixture-secret "mock-env-value"
+        env-config {:env {:TEST_SECRET fixture-secret}}
+        command-cases
+        (for [[header reason] [["Error from server (AlreadyExists): " :already-exists]
+                               ["Error from server (Forbidden): " :forbidden]
+                               ["error: You must be logged in to the server (" :unauthorized]
+                               ["The Job \"capsule\" is invalid: " :invalid-job]
+                               ["unrecognized: Error from server (Forbidden): " :provider-command-failed]]]
+          [{:exit 1 :err (str header fixture-secret) :out fixture-secret}
+           {:reason reason :exit-code 1}])
+        response-cases
+        [[{:exit 0 :out fixture-secret} {:reason :malformed-response :exit-code 0}]
+         [{:exit 0 :out (json/generate-string {:unexpected fixture-secret})} {:reason :receipt-mismatch :exit-code 0}]
+         [(java.io.IOException. fixture-secret) {:reason :command-io-failed}]]]
+    (with-redefs [client/wait-for-pod-ready reject-io! kubernetes/delete-job reject-io!]
+      (doseq [[reply expected] (concat command-cases response-cases)]
+        (with-redefs [shell/sh (fn [& _] (if (instance? Exception reply) (throw reply) reply))]
+          (let [error (:error (executor/acquire-environment! instance (random-uuid) env-config))]
+            (is (= :job-creation-unconfirmed (:code error)))
+            (is (= expected (:data error)))
+            (is (not (str/includes? (pr-str error) fixture-secret)))))))))
+
+(deftest ^{:stratum 1} interrupted-job-submission-preserves-cancellation
+  (let [instance (kubernetes/create-kubernetes-executor {})]
+    (with-redefs [shell/sh (fn [& _] (throw (InterruptedException.)))
+                  client/wait-for-pod-ready reject-io!
+                  kubernetes/delete-job reject-io!]
+      (try
+        (let [error (:error (executor/acquire-environment! instance (random-uuid) {}))
+              interrupted? (Thread/interrupted)]
+          (is (= :job-creation-unconfirmed (:code error)))
+          (is (= {:reason :interrupted} (:data error)))
+          (is interrupted?))
+        (finally (Thread/interrupted))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

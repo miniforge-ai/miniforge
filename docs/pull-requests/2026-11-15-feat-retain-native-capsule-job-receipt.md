@@ -30,6 +30,10 @@ must confirm the effective deadline, including any override.
 The create-request timeout and Pod readiness timings are independent
 executor options with validated packaged defaults; changing either
 does not change the Job deadline.
+Unconfirmed requests retain allowlisted reason codes and an available
+process exit code. Provider output, environment values and exception
+messages are never copied into these diagnostics. Status hints follow
+[kubectl's error formatter](https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/util/helpers.go#L150-L244).
 
 Separate the existing transport polling and resource projection into
 bounded namespaces. Preserve running and terminal readiness outcomes.
@@ -45,11 +49,13 @@ that a provider response reverting an override to the default is rejected.
 Verify the create-request and readiness options reach their own boundaries
 without changing the capsule budget.
 
-Both JVM products, Babashka source, and the fresh package passed 8 tests
-and 58 assertions each. The old acquisition path failed four receipt
-assertions. Deliberately ignoring the task or request-timeout override
-failed the corresponding assertion without a runtime error. Strict lint,
-namespace depths, Polylith, and Babashka classpaths passed.
+Both JVM products, Babashka source, and the fresh package passed 10 tests
+and 85 assertions each. The old acquisition path failed four receipt
+assertions. Ignoring an override failed its budget assertion; dropping the
+diagnostic data failed eight assertions. Neither introduced runtime
+errors. Tests also confirm that an interrupted submission preserves the
+interrupt flag. Strict lint, namespace depths, Polylith, and Babashka
+classpaths passed.
 
 ## Deployment plan
 
