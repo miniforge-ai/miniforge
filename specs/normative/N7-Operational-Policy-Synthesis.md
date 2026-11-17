@@ -570,16 +570,12 @@ A minimal compliant OPSV implementation MUST:
 
 ## Annex A — Implementation Conformance Status (informative)
 
-This annex is **informative**, recording implementation state as of 2026-09-08.
+This annex is **informative**, recording implementation state as of 2026-11-17.
 
 ### A.1 Implemented
 
-N7 is the best-served spec in the set on the dimension that has defeated the
-others: **its event family is both registered and emitted.** The nine
-`opsv.*` types of N3 §3.14 appear in N3's registry, and
-`components/event-stream/src/ai/miniforge/event_stream/opsv.clj` emits them with
-tests in `phase-opsv` and `event-stream`. Every other extension spec reviewed in
-this pass declared event types that were never registered.
+The nine `opsv.*` event types in N3 §3.14 are registered and emitted, with
+coverage in `phase-opsv` and `event-stream`.
 
 `components/opsv` implements canonical contracts and hashing, risk scoring,
 bounded convergence, verification, and effective-actuation decisions. The
@@ -588,31 +584,35 @@ verification, gates, capability, rollback, and postcondition prerequisites are
 all present.
 
 The `opsv` 1.0.0 workflow registers and executes all seven phases through the
-shared N2 lifecycle. Its deterministic staging MCI discovers CPU and backlog
+shared N2 lifecycle with the simulated adapter. It discovers CPU and backlog
 drivers, synthesizes an HPA/KEDA-compatible proposal, and assembles evidence.
 It emits the required lifecycle and domain events and completes in `:recommend-only`
-mode with no external effects. `components/opsv-adapter-simulated` supplies the
-simulation boundary.
+mode with no external effects.
+
+The governed PR coordinator has a GitHub adapter for exact-payload creation and
+read-only reconciliation of uncertain outcomes. Tests exercise the runtime PR
+path without creating a real PR.
+
+Native staging primitives include bounded Kubernetes reads, Prometheus
+criterion observations, inert load creation, governed replica trials and
+baseline restoration. Focused tests cover independently authorized recovery
+and observation of the original baseline. These tests do not establish
+end-to-end native staging conformance.
 
 ### A.2 Specified, Not Verified
 
-- **Guardrail rollback (N7.EX.2).** Convergence terminates on a guardrail abort,
-  and event projection preserves the declared rollback action, but no
-  end-to-end adapter test executes and verifies that rollback.
-- **External actuation (N7.AC.2–N7.AC.4).** Pure authorization decisions and
-  Ariadne correlation records exist, but OPSV has no real PR or Kubernetes
-  actuation adapter.
+- **Native staging and recovery (§3, §5.5, §6).** The native primitives still
+  need to be composed and verified across the seven-phase workflow, from load
+  and convergence through abort, authorized cleanup and baseline recovery. The
+  irreversible full-stop path and safe-checkpoint restart are not established
+  by the ordinary stop and recovery tests.
+- **Final apply (§7.3).** Governed temporary staging effects are not permanent
+  policy apply. The final apply path with verified rollback and postcondition
+  monitoring is not established.
 - **CLI/TUI and drift (§3, §8).** The six canonical commands, Fleet drill-down,
   policy-state projection, and drift producer are not implemented.
 - **Agent-budget use case.** The second OPSV domain and its pinned experiment
   fixture are not implemented.
-
-### A.3 Structural
-
-§7.3 requires apply actions to execute as N10-governed effects with verified
-rollback and postcondition monitoring. N10 Annex A records that no
-postcondition-monitoring component exists, so this requirement currently
-depends on machinery that is not there.
 
 ---
 
