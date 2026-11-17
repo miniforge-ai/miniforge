@@ -106,6 +106,11 @@
   (let [provisioning (entry :state/provisioning (request))]
     (testing "given the claim's end has passed → reconcile, not in flight"
       (is (= :reconcile (:decision/kind (lease/acquire-decision provisioning (request) expires-at)))))
+    (testing "given a pending cleanup → reconciled past its claim's end, never when a lease holder owns it"
+      (let [pending (entry :state/releasing (request))]
+        (is (= :reconcile (:decision/kind (lease/acquire-decision pending (request) expires-at))))
+        (is (= :anomalies.agent-environment/environment-releasing (:decision/reason (lease/acquire-decision pending (request) now))))
+        (is (= :refuse (:decision/kind (lease/acquire-decision (assoc pending :entry/claim nil) (request) expires-at))))))
     (testing "given a provisioned entry past the claim's end → still a duplicate"
       (is (= :duplicate (:decision/kind (lease/acquire-decision (entry :state/provisioned (request)) (request) expires-at)))))
     (testing "given an environment → adopted; none → the reservation released"

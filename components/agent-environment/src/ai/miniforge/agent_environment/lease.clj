@@ -169,15 +169,16 @@
 (defn ^{:stratum 2} acquire-decision
   "`:new` when the key has no live entry; `:duplicate` when the same request
    holds a provisioned environment; `:reconcile` when it holds a
-   reservation whose claim expired at `now`, or a cleanup left uncertain;
-   else `:refuse`."
+   reservation or a pending cleanup whose claim expired at `now`, or a
+   cleanup left uncertain; else `:refuse`. A release under a lease carries
+   no claim: its lease holder retries it."
   [entry request now]
   (let [state (:entry/state entry)]
     (cond
       (or (nil? entry) (= :state/released state)) (decision :new)
       (not= (request-digest request) (:entry/request-digest entry)) (decision :refuse :anomalies.agent-environment/conflicting-request)
       (= :state/provisioned state) (decision :duplicate)
-      (and (= :state/provisioning state) (claim-expired? entry now)) (decision :reconcile)
+      (and (#{:state/provisioning :state/releasing} state) (:entry/claim entry) (claim-expired? entry now)) (decision :reconcile)
       (= :state/cleanup-uncertain state) (decision :reconcile)
       :else (decision :refuse (state->refusal state)))))
 
