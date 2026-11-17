@@ -157,3 +157,12 @@
 (deftest ^{:stratum 2} test-names-and-hashes-reject-a-trailing-newline
   (is (not (m/validate schema/NamespaceName (str (lease/namespace-name (request)) "\n"))))
   (is (not (m/validate schema/Sha256Hex (str (apply str (repeat 64 "a")) "\n")))))
+
+(deftest ^{:stratum 2} test-digests-ignore-the-callers-printer-settings
+  (let [plain [(lease/request-digest (request)) (lease/namespace-name (request))]
+        other (request :environment/template-hash "other")]
+    (binding [*print-level* 0 *print-length* 1]
+      (testing "given printer bindings that truncate → the same digest and namespace"
+        (is (= plain [(lease/request-digest (request)) (lease/namespace-name (request))])))
+      (testing "given a different request under them → a different digest"
+        (is (not= (lease/request-digest (request)) (lease/request-digest other)))))))

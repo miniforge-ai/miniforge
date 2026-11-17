@@ -21,7 +21,7 @@
    reservation while it provisions, and which calls each ledger state
    admits. Pure functions over ledger entries; the controller applies them."
   (:require
-   [ai.miniforge.content-hash.interface :as content-hash])
+   [ai.miniforge.agent-environment.ledger.printing :as printing])
   (:import
    [java.time Instant]))
 
@@ -124,9 +124,10 @@
 (defn ^{:stratum 1} request-digest
   "The digest a reservation keeps of its request, so a replayed request is
    compared across restarts by content: its expiry is taken as an Instant,
-   so a Date and an Instant for one moment digest alike."
+   so a Date and an Instant for one moment digest alike, and the caller's
+   printer settings do not change it."
   [request]
-  (content-hash/content-hash (update request :environment/expires-at ->instant)))
+  (printing/plain-content-hash (update request :environment/expires-at ->instant)))
 
 (defn ^{:stratum 1} claim-expired?
   [entry now]
@@ -136,7 +137,7 @@
   "The namespace for `request`'s key: the same key always names the same
    namespace, across generations and controller restarts."
   [request]
-  (let [digest (content-hash/content-hash (mapv str (request-key request)))]
+  (let [digest (printing/plain-content-hash (mapv str (request-key request)))]
     (str namespace-prefix (subs digest 0 namespace-hash-chars))))
 
 ;------------------------------------------------------------------------------ Layer 2

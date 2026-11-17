@@ -63,6 +63,23 @@
   [uid generation]
   (constantly {:observed/uid uid :observed/generation generation :observed/ready? false}))
 
+(defn- ^{:stratum 0} during-delete
+  "A `deprovision!` hook that runs `rival!` once, before the provider
+   deletes; it returns nil, so the provider still answers."
+  [w rival!]
+  (fn []
+    (swap! (:hooks w) dissoc :deprovision!)
+    (rival!)
+    nil))
+
+(defn- ^{:stratum 0} unrecorded-release!
+  "Release `lease` with its outcome write failing, as an overlapping
+   attempt that deleted and then lost its ledger would."
+  [w lease]
+  (swap! (:faults w) assoc :writes 1)
+  (env/release! (:c w) (:a w) lease)
+  (swap! (:faults w) assoc :writes nil))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} failed-after-deleting
@@ -110,13 +127,15 @@
   (let [w (outage-world {:fake/fail-step :step/workload})]
     (is (= :anomalies.agent-environment/provisioning-failed (reason (acquired w))))
     (is (= [:state/released true true] (stages (stored w))))
-    (testing "given the ledger cannot take the cleanup intent → nothing is deleted"
+    (testing "given the ledger cannot take the cleanup intent → nothing is deleted, and no lease is offered"
       (let [w (outage-world {:fake/fail-step :step/workload})]
         (swap! (:faults w) assoc :writes 1)
-        (is (= unavailable (reason (acquired w))))
-        (is (nil? (:deprovision! @(:calls w))))
-        (is (= 1 (count (fake/live-namespaces (:fake w)))))
-        (is (= :state/provisioning (:entry/state (stored w))))))))
+        (let [refused (acquired w)]
+          (is (= unavailable (reason refused)))
+          (is (nil? (get-in refused [:anomaly/data :environment/lease])))
+          (is (nil? (:deprovision! @(:calls w))))
+          (is (= 1 (count (fake/live-namespaces (:fake w)))))
+          (is (= :state/provisioning (:entry/state (stored w)))))))))
 
 (deftest ^{:stratum 1} test-acquire-waits-while-a-release-is-pending
   (let [w (outage-world)
@@ -152,6 +171,16 @@
         (swap! (:faults w) assoc :writes nil)
         (is (= {:call/outcome :outcome/applied} (env/release! (:c w) (:a w) kept)))
         (is (= :state/released (:entry/state (stored w))))))))
+
+(deftest ^{:stratum 1} test-a-release-another-attempt-took-over-is-not-reported-done
+  (let [w (outage-world)
+        current (:environment/lease (acquired w))]
+    (swap! (:hooks w) assoc :deprovision! (during-delete w #(unrecorded-release! w current)))
+    (is (= :anomalies.agent-environment/environment-releasing (reason (env/release! (:c w) (:a w) current))))
+    (is (= :state/releasing (:entry/state (stored w))))
+    (testing "given a retry → released"
+      (is (= {:call/outcome :outcome/applied} (env/release! (:c w) (:a w) current)))
+      (is (= :state/released (:entry/state (stored w)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

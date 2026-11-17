@@ -37,7 +37,10 @@ Issue #2506 asks for submission identity and digests persisted before provider d
    1. `claim`: `{:claim/controller-id :claim/expires-at}`.
    2. `default-claim-ttl-ms`: 15 minutes, the pilot readiness target in issue #2439.
    3. `request-digest`: the content hash of the request with its expiry taken as an Instant, so a
-      `Date` and an `Instant` for one moment digest alike.
+      `Date` and an `Instant` for one moment digest alike. It hashes through `ledger.printing`, as
+      `namespace-name` now does too, so a caller's printer settings (`*print-level*`,
+      `*print-length*` and the rest) cannot make two requests digest alike or one request digest two
+      ways.
    4. `claim-expired?`.
    5. `reserve` takes the claim and writes it with the digest.
    6. `acquire-decision` compares digests instead of request maps.
@@ -97,8 +100,10 @@ intent keeps its claim. Only the provisioning state reads the claim.
    4. A controller whose claim expired before dispatch gets `claim-lost` and makes no `provision!`
       call, and the reservation stays provisioning.
 2. `lease_test`: `reserve` takes a claim, and a `Date` and an `Instant` for the same expiry are one
-   request, a duplicate.
-3. The agent-environment suite passes: 94 tests with 345 assertions, including PR #2539's review
+   request, a duplicate. Under `*print-level*` 0 and `*print-length*` 1, a request keeps its digest
+   and namespace, and a different request still digests differently; the test fails when the digest
+   uses the caller's printer settings.
+3. The agent-environment suite passes: 96 tests with 352 assertions, including PR #2539's review
    fixes merged in. clj-kondo and stratum-lint are clean.
 
 Fake-provider evidence only. Receipts stay `:profile/unqualified`.
