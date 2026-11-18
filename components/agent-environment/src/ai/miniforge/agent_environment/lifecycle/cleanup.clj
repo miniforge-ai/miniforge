@@ -45,11 +45,13 @@
    :cleanup/verified? false})
 
 (defn- ^{:stratum 0} requested-under-lease
-  "`entry` releasing under `cleanup`, unless it no longer admits a release under `lease`."
+  "`entry` releasing under `cleanup`, unless it no longer admits a release
+   under `lease`. A lease holder's release carries no claim, so no acquire
+   reconciles it while the holder retries."
   [lease now cleanup entry]
   (if (lease/lease-refusal entry :environment/release lease now)
     entry
-    (assoc entry :entry/state :state/releasing :entry/cleanup cleanup)))
+    (assoc entry :entry/state :state/releasing :entry/cleanup cleanup :entry/claim nil)))
 
 (defn- ^{:stratum 0} releasing
   [entry environment cleanup claim]
