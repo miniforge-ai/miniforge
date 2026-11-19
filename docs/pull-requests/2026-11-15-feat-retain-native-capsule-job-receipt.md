@@ -56,7 +56,7 @@ polling interval longer than the total budget. Refuse a late Running
 reply and preserve cancellation both before and during polling.
 
 Both JVM products, Babashka source, and the fresh package passed the
-focused packet: 21 tests / 119 assertions each. The old acquisition path failed four receipt
+focused packet: 23 tests / 132 assertions each. The old acquisition path failed four receipt
 assertions. Ignoring an override failed its budget assertion; dropping the
 diagnostic data failed eight assertions. Neither introduced runtime
 errors. Tests also confirm that an interrupted submission preserves the
