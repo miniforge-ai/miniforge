@@ -35,8 +35,8 @@ runner end a cancelled run as `:cancelled` and publish this event instead of `:w
 2. `es/workflow-cancelled` builds the event from that record and the run's duration, as a
    `:workflow/cancelled` on both publication paths, since N3 never folds a cancel into
    `:workflow/completed`. It returns an `:invalid-input` anomaly for a record N3 does not accept:
-   a blank or missing requester, a source that is not a keyword, a `:control-action` source with
-   no action id, or a duration that is not a non-negative integer. It is registered in
+   a blank or missing requester, a source N3 does not name, a `:control-action` source with no
+   action id, or a duration that is not a non-negative integer. It is registered in
    `event-type-registry.edn` with no browser handler yet, and is `:public` like the other
    terminal events.
 3. The operator's cancel records the intervention's requester (as a string) and its source. A
@@ -56,8 +56,8 @@ runner end a cancelled run as `:cancelled` and publish this event instead of `:w
 1. `workflow_terminal_constructor_test.clj`:
    1. the cancelled event, from the CLI and from a control action, commits and replays on the
       current path, and on the legacy path is a `:workflow/cancelled` with no `:workflow/status`;
-   2. each record N3 does not accept is refused on both paths, and a source N3 does not name is
-      refused at publication;
+   2. each record N3 does not accept, a source it does not name included, is refused on both
+      paths;
    3. a second cancel keeps the first record, and a cancel with none leaves none.
 2. `application_test.clj`: an applied cancel intervention records its requester and source on
    the runner's control state, each intervention source maps to the N3 source above, a control

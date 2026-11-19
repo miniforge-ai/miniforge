@@ -88,6 +88,7 @@
    [{:cancel/requested-by " " :cancel/source :cli} 0]
    [(dissoc cli-cancellation :cancel/source) 0]
    [(assoc cli-cancellation :cancel/source :control-action) 0]
+   [(assoc cli-cancellation :cancel/source :unknown) 0]
    [cli-cancellation nil]
    [cli-cancellation -1]
    [nil 0]])
@@ -152,12 +153,6 @@
           (is (anomaly/anomaly? (events/workflow-cancelled stream workflow-id
                                                            cancellation duration-ms))
               (pr-str [cancellation duration-ms])))
-        (is (anomaly/anomaly? (events/publish! stream (events/workflow-cancelled
-                                                      stream workflow-id
-                                                      (assoc cli-cancellation
-                                                             :cancel/source :unknown)
-                                                      0)))
-            "a source N3 does not name is refused at publication")
         (is (empty? (events/get-events stream)))))))
 
 (deftest ^{:stratum 2} legacy-terminal-payloads-preserve-status-and-diagnostics
