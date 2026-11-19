@@ -20,8 +20,8 @@ API surface class 1: in-process EDN.
 Domain (the lease rules: claim, digest, reserve) and application (the controller's claim and the
 dispatch guard).
 
-Base branch: `feat/agent-environment-cleanup-intent`. Depends on PR #2539, which is open. Retarget
-to `main` once it merges. PR #2524 (reconcile and takeover) is rebuilt on top of this.
+Base branch: `main`. PR #2539, which this was stacked on, is merged. PR #2524 (reconcile and
+takeover) is rebuilt on top of this.
 
 ## Motivation
 
@@ -119,5 +119,5 @@ Issue #2506; parent tracker issue #2439. Stacked on PR #2539. PR #2524 is rebuil
 ## Checklist
 
 - [x] Claims, digests and the dispatch guard, with tests
-- [ ] PR #2539 merged; retarget this PR to `main`
+- [x] PR #2539 merged; this PR retargeted to `main`
 - [ ] CI green, Copilot threads resolved, squash-merged
