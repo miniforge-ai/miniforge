@@ -25,11 +25,13 @@ stopped. Getting there needed a movement-only split of `responder.clj` first.
 1. The first commit moves forms verbatim into three namespaces:
    1. `responder-comments`: fetch, filter and group review comments;
    2. `responder-fix`: one comment group's fix spec, run and replies;
-   3. `responder`: PR URL parsing and `respond-to-comments!`. The functions that moved and were
-      public are re-exported under their old names, so the interface and tests are unchanged.
+   3. `responder`: PR URL parsing and `respond-to-comments!`, whose calls into the other two
+      are qualified.
 
    `process-comment-group` becomes public, since the orchestrator now calls it across a
-   namespace, and `respond-to-comments!` is retagged from stratum 3 to 2.
+   namespace, and `respond-to-comments!` is retagged from stratum 3 to 2. There are no
+   re-exports: the interface's `build-fix-spec` and the tests call the new namespaces, so a
+   test that redefines one of the moved functions reaches its caller.
 2. The second commit makes `fix-succeeded?` treat `:cancelled` like `:failed`. A cancelled DAG
    that opened PRs for its completed tasks still counts as a partial fix, as a failed one does.
 
@@ -39,7 +41,9 @@ stopped. Getting there needed a movement-only split of `responder.clj` first.
    `policy-eval-responder-test`, the two responder anomaly tests and the CLI's `pr-monitor-test`,
    49 tests.
 2. New `respond-to-comments-cancelled-fix-test`: a cancelled fix run is not a success, gets no
-   reply and is not pushed. It fails on the split alone and passes with the fix.
+   reply and is not pushed. It fails on the split alone and passes with the fix. New
+   `respond-to-comments-cancelled-dag-with-prs-test`: a cancelled DAG that opened PRs is still a
+   partial fix.
 
 ## Deployment Plan
 
@@ -47,8 +51,8 @@ No configuration or data migration.
 
 ## Related Issues/PRs
 
-1. miniforge-ai/miniforge#2544 and the runner follow-up: the cancel work that ends a cancelled run
-   `:cancelled` instead of `:failed`. This PR merges before the runner change.
+1. miniforge-ai/miniforge#2546: the runner change that ends a cancelled run `:cancelled` instead of
+   `:failed`. This PR merges before it.
 2. miniforge-ai/miniforge#2377: the cancel acceptance issue.
 
 ## Checklist

@@ -29,7 +29,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; PR URL parsing and comment filtering
+;; PR URL parsing
 (defn ^{:stratum 0} parse-pr-url
   "Extract owner, repo, and PR number from a GitHub PR URL.
    Returns {:owner :repo :number} or nil."
@@ -47,30 +47,6 @@
    :files-processed files-processed
    :fixes fixes
    :pushed? pushed?})
-
-(def ^{:stratum 0} group-comments-by-file
-  "Group comments by file path; see `responder-comments`."
-  review-comments/group-comments-by-file)
-
-(def ^{:stratum 0} filter-actionable-comments
-  "Keep trusted human code-review comments; see `responder-comments`."
-  review-comments/filter-actionable-comments)
-
-(def ^{:stratum 0} fetch-actionable-comments-result
-  "Fetch, filter and group a PR's comments; see `responder-comments`."
-  review-comments/fetch-actionable-comments-result)
-
-(def ^{:stratum 0} build-fix-spec
-  "The fix workflow spec for one comment group; see `responder-fix`."
-  comment-fix/build-fix-spec)
-
-(def ^{:stratum 0} reply-and-resolve!
-  "Reply to a review comment and resolve its thread; see `responder-fix`."
-  comment-fix/reply-and-resolve!)
-
-(def ^{:stratum 0} gather-context
-  "Gather the PR diff and file contents; see `responder-fix`."
-  comment-fix/gather-context)
 
 ;------------------------------------------------------------------------------ Layer 1
 
