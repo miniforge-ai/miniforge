@@ -90,12 +90,17 @@
                     (merge (es/workflow-failed event-stream (:execution/id context) error options)
                            (workflow-run-fields context :failed last-phase)))))
 
-(defn- ^{:stratum 1} publish-workflow-cancelled! [event-stream context last-phase]
-  (publish-event! event-stream
-                  (merge (es/workflow-cancelled event-stream (:execution/id context)
-                                                (ctx/cancellation context)
-                                                (get-in context [:execution/metrics :duration-ms]))
-                         (workflow-run-fields context :cancelled last-phase))))
+(defn- ^{:stratum 1} publish-workflow-cancelled!
+  "An invalid cancel record comes back as its anomaly, which the terminal
+   admission refuses: the run then fails closed with :workflow/failed."
+  [event-stream context last-phase]
+  (let [event (es/workflow-cancelled event-stream (:execution/id context)
+                                     (ctx/cancellation context)
+                                     (get-in context [:execution/metrics :duration-ms]))]
+    (if (anomaly/any-anomaly? event)
+      event
+      (publish-event! event-stream
+                      (merge event (workflow-run-fields context :cancelled last-phase))))))
 
 (defn- ^{:stratum 1} publish-workflow-success! [event-stream context last-phase]
   (let [metrics (build-completion-metrics context)
@@ -200,7 +205,7 @@
     (try+
       (let [last-phase (or (some-> (:execution/current-phase context) name) "")
             publisher (cond
-                        (= :cancelled (:execution/status context)) publish-workflow-cancelled!
+                        (ctx/cancelled? context) publish-workflow-cancelled!
                         (phase/failed? context) publish-workflow-failed!
                         :else publish-workflow-success!)
             receipt (publisher event-stream context last-phase)]

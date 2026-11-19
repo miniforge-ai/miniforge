@@ -131,6 +131,7 @@
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.interface :as es]
             [ai.miniforge.logging.interface :as log]
+            [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
             [ai.miniforge.workflow.fsm :as fsm]
@@ -141,9 +142,14 @@
 
 (def ^{:stratum 0} ^:private unrecorded-cancellation
   "N3 requires a cancel's requester and source. A stop set with no record
-   (`es/cancel!` with one argument, which no production path uses) reports
-   this."
+   (`es/cancel!` with one argument, which only the control-plane adapter's
+   uncalled `send-command` does) reports this."
   {:cancel/requested-by "unknown" :cancel/source :api})
+
+(defn ^{:stratum 0} cancelled?
+  "True for a run that ended :cancelled (N2 2.2)."
+  [ctx]
+  (= :cancelled (:execution/status ctx)))
 
 ;------------------------------------------------------------------------------ Internal helpers
 (def ^{:stratum 0} execution-passthrough-option-keys
@@ -181,7 +187,6 @@
   [machine-snapshot workflow]
   (-> machine-snapshot
       (dissoc :execution/ended-at
-              :execution/cancellation
               :execution/phase-error-offset
               :execution/attempt-phase
               :workflow/evidence-bundle-id
@@ -287,6 +292,14 @@
     :else                                nil))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} run-outcome
+  "How a finished run RESULT ended, for its reports: :completed (as
+   `phase/succeeded?` reads it), :cancelled or :failed."
+  [result]
+  (cond (phase/succeeded? result) :completed
+        (cancelled? result) :cancelled
+        :else :failed))
 
 (defn ^{:stratum 1} cancellation
   "Who cancelled the run in CTX and from where, for its :workflow/cancelled
@@ -505,7 +518,7 @@
     (if (contains? #{:completed :completed-with-warnings :failed} status)
       ctx
       (-> (cond
-            (= :cancelled status) ctx
+            (cancelled? ctx) ctx
             (:execution/fsm-machine ctx)
             (let [result (transition-execution-result ctx :cancel)]
               (if (anomaly/anomaly? result)

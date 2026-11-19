@@ -19,10 +19,12 @@
   "A confirmed stop ends a run :cancelled (N2 2.2), reported by
    :workflow/cancelled alone (N3), never :failed."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.execution-transition :as transition]
+   [ai.miniforge.workflow.isolation-test-support :as isolation]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.runner-environment :as runner-environment]
@@ -38,6 +40,16 @@
   "A test phase the operator cancels while it runs; it then fails, as an
    agent call the cancel cut short does."
   :cancelled-disposition-stopped)
+
+(deftest ^{:stratum 0} an-invalid-cancel-record-is-refused-not-lost
+  (let [stream (es/create-event-stream {:sinks []})
+        receipt (runner-events/publish-workflow-completed!
+                 stream {:execution/id (random-uuid) :execution/status :cancelled
+                         :execution/cancellation {:cancel/requested-by " " :cancel/source :tui}
+                         :execution/metrics {:duration-ms 1}})]
+    (is (anomaly/anomaly? receipt)
+        "the terminal admission refuses it, so the run fails closed with :workflow/failed")
+    (is (empty? (es/get-events stream)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -124,5 +136,9 @@
   phase-test-support/with-workflow-phase-test-support
   (fn [f]
     (with-redefs-fn {#'runner-environment/acquire-execution-environment! (fn [& _] nil)} f)))
+
+;; Checkpoints, the run-owner lock and the worktree base go to throwaway
+;; directories, never the developer's ~/.miniforge.
+(use-fixtures :once isolation/with-isolated-host)
 
 (comment ::cancelled-disposition)
