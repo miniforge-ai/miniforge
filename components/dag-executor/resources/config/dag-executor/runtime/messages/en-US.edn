@@ -16,6 +16,7 @@
   :kubernetes/job-creation-unconfirmed "Kubernetes did not confirm creation of the exact Job. Reconcile its identity before retrying."
   :kubernetes/pod-not-found "No Pod was found for the Job."
   :kubernetes/pod-timeout "Timed out waiting for the Pod to become ready."
+  :kubernetes/pod-interrupted "Interrupted while waiting for the Pod to become ready."
   :kubernetes/pod-ended "The Pod ended with status {phase}."
 
   ;; OCI runtime adapter diagnostics

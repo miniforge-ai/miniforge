@@ -30,6 +30,9 @@ must confirm the effective deadline, including any override.
 The create-request timeout and Pod readiness timings are independent
 executor options with validated packaged defaults; changing either
 does not change the Job deadline.
+Readiness shares one monotonic deadline across Pod listing, status reads,
+output capture and polling waits. Expiry stops the owned CLI process and
+rejects late status results; process cleanup has a bounded shutdown grace.
 Unconfirmed requests retain allowlisted reason codes and an available
 process exit code. Provider output, environment values and exception
 messages are never copied into these diagnostics. Status hints follow
@@ -48,9 +51,12 @@ Exercise the default, both levels of override, and invalid values; check
 that a provider response reverting an override to the default is rejected.
 Verify the create-request and readiness options reach their own boundaries
 without changing the capsule budget.
+Use disposable CLI fixtures to hang either readiness read and select a
+polling interval longer than the total budget. Refuse a late Running
+reply and preserve cancellation both before and during polling.
 
-Both JVM products, Babashka source, and the fresh package passed 10 tests
-and 85 assertions each. The old acquisition path failed four receipt
+Both JVM products, Babashka source, and the fresh package passed the
+focused packet: 19 tests / 112 assertions each. The old acquisition path failed four receipt
 assertions. Ignoring an override failed its budget assertion; dropping the
 diagnostic data failed eight assertions. Neither introduced runtime
 errors. Tests also confirm that an interrupted submission preserves the
@@ -66,6 +72,7 @@ Ordinary release and workload dispatch are unchanged.
 ## Related issues/PRs
 
 PR #2528 defines full stop; PR #2534 defines shared controller identity.
+PR #2542 supplies the bounded command prerequisite and lands first.
 
 [Pinned standards guide](https://github.com/miniforge-ai/miniforge-standards/blob/72f451d3d7e0ad82079610bec61be0399a2b7117/agents.md)
 and [catalog](https://github.com/miniforge-ai/miniforge-standards/blob/72f451d3d7e0ad82079610bec61be0399a2b7117/index.mdc).
