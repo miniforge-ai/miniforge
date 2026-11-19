@@ -445,8 +445,9 @@
                                         #(wr/extract-workspace-checkpoints (read-event-file workflow-id)))
         ;; Checked before a completed run is reported done: an invalid
         ;; request is refused, not answered "already completed".
+        ;; Terminality from the run as recorded: a rewind drops the snapshot.
         resume-run-id (run-id-for events-dir workflow-id (:machine-snapshot reconstructed) (:run-id opts)
-                                  (terminal-status? (get-in reconstructed
+                                  (terminal-status? (get-in recorded
                                                             [:machine-snapshot :execution/status])))
         ;; `--correlation-id` lands on the run's lifecycle events; the
         ;; operator's launcher passes its intervention id and waits for

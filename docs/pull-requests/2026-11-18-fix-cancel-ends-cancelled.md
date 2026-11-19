@@ -55,7 +55,8 @@ success-rate metric all counted a cancel as a failure.
 7. Resume treats a `:cancelled` checkpoint like a `:failed` one (N2 §8.3): a new attempt starts
    from the trimmed pipeline, never the terminal snapshot. `failed-checkpoint?` is renamed
    `terminal-checkpoint?`. A snapshot whose status is terminal is never resumed under its own id,
-   even when the run stopped before publishing its terminal event.
+   even when the run stopped before publishing its terminal event, and even through a rewind,
+   which drops the snapshot: terminality is read from the run as recorded.
 8. `mf status <id>` reports `:cancelled` for a run whose checkpoint or events say so, instead of
    running and then stale.
 
@@ -87,16 +88,20 @@ success-rate metric all counted a cancel as a failure.
 1. The CLI still exits 1 for a cancelled run, as for a failed one.
 2. A phase that fails for its own reasons while a cancel is pending also ends the run
    `:cancelled`. A phase cannot yet say whether the cancel caused its failure, and N2 and N3 do
-   not say which outcome wins.
-3. If a run's terminal checkpoint write itself fails, resume trusts the last snapshot, which is
+   not say which outcome wins. A phase that throws after the cancel lands still ends `:failed`
+   (the exception path), the other side of the same question.
+3. For a spec run the CLI publishes the terminal event and does not act on a refused publish
+   (a failed durable commit). That holds for completed and failed events as well, before and
+   after this PR.
+4. If a run's terminal checkpoint write itself fails, resume trusts the last snapshot, which is
    still active, while the event stream says the run ended. Failed runs have the same gap today.
-4. `:execution/cancellation` is not in the checkpoint's key list, so a checkpoint does not keep
+5. `:execution/cancellation` is not in the checkpoint's key list, so a checkpoint does not keep
    it; the run's `:workflow/cancelled` event does.
-5. `configurable.clj` (6 layers) and `workflow_resume/core.clj` (10 layers) fail the 3-layer
+6. `configurable.clj` (6 layers) and `workflow_resume/core.clj` (10 layers) fail the 3-layer
    check, so the hook blocks any edit to them until they are split. Configurable workflows still
    end a stopped DAG `:failed`. Resume's reconstruction is unchanged; the CLI decides from the
    snapshot's status instead.
-6. Readers that do not know `:workflow/cancelled` yet are fixed in their own PRs, which merge
+7. Readers that do not know `:workflow/cancelled` yet are fixed in their own PRs, which merge
    before this one: the PR responder (miniforge-ai/miniforge#2545); the dashboard's run status,
    archive and views, the event timeline, the TUI kanban and the automation-edge correlator. The
    TUI's and `mf workflow status`'s readers of the legacy single-file layout are unchanged, and a
