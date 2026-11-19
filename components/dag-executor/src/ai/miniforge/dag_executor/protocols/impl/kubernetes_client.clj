@@ -18,12 +18,20 @@
 (ns ai.miniforge.dag-executor.protocols.impl.kubernetes-client
   "Run legacy Kubernetes transport and observe Pod readiness."
   (:require [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
+            [ai.miniforge.dag-executor.protocols.impl.runtime.deadline :as deadline]
+            [ai.miniforge.dag-executor.protocols.impl.runtime.deadline-command :as command]
             [ai.miniforge.dag-executor.result :as result]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
-            [slingshot.slingshot :refer [try+]]))
+            [slingshot.slingshot :refer [try+]])
+  (:import [java.util.concurrent TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} interrupted []
+  (let [error (result/err :pod-interrupted (messages/t :kubernetes/pod-interrupted))]
+    (.interrupt (Thread/currentThread))
+    error))
 
 (defn ^{:stratum 0} run-kubectl
   "Execute a kubectl command and return the result."
@@ -35,6 +43,20 @@
         (.interrupt (Thread/currentThread)))
       {:exit 1 :err (.getMessage e) :out ""})))
 
+(defn- ^{:stratum 0} probe-ready [executable namespace job-name until]
+  (let [listing (command/run! until [executable "get" "pods" "-n" namespace
+                                    "-l" (str "job-name=" job-name) "-o" "jsonpath={.items[0].metadata.name}"])
+        pod-name (when (= 0 (:exit listing)) (some-> (:out listing) str/trim))
+        status (when-not (str/blank? pod-name)
+                 (command/run! until [executable "get" "pod" pod-name "-n" namespace
+                                      "-o" "jsonpath={.status.phase}"]))
+        phase (when (= 0 (:exit status)) (some-> (:out status) str/trim))]
+    (cond
+      (deadline/expired? until) nil
+      (= "Running" phase) (result/ok {:pod-name pod-name :status :running})
+      (contains? #{"Failed" "Succeeded"} phase)
+      (result/err :pod-failed (messages/t :kubernetes/pod-ended {:phase phase})))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} get-pod-for-job [kubectl-path namespace job-name]
@@ -45,19 +67,20 @@
       (result/ok {:pod-name (str/trim out)})
       (result/err :pod-not-found (get reply :err (messages/t :kubernetes/pod-not-found))))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} wait-for-pod-ready
+(defn ^{:stratum 1} wait-for-pod-ready
   [kubectl-path namespace job-name {:kubernetes/keys [pod-ready-timeout-ms pod-ready-poll-interval-ms]}]
-  (let [deadline (+ (System/currentTimeMillis) pod-ready-timeout-ms)]
-    (loop []
-      (if (> (System/currentTimeMillis) deadline)
-        (result/err :pod-timeout (messages/t :kubernetes/pod-timeout))
-        (let [pod-name (get-in (get-pod-for-job kubectl-path namespace job-name) [:data :pod-name])
-              out (when pod-name (:out (run-kubectl kubectl-path "get" "pod" pod-name "-n" namespace
-                                                     "-o" "jsonpath={.status.phase}")))
-              phase (some-> out str/trim)]
-          (cond
-            (= "Running" phase) (result/ok {:pod-name pod-name :status :running})
-            (contains? #{"Failed" "Succeeded"} phase) (result/err :pod-failed (messages/t :kubernetes/pod-ended {:phase phase}))
-            :else (do (Thread/sleep pod-ready-poll-interval-ms) (recur))))))))
+  (let [until (deadline/after-ms pod-ready-timeout-ms)
+        interval-ns (* pod-ready-poll-interval-ms deadline/nanos-per-ms)
+        executable (if (nil? kubectl-path) "kubectl" kubectl-path)]
+    (try+
+      (loop []
+        (cond
+          (.isInterrupted (Thread/currentThread)) (interrupted)
+          (deadline/expired? until) (result/err :pod-timeout (messages/t :kubernetes/pod-timeout))
+          :else
+          (if-let [observed (probe-ready executable namespace job-name until)]
+            observed
+            (do
+              (.sleep TimeUnit/NANOSECONDS (min interval-ns (deadline/remaining-ns until)))
+              (recur)))))
+      (catch InterruptedException _ (interrupted)))))

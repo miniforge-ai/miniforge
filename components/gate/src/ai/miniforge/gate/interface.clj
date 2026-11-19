@@ -54,6 +54,7 @@
    [ai.miniforge.gate.no-secrets :as no-secrets]
    [ai.miniforge.gate.registry :as registry]
    [ai.miniforge.gate.result :as check-result]
+   [ai.miniforge.gate.schema :as gate-schema]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]))
 
@@ -91,7 +92,7 @@
 
 ;;------------------------------------------------------------------------------ Layer 0.5
 ;; Gate result predicates
-(def ^{:stratum 0} passed?
+(def ^{:stratum 0 :malli/schema [:=> [:cat [:maybe :map]] :boolean]} passed?
   "Check if a gate result passed. Accepts the legacy `:passed?` shape
    and the canonical `response/success` / `response/error` shape; see
    `ai.miniforge.gate.result/passed?`, the one reader every gate-result
@@ -145,6 +146,7 @@
 
 (defn ^{:stratum 1} failed?
   "Check if a gate result failed. See `passed?` for accepted shapes."
+  {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
   [result]
   (not (passed? result)))
 
@@ -158,6 +160,7 @@
 
    Returns:
      {:passed? bool :errors [...] :gate gate-kw}"
+  {:malli/schema [:=> [:cat :keyword :any [:maybe :map]] gate-schema/CheckResult]}
   [gate-kw artifact ctx]
   (let [{:keys [check]} (get-gate gate-kw)
         start-ms (System/currentTimeMillis)]
@@ -191,6 +194,7 @@
 
    Returns the gate's repair result (either `{:success? bool :artifact ...}`
    or a `response/success` map) with `:gate gate-kw` assoc'd on top."
+  {:malli/schema [:=> [:cat :keyword :any :any [:maybe :map]] gate-schema/RepairResult]}
   [gate-kw artifact errors ctx]
   (let [{:keys [repair]} (get-gate gate-kw)]
     (if repair
@@ -256,6 +260,7 @@
 
    Returns:
      {:passed? bool :results [...]}"
+  {:malli/schema [:=> [:cat [:sequential :keyword] :any [:maybe :map]] gate-schema/ChecksResult]}
   [gate-kws artifact ctx]
   (let [results (mapv #(check-gate % artifact ctx) gate-kws)
         all-passed? (every? passed? results)]

@@ -24,6 +24,7 @@
    [ai.miniforge.agent-environment.conformance :as conformance]
    [ai.miniforge.agent-environment.controller :as controller]
    [ai.miniforge.agent-environment.fake :as fake]
+   [ai.miniforge.agent-environment.ledger.file :as file-ledger]
    [ai.miniforge.agent-environment.ledger.memory :as memory-ledger]
    [ai.miniforge.agent-environment.lifecycle :as lifecycle]
    [ai.miniforge.agent-environment.schema :as schema]
@@ -128,6 +129,14 @@
    use it for tests and fake-backed runs only."
   []
   (memory-ledger/create))
+
+(defn ^{:stratum 0} file-ledger
+  "A durable ledger store keeping one record file per key under `dir`,
+   created on first write. A write returns only once its record is on
+   stable storage, and controllers in any process sharing `dir` share its
+   leases. Instants in entries read back as Instants."
+  [dir]
+  (or (v/check v/LedgerDir dir) (file-ledger/create dir)))
 
 (defn ^{:stratum 0} fake-provider
   "An in-memory provider; `ai.miniforge.agent-environment.fake` documents

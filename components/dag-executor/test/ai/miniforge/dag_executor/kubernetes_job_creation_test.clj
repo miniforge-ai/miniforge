@@ -5,6 +5,7 @@
   (:require [ai.miniforge.dag-executor.protocols.executor :as executor]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes :as kubernetes]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
+            [ai.miniforge.dag-executor.protocols.impl.runtime.deadline-command :as command]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources :as resources]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-pod-observation :as observation]
             [ai.miniforge.dag-executor.result :as result]
@@ -41,7 +42,7 @@
 
 (deftest ^{:stratum 0} relocated-readiness-check-keeps-running-and-terminal-results-distinct
   (doseq [[phase success?] [["Running" true] ["Failed" false] ["Succeeded" false]]]
-    (with-redefs [shell/sh (fn [& [_ _ kind]]
+    (with-redefs [command/run! (fn [_ [_ _ kind]]
                             {:exit 0 :out (if (= "pods" kind) "mock-capsule-pod" phase)})]
       (let [observed (client/wait-for-pod-ready nil "capsules" "job"
                                                {:kubernetes/pod-ready-timeout-ms 1000
