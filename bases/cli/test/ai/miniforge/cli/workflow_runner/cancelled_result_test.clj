@@ -42,11 +42,10 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest ^{:stratum 1} an-invalid-cancel-record-publishes-a-failure-instead
+(deftest ^{:stratum 1} a-cancelled-event-the-stream-refuses-publishes-a-failure-instead
   (let [stream (es/create-event-stream {:sinks []})]
     (lifecycle/publish-completion-event
-     stream (random-uuid)
-     (assoc cancelled-result :execution/cancellation {:cancel/requested-by "" :cancel/source :cli}))
+     stream (random-uuid) (assoc-in cancelled-result [:execution/metrics :duration-ms] -1))
     (is (= [:workflow/failed] (mapv :event/type (es/get-events stream)))
         "the run still gets a terminal event")))
 

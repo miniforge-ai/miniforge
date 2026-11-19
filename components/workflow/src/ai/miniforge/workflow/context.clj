@@ -303,12 +303,13 @@
 
 (defn ^{:stratum 1} cancellation
   "Who cancelled the run in CTX and from where, for its :workflow/cancelled
-   event: as recorded at the stop, else from its control state, else
-   `unrecorded-cancellation`."
+   event: as recorded at the stop, else from its control state. A missing
+   record, or one N3 does not accept, reports `unrecorded-cancellation`,
+   so the run's terminal event is never refused for it."
   [ctx]
-  (or (:execution/cancellation ctx)
-      (some-> (get-in ctx [:execution/opts :control-state]) es/cancellation)
-      unrecorded-cancellation))
+  (let [recorded (or (:execution/cancellation ctx)
+                     (some-> (get-in ctx [:execution/opts :control-state]) es/cancellation))]
+    (if (es/valid-cancellation? recorded) recorded unrecorded-cancellation)))
 
 (defn- ^{:stratum 1} passthrough-option-values
   [opts]

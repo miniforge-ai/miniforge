@@ -30,7 +30,9 @@ success-rate metric all counted a cancel as a failure.
    records who cancelled it as `:execution/cancellation`. A run that completed or failed before
    the stop keeps its outcome. `context/cancellation` reads the record, falling back to the run's
    control state, then to an explicit unrecorded requester (`"unknown"` from `:api`) for a cancel
-   set with no record, which only the control-plane adapter's uncalled `send-command` does.
+   with no record, or one N3 does not accept (`es/valid-cancellation?`), so the terminal event is
+   never refused for its record. Only the control-plane adapter's uncalled `send-command` cancels
+   with no record.
    `context/cancelled?` and `context/run-outcome` (`:completed`, `:cancelled` or `:failed`) are
    the one check and the one classifier every reader below uses, through the workflow interface.
 2. Every stop path uses it: the stop at a phase boundary (`runner_iteration`) and a DAG the
@@ -43,16 +45,17 @@ success-rate metric all counted a cancel as a failure.
 4. The run loop treats `:cancelled` as terminal (`runner_outcome/terminal-state?`).
 5. The runner publishes `:workflow/cancelled` for a cancelled run, with `:workflow-run/status
    :cancelled`, and no `:pr/created` events. So does the CLI's own completion event, which is the
-   terminal event for a spec run (`lifecycle/publish-completion-event`). A cancel record the event
-   refuses fails closed: the runner's terminal admission refuses it and the run fails with
-   `:workflow/failed`, and the CLI publishes `:workflow/failed`. The run never ends with no
-   terminal event.
+   terminal event for a spec run (`lifecycle/publish-completion-event`). If the stream still
+   refuses the event (only an invalid duration can make it), the run fails closed: the runner's
+   terminal admission refuses it and the run fails with `:workflow/failed`, and the CLI publishes
+   `:workflow/failed`. The run never ends with no terminal event.
 6. The CLI shows `⏹ Workflow cancelled` in the summary and for a `:workflow/cancelled` event line.
    The manifest is marked `:cancelled`. A cancelled spec stays in `work/in-progress`, since it
    neither finished nor failed. A cancelled run is not recorded in the meta-loop's outcome tally.
 7. Resume treats a `:cancelled` checkpoint like a `:failed` one (N2 §8.3): a new attempt starts
    from the trimmed pipeline, never the terminal snapshot. `failed-checkpoint?` is renamed
-   `terminal-checkpoint?`.
+   `terminal-checkpoint?`. A snapshot whose status is terminal is never resumed under its own id,
+   even when the run stopped before publishing its terminal event.
 8. `mf status <id>` reports `:cancelled` for a run whose checkpoint or events say so, instead of
    running and then stale.
 
@@ -84,13 +87,15 @@ success-rate metric all counted a cancel as a failure.
 2. A phase that fails for its own reasons while a cancel is pending also ends the run
    `:cancelled`. A phase cannot yet say whether the cancel caused its failure, and N2 and N3 do
    not say which outcome wins.
-3. `:execution/cancellation` is not in the checkpoint's key list, so a checkpoint does not keep
+3. If a run's terminal checkpoint write itself fails, resume trusts the last snapshot, which is
+   still active, while the event stream says the run ended. Failed runs have the same gap today.
+4. `:execution/cancellation` is not in the checkpoint's key list, so a checkpoint does not keep
    it; the run's `:workflow/cancelled` event does.
-4. `configurable.clj` (6 layers) and `workflow_resume/core.clj` (10 layers) fail the 3-layer
+5. `configurable.clj` (6 layers) and `workflow_resume/core.clj` (10 layers) fail the 3-layer
    check, so the hook blocks any edit to them until they are split. Configurable workflows still
    end a stopped DAG `:failed`. Resume's reconstruction is unchanged; the CLI decides from the
    snapshot's status instead.
-5. Readers that do not know `:workflow/cancelled` yet are fixed in their own PRs, which merge
+6. Readers that do not know `:workflow/cancelled` yet are fixed in their own PRs, which merge
    before this one: the PR responder (miniforge-ai/miniforge#2545); the dashboard's run status,
    archive and views, the event timeline, the TUI kanban and the automation-edge correlator. The
    TUI's and `mf workflow status`'s readers of the legacy single-file layout are unchanged, and a

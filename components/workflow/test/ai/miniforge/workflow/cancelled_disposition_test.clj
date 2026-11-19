@@ -41,12 +41,22 @@
    agent call the cancel cut short does."
   :cancelled-disposition-stopped)
 
-(deftest ^{:stratum 0} an-invalid-cancel-record-is-refused-not-lost
+(deftest ^{:stratum 0} an-invalid-cancel-record-reports-an-unrecorded-requester
+  (let [stream (es/create-event-stream {:sinks []})]
+    (runner-events/publish-workflow-completed!
+     stream {:execution/id (random-uuid) :execution/status :cancelled
+             :execution/cancellation {:cancel/requested-by " " :cancel/source :tui}
+             :execution/metrics {:duration-ms 1}})
+    (is (= [["unknown" :api]] (mapv (juxt :cancel/requested-by :cancel/source)
+                                     (es/get-events stream)))
+        "the cancel is still reported; the record N3 refuses is not")))
+
+(deftest ^{:stratum 0} a-cancelled-event-the-stream-refuses-is-not-lost
   (let [stream (es/create-event-stream {:sinks []})
         receipt (runner-events/publish-workflow-completed!
                  stream {:execution/id (random-uuid) :execution/status :cancelled
-                         :execution/cancellation {:cancel/requested-by " " :cancel/source :tui}
-                         :execution/metrics {:duration-ms 1}})]
+                         :execution/cancellation {:cancel/requested-by "op" :cancel/source :tui}
+                         :execution/metrics {:duration-ms -1}})]
     (is (anomaly/anomaly? receipt)
         "the terminal admission refuses it, so the run fails closed with :workflow/failed")
     (is (empty? (es/get-events stream)))))
