@@ -5,6 +5,7 @@
   (:require [ai.miniforge.dag-executor.protocols.impl.runtime.deadline :as deadline]
             [ai.miniforge.dag-executor.protocols.impl.runtime.deadline-command :as command]
             [ai.miniforge.dag-executor.protocols.impl.runtime.process :as process]
+            [ai.miniforge.dag-executor.protocols.impl.runtime.process-shutdown :as shutdown]
             [ai.miniforge.subprocess.interface :as subprocess]
             [babashka.fs :as fs]
             [clojure.test :refer [deftest is]]))
@@ -30,6 +31,11 @@
 
 (defn- ^{:stratum 0} stalled-drain [stream options]
   (assoc (subprocess/drain-stream stream options) :future (future @(promise))))
+
+(defn- ^{:stratum 0} interrupt-first-wait [waits wait! child until]
+  (let [first? (empty? @waits)]
+    (swap! waits conj until)
+    (if first? (throw (InterruptedException.)) (wait! child until))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -90,5 +96,23 @@
           (is interrupted?)
           (is (not (.isAlive ^Process @started))))
         (finally (Thread/interrupted))))))
+
+(deftest ^{:stratum 1 :integration true} test-cancellation-during-grace-still-forces-termination
+  (let [started (atom nil)
+        waits (atom [])
+        start! (partial record-start! started @#'command/start!)
+        wait! (partial interrupt-first-wait waits @#'shutdown/wait-once!)
+        overrides {#'command/start! start! #'shutdown/wait-once! wait!}
+        argv (shell-command "trap '' TERM; while :; do :; done")]
+    (try
+      (let [reply (with-redefs-fn overrides #(command/run! (deadline/after-ms fixture-budget-ms) argv))
+            interrupted? (Thread/interrupted)]
+        (is (= :interrupted (:reason reply)))
+        (is interrupted?)
+        (is (not (.isAlive ^Process @started)))
+        (is (= (first @waits) (second @waits))))
+      (finally
+        (Thread/interrupted)
+        (.destroyForcibly ^Process @started)))))
 
 (comment (clojure.test/run-tests 'ai.miniforge.dag-executor.deadline-command-integration-test))

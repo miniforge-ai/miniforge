@@ -25,9 +25,8 @@
    container runtime, or `sh -c` forking the real command), and destroying
    only the parent leaks it. Keeping the helpers in one place means a fix
    to the grace period or kill order lands in every call site."
-  (:require [ai.miniforge.subprocess.interface :as subprocess])
-  (:import (java.lang ProcessHandle)
-           (java.util.concurrent TimeUnit)))
+  (:require [ai.miniforge.dag-executor.protocols.impl.runtime.process-shutdown :as shutdown]
+            [ai.miniforge.subprocess.interface :as subprocess]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -97,14 +96,4 @@
    leaves first reduces the chance an intermediate parent immediately
    forks a replacement when its child dies."
   [^Process process]
-  (let [handle      (.toHandle process)
-        descendants (reverse (iterator-seq (.iterator (.descendants handle))))]
-    (doseq [^ProcessHandle child descendants]
-      (.destroy child))
-    (.destroy process)
-    (.waitFor process graceful-shutdown-ms TimeUnit/MILLISECONDS)
-    (doseq [^ProcessHandle child descendants]
-      (when (.isAlive child)
-        (.destroyForcibly child)))
-    (when (.isAlive process)
-      (.destroyForcibly process))))
+  (shutdown/stop! process graceful-shutdown-ms))

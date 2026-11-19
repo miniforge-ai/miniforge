@@ -13,7 +13,7 @@
 (defn- ^{:stratum 0} start! [argv]
   (.start (ProcessBuilder. ^java.util.List argv)))
 
-(defn- ^{:stratum 0} run-child! [child until]
+(defn- ^{:stratum 0} capture-child! [child until]
   (let [streams (capture/drains child)]
     (try+
       (.close (.getOutputStream ^Process child))
@@ -22,7 +22,13 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} run!
+(defn- ^{:stratum 1} run-child! [child until]
+  (let [reply (capture-child! child until)]
+    (if (.isInterrupted (Thread/currentThread)) (capture/failure :interrupted) reply)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} run!
   "Run argv without stdin before until (System/nanoTime units). No expired
    admission or partial-output success. Cleanup may consume the shared shutdown
    grace. Cancellation restores the interrupt flag after owned-process cleanup."
