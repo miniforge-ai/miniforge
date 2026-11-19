@@ -23,6 +23,8 @@ Refuse an expired call before spawning, bound process and output waits,
 and stop the owned process on timeout or cancellation. Timeout results
 discard partial output. Cleanup may use the shared shutdown grace twice:
 once for graceful termination and once to confirm forced process exit.
+The dependent merge exposed prose-gate failures in three incoming PR
+documents. Their flagged sentences are split without changing the claims.
 
 ## Testing plan
 
