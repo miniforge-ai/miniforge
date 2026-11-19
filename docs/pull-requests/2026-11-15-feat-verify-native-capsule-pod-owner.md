@@ -37,8 +37,8 @@ an invalid controller, a different scope, a terminating Pod, and an
 unconfirmed identity. Verify that acquisition errors do not delete any
 resource by name.
 
-Both JVM products, Babashka source, and the fresh package passed 26 tests
-and 142 assertions each. Omitting controller validation failed three targeted
+Both JVM products, Babashka source, and the fresh package passed 28 tests
+and 155 assertions each. Omitting controller validation failed three targeted
 assertions, and ignoring the read timeout failed one. Neither caused
 runtime errors. Strict lint, namespace depths, Polylith, and Babashka
 classpaths passed.
