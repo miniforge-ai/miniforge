@@ -14,11 +14,12 @@
   (.start (ProcessBuilder. ^java.util.List argv)))
 
 (defn- ^{:stratum 0} capture-child! [child until]
-  (let [streams (capture/drains child)]
+  (let [streams (volatile! [])]
     (try+
       (.close (.getOutputStream ^Process child))
-      (capture/await! child streams until)
-      (finally (capture/cleanup! child streams)))))
+      (capture/start-drains! child streams)
+      (capture/await! child @streams until)
+      (finally (capture/cleanup! child @streams)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
