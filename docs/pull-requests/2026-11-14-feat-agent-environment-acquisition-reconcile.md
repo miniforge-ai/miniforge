@@ -65,7 +65,8 @@ listed under Review Findings.
    5. Each reconcile is receipted under the new operation `:environment/reconcile`, with a
       `:step/adopted` or `:step/abandoned` step. A reconcile that deletes what the key left behind
       reports `:step/abandoned` as applied only once the cleanup is verified and recorded, and as
-      uncertain otherwise.
+      uncertain otherwise. Reconcile and cleanup receipts name the adopted or deleted environment's
+      UID and generation; with no environment found, they keep the request subject.
    6. It then claims the request again and returns the fresh decision.
 4. `lifecycle`:
    1. `acquisition` acts on a claim decision. After a reconcile it acts on the fresh decision once: a
@@ -128,6 +129,9 @@ Copilot's second review, of the rebuilt PR, raised four more:
 4. A reconcile that deleted leftovers wrote no reconcile receipt. Fixed: it is receipted, as Changes
    in Detail 3.5 now describes.
 
+A third review raised two more. A reconcile interrupted after its cleanup intent is the finding
+PR #2541 fixes. Receipts that omitted the known environment's UID now carry it.
+
 ## Design Notes
 
 The easy option was to reconcile any provisioning entry on sight. It is rejected because the owner
@@ -178,10 +182,12 @@ trigger a reconcile.
       owner's cleanup intent is not taken, and the entry stays provisioned.
    7. A late owner whose partial provision fails after a rival abandoned the reservation deletes what
       it made, and the entry is released.
-   8. The partial-environment reconcile writes one applied `:environment/reconcile` receipt.
+   8. The partial-environment reconcile writes one applied `:environment/reconcile` receipt, and it
+      and the cleanup's release receipt name the deleted environment's UID. An adoption's reconcile
+      receipt names the adopted UID; a reconcile that found nothing names none.
 4. Each review finding fixed here has a test that fails with its fix removed, checked by mutation on
    this version. The tests for first-round finding 3 and the second-round findings are new.
-5. The agent-environment suite passes: 110 tests with 403 assertions, including the base PRs'
+5. The agent-environment suite passes: 110 tests with 407 assertions, including the base PRs'
    review fixes merged in. clj-kondo and stratum-lint are clean.
 
 All of this is fake-provider evidence. A real provider's `observe` must be authoritative for the

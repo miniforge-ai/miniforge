@@ -35,9 +35,9 @@
 
 (defn- ^{:stratum 0} states [w] (mapv :entry/state (ledger/all-entries (:inner w))))
 
-(defn- ^{:stratum 0} reconcile-steps
-  [w]
-  (->> @(:receipts w) (filter #(= :environment/reconcile (:receipt/operation %))) (mapv :receipt/steps)))
+(defn- ^{:stratum 0} reconcile-steps [w] (mapv :receipt/steps (faults/receipts-of w :environment/reconcile)))
+
+(defn- ^{:stratum 0} reconcile-uids [w] (mapv :receipt/environment-uid (faults/receipts-of w :environment/reconcile)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -70,7 +70,8 @@
       (is (= 1 (:provision! @(:calls w))))
       (is (= (fake/live-namespaces (:fake w)) #{(:environment/namespace adopted)}))
       (is (= {:readiness/ready? true} (env/readiness c (:a w) (:environment/lease adopted))))
-      (is (= [[{:step/name :step/adopted :step/outcome :outcome/applied}]] (reconcile-steps w))))))
+      (is (= [[{:step/name :step/adopted :step/outcome :outcome/applied}]] (reconcile-steps w)))
+      (is (= [(:environment/uid adopted)] (reconcile-uids w))))))
 
 (deftest ^{:stratum 1} test-a-reservation-nothing-was-made-for-is-released-then-resubmitted
   (let [w (outage-world)
@@ -79,7 +80,8 @@
     (let [resubmitted (faults/reacquire w (faults/late-controller w) req)]
       (is (= 2 (get-in resubmitted [:environment/lease :lease/generation])))
       (is (= 1 (:provision! @(:calls w))))
-      (is (= [[{:step/name :step/abandoned :step/outcome :outcome/applied}]] (reconcile-steps w))))))
+      (is (= [[{:step/name :step/abandoned :step/outcome :outcome/applied}]] (reconcile-steps w)))
+      (is (= [nil] (reconcile-uids w))))))
 
 (deftest ^{:stratum 1} test-a-provider-that-cannot-answer-leaves-the-reservation
   (let [w (outage-world)
