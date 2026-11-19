@@ -35,9 +35,13 @@ admission, a hung process, cancellation and capture overflow. Verify that
 the directly launched process is no longer alive when the call returns.
 Run strict lint, actual namespace depths and both product runtimes.
 Both JVM products, Babashka source and a freshly built package passed
-7 integration tests / 20 assertions each. This includes cancellation
+8 integration tests / 23 assertions each. This includes cancellation
 during cleanup of a process that ignores SIGTERM. The process tests use a local
 POSIX shell; no provider or cluster is contacted.
+The held-pipe regression forks a real descendant that retains stdout
+after its parent exits. It verifies timeout and refusal of partial
+output without substituting capture futures. Both JVM products use
+Java 21; the native Babashka runtime is verified separately.
 Removing interruption deferral fails two cleanup assertions without a
 runtime error. Existing executor and fake-runtime suites passed 82 tests /
 301 assertions against the shared helper.
