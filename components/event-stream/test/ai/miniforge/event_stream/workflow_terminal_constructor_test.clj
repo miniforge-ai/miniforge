@@ -17,12 +17,6 @@
   (events/workflow-completed stream workflow-id :completed 0
                              {:workflow/evidence-bundle-id (random-uuid) :tokens 0 :cost-usd 0.0}))
 
-(defn- ^{:stratum 0} cancelled [stream workflow-id]
-  (events/workflow-cancelled stream workflow-id
-                             {:cancel/requested-by "op@example.invalid" :cancel/source :cli
-                              :cancel/reason "fixture cancel"}
-                             0))
-
 (defn- ^{:stratum 0} failed
   ([stream workflow-id] (failed stream workflow-id (Exception. "fixture failure")))
   ([stream workflow-id error]
@@ -41,19 +35,17 @@
       (try+ (is (= [receipt] (events/get-events stream)))
         (finally (events/close-current-event-stream! stream))))))
 
-(deftest ^{:stratum 0} cancellation-without-a-requester-or-control-action-id-fails-closed
-  (fixture/with-stream
-    (fn [stream _]
-      (let [workflow-id (random-uuid)]
-        (doseq [cancellation [{:cancel/source :cli}
-                              {:cancel/requested-by "op" :cancel/source :control-action}
-                              {:cancel/requested-by "op" :cancel/source :unknown}]]
-          (is (anomaly/anomaly? (events/publish! stream (events/workflow-cancelled
-                                                        stream workflow-id cancellation 0)))
-              (pr-str cancellation)))
-        (is (empty? (events/get-events stream)))))))
+(def ^{:stratum 0} ^:private cli-cancellation
+  {:cancel/requested-by "op@example.invalid" :cancel/source :cli})
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} control-action-cancelled [action-id]
+  (fn [stream workflow-id]
+    (events/workflow-cancelled stream workflow-id
+                               (assoc cli-cancellation :cancel/source :control-action
+                                      :action/id action-id)
+                               5)))
 
 (defn- ^{:stratum 1} verify-current [constructor expected stream options]
   (let [draft (constructor stream (random-uuid))
@@ -91,40 +83,28 @@
       (is (= failure (completed stream (random-uuid))))
       (is (= failure (failed stream (random-uuid)))))))
 
-(deftest ^{:stratum 1} legacy-terminal-payloads-preserve-status-and-diagnostics
-  (let [stream (events/create-event-stream {:sinks []})
-        workflow-id (random-uuid)
-        event (completed stream workflow-id)]
-    (is (= :completed (:workflow/status event)))
-    (is (= 0 (:workflow/duration-ms event)))
-    (is (= 0 (:workflow/tokens event)))
-    (is (= 0.0 (:workflow/cost-usd event)))
-    (is (uuid? (:workflow/evidence-bundle-id event)))
-    (doseq [error (error-cases)]
-      (let [event (events/workflow-failed stream workflow-id error)]
-        (is (= "fixture failure" (:workflow/failure-reason event)))
-        (is (= (msg/t :workflow/failed {:reason "fixture failure"}) (:message event)))
-        (is (map? (:workflow/error-details event)))
-        (is (= :anomalies/fault (:workflow/anomaly-code event)))
-        (is (false? (:workflow/retryable? event)))))
-    (let [event (cancelled stream workflow-id)]
-      (is (= :workflow/cancelled (:event/type event))
-          "a cancel is never folded into :workflow/completed or :workflow/failed (N3)")
-      (is (nil? (:workflow/status event)))
-      (is (= "op@example.invalid" (:cancel/requested-by event)))
-      (is (= (msg/t :workflow/cancelled {:requested-by "op@example.invalid"}) (:message event))))))
+(def ^{:stratum 1} ^:private invalid-cancellations
+  [[{:cancel/source :cli} 0]
+   [{:cancel/requested-by " " :cancel/source :cli} 0]
+   [(dissoc cli-cancellation :cancel/source) 0]
+   [(assoc cli-cancellation :cancel/source :control-action) 0]
+   [cli-cancellation nil]
+   [cli-cancellation -1]
+   [nil 0]])
+
+(defn- ^{:stratum 1} cancelled [stream workflow-id]
+  (events/workflow-cancelled stream workflow-id cli-cancellation 0))
+
+(deftest ^{:stratum 1} a-cancel-records-its-first-requester
+  (let [cs (events/create-control-state)]
+    (events/cancel! cs)
+    (is (nil? (events/cancellation cs)) "a cancel with no record leaves none")
+    (events/cancel! cs cli-cancellation)
+    (events/cancel! cs {:cancel/requested-by "later" :cancel/source :tui})
+    (is (true? (events/cancelled? cs)))
+    (is (= cli-cancellation (events/cancellation cs)))))
 
 ;------------------------------------------------------------------------------ Layer 2
-
-(deftest ^{:stratum 2} current-terminal-facts-commit-and-replay
-  (doseq [[constructor expected]
-          [[completed {:workflow/duration-ms 0 :workflow/tokens 0 :workflow/cost-usd 0.0}]
-           [failed {:failure/class :failure.class/task-code
-                    :workflow/failure-phase :opsv/verify :workflow/failure-reason "fixture failure"}]
-           [cancelled {:event/type :workflow/cancelled :workflow/duration-ms 0
-                       :cancel/requested-by "op@example.invalid" :cancel/source :cli
-                       :cancel/reason "fixture cancel"}]]]
-    (fixture/with-stream (partial verify-current constructor expected))))
 
 (deftest ^{:stratum 2} incomplete-and-contradictory-terminal-facts-fail-closed
   (fixture/with-stream verify-refusals))
@@ -159,5 +139,63 @@
 (deftest ^{:stratum 2} identity-failures-remain-anomalies-on-both-profiles
   (fixture/with-stream verify-identity-failure)
   (verify-identity-failure (events/create-event-stream {:sinks []}) nil))
+
+(deftest ^{:stratum 2} cancellation-records-n3-refuses-fail-closed-on-both-profiles
+  (doseq [[cancellation duration-ms] invalid-cancellations]
+    (is (anomaly/anomaly? (events/workflow-cancelled (events/create-event-stream {:sinks []})
+                                                     (random-uuid) cancellation duration-ms))
+        (pr-str [cancellation duration-ms])))
+  (fixture/with-stream
+    (fn [stream _]
+      (let [workflow-id (random-uuid)]
+        (doseq [[cancellation duration-ms] invalid-cancellations]
+          (is (anomaly/anomaly? (events/workflow-cancelled stream workflow-id
+                                                           cancellation duration-ms))
+              (pr-str [cancellation duration-ms])))
+        (is (anomaly/anomaly? (events/publish! stream (events/workflow-cancelled
+                                                      stream workflow-id
+                                                      (assoc cli-cancellation
+                                                             :cancel/source :unknown)
+                                                      0)))
+            "a source N3 does not name is refused at publication")
+        (is (empty? (events/get-events stream)))))))
+
+(deftest ^{:stratum 2} legacy-terminal-payloads-preserve-status-and-diagnostics
+  (let [stream (events/create-event-stream {:sinks []})
+        workflow-id (random-uuid)
+        event (completed stream workflow-id)]
+    (is (= :completed (:workflow/status event)))
+    (is (= 0 (:workflow/duration-ms event)))
+    (is (= 0 (:workflow/tokens event)))
+    (is (= 0.0 (:workflow/cost-usd event)))
+    (is (uuid? (:workflow/evidence-bundle-id event)))
+    (doseq [error (error-cases)]
+      (let [event (events/workflow-failed stream workflow-id error)]
+        (is (= "fixture failure" (:workflow/failure-reason event)))
+        (is (= (msg/t :workflow/failed {:reason "fixture failure"}) (:message event)))
+        (is (map? (:workflow/error-details event)))
+        (is (= :anomalies/fault (:workflow/anomaly-code event)))
+        (is (false? (:workflow/retryable? event)))))
+    (let [event (cancelled stream workflow-id)]
+      (is (= :workflow/cancelled (:event/type event))
+          "a cancel is never folded into :workflow/completed or :workflow/failed (N3)")
+      (is (nil? (:workflow/status event)))
+      (is (= (:cancel/requested-by cli-cancellation) (:cancel/requested-by event)))
+      (is (= (msg/t :workflow/cancelled {:requested-by (:cancel/requested-by cli-cancellation)})
+             (:message event))))))
+
+(deftest ^{:stratum 2} current-terminal-facts-commit-and-replay
+  (doseq [:let [action-id (random-uuid)]
+          [constructor expected]
+          [[completed {:workflow/duration-ms 0 :workflow/tokens 0 :workflow/cost-usd 0.0}]
+           [failed {:failure/class :failure.class/task-code
+                    :workflow/failure-phase :opsv/verify :workflow/failure-reason "fixture failure"}]
+           [cancelled {:event/type :workflow/cancelled :workflow/duration-ms 0
+                       :cancel/requested-by (:cancel/requested-by cli-cancellation)
+                       :cancel/source :cli}]
+           [(control-action-cancelled action-id)
+            {:event/type :workflow/cancelled :cancel/source :control-action
+             :action/id action-id :workflow/duration-ms 5}]]]
+    (fixture/with-stream (partial verify-current constructor expected))))
 
 (comment ::workflow-terminal-constructor-acceptance)
