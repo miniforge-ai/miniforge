@@ -18,8 +18,8 @@ Before this PR the slot printed "learning: not instrumented".
 
 ## Motivation
 
-Thesium Codex T2 §4.1 item 6 defines the learning slot as the median time
-from a miss to a codex node admitted for it, or to an explicit refusal.
+Thesium Codex T2 §4.1 item 6 defines the learning slot as median latency.
+It measures time from a miss to admission or explicit refusal.
 T1 §8.4 makes those decisions dated harvest records. Harvest entries
 cited their sources in prose, so nothing could pair a miss with the
 decision that closed it.
@@ -33,16 +33,15 @@ decision that closed it.
   - `misses::` (comma-separated `:miss/id` UUIDs).
 
   A section starts at a markdown heading: up to three leading spaces, one
-  to six `#`, then a space, so a `#tag` line does not split a section. A
-  field line may start with `- `. A section without all three, or with
+  to six `#`, then a space. A `#tag` line does not split a section. A
+  field line may start with `-`. A section without all three, or with
   an unparseable date or outcome, decides nothing. Invalid miss ids in a
   list are dropped.
-- `codex/harvest.clj` (new) and `codex.interface/harvest-decisions`: read
-  the logs and return `{:decisions [...]}`, or a `:codex-unreadable`
-  anomaly when the directory is missing, unreadable, or has a
-  subdirectory that cannot be listed. `file-seq` would skip such a
-  subdirectory silently, so the reader walks the tree itself, skipping
-  symlinked directories so a link back to an ancestor cannot loop. The codex
+- `codex/harvest.clj` and `codex.interface/harvest-decisions` read logs and
+  return `{:decisions [...]}`. A missing, unreadable or unlistable directory
+  yields a `:codex-unreadable` anomaly. This includes unlistable subdirectories.
+  `file-seq` would silently skip them, so the reader walks the tree itself.
+  It skips symlinked directories to avoid loops through ancestors. The codex
   stays read-only.
 - `codex-gap/report.clj`:
   - `harvest-decisions` reads the decisions through the codex interface,
@@ -64,9 +63,9 @@ decision that closed it.
 - `bb.edn` `codex-gap-report`: passes the harvest decisions when
   `MINIFORGE_CODEX_PATH` is set.
 - `work/`: the spec moves to `work/done/`. With #2519 merged, the codex-gap
-  theme has no queued spec left: `QUEUE.md` loses its section (by hand,
-  because `bb work:queue` could not run here), and `themes.edn` marks the
-  theme `:complete` with a completion note.
+  theme has no queued spec left. `QUEUE.md` loses its section manually because
+  `bb work:queue` could not run here. `themes.edn` marks the theme
+  `:complete` with a completion note.
 
 ## Testing Plan
 
