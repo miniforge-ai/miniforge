@@ -30,10 +30,12 @@ success-rate metric all counted a cancel as a failure.
    records who cancelled it as `:execution/cancellation`. A run that completed or failed before
    the stop keeps its outcome. `context/cancellation` reads the record, falling back to the run's
    control state, then to an explicit unrecorded requester (`"unknown"` from `:api`) for a cancel
-   set with no record, which no production path does. A resumed attempt drops the old record.
-2. Every stop path uses it: the stop at a phase boundary (`runner_iteration`), a stop anomaly
-   thrown out of the pipeline loop (`runner_execution_boundary`), and a DAG the operator stopped
-   (`execution_dag`).
+   set with no record, which only the control-plane adapter's uncalled `send-command` does.
+   `context/cancelled?` and `context/run-outcome` (`:completed`, `:cancelled` or `:failed`) are
+   the one check and the one classifier every reader below uses, through the workflow interface.
+2. Every stop path uses it: the stop at a phase boundary (`runner_iteration`) and a DAG the
+   operator stopped (`execution_dag`). The catch for a stop anomaly thrown out of the pipeline
+   loop (`runner_execution_boundary`) does too, though nothing throws one today.
 3. A phase that fails after its run was stopped sends `:cancel` to the machine instead of
    `:phase/fail` (`execution_transition/stop-aware-event`). That failure is the cancel's own
    effect, the agent call it cut short, and `:failed` is final, so without this the stop could not
@@ -41,13 +43,18 @@ success-rate metric all counted a cancel as a failure.
 4. The run loop treats `:cancelled` as terminal (`runner_outcome/terminal-state?`).
 5. The runner publishes `:workflow/cancelled` for a cancelled run, with `:workflow-run/status
    :cancelled`, and no `:pr/created` events. So does the CLI's own completion event, which is the
-   terminal event for a spec run (`lifecycle/publish-completion-event`). `workflow/cancellation`
-   is on the workflow interface for it.
+   terminal event for a spec run (`lifecycle/publish-completion-event`). A cancel record the event
+   refuses fails closed: the runner's terminal admission refuses it and the run fails with
+   `:workflow/failed`, and the CLI publishes `:workflow/failed`. The run never ends with no
+   terminal event.
 6. The CLI shows `⏹ Workflow cancelled` in the summary and for a `:workflow/cancelled` event line.
    The manifest is marked `:cancelled`. A cancelled spec stays in `work/in-progress`, since it
    neither finished nor failed. A cancelled run is not recorded in the meta-loop's outcome tally.
 7. Resume treats a `:cancelled` checkpoint like a `:failed` one (N2 §8.3): a new attempt starts
-   from the trimmed pipeline, never the terminal snapshot.
+   from the trimmed pipeline, never the terminal snapshot. `failed-checkpoint?` is renamed
+   `terminal-checkpoint?`.
+8. `mf status <id>` reports `:cancelled` for a run whose checkpoint or events say so, instead of
+   running and then stale.
 
 ## Testing Plan
 
@@ -56,27 +63,38 @@ success-rate metric all counted a cancel as a failure.
       the requester recorded;
    2. `stop-aware-event` changes only a phase failure, and only on a stopped run;
    3. a stop does not rewrite a completed or failed run;
-   4. a cancelled run publishes `:workflow/cancelled` alone.
-2. New `cancelled_result_test.clj`: the CLI's completion event, summary line and kanban folder for
-   a cancelled run.
+   4. a cancelled run publishes `:workflow/cancelled` alone, and an invalid cancel record is
+      refused, not lost.
+
+   It runs under `isolation/with-isolated-host`, so its checkpoints never reach `~/.miniforge`.
+2. New `cancelled_result_test.clj`: the CLI's completion event (and its failure fallback), summary
+   line and kanban folder for a cancelled run. `status_test`: `mf status` reads a cancelled run
+   from its checkpoint and from its events.
 3. Updated: `runner_test` (a stopped run returns `:cancelled` with its requester),
    `runner_iteration_control_test`, `dag_operator_control_test`, and `resume_test` (a cancelled
    checkpoint resumes as a new attempt).
-4. The 42 component and base test namespaces that cover stops, cancels and the changed functions
-   pass except `runner_checkpoint_test`'s relative-root case, which fails the same way on main on
-   macOS. The 21 project test namespaces that mention cancel pass, among them
-   `cancel_reaches_llm_test` and `dag_merge_cancel_test`: 161 tests, 4706 assertions.
+4. The 45 component and base test namespaces that cover stops, cancels and the changed functions
+   pass, 438 tests and 1564 assertions, except `runner_checkpoint_test`'s relative-root case, which
+   fails the same way on main on macOS. The 21 project test namespaces that mention cancel pass,
+   among them `cancel_reaches_llm_test` and `dag_merge_cancel_test`: 161 tests, 4706 assertions.
 
 ## Notes
 
 1. The CLI still exits 1 for a cancelled run, as for a failed one.
-2. `configurable.clj` (6 layers) and `workflow_resume/core.clj` (10 layers) fail the 3-layer
+2. A phase that fails for its own reasons while a cancel is pending also ends the run
+   `:cancelled`. A phase cannot yet say whether the cancel caused its failure, and N2 and N3 do
+   not say which outcome wins.
+3. `:execution/cancellation` is not in the checkpoint's key list, so a checkpoint does not keep
+   it; the run's `:workflow/cancelled` event does.
+4. `configurable.clj` (6 layers) and `workflow_resume/core.clj` (10 layers) fail the 3-layer
    check, so the hook blocks any edit to them until they are split. Configurable workflows still
    end a stopped DAG `:failed`. Resume's reconstruction is unchanged; the CLI decides from the
    snapshot's status instead.
-3. Readers that do not know `:workflow/cancelled` yet, the PR responder, the dashboard's run
-   status and archive, and the event timeline, are fixed in their own PRs, which merge before this
-   one.
+5. Readers that do not know `:workflow/cancelled` yet are fixed in their own PRs, which merge
+   before this one: the PR responder (miniforge-ai/miniforge#2545); the dashboard's run status,
+   archive and views, the event timeline, the TUI kanban and the automation-edge correlator. The
+   TUI's and `mf workflow status`'s readers of the legacy single-file layout are unchanged, and a
+   cancelled chain step still ends its chain as a failed step.
 
 ## Deployment Plan
 

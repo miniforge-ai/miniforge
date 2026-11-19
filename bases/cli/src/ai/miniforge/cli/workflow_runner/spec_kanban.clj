@@ -26,7 +26,6 @@
    [clojure.string :as str]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -41,9 +40,7 @@
   "The kanban folder a finished run's spec moves to; nil for a cancelled
    run, whose spec stays where it is."
   [result]
-  (cond (phase/succeeded? result) :done
-        (= :cancelled (:execution/status result)) nil
-        :else :failed))
+  (get {:completed :done :failed :failed} (workflow/run-outcome result)))
 
 (defn- ^{:stratum 0} work-spec?
   "True when the spec provenance points to a file under work/."

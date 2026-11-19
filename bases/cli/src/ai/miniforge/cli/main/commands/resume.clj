@@ -489,11 +489,10 @@
                                                                                      :duration-ms 0})))
             ;; A run that ended :failed or :cancelled is terminal (N2 §8.3):
             ;; its snapshot is not continued, a new attempt starts from it.
-            failed-checkpoint? (and machine-snapshot
-                                    (or (:failed? reconstructed)
-                                        (when (= :cancelled (:execution/status machine-snapshot))
-                                          true)))
-            resume-workflow (if (and machine-snapshot (not failed-checkpoint?))
+            terminal-checkpoint? (and machine-snapshot
+                                      (or (:failed? reconstructed)
+                                          (when (workflow/cancelled? machine-snapshot) true)))
+            resume-workflow (if (and machine-snapshot (not terminal-checkpoint?))
                               workflow
                               (wr/trim-pipeline workflow completed-phases))
             _ (resume-anomaly/throw-resume-anomaly! resume-workflow)
@@ -557,7 +556,7 @@
                                       :event-stream event-stream
                                       :control-state control-state
                                       :resume-machine-snapshot machine-snapshot
-                                      :resume-reset-terminal? failed-checkpoint?
+                                      :resume-reset-terminal? terminal-checkpoint?
                                       ;; Never event telemetry; a rewind has
                                       ;; already cut them to the kept phases.
                                       :resume-phase-results (when (wr/checkpointed-phase-results recorded)
