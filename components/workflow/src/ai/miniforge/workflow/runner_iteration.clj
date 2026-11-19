@@ -20,14 +20,14 @@
   (log/create-logger {:min-level :debug :output :human}))
 
 (defn- ^{:stratum 0} apply-dashboard-stop
-  "Mark context failed after a dashboard stop request."
+  "Record the stop and end the run :cancelled, not :failed (N2 §2.2)."
   [context stop-anomaly]
   (-> context
       (update :execution/errors conj
               (outcome/make-execution-error :dashboard-stop
                                     (:anomaly/message stop-anomaly)
                                     {:data (:anomaly/data stop-anomaly)}))
-      (ctx/transition-to-failed)))
+      (ctx/transition-to-cancelled)))
 
 (defn- ^{:stratum 0} stop-recorded?
   "True when `context` already records a dashboard stop, as a DAG phase

@@ -26,6 +26,7 @@
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.self-healing.interface :as self-healing]
    [ai.miniforge.workflow.boundary.runner-heartbeat :as heartbeat]
+   [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-event-dispatch :as dispatch]
    [ai.miniforge.workflow.runner-failure-event :as failure-event]
@@ -88,6 +89,13 @@
     (publish-event! event-stream
                     (merge (es/workflow-failed event-stream (:execution/id context) error options)
                            (workflow-run-fields context :failed last-phase)))))
+
+(defn- ^{:stratum 1} publish-workflow-cancelled! [event-stream context last-phase]
+  (publish-event! event-stream
+                  (merge (es/workflow-cancelled event-stream (:execution/id context)
+                                                (ctx/cancellation context)
+                                                (get-in context [:execution/metrics :duration-ms]))
+                         (workflow-run-fields context :cancelled last-phase))))
 
 (defn- ^{:stratum 1} publish-workflow-success! [event-stream context last-phase]
   (let [metrics (build-completion-metrics context)
@@ -191,10 +199,12 @@
   (when (dispatch/dispatchable-event-stream? event-stream)
     (try+
       (let [last-phase (or (some-> (:execution/current-phase context) name) "")
-            failed? (phase/failed? context)
-            publisher (if failed? publish-workflow-failed! publish-workflow-success!)
+            publisher (cond
+                        (= :cancelled (:execution/status context)) publish-workflow-cancelled!
+                        (phase/failed? context) publish-workflow-failed!
+                        :else publish-workflow-success!)
             receipt (publisher event-stream context last-phase)]
-        (when (and (not failed?) (not (anomaly/any-anomaly? receipt)))
+        (when (and (= publish-workflow-success! publisher) (not (anomaly/any-anomaly? receipt)))
           (publish-pr-created-events! event-stream context))
         receipt)
       #_{:clj-kondo/ignore [:unresolved-symbol]}

@@ -31,7 +31,8 @@
             [ai.miniforge.workflow.context :as context]
             [ai.miniforge.workflow.execution-events :as exec-events]
             [ai.miniforge.workflow.fsm :as workflow-fsm]
-            [ai.miniforge.workflow.messages :as messages]))
+            [ai.miniforge.workflow.messages :as messages]
+            [ai.miniforge.workflow.stop-signal :as stop-signal]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -78,6 +79,17 @@
   (or (get-in phase-result [:result :output :phase/verdict])
       (get-in phase-result [:output :phase/verdict])
       (get phase-result :phase/verdict)))
+
+(defn ^{:stratum 0} stop-aware-event
+  "EVENT for the phase that just ran, except that a phase failing after its
+   run was stopped sends :cancel: the failure is the cancel's own effect
+   (the agent call it cut short), and :failed is final, so the stop could
+   not be recorded after it."
+  [ctx event]
+  (if (and (= :phase/fail (if (map? event) (:type event) event))
+           (stop-signal/stopped? (get-in ctx [:execution/opts :control-state])))
+    :cancel
+    event))
 
 ;------------------------------------------------------------------------------ Layer 1
 
