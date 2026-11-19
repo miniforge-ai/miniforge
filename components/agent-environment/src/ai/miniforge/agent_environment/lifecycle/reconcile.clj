@@ -27,7 +27,6 @@
    [ai.miniforge.agent-environment.lifecycle.cleanup :as cleanup]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]
    [ai.miniforge.agent-environment.lifecycle.support :as support]
-   [ai.miniforge.agent-environment.receipt :as receipt]
    [ai.miniforge.anomaly.interface :as anomaly]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -85,10 +84,12 @@
 
 (defn- ^{:stratum 1} settled!
   "Adopt the ready environment the reservation made, delete what the key
-   left behind, or release the reservation when nothing of the key exists."
-  [c subject request stale target seen]
+   left behind, or release the reservation when nothing of the key exists.
+   Receipts name the adopted or deleted environment when there is one."
+  [c acting request stale target seen]
   (let [adopted (when-not (anomaly/anomaly? seen) (adoptable stale target seen))
-        leftover (when-not (or (anomaly/anomaly? seen) adopted) (doomed stale target seen))]
+        leftover (when-not (or (anomaly/anomaly? seen) adopted) (doomed stale target seen))
+        subject (support/subject-of acting request (or adopted leftover))]
     (cond
       (anomaly/anomaly? seen) (controller/finish! c subject :environment/reconcile seen)
       leftover (controller/finish! c subject :environment/reconcile (leftover-call (cleaned! c subject request stale leftover)))
@@ -104,7 +105,6 @@
   [c acting request decision]
   (let [stale (:decision/entry decision)
         target (controller/target stale)
-        subject (receipt/request-subject acting request)
         seen (protocol/observe (support/provider c) target)]
-    (anomaly/let-ok [_ (settled! c subject request stale target seen)]
+    (anomaly/let-ok [_ (settled! c acting request stale target seen)]
       (controller/claim! c request))))

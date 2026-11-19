@@ -49,8 +49,8 @@ listed under Review Findings.
       uncertain, yield `:reconcile` instead of a refusal.
    2. `reconciled`: the entry a reconcile leaves, provisioned with the adopted environment or
       released, with the claim cleared.
-   3. `claim-held?`: the entry is still the reservation at the given generation, under the given
-      controller's unexpired claim.
+   3. `claim-held?`: the entry is still the reservation at the given generation, still provisioning,
+      under the given controller's unexpired claim.
 2. `controller`: `claim!` decides at the clock's `now`, and a `:reconcile` decision carries the stale
    entry. `settle-reconciled!` applies a reconcile only while the stale entry is still the key's exact
    entry, so two controllers reconciling at once settle it once.
@@ -63,7 +63,10 @@ listed under Review Findings.
    4. A provider that cannot answer leaves the entry as it is, and the acquire gets the provider's
       anomaly. "Cannot see it" is never read as "nothing exists".
    5. Each reconcile is receipted under the new operation `:environment/reconcile`, with a
-      `:step/adopted` or `:step/abandoned` step.
+      `:step/adopted` or `:step/abandoned` step. A reconcile that deletes what the key left behind
+      reports `:step/abandoned` as applied only once the cleanup is verified and recorded, and as
+      uncertain otherwise. Reconcile and cleanup receipts name the adopted or deleted environment's
+      UID and generation; with no environment found, they keep the request subject.
    6. It then claims the request again and returns the fresh decision.
 4. `lifecycle`:
    1. `acquisition` acts on a claim decision. After a reconcile it acts on the fresh decision once: a
@@ -74,14 +77,17 @@ listed under Review Findings.
 5. `lifecycle.provisioning/adopted`, when the owner records its provision:
    1. If the entry no longer holds the owner's lease, another controller reconciled the reservation.
       The owner deletes what it created under a cleanup intent on the reservation the reconcile
-      released, and returns `claim-lost` with the receipt ids and UID. If a newer generation already
+      released with no environment, and returns `claim-lost` with the receipt ids and UID. If a newer generation already
       holds the key, the intent is not taken and nothing is deleted. The UID in the refusal is left
       for orphan discovery.
    2. If the entry holds the owner's lease but another controller moved it on (adopted, then
       cancelled or released), the owner gets that state's refusal and deletes nothing.
 6. `lifecycle.cleanup/cleaned-under!` replaces `reservation-cleaned!`. The caller passes the
-   ownership rule the intent is written under (`for-reservation`, `for-abandoned` or `for-stale`) and
-   the receipt's reason.
+   ownership rule the intent is written under, and the receipt's reason:
+   1. `for-reservation`: the reservation at the owner's generation while provisioning, or once a
+      reconcile released it with no environment. It serves a failed provision and a late owner's
+      claim-lost cleanup alike, and never takes an adopted environment or a newer generation.
+   2. `for-stale`: the exact stale entry a reconcile read.
 7. `support/applied-step`; the `:environment/reconcile` operation in the receipt schema.
 8. Test helpers in `ledger-faults`: a one-shot `:before-read` hook beside `:before-write`, and
    `abandon!`, `at-record` and `late-controller`, shared by the reconcile and takeover tests.
@@ -111,6 +117,21 @@ Copilot's six findings on the first version of this PR, and where each is fixed:
 6. A partial environment could be adopted. Fixed: only a ready environment is adopted, and a partial
    one is deleted.
 
+Copilot's second review, of the rebuilt PR, raised four more:
+
+1. The dispatch guard accepted a non-provisioning entry that kept the claim. Fixed: `claim-held?`
+   requires `:state/provisioning`.
+2. A reconcile interrupted between its cleanup intent and its outcome left the entry releasing with
+   no lease holder, blocking the key. Fixed in PR #2541, stacked on this one, to keep this PR under
+   the 600-line budget.
+3. A late owner whose partial provision failed after a reconcile abandoned its reservation deleted
+   nothing. Fixed: `for-reservation` also takes an abandoned reservation.
+4. A reconcile that deleted leftovers wrote no reconcile receipt. Fixed: it is receipted, as Changes
+   in Detail 3.5 now describes.
+
+A third review raised two more. A reconcile interrupted after its cleanup intent is the finding
+PR #2541 fixes. Receipts that omitted the known environment's UID now carry it.
+
 ## Design Notes
 
 The easy option was to reconcile any provisioning entry on sight. It is rejected because the owner
@@ -130,15 +151,16 @@ trigger a reconcile.
 1. Orphan discovery against a provider inventory. A late owner whose cleanup intent was not taken,
    and a partial provision whose UID is unknown, are found by it.
 2. A sweep that reconciles expired claims without waiting for a replay.
-3. An append-only decision history, and ledger export and restore.
+3. Reconciling a releasing entry whose cleaner stopped before recording its outcome: PR #2541.
+4. An append-only decision history, and ledger export and restore.
 
 ## Testing Plan
 
 1. `lease_test`:
    1. An expired claim yields `:reconcile`; a provisioned entry past the claim's end is still a
       duplicate; a cleanup left uncertain, with or without a UID, yields `:reconcile`.
-   2. `claim-held?` is false for another generation, another controller, the claim's end, or an
-      entry with no claim.
+   2. `claim-held?` is false for another generation, another controller, the claim's end, an entry
+      with no claim, or a releasing entry that kept the claim.
    3. `reconciled` adopts or releases.
 2. `reconcile_test`, with a controller whose clock is past every claim:
    1. A lost provision response, replayed: one `provision!` call in all, the environment adopted and
@@ -158,9 +180,14 @@ trigger a reconcile.
       dispatch: the owner gets `claim-lost`, and the rival's is the only `provision!` call.
    6. A provision that ends unconfirmed after a rival adopted its environment deletes nothing: the
       owner's cleanup intent is not taken, and the entry stays provisioned.
-4. Each of the six review findings has a test that fails with its fix removed, checked by mutation on
-   this version. The test for finding 3 is new in this version.
-5. The agent-environment suite passes: 107 tests with 391 assertions, including the base PRs'
+   7. A late owner whose partial provision fails after a rival abandoned the reservation deletes what
+      it made, and the entry is released.
+   8. The partial-environment reconcile writes one applied `:environment/reconcile` receipt, and it
+      and the cleanup's release receipt name the deleted environment's UID. An adoption's reconcile
+      receipt names the adopted UID; a reconcile that found nothing names none.
+4. Each review finding fixed here has a test that fails with its fix removed, checked by mutation on
+   this version. The tests for first-round finding 3 and the second-round findings are new.
+5. The agent-environment suite passes: 110 tests with 407 assertions, including the base PRs'
    review fixes merged in. clj-kondo and stratum-lint are clean.
 
 All of this is fake-provider evidence. A real provider's `observe` must be authoritative for the

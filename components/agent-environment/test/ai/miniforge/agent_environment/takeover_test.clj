@@ -56,6 +56,11 @@
 
 (defn- ^{:stratum 0} release-outcomes [w] (fx/outcomes w :environment/release))
 
+(defn- ^{:stratum 0} live-uid
+  "The UID of the one namespace the fake holds."
+  [w]
+  (get-in @(:state (:fake w)) [(first (fake/live-namespaces (:fake w))) :uid]))
+
 (defn- ^{:stratum 0} before-dispatch
   "Run `rival!` after the owner's claim is written and before its dispatch
    re-reads the reservation."
@@ -69,9 +74,7 @@
    just made, leaving it in `state`, would."
   [w req state]
   (let [k (lease/request-key req)
-        space (first (fake/live-namespaces (:fake w)))
-        uid (get-in @(:state (:fake w)) [space :uid])
-        adopted (support/environment req (target-of req first-generation) uid)
+        adopted (support/environment req (target-of req first-generation) (live-uid w))
         {:ledger/keys [entry revision]} (store/read-entry (:inner w) k)]
     (store/write-entry! (:inner w) k revision (assoc entry :entry/state state :entry/environment adopted :entry/claim nil))))
 
@@ -89,11 +92,15 @@
         req (fx/request w (:a w))]
     (controller/claim! (:c w) req)
     (protocol/provision! (:fake w) (target-of req first-generation) req)
-    (is (= :anomalies.agent-environment/provisioning-failed (reason (faults/reacquire w (faults/late-controller w) req))))
-    (testing "given the crashed owner's namespace without its workload → deleted before the next generation"
-      (is (empty? (fake/live-namespaces (:fake w))))
-      (is (= [:outcome/applied :outcome/applied] (release-outcomes w)))
-      (is (= [:outcome/applied] (fx/outcomes w :environment/reconcile))))))
+    (let [uid (live-uid w)]
+      (is (= :anomalies.agent-environment/provisioning-failed (reason (faults/reacquire w (faults/late-controller w) req))))
+      (testing "given the crashed owner's namespace without its workload → deleted before the next generation"
+        (is (empty? (fake/live-namespaces (:fake w))))
+        (is (= [:outcome/applied :outcome/applied] (release-outcomes w)))
+        (is (= [:outcome/applied] (fx/outcomes w :environment/reconcile))))
+      (testing "given the leftover's UID known → its reconcile and release receipts name it"
+        (is (= [uid] (mapv :receipt/environment-uid (faults/receipts-of w :environment/reconcile))))
+        (is (= uid (:receipt/environment-uid (first (faults/receipts-of w :environment/release)))))))))
 
 (deftest ^{:stratum 1} test-a-cleanup-left-without-a-uid-is-reconciled
   (let [w (outage-world)

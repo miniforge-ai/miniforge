@@ -63,6 +63,10 @@
   []
   (.plus (Instant/now) (Duration/ofMillis (* 2 (inc lease/default-claim-ttl-ms)))))
 
+(defn ^{:stratum 0} receipts-of
+  [w operation]
+  (filterv #(= operation (:receipt/operation %)) @(:receipts w)))
+
 (defn ^{:stratum 0} reacquire [w c req] (env/acquire! c (:a w) (fx/provision-grant w (:a w)) req))
 
 (defn ^{:stratum 0} abandon!
