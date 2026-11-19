@@ -28,6 +28,9 @@
 (defn- ^{:stratum 0} record-start! [started start! argv]
   (reset! started (start! argv)))
 
+(defn- ^{:stratum 0} stalled-drain [stream options]
+  (assoc (subprocess/drain-stream stream options) :future (future @(promise))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} test-complete-output-before-the-deadline
@@ -50,6 +53,12 @@
                               (shell-command "printf 01234567890123456789"))]
       (is (not (zero? (:exit reply))))
       (is (= :output-limit (:reason reply)))
+      (is (= "" (:out reply))))))
+
+(deftest ^{:stratum 1} test-output-capture-shares-the-command-deadline
+  (with-redefs [process/drain-stream stalled-drain]
+    (let [reply (command/run! (deadline/after-ms fixture-budget-ms) (shell-command "printf ready"))]
+      (is (= :deadline (:reason reply)))
       (is (= "" (:out reply))))))
 
 (deftest ^{:stratum 1 :integration true} test-hung-command-is-killed-and-partial-output-is-dropped

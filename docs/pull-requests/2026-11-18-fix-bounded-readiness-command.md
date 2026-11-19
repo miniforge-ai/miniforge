@@ -21,7 +21,8 @@ Waiting for output also needs to share the acquisition deadline.
 Reuse the executor's process-tree cleanup and bounded stream capture.
 Refuse an expired call before spawning, bound process and output waits,
 and stop the owned process on timeout or cancellation. Timeout results
-discard partial output. Cleanup may use the existing bounded shutdown grace.
+discard partial output. Cleanup may use the shared shutdown grace twice:
+once for graceful termination and once to confirm forced process exit.
 
 ## Testing plan
 
@@ -30,7 +31,7 @@ admission, a hung process, cancellation and capture overflow. Verify that
 the directly launched process is no longer alive when the call returns.
 Run strict lint, actual namespace depths and both product runtimes.
 Both JVM products, Babashka source and a freshly built package passed
-5 integration tests / 14 assertions each. The process tests use a local
+6 integration tests / 16 assertions each. The process tests use a local
 POSIX shell; no provider or cluster is contacted.
 
 ## Deployment plan
