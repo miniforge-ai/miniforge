@@ -26,6 +26,9 @@ the environment record. An acquisition with missing evidence does not
 issue a name-only delete; the Job's admitted deadline remains in force.
 The Pod identity read has its own validated timeout, independent of the
 Job creation request and the ongoing readiness polling.
+The same bound stops an uncooperative local readback process, not just
+the provider request. An interrupted readback remains a refusal and
+preserves cancellation.
 
 ## Testing plan
 
@@ -34,8 +37,8 @@ an invalid controller, a different scope, a terminating Pod, and an
 unconfirmed identity. Verify that acquisition errors do not delete any
 resource by name.
 
-Both JVM products, Babashka source, and the fresh package passed 23 tests
-and 135 assertions each. Omitting controller validation failed three targeted
+Both JVM products, Babashka source, and the fresh package passed 26 tests
+and 142 assertions each. Omitting controller validation failed three targeted
 assertions, and ignoring the read timeout failed one. Neither caused
 runtime errors. Strict lint, namespace depths, Polylith, and Babashka
 classpaths passed.

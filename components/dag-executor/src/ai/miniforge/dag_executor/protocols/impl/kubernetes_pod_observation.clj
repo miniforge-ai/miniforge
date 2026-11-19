@@ -3,8 +3,9 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.dag-executor.protocols.impl.kubernetes-pod-observation
   "Verify the observed Pod against the exact Job creation receipt before admission."
-  (:require [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
-            [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation :as job-creation]
+  (:require [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation :as job-creation]
+            [ai.miniforge.dag-executor.protocols.impl.runtime.deadline :as deadline]
+            [ai.miniforge.dag-executor.protocols.impl.runtime.deadline-command :as command]
             [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
             [ai.miniforge.dag-executor.result :as result]
             [ai.miniforge.kubernetes-target.interface :as target]
@@ -20,7 +21,10 @@
    "metadata" {"name" job-name "namespace" namespace "uid" job-uid}})
 
 (defn- ^{:stratum 0} unconfirmed []
-  (result/err :pod-owner-unconfirmed (messages/t :kubernetes/pod-owner-unconfirmed)))
+  (let [interrupted? (.isInterrupted (Thread/currentThread))
+        failure (result/err :pod-owner-unconfirmed (messages/t :kubernetes/pod-owner-unconfirmed))]
+    (when interrupted? (.interrupt (Thread/currentThread)))
+    failure))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -44,11 +48,13 @@
                   [pod-name (:namespace job) (:job-name job) (:job-uid job)])
     (unconfirmed)
     (try+
-      (let [{:keys [exit out]} (client/run-kubectl executable "get" "pod" "-n" (:namespace job)
-                                                    "-o" "json" (str "--request-timeout=" request-timeout-ms "ms")
-                                                    "--" pod-name)
+      (let [until (deadline/after-ms request-timeout-ms)
+            binary (if (nil? executable) "kubectl" executable)
+            args [binary "get" "pod" "-n" (:namespace job) "-o" "json"
+                  (str "--request-timeout=" request-timeout-ms "ms") "--" pod-name]
+            {:keys [exit out]} (command/run! until args)
             observed (when (= 0 exit) (retain job pod-name (json/parse-string-strict out)))]
-        (if observed (result/ok observed) (unconfirmed)))
+        (if (and observed (not (deadline/expired? until))) (result/ok observed) (unconfirmed)))
       (catch Exception e
         (when (instance? InterruptedException e)
           (.interrupt (Thread/currentThread)))
