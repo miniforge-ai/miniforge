@@ -222,6 +222,20 @@
         (is (nil? (get-in result [:fixes 0 :replied?])))
         (is (false? (:pushed? result)))))))
 
+(deftest ^{:stratum 1} respond-to-comments-cancelled-fix-test
+  (testing "a fix run the operator cancelled is no fix: no reply, no push"
+    (with-redefs [poller/fetch-pr-comments
+                  (fn [_ _] (dag/ok {:comments [review-comment]}))]
+      (let [result (responder/respond-to-comments!
+                    "https://github.com/org/repo/pull/1"
+                    "/tmp/worktree"
+                    (fn [_ _] {:execution/status :cancelled})
+                    (fn [] true)
+                    {})]
+        (is (false? (get-in result [:fixes 0 :succeeded?])))
+        (is (nil? (get-in result [:fixes 0 :replied?])))
+        (is (false? (:pushed? result)))))))
+
 (deftest ^{:stratum 1} respond-to-comments-partial-success-test
   (testing "treats DAG partial success (failed status but PRs produced) as success"
     (with-redefs [poller/fetch-pr-comments

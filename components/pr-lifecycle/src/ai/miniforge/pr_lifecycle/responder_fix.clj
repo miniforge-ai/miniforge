@@ -79,14 +79,10 @@
               (get-in reply-result [:error :message] "Reply failed"))}))
 
 ;; Orchestration primitives
-(defn- ^{:stratum 0} fix-succeeded?
-  "True when a workflow result indicates success or partial success.
-   A DAG workflow may fail overall but still produce PRs for completed tasks."
-  [result]
-  (and (map? result)
-       (not (:error result))
-       (or (not= :failed (get result :execution/status))
-           (seq (get-in result [:execution/dag-result :pr-infos])))))
+(def ^{:stratum 0} ^:private unsuccessful-statuses
+  "Run statuses that are not a fix: a failed run, and one an operator
+   cancelled (N2 2.2), which stopped before finishing its work."
+  #{:failed :cancelled})
 
 (defn- ^{:stratum 0} fix-result
   "Build a normalized fix result map."
@@ -99,6 +95,16 @@
    :error error})
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} fix-succeeded?
+  "True when a workflow result indicates success or partial success.
+   A DAG workflow may fail or be cancelled overall but still produce PRs
+   for completed tasks."
+  [result]
+  (and (map? result)
+       (not (:error result))
+       (or (not (contains? unsuccessful-statuses (get result :execution/status)))
+           (seq (get-in result [:execution/dag-result :pr-infos])))))
 
 (defn ^{:stratum 1} gather-context
   "Gather PR diff and file contents for all comment groups upfront.
