@@ -25,7 +25,7 @@
      (process/drain-stream (.getErrorStream child) options)]))
 
 (defn- ^{:stratum 0} output-finished? [until {worker :future}]
-  (let [wait-ms (quot (deadline/remaining-ns until) deadline/nanos-per-ms)]
+  (let [wait-ms (deadline/ceil-ms (deadline/remaining-ns until))]
     (not= ::pending (deref worker wait-ms ::pending))))
 
 (defn- ^{:stratum 0} command-result [exit out err]
