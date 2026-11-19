@@ -133,7 +133,8 @@
    :workflow/failed. Takes the cancel's
    {:cancel/requested-by :cancel/source :action/id?} and the run's
    duration in ms. Returns an :invalid-input anomaly when the requester is
-   not a non-blank string, the source is not a keyword, a :control-action
+   not a non-blank string, the source is not one N3 names (:cli :api :tui
+   :supervisor :control-action), a :control-action
    source has no :action/id uuid, or the duration is not a non-negative
    integer."
   workflow-terminal/workflow-cancelled)
