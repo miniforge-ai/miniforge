@@ -29,7 +29,8 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.event-stream.interface.manifest :as es-manifest]
    [ai.miniforge.phase.interface :as phase]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -78,12 +79,21 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} publish-completion-event [event-stream workflow-id result]
-  (let [status (if (phase/succeeded? result) :success :failure)
+(defn ^{:stratum 1} publish-completion-event
+  "Publish the run's terminal event: completed, cancelled (N3: never
+   folded into completed or failed) or failed."
+  [event-stream workflow-id result]
+  (let [status (cond (phase/succeeded? result) :success
+                     (= :cancelled (:execution/status result)) :cancelled
+                     :else :failure)
         duration-ms (get-in result [:execution/metrics :duration-ms])]
     (es/publish! event-stream
-                 (if (= status :success)
+                 (case status
+                   :success
                    (es/workflow-completed event-stream workflow-id status duration-ms)
+                   :cancelled
+                   (es/workflow-cancelled event-stream workflow-id
+                                          (workflow/cancellation result) duration-ms)
                    (es/workflow-failed event-stream workflow-id
                                        {:message (failure-message result)
                                         :errors (or (seq (:execution/errors result))

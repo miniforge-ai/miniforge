@@ -59,6 +59,13 @@
         (agent/run-cycle-from-context! ctx))
       (catch Exception _e nil))))
 
+(defn- ^{:stratum 0} outcome-status
+  "The manifest's terminal status for a run RESULT."
+  [result]
+  (cond (phase/succeeded? result) :completed
+        (= :cancelled (:execution/status result)) :cancelled
+        :else :failed))
+
 ;; Workflow interface resolution and pipeline helpers
 (defn- ^{:stratum 0} enqueue-workflow-gc-best-effort!
   "Append `workflow-id` to the scratch-ref GC queue.
@@ -136,9 +143,7 @@
                 [result final]
                 (try
                   (let [result (execution/execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store stream)]
-                    (lifecycle/mark-manifest-terminal!
-                     manifest-handle
-                     (if (phase/succeeded? result) :completed :failed))
+                    (lifecycle/mark-manifest-terminal! manifest-handle (outcome-status result))
                     ;; BD-2a shutdown ordering: fence late publishers for this
                     ;; workflow, then drain sinks before returning. quiesce!
                     ;; rejects any post-terminal `publish!` for this workflow
@@ -283,10 +288,13 @@
                                            :workflow-id workflow-id
                                            :sandbox-cleanup sandbox-cleanup
                                            :opts opts})
-              outcome-status (if (phase/succeeded? result) :completed :failed)]
+              status (outcome-status result)]
           (spec-kanban/finish-spec! provenance result)
-          ;; Trigger meta-loop learning cycle in background
-          (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
+          ;; Trigger meta-loop learning cycle in background. A cancel is
+          ;; neither outcome, and counting it as a failure would skew the
+          ;; learning (N3: consumers that count failures do not count it).
+          (when-not (= :cancelled status)
+            (trigger-meta-loop-after-workflow! workflow-id status nil))
           result)
         (finally
           (progress-cleanup)

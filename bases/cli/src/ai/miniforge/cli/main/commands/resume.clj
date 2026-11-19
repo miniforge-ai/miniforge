@@ -487,7 +487,12 @@
                                             :execution/origin-id origin-id)
                                      (cond-> new-attempt? (assoc :execution/metrics {:tokens 0 :cost-usd 0.0
                                                                                      :duration-ms 0})))
-            failed-checkpoint? (and machine-snapshot (:failed? reconstructed))
+            ;; A run that ended :failed or :cancelled is terminal (N2 §8.3):
+            ;; its snapshot is not continued, a new attempt starts from it.
+            failed-checkpoint? (and machine-snapshot
+                                    (or (:failed? reconstructed)
+                                        (when (= :cancelled (:execution/status machine-snapshot))
+                                          true)))
             resume-workflow (if (and machine-snapshot (not failed-checkpoint?))
                               workflow
                               (wr/trim-pipeline workflow completed-phases))

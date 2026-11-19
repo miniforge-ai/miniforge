@@ -226,18 +226,21 @@
     (is (nil? (#'sut/resume-print-phase nil [])))))
 
 (deftest ^{:stratum 0} resume-workflow-trims-failed-checkpoint-before-running-test
+  ;; A :cancelled run is terminal like a :failed one (N2 8.3): a new
+  ;; attempt starts from its trimmed pipeline, never its final snapshot.
+  (doseq [[failed? status] [[true :failed] [false :cancelled]]]
   (let [workflow-id (random-uuid)
         run-pipeline-opts (atom nil)
         run-pipeline-workflow (atom nil)
         reconstructed {:completed-phases [:plan]
                        :event-count 0
-                       :failed? true
+                       :failed? failed?
                        :completed-dag-tasks #{}
                        :completed-dag-artifacts []
                        :phase-results {:plan {:status :completed}}
                        :machine-snapshot {:execution/id workflow-id
-                                          :execution/status :failed
-                                          :execution/fsm-state {:_state :failed}}
+                                          :execution/status status
+                                          :execution/fsm-state {:_state status}}
                        :workflow-spec {:name "canonical-sdlc"
                                        :version "1.0.0"}}]
     (with-redefs [wr/reconstruct-context (fn [_events-dir _workflow-id] reconstructed)
@@ -268,10 +271,10 @@
         (is (= :completed (:execution/status result)))
         (is (= [{:phase :implement} {:phase :verify}]
                (:workflow/pipeline @run-pipeline-workflow)))
-        (is (true? (:resume-reset-terminal? @run-pipeline-opts)))
+        (is (true? (:resume-reset-terminal? @run-pipeline-opts)) (str status))
         (is (not= workflow-id
                   (get-in @run-pipeline-opts [:resume-machine-snapshot :execution/id]))
-            "a run with no live, unfinished run directory resumes as a new attempt")))))
+            "a run with no live, unfinished run directory resumes as a new attempt"))))))
 
 (defn- ^{:stratum 0} resume-with
   "Run `resume-workflow` over `reconstructed` with every runtime seam
