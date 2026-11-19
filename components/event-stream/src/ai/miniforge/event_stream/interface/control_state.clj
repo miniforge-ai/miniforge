@@ -42,12 +42,14 @@
 (def ^{:stratum 0} cancel!
   "Set the control-state atom's :stopped flag true. Returns the new
    state map. The 2-arity also records the cancel's
-   {:cancel/requested-by :cancel/source :cancel/reason? :action/id?}."
+   {:cancel/requested-by :cancel/source :action/id?}; the first record is
+   kept."
   control/cancel!)
 
 (def ^{:stratum 0} cancellation
-  "Return the cancel's recorded requester and source map, or nil when the
-   control-state is not cancelled or the cancel recorded none."
+  "Return the first recorded cancel's
+   {:cancel/requested-by :cancel/source :action/id?} map, or nil when no
+   cancel recorded one."
   control/cancellation)
 
 (def ^{:stratum 0} paused?

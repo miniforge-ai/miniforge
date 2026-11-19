@@ -5,7 +5,8 @@
   "Shared terminal payload projection; publication identity stays with the envelope."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.messages :as msg]
-            [ai.miniforge.response.interface :as response]))
+            [ai.miniforge.response.interface :as response]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -23,14 +24,22 @@
     (:workflow/evidence-bundle-id opts)
     (assoc :workflow/evidence-bundle-id (:workflow/evidence-bundle-id opts))))
 
-(defn ^{:stratum 0} cancelled [cancellation duration-ms]
-  (let [{:cancel/keys [requested-by source reason] action-id :action/id} cancellation]
-    (cond-> {:message (msg/t :workflow/cancelled {:requested-by requested-by})
-             :cancel/requested-by requested-by
-             :cancel/source source}
-      reason (assoc :cancel/reason reason)
-      action-id (assoc :action/id action-id)
-      duration-ms (assoc :workflow/duration-ms duration-ms))))
+(defn ^{:stratum 0} cancelled
+  "The :workflow/cancelled payload, or an :invalid-input anomaly for a
+   record N3 does not accept."
+  [cancellation duration-ms]
+  (let [{:cancel/keys [requested-by source] action-id :action/id} cancellation]
+    (if (and (string? requested-by) (not (str/blank? requested-by))
+             (keyword? source)
+             (or (not= :control-action source) (uuid? action-id))
+             (nat-int? duration-ms))
+      (cond-> {:message (msg/t :workflow/cancelled {:requested-by requested-by})
+               :cancel/requested-by requested-by
+               :cancel/source source
+               :workflow/duration-ms duration-ms}
+        (uuid? action-id) (assoc :action/id action-id))
+      (anomaly/anomaly :invalid-input (msg/system :workflow/invalid-cancellation)
+                       {:cancellation cancellation :duration-ms duration-ms}))))
 
 (defn- ^{:stratum 0} error-anomaly [error]
   (cond

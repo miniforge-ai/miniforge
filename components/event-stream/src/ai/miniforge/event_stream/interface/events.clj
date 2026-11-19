@@ -131,8 +131,11 @@
   "Build and return a :workflow/cancelled event envelope map (N3): a run
    an operator stopped, reported apart from :workflow/completed and
    :workflow/failed. Takes the cancel's
-   {:cancel/requested-by :cancel/source :cancel/reason? :action/id?} and
-   the run's duration in ms."
+   {:cancel/requested-by :cancel/source :action/id?} and the run's
+   duration in ms. Returns an :invalid-input anomaly when the requester is
+   not a non-blank string, the source is not a keyword, a :control-action
+   source has no :action/id uuid, or the duration is not a non-negative
+   integer."
   workflow-terminal/workflow-cancelled)
 
 (def ^{:stratum 0} llm-request

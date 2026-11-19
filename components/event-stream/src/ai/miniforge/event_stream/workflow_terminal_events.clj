@@ -31,16 +31,11 @@
                            (select-keys opts [:workflow/failure-phase])))
     (legacy/workflow-failed stream workflow-id error opts)))
 
-(defn ^{:stratum 1} workflow-cancelled
-  "N3 keeps a cancel out of :workflow/completed and :workflow/failed on
-   both publication paths."
-  [stream workflow-id cancellation duration-ms]
+(defn ^{:stratum 1} workflow-cancelled [stream workflow-id cancellation duration-ms]
   (let [payload (fields/cancelled cancellation duration-ms)]
-    (if (current/active? stream)
-      (terminal-draft stream workflow-id :workflow/cancelled payload)
-      (fields/attach (legacy/create-envelope stream :workflow/cancelled workflow-id
-                                             (:message payload))
-                     payload))))
+    (if (anomaly/anomaly? payload)
+      payload
+      (terminal-draft stream workflow-id :workflow/cancelled payload))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

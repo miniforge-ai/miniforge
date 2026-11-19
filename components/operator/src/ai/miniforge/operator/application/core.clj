@@ -108,10 +108,25 @@
   "The N3 `:cancel/source` for each intervention request source. N3 names
    :cli, :api, :tui, :supervisor and :control-action. The dashboard posts
    over the HTTP API, the native app is a local operator UI like the TUI,
-   and the meta-agent is the supervising agent. A source outside this map
-   reports :api."
+   and the meta-agent is the supervising agent."
   {:cli :cli :tui :tui :native-app :tui :api :api :dashboard :api
    :meta-agent :supervisor})
+
+(def ^{:stratum 0} ^:private unmapped-cancel-source
+  "The N3 source for a request source `cancel-sources` does not name."
+  :api)
+
+(defn- ^{:stratum 0} control-action-id
+  "The id of the N8 control action an intervention carries out, as a uuid,
+   or nil when it carries none."
+  [interv]
+  (let [id (get-in interv [:intervention/details :action/id])]
+    (if (uuid? id) id (some-> id str parse-uuid))))
+
+(defn- ^{:stratum 0} cancel-effect!
+  [control-state cancellation]
+  (es/cancel! control-state cancellation)
+  {:verb :cancel :observed (boolean (es/cancelled? control-state)) :expected true})
 
 (defn ^{:stratum 0} resume-events-dir
   [launcher]
@@ -119,14 +134,18 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} cancellation
-  "Who asked for the cancel INTERV carries, and from where, in the shape
-   `es/cancel!` records for the run's `:workflow/cancelled` event."
+(defn ^{:stratum 1} intervention-cancellation
+  "Who asked for the cancel INTERV carries, and from where, as `es/cancel!`
+   records it. A cancel carrying out an N8 control action reports
+   :control-action and its id (N3). The justification is free text, which
+   stays on the intervention's own confidential events."
   [interv]
-  (let [reason (:intervention/justification interv)]
-    (cond-> {:cancel/requested-by (:intervention/requested-by interv)
-             :cancel/source (get cancel-sources (:intervention/request-source interv) :api)}
-      reason (assoc :cancel/reason reason))))
+  (let [action-id (control-action-id interv)
+        source (get cancel-sources (:intervention/request-source interv)
+                    unmapped-cancel-source)]
+    (cond-> {:cancel/requested-by (str (:intervention/requested-by interv))
+             :cancel/source (if action-id :control-action source)}
+      action-id (assoc :action/id action-id))))
 
 (defn- ^{:stratum 1} new-verification-pool
   "A fixed pool of named daemon threads with a bounded queue; when both
@@ -214,20 +233,15 @@
   "Flip the control-state flag for `verb` and return the readback the
    verification step asserts. A cancel records INTERV's requester and
    source on the control state."
-  ([control-state verb] (control-state-effect! control-state verb nil))
-  ([control-state verb interv]
-   (case verb
-     :pause  (do (es/pause! control-state)
-                 {:verb :pause :observed (boolean (es/paused? control-state))
-                  :expected true})
-     :resume (do (es/resume! control-state)
-                 {:verb :resume :observed (boolean (es/paused? control-state))
-                  :expected false})
-     :cancel (do (if interv
-                   (es/cancel! control-state (cancellation interv))
-                   (es/cancel! control-state))
-                 {:verb :cancel :observed (boolean (es/cancelled? control-state))
-                  :expected true}))))
+  [control-state verb interv]
+  (case verb
+    :pause  (do (es/pause! control-state)
+                {:verb :pause :observed (boolean (es/paused? control-state))
+                 :expected true})
+    :resume (do (es/resume! control-state)
+                {:verb :resume :observed (boolean (es/paused? control-state))
+                 :expected false})
+    :cancel (cancel-effect! control-state (intervention-cancellation interv))))
 
 (defn ^{:stratum 2} submit-verification!
   "Run `f` on the verification pool and return `result` — the

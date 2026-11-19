@@ -243,11 +243,23 @@
 (deftest ^{:stratum 0} cancel-sources-map-onto-n3
   (doseq [[source expected] {:cli :cli :tui :tui :native-app :tui :api :api
                              :dashboard :api :meta-agent :supervisor :unknown :api}]
-    (is (= {:cancel/requested-by "op" :cancel/source expected :cancel/reason "why"}
-           (core/cancellation {:intervention/requested-by "op"
-                               :intervention/request-source source
-                               :intervention/justification "why"}))
+    (is (= {:cancel/requested-by "op" :cancel/source expected}
+           (core/intervention-cancellation {:intervention/requested-by "op"
+                                            :intervention/request-source source
+                                            :intervention/justification "why"}))
         (str source))))
+
+(deftest ^{:stratum 0} a-control-action-cancel-reports-its-action
+  (let [action-id (random-uuid)]
+    (doseq [id [action-id (str action-id)]]
+      (is (= {:cancel/requested-by "op" :cancel/source :control-action :action/id action-id}
+             (core/intervention-cancellation {:intervention/requested-by "op"
+                                              :intervention/request-source :dashboard
+                                              :intervention/details {:action/id id}})))))
+  (is (= "42" (:cancel/requested-by (core/intervention-cancellation
+                                     {:intervention/requested-by 42
+                                      :intervention/request-source :native-app})))
+      "a requester read off the wire as a non-string still records a string"))
 
 ;------------------------------------------------------------------------------ Layer 1
 
