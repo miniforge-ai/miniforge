@@ -50,9 +50,21 @@
   (swap! control-state assoc :paused false))
 
 (defn ^{:stratum 0} cancel!
-  "Cancel workflow execution."
+  "Cancel workflow execution. With CANCELLATION, also record who asked and
+   from where, for the run's `:workflow/cancelled` event (N3): a map of
+   `:cancel/requested-by` (the principal, a string), `:cancel/source` (a
+   keyword) and, when given, `:cancel/reason` and `:action/id`."
+  ([control-state]
+   (swap! control-state assoc :stopped true))
+  ([control-state cancellation]
+   (swap! control-state assoc :stopped true :cancellation cancellation)))
+
+(defn ^{:stratum 0} cancellation
+  "Who asked for the cancel and from where, as `cancel!` recorded it; nil
+   when the run is not cancelled or the cancel recorded nothing."
   [control-state]
-  (swap! control-state assoc :stopped true))
+  (let [state @control-state]
+    (when (:stopped state) (:cancellation state))))
 
 (defn ^{:stratum 0} paused?
   "Check if workflow is paused."

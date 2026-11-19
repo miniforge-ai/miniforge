@@ -127,6 +127,14 @@
    :workflow/failure-phase in opts."
   workflow-terminal/workflow-failed)
 
+(def ^{:stratum 0} workflow-cancelled
+  "Build and return a :workflow/cancelled event envelope map (N3): a run
+   an operator stopped, reported apart from :workflow/completed and
+   :workflow/failed. Takes the cancel's
+   {:cancel/requested-by :cancel/source :cancel/reason? :action/id?} and
+   the run's duration in ms."
+  workflow-terminal/workflow-cancelled)
+
 (def ^{:stratum 0} llm-request
   "Build and return an :llm/request event envelope map for an LLM call
    (model, optional prompt-tokens); assigns a fresh :llm/request-id."

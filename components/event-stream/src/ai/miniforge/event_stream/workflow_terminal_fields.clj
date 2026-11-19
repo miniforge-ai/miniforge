@@ -23,6 +23,15 @@
     (:workflow/evidence-bundle-id opts)
     (assoc :workflow/evidence-bundle-id (:workflow/evidence-bundle-id opts))))
 
+(defn ^{:stratum 0} cancelled [cancellation duration-ms]
+  (let [{:cancel/keys [requested-by source reason] action-id :action/id} cancellation]
+    (cond-> {:message (msg/t :workflow/cancelled {:requested-by requested-by})
+             :cancel/requested-by requested-by
+             :cancel/source source}
+      reason (assoc :cancel/reason reason)
+      action-id (assoc :action/id action-id)
+      duration-ms (assoc :workflow/duration-ms duration-ms))))
+
 (defn- ^{:stratum 0} error-anomaly [error]
   (cond
     (anomaly/any-anomaly? error) error

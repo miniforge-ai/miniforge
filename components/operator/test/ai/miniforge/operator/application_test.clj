@@ -240,6 +240,15 @@
                  :intervention/target-id (random-uuid)}))
         (str verb " must be owned even with no live runner for its target"))))
 
+(deftest ^{:stratum 0} cancel-sources-map-onto-n3
+  (doseq [[source expected] {:cli :cli :tui :tui :native-app :tui :api :api
+                             :dashboard :api :meta-agent :supervisor :unknown :api}]
+    (is (= {:cancel/requested-by "op" :cancel/source expected :cancel/reason "why"}
+           (core/cancellation {:intervention/requested-by "op"
+                               :intervention/request-source source
+                               :intervention/justification "why"}))
+        (str source))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} stage-golden!
@@ -292,6 +301,9 @@
       (let [stream (memory-stream)
             result (application/apply-intervention! stream (approved :cancel wid))]
         (is (true? (es/cancelled? cs)))
+        (is (= {:cancel/requested-by "test@example.invalid" :cancel/source :tui}
+               (es/cancellation cs))
+            "the cancel records who asked and from where, for :workflow/cancelled")
         (is (= :verified (:intervention/state result)))))))
 
 ;------------------------------------------------------------------------------ No-effect and unwired verbs

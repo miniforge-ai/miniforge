@@ -84,8 +84,14 @@
 
 (def ^{:stratum 0} cancel!
   "Set the control-state atom's :stopped flag true. Returns the new
-   state map."
+   state map. The 2-arity also records the cancel's
+   {:cancel/requested-by :cancel/source :cancel/reason? :action/id?}."
   control-state/cancel!)
+
+(def ^{:stratum 0} cancellation
+  "Return the cancel's recorded requester and source map, or nil when the
+   control-state is not cancelled or the cancel recorded none."
+  control-state/cancellation)
 
 (def ^{:stratum 0} paused?
   "Return the boolean :paused flag from a control-state atom."
@@ -469,6 +475,14 @@
    :failure/class. Current drafts require the class and may carry
    :workflow/failure-phase in opts."
   events/workflow-failed)
+
+(def ^{:stratum 0} workflow-cancelled
+  "Build and return a :workflow/cancelled event envelope map (N3): a run
+   an operator stopped, reported apart from :workflow/completed and
+   :workflow/failed. Takes the cancel's
+   {:cancel/requested-by :cancel/source :cancel/reason? :action/id?} and
+   the run's duration in ms."
+  events/workflow-cancelled)
 
 (def ^{:stratum 0} llm-request
   "Build and return an :llm/request event envelope map for an LLM call

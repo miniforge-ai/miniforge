@@ -104,26 +104,29 @@
   [result]
   (true? (:success? result)))
 
-(defn ^{:stratum 0} control-state-effect!
-  "Flip the control-state flag for `verb` and return the readback the
-   verification step asserts."
-  [control-state verb]
-  (case verb
-    :pause  (do (es/pause! control-state)
-                {:verb :pause :observed (boolean (es/paused? control-state))
-                 :expected true})
-    :resume (do (es/resume! control-state)
-                {:verb :resume :observed (boolean (es/paused? control-state))
-                 :expected false})
-    :cancel (do (es/cancel! control-state)
-                {:verb :cancel :observed (boolean (es/cancelled? control-state))
-                 :expected true})))
+(def ^{:stratum 0} ^:private cancel-sources
+  "The N3 `:cancel/source` for each intervention request source. N3 names
+   :cli, :api, :tui, :supervisor and :control-action. The dashboard posts
+   over the HTTP API, the native app is a local operator UI like the TUI,
+   and the meta-agent is the supervising agent. A source outside this map
+   reports :api."
+  {:cli :cli :tui :tui :native-app :tui :api :api :dashboard :api
+   :meta-agent :supervisor})
 
 (defn ^{:stratum 0} resume-events-dir
   [launcher]
   (or (:events-dir launcher) (es/default-events-dir)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} cancellation
+  "Who asked for the cancel INTERV carries, and from where, in the shape
+   `es/cancel!` records for the run's `:workflow/cancelled` event."
+  [interv]
+  (let [reason (:intervention/justification interv)]
+    (cond-> {:cancel/requested-by (:intervention/requested-by interv)
+             :cancel/source (get cancel-sources (:intervention/request-source interv) :api)}
+      reason (assoc :cancel/reason reason))))
 
 (defn- ^{:stratum 1} new-verification-pool
   "A fixed pool of named daemon threads with a bounded queue; when both
@@ -206,6 +209,25 @@
      :expected (get expected-degradation-mode-by-verb verb)}))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} control-state-effect!
+  "Flip the control-state flag for `verb` and return the readback the
+   verification step asserts. A cancel records INTERV's requester and
+   source on the control state."
+  ([control-state verb] (control-state-effect! control-state verb nil))
+  ([control-state verb interv]
+   (case verb
+     :pause  (do (es/pause! control-state)
+                 {:verb :pause :observed (boolean (es/paused? control-state))
+                  :expected true})
+     :resume (do (es/resume! control-state)
+                 {:verb :resume :observed (boolean (es/paused? control-state))
+                  :expected false})
+     :cancel (do (if interv
+                   (es/cancel! control-state (cancellation interv))
+                   (es/cancel! control-state))
+                 {:verb :cancel :observed (boolean (es/cancelled? control-state))
+                  :expected true}))))
 
 (defn ^{:stratum 2} submit-verification!
   "Run `f` on the verification pool and return `result` — the

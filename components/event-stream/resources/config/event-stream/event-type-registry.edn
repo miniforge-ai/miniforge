@@ -39,6 +39,11 @@
   :json-string "workflow/failed"
   :browser?    true}
 
+ {:constructor "workflow-cancelled"
+  :event-type  :workflow/cancelled
+  :json-string "workflow/cancelled"
+  :browser?    false}
+
  {:constructor "agent-chunk"
   :event-type  :agent/chunk
   :json-string "agent/chunk"

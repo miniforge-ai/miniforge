@@ -17,6 +17,12 @@
   (events/workflow-completed stream workflow-id :completed 0
                              {:workflow/evidence-bundle-id (random-uuid) :tokens 0 :cost-usd 0.0}))
 
+(defn- ^{:stratum 0} cancelled [stream workflow-id]
+  (events/workflow-cancelled stream workflow-id
+                             {:cancel/requested-by "op@example.invalid" :cancel/source :cli
+                              :cancel/reason "fixture cancel"}
+                             0))
+
 (defn- ^{:stratum 0} failed
   ([stream workflow-id] (failed stream workflow-id (Exception. "fixture failure")))
   ([stream workflow-id error]
@@ -34,6 +40,18 @@
     (when-not (anomaly/anomaly? stream)
       (try+ (is (= [receipt] (events/get-events stream)))
         (finally (events/close-current-event-stream! stream))))))
+
+(deftest ^{:stratum 0} cancellation-without-a-requester-or-control-action-id-fails-closed
+  (fixture/with-stream
+    (fn [stream _]
+      (let [workflow-id (random-uuid)]
+        (doseq [cancellation [{:cancel/source :cli}
+                              {:cancel/requested-by "op" :cancel/source :control-action}
+                              {:cancel/requested-by "op" :cancel/source :unknown}]]
+          (is (anomaly/anomaly? (events/publish! stream (events/workflow-cancelled
+                                                        stream workflow-id cancellation 0)))
+              (pr-str cancellation)))
+        (is (empty? (events/get-events stream)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -88,7 +106,13 @@
         (is (= (msg/t :workflow/failed {:reason "fixture failure"}) (:message event)))
         (is (map? (:workflow/error-details event)))
         (is (= :anomalies/fault (:workflow/anomaly-code event)))
-        (is (false? (:workflow/retryable? event)))))))
+        (is (false? (:workflow/retryable? event)))))
+    (let [event (cancelled stream workflow-id)]
+      (is (= :workflow/cancelled (:event/type event))
+          "a cancel is never folded into :workflow/completed or :workflow/failed (N3)")
+      (is (nil? (:workflow/status event)))
+      (is (= "op@example.invalid" (:cancel/requested-by event)))
+      (is (= (msg/t :workflow/cancelled {:requested-by "op@example.invalid"}) (:message event))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -96,7 +120,10 @@
   (doseq [[constructor expected]
           [[completed {:workflow/duration-ms 0 :workflow/tokens 0 :workflow/cost-usd 0.0}]
            [failed {:failure/class :failure.class/task-code
-                    :workflow/failure-phase :opsv/verify :workflow/failure-reason "fixture failure"}]]]
+                    :workflow/failure-phase :opsv/verify :workflow/failure-reason "fixture failure"}]
+           [cancelled {:event/type :workflow/cancelled :workflow/duration-ms 0
+                       :cancel/requested-by "op@example.invalid" :cancel/source :cli
+                       :cancel/reason "fixture cancel"}]]]
     (fixture/with-stream (partial verify-current constructor expected))))
 
 (deftest ^{:stratum 2} incomplete-and-contradictory-terminal-facts-fail-closed
