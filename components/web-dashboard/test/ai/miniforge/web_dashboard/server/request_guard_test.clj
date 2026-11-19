@@ -29,7 +29,7 @@
    [ai.miniforge.web-dashboard.server :as server]
    [ai.miniforge.web-dashboard.server.auth :as auth]
    [ai.miniforge.web-dashboard.server.request-guard :as guard]
-   [ai.miniforge.web-dashboard.state.workflows :as workflows]
+   [ai.miniforge.web-dashboard.state.workflows.sources :as sources]
    [cheshire.core :as json]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
@@ -120,8 +120,8 @@
    `(f port home)`."
   [f]
   (let [home (temp-dir)]
-    (with-redefs [config/miniforge-home     (constantly home)
-                  workflows/events-dir-path (str home "/events")]
+    (with-redefs [config/miniforge-home   (constantly home)
+                  sources/events-dir-path (str home "/events")]
       (let [handle (binding [*out* (java.io.StringWriter.)]
                      (server/start-server! {:port 0
                                             :host "127.0.0.1"

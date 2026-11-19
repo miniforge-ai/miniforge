@@ -21,7 +21,8 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.web-dashboard.state.core :as core]
-   [ai.miniforge.web-dashboard.state.workflows :as sut]))
+   [ai.miniforge.web-dashboard.state.workflows :as sut]
+   [ai.miniforge.web-dashboard.state.workflows.sources :as sources]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -71,7 +72,7 @@
       (io/make-parents event-file)
       (spit event-file (str (pr-str started) "\n" (pr-str phase-started) "\n"))
       (es/publish! stream chunk)
-      (with-redefs [sut/events-dir-path (.getPath events-dir)]
+      (with-redefs [sources/events-dir-path (.getPath events-dir)]
         (let [events (sut/get-events state {:workflow-id wf-id :limit 10})
               phase-events (sut/get-events state {:workflow-id wf-id
                                                   :event-type :workflow/phase-started
@@ -102,7 +103,7 @@
                                     :phase/tokens 42
                                     :phase/duration-ms 3000
                                     :phase/outcome :success))
-      (with-redefs [sut/events-dir-path (.getPath events-dir)]
+      (with-redefs [sources/events-dir-path (.getPath events-dir)]
         (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)]
           (is (= wf-id (:id workflow)))
           (is (= :review (:phase workflow)))
@@ -122,7 +123,7 @@
       (doseq [d deltas]
         (es/publish! stream (wf-event :agent/chunk wf-id at :agent/id :plan :chunk/delta d)))
       (es/publish! stream (wf-event :workflow/phase-started wf-id at :workflow/phase :implement))
-      (with-redefs [sut/events-dir-path (.getPath (temp-events-dir))]
+      (with-redefs [sources/events-dir-path (.getPath (temp-events-dir))]
         (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)]
           (is (= (apply str deltas) (:latest-output workflow)) "chunks in publish order")
           (is (= :implement (:phase workflow)) "the phase started last"))))))
@@ -144,7 +145,7 @@
                                     :dependency/class :outage
                                     :dependency/retryability :retryable
                                     :event/message "Dependency anthropic unavailable"))
-      (with-redefs [sut/events-dir-path (.getPath events-dir)]
+      (with-redefs [sources/events-dir-path (.getPath events-dir)]
         (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)
               issue (first (:dependency-issues workflow))]
           (is (= :error (:dependency-severity workflow)))
@@ -172,7 +173,7 @@
                                     :workflow/phase :implement :phase/tokens 42))
       (es/publish! stream (wf-event :workflow/completed wf-id "2026-03-28T13:10:01Z"
                                     :workflow/status :success))
-      (with-redefs [sut/events-dir-path (.getPath events-dir)]
+      (with-redefs [sources/events-dir-path (.getPath events-dir)]
         (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)]
           (is (< (count (es/get-events stream)) 50) "304 events published, history bounded")
           (is (= "Flooded" (:name workflow)))
