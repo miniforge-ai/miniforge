@@ -37,9 +37,11 @@ the 3-layer limit, so the PR first splits them, moving code without changing it.
    1. `wf-status` returns `:cancelled` for a `:workflow/cancelled` event, or an older completed
       event with status `:cancelled`; `:cancelled` is a terminal status, so progress shows 100.
    2. The archive summary reads the same, and counts `:workflow/cancelled` as terminal.
-   3. The archived view labels it "Cancelled".
-   4. The event timeline counts `:workflow/cancelled` as a terminal event.
-   5. The TUI DAG kanban shows a cancelled workflow as a done card.
+   3. The archived view labels it "Cancelled", and the stylesheet gives the cancelled status
+      dot, badge and summary item the warning colour.
+   4. The fleet evidence page keeps a cancelled run, as it keeps completed and failed ones.
+   5. The event timeline counts `:workflow/cancelled` as a terminal event.
+   6. The TUI DAG kanban shows a cancelled workflow as a done card.
 
 ## Testing Plan
 
@@ -49,7 +51,8 @@ the 3-layer limit, so the PR first splits them, moving code without changing it.
 2. New tests: `archive_summary_test` (status and summary of a cancelled run),
    `get-workflows-shows-a-cancelled-run-as-cancelled-test`, a cancelled timeline event, and
    `dag_kanban_test`.
-3. The dashboard, archive, timeline and TUI test namespaces pass: 204 tests, 1014 assertions.
+3. The dashboard, archive, fleet, timeline and TUI test namespaces pass: 224 tests,
+   1072 assertions.
 
 ## Notes
 
@@ -57,7 +60,13 @@ the 3-layer limit, so the PR first splits them, moving code without changing it.
    handler is cancelled stays pending. N5-delta-4 §2.4 defines no cancel transition for an edge,
    and its `core.clj` has layer headings without stratum metadata at 4 layers, so it needs a spec
    rule and a mechanical split first.
-2. The runner change, #2546, merges after this PR.
+2. Other TUI readers still do not know `:cancelled`: a cancelled workflow's detail view shows its
+   phase as running, `:archive all-done` skips it, and the list and kanban draw it with the
+   pending glyph. The TUI's own cancel already reaches them today. `navigation.clj`,
+   `command.clj` and `workflow_list.clj` are over the 3-layer limit and `widget/status.clj` has no
+   stratum metadata, so each needs a mechanical change first.
+3. The browser shows no toast for `workflow/cancelled` yet, while completed and failed get one.
+4. The runner change, miniforge-ai/miniforge#2546, merges after this PR.
 
 ## Deployment Plan
 

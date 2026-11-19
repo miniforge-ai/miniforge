@@ -48,7 +48,7 @@
   (first (filter #(contains? type-set (:event/type %)) events)))
 
 (defn ^{:stratum 0} derive-status
-  [terminal-event tail-line-count]
+  [terminal-event _tail-line-count]
   (cond
     (= :workflow/failed (:event/type terminal-event))
     :failed
@@ -61,9 +61,6 @@
       (:failure :failed) :failed
       :cancelled :cancelled
       :completed)
-
-    (<= tail-line-count 2)
-    :stale
 
     :else :stale))
 

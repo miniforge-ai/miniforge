@@ -117,9 +117,10 @@
           state      (core/create-state {:event-stream stream})
           events-dir (temp-events-dir)
           wf-id      (random-uuid)]
-      (es/publish! stream (wf-event :workflow/started wf-id "2026-03-28T11:00:00Z"
+      ;; Recent, so an unrecognised end would read as running (progress 50), not stale.
+      (es/publish! stream (wf-event :workflow/started wf-id (str (java.time.Instant/now))
                                     :workflow/spec {:name "Cancelled"}))
-      (es/publish! stream (wf-event :workflow/cancelled wf-id "2026-03-28T11:00:05Z"
+      (es/publish! stream (wf-event :workflow/cancelled wf-id (str (java.time.Instant/now))
                                     :cancel/requested-by "op" :cancel/source :cli))
       (with-redefs [sources/events-dir-path (.getPath events-dir)]
         (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)]

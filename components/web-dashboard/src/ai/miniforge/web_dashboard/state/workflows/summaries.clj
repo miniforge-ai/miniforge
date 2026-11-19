@@ -106,3 +106,5 @@
     (catch Exception e
       (println "Error getting workflows:" (ex-message e))
       [])))
+
+(comment ::workflows-summaries)
