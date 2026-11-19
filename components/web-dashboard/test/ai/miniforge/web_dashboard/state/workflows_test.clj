@@ -111,6 +111,21 @@
           (is (= 42 (get-in workflow [:metrics :tokens])))
           (is (= 3000 (get-in workflow [:metrics :duration-ms]))))))))
 
+(deftest ^{:stratum 2} get-workflows-shows-a-cancelled-run-as-cancelled-test
+  (testing "a run ended by :workflow/cancelled is cancelled and finished, not running or failed"
+    (let [stream     (es/create-event-stream {:sinks []})
+          state      (core/create-state {:event-stream stream})
+          events-dir (temp-events-dir)
+          wf-id      (random-uuid)]
+      (es/publish! stream (wf-event :workflow/started wf-id "2026-03-28T11:00:00Z"
+                                    :workflow/spec {:name "Cancelled"}))
+      (es/publish! stream (wf-event :workflow/cancelled wf-id "2026-03-28T11:00:05Z"
+                                    :cancel/requested-by "op" :cancel/source :cli))
+      (with-redefs [sources/events-dir-path (.getPath events-dir)]
+        (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)]
+          (is (= :cancelled (:status workflow)))
+          (is (= 100 (:progress workflow))))))))
+
 (deftest ^{:stratum 2} get-workflows-keeps-publish-order-among-tied-timestamps-test
   (testing "more events than an array map holds, all in one millisecond"
     (let [stream (es/create-event-stream {:sinks []})

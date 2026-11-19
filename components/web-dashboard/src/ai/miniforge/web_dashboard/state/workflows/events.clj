@@ -35,7 +35,7 @@
 
 (def ^{:stratum 0} terminal-statuses
   "Workflow statuses that indicate no further execution."
-  #{:completed :failed :stale})
+  #{:completed :failed :cancelled :stale})
 
 (defn ^{:stratum 0} normalize-ts
   "Normalize timestamp inputs to java.util.Date for UI rendering."
@@ -184,12 +184,18 @@
       :unknown))
 
 (defn ^{:stratum 2} wf-status
-  "Derive a workflow status keyword from terminal events and staleness."
-  [completed failed last-event-ts]
+  "Derive a workflow status keyword from terminal events and staleness. A
+   cancel is its own outcome (N3 workflow/cancelled), never a failure; an
+   older run folded it into :workflow/completed with status :cancelled."
+  [completed failed cancelled last-event-ts]
   (cond
     failed     :failed
+    cancelled  :cancelled
     completed  (let [status (get completed :workflow/status (get completed :status))]
-                 (if (#{:success :completed} status) :completed :failed))
+                 (case status
+                   (:success :completed) :completed
+                   :cancelled :cancelled
+                   :failed))
     :else      (let [last-ts (normalize-ts last-event-ts)]
                  (if (and last-ts
                           (> (- (System/currentTimeMillis) (.getTime ^java.util.Date last-ts))
