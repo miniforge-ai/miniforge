@@ -18,11 +18,12 @@
    :output-limit process/output-limit-exit-code
    :command-error 1})
 
-(defn ^{:stratum 0} drains [^Process child]
+(defn ^{:stratum 0} start-drains! [^Process child acquired]
   (let [stop! (partial process/destroy-process-tree! child)
         options {:on-overflow stop!}]
-    [(process/drain-stream (.getInputStream child) options)
-     (process/drain-stream (.getErrorStream child) options)]))
+    (doseq [stream [(.getInputStream child) (.getErrorStream child)]]
+      (let [handle (process/drain-stream stream options)]
+        (vswap! acquired conj handle)))))
 
 (defn- ^{:stratum 0} output-finished? [until {worker :future}]
   (let [wait-ms (deadline/ceil-ms (deadline/remaining-ns until))]
