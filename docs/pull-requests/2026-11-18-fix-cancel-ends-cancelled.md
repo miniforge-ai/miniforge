@@ -74,8 +74,9 @@ success-rate metric all counted a cancel as a failure.
    line and kanban folder for a cancelled run. `status_test`: `mf status` reads a cancelled run
    from its checkpoint and from its events.
 3. Updated: `runner_test` (a stopped run returns `:cancelled` with its requester),
-   `runner_iteration_control_test`, `dag_operator_control_test`, and `resume_test` (a cancelled
-   checkpoint resumes as a new attempt).
+   `runner_iteration_control_test` and `dag_operator_control_test`. New in `resume_test`: a
+   snapshot that checkpointed `:cancelled` resumes as a new attempt under a fresh id, with its
+   terminal state reset.
 4. The 45 component and base test namespaces that cover stops, cancels and the changed functions
    pass, 438 tests and 1564 assertions, except `runner_checkpoint_test`'s relative-root case, which
    fails the same way on main on macOS. The 21 project test namespaces that mention cancel pass,
