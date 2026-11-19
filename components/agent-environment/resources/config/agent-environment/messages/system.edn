@@ -22,6 +22,7 @@
   :anomalies.agent-environment/acquire-in-flight "This run and task are already being provisioned"
   :anomalies.agent-environment/environment-cancelled "The environment is cancelled and admits no new work"
   :anomalies.agent-environment/environment-released "The environment has been released"
+  :anomalies.agent-environment/environment-releasing "The environment is being released; only a release runs"
   :anomalies.agent-environment/cleanup-uncertain "Cleanup of this environment is unconfirmed; release it again"
   :anomalies.agent-environment/unknown-lease "No environment is recorded for this lease"
   :anomalies.agent-environment/operation-not-admitted "No environment state admits this operation"

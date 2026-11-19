@@ -38,6 +38,11 @@
    :controller/persist! persist!
    :controller/ledger ledger})
 
+(defn ^{:stratum 0} change-entry!
+  "Apply `f` to key `k`'s entry by compare-and-set: the ledger's change or anomaly."
+  [controller k f]
+  (ledger/change! (:controller/ledger controller) k f))
+
 (defn ^{:stratum 0} entry
   [controller k]
   (ledger/entry (:controller/ledger controller) k))

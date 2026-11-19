@@ -24,6 +24,7 @@
    [ai.miniforge.agent-environment.controller :as controller]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]
    [ai.miniforge.agent-environment.lease :as lease]
+   [ai.miniforge.agent-environment.lifecycle.cleanup :as cleanup]
    [ai.miniforge.agent-environment.lifecycle.support :as support]
    [ai.miniforge.agent-environment.receipt :as receipt]
    [ai.miniforge.agent-environment.refusal :as refusal]
@@ -45,12 +46,12 @@
     (controller/record! c (support/subject-of acting request env) :environment/acquire :outcome/applied steps reason)
     (if reason recorded env)))
 
-(defn- ^{:stratum 0} cleanup!
-  [c subject target uid]
-  (let [steps (support/reported-steps (protocol/deprovision! (support/provider c) (assoc target :target/uid uid))
-                                      :deprovision/steps)]
-    (controller/record! c subject :environment/release (receipt/steps-outcome steps) steps
-                        :anomalies.agent-environment/provisioning-failed)))
+(defn- ^{:stratum 0} uncleaned!
+  "Record a failed provision nothing is deleted for: released when every
+   step failed, so nothing exists, else cleanup-uncertain."
+  [c request target environment outcome]
+  (let [state (if (= :outcome/failed outcome) :state/released :state/cleanup-uncertain)]
+    (controller/settle-provision! c request (:target/generation target) state environment)))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -72,18 +73,15 @@
         outcome (support/unconfirmed-if-anonymous (receipt/steps-outcome steps) environment)
         acquired (controller/record! c subject :environment/acquire outcome steps
                                      :anomalies.agent-environment/provisioning-failed)
-        cleaned (when (and environment (not= :outcome/failed outcome))
-                  (cleanup! c subject target (:environment/uid environment)))
-        state (if (or (= :outcome/failed outcome) (= :outcome/applied (:receipt/outcome cleaned)))
-                :state/released
-                :state/cleanup-uncertain)
-        recorded (controller/settle-provision! c request (:target/generation target) state environment)
-        receipt-ids (filterv some? [(:receipt/id acquired) (:receipt/id cleaned)])]
+        cleanup? (and environment (not= :outcome/failed outcome))
+        cleaned (when cleanup? (cleanup/reservation-cleaned! c subject request target environment))
+        recorded (if cleanup? (:cleanup/recorded cleaned) (uncleaned! c request target environment outcome))
+        receipt-ids (filterv some? [(:receipt/id acquired) (get-in cleaned [:cleanup/receipt :receipt/id])])
+        known {:receipt/ids receipt-ids :environment/lease (:environment/lease environment)}
+        retry (when (:cleanup/receipt cleaned) (select-keys known [:environment/lease]))]
     (if (anomaly/anomaly? recorded)
-      recorded
-      (refusal/reason-anomaly :anomalies.agent-environment/provisioning-failed
-                              {:receipt/ids receipt-ids
-                               :environment/lease (:environment/lease environment)}))))
+      (update recorded :anomaly/data merge (select-keys known [:receipt/ids]) retry)
+      (refusal/reason-anomaly :anomalies.agent-environment/provisioning-failed known))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
