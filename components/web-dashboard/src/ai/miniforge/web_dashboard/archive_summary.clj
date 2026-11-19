@@ -53,9 +53,13 @@
     (= :workflow/failed (:event/type terminal-event))
     :failed
 
+    (= :workflow/cancelled (:event/type terminal-event))
+    :cancelled
+
     (= :workflow/completed (:event/type terminal-event))
     (case (or (:workflow/status terminal-event) (:status terminal-event))
-      (:failure :failed :cancelled) :failed
+      (:failure :failed) :failed
+      :cancelled :cancelled
       :completed)
 
     (<= tail-line-count 2)
@@ -70,7 +74,8 @@
   [first-event tail-events file-path file-size]
   (let [wf-id (extract-wf-id first-event)]
     (when wf-id
-      (let [terminal    (find-by-type #{:workflow/completed :workflow/failed} tail-events)
+      (let [terminal    (find-by-type #{:workflow/completed :workflow/failed :workflow/cancelled}
+                                     tail-events)
             phase-event (find-by-type #{:workflow/phase-started :workflow/phase-completed} tail-events)]
         {:id           wf-id
          :name         (extract-wf-name first-event wf-id)

@@ -218,7 +218,14 @@
                             :message "phase implement failed")
           result (sut/render-timeline [event])]
       (is (str/includes? result "TERMINATED"))
-      (is (str/includes? result "phase implement failed")))))
+      (is (str/includes? result "phase implement failed"))))
+
+  (testing "workflow/cancelled renders TERMINATED marker"
+    (let [event  (mk-event :workflow/cancelled 5000
+                            :message "Workflow cancelled by op")
+          result (sut/render-timeline [event])]
+      (is (str/includes? result "TERMINATED"))
+      (is (str/includes? result "Workflow cancelled by op")))))
 
 (deftest ^{:stratum 2} phase-lifecycle-events-render
   (testing "workflow/phase-started renders phase started label"
