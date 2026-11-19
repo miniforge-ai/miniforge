@@ -17,5 +17,8 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} ceil-ms [remaining-ns]
+  (quot (+ remaining-ns (dec nanos-per-ms)) nanos-per-ms))
+
 (defn ^{:stratum 1} after-ms [budget-ms]
   (+ (System/nanoTime) (* budget-ms nanos-per-ms)))
