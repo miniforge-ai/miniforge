@@ -79,7 +79,7 @@
                                    :progress           (workflow-progress status)
                                    :started-at         (normalize-ts (event-ts started))
                                    :updated-at         (normalize-ts (some-> wf-events last event-ts))
-                                   :completed-at       (normalize-ts (event-ts completed))
+                                   :completed-at       (normalize-ts (event-ts (or completed cancelled)))
                                    :event-count        (count wf-events)
                                    :evidence-bundle-id (:workflow/evidence-bundle-id completed)
                                    :metrics            metrics}

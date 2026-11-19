@@ -205,11 +205,12 @@
 
 (defn ^{:stratum 2} workflow-metrics
   "Aggregate workflow metrics from terminal and phase completion events.
-   Prefers values on the :workflow/completed event; falls back to summing
-   individual phase completion events."
+   Prefers values on the :workflow/completed or :workflow/cancelled event
+   (a cancel carries the run's duration); falls back to summing individual
+   phase completion events."
   [events]
   (let [terminal (->> events
-                      (filter #(= :workflow/completed (:event/type %)))
+                      (filter #(#{:workflow/completed :workflow/cancelled} (:event/type %)))
                       (sort-by #(ts-epoch-ms (event-ts %)))
                       last)
         phases (filter #(= :workflow/phase-completed (:event/type %)) events)

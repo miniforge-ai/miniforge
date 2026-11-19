@@ -121,11 +121,15 @@
       (es/publish! stream (wf-event :workflow/started wf-id (str (java.time.Instant/now))
                                     :workflow/spec {:name "Cancelled"}))
       (es/publish! stream (wf-event :workflow/cancelled wf-id (str (java.time.Instant/now))
-                                    :cancel/requested-by "op" :cancel/source :cli))
+                                    :cancel/requested-by "op" :cancel/source :cli
+                                    :workflow/duration-ms 4200))
       (with-redefs [sources/events-dir-path (.getPath events-dir)]
         (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)]
           (is (= :cancelled (:status workflow)))
-          (is (= 100 (:progress workflow))))))))
+          (is (= 100 (:progress workflow)))
+          (is (some? (:completed-at workflow)) "the cancel is when it finished")
+          (is (= 4200 (get-in workflow [:metrics :duration-ms]))
+              "the duration the cancel recorded, not the finished phases' sum"))))))
 
 (deftest ^{:stratum 2} get-workflows-keeps-publish-order-among-tied-timestamps-test
   (testing "more events than an array map holds, all in one millisecond"
