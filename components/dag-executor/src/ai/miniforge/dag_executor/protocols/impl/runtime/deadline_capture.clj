@@ -19,7 +19,8 @@
    :command-error 1})
 
 (defn ^{:stratum 0} drains [^Process child]
-  (let [options {:on-overflow (partial process/destroy-process-tree! child)}]
+  (let [stop! (partial process/destroy-process-tree! child)
+        options {:on-overflow stop!}]
     [(process/drain-stream (.getInputStream child) options)
      (process/drain-stream (.getErrorStream child) options)]))
 
@@ -27,11 +28,8 @@
   (let [wait-ms (quot (deadline/remaining-ns until) deadline/nanos-per-ms)]
     (not= ::pending (deref worker wait-ms ::pending))))
 
-(defn- ^{:stratum 0} completed [^Process child [stdout stderr]]
-  (let [exit (.exitValue child)
-        out (process/drained-text stdout)
-        err (process/drained-text stderr)]
-    {:exit exit :out out :err err}))
+(defn- ^{:stratum 0} command-result [exit out err]
+  {:exit exit :out out :err err})
 
 (defn ^{:stratum 0} cleanup! [^Process child capture]
   (try+
@@ -40,9 +38,15 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} completed [^Process child [stdout stderr]]
+  (let [exit (.exitValue child)
+        out (process/drained-text stdout)
+        err (process/drained-text stderr)]
+    (command-result exit out err)))
+
 (defn ^{:stratum 1} failure [reason]
   (let [exit (get failure-exit-codes reason)]
-    {:exit exit :out "" :err "" :reason reason}))
+    (assoc (command-result exit "" "") :reason reason)))
 
 ;------------------------------------------------------------------------------ Layer 2
 

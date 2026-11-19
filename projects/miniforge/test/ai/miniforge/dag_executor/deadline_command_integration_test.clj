@@ -18,13 +18,15 @@
 
 (def ^{:stratum 0 :private true} success-budget-ms 5000)
 
+(def ^{:stratum 0 :private true} held-pipe-ceiling-ms 2500)
+
 (defn- ^{:stratum 0} shell-command [script & args]
   (into ["/bin/sh" "-c" script "deadline-fixture"] args))
 
-(defn- ^{:stratum 0} pid-live? [pid-file]
+(defn- ^{:stratum 0} recorded-handle [pid-file]
   (let [pid (Long/parseLong (slurp (str pid-file)))
         handle (java.lang.ProcessHandle/of pid)]
-    (and (.isPresent handle) (.isAlive ^java.lang.ProcessHandle (.get handle)))))
+    (.orElse handle nil)))
 
 (defn- ^{:stratum 0} record-start! [started start! argv]
   (reset! started (start! argv)))
@@ -38,6 +40,15 @@
     (if first? (throw (InterruptedException.)) (wait! child until))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} pid-live? [pid-file]
+  (when-let [handle (recorded-handle pid-file)]
+    (.isAlive ^java.lang.ProcessHandle handle)))
+
+(defn- ^{:stratum 1} kill-recorded-fixture! [pid-file]
+  (when (fs/exists? pid-file)
+    (when-let [handle (recorded-handle pid-file)]
+      (.destroyForcibly ^java.lang.ProcessHandle handle))))
 
 (deftest ^{:stratum 1} test-complete-output-before-the-deadline
   (let [until (deadline/after-ms success-budget-ms)
@@ -66,19 +77,6 @@
     (let [reply (command/run! (deadline/after-ms fixture-budget-ms) (shell-command "printf ready"))]
       (is (= :deadline (:reason reply)))
       (is (= "" (:out reply))))))
-
-(deftest ^{:stratum 1 :integration true} test-hung-command-is-killed-and-partial-output-is-dropped
-  (fs/with-temp-dir [directory {}]
-    (let [pid-file (fs/path directory "pid")
-          argv (shell-command "printf '%s' \"$$\" > \"$1\"; printf partial; exec sleep 30" (str pid-file))
-          started (System/nanoTime)
-          reply (command/run! (deadline/after-ms fixture-budget-ms) argv)
-          elapsed-ms (/ (- (System/nanoTime) started) deadline/nanos-per-ms)]
-      (is (= :deadline (:reason reply)))
-      (is (= "" (:out reply)))
-      (is (< elapsed-ms scheduling-ceiling-ms))
-      (is (fs/exists? pid-file))
-      (is (not (pid-live? pid-file))))))
 
 (deftest ^{:stratum 1 :integration true} test-interruption-kills-the-owned-command-and-preserves-the-flag
   (let [argv (shell-command "exec sleep 30")
@@ -114,5 +112,33 @@
       (finally
         (Thread/interrupted)
         (.destroyForcibly ^Process @started)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2 :integration true} test-real-descendant-held-pipe-cannot-extend-capture
+  (fs/with-temp-dir [directory {}]
+    (let [pid-file (fs/path directory "descendant")
+          argv (shell-command "sleep 3 & printf '%s' \"$!\" > \"$1\"; printf inherited; sleep 0.1" (str pid-file))
+          started (System/nanoTime)]
+      (try
+        (let [reply (command/run! (deadline/after-ms fixture-budget-ms) argv)
+              elapsed-ms (/ (- (System/nanoTime) started) deadline/nanos-per-ms)]
+          (is (= :deadline (:reason reply)))
+          (is (= "" (:out reply)))
+          (is (< elapsed-ms held-pipe-ceiling-ms)))
+        (finally (kill-recorded-fixture! pid-file))))))
+
+(deftest ^{:stratum 2 :integration true} test-hung-command-is-killed-and-partial-output-is-dropped
+  (fs/with-temp-dir [directory {}]
+    (let [pid-file (fs/path directory "pid")
+          argv (shell-command "printf '%s' \"$$\" > \"$1\"; printf partial; exec sleep 30" (str pid-file))
+          started (System/nanoTime)
+          reply (command/run! (deadline/after-ms fixture-budget-ms) argv)
+          elapsed-ms (/ (- (System/nanoTime) started) deadline/nanos-per-ms)]
+      (is (= :deadline (:reason reply)))
+      (is (= "" (:out reply)))
+      (is (< elapsed-ms scheduling-ceiling-ms))
+      (is (fs/exists? pid-file))
+      (is (not (pid-live? pid-file))))))
 
 (comment (clojure.test/run-tests 'ai.miniforge.dag-executor.deadline-command-integration-test))
