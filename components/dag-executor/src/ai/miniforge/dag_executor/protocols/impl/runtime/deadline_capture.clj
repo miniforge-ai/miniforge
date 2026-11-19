@@ -36,7 +36,6 @@
 (defn ^{:stratum 0} cleanup! [^Process child capture]
   (try+
     (process/destroy-process-tree! child)
-    (.waitFor child process/graceful-shutdown-ms TimeUnit/MILLISECONDS)
     (finally (run! process/cancel-drain! capture))))
 
 ;------------------------------------------------------------------------------ Layer 1

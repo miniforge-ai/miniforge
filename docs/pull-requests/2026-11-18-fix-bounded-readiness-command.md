@@ -23,6 +23,10 @@ Refuse an expired call before spawning, bound process and output waits,
 and stop the owned process on timeout or cancellation. Timeout results
 discard partial output. Cleanup may use the shared shutdown grace twice:
 once for graceful termination and once to confirm forced process exit.
+The shared tree helper defers cancellation through forced termination.
+Interrupts do not restart either shutdown deadline.
+The dependent merge exposed prose-gate failures in three incoming PR
+documents. Their flagged sentences are split without changing the claims.
 
 ## Testing plan
 
@@ -31,8 +35,12 @@ admission, a hung process, cancellation and capture overflow. Verify that
 the directly launched process is no longer alive when the call returns.
 Run strict lint, actual namespace depths and both product runtimes.
 Both JVM products, Babashka source and a freshly built package passed
-6 integration tests / 16 assertions each. The process tests use a local
+7 integration tests / 20 assertions each. This includes cancellation
+during cleanup of a process that ignores SIGTERM. The process tests use a local
 POSIX shell; no provider or cluster is contacted.
+Removing interruption deferral fails two cleanup assertions without a
+runtime error. Existing executor and fake-runtime suites passed 82 tests /
+301 assertions against the shared helper.
 
 ## Deployment plan
 
