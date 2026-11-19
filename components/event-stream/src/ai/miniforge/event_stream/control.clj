@@ -50,9 +50,20 @@
   (swap! control-state assoc :paused false))
 
 (defn ^{:stratum 0} cancel!
-  "Cancel workflow execution."
+  "Cancel workflow execution, recording CANCELLATION when given. The first
+   record is kept: the run stops on the first cancel."
+  ([control-state]
+   (swap! control-state assoc :stopped true))
+  ([control-state cancellation]
+   (swap! control-state
+          (fn [state]
+            (cond-> (assoc state :stopped true)
+              (nil? (:cancellation state)) (assoc :cancellation cancellation))))))
+
+(defn ^{:stratum 0} cancellation
+  "The record the first recorded cancel left, or nil."
   [control-state]
-  (swap! control-state assoc :stopped true))
+  (:cancellation @control-state))
 
 (defn ^{:stratum 0} paused?
   "Check if workflow is paused."
