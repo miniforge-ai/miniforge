@@ -36,7 +36,16 @@
       (testing "unparseable JSON throws and the file is left untouched"
         (spit path corrupt-json)
         (is (thrown? clojure.lang.ExceptionInfo (tasks/read-json-file path)))
-        (is (= corrupt-json (slurp path)))))))
+        (is (= corrupt-json (slurp path))))
+      (testing "content after the first JSON value is rejected, not ignored"
+        (spit path "{} {\"mcpServers\":{\"other\":{}}}")
+        (is (thrown? clojure.lang.ExceptionInfo (tasks/read-json-file path))))
+      (testing "a non-object root is rejected"
+        (spit path "[1]")
+        (is (thrown? clojure.lang.ExceptionInfo (tasks/read-json-file path))))
+      (testing "a blank file holds nothing to lose and reads as empty"
+        (spit path "  \n")
+        (is (= {} (tasks/read-json-file path)))))))
 
 (deftest write-json-file-test
   (fs/with-temp-dir [dir {}]

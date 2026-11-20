@@ -195,13 +195,26 @@
   []
   (str (fs/home) "/.codex/config.toml"))
 
+(defn- parse-single-json-object
+  "The one JSON object in text, {} for blank text (nothing to lose), else
+   throws. Consumes every root value, because cheshire's parse-string would
+   silently ignore content after the first."
+  [text]
+  (if (str/blank? text)
+    {}
+    (let [values (vec (json/parsed-seq (java.io.StringReader. text)))]
+      (if (and (= 1 (count values)) (map? (first values)))
+        (first values)
+        (throw (ex-info "Expected exactly one JSON object" {:values (count values)}))))))
+
 (defn read-json-file
-  "Read and parse a JSON file. Returns {} only when the file is missing.
-   A file that exists but cannot be parsed throws, so a caller that merges
-   into it never rewrites (and so destroys) a config it could not read."
+  "Read and parse a JSON config file. Returns {} for a missing or blank file.
+   A file that exists but is not exactly one JSON object throws, so a caller
+   that merges into it never rewrites (and so destroys) a config it could
+   not fully read."
   [path]
   (if (fs/exists? path)
-    (try (json/parse-string (slurp path))
+    (try (parse-single-json-object (slurp path))
          (catch Exception e
            (throw (ex-info (str "Cannot parse existing JSON config, leaving it untouched: " path)
                            {:path (str path)} e))))
