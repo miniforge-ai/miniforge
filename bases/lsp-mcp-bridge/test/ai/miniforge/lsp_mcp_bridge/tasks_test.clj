@@ -46,3 +46,23 @@
         (is (= {"a" 1} (tasks/read-json-file path))))
       (testing "leaves no temp file behind"
         (is (not (fs/exists? (str path ".tmp"))))))))
+
+(deftest write-file-atomically-preserves-target-test
+  (fs/with-temp-dir [dir {}]
+    (let [real (str dir "/real.json")
+          link (str dir "/link.json")]
+      (spit real "old")
+      (fs/create-sym-link link real)
+      (when-not (fs/windows?)
+        (fs/set-posix-file-permissions real "rw-------"))
+      (tasks/write-file-atomically! link "new")
+      (testing "a symlinked config is written through, the link survives"
+        (is (fs/sym-link? link))
+        (is (= "new" (slurp real))))
+      (testing "the existing mode is kept"
+        (when-not (fs/windows?)
+          (is (= (fs/str->posix "rw-------")
+                 (fs/posix-file-permissions real)))))
+      (testing "no temp file is left in the directory"
+        (is (= #{"real.json" "link.json"}
+               (set (map fs/file-name (fs/list-dir dir)))))))))

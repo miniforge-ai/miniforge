@@ -208,16 +208,25 @@
     {}))
 
 (defn write-file-atomically!
-  "Write content to path via a sibling temp file and an atomic move, so a
-   crash mid-write cannot leave a truncated user config behind."
+  "Write content to path via a unique sibling temp file and an atomic move, so
+   a crash mid-write cannot truncate a user config and concurrent setup runs
+   never share a temp file. A symlinked config is written through to its
+   target (the link survives), and an existing config keeps its permissions:
+   the temp file is owner-only on creation and takes the target's mode
+   before any content lands in it."
   [path content]
-  (let [target (fs/path path)
-        tmp    (fs/path (str path ".tmp"))]
-    (fs/create-dirs (fs/parent target))
-    (spit (str tmp) content)
-    (Files/move tmp target
-                (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
-                                        StandardCopyOption/REPLACE_EXISTING]))))
+  (let [target (if (fs/exists? path) (fs/real-path path) (fs/absolutize path))
+        _      (fs/create-dirs (fs/parent target))
+        tmp    (fs/create-temp-file {:dir (fs/parent target) :prefix ".mf-config-" :suffix ".tmp"})]
+    (try
+      (when (and (fs/exists? target) (not (fs/windows?)))
+        (fs/set-posix-file-permissions tmp (fs/posix-file-permissions target)))
+      (spit (str tmp) content)
+      (Files/move tmp target
+                  (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                          StandardCopyOption/REPLACE_EXISTING]))
+      (finally
+        (fs/delete-if-exists tmp)))))
 
 (defn write-json-file
   "Write data as formatted JSON to a file."
