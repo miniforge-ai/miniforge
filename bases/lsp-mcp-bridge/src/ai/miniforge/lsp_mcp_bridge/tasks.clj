@@ -32,7 +32,9 @@
    [ai.miniforge.response.interface :as response]
    [babashka.fs :as fs]
    [cheshire.core :as json]
-   [clojure.string :as str]))
+   [clojure.string :as str])
+  (:import
+   (java.nio.file CopyOption Files StandardCopyOption)))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Name resolution and display helpers
@@ -193,19 +195,56 @@
   []
   (str (fs/home) "/.codex/config.toml"))
 
+(defn- parse-single-json-object
+  "The one JSON object in text, {} for blank text (nothing to lose), else
+   throws. Consumes every root value, because cheshire's parse-string would
+   silently ignore content after the first."
+  [text]
+  (if (str/blank? text)
+    {}
+    (let [values (vec (json/parsed-seq (java.io.StringReader. text)))]
+      (if (and (= 1 (count values)) (map? (first values)))
+        (first values)
+        (throw (ex-info "Expected exactly one JSON object" {:values (count values)}))))))
+
 (defn read-json-file
-  "Read and parse a JSON file. Returns {} if missing or invalid."
+  "Read and parse a JSON config file. Returns {} for a missing or blank file.
+   A file that exists but is not exactly one JSON object throws, so a caller
+   that merges into it never rewrites (and so destroys) a config it could
+   not fully read."
   [path]
   (if (fs/exists? path)
-    (try (json/parse-string (slurp path))
-         (catch Exception _ {}))
+    (try (parse-single-json-object (slurp path))
+         (catch Exception e
+           (throw (ex-info (str "Cannot parse existing JSON config, leaving it untouched: " path)
+                           {:path (str path)} e))))
     {}))
+
+(defn write-file-atomically!
+  "Write content to path via a unique sibling temp file and an atomic move, so
+   a crash mid-write cannot truncate a user config and concurrent setup runs
+   never share a temp file. A symlinked config is written through to its
+   target (the link survives), and an existing config keeps its permissions:
+   the temp file is owner-only on creation and takes the target's mode
+   before any content lands in it."
+  [path content]
+  (let [target (if (fs/exists? path) (fs/real-path path) (fs/absolutize path))
+        _      (fs/create-dirs (fs/parent target))
+        tmp    (fs/create-temp-file {:dir (fs/parent target) :prefix ".mf-config-" :suffix ".tmp"})]
+    (try
+      (when (and (fs/exists? target) (not (fs/windows?)))
+        (fs/set-posix-file-permissions tmp (fs/posix-file-permissions target)))
+      (spit (str tmp) content)
+      (Files/move tmp target
+                  (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                          StandardCopyOption/REPLACE_EXISTING]))
+      (finally
+        (fs/delete-if-exists tmp)))))
 
 (defn write-json-file
   "Write data as formatted JSON to a file."
   [path data]
-  (fs/create-dirs (fs/parent path))
-  (spit path (json/generate-string data {:pretty true}))
+  (write-file-atomically! path (json/generate-string data {:pretty true}))
   (println (str "  Wrote: " path)))
 
 (defn toml-escape
@@ -314,8 +353,7 @@
         existing (if (fs/exists? path) (slurp path) "")
         cleaned (remove-toml-block existing "mcp_servers.miniforge-lsp")
         updated (append-toml-block cleaned block)]
-    (fs/create-dirs (fs/parent path))
-    (spit path updated)
+    (write-file-atomically! path updated)
     (println (str "  Wrote: " path))
     (println "  Codex configured. Restart Codex to pick up changes.")))
 
