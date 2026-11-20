@@ -32,7 +32,9 @@
    [ai.miniforge.response.interface :as response]
    [babashka.fs :as fs]
    [cheshire.core :as json]
-   [clojure.string :as str]))
+   [clojure.string :as str])
+  (:import
+   (java.nio.file CopyOption Files StandardCopyOption)))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Name resolution and display helpers
@@ -194,18 +196,33 @@
   (str (fs/home) "/.codex/config.toml"))
 
 (defn read-json-file
-  "Read and parse a JSON file. Returns {} if missing or invalid."
+  "Read and parse a JSON file. Returns {} only when the file is missing.
+   A file that exists but cannot be parsed throws, so a caller that merges
+   into it never rewrites (and so destroys) a config it could not read."
   [path]
   (if (fs/exists? path)
     (try (json/parse-string (slurp path))
-         (catch Exception _ {}))
+         (catch Exception e
+           (throw (ex-info (str "Cannot parse existing JSON config, leaving it untouched: " path)
+                           {:path (str path)} e))))
     {}))
+
+(defn write-file-atomically!
+  "Write content to path via a sibling temp file and an atomic move, so a
+   crash mid-write cannot leave a truncated user config behind."
+  [path content]
+  (let [target (fs/path path)
+        tmp    (fs/path (str path ".tmp"))]
+    (fs/create-dirs (fs/parent target))
+    (spit (str tmp) content)
+    (Files/move tmp target
+                (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                        StandardCopyOption/REPLACE_EXISTING]))))
 
 (defn write-json-file
   "Write data as formatted JSON to a file."
   [path data]
-  (fs/create-dirs (fs/parent path))
-  (spit path (json/generate-string data {:pretty true}))
+  (write-file-atomically! path (json/generate-string data {:pretty true}))
   (println (str "  Wrote: " path)))
 
 (defn toml-escape
@@ -314,8 +331,7 @@
         existing (if (fs/exists? path) (slurp path) "")
         cleaned (remove-toml-block existing "mcp_servers.miniforge-lsp")
         updated (append-toml-block cleaned block)]
-    (fs/create-dirs (fs/parent path))
-    (spit path updated)
+    (write-file-atomically! path updated)
     (println (str "  Wrote: " path))
     (println "  Codex configured. Restart Codex to pick up changes.")))
 
