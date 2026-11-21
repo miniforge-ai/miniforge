@@ -54,6 +54,7 @@
     :running   (msg/t :workflow.status/running)
     :completed (msg/t :workflow.status/completed)
     :failed    (msg/t :status/failed-label)
+    :cancelled (msg/t :workflow.status/cancelled)
     :stale     (msg/t :workflow.status/stale)
     (msg/t :workflow.status/unknown)))
 

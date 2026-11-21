@@ -54,9 +54,11 @@
         stale   (filterv #(= :stale (:status %)) all-wfs)
         done    (filterv #(#{:success :completed} (:status %)) all-wfs)
         failed  (filterv #(= :failed (:status %)) all-wfs)
+        cancelled (filterv #(= :cancelled (:status %)) all-wfs)
         done-cards (vec (concat
                          (mapv (fn [wf] {:label (:name wf) :status :success}) done)
                          (mapv (fn [wf] {:label (:name wf) :status :failed}) failed)
+                         (mapv (fn [wf] {:label (:name wf) :status :cancelled}) cancelled)
                          (mapv (fn [wf] {:label (:name wf) :status :stale}) stale)))
         blocked-cards (mapv (fn [wf] {:label (:name wf) :status :blocked}) blocked)
         pending-cards (mapv (fn [wf] {:label (:name wf) :status :pending}) pending)
