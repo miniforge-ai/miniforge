@@ -53,3 +53,9 @@ and [setup workflow contract](https://docs.github.com/en/copilot/how-tos/copilot
 ## Related issues/PRs
 
 Unblocks review of #2542, which precedes readiness repair in #2536.
+
+## Checklist
+
+- Workflow syntax and local preparation tasks validated.
+- Hosted setup, ordinary CI and full review required before merge.
+- Confirm runtime setup in subsequent review logs before revisiting #2542.
