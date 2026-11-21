@@ -39,6 +39,9 @@ and a failed child never yields an acknowledgement.
 A scoped GitHub-hosted macOS job checks out the exact PR head.
 It runs the native fixtures in both JVM products, Babashka source,
 and the fresh package. Run the task locally with `bb test:darwin-storage`.
+The subprocess and native ACL fixtures live in project integration-test
+roots rather than slowing component unit tests. The hosted trigger covers
+those roots, and the runner includes shared component fixtures in every mode.
 
 Local results: 27 tests and 112 assertions passed in each of the four runs.
 Disabling the ACL guard, child deadline or capture cancellation failed the

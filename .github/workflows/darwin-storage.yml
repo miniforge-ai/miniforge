@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'components/file-durability/**'
+      - 'projects/miniforge/test/ai/miniforge/file_durability/**'
       - 'tasks/darwin_storage_test.clj'
       - 'bb.edn'
       - '.github/tool-versions.json'

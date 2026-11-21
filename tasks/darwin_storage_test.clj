@@ -12,12 +12,13 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0 :private true} runner
+  "Run the native integration packet in a fresh runtime, failing on any assertion."
   (pr-str
    '(do
       (require 'clojure.test)
       (try
-        (let [suites '[ai.miniforge.file-durability.macos-acl-test
-                       ai.miniforge.file-durability.native-probe-test]]
+        (let [suites '[ai.miniforge.file-durability.macos-acl-integration-test
+                       ai.miniforge.file-durability.native-probe-integration-test]]
           (clojure.core/run! require suites)
           (let [{:keys [fail error]} (apply clojure.test/run-tests suites)]
             (when-not (zero? (+ fail error))
@@ -30,12 +31,18 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} jvm-check! [workspace product tests]
-  (process/shell {:dir (str (fs/path workspace "projects" product))}
-                 "clojure" "-Sdeps" (pr-str {:paths [tests]}) "-M" "-e" runner))
+  (let [directory (str (fs/path workspace "projects" product))
+        dependencies (pr-str {:paths tests})]
+    (process/shell {:dir directory}
+                   "clojure" "-Sdeps" dependencies "-M" "-e" runner)))
+
+(defn- ^{:stratum 1} test-paths [workspace]
+  [(storage-path workspace "test")
+   (str (fs/path workspace "projects/miniforge/test"))])
 
 (defn- ^{:stratum 1} babashka-check! [workspace tests]
   (let [jar (str (fs/path workspace "dist/miniforge.jar"))
-        packaged [jar tests]
+        packaged (into [jar] tests)
         source (concat (map (partial storage-path workspace) ["src" "resources"]) packaged)]
     (process/shell "bb" "build:cli")
     (fs/with-temp-dir [isolated {}]
@@ -49,7 +56,7 @@
   (when-not (= "Mac OS X" (System/getProperty "os.name"))
     (throw (ex-info "Native ACL verification requires macOS." {})))
   (let [workspace (fs/cwd)
-        tests (storage-path workspace "test")]
+        tests (test-paths workspace)]
     (process/shell "git" "rev-parse" "HEAD")
     (doseq [product ["miniforge-core" "miniforge"]]
       (jvm-check! workspace product tests))

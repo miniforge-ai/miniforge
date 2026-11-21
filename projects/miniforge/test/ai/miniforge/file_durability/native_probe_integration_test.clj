@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.file-durability.native-probe-test
+(ns ai.miniforge.file-durability.native-probe-integration-test
   (:require [ai.miniforge.file-durability.boundary.native-probe :as probe]
             [babashka.fs :as fs]
             [babashka.process :as process]
@@ -71,4 +71,4 @@
   (when (fs/exists? (first failed-child))
     (is (nil? (probe/read-output failed-child nil)))))
 
-(comment (clojure.test/run-tests 'ai.miniforge.file-durability.native-probe-test))
+(comment (clojure.test/run-tests 'ai.miniforge.file-durability.native-probe-integration-test))

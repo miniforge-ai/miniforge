@@ -1,7 +1,7 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
-(ns ai.miniforge.file-durability.macos-acl-test
+(ns ai.miniforge.file-durability.macos-acl-integration-test
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.file-durability.boundary.macos-acl :as acl]
             [ai.miniforge.file-durability.boundary.native-probe :as probe]
@@ -51,4 +51,4 @@
          (is (anomaly/anomaly? (durability/verify-publication! directory)))
          (is (empty? (fs/list-dir directory))))))))
 
-(comment (clojure.test/run-tests 'ai.miniforge.file-durability.macos-acl-test))
+(comment (clojure.test/run-tests 'ai.miniforge.file-durability.macos-acl-integration-test))
