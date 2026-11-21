@@ -2,17 +2,28 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.publication-support
+  (:require [babashka.process :as process])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files StandardCopyOption]
            [java.nio.file.attribute FileAttribute PosixFilePermissions]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} candidate "candidate")
+(def ^{:stratum 0} candidate
+  "Distinct new payload used to verify publication and replacement."
+  "candidate")
 
-(def ^{:stratum 0} previous "previous")
+(def ^{:stratum 0} previous
+  "Old payload retained until a replacement has been published."
+  "previous")
 
-(def ^{:stratum 0} readonly "r--------")
+(def ^{:stratum 0} readonly
+  "Owner-only read permission that publication must preserve."
+  "r--------")
+
+(def ^{:stratum 0 :private true} chmod-command
+  "Use the system permission tool only on fixture-owned directories."
+  "/bin/chmod")
 
 (defn ^{:stratum 0} with-root [f]
   (let [root (.toFile (Files/createTempDirectory "mf-durability-publication-" (make-array FileAttribute 0)))]
@@ -47,10 +58,13 @@
 (defn ^{:stratum 1} make-readonly! [file]
   (Files/setPosixFilePermissions (.toPath file) (PosixFilePermissions/fromString readonly)))
 
+(defn ^{:stratum 1} set-test-ace! [directory ace]
+  (process/check (process/process [chmod-command "+a" ace (str directory)])))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} publish-readonly! [temporary target]
   (make-readonly! temporary)
   (move! temporary target))
 
-(comment ::owned-publication-fixtures)
+(comment (with-root mode))

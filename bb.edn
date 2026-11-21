@@ -108,6 +108,11 @@
   ;; Testing
   ;; ──────────────────────────────────────────────────────────────────────────
 
+  test:darwin-storage
+  {:doc "Verify native storage protection in both JVM products and Babashka on macOS"
+   :requires ([darwin-storage-test])
+   :task (darwin-storage-test/run!)}
+
   test
   {:doc  "Run stable-derived changed-and-affected project tests"
    :task (let [exit (run-stream! "bb" "scripts/test-since-stable.bb")]
