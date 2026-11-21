@@ -182,6 +182,19 @@
       (is (= {:call/outcome :outcome/applied} (env/release! (:c w) (:a w) current)))
       (is (= :state/released (:entry/state (stored w)))))))
 
+(deftest ^{:stratum 1} test-a-lease-holders-retry-is-never-reconciled
+  (let [w (outage-world {:fake/fail-step :step/workload})
+        req (fx/request w (:a w))]
+    (swap! (:faults w) assoc :writes 2)
+    (let [kept (get-in (fx/acquire w (:a w) req) [:anomaly/data :environment/lease])]
+      (swap! (:faults w) assoc :writes 1)
+      (env/release! (:c w) (:a w) kept)
+      (swap! (:faults w) assoc :writes nil)
+      (testing "given the lease holder's retry left pending → no claim, so an acquire past the old claim is refused"
+        (is (nil? (:entry/claim (stored w))))
+        (is (= :anomalies.agent-environment/environment-releasing
+               (reason (faults/reacquire w (faults/restarted w faults/much-later) req))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-a-delete-reported-failed-is-not-a-release

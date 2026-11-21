@@ -58,6 +58,11 @@
   []
   (.plus (Instant/now) (Duration/ofMillis (inc lease/default-claim-ttl-ms))))
 
+(defn ^{:stratum 0} much-later
+  "A clock reading past every claim made on a `later` clock."
+  []
+  (.plus (Instant/now) (Duration/ofMillis (* 2 (inc lease/default-claim-ttl-ms)))))
+
 (defn ^{:stratum 0} receipts-of
   [w operation]
   (filterv #(= operation (:receipt/operation %)) @(:receipts w)))
