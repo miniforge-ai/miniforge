@@ -28,6 +28,7 @@
    The canonical job configuration is documented in:
    resources/executor/kubernetes/job-template.yaml"
   (:require
+   [ai.miniforge.dag-executor.protocols.impl.kubernetes-acquisition :as acquisition]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources :as resources]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-settings :as settings]
@@ -172,6 +173,16 @@
                   :raw (:out result)})
       (result/ok {:status :unknown :error (:err result)}))))
 
+(defn- ^{:stratum 0} retain-environment!
+  "Cache the Pod name and preserve the legacy environment-record shape."
+  [cache {:keys [job-name task-id workdir namespace options]} {:keys [pod-name]}]
+  (swap! cache assoc job-name pod-name)
+  (result/ok (proto/create-environment-record
+              job-name :kubernetes task-id workdir
+              (assoc options :metadata {:job-name job-name
+                                        :pod-name pod-name
+                                        :namespace namespace}))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================
@@ -197,23 +208,15 @@
                                    (:env env-config)
                                    (:resources env-config)
                                    task-id)
-          apply-result (apply-job kubectl-path namespace job-spec)]
-      (if (result/err? apply-result)
-        apply-result
-        (let [wait-result (client/wait-for-pod-ready kubectl-path namespace job-name
-                                              config)]
-          (if (result/err? wait-result)
-            (do
-              (delete-job kubectl-path namespace job-name)
-              wait-result)
-            (let [pod-name (:pod-name (:data wait-result))]
-              (swap! pod-cache assoc job-name pod-name)
-              (result/ok (proto/create-environment-record
-                          job-name :kubernetes task-id workdir
-                          (assoc env-config
-                                 :metadata {:job-name job-name
-                                            :pod-name pod-name
-                                            :namespace namespace})))))))))
+          context {:job-name job-name
+                   :task-id task-id
+                   :workdir workdir
+                   :namespace namespace
+                   :options env-config}]
+      (acquisition/acquire! (partial apply-job kubectl-path namespace job-spec)
+                            (partial client/wait-for-pod-ready kubectl-path namespace job-name config)
+                            (partial delete-job kubectl-path namespace job-name)
+                            (partial retain-environment! pod-cache context))))
 
   (execute! [_this environment-id command opts]
     (try+
