@@ -239,9 +239,15 @@
     :else {}))
 
 ;; Context decoration
-(defn ^{:stratum 1} decorate-spec-with-runtime-context [spec {:keys [iteration parent-task-id] :or {iteration 1}}]
+(defn ^{:stratum 1} decorate-spec-with-runtime-context
+  "`spec` with its runtime :spec/context and :spec/metadata. The context's
+   :git-branch and :git-commit are those of the repository holding the spec
+   file (:spec/source-dir) when it has one, else the working directory's:
+   the run cuts its task worktree from that repository, and the branch is
+   its default base, so it must name a branch there."
+  [spec {:keys [iteration parent-task-id] :or {iteration 1}}]
   (let [cwd (or (worktree/worktree-root) (str (fs/cwd)))
-        git-info (git/get-git-info cwd)
+        git-info (git/get-git-info (get spec :spec/source-dir cwd))
         files-in-scope (get-files-in-scope (:spec/intent spec))]
     (assoc spec
            :spec/context

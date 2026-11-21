@@ -250,10 +250,17 @@
                         ;; Assoc repo-url, branch, and (optionally) execution-mode
                         ;; so runner.clj can clone into a container or create a
                         ;; worktree. runtime-config carries MINIFORGE_RUNTIME to
-                        ;; the governed capsule's runtime selection.
+                        ;; the governed capsule's runtime selection. repo-path is
+                        ;; the spec's repository (:source-root): without it the
+                        ;; runner cuts the task worktree from the process's
+                        ;; working directory, which can be another repository.
+                        ;; --worktree does not override it: that path is where
+                        ;; the backend preflight runs, and where the run works
+                        ;; only when no task worktree can be acquired.
                         (cond-> (assoc ctx
                                        :repo-url repo-url
                                        :branch branch
+                                       :repo-path (:source-root ctx)
                                        :execution-mode mode
                                        :runtime-config (runtime-env/selection-config))
 ))
