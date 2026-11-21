@@ -23,10 +23,11 @@
    [ai.miniforge.agent-environment.interface :as env]
    [ai.miniforge.agent-environment.interface.ledger :as store]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]
+   [ai.miniforge.agent-environment.lease :as lease]
    [ai.miniforge.agent-environment.ledger.memory :as memory-ledger]
    [ai.miniforge.anomaly.interface :as anomaly])
   (:import
-   [java.time Instant]))
+   [java.time Duration Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -51,6 +52,13 @@
         left (:writes before)]
     (or (nil? left) (pos? left))))
 
+(defn ^{:stratum 0} later
+  "A clock reading past every claim made now."
+  []
+  (.plus (Instant/now) (Duration/ofMillis (inc lease/default-claim-ttl-ms))))
+
+(defn ^{:stratum 0} reacquire [w c req] (env/acquire! c (:a w) (fx/provision-grant w (:a w)) req))
+
 (defn ^{:stratum 0} controller-over
   "Another controller over `w`'s provider and receipt log, keeping leases
    in `ledger-store`, with `options` (such as `:clock`) over the defaults:
@@ -64,6 +72,12 @@
                                 options)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} restarted
+  "A controller over `w`'s provider and ledger on `clock`: a restarted or
+   concurrent controller process."
+  [w clock]
+  (controller-over w (get-in w [:c :controller/ledger]) {:clock clock}))
 
 (defn ^{:stratum 1} counting
   "Every call counted in `calls`; a non-nil value from a `hooks` fn answers in the provider's place."

@@ -79,6 +79,17 @@
       (let [steps (support/reported-steps (protocol/cancel! (support/provider c) target) :cancel/steps)]
         {:call/value {:call/outcome (receipt/steps-outcome steps)} :call/steps steps}))))
 
+(defn- ^{:stratum 0} provisioned
+  "Provision the reserved `generation` only while its claim is live: the
+   reservation is re-read just before the provider call, and when that read
+   fails or the claim has expired, nothing is sent."
+  [c acting subject request generation]
+  (let [entry (controller/entry c (lease/request-key request))]
+    (cond
+      (anomaly/anomaly? entry) (controller/refuse-anomaly! c subject :environment/acquire entry)
+      (lease/claim-expired? entry (support/now c)) (controller/refuse! c subject :environment/acquire :anomalies.agent-environment/claim-lost [])
+      :else (provisioning/provision c acting request generation))))
+
 (defn ^{:stratum 0} preflight
   [c acting request]
   (let [subject (receipt/request-subject acting request)
@@ -107,7 +118,7 @@
                                          :anomalies.agent-environment/preflight-failed
                                          (mapv support/failure-step failures))
       (anomaly/anomaly? decision) (controller/refuse-anomaly! c subject :environment/acquire decision)
-      (= :new (:decision/kind decision)) (provisioning/provision c acting request (:decision/generation decision))
+      (= :new (:decision/kind decision)) (provisioned c acting subject request (:decision/generation decision))
       (= :duplicate (:decision/kind decision)) (duplicate c acting request decision)
       :else (controller/refuse! c subject :environment/acquire (:decision/reason decision) []))))
 
