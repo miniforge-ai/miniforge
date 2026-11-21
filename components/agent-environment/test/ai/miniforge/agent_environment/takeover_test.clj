@@ -102,16 +102,20 @@
         (is (= [uid] (mapv :receipt/environment-uid (faults/receipts-of w :environment/reconcile))))
         (is (= uid (:receipt/environment-uid (first (faults/receipts-of w :environment/release)))))))))
 
-(deftest ^{:stratum 1} test-a-cleanup-left-without-a-uid-is-reconciled
+(deftest ^{:stratum 1} test-a-cleanup-left-without-a-uid-is-reconciled-once
   (let [w (outage-world)
         req (fx/request w (:a w))]
     (controller/claim! (:c w) req)
     (protocol/provision! (:fake w) (target-of req first-generation) req)
     (controller/settle-provision! (:c w) req first-generation :state/cleanup-uncertain nil)
+    (swap! (:faults w) assoc :before-write #(faults/reacquire w (faults/late-controller w) req))
     (let [replaced (fx/acquire w (:a w) req)]
       (is (= 2 (get-in replaced [:environment/lease :lease/generation])))
       (is (= #{(:environment/namespace replaced)} (fake/live-namespaces (:fake w))))
-      (is (= [:outcome/applied] (release-outcomes w))))))
+      (is (= [:outcome/applied] (release-outcomes w)))
+      (testing "given a rival that finished the cleanup first → only its reconcile records abandonment"
+        (is (= [[{:step/name :step/abandoned :step/outcome :outcome/applied}] []]
+               (mapv :receipt/steps (faults/receipts-of w :environment/reconcile))))))))
 
 (deftest ^{:stratum 1} test-a-late-owners-cleanup-stays-tracked-until-verified
   (let [w (outage-world)

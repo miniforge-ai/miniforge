@@ -64,7 +64,8 @@ listed under Review Findings.
    5. Each reconcile is receipted under the new operation `:environment/reconcile`, with a
       `:step/adopted` or `:step/abandoned` step. A reconcile that deletes what the key left behind
       reports `:step/abandoned` as applied only once the cleanup is verified and recorded, and as
-      uncertain otherwise. Reconcile and cleanup receipts name the adopted or deleted environment's
+      uncertain otherwise, and records no step when another controller's cleanup took the entry
+      first. Reconcile and cleanup receipts name the adopted or deleted environment's
       UID and generation; with no environment found, they keep the request subject.
    6. It then claims the request again and returns the fresh decision.
 4. `lifecycle`:
@@ -173,7 +174,8 @@ trigger a reconcile.
 3. `takeover_test`:
    1. A late owner gets the adopted environment's refusal and deletes nothing.
    2. A partial environment is deleted before the next generation, not adopted.
-   3. A cleanup left without a UID is reconciled and the key reused.
+   3. A cleanup left without a UID is reconciled and the key reused, once: when a rival finishes the
+      cleanup first, only the rival's reconcile records `:step/abandoned`.
    4. A late owner's unconfirmed delete stays `cleanup-uncertain`, and the next acquire deletes it.
    5. A rival that reconciled and provisioned the next generation between the owner's claim and its
       dispatch: the owner gets `claim-lost`, and the rival's is the only `provision!` call.
@@ -186,7 +188,7 @@ trigger a reconcile.
       receipt names the adopted UID; a reconcile that found nothing names none.
 4. Each review finding fixed here has a test that fails with its fix removed, checked by mutation on
    this version. The tests for first-round finding 3 and the second-round findings are new.
-5. The agent-environment suite passes: 110 tests with 407 assertions, including the base PRs'
+5. The agent-environment suite passes: 110 tests with 408 assertions, including the base PRs'
    review fixes merged in. clj-kondo and stratum-lint are clean.
 
 All of this is fake-provider evidence. A real provider's `observe` must be authoritative for the

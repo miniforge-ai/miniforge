@@ -66,19 +66,22 @@
     (if (anomaly/anomaly? changed) changed {:call/value changed :call/steps steps})))
 
 (defn- ^{:stratum 0} cleaned!
-  "Delete `environment` under a cleanup intent on `stale`: the ledger's
-   change, or its anomaly when the intent or its outcome was not recorded."
+  "Delete `environment` under a cleanup intent on `stale`:
+   `{:cleanup/receipt r :cleanup/recorded change}`, the receipt nil when the
+   intent was not taken."
   [c subject request stale environment]
   (let [at (assoc (controller/target stale) :target/generation (get-in environment [:environment/lease :lease/generation]))]
-    (:cleanup/recorded (cleanup/cleaned-under! c subject request at environment (partial cleanup/for-stale stale) nil))))
+    (cleanup/cleaned-under! c subject request at environment (partial cleanup/for-stale stale) nil)))
 
 (defn- ^{:stratum 0} leftover-call
   "The call result for a reconcile that deleted what the key left behind:
-   abandoned once the cleanup is verified and recorded, else uncertain."
-  [recorded]
+   abandoned once the cleanup is verified and recorded, else uncertain; no
+   step when another controller's cleanup took the entry first."
+  [{:cleanup/keys [receipt recorded]}]
   (let [released? (= :state/released (get-in recorded [:ledger/after :entry/state]))
-        step {:step/name :step/abandoned :step/outcome (if released? :outcome/applied :outcome/uncertain)}]
-    (if (anomaly/anomaly? recorded) recorded {:call/value recorded :call/steps [step]})))
+        step {:step/name :step/abandoned :step/outcome (if released? :outcome/applied :outcome/uncertain)}
+        steps (if receipt [step] [])]
+    (if (anomaly/anomaly? recorded) recorded {:call/value recorded :call/steps steps})))
 
 ;------------------------------------------------------------------------------ Layer 1
 
