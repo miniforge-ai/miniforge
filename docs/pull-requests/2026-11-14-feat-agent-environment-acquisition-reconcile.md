@@ -26,8 +26,7 @@ API surface class 1: in-process EDN.
 
 Domain (the lease rules) and Application (the controller and the lifecycle).
 
-Base branch: `feat/agent-environment-acquisition-claims`. Depends on PR #2540, which is stacked on
-PR #2539. Both are open. Retarget to `main` once they merge.
+Base branch: `main`. PRs #2539 and #2540, which this was stacked on, are merged.
 
 ## Motivation
 
@@ -206,5 +205,5 @@ follows PRs #2521 and #2522, both merged.
 ## Checklist
 
 - [x] Reconcile, takeover and the late-owner path, with tests
-- [ ] PRs #2539 and #2540 merged; retarget to `main`
+- [x] PRs #2539 and #2540 merged; this PR retargeted to `main`
 - [ ] CI green, Copilot threads resolved, squash-merged
