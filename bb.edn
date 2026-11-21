@@ -60,6 +60,18 @@
    :requires ([lint])
    :task (lint/stratum-staged)}
 
+  lint:malli-types
+  {:doc  "Regenerate the clj-kondo types (.clj-kondo/metosin/malli-types-clj/config.edn) from every brick function's Malli schema; commit the result"
+   :task (let [exit (run-clojure-stream! "-X:dev" "ai.miniforge.malli-types/emit!")]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
+  lint:malli-types:check
+  {:doc  "Fail when the committed clj-kondo Malli types differ from the current function schemas"
+   :task (let [exit (run-clojure-stream! "-X:dev" "ai.miniforge.malli-types/check!")]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
   check:bb-classpaths
   {:doc  "Load-check entry namespaces of every bb.edn task declaring :extra-paths + :requires (catches classpath drift; load only, no task execution)"
    :requires ([ai.miniforge.bb-task-classpath.interface :as task-classpath])
