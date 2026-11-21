@@ -29,6 +29,7 @@
 
   ;; Kubernetes observations
   :kubernetes/pod-not-found "No pod found for job"
+  :kubernetes/pod-not-cached "Pod not in cache"
   :kubernetes/pod-timeout "Timed out waiting for pod to be ready"
   :kubernetes/pod-interrupted "Pod readiness was interrupted"
   :kubernetes/pod-ended "Pod ended with status: {phase}"

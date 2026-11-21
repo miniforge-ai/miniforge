@@ -26,6 +26,8 @@
 
 (def ^{:stratum 1 :private true} executor-schema
   [:map
+   [:namespace :string]
+   [:image :string]
    [:kubernetes/pod-ready-timeout-ms millis-schema]
    [:kubernetes/pod-ready-poll-interval-ms millis-schema]
    [:kubernetes/executable :string]
