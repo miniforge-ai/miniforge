@@ -61,7 +61,9 @@
    an anomaly. A call the ledger cannot record is refused or returns the
    ledger's anomaly, never a result the ledger does not show. A reservation
    carries this controller's claim for `:claim-ttl-ms` (default 15 minutes);
-   provisioning starts only while that claim has not expired."
+   provisioning starts only while that claim is held, and past it an acquire
+   of the same request reconciles the reservation with what the provider
+   holds before submitting anything new."
   [opts]
   (or (v/check v/ControllerOptions opts) (controller/create opts)))
 
