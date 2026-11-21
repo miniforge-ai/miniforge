@@ -42,3 +42,6 @@
       (.interrupt (Thread/currentThread))
       (capture/failure :interrupted))
     (catch Exception _ (capture/failure :command-error))))
+
+(comment
+  (run! (System/nanoTime) []))

@@ -59,7 +59,9 @@
    receives every receipt, and `:persist!` stores one artifact `(persist!
    lease path text)` outside the environment, returning its reference or
    an anomaly. A call the ledger cannot record is refused or returns the
-   ledger's anomaly, never a result the ledger does not show."
+   ledger's anomaly, never a result the ledger does not show. A reservation
+   carries this controller's claim for `:claim-ttl-ms` (default 15 minutes);
+   provisioning starts only while that claim has not expired."
   [opts]
   (or (v/check v/ControllerOptions opts) (controller/create opts)))
 

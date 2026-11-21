@@ -17,9 +17,10 @@
 ;; limitations under the License.
 (ns ai.miniforge.agent-environment.ledger.printing
   "Printing that a caller's printer bindings cannot change: the durable
-   ledger's file names and record bytes must be the same whatever
-   `*print-length*`, `*print-readably*` or `*print-dup*` the calling thread
-   has bound, or an acknowledged write could later read as absent or corrupt."
+   ledger's file names and record bytes, and the lease digests, must be the
+   same whatever `*print-length*`, `*print-readably*` or `*print-dup*` the
+   calling thread has bound, or an acknowledged write could later read as
+   absent or corrupt, and one request could digest as another."
   (:require
    [ai.miniforge.content-hash.interface :as content-hash]))
 

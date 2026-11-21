@@ -16,15 +16,8 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.dag-executor.protocols.impl.runtime.process
-  "Shared process-tree helpers for executors that shell out.
-
-   The runtime CLI executors (`descriptor` probes, `oci-cli` exec) and the
-   worktree executor's `execute-command` all start child processes, drain
-   stdout/stderr through the `subprocess` component, and kill the whole
-   process tree on timeout — the parent typically forks a child (a
-   container runtime, or `sh -c` forking the real command), and destroying
-   only the parent leaks it. Keeping the helpers in one place means a fix
-   to the grace period or kill order lands in every call site."
+  "Shared owned-process shutdown and bounded capture for runtime CLI
+   and worktree executors."
   (:require [ai.miniforge.dag-executor.protocols.impl.runtime.process-shutdown :as shutdown]
             [ai.miniforge.subprocess.interface :as subprocess]))
 
@@ -42,6 +35,10 @@
    .destroyForcibly. Keep this small — the runtime CLI calls are
    short-lived probes/exec; a stuck child blocks the executor."
   1000)
+
+(def ^{:stratum 0} interrupted-exit-code
+  "Conventional shell SIGINT result, kept distinct from command timeout."
+  130)
 
 ;; The executors drain stdout/stderr through these names; the capture
 ;; limit and its behavior live in the subprocess component.
@@ -87,13 +84,13 @@
     done?))
 
 (defn ^{:stratum 1} destroy-process-tree!
-  "Kill `process` and every descendant. Tries SIGTERM first (children
-   in reverse-discovery order, then the parent), waits up to
-   `graceful-shutdown-ms` for the parent to exit, and escalates to
-   SIGKILL on anything still alive.
-
-   Why reverse-order: descendants are listed parent-to-leaf; killing
-   leaves first reduces the chance an intermediate parent immediately
-   forks a replacement when its child dies."
+  "Signal snapshotted descendants and the owned direct child, leaf first.
+   Defer cancellation through forced termination and bounded exit waits,
+   then restore the interrupt flag."
   [^Process process]
   (shutdown/stop! process graceful-shutdown-ms))
+
+(comment
+  (let [capture (drain-stream (java.io.ByteArrayInputStream. (byte-array 0)) {})]
+    @(:future capture)
+    (drained-text capture)))

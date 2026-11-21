@@ -24,6 +24,7 @@
    [ai.miniforge.agent-environment.controller :as controller]
    [ai.miniforge.agent-environment.interface.protocol :as protocol]
    [ai.miniforge.agent-environment.lease :as lease]
+   [ai.miniforge.agent-environment.lifecycle.cleanup :as cleanup]
    [ai.miniforge.agent-environment.lifecycle.provisioning :as provisioning]
    [ai.miniforge.agent-environment.lifecycle.support :as support]
    [ai.miniforge.agent-environment.receipt :as receipt]
@@ -78,14 +79,16 @@
       (let [steps (support/reported-steps (protocol/cancel! (support/provider c) target) :cancel/steps)]
         {:call/value {:call/outcome (receipt/steps-outcome steps)} :call/steps steps}))))
 
-(defn- ^{:stratum 0} settled
-  "Move the ledger to `state` whatever the provider confirmed: the ledger
-   stops admitting work on request, and the receipt says what applied. When
-   the ledger does not take the move, the caller gets its anomaly instead
-   of an outcome the ledger does not show."
-  [c lease steps state]
-  (let [recorded (controller/settle! c lease #(assoc % :entry/state state))]
-    (support/recorded-call recorded {:call/outcome (receipt/steps-outcome steps)} steps)))
+(defn- ^{:stratum 0} provisioned
+  "Provision the reserved `generation` only while its claim is live: the
+   reservation is re-read just before the provider call, and when that read
+   fails or the claim has expired, nothing is sent."
+  [c acting subject request generation]
+  (let [entry (controller/entry c (lease/request-key request))]
+    (cond
+      (anomaly/anomaly? entry) (controller/refuse-anomaly! c subject :environment/acquire entry)
+      (lease/claim-expired? entry (support/now c)) (controller/refuse! c subject :environment/acquire :anomalies.agent-environment/claim-lost [])
+      :else (provisioning/provision c acting request generation))))
 
 (defn ^{:stratum 0} preflight
   [c acting request]
@@ -99,12 +102,6 @@
     {:preflight/failures failures}))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} released
-  [c lease target]
-  (let [steps (support/reported-steps (protocol/deprovision! (support/provider c) target) :deprovision/steps)
-        state (if (= :outcome/applied (receipt/steps-outcome steps)) :state/released :state/cleanup-uncertain)]
-    (settled c lease steps state)))
 
 (defn ^{:stratum 1} acquire!
   [c acting grant request]
@@ -121,7 +118,7 @@
                                          :anomalies.agent-environment/preflight-failed
                                          (mapv support/failure-step failures))
       (anomaly/anomaly? decision) (controller/refuse-anomaly! c subject :environment/acquire decision)
-      (= :new (:decision/kind decision)) (provisioning/provision c acting request (:decision/generation decision))
+      (= :new (:decision/kind decision)) (provisioned c acting subject request (:decision/generation decision))
       (= :duplicate (:decision/kind decision)) (duplicate c acting request decision)
       :else (controller/refuse! c subject :environment/acquire (:decision/reason decision) []))))
 
@@ -150,8 +147,6 @@
   [c acting lease]
   (leased c :environment/cancel acting lease #(stopped c lease %)))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} release!
+(defn ^{:stratum 1} release!
   [c acting lease]
-  (leased c :environment/release acting lease #(released c lease %)))
+  (leased c :environment/release acting lease #(cleanup/released! c lease %)))

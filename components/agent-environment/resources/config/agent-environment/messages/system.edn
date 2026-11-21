@@ -22,6 +22,7 @@
   :anomalies.agent-environment/acquire-in-flight "This run and task are already being provisioned"
   :anomalies.agent-environment/environment-cancelled "The environment is cancelled and admits no new work"
   :anomalies.agent-environment/environment-released "The environment has been released"
+  :anomalies.agent-environment/environment-releasing "The environment is being released; only a release runs"
   :anomalies.agent-environment/cleanup-uncertain "Cleanup of this environment is unconfirmed; release it again"
   :anomalies.agent-environment/unknown-lease "No environment is recorded for this lease"
   :anomalies.agent-environment/operation-not-admitted "No environment state admits this operation"
@@ -30,5 +31,6 @@
   :anomalies.agent-environment/provisioning-failed "Provisioning stopped before the environment was complete"
   :anomalies.agent-environment/ledger-unavailable "The lease ledger store did not answer; the ledger does not record this call"
   :anomalies.agent-environment/ledger-conflict "The ledger entry changed under every write attempt; retry the call"
+  :anomalies.agent-environment/claim-lost "This controller no longer holds the acquisition's claim"
   :fake/target-missing "The fake provider holds no environment with this namespace and UID"
   :fake/file-missing "The fake environment holds no file at this path"}}
