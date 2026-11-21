@@ -59,6 +59,13 @@
       (cleanup/observe-workflow-signal! opts ctx {} nil)
       (is (= :workflow-complete (:signal/type @captured))))))
 
+(deftest ^{:stratum 1} observe-workflow-signal-skips-a-cancelled-run-test
+  (testing "a cancelled run sends the observer no failure signal"
+    (let [captured (atom ::none)
+          opts {:observe-signal-fn (partial reset! captured)}]
+      (cleanup/observe-workflow-signal! opts (execution-context :cancelled) {} nil)
+      (is (= ::none @captured)))))
+
 (deftest ^{:stratum 1} observe-workflow-signal-noop-without-fn-test
   (testing "no-ops when observe-signal-fn is absent"
     (is (nil? (cleanup/observe-workflow-signal! {} (execution-context :completed) {} nil)))))

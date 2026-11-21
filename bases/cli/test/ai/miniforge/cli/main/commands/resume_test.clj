@@ -539,6 +539,27 @@
             (is (= snapshot-id (:registered (resume-with snapshotted {}))))
             (is (= snapshot-id (:registered (resume-with snapshotted {:run-id (str snapshot-id)}))))))))))
 
+(deftest ^{:stratum 1} a-terminal-snapshot-is-never-resumed-under-its-own-id-test
+  (with-temp-events-dir
+    (fn [base-dir]
+      (with-redefs [sut/events-dir (.getPath ^java.io.File base-dir)]
+        (let [snapshot-id (random-uuid)
+              sink {:config {:observability {:event-sinks [{:type :file :base-dir (str base-dir)
+                                                            :ttl-ms Long/MAX_VALUE}]}}}
+              original (es/create-event-stream sink)]
+          ;; The run checkpointed :cancelled, then stopped before its terminal event.
+          (es/publish! original (es/create-envelope original :workflow/started snapshot-id "started"))
+          (let [cancelled {:completed-phases [:plan] :phase-results {:plan {}}
+                           :machine-snapshot {:execution/id snapshot-id
+                                              :execution/status :cancelled}}
+                {:keys [registered opts]} (resume-with cancelled {})]
+            (is (not= snapshot-id registered) "a new attempt, under a fresh id (N2 2.2)")
+            (is (true? (:resume-reset-terminal? opts)))
+            (is (thrown? clojure.lang.ExceptionInfo
+                         (resume-with cancelled {::workflow-id snapshot-id :from-phase :plan
+                                                 :run-id (str snapshot-id)}))
+                "a rewind drops the snapshot, but the run as recorded ended: its id is refused")))))))
+
 (deftest ^{:stratum 1} an-ended-live-run-resumes-as-a-new-attempt-test
   (with-temp-events-dir
     (fn [base-dir]

@@ -39,7 +39,7 @@
    [ai.miniforge.cli.workflow-runner.spec-kanban :as spec-kanban]
    [ai.miniforge.cli.workflow-runner.sandbox :as sandbox]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
-   [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.workflow.interface :as workflow]
    [slingshot.slingshot :refer [try+ throw+]]
    [ai.miniforge.dag-executor.interface :as gc-queue]
    [ai.miniforge.cli.worktree :as worktree]
@@ -136,9 +136,7 @@
                 [result final]
                 (try
                   (let [result (execution/execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store stream)]
-                    (lifecycle/mark-manifest-terminal!
-                     manifest-handle
-                     (if (phase/succeeded? result) :completed :failed))
+                    (lifecycle/mark-manifest-terminal! manifest-handle (workflow/run-outcome result))
                     ;; BD-2a shutdown ordering: fence late publishers for this
                     ;; workflow, then drain sinks before returning. quiesce!
                     ;; rejects any post-terminal `publish!` for this workflow
@@ -283,10 +281,13 @@
                                            :workflow-id workflow-id
                                            :sandbox-cleanup sandbox-cleanup
                                            :opts opts})
-              outcome-status (if (phase/succeeded? result) :completed :failed)]
+              status (workflow/run-outcome result)]
           (spec-kanban/finish-spec! provenance result)
-          ;; Trigger meta-loop learning cycle in background
-          (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
+          ;; Trigger meta-loop learning cycle in background. A cancel is
+          ;; neither outcome, and counting it as a failure would skew the
+          ;; learning (N3: consumers that count failures do not count it).
+          (when-not (= :cancelled status)
+            (trigger-meta-loop-after-workflow! workflow-id status nil))
           result)
         (finally
           (progress-cleanup)

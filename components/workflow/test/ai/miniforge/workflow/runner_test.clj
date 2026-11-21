@@ -257,18 +257,21 @@
       (is (:valid? result)))))
 
 (deftest ^{:stratum 1} run-pipeline-stopped-control-state-test
-  (testing "dashboard stop request returns a failed context"
+  (testing "dashboard stop request returns a cancelled context naming who cancelled"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
                     :workflow/pipeline [{:phase test-done-phase}]}
+          cancellation {:cancel/requested-by "op@example.invalid" :cancel/source :cli}
           result (runner/run-pipeline
                   workflow
                   {:task "Test"}
                   {:control-state (atom {:paused false
                                          :stopped true
+                                         :cancellation cancellation
                                          :adjustments {}})
                    :skip-lifecycle-events true})]
-      (is (= :failed (:execution/status result)))
+      (is (= :cancelled (:execution/status result)))
+      (is (= cancellation (:execution/cancellation result)))
       (is (some #(= :dashboard-stop (:type %))
                 (:execution/errors result))))))
 
