@@ -42,8 +42,12 @@ and the fresh package. Run the task locally with `bb test:darwin-storage`.
 The subprocess and native ACL fixtures live in project integration-test
 roots rather than slowing component unit tests. The hosted trigger covers
 those roots, and the runner includes shared component fixtures in every mode.
+The ordinary project integration alias also includes the shared fixture root.
+Fixture assertions use named scenarios, commands and timing budgets. These
+are structural changes only; the native script and guard behavior stay fixed.
 
-Local results: 27 tests and 112 assertions passed in each of the four runs.
+The relocated native packet passes 8 tests and 17 assertions in each runtime.
+The earlier full local packet passed 27 tests and 112 assertions per runtime.
 Disabling the ACL guard, child deadline or capture cancellation failed the
 corresponding assertions without runtime errors. Strict lint, inferred
 namespace depths, Polylith, and Babashka classpaths passed.
@@ -59,3 +63,9 @@ Follows #2532; prerequisite for storage qualification and #2530.
 
 [Pinned standards guide](https://github.com/miniforge-ai/miniforge-standards/blob/72f451d3d7e0ad82079610bec61be0399a2b7117/agents.md)
 and [catalog](https://github.com/miniforge-ai/miniforge-standards/blob/72f451d3d7e0ad82079610bec61be0399a2b7117/index.mdc).
+
+## Checklist
+
+- Verify the native packet in all four runtimes on macOS.
+- Require green current-head Darwin fixtures, Test, Build and full review.
+- Resolve all review threads and verify signing and conflicts before merge.

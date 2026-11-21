@@ -22,7 +22,8 @@
           (clojure.core/run! require suites)
           (let [{:keys [fail error]} (apply clojure.test/run-tests suites)]
             (when-not (zero? (+ fail error))
-              (throw (ex-info "Native storage fixtures failed." {:fail fail :error error})))))
+              (throw (ex-info "Native storage fixtures failed." {:fail fail
+                                                               :error error})))))
         (finally (shutdown-agents))))))
 
 (defn- ^{:stratum 0} storage-path [workspace directory]
