@@ -1,0 +1,7 @@
+;; Legacy projection defaults, not additional executor options.
+{:executable "kubectl"
+ :workdir "/workspace"
+ :resources {:limits {:memory "512Mi"
+                      :cpu "500m"}
+             :requests {:memory "256Mi"
+                        :cpu "100m"}}}

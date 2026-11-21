@@ -34,6 +34,7 @@
   :kubernetes/pod-interrupted "Pod readiness was interrupted"
   :kubernetes/pod-ended "Pod ended with status: {phase}"
   :kubernetes/invalid-setting "Invalid Kubernetes executor setting: {key}"
+  :kubernetes/invalid-defaults "Invalid packaged Kubernetes projection defaults"
 
   ;; State management
   :state/task-not-found          "Task {task-id} not found"

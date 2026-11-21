@@ -3,7 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.dag-executor.protocols.impl.kubernetes-client
   "Keep legacy transport separate from deadline-bound Pod readiness observations."
-  (:require [ai.miniforge.dag-executor.protocols.impl.kubernetes-settings :as settings]
+  (:require [ai.miniforge.dag-executor.protocols.impl.kubernetes-defaults :as defaults]
             [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
             [ai.miniforge.dag-executor.protocols.impl.runtime.deadline :as deadline]
             [ai.miniforge.dag-executor.protocols.impl.runtime.deadline-command :as command]
@@ -29,7 +29,7 @@
     error))
 
 (defn- ^{:stratum 0} executable [path]
-  (or path (:kubernetes/executable (settings/defaults))))
+  (or path (:executable (defaults/data))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

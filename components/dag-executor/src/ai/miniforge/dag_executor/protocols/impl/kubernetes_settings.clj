@@ -17,11 +17,6 @@
   [:int {:min 1
          :max Integer/MAX_VALUE}])
 
-(def ^{:stratum 0 :private true} resource-schema
-  [:map
-   [:limits [:map [:memory :string] [:cpu :string]]]
-   [:requests [:map [:memory :string] [:cpu :string]]]])
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1 :private true} executor-schema
@@ -29,10 +24,7 @@
    [:namespace :string]
    [:image :string]
    [:kubernetes/pod-ready-timeout-ms millis-schema]
-   [:kubernetes/pod-ready-poll-interval-ms millis-schema]
-   [:kubernetes/executable :string]
-   [:kubernetes/workdir :string]
-   [:kubernetes/resources resource-schema]])
+   [:kubernetes/pod-ready-poll-interval-ms millis-schema]])
 
 (defn ^{:stratum 1} defaults
   "Load packaged data through the shared fail-closed resource boundary."

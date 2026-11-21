@@ -3,14 +3,14 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources
   "Project legacy resource and environment values without dispatching provider requests."
-  (:require [ai.miniforge.dag-executor.protocols.impl.kubernetes-settings :as settings]))
+  (:require [ai.miniforge.dag-executor.protocols.impl.kubernetes-defaults :as defaults]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} default-workdir
   "Preserve the legacy working directory from packaged defaults."
   []
-  (:kubernetes/workdir (settings/defaults)))
+  (:workdir (defaults/data)))
 
 (defn ^{:stratum 0} build-env-vars
   "Use Kubernetes name/value entries, stringifying values as the old executor did."
@@ -28,7 +28,7 @@
 (defn ^{:stratum 1} build-resource-spec
   "Merge legacy defaults, keep memory/CPU only, and stringify truthy CPU values."
   [resources]
-  (let [defaults (:kubernetes/resources (settings/defaults))
+  (let [defaults (:resources (defaults/data))
         merged (merge-with merge defaults resources)]
     (update-vals (select-keys merged [:limits :requests]) project-resource)))
 
