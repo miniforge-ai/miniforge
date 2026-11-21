@@ -11,6 +11,13 @@
   :selector/none-available            "No OCI-compatible container runtime is available."
   :selector/executable-requires-kind  "An :executable/:docker-path override requires an explicit :runtime-kind."
 
+  :kubernetes/invalid-deadline "Kubernetes capsule :resources/timeout-seconds must be a positive integer within the signed 64-bit range."
+  :kubernetes/invalid-setting "Invalid Kubernetes executor setting: {key}."
+  :kubernetes/job-creation-unconfirmed "Kubernetes did not confirm creation of the exact Job. Reconcile its identity before retrying."
+  :kubernetes/pod-not-found "No Pod was found for the Job."
+  :kubernetes/pod-timeout "Timed out waiting for the Pod to become ready."
+  :kubernetes/pod-ended "The Pod ended with status {phase}."
+
   ;; OCI runtime adapter diagnostics
   :oci/acquire-failed        "OCI runtime acquire failed"
   :oci/acquire-deadline      "[oci-cli] acquire-environment! deadline {ms}ms exceeded; cancelling runtime subprocess."
