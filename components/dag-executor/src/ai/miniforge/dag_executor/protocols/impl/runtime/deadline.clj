@@ -22,3 +22,6 @@
 
 (defn ^{:stratum 1} after-ms [budget-ms]
   (+ (System/nanoTime) (* budget-ms nanos-per-ms)))
+
+(comment
+  (ceil-ms (dec nanos-per-ms)))

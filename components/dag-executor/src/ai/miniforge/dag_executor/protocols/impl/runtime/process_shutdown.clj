@@ -48,3 +48,8 @@
       (signal! true handles)
       (await-exit! child forced-until interrupted)
       (finally (when @interrupted (.interrupt (Thread/currentThread)))))))
+
+(comment
+  (let [child (.start (ProcessBuilder. ["java" "-version"]))
+        grace-ms (.toMillis (java.time.Duration/ofSeconds 1))]
+    (stop! child grace-ms)))

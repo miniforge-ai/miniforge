@@ -29,6 +29,17 @@ Cleanup is established before output readers start; each acquired reader
 is retained so failure to start a later reader cannot leak it or the child.
 The dependent merge exposed prose-gate failures in three incoming PR
 documents. Their flagged sentences are split without changing the claims.
+The final standards pass names test limits and scripts, extracts the
+interrupting reader callback, and supplies the runtime REPL examples.
+These are behavior-preserving changes; budgets and fixture commands stay fixed.
+Runtime imports remain acyclic:
+
+```text
+command -> {deadline, capture}
+capture -> {deadline, process}
+process -> {shutdown, subprocess.interface}
+shutdown -> deadline
+```
 
 ## Testing plan
 
@@ -61,3 +72,9 @@ not change workload dispatch; #2536 will wire readiness to it.
 ## Related issues/PRs
 
 Based on main. Required by #2536; merge this prerequisite first.
+
+## Checklist
+
+- Local runtime packets, strict lint and actual namespace depths verified.
+- Current-head CI, full review and resolved threads required before merge.
+- Signed head and a fresh main conflict check required before merge.

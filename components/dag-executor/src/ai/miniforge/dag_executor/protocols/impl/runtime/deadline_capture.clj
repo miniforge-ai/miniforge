@@ -14,7 +14,7 @@
   "Timeout, conventional SIGINT, capture-limit and launch-failure result codes."
   {:deadline process/timeout-exit-code
    :incomplete-output process/timeout-exit-code
-   :interrupted 130
+   :interrupted process/interrupted-exit-code
    :output-limit process/output-limit-exit-code
    :command-error 1})
 
@@ -30,7 +30,9 @@
     (not= ::pending (deref worker wait-ms ::pending))))
 
 (defn- ^{:stratum 0} command-result [exit out err]
-  {:exit exit :out out :err err})
+  {:exit exit
+   :out out
+   :err err})
 
 (defn ^{:stratum 0} cleanup! [^Process child capture]
   (try+
@@ -59,3 +61,6 @@
       (some process/overflowed? capture) (failure :output-limit)
       (not captured?) (failure :incomplete-output)
       :else (completed child capture))))
+
+(comment
+  (failure :deadline))
