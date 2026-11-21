@@ -40,3 +40,29 @@
                                "3\thttps://x/pull/3\tOPEN\n"))))))
   (testing "lines that are not a PR are ignored"
     (is (nil? (pr-lookup/parse-lookup "warning: something\nabc\tdef\tOPEN\n")))))
+
+(deftest ^{:stratum 0} head-ref-test
+  (testing "an owner/repo URL in any push form → <owner>:<branch>"
+    (doseq [url ["git@github.com:o-1/r.git"
+                 "ssh://git@github.com/o-1/r.git"
+                 "https://github.com/o-1/r.git"
+                 "https://x-access-token@github.com/o-1/r"]]
+      (is (= "o-1:mf/x" (pr-lookup/head-ref url "mf/x")) url)))
+  (testing "no owner to read → the bare branch"
+    (doseq [url [nil "" "/srv/git/r.git" "file:///srv/git/r.git"
+                 "https://github.com/o/group/r.git" "https://github.com/-o/r.git"]]
+      (is (= "mf/x" (pr-lookup/head-ref url "mf/x")) (pr-str url)))))
+
+(deftest ^{:stratum 0} head-from-lookups-test
+  (let [read-ok   (fn [output] {:success? true :output output :error ""})
+        branch-r  (read-ok "mf/x\n")
+        url-r     (read-ok "git@github.com:o/r.git\n")]
+    (testing "given a branch and origin's URL → the branch and its <owner>:<branch> head"
+      (is (= {:branch "mf/x" :head "o:mf/x"} (pr-lookup/head-from-lookups branch-r url-r))))
+    (testing "given no branch printed (detached HEAD) → no branch, no head"
+      (is (= {:branch nil :head nil} (pr-lookup/head-from-lookups (read-ok "") url-r))))
+    (testing "given an interrupted or timed-out lookup → {:stopped <that result>}"
+      (let [interrupted {:success? false :output "" :error "cancelled" :interrupted? true}
+            timed-out   {:success? false :output "" :error "deadline" :timed-out? true}]
+        (is (= {:stopped interrupted} (pr-lookup/head-from-lookups interrupted url-r)))
+        (is (= {:stopped timed-out} (pr-lookup/head-from-lookups branch-r timed-out)))))))

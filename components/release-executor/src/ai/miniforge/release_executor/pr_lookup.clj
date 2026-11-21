@@ -17,9 +17,12 @@
 ;; limitations under the License.
 (ns ai.miniforge.release-executor.pr-lookup
   "Find the PR a release branch already has, so a retried or resumed
-   release reuses it instead of opening a second one. Shared by the host
-   (git) and sandbox backends; each runs `lookup-argv` its own way."
-  (:require [clojure.string :as str]))
+   release reuses it instead of opening a second one, and name the head a
+   new PR is opened from. Shared by the host (git) and sandbox backends;
+   each runs `lookup-argv` its own way."
+  (:require [ai.miniforge.release-executor.push-auth :as push-auth]
+            [ai.miniforge.release-executor.result :as result]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -37,7 +40,47 @@
    "--json" "number,url,state,headRefOid"
    "--jq" ".[] | [.number, .url, .state, .headRefOid] | @tsv"])
 
+(def ^{:stratum 0} branch-argv
+  "git command printing the checked-out branch. It prints nothing for a
+   detached HEAD."
+  ["git" "branch" "--show-current"])
+
+(def ^{:stratum 0} push-url-argv
+  "git command printing the URL a push to origin goes to: where release
+   pushes its branch, so the URL's owner is the PR head's owner."
+  ["git" "remote" "get-url" "--push" "origin"])
+
+(defn- ^{:stratum 0} url-owner
+  "The owner in an SSH or HTTPS URL of an `<owner>/<repo>` path, or nil."
+  [url]
+  (some->> (push-auth/https-url url)
+           second
+           (re-matches #"https://[^/]+/([A-Za-z0-9][A-Za-z0-9-]*)/[^/]+")
+           second))
+
+(defn- ^{:stratum 0} stopped?
+  "True for a shell-result whose command was interrupted or timed out."
+  [r]
+  (boolean (or (:interrupted? r) (:timed-out? r))))
+
+(defn- ^{:stratum 0} lookup-output
+  "Trimmed output of a succeeded lookup, or nil."
+  [r]
+  (when (result/succeeded? r)
+    (not-empty (str/trim (get r :output "")))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} head-ref
+  "The `gh pr create --head` value for `branch` pushed to `push-url`:
+   `<owner>:<branch>` when the URL names an owner, else `branch` alone.
+   gh reads a bare branch as a branch in the base repository; the owner
+   keeps a fork's PR pointing at the fork when gh resolves the base to
+   another remote."
+  [push-url branch]
+  (if-let [owner (url-owner push-url)]
+    (str owner ":" branch)
+    branch))
 
 (defn ^{:stratum 1} parse-lookup
   "The branch's PR from `lookup-argv` output as {:pr-number :pr-url
@@ -53,3 +96,17 @@
        ;; sort-by is stable, so gh's newest-first order holds within a state.
        (sort-by (comp state-order :pr-state))
        first))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} head-from-lookups
+  "The PR head from create-pr!'s two git lookups, the shell-results of
+   `branch-argv` and `push-url-argv`. {:stopped r} when either was
+   interrupted or timed out: gh must not start. Else {:branch b :head h},
+   both nil when no branch was read."
+  [branch-r url-r]
+  (if-let [stopped (first (filter stopped? [branch-r url-r]))]
+    {:stopped stopped}
+    (let [branch (lookup-output branch-r)]
+      {:branch branch
+       :head   (some->> branch (head-ref (lookup-output url-r)))})))

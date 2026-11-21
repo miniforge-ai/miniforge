@@ -36,24 +36,29 @@
 
 (defn- ^{:stratum 0} capture-host-gh
   "Call `f` with the host backend's gh process captured; returns each argv.
-   Mocks process/process as well as process/shell so the real gh never
-   runs, whichever of the two the backend starts it with."
+   gh starts through shell/run-bounded, which uses process/process.
+   process/shell runs only local git, which prints no branch here, so
+   create-pr! runs gh without --head."
   [f]
   (let [calls (atom [])
         ok    {:exit 0 :out "https://github.com/o/r/pull/7\n" :err ""}]
-    (with-redefs [process/shell   (fn [_opts & args] (swap! calls conj (vec args)) ok)
+    (with-redefs [process/shell   (constantly {:exit 0 :out "" :err ""})
                   process/process (fn [_opts & args] (swap! calls conj (vec args)) (delay ok))]
       (f))
     @calls))
 
 (defn- ^{:stratum 0} capture-sandbox-cmds
   "Call `f` with commands/exec! (which the sandbox operations call) captured;
-   returns each command string."
+   returns each command string. An argv command is create-pr!'s git lookup:
+   it prints no branch and is not returned, so create-pr! runs gh without
+   --head."
   [f]
   (let [cmds (atom [])]
     (with-redefs [commands/exec! (fn [_executor _env-id cmd & _]
-                                   (swap! cmds conj cmd)
-                                   {:success? true :output "https://github.com/o/r/pull/7"})]
+                                   (if (vector? cmd)
+                                     {:success? true :output ""}
+                                     (do (swap! cmds conj cmd)
+                                         {:success? true :output "https://github.com/o/r/pull/7"})))]
       (f))
     @cmds))
 

@@ -76,6 +76,7 @@
         sha (str "sha-" commits)]
     (cond
       (str/starts-with? line "git symbolic-ref") (ok "refs/remotes/origin/main")
+      (str/starts-with? line "git branch --show-current") (ok (str head))
       (str/starts-with? line "git checkout -b ")
       (let [b (last-word line)]
         (if (contains? branches b)
