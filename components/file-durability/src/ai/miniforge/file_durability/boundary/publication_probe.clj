@@ -83,3 +83,5 @@
         (Files/deleteIfExists (.toPath candidate))
         (Files/deleteIfExists (.toPath destination))
         (Files/delete work)))))
+
+(comment (probe-value))

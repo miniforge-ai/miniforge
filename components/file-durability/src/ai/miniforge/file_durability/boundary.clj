@@ -37,7 +37,8 @@
 
 (defn- ^{:stratum 1} failure [operation file]
   (anomaly/anomaly :fault (t :file/io-failed)
-                   {:durability/operation operation :durability/path (str file)}))
+                   {:durability/operation operation
+                    :durability/path (str file)}))
 
 ;------------------------------------------------------------------------------ Layer 2
 
