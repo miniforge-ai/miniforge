@@ -13,17 +13,27 @@
   "Keep legacy CLI, workdir and resource defaults in one packaged data asset."
   "config/dag-executor/runtime/kubernetes-defaults.edn")
 
-(def ^{:stratum 0 :private true} defaults-schema
+(def ^{:stratum 0 :private true} millis-schema
+  [:int {:min 1
+         :max Integer/MAX_VALUE}])
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1 :private true} defaults-schema
   [:map
+   [:namespace :string]
+   [:image :string]
+   [:kubernetes/pod-ready-timeout-ms millis-schema]
+   [:kubernetes/pod-ready-poll-interval-ms millis-schema]
    [:executable [:string {:min 1}]]
    [:workdir [:string {:min 1}]]
    [:resources [:map
                 [:limits [:map [:memory :string] [:cpu :string]]]
                 [:requests [:map [:memory :string] [:cpu :string]]]]]])
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 1} data []
+(defn ^{:stratum 2} data []
   (let [value (config/load-config-resource resource-path)]
     (when-not (m/validate defaults-schema value)
       (throw (ex-info (messages/t :kubernetes/invalid-defaults)

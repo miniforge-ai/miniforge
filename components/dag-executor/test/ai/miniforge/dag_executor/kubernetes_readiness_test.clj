@@ -46,9 +46,10 @@
   "A completed or failed Pod is not the interactive Running outcome."
   [["Running" true] ["Failed" false] ["Succeeded" false]])
 
-(def ^{:stratum 0 :private true} invalid-budgets
-  "Refuse absent, nonintegral, nonpositive and overflowing millisecond options."
-  [nil false 0 -1 1.5 (inc Integer/MAX_VALUE)])
+(def ^{:stratum 0 :private true} shipped-readiness-settings
+  "Keep the existing fixed 120-second deadline and two-second polling defaults."
+  {:kubernetes/pod-ready-timeout-ms 120000
+   :kubernetes/pod-ready-poll-interval-ms 2000})
 
 (def ^{:stratum 0 :private true} projection-data-resource
   "Corrupt only fixed projection data, leaving settings and message loading intact."
@@ -62,23 +63,29 @@
   {:exit 0
    :out output})
 
-(defn- ^{:stratum 0} invalid-setting [key value]
-  (try+
-    (kubernetes/create-kubernetes-executor {key value})
-    (catch map? error (:config/key error))))
-
 (defn- ^{:stratum 0} refuse-provider! [& _]
   (throw (AssertionError.)))
 
 (defn- ^{:stratum 0} accepted-job [& _]
   (result/ok {:applied true}))
 
-(defn- ^{:stratum 0} observe-readiness [expected _ namespace _ effective]
-  (is (= "default" namespace))
-  (is (= expected (select-keys effective (keys expected))))
-  (result/ok {:pod-name "mock-capsule-pod"}))
+(defn- ^{:stratum 0} interrupted-submission [& _]
+  (throw (InterruptedException.)))
+
+(defn- ^{:stratum 0} interrupted-observation [reply]
+  (.interrupt (Thread/currentThread))
+  reply)
+
+(defn- ^{:stratum 0} ready-pod []
+  (result/ok {:pod-name "mock-capsule-pod"
+              :status :running}))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} observe-readiness [expected _ namespace _ effective]
+  (is (= "default" namespace))
+  (is (= expected (select-keys effective (keys expected))))
+  (ready-pod))
 
 (defn- ^{:stratum 1} malformed-defaults [loader path & options]
   (if (= projection-data-resource path) {} (apply loader path options)))
@@ -103,18 +110,6 @@
   (is (= [] (resources/build-env-vars nil)))
   (is (= "/workspace" (resources/default-workdir))))
 
-(deftest ^{:stratum 1} test-invalid-polling-budgets-are-refused-at-construction
-  (doseq [key (keys readiness-settings)
-          value invalid-budgets]
-    (is (= key (invalid-setting key value)))))
-
-(deftest ^{:stratum 1} test-configured-polling-budgets-reach-acquisition
-  (let [instance (kubernetes/create-kubernetes-executor readiness-settings)]
-    (with-redefs [shell/sh refuse-provider!
-                  kubernetes/apply-job accepted-job
-                  client/wait-for-pod-ready (partial observe-readiness readiness-settings)]
-      (is (result/ok? (executor/acquire-environment! instance (random-uuid) {}))))))
-
 (deftest ^{:stratum 1} test-rejected-submission-never-observes-cleans-or-retains
   (let [rejected (result/err :job-apply-failed (messages/t :kubernetes/pod-timeout))]
     (is (= rejected (acquisition/acquire! (constantly rejected)
@@ -129,7 +124,35 @@
                                           refuse-provider!)))
     (is (= [:cleanup] @actions))))
 
+(deftest ^{:stratum 1} test-cancelled-submission-never-observes-cleans-or-retains
+  (doseq [[already? submit!] [[true refuse-provider!] [false interrupted-submission]]]
+    (try+
+      (when already? (.interrupt (Thread/currentThread)))
+      (let [reply (acquisition/acquire! submit! refuse-provider! refuse-provider! refuse-provider!)
+            interrupted? (Thread/interrupted)]
+        (is (= :pod-interrupted (get-in reply [:error :code])))
+        (is interrupted?))
+      (finally (Thread/interrupted)))))
+
+(deftest ^{:stratum 1} test-cancelled-observation-never-cleans-or-retains
+  (doseq [observed [(result/err :pod-interrupted (messages/t :kubernetes/pod-interrupted))
+                    (ready-pod)]]
+    (try+
+      (let [reply (acquisition/acquire! accepted-job (partial interrupted-observation observed)
+                                         refuse-provider! refuse-provider!)
+            interrupted? (Thread/interrupted)]
+        (is (= :pod-interrupted (get-in reply [:error :code])))
+        (is interrupted?))
+      (finally (Thread/interrupted)))))
+
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} test-shipped-polling-budgets-reach-acquisition
+  (let [instance (kubernetes/create-kubernetes-executor {})]
+    (with-redefs [shell/sh refuse-provider!
+                  kubernetes/apply-job accepted-job
+                  client/wait-for-pod-ready (partial observe-readiness shipped-readiness-settings)]
+      (is (result/ok? (executor/acquire-environment! instance (random-uuid) {}))))))
 
 (deftest ^{:stratum 2} test-malformed-fixed-defaults-are-refused
   (let [loader config/load-config-resource]

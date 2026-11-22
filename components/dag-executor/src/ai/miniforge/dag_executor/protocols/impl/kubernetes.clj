@@ -30,8 +30,8 @@
   (:require
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-acquisition :as acquisition]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
+   [ai.miniforge.dag-executor.protocols.impl.kubernetes-defaults :as defaults]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources :as resources]
-   [ai.miniforge.dag-executor.protocols.impl.kubernetes-settings :as settings]
    [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.workspace :as workspace]
@@ -214,7 +214,7 @@
                    :namespace namespace
                    :options env-config}]
       (acquisition/acquire! (partial apply-job kubectl-path namespace job-spec)
-                            (partial client/wait-for-pod-ready kubectl-path namespace job-name config)
+                            (partial client/wait-for-pod-ready kubectl-path namespace job-name (defaults/data))
                             (partial delete-job kubectl-path namespace job-name)
                             (partial retain-environment! pod-cache context))))
 
@@ -285,15 +285,14 @@
    Config:
    - :namespace - K8s namespace (default: 'default')
    - :image - Container image for tasks (default: alpine:latest)
-   - :kubectl-path - Path to kubectl binary
-   - :kubernetes/pod-ready-timeout-ms, :kubernetes/pod-ready-poll-interval-ms - Readiness polling"
+   - :kubectl-path - Path to kubectl binary"
   [config]
-  (let [effective (settings/configure config)]
+  (let [packaged (defaults/data)]
     (map->KubernetesExecutor
-     {:config effective
-      :namespace (:namespace effective)
-      :image (:image effective)
-      :kubectl-path (:kubectl-path effective)
+     {:config config
+      :namespace (get config :namespace (:namespace packaged))
+      :image (get config :image (:image packaged))
+      :kubectl-path (:kubectl-path config)
       :pod-cache (atom {})})))
 
 (comment (create-kubernetes-executor {}))

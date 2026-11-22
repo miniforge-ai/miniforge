@@ -25,43 +25,46 @@ local process; it does not prove remote effects stopped.
 Final observation admission checks both expiry and the thread's interrupt flag.
 Cancellation concurrent with a Running reply is refused rather than admitted.
 
-Separate transport, resource projection and settings from the executor record.
+Separate transport and resource projection from the executor record.
 Compose the legacy acquisition order through named callbacks without nested conditions.
 Named helpers project memory/CPU once for both resource sections. Defaults
-move to packaged EDN without changing their values. Validate operator settings
-at construction and fixed projection data before provider calls. Tests use factories,
+move to packaged EDN without changing their values. Validate fixed projection
+data before provider calls. Tests use factories,
 intent-named budgets and programs, and genuine per-namespace strata.
-Fixed projection defaults live separately from operator options.
+Fixed projection defaults are not new operator options.
 Existing task `:workdir`/`:resources` and executor `:kubectl-path` remain their override inputs.
+Configurable timing options remain in the following receipt change, #2536.
+Check cancellation before submission, cleanup and retention, and restore interrupts.
+An interrupted readiness result cannot trigger name-only cleanup.
+Already dispatched provider requests cannot be recalled by this local check.
 
 The dependency graph is acyclic:
 
 ```text
-executor -> {acquisition, client, resources, settings}
-acquisition -> result
+executor -> {acquisition, client, resources, defaults}
+acquisition -> {result, runtime.messages}
 client -> {defaults, deadline, command}
 resources -> defaults
 defaults -> {config.interface, runtime.messages, Malli}
-settings -> {config.interface, runtime.messages, Malli}
 ```
 
-Job apply, creation identity, name-based cleanup, ordinary release and execution
-remain legacy paths. This PR does not authorize or implement full stop.
+Job apply, creation identity, noncancelled failure cleanup, ordinary release and
+execution remain legacy paths. This PR does not authorize or implement full stop.
 The create-only request and confirmed Job identity remain scoped to #2536.
 
 ## Testing plan
 
-Run readiness, resource projection, configuration refusal and #2542's command
+Run readiness, resource projection, data refusal and #2542's command
 fixtures in both JVM products, source Babashka and a fresh package.
 The packet also checks constructor wiring and the legacy acquisition failure order.
 Also refuse malformed projection data without altering unrelated resource loading.
-All four modes pass 22 tests and 80 assertions each.
+All four modes pass 23 tests and 76 assertions each.
 Use disposable CLI fixtures to hang listing or status and exceed the poll budget.
 Mock late status and cancellation without sleeping test threads.
 Pin the legacy resource defaults independently of the packaged data.
 Removing the final interrupt guard fails one assertion without runtime errors
 on both Java 21 and native Babashka.
-Execute the six changed implementation namespaces' REPL examples on Java 21
+Execute the five changed implementation namespaces' REPL examples on Java 21
 and native Babashka. No live cluster calls are used.
 Remove the unused internal template loader after tracing its lack of callers.
 The YAML template remains the canonical documentation asset.
