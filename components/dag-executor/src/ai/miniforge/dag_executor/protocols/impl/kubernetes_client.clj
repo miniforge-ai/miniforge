@@ -49,7 +49,7 @@
   (let [listing (command/run! until [executable "get" "pods" "-n" namespace
                                     "-l" (str "job-name=" job-name) "-o" "jsonpath={.items[0].metadata.name}"])
         pod-name (when (= 0 (:exit listing)) (some-> (:out listing) str/trim))
-        status (when-not (str/blank? pod-name)
+        status (when-not (or (str/blank? pod-name) (.isInterrupted (Thread/currentThread)))
                  (command/run! until [executable "get" "pod" pod-name "-n" namespace
                                       "-o" "jsonpath={.status.phase}"]))
         phase (when (= 0 (:exit status)) (some-> (:out status) str/trim))]

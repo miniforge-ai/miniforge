@@ -5,7 +5,6 @@
   (:require [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
             [ai.miniforge.dag-executor.protocols.impl.runtime.deadline :as deadline]
             [ai.miniforge.dag-executor.protocols.impl.runtime.deadline-command :as command]
-            [ai.miniforge.dag-executor.protocols.impl.runtime.process :as process]
             [babashka.fs :as fs]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]]))
@@ -34,11 +33,12 @@
   {:exit 0
    :out (if (= "pods" kind) "candidate" "Running")})
 
-(defn- ^{:stratum 0} cancelled-command [& _]
-  (.interrupt (Thread/currentThread))
-  {:exit process/interrupted-exit-code})
-
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} cancelled-listing [calls _ [_ _ kind]]
+  (swap! calls inc)
+  (.interrupt (Thread/currentThread))
+  (running-reply kind))
 
 (defn- ^{:stratum 1} late-reply [expired _ [_ _ kind]]
   (when (= "pod" kind) (reset! expired true))
@@ -64,13 +64,15 @@
                      [:error :code]))))))
 
 (deftest ^{:stratum 2} test-readiness-cancellation-preserves-the-interrupt
-  (doseq [interrupt-before? [true false]]
-    (with-redefs [command/run! cancelled-command]
+  (doseq [interrupt-before? [true false]
+          :let [calls (atom 0)]]
+    (with-redefs [command/run! (partial cancelled-listing calls)]
       (try+
         (when interrupt-before? (.interrupt (Thread/currentThread)))
         (let [reply (client/wait-for-pod-ready "fixture" "capsules" "job" (settings))
               interrupted? (Thread/interrupted)]
           (is (= :pod-interrupted (get-in reply [:error :code])))
+          (is (= (if interrupt-before? 0 1) @calls))
           (is interrupted?))
         (finally (Thread/interrupted))))))
 

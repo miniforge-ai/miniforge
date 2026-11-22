@@ -58,9 +58,10 @@ Run readiness, resource projection, data refusal and #2542's command
 fixtures in both JVM products, source Babashka and a fresh package.
 The packet also checks constructor wiring and the legacy acquisition failure order.
 Also refuse malformed projection data without altering unrelated resource loading.
-All four modes pass 23 tests and 76 assertions each.
+All four modes pass 23 tests and 78 assertions each.
 Use disposable CLI fixtures to hang listing or status and exceed the poll budget.
 Mock late status and cancellation without sleeping test threads.
+Count commands to prove cancellation during listing never dispatches status.
 Pin the legacy resource defaults independently of the packaged data.
 Removing the final interrupt guard fails one assertion without runtime errors
 on both Java 21 and native Babashka.
