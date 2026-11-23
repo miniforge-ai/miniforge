@@ -20,9 +20,8 @@
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-file.writer :as sut])
-  (:import [java.nio.file Files]
-           [java.nio.file.attribute PosixFilePermissions]
-           [java.nio.file.attribute FileAttribute]))
+  (:import [java.nio.file Files FileSystems]
+           [java.nio.file.attribute FileAttribute PosixFilePermissions]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -40,6 +39,12 @@
     (.deleteOnExit dir)
     (.deleteOnExit file)
     (str file)))
+
+(defn- ^{:stratum 0} posix-fs?
+  "True when the default filesystem supports POSIX permissions and symlinks,
+   so the tests that rely on them can run (not on native Windows)."
+  []
+  (contains? (.supportedFileAttributeViews (FileSystems/getDefault)) "posix"))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -81,15 +86,6 @@
       (is (thrown? Exception (sut/write-json path [{:bad (Object.)}] :overwrite)))
       (is (= [{:id 1}] (edn/read-string (slurp path))))
       (is (= ["out.edn"] (mapv #(.getName ^java.io.File %) (.listFiles dir)))))))
-
-(defn- ^{:stratum 0} posix-fs?
-  "True when the temp directory's filesystem supports POSIX permissions and
-   symlinks, so the tests that rely on them can run (not on native Windows)."
-  []
-  (-> (Files/createTempDirectory "connector-file-posix-probe" (make-array FileAttribute 0))
-      .getFileSystem
-      .supportedFileAttributeViews
-      (contains? "posix")))
 
 (deftest ^{:stratum 1} write-keeps-owner-only-permissions-test
   (when (posix-fs?)
