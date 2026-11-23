@@ -6,6 +6,7 @@
             [ai.miniforge.config.interface :as config]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-acquisition :as acquisition]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-defaults :as defaults]
+            [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-creation :as creation]
             [ai.miniforge.dag-executor.protocols.executor :as executor]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-client :as client]
             [ai.miniforge.dag-executor.protocols.impl.kubernetes-job-resources :as resources]
@@ -145,12 +146,21 @@
         (is interrupted?))
       (finally (Thread/interrupted)))))
 
+(deftest ^{:stratum 1} test-cancelled-successful-submission-never-starts-observation
+  (try+
+    (let [submit! (partial interrupted-observation (accepted-job))
+          reply (acquisition/acquire! submit! refuse-provider! refuse-provider! refuse-provider!)
+          interrupted? (Thread/interrupted)]
+      (is (= :pod-interrupted (get-in reply [:error :code])))
+      (is interrupted?))
+    (finally (Thread/interrupted))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} test-shipped-polling-budgets-reach-acquisition
   (let [instance (kubernetes/create-kubernetes-executor {})]
     (with-redefs [shell/sh refuse-provider!
-                  kubernetes/apply-job accepted-job
+                  creation/create! accepted-job
                   client/wait-for-pod-ready (partial observe-readiness shipped-readiness-settings)]
       (is (result/ok? (executor/acquire-environment! instance (random-uuid) {}))))))
 

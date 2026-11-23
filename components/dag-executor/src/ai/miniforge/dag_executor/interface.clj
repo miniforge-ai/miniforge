@@ -426,7 +426,19 @@
   executor/select-executor)
 
 (def ^{:stratum 0} create-kubernetes-executor
-  "Create a Kubernetes executor for task isolation via K8s Jobs."
+  "Create a TaskExecutor for create-only Kubernetes capsule Jobs. Accepts a config map:
+   :namespace, :image and :kubectl-path select the target and CLI. Packaged defaults
+   use namespace default and image docker.io/library/alpine:latest.
+   :resources/timeout-seconds sets the positive signed-64-bit capsule lifetime
+   (default 3600); a task may override it under its :resources map.
+   :kubernetes/creation-request-timeout-ms bounds provider HTTP requests (30000),
+   not the local creation process. :kubernetes/pod-ready-timeout-ms bounds total
+   local readiness (120000); :kubernetes/pod-ready-poll-interval-ms sets polling (2000).
+   These millisecond settings must be integers in 1..Integer/MAX_VALUE.
+   Invalid budgets return an unavailable executor whose operations return the
+   configuration error without provider I/O. Successful acquisition retains the
+   Job UID and historical creation resource version in environment metadata;
+   this alone does not establish Pod ownership or full-stop containment."
   executor/create-kubernetes-executor)
 
 (def ^{:stratum 0} create-docker-executor
