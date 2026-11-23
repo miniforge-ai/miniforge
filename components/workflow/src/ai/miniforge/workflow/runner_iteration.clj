@@ -4,6 +4,7 @@
 (ns ai.miniforge.workflow.runner-iteration
   "Apply dashboard control and supervision around one checkpointed phase step."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.llm.interface :as llm]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.messages :as messages]
@@ -19,23 +20,36 @@
   (log/create-logger {:min-level :debug :output :human}))
 
 (defn- ^{:stratum 0} apply-dashboard-stop
-  "Mark context failed after a dashboard stop request."
+  "Record the stop and end the run :cancelled, not :failed (N2 §2.2)."
   [context stop-anomaly]
   (-> context
       (update :execution/errors conj
               (outcome/make-execution-error :dashboard-stop
                                     (:anomaly/message stop-anomaly)
                                     {:data (:anomaly/data stop-anomaly)}))
-      (ctx/transition-to-failed)))
+      (ctx/transition-to-cancelled)))
+
+(defn- ^{:stratum 0} stop-recorded?
+  "True when `context` already records a dashboard stop, as a DAG phase
+   does for a cancel between batches."
+  [context]
+  (boolean (some #(= :dashboard-stop (:type %)) (:execution/errors context))))
 
 (defn- ^{:stratum 0} execute-supervised
-  [pipeline context callbacks iteration]
+  "Run one supervised phase step. Its LLM calls see the run's cancel: once
+   CONTROL-STATE is stopped, a streaming agent call in flight kills the
+   agent's process tree and returns, and a later one ends as it starts. The
+   phase then finishes its own flow, boundary persist included, and the
+   caller records the stop."
+  [pipeline context callbacks iteration control-state]
   (let [state (monitoring/build-supervision-state context iteration)
         result (monitoring/check-workflow-supervision
                  (:execution/supervision-runtime context) state)]
     (if (= :halt (:status result))
       (monitoring/handle-supervision-halt context result ctx/transition-to-failed)
-      (phase-step/execute-phase pipeline context callbacks))))
+      (llm/call-with-cancel-signal #(boolean (:stopped @control-state))
+                                   #(phase-step/execute-phase pipeline context callbacks
+                                                              control-state)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -70,9 +84,18 @@
   "Apply control, supervision, phase policy, and checkpoint the resulting context."
   [pipeline context callbacks iteration control-state]
   (await-resume! control-state)
-  (let [result (if-let [stop-anomaly (check-stopped control-state)]
-                 (apply-dashboard-stop context stop-anomaly)
-                 (execute-supervised pipeline context callbacks iteration))]
+  (let [stopped-before (check-stopped control-state)
+        phase-context (if stopped-before
+                        context
+                        (execute-supervised pipeline context callbacks iteration control-state))
+        ;; A stop during the phase is recorded once, unless the phase completed the run.
+        stop-anomaly (or stopped-before
+                         (when-not (or (= :completed (:execution/status phase-context))
+                                       (stop-recorded? phase-context))
+                           (check-stopped control-state)))
+        result (if stop-anomaly
+                 (apply-dashboard-stop phase-context stop-anomaly)
+                 phase-context)]
     ;; A failed write is warned about and published, never thrown, so
     ;; the run goes on without that checkpoint.
     (runner-checkpoint/checkpoint! result)

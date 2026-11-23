@@ -1,0 +1,75 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.release-executor.pr-lookup-test
+  (:require
+   [ai.miniforge.release-executor.pr-lookup :as pr-lookup]
+   [clojure.test :refer [deftest is testing]]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} parse-lookup-test
+  (testing "no PRs"
+    (is (nil? (pr-lookup/parse-lookup "")))
+    (is (nil? (pr-lookup/parse-lookup nil))))
+  (testing "one PR"
+    (is (= {:pr-number 7 :pr-url "https://github.com/o/r/pull/7" :pr-state "OPEN"
+            :pr-head-sha "abc"}
+           (pr-lookup/parse-lookup "7\thttps://github.com/o/r/pull/7\tOPEN\tabc\n"))))
+  (testing "open before merged before closed, newest first within a state"
+    (is (= 9 (:pr-number (pr-lookup/parse-lookup
+                          (str "10\thttps://x/pull/10\tCLOSED\n"
+                               "9\thttps://x/pull/9\tMERGED\n"
+                               "8\thttps://x/pull/8\tMERGED\n")))))
+    (is (= 3 (:pr-number (pr-lookup/parse-lookup
+                          (str "5\thttps://x/pull/5\tCLOSED\n"
+                               "3\thttps://x/pull/3\tOPEN\n"))))))
+  (testing "lines that are not a PR are ignored"
+    (is (nil? (pr-lookup/parse-lookup "warning: something\nabc\tdef\tOPEN\n")))))
+
+(deftest ^{:stratum 0} head-ref-test
+  (testing "an owner/repo URL in any push form → <owner>:<branch>"
+    (doseq [url ["git@github.com:o-1/r.git"
+                 "ssh://git@github.com/o-1/r.git"
+                 "https://github.com/o-1/r.git"
+                 "https://github.com/o-1/r.git/"
+                 "https://x-access-token@github.com/o-1/r"]]
+      (is (= "o-1:mf/x" (pr-lookup/head-ref url "mf/x")) url)))
+  (testing "several push URLs that name one owner → <owner>:<branch>"
+    (is (= "o:mf/x" (pr-lookup/head-ref "git@github.com:o/r.git\nhttps://github.com/o/r.git\n" "mf/x")))
+    (is (= "o:mf/x" (pr-lookup/head-ref "/srv/mirror/r.git\ngit@github.com:o/r.git\n" "mf/x"))))
+  (testing "push URLs that name different owners → the bare branch"
+    (is (= "mf/x" (pr-lookup/head-ref "git@mirror.example.com:mirror-owner/r.git\ngit@github.com:o/r.git\n"
+                                      "mf/x"))))
+  (testing "no owner to read → the bare branch"
+    (doseq [url [nil "" "/srv/git/r.git" "file:///srv/git/r.git"
+                 "https://github.com/o/group/r.git" "https://github.com/-o/r.git"]]
+      (is (= "mf/x" (pr-lookup/head-ref url "mf/x")) (pr-str url)))))
+
+(deftest ^{:stratum 0} head-from-lookups-test
+  (let [read-ok   (fn [output] {:success? true :output output :error ""})
+        branch-r  (read-ok "mf/x\n")
+        url-r     (read-ok "git@github.com:o/r.git\n")]
+    (testing "given a branch and origin's URL → the branch and its <owner>:<branch> head"
+      (is (= {:branch "mf/x" :head "o:mf/x"} (pr-lookup/head-from-lookups branch-r url-r))))
+    (testing "given no branch printed (detached HEAD) → no branch, no head"
+      (is (= {:branch nil :head nil} (pr-lookup/head-from-lookups (read-ok "") url-r))))
+    (testing "given an interrupted or timed-out lookup → {:stopped <that result>}"
+      (let [interrupted {:success? false :output "" :error "cancelled" :interrupted? true}
+            timed-out   {:success? false :output "" :error "deadline" :timed-out? true}]
+        (is (= {:stopped interrupted} (pr-lookup/head-from-lookups interrupted url-r)))
+        (is (= {:stopped timed-out} (pr-lookup/head-from-lookups branch-r timed-out)))))))

@@ -17,7 +17,6 @@
 ;; limitations under the License.
 (ns ai.miniforge.web-dashboard.state.trains-test
   (:require
-   [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [cheshire.core :as json]

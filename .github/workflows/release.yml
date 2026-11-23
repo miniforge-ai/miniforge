@@ -17,12 +17,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # Public identifier for the read-only Miniforge CI GitHub App (the one
-  # ci.yml uses); credentials remain in MINIFORGE_CI_BOT_KEY. The CLI build
-  # resolves the private miniforge-ai/workbench-contract git dependency.
-  MINIFORGE_CI_BOT_APP_ID: "3360143"
-
 jobs:
   # Refuses to release a commit that is not on main, or whose newest
   # ci.yml push run on main did not pass. Tag pushes and manual
@@ -133,21 +127,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Generate workbench contract token
-        id: workbench-contract-token
-        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
-        with:
-          app-id: ${{ env.MINIFORGE_CI_BOT_APP_ID }}
-          private-key: ${{ secrets.MINIFORGE_CI_BOT_KEY }}
-          owner: miniforge-ai
-          repositories: workbench-contract
-
-      - name: Configure workbench contract access
-        env:
-          WORKBENCH_CONTRACT_TOKEN: ${{ steps.workbench-contract-token.outputs.token }}
-        run: |
-          git config --global url."https://x-access-token:${WORKBENCH_CONTRACT_TOKEN}@github.com/miniforge-ai/workbench-contract.git".insteadOf "ssh://git@github.com/miniforge-ai/workbench-contract.git"
-
       - name: Set up Java
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
@@ -234,22 +213,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
-      - name: Generate workbench contract token
-        id: workbench-contract-token
-        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
-        with:
-          app-id: ${{ env.MINIFORGE_CI_BOT_APP_ID }}
-          private-key: ${{ secrets.MINIFORGE_CI_BOT_KEY }}
-          owner: miniforge-ai
-          repositories: workbench-contract
-
-      - name: Configure workbench contract access
-        shell: bash
-        env:
-          WORKBENCH_CONTRACT_TOKEN: ${{ steps.workbench-contract-token.outputs.token }}
-        run: |
-          git config --global url."https://x-access-token:${WORKBENCH_CONTRACT_TOKEN}@github.com/miniforge-ai/workbench-contract.git".insteadOf "ssh://git@github.com/miniforge-ai/workbench-contract.git"
 
       - name: Set up Java
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1

@@ -65,4 +65,10 @@
   ;; sharing commit-budget's merge detection) and that non-merge
   ;; commits still dispatch to autofix. Pure with-redefs — no
   ;; subprocess, no filesystem.
-  "lint-test"]}
+  "lint-test"
+  ;; Pins the test-runner tasks: the git-environment strip applied before
+  ;; starting a test process (this smoke run included), and which project
+  ;; tests `bb test:integration` discovers. Two throwaway repositories
+  ;; under java.io.tmpdir and four git commands; the rest reads files or
+  ;; stubs process starts.
+  "test-runner-test"]}

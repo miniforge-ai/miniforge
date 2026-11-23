@@ -21,6 +21,7 @@
    [clojure.test :refer [deftest testing is use-fixtures]]
    [babashka.fs :as fs]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.main.commands.intervention-outcome :as outcome]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.commands.workflow-commands :as sut]
    [ai.miniforge.cli.worktree :as worktree]
@@ -98,11 +99,16 @@
 
 (deftest ^{:stratum 0} workflow-cancel-cmd-requests-a-cancel-intervention-test
   (testing "cancel command writes a governed intervention request"
-    (let [requests (atom [])]
+    (let [requests (atom [])
+          exit-code (atom nil)]
       (with-redefs [es/request-intervention!
                     (fn [request]
                       (swap! requests conj request)
-                      (assoc request :intervention/id (random-uuid)))]
+                      (assoc request :intervention/id (random-uuid)))
+                    ;; The run applying it is covered in
+                    ;; workflow-cancel-outcome-test; here it is stubbed.
+                    outcome/await-transition (constantly {:intervention/state :verified})
+                    shared/exit! (fn [code] (reset! exit-code code))]
         ;; A UUID id reflects the real contract: the operator writer
         ;; rejects a non-UUID workflow target, so a governed run's id is
         ;; always a UUID string.
@@ -110,6 +116,7 @@
               output (with-out-str (sut/workflow-cancel-cmd {:id wid}))
               request (first @requests)]
           (is (.contains output "Cancel"))
+          (is (nil? @exit-code) "an applied cancel exits 0")
           (is (= 1 (count @requests)))
           ;; The legacy poller verb was `stop`; the intervention
           ;; vocabulary names the same operation `:cancel`.

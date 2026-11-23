@@ -26,6 +26,7 @@
    [ai.miniforge.dag-executor.interface :as dag-exec]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.phase.interface.boundary-commit :as boundary-commit]
    [ai.miniforge.workflow.checkpoint-test-support :as checkpoint-test-support]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
@@ -424,8 +425,10 @@
                    :execution/mode :governed
                    :execution/environment-id "env-42"
                    :execution/task-branch "task/abc"
-                   :execution/worktree-path "/workspace"}
-          phase-ctx {:execution/current-phase :implement}]
+                   :execution/worktree-path "/workspace"
+                   :execution/current-phase :implement}
+          ;; After a successful step the machine has moved on to the next phase.
+          phase-ctx {:execution/current-phase :verify}]
       (with-redefs [dag-exec/persist-workspace!
                     (fn [executor env-id opts]
                       (reset! call-args {:executor executor
@@ -437,11 +440,13 @@
         (is (= "env-42" (:env-id @call-args)))
         (is (= "task/abc" (get-in @call-args [:opts :branch])))
         (is (= "/workspace" (get-in @call-args [:opts :workdir])))
-        (is (= (messages/t :env/persist-message {:phase "implement"})
-               (get-in @call-args [:opts :message])))))))
+        (is (= (boundary-commit/with-phase-trailers
+                 (messages/t :env/persist-message {:phase "implement"}) [:implement])
+               (get-in @call-args [:opts :message]))
+            "the commit names the phase that ran, not the one the machine moved to")))))
 
 (deftest ^{:stratum 1} persist-workspace-uses-unknown-when-no-phase-test
-  (testing "uses 'unknown' when phase-ctx has no :execution/current-phase"
+  (testing "uses 'unknown' when the context has no :execution/current-phase"
     (let [call-args (atom nil)
           context {:execution/executor :mock
                    :execution/mode :governed
@@ -452,7 +457,8 @@
                     (fn [_exec _env-id opts]
                       (reset! call-args opts))]
         (persist-fn context phase-ctx)
-        (is (= (messages/t :env/persist-message {:phase "unknown"})
+        (is (= (boundary-commit/with-phase-trailers
+                 (messages/t :env/persist-message {:phase "unknown"}) [:unknown])
                (:message @call-args)))))))
 
 (deftest ^{:stratum 1} persist-workspace-catches-exceptions-test
@@ -525,6 +531,23 @@
                                                      {:task "T"}
                                                      {:workflow-id "session-label"}))]
       (is (uuid? adopted)))))
+
+(deftest ^{:stratum 2} context-carries-the-run-lineage-test
+  (let [wid (random-uuid) origin (random-uuid)]
+    (testing "a new run is its own lineage"
+      (is (= wid (:execution/origin-id (ctx/create-context minimal-rollup-test-workflow
+                                                           {:task "T"} {:workflow-id wid})))))
+    (testing "a resume attempt under a new id continues the run in :origin-id"
+      (is (= origin (:execution/origin-id (ctx/create-context minimal-rollup-test-workflow
+                                                              {:task "T"}
+                                                              {:workflow-id wid :origin-id (str origin)})))))
+    (testing "a restored snapshot keeps its lineage; an older one without it falls back"
+      (is (= origin (:execution/origin-id
+                     (ctx/restore-context minimal-rollup-test-workflow {:task "T"}
+                                          {:execution/id wid :execution/origin-id origin} {} {}))))
+      (is (= wid (:execution/origin-id
+                  (ctx/restore-context minimal-rollup-test-workflow {:task "T"}
+                                       {:execution/id wid} {} {})))))))
 
 (deftest ^{:stratum 2} apply-dag-success-rolls-dag-metrics-into-execution-test
   (testing "DAG sub-workflow tokens/cost/duration roll into :execution/metrics on success"

@@ -31,7 +31,8 @@
             [ai.miniforge.workflow.context :as context]
             [ai.miniforge.workflow.execution-events :as exec-events]
             [ai.miniforge.workflow.fsm :as workflow-fsm]
-            [ai.miniforge.workflow.messages :as messages]))
+            [ai.miniforge.workflow.messages :as messages]
+            [ai.miniforge.workflow.stop-signal :as stop-signal]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -40,6 +41,17 @@
   [phase-result]
   (or (phase/already-done? phase-result)
       (phase/already-done? (:result phase-result))))
+
+(defn ^{:stratum 0} gate-warnings
+  "A check-gates result's warnings as [{:gate kw :warnings [..]}], one entry
+   per gate that warned, in gate order; nil when no gate warned."
+  [gate-result]
+  (not-empty
+   (into []
+         (keep (fn [{:keys [gate warnings]}]
+                 (when (seq warnings)
+                   {:gate gate :warnings (vec warnings)})))
+         (:results gate-result))))
 
 (defn- ^{:stratum 0} phase-transition-event-message
   [event]
@@ -67,6 +79,17 @@
   (or (get-in phase-result [:result :output :phase/verdict])
       (get-in phase-result [:output :phase/verdict])
       (get phase-result :phase/verdict)))
+
+(defn ^{:stratum 0} stop-aware-event
+  "EVENT for the phase that just ran, except that a phase failing after its
+   run was stopped sends :cancel: the failure is the cancel's own effect
+   (the agent call it cut short), and :failed is final, so the stop could
+   not be recorded after it."
+  [ctx event]
+  (if (and (= :phase/fail (if (map? event) (:type event) event))
+           (stop-signal/stopped? (get-in ctx [:execution/opts :control-state])))
+    :cancel
+    event))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -167,6 +190,7 @@
       (if (seq gate-keywords)
         (let [gate-result (gate/check-gates gate-keywords artifact ctx)
               minted (gate/gates->envelope gate-result (nil? artifact))
+              warnings (gate-warnings gate-result)
               ;; envelope minting can itself anomaly; fail closed on that too
               envelope (when (:envelope/id minted) minted)
               receipt (exec-events/emit-phase-decision! ctx phase-result envelope)]
@@ -192,6 +216,8 @@
                                                (remove gate/passed?)
                                                (mapv #(-> (select-keys % [:gate :errors])
                                                           (update :errors (fnil vec [])))))))
+            ;; Warnings never change the decision, so the envelope cannot carry them.
+            warnings (assoc :phase/gate-warnings warnings)
             ;; Projected before :leave runs, the same way as a denial, so leave
             ;; handlers finalize a failed phase instead of publishing success.
             (anomaly/any-anomaly? receipt)

@@ -1,5 +1,6 @@
 {:event-stream/messages
  {:delivery/quiesced "publish! rejected: workflow quiesced"
+  :publication/not-persisted "The event was not persisted: the stream has no durable sink, or a durable sink failed to write it."
   :delivery/replay-unsupported "replay! delivers stored events to a legacy stream; a current stream restores them from its journal."
   :heartbeat/emission-failed "Current heartbeat publication failed."
   :heartbeat/invalid-options "Heartbeat identity, interval or progress sources are invalid."
@@ -7,4 +8,5 @@
   :heartbeat/closed-stream "Cannot start a heartbeat on a closed current stream."
   :heartbeat/start-failed "Heartbeat scheduler could not be started."
   :workflow/invalid-completion-status "Current completion events require the completed workflow status."
+  :workflow/invalid-cancellation "A cancelled event needs a non-blank requester, a source N3 names, an action id for a control-action source, and a non-negative duration."
   :chain/invalid-draft "Chain draft has invalid lifecycle fields, identity, or reserved envelope fields."}}

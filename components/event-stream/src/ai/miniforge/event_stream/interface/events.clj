@@ -28,11 +28,14 @@
    [ai.miniforge.event-stream.phase-events :as phase-events]
    [ai.miniforge.event-stream.recovery-events :as recovery]
    [ai.miniforge.event-stream.workflow-entry-events :as workflow-entry]
-   [ai.miniforge.event-stream.workflow-terminal-events :as workflow-terminal]))
+   [ai.miniforge.event-stream.workflow-terminal-events :as workflow-terminal]
+   [ai.miniforge.event-stream.workflow-terminal-fields :as workflow-terminal-fields]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Event constructors
+(def ^{:stratum 0} checkpoint-location recovery/checkpoint-location)
+
 (def ^{:stratum 0} checkpoint-written recovery/checkpoint-written)
 
 (def ^{:stratum 0} checkpoint-write-failed recovery/checkpoint-write-failed)
@@ -124,6 +127,24 @@
    :failure/class. Current drafts require the class and may carry
    :workflow/failure-phase in opts."
   workflow-terminal/workflow-failed)
+
+(def ^{:stratum 0} valid-cancellation?
+  "True for a cancel record :workflow/cancelled accepts: a non-blank
+   requester, a source N3 names, and an action id for a :control-action
+   source."
+  workflow-terminal-fields/valid-cancellation?)
+
+(def ^{:stratum 0} workflow-cancelled
+  "Build and return a :workflow/cancelled event envelope map (N3): a run
+   an operator stopped, reported apart from :workflow/completed and
+   :workflow/failed. Takes the cancel's
+   {:cancel/requested-by :cancel/source :action/id?} and the run's
+   duration in ms. Returns an :invalid-input anomaly when the requester is
+   not a non-blank string, the source is not one N3 names (:cli :api :tui
+   :supervisor :control-action), a :control-action
+   source has no :action/id uuid, or the duration is not a non-negative
+   integer."
+  workflow-terminal/workflow-cancelled)
 
 (def ^{:stratum 0} llm-request
   "Build and return an :llm/request event envelope map for an LLM call

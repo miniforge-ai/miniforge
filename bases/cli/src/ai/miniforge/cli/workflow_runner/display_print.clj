@@ -24,8 +24,8 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-runner.display-ansi :as ansi]
-   [ai.miniforge.cli.workflow-runner.display-format :as fmt]
-   [ai.miniforge.cli.workflow-runner.display-summary :as summary]))
+   [ai.miniforge.cli.workflow-runner.display-summary :as summary]
+   [ai.miniforge.cli.workflow-runner.display-summary-lines :as lines]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -42,16 +42,10 @@
     (flush)))
 
 (defn ^{:stratum 0} print-workflow-summary [result]
-  (let [{:execution/keys [status metrics errors]} result
-        success? (= status :completed)]
-    (println (if success?
-               (ansi/colorize :green (messages/t :workflow-runner/summary-success))
-               (ansi/colorize :red (messages/t :workflow-runner/summary-failure))))
-    (when metrics
-      (println (messages/t :workflow-runner/metrics
-                           {:tokens (:tokens metrics 0)
-                            :cost (format "%.4f" (:cost-usd metrics 0.0))
-                            :duration (fmt/format-duration (:duration-ms metrics 0))})))
+  (let [{:execution/keys [status metrics errors]} result]
+    (println (lines/status-line status))
+    (doseq [line (lines/metrics-lines metrics)]
+      (println line))
     (when (seq errors)
       (println (ansi/colorize :red (str "\n" (messages/t :workflow-runner/errors))))
       (doseq [err errors]

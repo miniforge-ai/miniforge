@@ -721,9 +721,11 @@
                                                           42 "/tmp/repo")
                                     nil)))]
     (testing "gh has no log yet (run still in progress): keep polling"
-      (let [result (poll {:ci/logs nil :ci/log-errors [{:run-id "1" :error {:message "run 1 is still in progress"}}]})]
+      (let [log-errors [{:run-id "1" :error {:message "run 1 is still in progress"}}]
+            result (poll {:ci/logs nil :ci/log-errors log-errors})]
         (is (= :pending (:status result)))
-        (is (nil? (:event result)))))
+        (is (nil? (:event result)))
+        (is (= log-errors (:ci/log-errors result)) "the retry says why the log is missing")))
     (testing "a failed fetch after every check finished: retry next poll"
       (with-redefs [checks/get-pr-checks (fn [_ _] (dag/ok {:checks [(first checks)]}))
                     checks/get-check-logs (fn [_ _] {:ci/logs nil

@@ -39,6 +39,11 @@
                  ;; Example: {:opencode 210000} gives OpenCode 2 extra minutes
                  ;; (210s total) before stall detection fires.
                  :agent/per-backend-gap-thresholds {}}
+  ;; Where agents run. :local (the default without this key) is a host
+  ;; worktree with the operator's privileges; :governed is a container
+  ;; capsule. With :require-governed? true, runs default to governed and a
+  ;; run that would execute in another mode is refused.
+  :execution {:require-governed? false}
   :governance {:readiness {}
                :risk {}
                :tiers {}

@@ -1,0 +1,62 @@
+{:spec/title "Codex gap report — measure learning latency from miss to harvest decision"
+
+ :spec/description
+ "Thesium Codex SPEC T2 §4.1 item 6 defines the learning slot of the gap
+  vector as the median time from a miss being recorded to a codex node
+  admitted for it, or to an explicit refusal (T1 §5.6/§6.4). T1 §8.4
+  requires those decisions to be dated, append-only records: admissions and
+  refusals in the codex's `HARVEST-*.md` logs. `ai.miniforge.codex-gap.report/build-report`
+  sets `[:learning :status]` to `:not-instrumented` and lists the open
+  misses (:uncovered, :novel and :review-queue).
+
+  The link from a miss to its decision does not exist yet. Harvest entries
+  cite their sources in prose (a run id, a series rep), not the
+  `:miss/id`s they answer, and give their date and outcome in prose too,
+  so nothing can pair a miss with the decision that closed it.
+
+  Change:
+  1. A harvest entry may carry three fields in the codex's `key:: value`
+     form: `decided::` (an ISO date), `outcome::` (admitted or refused) and
+     `misses::` (a comma-separated list of `:miss/id` UUIDs).
+  2. codex-gap reads the harvest logs in the configured codex directory
+     through `ai.miniforge.codex.interface`, pairs each named miss with its
+     earliest decision, and `build-report` reports the median latency in
+     days over decided misses, the decided count, and the open misses that
+     no decision names.
+  3. `bb codex-gap-report` passes the harvest decisions in when
+     `MINIFORGE_CODEX_PATH` is set, as it does for anchoring."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/codex/src"
+          "components/codex/test"
+          "components/codex-gap/src"
+          "components/codex-gap/resources"
+          "components/codex-gap/test"
+          "bb.edn"]}
+
+ :spec/constraints
+ ["Harvest logs stay the codex's records; miniforge reads them and never writes them"
+  "A harvest entry without all three fields is valid and decides no miss"
+  "Codex files are read through ai.miniforge.codex.interface only — no parsing outside the codex component"
+  "The latency ships with its decided count and open-miss list (T2 §4.2); no single number across slots"]
+
+ :spec/acceptance-criteria
+ ["Given a miss recorded on 2026-09-01 and a harvest entry dated 2026-09-04 that names it as admitted, the learning slot reports one decided miss with a latency of 3 days"
+  "A refusal that names a miss decides it the same way an admission does"
+  "A miss named by two harvest entries is paired with the earlier one"
+  "An :uncovered miss that no harvest entry names stays in the slot's open list"
+  "Without a configured codex directory the learning slot reports that harvest records are unavailable, not a latency"]
+
+ :spec/priority
+ {:tier :low
+  :axes #{:observation}
+  :theme :codex-gap
+  :rationale "The learning slot reports only how many misses are open; until misses are paired with harvest decisions, the report cannot show how fast the codex grows from its failures."
+  :blocks []
+  :blocked-by []}
+
+ :normative-refs
+ ["Thesium Codex SPEC T1 (SPEC.md) §8.4 — admissions and refusals are dated HARVEST records"]
+
+ :spec/workflow-type :canonical-sdlc}

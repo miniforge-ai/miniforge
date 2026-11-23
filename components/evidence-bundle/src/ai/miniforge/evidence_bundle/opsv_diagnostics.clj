@@ -3,7 +3,8 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.evidence-bundle.opsv-diagnostics
   "Canonical OPSV assembly failure reports and localized diagnostics."
-  (:require [ai.miniforge.messages.interface :as messages]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.messages.interface :as messages]
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -12,6 +13,10 @@
   (messages/create-translator "config/evidence-bundle/messages/system.edn" :evidence-bundle/system))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} unsupported-material []
+  (anomaly/anomaly :invalid-input (ts :material/unsupported)
+                   {:opsv.validation/errors [{:code :unsupported-evidence-content}]}))
 
 (defn ^{:stratum 1} failure [category message-key bundle-id errors]
   (response/make-anomaly category (ts message-key)

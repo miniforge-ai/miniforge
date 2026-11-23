@@ -10,9 +10,8 @@
 
 (def ^{:stratum 0} Duration [:and int? [:>= 0]])
 
-(def ^{:stratum 0} Identity
+(def ^{:stratum 0} ScopeIdentity
   [:map
-   [:event/version [:= "1.0.0"]]
    [:scope/type [:= :workflow]]
    [:workflow/id :uuid]])
 
@@ -37,6 +36,9 @@
   [:map [:workflow/status {:optional true} :nil]])
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} Identity
+  [:and ScopeIdentity [:map [:event/version [:= "1.0.0"]]]])
 
 (def ^{:stratum 1} Lifecycle
   [:multi {:dispatch :event/type}

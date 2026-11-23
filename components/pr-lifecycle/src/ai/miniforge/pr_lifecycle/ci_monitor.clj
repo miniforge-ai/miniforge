@@ -108,8 +108,10 @@
    failed-job log only once the whole run has finished, and a fetch can
    fail transiently, so a failure with no log yet polls as :pending while
    other checks are still pending or a fetch failed, and the log is
-   fetched again next poll (bounded by the monitor timeout). A failure
-   whose checks have no GitHub Actions run is terminal at once.
+   fetched again next poll (bounded by the monitor timeout). That
+   :pending result still carries :ci/logs and :ci/log-errors, so a caller
+   sees why the fetch is being retried. A failure whose checks have no
+   GitHub Actions run is terminal at once.
 
    Returns {:status keyword :checks [...] :event event-or-nil}"
   [monitor logger]
@@ -165,7 +167,7 @@
                                               (str "Failed checks: "
                                                    (str/join ", "
                                                              (map :name (:failed computed)))))))}
-          (= :failure status)
+          logs
           (merge logs))))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -247,10 +249,10 @@
 
   ;; Compute status from checks
   (ci-checks/compute-ci-status
-   [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}
-    {:name "lint" :state "COMPLETED" :conclusion "FAILURE"}
-    {:name "build" :state "IN_PROGRESS" :conclusion nil}])
-  ; => {:status :pending :passed [{...}] :failed [{...}] :pending [{...}]}
+   [{:name "tests" :state "SUCCESS" :bucket "pass"}
+    {:name "lint" :state "FAILURE" :bucket "fail"}
+    {:name "build" :state "IN_PROGRESS" :bucket "pending"}])
+  ; => {:status :failure :passed [{...}] :failed [{...}] :pending [{...}]}
 
   ;; Run until complete (would block in real use)
   ;; (run-ci-monitor monitor nil :on-poll println)

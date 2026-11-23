@@ -20,7 +20,56 @@
   "File writing for JSON and EDN formats."
   (:require [cheshire.core :as json]
             [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io])
+  (:import [java.nio.file Files Path StandardCopyOption]
+           [java.nio.file.attribute FileAttribute PosixFilePermissions]))
+
+(defn- ^{:stratum 0} posix?
+  "True when the store holding `path` supports POSIX permissions. The store is
+   checked, not the default filesystem, because a mount can lack what the
+   filesystem advertises."
+  [^Path path]
+  (.supportsFileAttributeView (Files/getFileStore path) "posix"))
+
+(defn- ^{:stratum 0} create-temp-like!
+  "Create the empty temp file at `tmp`. When `target` exists and the filesystem
+   is POSIX, the temp file gets exactly the target's permissions from creation,
+   so the atomic replace neither loosens an owner-only file nor exposes its
+   records while they are being written."
+  [^Path tmp ^Path target]
+  (if (and (Files/exists target (into-array java.nio.file.LinkOption []))
+           (posix? target))
+    (let [perms (Files/getPosixFilePermissions target (into-array java.nio.file.LinkOption []))]
+      (Files/createFile tmp (into-array FileAttribute [(PosixFilePermissions/asFileAttribute perms)]))
+      (Files/setPosixFilePermissions tmp perms))
+    (Files/createFile tmp (into-array FileAttribute []))))
+
+(defn- ^{:stratum 0} write-atomically!
+  "Write the output of `write-fn` (called with a Writer) to `path` by writing a
+   sibling temp file and renaming it over the target, so a crash mid-write never
+   leaves a truncated or half-written file where earlier records used to be."
+  [path write-fn]
+  (let [given  (.getAbsoluteFile (io/file path))
+        ;; An existing symlink is followed, so the replace updates the file it
+        ;; points at instead of swapping the link itself for a regular file.
+        target (if (.exists given)
+                 (.toFile (.toRealPath (.toPath given) (into-array java.nio.file.LinkOption [])))
+                 given)
+        ;; The name does not embed the target's, so a long valid output name
+        ;; cannot push the temp name past the filesystem's component limit.
+        tmp    (io/file (.getParentFile target)
+                        (str "." (random-uuid) ".tmp"))]
+    (io/make-parents target)
+    (try
+      (create-temp-like! (.toPath tmp) (.toPath target))
+      (with-open [wtr (io/writer tmp)]
+        (write-fn wtr))
+      (Files/move (.toPath tmp) (.toPath target)
+                  (into-array java.nio.file.CopyOption
+                              [StandardCopyOption/ATOMIC_MOVE
+                               StandardCopyOption/REPLACE_EXISTING]))
+      (finally
+        (Files/deleteIfExists (.toPath tmp))))))
 
 (defn write-json
   "Write records as JSON array to file."
@@ -31,9 +80,7 @@
         all-records (if existing
                       (into (vec existing) records)
                       (vec records))]
-    (io/make-parents path)
-    (with-open [wtr (io/writer path)]
-      (json/generate-stream all-records wtr))
+    (write-atomically! path #(json/generate-stream all-records %))
     (count records)))
 
 (defn write-edn
@@ -44,8 +91,7 @@
         all-records (if existing
                       (into (vec existing) records)
                       (vec records))]
-    (io/make-parents path)
-    (spit path (pr-str all-records))
+    (write-atomically! path #(.write ^java.io.Writer % ^String (pr-str all-records)))
     (count records)))
 
 (defn write-file

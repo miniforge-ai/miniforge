@@ -68,9 +68,13 @@
 
 (defn ^{:stratum 0} enrich-violation
   "Attach remediation metadata from the pack rule to a violation map.
-   Downstream classify and execute phases use these fields."
+   Downstream classify and execute phases use these fields. `classify` reads
+   `:remediation-strategy` to refuse a `:semantic` or `:manual` rule."
   [violation remediation]
   (cond-> violation
+    (get remediation :strategy)
+    (assoc :remediation-strategy (get remediation :strategy))
+
     (get remediation :type)
     (assoc :remediation-type (get remediation :type))
 

@@ -21,6 +21,8 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.content-hash.interface :as content-hash]
+   [ai.miniforge.evidence-bundle.artifact-material :as artifact-material]
+   [ai.miniforge.evidence-bundle.boundary.artifact-material :as material-boundary]
    [ai.miniforge.evidence-bundle.canonical-validation :as canonical]
    [ai.miniforge.evidence-bundle.chain-evidence :as chain-evidence]
    [ai.miniforge.evidence-bundle.collector :as collector]
@@ -38,9 +40,27 @@
    [ai.miniforge.evidence-bundle.schema.domain :as domain]
    [ai.miniforge.evidence-bundle.schema.opsv :as opsv-schema]
    [ai.miniforge.evidence-bundle.interface.protocols.evidence-bundle :as p]
-   [ai.miniforge.evidence-bundle.protocols.records.evidence-bundle :as records]))
+   [ai.miniforge.evidence-bundle.protocols.records.evidence-bundle :as records]
+   [ai.miniforge.redaction.interface :as redaction]
+   [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} prepare-artifact-content
+  "Scan and redact finite content before hashing or storing an artifact.
+   Returns protected :artifact/content and :artifact/metadata compliance fields,
+   or a value-free anomaly for unsupported content. This does not seal a bundle
+   or authorize use of the reporting copy as an execution/recovery contract."
+  [content]
+  (material-boundary/prepare content))
+
+(defn ^{:stratum 0} valid-protected-artifact-content?
+  "Verify protected content and its original bound compliance metadata without rescanning away historical findings.
+   This validates reporting material only; its immutable identity and run binding are the producer's responsibility."
+  [value]
+  (and (redaction/supported? value)
+       (m/validate artifact-material/Content value)
+       (artifact-material/protected? value)))
 
 (def ^{:stratum 0} OpsvEvidence
   "Canonical N6 section 2.8 OPSV evidence schema."

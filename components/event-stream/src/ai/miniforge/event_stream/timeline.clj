@@ -50,8 +50,9 @@
   values/args-preview-length)
 
 (def ^{:stratum 0} ^:private terminal-event-types
-  "Event types that denote workflow termination."
-  #{:workflow/completed :workflow/failed})
+  "Event types that denote workflow termination; a cancel ends a run with
+   :workflow/cancelled alone (N3)."
+  #{:workflow/completed :workflow/failed :workflow/cancelled})
 
 (def ^{:stratum 0} ^:private stall-event-types
   "Event types that denote stream stalls."
@@ -98,7 +99,9 @@
 
    Status is sourced from `:tool/success?` (per the schema), with
    `:tool/error` presence as the secondary signal for legacy events
-   that omitted the boolean."
+   that omitted the boolean. With neither, the outcome is unknown (a
+   Codex item still in progress when its turn ended) and renders as
+   such, not as success."
   [event tool-names-by-call-id]
   (let [ts       (values/format-hms (values/event-timestamp event))
         phase    (values/event-phase event)
@@ -111,7 +114,7 @@
                    (false? (:tool/success? event)) (messages/t :timeline/status-error)
                    (true?  (:tool/success? event)) (messages/t :timeline/status-success)
                    (some? (:tool/error event))     (messages/t :timeline/status-error)
-                   :else                           (messages/t :timeline/status-success))
+                   :else                           (messages/t :timeline/status-unknown))
         dur-str  (if dur-ms
                    (str "  " (values/format-duration-ms dur-ms) "  " status)
                    (str "  " status))]
@@ -134,8 +137,8 @@
       (format "%s  %s  %s" ts phase marker))))
 
 (defn- ^{:stratum 0} render-terminal
-  "`:workflow/completed` / `:workflow/failed` — terminal status with the
-   localized terminated marker."
+  "`:workflow/completed` / `:workflow/failed` / `:workflow/cancelled` —
+   terminal status with the localized terminated marker."
   [event]
   (let [ts     (values/format-hms (values/event-timestamp event))
         phase  (values/event-phase event)

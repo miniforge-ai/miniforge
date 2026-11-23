@@ -27,9 +27,10 @@
   (fs/with-temp-dir [dir {:prefix "deploy-authority-"}]
     (authority/prepare {:execution/id (random-uuid)
                         :execution/phase-results {:provision {:result {:output {:steps []}}}}
-                        :grant-breach-dir (str dir)}
+                        :grant-breach-dir (str (fs/canonicalize dir))}
                        (random-uuid) target
-                       {:app-label "api" :rendered-yaml rendered-yaml}
+                       {:app-label "api" :rendered-yaml rendered-yaml
+                        :server-dry-run "validated"}
                        (Instant/parse "2026-10-29T00:00:00Z"))))
 
 ;------------------------------------------------------------------------------ Layer 2

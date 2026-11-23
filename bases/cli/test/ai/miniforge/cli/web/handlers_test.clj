@@ -29,6 +29,16 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} ^:private configured-repos ["org/repo"])
+
+(def ^{:stratum 0} ^:private unconfigured-pr-uri "/api/pr/evil%2Frepo/7")
+
+(def ^{:stratum 0} ^:private invalid-pr-path {:status 400 :body "Invalid PR path"})
+
+(defn- ^{:stratum 0} must-not-reach-github
+  [& _]
+  (throw (ex-info "should not be called" {})))
+
 (deftest ^{:stratum 0} parse-pr-path-parses-a-well-formed-path-test
   (testing "repo + numeric PR are extracted and the repo segment is URL-decoded"
     (is (= {:repo "org/repo" :number 42}
@@ -46,10 +56,34 @@
   (testing "malformed path short-circuits to a 400 before touching the github component"
     (with-redefs [github/fetch-prs (fn [& _] (throw (ex-info "should not be called" {})))]
       (is (= {:status 400 :body "Invalid PR path"}
-             (sut/pr-detail "/api/pr/org%2Frepo/not-a-number"))))))
+             (sut/pr-detail "/api/pr/org%2Frepo/not-a-number" ["org/repo"]))))))
 
 (deftest ^{:stratum 0} approve-returns-bad-request-for-a-malformed-path-without-throwing-test
   (testing "malformed path short-circuits to a 400 before touching the github component"
     (with-redefs [github/approve-pr! (fn [& _] (throw (ex-info "should not be called" {})))]
       (is (= {:status 400 :body "Invalid PR path"}
-             (sut/approve "/api/pr/"))))))
+             (sut/approve "/api/pr/" ["org/repo"]))))))
+
+(deftest ^{:stratum 0} parse-configured-pr-path-accepts-only-configured-repos-test
+  (testing "a configured repo is parsed"
+    (is (= {:repo "org/repo" :number 7}
+           (sut/parse-configured-pr-path "/api/pr/org%2Frepo/7" ["org/repo"]))))
+  (testing "an unconfigured repo is rejected"
+    (is (nil? (sut/parse-configured-pr-path "/api/pr/evil%2Frepo/7" ["org/repo"]))))
+  (testing "no configured repos rejects everything"
+    (is (nil? (sut/parse-configured-pr-path "/api/pr/org%2Frepo/7" [])))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} every-pr-handler-refuses-an-unconfigured-repo-test
+  (testing "an unconfigured repo is a 400 and never reaches gh"
+    (with-redefs [github/fetch-prs           must-not-reach-github
+                  github/approve-pr!         must-not-reach-github
+                  github/request-changes!    must-not-reach-github
+                  github/fetch-pr-diff       must-not-reach-github
+                  github/generate-pr-summary must-not-reach-github]
+      (is (= invalid-pr-path (sut/pr-detail unconfigured-pr-uri configured-repos)))
+      (is (= invalid-pr-path (sut/approve (str unconfigured-pr-uri "/approve") configured-repos)))
+      (is (= invalid-pr-path (sut/reject (str unconfigured-pr-uri "/reject") {} configured-repos)))
+      (is (= invalid-pr-path (sut/chat (str unconfigured-pr-uri "/chat") {} configured-repos)))
+      (is (= invalid-pr-path (sut/summary (str unconfigured-pr-uri "/summary") configured-repos))))))

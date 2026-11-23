@@ -7,7 +7,6 @@
    it, not an empty answer."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.checkpoint-store :as store]
-            [ai.miniforge.workflow.checkpoint-store-paths :as paths]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.context :as context]
             [ai.miniforge.workflow.interface :as workflow]
@@ -43,7 +42,7 @@
    (fn [root]
      (let [run-id (checkpoint-two-phases! root)
            opts {:checkpoint/root root}
-           implement-path (paths/phase-checkpoint-path root run-id :implement)
+           implement-path (:implement (fixture/recorded-paths root run-id))
            _ (spit implement-path "{:phase/result {:status")
            loaded (workflow/load-checkpoint-data run-id opts)]
        (testing "the snapshot and the readable phase still load"
@@ -61,8 +60,7 @@
    (fn [root]
      (let [run-id (checkpoint-two-phases! root)
            opts {:checkpoint/root root}
-           implement-path (paths/phase-checkpoint-path root run-id :implement)
-           snapshot-path (paths/machine-snapshot-path root run-id)]
+           {implement-path :implement snapshot-path :snapshot} (fixture/recorded-paths root run-id)]
        (testing "a whitespace-only phase file is named, not dropped"
          (spit implement-path "  \n")
          (is (= [implement-path]
@@ -79,7 +77,7 @@
    (fn [root]
      (let [run-id (checkpoint-two-phases! root)
            opts {:checkpoint/root root}
-           snapshot-path (paths/machine-snapshot-path root run-id)
+           snapshot-path (:snapshot (fixture/recorded-paths root run-id))
            _ (spit snapshot-path "{:execution/id")
            loaded (workflow/load-checkpoint-data run-id opts)]
        (is (anomaly/anomaly? loaded))

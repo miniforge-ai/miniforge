@@ -28,7 +28,8 @@
           :deploy/rollback-info (:rollback-info state)
           :deploy/rendered-yaml (:rendered-yaml state)
           :deploy/effect-id (get-in state [:authority :effect/id])
-          :deploy/grant-id (get-in state [:authority :authority/grant :grant/id])
+          :deploy/grant-id (get-in state [:authority :authority/grant :grant/id]
+                                  (:grant/id state))
           :deploy/envelope-id (get-in state [:authority :authority/envelope :envelope/id])}
          data))
 
@@ -66,6 +67,8 @@
 (defn ^{:stratum 2} from-state
   "Project one completed or refused governed flow into its phase result."
   [state]
-  (if-let [{:keys [stage message]} (:flow/failure state)]
-    (deployment state :failed stage {:deploy/failure message})
-    (transaction-deployment state)))
+  (cond-> (if-let [{:keys [stage message]} (:flow/failure state)]
+            (deployment state :failed stage {:deploy/failure message})
+            (transaction-deployment state))
+    (:grant/revocation-failure state)
+    (assoc :deploy/revocation-failure (:grant/revocation-failure state))))

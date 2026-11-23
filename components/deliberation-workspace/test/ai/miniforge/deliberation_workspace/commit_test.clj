@@ -115,7 +115,7 @@
   (let [ws (transact (workspace (obj "claim-1" :claim)) :skeptic
                      {:op :challenge :targets #{"claim-1"}})
         recorded (first (vals (:workspace/challenges ws)))]
-    (is (= :skeptic (:challenge/role recorded)))
+    (is (= :skeptic (:challenge/participant recorded)))
     (is (= "claim-1" (:challenge/target recorded)))
     (is (= :open (:challenge/status recorded)))))
 
@@ -207,3 +207,66 @@
                         :links {:supports #{"evidence-1"}}})]
       (is (= #{"evidence-1"} (object/linked (object-at ws "claim-1") :supports)))
       (is (= 6 (:object/touched-at (object-at ws "claim-1")))))))
+
+(deftest ^{:stratum 1} created-objects-carry-the-runtime-participant
+  (let [ws (commit/commit (workspace)
+                          (assoc (tx/new-transaction
+                                  {:role :proposer :activation "act-9" :basis 5
+                                   :operations [{:op :assert-claim
+                                                 :creates [{:id "claim-1" :type :claim
+                                                            :statement "a claim"}]}]})
+                                 :tx/participant :proposer-2))]
+    (is (= :proposer-2 (:object/participant (object-at ws "claim-1"))))
+    (is (= :proposer (:object/role (object-at ws "claim-1"))))))
+
+(deftest ^{:stratum 1} a-challenge-records-its-grounds
+  (let [ws (transact (workspace (obj "claim-1" :claim)) :skeptic
+                     {:op :challenge :targets #{"claim-1"}
+                      :reason "ordering assumed" :resolution "check the transport contract"})
+        recorded (first (vals (:workspace/challenges ws)))]
+    (is (= "ordering assumed" (:challenge/reason recorded)))
+    (is (= "check the transport contract" (:challenge/resolution recorded)))))
+
+(deftest ^{:stratum 1} challenging-an-adopted-record-keeps-its-disposition
+  (let [ws (transact (workspace (obj "decision-1" :decision :status :accepted)) :skeptic
+                     {:op :challenge :targets #{"decision-1"}
+                      :reason "ordering assumed" :resolution "check the transport contract"})]
+    (is (= :accepted (:object/status (object-at ws "decision-1"))))
+    (is (true? (:object/contested? (object-at ws "decision-1"))))))
+
+(deftest ^{:stratum 1} a-revision-keeps-the-prior-statement
+  (let [ws (transact (workspace (obj "claim-1" :claim)) :proposer
+                     {:op :refine-claim :targets #{"claim-1"} :statement "narrower claim"})
+        revised (object-at ws "claim-1")]
+    (is (= "narrower claim" (:object/statement revised)))
+    (is (= ["statement claim-1"] (mapv :object/statement (:object/history revised))))))
+
+(deftest ^{:stratum 1} an-answer-is-recorded-beside-its-question
+  (let [ws (transact (workspace (obj "question-1" :question)) :proposer
+                     {:op :answer-question :targets #{"question-1"} :statement "yes"})
+        answered (object-at ws "question-1")]
+    (is (= :answered (:object/status answered)))
+    (is (= "statement question-1" (:object/statement answered)))
+    (is (= "yes" (:object/answer answered)))))
+
+(deftest ^{:stratum 1} supersession-names-the-replacement
+  (let [ws (transact (workspace (obj "decision-1" :decision :status :accepted)
+                                (obj "decision-2" :decision))
+                     :synthesizer
+                     {:op :supersede :targets #{"decision-1"} :replacement #{"decision-2"}})]
+    (is (= :superseded (:object/status (object-at ws "decision-1"))))
+    (is (= "decision-2" (:object/superseded-by (object-at ws "decision-1"))))
+    (is (= :open (:object/status (object-at ws "decision-2"))))))
+
+(deftest ^{:stratum 1} adopting-a-contested-record-keeps-the-marker
+  (let [ws (transact (workspace (obj "decision-1" :decision :status :contested)) :synthesizer
+                     {:op :accept-decision :targets #{"decision-1"}})]
+    (is (= :accepted (:object/status (object-at ws "decision-1"))))
+    (is (true? (:object/contested? (object-at ws "decision-1"))))))
+
+(deftest ^{:stratum 1} an-experiment-keeps-what-it-discriminates
+  (let [ws (transact (workspace (obj "claim-1" :claim)) :skeptic
+                     {:op :challenge :targets #{"claim-1"}}
+                     {:op :propose-experiment :discriminates ["claim-1"]
+                      :creates [{:id "exp-1" :type :experiment :statement "replay the log"}]})]
+    (is (= #{"claim-1"} (object/linked (object-at ws "exp-1") :discriminates)))))

@@ -72,13 +72,13 @@
     (is (= :persist-push-failed (get-in r [:error :code])))))
 
 (deftest ^{:stratum 0} git-restore!-fetch-and-checkout-failures-are-errors-test
-  (let [failing (fn [needle code]
+  (let [failing (fn [needle]
                   (fn [cmd]
                     (if (and (vector? cmd) (some #{needle} cmd))
                       (result/ok {:exit-code 1 :stdout "" :stderr (str needle " failed")})
                       (result/ok {:exit-code 0 :stdout "abc\n" :stderr ""}))))]
-    (is (= :restore-fetch-failed (get-in (sut/git-restore! (failing "fetch" 1) {:branch "task/x"}) [:error :code])))
-    (is (= :restore-checkout-failed (get-in (sut/git-restore! (failing "checkout" 1) {:branch "task/x"}) [:error :code])))))
+    (is (= :restore-fetch-failed (get-in (sut/git-restore! (failing "fetch") {:branch "task/x"}) [:error :code])))
+    (is (= :restore-checkout-failed (get-in (sut/git-restore! (failing "checkout") {:branch "task/x"}) [:error :code])))))
 
 (deftest ^{:stratum 0} rev-parse-failure-is-an-error-test
   (let [exec-fn (fn [cmd]
@@ -335,6 +335,23 @@
             "fetch must be an arg vector, not a shell string")
         (is (some #(and (vector? %) (cmd-has? % "git checkout feature/restore")) cmds)
             "checkout must be an arg vector, not a shell string")))))
+
+(deftest ^{:stratum 2} remote-url-replaces-origin-test
+  (testing "a :remote URL is the ls-remote and push target, and the fetch
+            from it writes origin's tracking ref so the checkout still finds
+            the branch"
+    (let [url "https://github.com/o/r.git"
+          [persist-fn persist-calls] (recording-exec-fn
+                                      {"git status" (shell-result " M f")
+                                       "git rev-parse" (shell-result head-sha)})
+          [restore-fn restore-calls] (recording-exec-fn
+                                      {"git rev-parse" (shell-result head-sha)})]
+      (sut/git-persist! persist-fn {:branch "task/x" :remote url})
+      (sut/git-restore! restore-fn {:branch "task/x" :remote url})
+      (is (some #{["git" "ls-remote" url "refs/heads/task/x"]} @persist-calls))
+      (is (some #{["git" "push" "--force-with-lease=task/x:" url "HEAD:task/x"]} @persist-calls))
+      (is (some #{["git" "fetch" url "+refs/heads/task/x:refs/remotes/origin/task/x"]}
+                @restore-calls)))))
 
 (deftest ^{:stratum 2} git-restore!-defaults-branch-test
   (testing "Missing :branch defaults to 'task/unknown'"

@@ -5,7 +5,7 @@
   "With MINIFORGE_HOME set, worktrees and task archives go under it, with
    no config and with the shipped config defaults."
   (:require [ai.miniforge.config.interface :as config]
-            [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]
+            [ai.miniforge.dag-executor.protocols.impl.worktree.paths :as worktree-paths]
             [babashka.fs :as fs]
             [clojure.test :refer [deftest is]]))
 
@@ -17,9 +17,9 @@
           load config/load-merged-config]
       (with-redefs [config/miniforge-home (constantly home)]
         (let [shipped (load (str home "/config.edn"))]
-          (is (= (str home "/worktrees") (worktree/default-base-path)))
-          (is (= (str home "/worktrees") (worktree/default-base-path {})))
-          (is (= (str home "/worktrees") (worktree/default-base-path shipped)))
-          (is (= (str home "/checkpoints") (worktree/default-archive-dir))))))))
+          (is (= (str home "/worktrees") (worktree-paths/default-base-path)))
+          (is (= (str home "/worktrees") (worktree-paths/default-base-path {})))
+          (is (= (str home "/worktrees") (worktree-paths/default-base-path shipped)))
+          (is (= (str home "/checkpoints") (worktree-paths/default-archive-dir))))))))
 
 (comment ::worktree-home)

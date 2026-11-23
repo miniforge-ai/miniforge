@@ -9,6 +9,7 @@
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.workflow.checkpoint-store :as store]
             [ai.miniforge.workflow.checkpoint-store-gc :as gc]
+            [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.context :as context]
             [ai.miniforge.workflow.monitoring :as monitoring]
             [ai.miniforge.workflow.runner :as runner]
@@ -19,12 +20,9 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} archive-event!
-  "Write `event` as archived event file number `n` of run `id`."
-  [events-dir id n event]
-  (let [file (io/file events-dir "archived" (str id) (format "%016x__%012d.transit.json" n n))]
-    (io/make-parents file)
-    (spit file (if (string? event) event (es/serialize-event event)))))
+(def ^{:stratum 0} ^:private snowflake-timestamp-shift
+  "The file sink reserves the low 22 ID bits for worker and per-ms sequence."
+  22)
 
 (defn- ^{:stratum 0} legacy-stream [] (es/create-event-stream {:sinks []}))
 
@@ -42,6 +40,15 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} archive-event!
+  "Write `event` as archived event file number `n` of run `id`."
+  [events-dir id n event]
+  (let [snowflake (bit-shift-left n snowflake-timestamp-shift)
+        filename (format "%016x__%012d.transit.json" snowflake n)
+        file (io/file events-dir "archived" (str id) filename)]
+    (io/make-parents file)
+    (spit file (if (string? event) event (es/serialize-event event)))))
+
 (deftest ^{:stratum 1} a-snapshot-only-iteration-is-announced
   (fs/with-temp-dir [dir {:prefix "hold-evidence-"}]
     (let [stream (es/create-current-event-stream
@@ -58,20 +65,26 @@
               written (filter #(= :workflow/machine-snapshot-written (:event/type %))
                               (es/get-events stream))]
           (is (= 1 (count written)))
-          (is (= (str (fs/path root (str (:execution/id ctx)) "machine-snapshot.edn"))
+          (is (= "1.1.0" (:event/version (first written))))
+          (is (= (es/checkpoint-location (str (fs/real-path root))
+                                        (str (fs/real-path (fs/path root (str (:execution/id ctx))))))
+                 (:checkpoint/location (first written))))
+          (is (= (:snapshot (fixture/recorded-paths root (:execution/id ctx)))
                  (:snapshot/path (first written)))))
         (finally (es/close-current-event-stream! stream))))))
 
-(deftest ^{:stratum 1} a-snapshot-only-checkpoint-under-another-root-holds
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} a-snapshot-only-checkpoint-under-another-root-holds
   (fs/with-temp-dir [alternate {:prefix "hold-alternate-"}]
     (fs/with-temp-dir [events-dir {:prefix "hold-events-"}]
       (let [id (snapshot-only-run! (str alternate))
             path (str (fs/path alternate (str id) "machine-snapshot.edn"))]
         (archive-event! (fs/file events-dir) id 1
-                        (es/machine-snapshot-written (legacy-stream) id :running path 1))
+                        (es/machine-snapshot-written (legacy-stream) id :running path 1 (str alternate)))
         (is (true? (es/retention-hold ::gc/checkpoint (str id) (fs/file events-dir))))))))
 
-(deftest ^{:stratum 1} the-scan-stops-at-the-newest-announced-write
+(deftest ^{:stratum 2} the-scan-stops-at-the-newest-announced-write
   (fs/with-temp-dir [alternate {:prefix "hold-alternate-"}]
     (fs/with-temp-dir [events-dir {:prefix "hold-events-"}]
       (let [id (random-uuid)
@@ -84,7 +97,7 @@
           (archive-event! (fs/file events-dir) id n (es/workflow-resumed (legacy-stream) id :x :plan [])))
         ;; Newest: the write, under a root whose checkpoint is already gone.
         (archive-event! (fs/file events-dir) id 40
-                        (es/checkpoint-written (legacy-stream) id :plan gone 1))
+                        (es/checkpoint-written (legacy-stream) id :plan gone 1 (str alternate)))
         (with-redefs [es/read-event-file (fn [f] (swap! reads inc) (read-event-file f))]
           (testing "the newest write answers: its checkpoint is gone, so nothing holds"
             (is (false? (es/retention-hold ::gc/checkpoint (str id) (fs/file events-dir)))))

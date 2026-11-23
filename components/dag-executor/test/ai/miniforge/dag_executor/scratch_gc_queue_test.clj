@@ -34,6 +34,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.edn :as edn]
+   [clojure.string :as str]
    [ai.miniforge.config.interface :as mf-config]
    [ai.miniforge.dag-executor.scratch-gc-queue :as sut]
    [ai.miniforge.dag-executor.scratch-commit :as scratch-commit]
@@ -79,8 +80,8 @@
   (testing "gc-queue-path returns a non-blank string ending in .edn"
     (let [p (sut/gc-queue-path)]
       (is (string? p))
-      (is (not (clojure.string/blank? p)))
-      (is (clojure.string/ends-with? p ".edn")))))
+      (is (not (str/blank? p)))
+      (is (str/ends-with? p ".edn")))))
 
 (deftest ^{:stratum 0} gc-queue-path-creates-miniforge-dir-test
   (testing "Calling gc-queue-path creates the ~/.miniforge directory if absent"
@@ -98,6 +99,11 @@
           (is (.isDirectory parent)))
         (finally
           (System/setProperty "user.home" orig))))))
+
+(def ^{:stratum 0} ^:private truncated-queue-content
+  "What a write killed midway leaves on disk: the start of a queue, cut
+   inside its first entry, which `read-gc-queue` reports as corrupt."
+  "[{:workflow-id \"wf-")
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -378,4 +384,42 @@
             (let [remaining (read-raw-queue tmp-path)]
               (is (= 1 (count remaining)))
               (is (= "wf-stale-err" (:workflow-id (first remaining)))))))
+        (finally (delete-dir-recursive! tmp-dir))))))
+
+;;------------------------------------------------------------------------------ write-gc-queue!
+(deftest ^{:stratum 1} write-gc-queue!-replaces-atomically-test
+  (testing "the queue is replaced whole and no temp sibling is left behind"
+    (let [tmp-dir  (make-temp-dir!)
+          tmp-path (str tmp-dir "/scratch-gc-queue.edn")
+          write!   @#'sut/write-gc-queue!]
+      (try
+        (write! tmp-path [{:workflow-id "wf-a"}])
+        (write! tmp-path [{:workflow-id "wf-a"} {:workflow-id "wf-b"}])
+        (is (= [{:workflow-id "wf-a"} {:workflow-id "wf-b"}] (read-raw-queue tmp-path)))
+        (is (= ["scratch-gc-queue.edn"]
+               (vec (.list (File. ^String tmp-dir)))))
+        (finally (delete-dir-recursive! tmp-dir))))))
+
+(defn- ^{:stratum 1} spit-part-then-fail
+  "Write `truncated-queue-content` to `f` with `real-spit`, then throw."
+  [real-spit f _content & opts]
+  (apply real-spit f truncated-queue-content opts)
+  (throw (ex-info "disk full" {})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} write-gc-queue!-interrupted-write-keeps-queue-test
+  (testing "a write that dies midway leaves the previous queue intact and no temp file"
+    (let [tmp-dir  (make-temp-dir!)
+          tmp-path (str tmp-dir "/scratch-gc-queue.edn")
+          write!   @#'sut/write-gc-queue!
+          previous [{:workflow-id "wf-a"}]]
+      (try
+        (write! tmp-path previous)
+        (with-redefs [spit (partial spit-part-then-fail spit)]
+          (is (thrown? clojure.lang.ExceptionInfo
+                       (write! tmp-path [{:workflow-id "wf-a"} {:workflow-id "wf-b"}]))))
+        (is (= previous (read-raw-queue tmp-path)))
+        (is (= ["scratch-gc-queue.edn"]
+               (vec (.list (File. ^String tmp-dir)))))
         (finally (delete-dir-recursive! tmp-dir))))))
