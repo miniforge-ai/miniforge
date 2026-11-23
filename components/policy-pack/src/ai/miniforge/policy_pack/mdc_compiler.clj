@@ -79,6 +79,12 @@
              :let [value (pr-str (get frontmatter k))]]
          (translate message-key {:filename filename :key k :value value}))))
 
+(defn- ^{:stratum 0} rule-failure
+  "The `mdc->rule` failure result for `filename` and the exception it hit."
+  [filename ^Exception e]
+  (merge (schema-validation/failure :rule (.getMessage e))
+         {:filename filename}))
+
 ;; Detection and remediation config builders
 (defn- ^{:stratum 0} group-dotted-keys
   "Group dot-notation keys into nested maps.
@@ -235,8 +241,10 @@
    - {:success? true  :rule <rule-map>}
    - {:success? false :error <message> :filename <string>}"
   [filename content]
-  ;; Detectors run outside the try so their warnings survive a throw from
-  ;; `group-dotted-keys`.
+  ;; Detectors run outside the inner try so their warnings survive a throw
+  ;; from `group-dotted-keys`; the outer try turns a throw from parsing or
+  ;; the detectors into this file's failure instead of the pack's.
+  (try
   (let [{:keys [frontmatter frontmatter-raw body]} (parse-mdc content)
         nested-blocks        (frontmatter/nested-block-keys frontmatter-raw)
         commented-keys       (frontmatter/commented-list-keys frontmatter-raw)
@@ -334,9 +342,10 @@
             nested-warnings (key-warnings t :mdc/nested-block-compile-failed
                                           nested-params nested-blocks)
             warnings        (into nested-warnings list-warnings)]
-        (cond-> (merge (schema-validation/failure :rule (.getMessage e))
-                       {:filename filename})
-          (seq warnings) (assoc :warnings warnings)))))))
+        (cond-> (rule-failure filename e)
+          (seq warnings) (assoc :warnings warnings))))))
+  (catch Exception e
+    (rule-failure filename e))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

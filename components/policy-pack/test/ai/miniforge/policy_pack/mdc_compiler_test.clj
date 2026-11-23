@@ -760,6 +760,14 @@
       (is (str/includes? (first (:warnings result)) "\"*.sh\"")
           "the warning names what survived, so the truncation is visible"))))
 
+(deftest ^{:stratum 0} mdc->rule-parse-throw-is-this-files-failure-test
+  (testing "a throw while parsing the frontmatter fails this file, not the caller"
+    (with-redefs [frontmatter/parse-frontmatter (fn [_] (throw (ex-info "unparseable" {})))]
+      (let [result (sut/mdc->rule "z.mdc" "---\ndewey: \"740\"\n---\nbody")]
+        (is (false? (:success? result)))
+        (is (= "unparseable" (:error result)))
+        (is (= "z.mdc" (:filename result)))))))
+
 (deftest ^{:stratum 0} mdc->rule-warnings-survive-compile-failure-test
   (testing "an indented dotted child throws during grouping; the bare exception
             names nothing actionable, so the nested-block finding has to ride
