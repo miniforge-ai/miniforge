@@ -17,6 +17,12 @@
   "Only the process-local kernel mount table is substituted."
   "/proc/self/mountinfo")
 
+(def ^{:stratum 0 :private true} overmounted-mounts
+  "The hidden child XFS row still wins a textual longest-prefix lookup."
+  "36 35 8:0 / / rw - xfs /dev/root rw
+37 36 8:0 / /mnt/store rw - xfs /dev/root rw
+38 36 0:41 / /mnt rw - tmpfs tmpfs rw")
+
 (defn- ^{:stratum 0} mount-row [device]
   (str "36 35 " device " / / rw - xfs /dev/root rw"))
 
@@ -88,6 +94,12 @@
     (action)))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} overmounted-ancestor []
+  (let [fixture (kernel ahci true)]
+    (-> fixture
+        (assoc :fixture/device-number 41)
+        (assoc-in [:fixture/files mounts] overmounted-mounts))))
 
 (defn ^{:stratum 2} nvme-transport [value]
   (if (nil? value)

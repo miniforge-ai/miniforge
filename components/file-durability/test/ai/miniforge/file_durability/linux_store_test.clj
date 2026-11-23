@@ -11,6 +11,11 @@
 
 (defn- ^{:stratum 0} observe-root [] (store/observe (fs/path "/workspace")))
 
+(deftest ^{:stratum 0} test-overmounted-ancestor-cannot-attest-a-hidden-xfs-device
+  (let [fixture (fixtures/overmounted-ancestor)
+        observe! (partial store/observe (fs/path "/mnt/store/run"))]
+    (is (nil? (fixtures/with-kernel fixture observe!)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} test-observation-requires-a-recognized-local-controller-stack
