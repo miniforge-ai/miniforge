@@ -19,12 +19,13 @@
   "Write a report as EDN and JSON under an output directory, one directory
    per gate and one file pair per run."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.qualification.messages :as msg]
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [slingshot.slingshot :refer [try+ throw+]])
+   [slingshot.slingshot :refer [try+]])
   (:import [java.nio.file Files LinkOption OpenOption StandardOpenOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -82,20 +83,22 @@
         parent  (.toRealPath (.getParent (.toAbsolutePath (.toPath (io/file path)))) no-opts)]
     (.startsWith parent base)))
 
-(defn- ^{:stratum 0} refuse!
-  "Throw the write refusal `message-key` names."
+(defn- ^{:stratum 0} refusal
+  "The write refusal `message-key` names, as an `:invalid-input` anomaly."
   [message-key out-dir paths]
-  (throw (ex-info (msg/t message-key) {:out-dir out-dir :paths paths})))
+  (anomaly/anomaly :invalid-input (msg/t message-key) {:out-dir out-dir :paths paths}))
 
 (defn- ^{:stratum 0} write-new!
-  "Create `path` with `text`; fails if anything, a symlink too, is there. A
-   write that fails after creating the file deletes it."
+  "Create `path` with `text`; java.nio throws if anything, a symlink too, is
+   there. A write that fails after creating the file deletes it."
   [path text]
-  (let [p   (.toPath (io/file path))
-        out (Files/newOutputStream p ^"[Ljava.nio.file.OpenOption;"
-                                   (into-array OpenOption [StandardOpenOption/CREATE_NEW StandardOpenOption/WRITE]))]
-    (try+ (with-open [o out] (.write o (.getBytes ^String text "UTF-8")))
-          (catch Object _ (Files/deleteIfExists p) (throw+)))))
+  (let [p      (.toPath (io/file path))
+        out    (Files/newOutputStream p ^"[Ljava.nio.file.OpenOption;"
+                                      (into-array OpenOption [StandardOpenOption/CREATE_NEW StandardOpenOption/WRITE]))
+        wrote? (volatile! false)]
+    (try (with-open [o out] (.write o (.getBytes ^String text "UTF-8")))
+         (vreset! wrote? true)
+         (finally (when-not @wrote? (Files/deleteIfExists p))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -121,27 +124,28 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} write-report!
-  "Write `report` under `out-dir` as EDN and JSON; returns the paths. Throws,
-   leaving no new file, when a path leaves `out-dir` (as written or through
-   a symlink), when JSON would merge two keys, when the EDN would not read
-   back as `report`, when a file exists, or when a write fails."
+  "Write `report` under `out-dir` as EDN and JSON; returns the paths. Returns
+   an `:invalid-input` anomaly, writing nothing, when a path leaves `out-dir`
+   (as written or through a symlink), when JSON would merge two keys, or when
+   the EDN would not read back as `report`. java.nio's own exceptions (a file
+   exists, a write fails) reach the caller, leaving no new file."
   [out-dir report]
   (let [{:keys [edn json] :as paths} (report-paths out-dir report)
         edn-body  (edn-text report)
         json-body (when-not (json-key-collision? report) (json-text report))]
-    (when-not (and (inside? out-dir edn) (inside? out-dir json))
-      (refuse! :write/path-leaves-out-dir out-dir paths))
-    (when-not json-body
-      (refuse! :write/json-key-collision out-dir paths))
-    (when-not (reads-back? edn-body report)
-      (refuse! :write/edn-does-not-read-back out-dir paths))
-    (io/make-parents edn)
-    (when-not (and (real-inside? out-dir edn) (real-inside? out-dir json))
-      (refuse! :write/directory-resolves-outside out-dir paths))
-    (write-new! edn edn-body)
-    (try+ (write-new! json json-body)
-          (catch Object _ (Files/deleteIfExists (.toPath (io/file edn))) (throw+)))
-    paths))
+    (or (cond
+          (not (and (inside? out-dir edn) (inside? out-dir json))) (refusal :write/path-leaves-out-dir out-dir paths)
+          (not json-body)                     (refusal :write/json-key-collision out-dir paths)
+          (not (reads-back? edn-body report)) (refusal :write/edn-does-not-read-back out-dir paths))
+        (do (io/make-parents edn)
+            (if-not (and (real-inside? out-dir edn) (real-inside? out-dir json))
+              (refusal :write/directory-resolves-outside out-dir paths)
+              (let [both? (volatile! false)]
+                (write-new! edn edn-body)
+                (try (write-new! json json-body)
+                     (vreset! both? true)
+                     (finally (when-not @both? (Files/deleteIfExists (.toPath (io/file edn))))))
+                paths))))))
 
 (comment
   (report-paths "target/qualification"

@@ -100,6 +100,12 @@ data.
 20. Output must also read back from its plain EDN, the text the report
     holds, so a value the hash accepts but that prints unreadably (a
     queue) is recorded as invalid output instead of failing the write.
+21. Write refusals (path outside `:out-dir`, merged JSON keys, unreadable
+    EDN, a symlinked directory) return `:invalid-input` anomalies instead of
+    throwing, per exceptions-as-data (005); `run-gate!` turns one into
+    `:write-failure`. Only java.nio's own exceptions (a file exists, a write
+    fails) are caught, at the write in `run-gate!`, and partial-file cleanup
+    runs in `finally` rather than catch-and-rethrow.
 
 From the schema PR's review: the verdict is `vocabulary/report-verdict`, so
 passing rows on a dirty tree, without a commit or without hashes give

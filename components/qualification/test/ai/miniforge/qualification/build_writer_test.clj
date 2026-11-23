@@ -19,6 +19,7 @@
   "Build identity never reports an unreadable build as clean; the writer
    round-trips a report as EDN and JSON."
   (:require [clojure.test :refer [deftest is testing]]
+            [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.qualification.build :as build]
             [ai.miniforge.qualification.writer :as writer]
             [cheshire.core :as json]
@@ -121,19 +122,19 @@
       (is (.startsWith (.getCanonicalPath (io/file json)) (str base "/"))))))
 
 (deftest ^{:stratum 1} test-writer-refuses-escapes-and-merged-keys
-  (testing "given a symlinked gate directory, two keys one JSON property, EDN that would not read back, or an existing JSON file → throws, no new file"
+  (testing "given a symlinked gate directory, two keys one JSON property, or EDN that would not read back → an anomaly; an existing JSON file → java.nio throws; no new file"
     (let [dir     (temp-dir)
           outside (temp-dir)]
       (Files/createSymbolicLink (.toPath (io/file dir "fixture.gate")) (.toPath (io/file outside))
                                 (make-array FileAttribute 0))
-      (is (thrown? Exception (writer/write-report! dir report)))
+      (is (anomaly/anomaly? (writer/write-report! dir report)))
       (is (empty? (.list (io/file outside)))))
     (let [dir (temp-dir)]
-      (is (thrown? Exception (writer/write-report! dir (assoc report :report/extra {:sink/calls 0 "sink/calls" 1}))))
+      (is (anomaly/anomaly? (writer/write-report! dir (assoc report :report/extra {:sink/calls 0 "sink/calls" 1}))))
       (is (empty? (.list (io/file dir)))))
     (doseq [unreadable [(assoc report :report/gate-title "\uD800") (assoc report :report/extra (keyword "a b"))]]
       (let [dir (temp-dir)]
-        (is (thrown? Exception (writer/write-report! dir unreadable)))
+        (is (anomaly/anomaly? (writer/write-report! dir unreadable)))
         (is (empty? (.list (io/file dir))))))
     (let [dir (temp-dir) {:keys [edn json]} (writer/report-paths dir report)]
       (io/make-parents json) (spit json "old")

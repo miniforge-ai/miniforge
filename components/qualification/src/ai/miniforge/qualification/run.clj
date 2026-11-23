@@ -21,6 +21,7 @@
    becomes a recorded failure: every criterion is then unrun, and the
    verdict is never a pass."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.qualification.build :as build]
    [ai.miniforge.qualification.messages :as msg]
@@ -184,7 +185,10 @@
         (if-not (m/validate schema/Report report)
           {:report report :invalid-report (pr-str (me/humanize (m/explain schema/Report report)))}
           (try+
-           {:report report :paths (writer/write-report! out-dir report)}
+           (let [written (writer/write-report! out-dir report)]
+             (if (anomaly/anomaly? written)
+               {:report report :write-failure (:anomaly/message written)}
+               {:report report :paths written}))
            (catch thrown-value? _
              {:report report :write-failure (write-failure-message (:throwable &throw-context))})
            (catch Exception e
