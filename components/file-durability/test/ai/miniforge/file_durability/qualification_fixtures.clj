@@ -31,3 +31,5 @@
                   publication/check! (constantly :publication-verified)
                   locks/check! (constantly true)]
       (durability/qualify-local-root! root profile (peer root)))))
+
+(comment (peer (fs/file ".")))

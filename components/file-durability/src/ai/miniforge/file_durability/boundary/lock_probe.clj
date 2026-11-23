@@ -5,11 +5,10 @@
   "Start a distinct trusted runtime, then verify genuine mutual file-lock exclusion."
   (:require [ai.miniforge.file-durability.boundary.directory-policy :as directory-policy]
             [ai.miniforge.file-durability.boundary.lock-protocol :as protocol]
+            [ai.miniforge.file-durability.boundary.lock-peer :as peer]
             [ai.miniforge.file-durability.boundary.native-probe :as native]
             [babashka.fs :as fs]
-            [babashka.process :as process]
-            [slingshot.slingshot :refer [try+]])
-  (:import [java.io File]))
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -17,28 +16,16 @@
   "Each handshake owns a new private directory and cannot reuse stale markers."
   "miniforge-lock-probe-")
 
-(def ^{:stratum 0 :private true} peer-main
-  "Both runtimes load the same lock implementation from the selected installation."
-  "ai.miniforge.file-durability.boundary.lock-peer")
-
-(def ^{:stratum 0 :private true} entrypoints
-  "Construct argv without accepting a shell command or additional flags."
-  {:jvm ["clojure.main" "-m"] :babashka ["-m"]})
-
 (def ^{:stratum 0 :private true} exit-timeout-ms
   "Require bounded clean peer exit before verifying host lock reacquisition."
   5000)
 
-(defn- ^{:stratum 0} other-runtime [runtime]
-  (if (= runtime :babashka) :jvm :babashka))
+(defn- ^{:stratum 0} start-peer! [child root configuration acquired?]
+  (when acquired?
+    (vreset! child (peer/launch! root configuration))
+    (protocol/await? root :peer-excluded)))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} launch [root {:peer/keys [^File executable classpath]}]
-  (let [kind (other-runtime (protocol/runtime-kind))
-        arguments (into [(.getPath executable) "-cp" classpath]
-                        (concat (entrypoints kind) [peer-main (name kind) (str root)]))]
-    (process/process arguments {:out :discard :err :discard})))
 
 (defn- ^{:stratum 1} confirm-peer-held! [root child]
   (and (protocol/signal! root :host-released)
@@ -56,10 +43,9 @@
     (let [child (volatile! nil)]
       (protocol/allocate! root)
       (try+
-        (and (protocol/with-attempt root
-               #(when %
-                  (vreset! child (launch root peer))
-                  (protocol/await? root :peer-excluded)))
+        (and (protocol/with-attempt root (partial start-peer! child root peer))
              (confirm-peer-held! root @child))
         (finally
           (when-let [started @child] (native/stop! started)))))))
+
+(comment (protocol/runtime-kind))

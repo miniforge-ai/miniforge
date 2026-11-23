@@ -20,3 +20,5 @@
              (identity/same-device? anchor attached))
       (macos-acl/check! attached)
       (boundary/unqualified-store child :storage/attached-directory))))
+
+(comment (identity/same-device? (.toPath (File. ".")) (.toPath (File. "."))))

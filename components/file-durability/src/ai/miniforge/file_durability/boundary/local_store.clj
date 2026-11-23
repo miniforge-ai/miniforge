@@ -27,11 +27,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} observe [profile ^File root]
-  (if-let [native-probe (get observers [profile (System/getProperty "os.name")])]
-    (let [path (directory/existing! root)
-          evidence (when (and (= path (.toPath root))
-                              (= :posix (permissions/filesystem-profile path)))
-                     (observe-root native-probe path))]
-      (or evidence (boundary/unqualified-store root profile)))
-    (boundary/unqualified-store root profile)))
+(defn- ^{:stratum 1} protected-observation [native-probe ^File root]
+  (let [path (directory/existing! root)]
+    (when (and (= path (.toPath root))
+               (= :posix (permissions/filesystem-profile path)))
+      (observe-root native-probe path))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} observe [profile root]
+  (let [native-probe (get observers [profile (System/getProperty "os.name")])
+        evidence (when native-probe (protected-observation native-probe root))]
+    (or evidence (boundary/unqualified-store root profile))))
+
+(comment (keys observers))
