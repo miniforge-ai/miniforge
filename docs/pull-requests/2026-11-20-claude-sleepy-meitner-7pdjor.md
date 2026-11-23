@@ -31,6 +31,9 @@ other MCP server the user had configured was dropped.
 - The temp file is created owner-only. When the target exists, the temp
   file takes the target's POSIX mode before any content is written.
 - A symlinked config is written through to its target; the link stays.
+  The link chain is followed by hand, so a link whose backing file is
+  missing is kept and the backing file is created. A link cycle throws
+  after 40 hops and writes nothing.
 - A config created for the first time is owner-only. The previous
   in-place write used the process umask.
 - `setup` stops at the first client whose config cannot be read. Later
@@ -38,7 +41,7 @@ other MCP server the user had configured was dropped.
 
 ## Testing plan
 
-New `tasks_test.clj`, 3 tests and 13 assertions:
+New `tasks_test.clj`, 5 tests and 17 assertions:
 
 - `read-json-file` on a missing file, valid JSON, truncated JSON,
   trailing content, a non-object root and a blank file.
@@ -46,6 +49,9 @@ New `tasks_test.clj`, 3 tests and 13 assertions:
   config in its directory.
 - `write-file-atomically!` writes through a symlink, keeps an
   owner-only mode and leaves no temp file.
+- A link with a missing backing file is kept and its backing file is
+  created.
+- A link cycle throws and leaves both links in place.
 
 The namespace passes on the JVM. Under Babashka, `bb lsp:setup` loads
 the namespace and prints its preview, and the calls the change adds

@@ -30,6 +30,17 @@
   [dir]
   (set (map fs/file-name (fs/list-dir dir))))
 
+(deftest ^{:stratum 0} write-file-atomically-dangling-symlink-test
+  (fs/with-temp-dir [dir {}]
+    (let [real (str dir "/dotfiles/real.json")
+          link (str dir "/link.json")]
+      (fs/create-dirs (str dir "/dotfiles"))
+      (fs/create-sym-link link "dotfiles/real.json")
+      (tasks/write-file-atomically! link "new")
+      (testing "a link whose backing file is missing is kept, and the backing file created"
+        (is (fs/sym-link? link))
+        (is (= "new" (slurp real)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} read-json-file-test
@@ -82,13 +93,12 @@
       (testing "no temp file is left in the directory"
         (is (= #{"real.json" "link.json"} (file-names dir)))))))
 
-(deftest ^{:stratum 1} write-file-atomically-dangling-symlink-test
+(deftest ^{:stratum 1} write-file-atomically-symlink-cycle-test
   (fs/with-temp-dir [dir {}]
-    (let [real (str dir "/dotfiles/real.json")
-          link (str dir "/link.json")]
-      (fs/create-dirs (str dir "/dotfiles"))
-      (fs/create-sym-link link "dotfiles/real.json")
-      (tasks/write-file-atomically! link "new")
-      (testing "a link whose backing file is missing is kept, and the backing file created"
-        (is (fs/sym-link? link))
-        (is (= "new" (slurp real)))))))
+    (let [link (str dir "/link.json")
+          back (str dir "/back.json")]
+      (fs/create-sym-link link "back.json")
+      (fs/create-sym-link back "link.json")
+      (testing "a link cycle throws instead of looping, and both links are kept"
+        (is (thrown? clojure.lang.ExceptionInfo (tasks/write-file-atomically! link "new")))
+        (is (= #{"link.json" "back.json"} (file-names dir)))))))
