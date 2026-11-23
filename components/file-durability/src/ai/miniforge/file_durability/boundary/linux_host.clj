@@ -20,4 +20,4 @@
 (defn ^{:stratum 1} non-virtual? []
   (= no-virtualization (probe/read-output detection-command nil #{1})))
 
-(comment detection-command)
+(comment (when (= "Linux" (System/getProperty "os.name")) (non-virtual?)))
