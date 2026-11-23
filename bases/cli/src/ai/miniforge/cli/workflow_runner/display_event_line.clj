@@ -74,6 +74,7 @@
       :workflow/failed (str (ansi/colorize :red (messages/t :workflow-runner/failed))
                             (when-let [r (:workflow/failure-reason event)]
                               (str ": " r)))
+      :workflow/cancelled (ansi/colorize :yellow (messages/t :workflow-runner/cancelled-event))
       :workflow/phase-started (ansi/colorize :yellow (messages/t :workflow-runner/phase-started
                                                                  {:phase phase}))
       :workflow/phase-completed (let [outcome (or (:phase/outcome event) :completed)

@@ -65,10 +65,12 @@
                     :duration (fmt/format-duration (get metrics :duration-ms 0))})])))
 
 (defn ^{:stratum 0} status-line
-  [success?]
-  (if success?
-    (ansi/colorize :green (messages/t :workflow-runner/summary-success))
-    (ansi/colorize :red   (messages/t :workflow-runner/summary-failure))))
+  "The summary's outcome line for a run that ended with STATUS."
+  [status]
+  (case status
+    :completed (ansi/colorize :green  (messages/t :workflow-runner/summary-success))
+    :cancelled (ansi/colorize :yellow (messages/t :workflow-runner/summary-cancelled))
+    (ansi/colorize :red (messages/t :workflow-runner/summary-failure))))
 
 (defn ^{:stratum 0} pr-lines
   [result]

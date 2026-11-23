@@ -36,6 +36,9 @@
                                  :pending | :running | :paused | :completed |
                                  :failed | :cancelled |
                                  :completed-with-warnings
+   :execution/cancellation     — Who cancelled a :cancelled run and from where
+                                 (`es/cancel!`'s record), for its
+                                 :workflow/cancelled event
    :execution/fsm-machine      — Compiled execution machine for this run
    :execution/fsm-state        — Authoritative machine snapshot
 
@@ -126,7 +129,9 @@
    :policy-packs   — Policy packs the pack gates evaluate
    (the full list is execution-passthrough-option-keys)"
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.event-stream.interface :as es]
             [ai.miniforge.logging.interface :as log]
+            [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.checkpoint-store-paths :as checkpoint-paths]
             [ai.miniforge.workflow.fsm :as fsm]
@@ -134,6 +139,17 @@
             [ai.miniforge.agent.interface :as agent]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private unrecorded-cancellation
+  "N3 requires a cancel's requester and source. A stop set with no record
+   (`es/cancel!` with one argument, which only the control-plane adapter's
+   uncalled `send-command` does) reports this."
+  {:cancel/requested-by "unknown" :cancel/source :api})
+
+(defn ^{:stratum 0} cancelled?
+  "True for a run that ended :cancelled (N2 2.2)."
+  [ctx]
+  (= :cancelled (:execution/status ctx)))
 
 ;------------------------------------------------------------------------------ Internal helpers
 (def ^{:stratum 0} execution-passthrough-option-keys
@@ -276,6 +292,24 @@
     :else                                nil))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} run-outcome
+  "How a finished run RESULT ended, for its reports: :completed (as
+   `phase/succeeded?` reads it), :cancelled or :failed."
+  [result]
+  (cond (phase/succeeded? result) :completed
+        (cancelled? result) :cancelled
+        :else :failed))
+
+(defn ^{:stratum 1} cancellation
+  "Who cancelled the run in CTX and from where, for its :workflow/cancelled
+   event: as recorded at the stop, else from its control state. A missing
+   record, or one N3 does not accept, reports `unrecorded-cancellation`,
+   so the run's terminal event is never refused for it."
+  [ctx]
+  (let [recorded (or (:execution/cancellation ctx)
+                     (some-> (get-in ctx [:execution/opts :control-state]) es/cancellation))]
+    (if (es/valid-cancellation? recorded) recorded unrecorded-cancellation)))
 
 (defn- ^{:stratum 1} passthrough-option-values
   [opts]
@@ -468,6 +502,33 @@
         (assoc ctx :execution/status :completed))
       (assoc :execution/ended-at (System/currentTimeMillis))
       stamp-wall-clock-duration))
+
+(defn ^{:stratum 2} transition-to-cancelled
+  "End the run :cancelled (N2 §2.2), a terminal state apart from :failed,
+   with the same ended-at and wall-clock duration stamps as the other
+   terminal transitions. Records who cancelled it, from the run's control
+   state, as :execution/cancellation.
+
+   A run whose stopped phase already sent the machine to :cancelled keeps
+   that state. A run that completed or failed before the stop keeps its
+   outcome: the stop does not rewrite a terminal state. One parked in a
+   state with no :cancel transition is marked :cancelled directly, as
+   `transition-to-failed` does for :fail."
+  [ctx]
+  (let [status (:execution/status ctx)]
+    (if (contains? #{:completed :completed-with-warnings :failed} status)
+      ctx
+      (-> (cond
+            (cancelled? ctx) ctx
+            (:execution/fsm-machine ctx)
+            (let [result (transition-execution-result ctx :cancel)]
+              (if (anomaly/anomaly? result)
+                (assoc ctx :execution/status :cancelled)
+                result))
+            :else (assoc ctx :execution/status :cancelled))
+          (assoc :execution/cancellation (cancellation ctx))
+          (update :execution/ended-at #(or % (System/currentTimeMillis)))
+          stamp-wall-clock-duration))))
 
 (defn ^{:stratum 2} transition-to-failed
   "Transition workflow to failed state using FSM. Same wall-clock

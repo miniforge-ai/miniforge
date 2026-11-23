@@ -370,8 +370,12 @@
    directory its readers do not read, now or once the cleanup archives
    it (see `resumable-in-place?`). A `--run-id` naming another run that has a run
    directory under `events-dir` or a checkpoint is refused: the attempt
-   would write into that run."
-  [events-dir workflow-id machine-snapshot run-id-opt]
+   would write into that run.
+
+   SNAPSHOT-ENDED? (its status is terminal) also rules out its own id: a
+   run that checkpointed its end but stopped before publishing it has no
+   ending event, and must still never continue under its id (N2 2.2)."
+  [events-dir workflow-id machine-snapshot run-id-opt snapshot-ended?]
   (let [requested (uuid-option "--run-id" run-id-opt)
         snapshot-id (:execution/id machine-snapshot)
         ;; Not a set literal: the two ids are usually equal, and a literal
@@ -382,12 +386,12 @@
                                            (messages/t message-key {:run-id run-id-opt})
                                            {:run-id run-id-opt}))]
     (cond
-      (and requested own? (not (resumable-in-place? events-dir requested)))
+      (and requested own? (or snapshot-ended? (not (resumable-in-place? events-dir requested))))
       (refuse! :resume/run-id-archived)
       (and requested (not own?) (or (run-recorded? events-dir requested) (checkpointed? requested)))
       (refuse! :resume/run-id-taken)
       requested requested
-      (and snapshot-id (resumable-in-place? events-dir snapshot-id)) snapshot-id
+      (and snapshot-id (not snapshot-ended?) (resumable-in-place? events-dir snapshot-id)) snapshot-id
       :else (random-uuid))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -441,7 +445,10 @@
                                         #(wr/extract-workspace-checkpoints (read-event-file workflow-id)))
         ;; Checked before a completed run is reported done: an invalid
         ;; request is refused, not answered "already completed".
-        resume-run-id (run-id-for events-dir workflow-id (:machine-snapshot reconstructed) (:run-id opts))
+        ;; Terminality from the run as recorded: a rewind drops the snapshot.
+        resume-run-id (run-id-for events-dir workflow-id (:machine-snapshot reconstructed) (:run-id opts)
+                                  (terminal-status? (get-in recorded
+                                                            [:machine-snapshot :execution/status])))
         ;; `--correlation-id` lands on the run's lifecycle events; the
         ;; operator's launcher passes its intervention id and waits for
         ;; it. Absent, none is imposed and the runner's default applies
@@ -487,8 +494,12 @@
                                             :execution/origin-id origin-id)
                                      (cond-> new-attempt? (assoc :execution/metrics {:tokens 0 :cost-usd 0.0
                                                                                      :duration-ms 0})))
-            failed-checkpoint? (and machine-snapshot (:failed? reconstructed))
-            resume-workflow (if (and machine-snapshot (not failed-checkpoint?))
+            ;; A run that ended :failed or :cancelled is terminal (N2 §8.3):
+            ;; its snapshot is not continued, a new attempt starts from it.
+            terminal-checkpoint? (and machine-snapshot
+                                      (or (:failed? reconstructed)
+                                          (when (workflow/cancelled? machine-snapshot) true)))
+            resume-workflow (if (and machine-snapshot (not terminal-checkpoint?))
                               workflow
                               (wr/trim-pipeline workflow completed-phases))
             _ (resume-anomaly/throw-resume-anomaly! resume-workflow)
@@ -552,7 +563,7 @@
                                       :event-stream event-stream
                                       :control-state control-state
                                       :resume-machine-snapshot machine-snapshot
-                                      :resume-reset-terminal? failed-checkpoint?
+                                      :resume-reset-terminal? terminal-checkpoint?
                                       ;; Never event telemetry; a rewind has
                                       ;; already cut them to the kept phases.
                                       :resume-phase-results (when (wr/checkpointed-phase-results recorded)

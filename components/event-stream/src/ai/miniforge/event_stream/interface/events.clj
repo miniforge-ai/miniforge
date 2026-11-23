@@ -28,7 +28,8 @@
    [ai.miniforge.event-stream.phase-events :as phase-events]
    [ai.miniforge.event-stream.recovery-events :as recovery]
    [ai.miniforge.event-stream.workflow-entry-events :as workflow-entry]
-   [ai.miniforge.event-stream.workflow-terminal-events :as workflow-terminal]))
+   [ai.miniforge.event-stream.workflow-terminal-events :as workflow-terminal]
+   [ai.miniforge.event-stream.workflow-terminal-fields :as workflow-terminal-fields]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -126,6 +127,12 @@
    :failure/class. Current drafts require the class and may carry
    :workflow/failure-phase in opts."
   workflow-terminal/workflow-failed)
+
+(def ^{:stratum 0} valid-cancellation?
+  "True for a cancel record :workflow/cancelled accepts: a non-blank
+   requester, a source N3 names, and an action id for a :control-action
+   source."
+  workflow-terminal-fields/valid-cancellation?)
 
 (def ^{:stratum 0} workflow-cancelled
   "Build and return a :workflow/cancelled event envelope map (N3): a run

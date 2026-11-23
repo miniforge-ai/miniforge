@@ -478,6 +478,12 @@
    :workflow/failure-phase in opts."
   events/workflow-failed)
 
+(def ^{:stratum 0} valid-cancellation?
+  "True for a cancel record :workflow/cancelled accepts: a non-blank
+   requester, a source N3 names, and an action id for a :control-action
+   source."
+  events/valid-cancellation?)
+
 (def ^{:stratum 0} workflow-cancelled
   "Build and return a :workflow/cancelled event envelope map (N3): a run
    an operator stopped, reported apart from :workflow/completed and
