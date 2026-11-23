@@ -45,8 +45,11 @@ the run cannot answer a prompt. With `--head`, gh skips this lookup;
 
 1. `pr_lookup.clj`:
    1. `branch-argv` and `push-url-argv`, the git commands both backends run.
-   2. `head-ref`: `<owner>:<branch>` when origin's push URL is an SSH or
-      HTTPS URL of an `<owner>/<repo>` path, else the bare branch.
+   2. `head-ref`: `<owner>:<branch>` when origin's push URLs are SSH or
+      HTTPS URLs of an `<owner>/<repo>` path and name one owner, else the
+      bare branch. All push URLs are read (`--push --all`). A trailing
+      slash on a URL is accepted. URLs that name different owners, such
+      as a mirror beside the repository, give the bare branch.
 2. `git.clj` and `sandbox.clj`, `create-pr!`:
    1. Read the checked-out branch (`git branch --show-current`) and origin's
       push URL, then pass `--head` from `head-ref`.

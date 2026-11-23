@@ -46,8 +46,15 @@
     (doseq [url ["git@github.com:o-1/r.git"
                  "ssh://git@github.com/o-1/r.git"
                  "https://github.com/o-1/r.git"
+                 "https://github.com/o-1/r.git/"
                  "https://x-access-token@github.com/o-1/r"]]
       (is (= "o-1:mf/x" (pr-lookup/head-ref url "mf/x")) url)))
+  (testing "several push URLs that name one owner → <owner>:<branch>"
+    (is (= "o:mf/x" (pr-lookup/head-ref "git@github.com:o/r.git\nhttps://github.com/o/r.git\n" "mf/x")))
+    (is (= "o:mf/x" (pr-lookup/head-ref "/srv/mirror/r.git\ngit@github.com:o/r.git\n" "mf/x"))))
+  (testing "push URLs that name different owners → the bare branch"
+    (is (= "mf/x" (pr-lookup/head-ref "git@mirror.example.com:mirror-owner/r.git\ngit@github.com:o/r.git\n"
+                                      "mf/x"))))
   (testing "no owner to read → the bare branch"
     (doseq [url [nil "" "/srv/git/r.git" "file:///srv/git/r.git"
                  "https://github.com/o/group/r.git" "https://github.com/-o/r.git"]]

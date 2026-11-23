@@ -46,16 +46,16 @@
   ["git" "branch" "--show-current"])
 
 (def ^{:stratum 0} push-url-argv
-  "git command printing the URL a push to origin goes to: where release
-   pushes its branch, so the URL's owner is the PR head's owner."
-  ["git" "remote" "get-url" "--push" "origin"])
+  "git command printing every URL a push to origin goes to, one per line:
+   where release pushes its branch, so their owner is the PR head's owner."
+  ["git" "remote" "get-url" "--push" "--all" "origin"])
 
 (defn- ^{:stratum 0} url-owner
   "The owner in an SSH or HTTPS URL of an `<owner>/<repo>` path, or nil."
   [url]
   (some->> (push-auth/https-url url)
            second
-           (re-matches #"https://[^/]+/([A-Za-z0-9][A-Za-z0-9-]*)/[^/]+")
+           (re-matches #"https://[^/]+/([A-Za-z0-9][A-Za-z0-9-]*)/[^/]+/?")
            second))
 
 (defn- ^{:stratum 0} stopped?
@@ -72,15 +72,18 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} head-ref
-  "The `gh pr create --head` value for `branch` pushed to `push-url`:
-   `<owner>:<branch>` when the URL names an owner, else `branch` alone.
-   gh reads a bare branch as a branch in the base repository; the owner
-   keeps a fork's PR pointing at the fork when gh resolves the base to
-   another remote."
-  [push-url branch]
-  (if-let [owner (url-owner push-url)]
-    (str owner ":" branch)
-    branch))
+  "The `gh pr create --head` value for `branch` pushed to `push-urls`, the
+   output of `push-url-argv`: `<owner>:<branch>` when the URLs name exactly
+   one owner, else `branch` alone. gh reads a bare branch as a branch in
+   the base repository; the owner keeps a fork's PR pointing at the fork
+   when gh resolves the base to another remote. Push URLs that name
+   different owners (a mirror beside the repository) do not say which one
+   holds the PR head, so no owner is given."
+  [push-urls branch]
+  (let [owners (distinct (keep url-owner (str/split-lines (str push-urls))))]
+    (if (= 1 (count owners))
+      (str (first owners) ":" branch)
+      branch)))
 
 (defn ^{:stratum 1} parse-lookup
   "The branch's PR from `lookup-argv` output as {:pr-number :pr-url
