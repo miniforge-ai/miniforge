@@ -14,6 +14,7 @@
         ai.miniforge/logging {:local/root "../../components/logging"}
         ai.miniforge/messages {:local/root "../../components/messages"}
         ai.miniforge/redaction {:local/root "../../components/redaction"}
-        ai.miniforge/response {:local/root "../../components/response"}}
+        ai.miniforge/response {:local/root "../../components/response"}
+        ai.miniforge/subprocess {:local/root "../../components/subprocess"}}
 
  :aliases {:run {:main-opts ["-m" "ai.miniforge.deliberation-lab.main"]}}}

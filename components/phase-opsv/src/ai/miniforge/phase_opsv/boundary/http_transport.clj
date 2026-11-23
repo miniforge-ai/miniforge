@@ -21,6 +21,10 @@
   "Only HTTP Created acknowledges creation of a previously absent native resource."
   HttpURLConnection/HTTP_CREATED)
 
+(def ^{:stratum 0} accepted-status
+  "HTTP Accepted confirms request acceptance, never completed resource deletion."
+  HttpURLConnection/HTTP_ACCEPTED)
+
 (def ^{:stratum 0} not-found-status
   "HTTP absence is distinct from JSON null; only declared optional resources may be absent."
   HttpURLConnection/HTTP_NOT_FOUND)

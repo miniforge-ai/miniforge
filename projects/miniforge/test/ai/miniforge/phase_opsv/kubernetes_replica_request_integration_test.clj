@@ -60,6 +60,7 @@
 (deftest ^{:stratum 0} reused-names-and-mismatched-native-targets-are-refused-test
   (let [input (fixtures/input)]
     (doseq [[path value] [[[:kubernetes/inventory :runtime/target :cluster] "foreign"]
+                         [[:kubernetes/cluster "metadata" "uid"] "foreign-physical-cluster"]
                          [[:kubernetes/inventory :kubernetes/cluster-id] "foreign"]
                          [[:kubernetes/inventory :kubernetes/namespace "metadata" "uid"] "replacement"]
                          [[:kubernetes/inventory :kubernetes/deployment "metadata" "uid"] "replacement"]
@@ -110,4 +111,5 @@
             changed (cond-> observed (some? desired) (assoc-in [:parameters :replicas/count] desired))]
         (is (= :conflict (:anomaly/type (fixtures/prepare changed))))))))
 
-(comment ::request-data-is-not-a-current-grant-provider-effect-or-recovery-verdict)
+(comment
+  (fixtures/prepare (fixtures/input)))

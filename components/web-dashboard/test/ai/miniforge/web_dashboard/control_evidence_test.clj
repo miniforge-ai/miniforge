@@ -67,12 +67,16 @@
   (let [stream (events/create-event-stream {:sinks []})
         dashboard-state (dashboard stream)
         requester (:control/requester @dashboard-state)
-        workflow-id (random-uuid)]
-    (with-redefs [events/request-intervention! identity]
+        workflow-id (random-uuid)
+        requests (atom [])]
+    (with-redefs [events/request-intervention! (fn [request] (swap! requests conj request) request)]
       (dotimes [_ 2]
         (is (= 200 (:status (handlers/handle-api-workflow-command-v2
                             dashboard-state workflow-id (control-body)))))))
     (let [records (recorded-actions stream workflow-id)
+          _ (is (= (mapv :action/id records)
+                   (mapv #(get-in % [:intervention/details :action/id]) @requests))
+                "each intervention names the control action it carries out (N3)")
           record (first records)
           listener (registered-listener stream (:listener-id requester))]
       (is (= 2 (count records)))

@@ -81,7 +81,7 @@
 
 (defn ^{:stratum 1} apply-control-verb!
   [stream dispatched entry verb]
-  (let [readback (core/control-state-effect! (:control-state entry) verb)]
+  (let [readback (core/control-state-effect! (:control-state entry) verb dispatched)]
     (when-let [applied (core/advance! stream dispatched intervention/apply-result)]
       (verify-readback! stream applied readback
                         :control-state-readback-mismatch))))

@@ -94,8 +94,19 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} pr-detail [uri]
-  (if-let [{:keys [repo number]} (parse-pr-path uri)]
+(defn ^{:stratum 1} parse-configured-pr-path
+  "Like `parse-pr-path`, but nil unless the repo is one of the configured
+   fleet `repos`. The URI is untrusted input and the repo reaches
+   `gh pr review --repo`, so an unconfigured repo must never be acted on."
+  [uri repos]
+  (let [pr (parse-pr-path uri)]
+    (when (and pr (some #{(:repo pr)} repos))
+      pr)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} pr-detail [uri repos]
+  (if-let [{:keys [repo number]} (parse-configured-pr-path uri repos)]
     (let [pr (->> (github/fetch-prs repo)
                   (filter #(= (:number %) number))
                   first)]
@@ -104,21 +115,21 @@
         (response/not-found "PR not found")))
     (response/bad-request "Invalid PR path")))
 
-(defn ^{:stratum 1} approve [uri]
-  (if-let [{:keys [repo number]} (parse-pr-path uri)]
+(defn ^{:stratum 2} approve [uri repos]
+  (if-let [{:keys [repo number]} (parse-configured-pr-path uri repos)]
     (let [result (github/approve-pr! repo number)]
       (response/html (c/toast (:message result) (:success result))))
     (response/bad-request "Invalid PR path")))
 
-(defn ^{:stratum 1} reject [uri req]
-  (if-let [{:keys [repo number]} (parse-pr-path uri)]
+(defn ^{:stratum 2} reject [uri req repos]
+  (if-let [{:keys [repo number]} (parse-configured-pr-path uri repos)]
     (let [reason (get-in req [:headers "hx-prompt"] "Changes requested")
           result (github/request-changes! repo number reason)]
       (response/html (c/toast (:message result) (:success result))))
     (response/bad-request "Invalid PR path")))
 
-(defn ^{:stratum 1} chat [uri req]
-  (if-let [{:keys [repo number]} (parse-pr-path uri)]
+(defn ^{:stratum 2} chat [uri req repos]
+  (if-let [{:keys [repo number]} (parse-configured-pr-path uri repos)]
     (let [question (or (parse-body-question req) "What are the key changes in this PR?")
           diff (github/fetch-pr-diff repo number)
           resp (if diff
@@ -127,8 +138,8 @@
       (response/html (c/chat-message question resp)))
     (response/bad-request "Invalid PR path")))
 
-(defn ^{:stratum 1} summary [uri]
-  (if-let [{:keys [repo number]} (parse-pr-path uri)]
+(defn ^{:stratum 2} summary [uri repos]
+  (if-let [{:keys [repo number]} (parse-configured-pr-path uri repos)]
     (let [result (github/generate-pr-summary repo number)]
       (if (and (not (:success result)) (anomaly/anomaly-map? (:anomaly result)))
         (response/from-anomaly (:anomaly result))

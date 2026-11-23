@@ -88,6 +88,16 @@
   (cond-> (.toString buffer "UTF-8")
     (overflowed? handle) (str (msg/t :capture/cut-note {:bytes max-bytes}))))
 
+(defn- ^{:stratum 1} new-handle
+  [^InputStream stream opts]
+  (let [max-bytes   (get opts :max-bytes config/max-captured-bytes)
+        on-overflow (get opts :on-overflow no-op)]
+    {:buffer      (ByteArrayOutputStream.)
+     :stream      stream
+     :max-bytes   max-bytes
+     :overflow    (atom false)
+     :on-overflow on-overflow}))
+
 (defn- ^{:stratum 1} copy-bounded!
   "Read `stream` to end-of-stream, keeping what fits. Reading on past the
    limit keeps the child from blocking on a full pipe."
@@ -103,17 +113,19 @@
 
 (defn ^{:stratum 2} drain-stream
   [^InputStream stream opts]
-  (let [max-bytes   (get opts :max-bytes config/max-captured-bytes)
-        on-overflow (get opts :on-overflow no-op)
-        handle      {:buffer      (ByteArrayOutputStream.)
-                     :stream      stream
-                     :max-bytes   max-bytes
-                     :overflow    (atom false)
-                     :on-overflow on-overflow}]
+  (let [handle (new-handle stream opts)]
     (assoc handle :future (future
                             (try
                               (copy-bounded! handle)
                               (finally (.close stream)))))))
+
+(defn ^{:stratum 2} read-bounded
+  [^InputStream stream opts]
+  (let [handle (new-handle stream opts)]
+    (try
+      (copy-bounded! handle)
+      (finally (.close stream)))
+    handle))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

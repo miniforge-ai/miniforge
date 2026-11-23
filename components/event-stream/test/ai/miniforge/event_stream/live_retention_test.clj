@@ -194,6 +194,23 @@
           "a resume reads the run from archived/")
       (is (= 2 (count (es/read-workflow-events-by-id (str dir) wf-id)))))))
 
+(deftest ^{:stratum 1} workflow-events-dir-does-not-climb-out-of-the-events-dir
+  (let [root    (temp-events-dir)
+        dir     (doto (io/file root "events") .mkdirs)
+        sibling (doto (io/file root "outside") .mkdirs)]
+    (is (.isDirectory sibling))
+    (is (nil? (es/workflow-events-dir (str dir) "../outside"))
+        "a traversal id does not resolve to a directory beside the events dir")
+    (is (nil? (es/workflow-events-dir (str dir) nil))
+        "a missing id does not resolve to the events dir itself")))
+
+(deftest ^{:stratum 1} workflow-events-dir-still-finds-a-legacy-flat-run
+  (let [dir    (temp-events-dir)
+        wf-id  (random-uuid)
+        legacy (doto (io/file dir (str wf-id)) .mkdirs)]
+    (is (= legacy (es/workflow-events-dir (str dir) wf-id)))
+    (is (= legacy (es/workflow-events-dir (str dir) (str wf-id))))))
+
 (deftest ^{:stratum 1} live-runs-that-may-still-matter-stay
   (let [dir      (temp-events-dir)
         running  (write-run! dir :workflow/started :workflow/phase-started)

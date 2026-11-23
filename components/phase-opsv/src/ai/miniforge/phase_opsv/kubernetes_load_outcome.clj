@@ -40,7 +40,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn- ^{:stratum 1} unchanged? [record pod]
+(defn ^{:stratum 1} matches-request? [record pod]
   (let [expected (:body (native/request record))]
     (and (requested? (resources/normalized expected) (resources/normalized pod))
          (= (get-in expected ["spec" "schedulingGates"]) (get-in pod ["spec" "schedulingGates"]))
@@ -53,7 +53,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} report [record pod]
-  (if (and (valid-observation? pod) (unchanged? record pod))
+  (if (and (valid-observation? pod) (matches-request? record pod))
     {:effect/outcome :succeeded :effect/observed (observed record pod)}
     (unconfirmed)))
 

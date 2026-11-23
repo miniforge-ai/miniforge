@@ -60,6 +60,7 @@
    :consultation/phase phase
    :consultation/situation (get consultation :situation)
    :consultation/status (get consultation :status)
+   :consultation/anomaly (get consultation :anomaly)
    :consultation/pin-read? (get consultation :pin-read?)
    :consultation/answer-log (get consultation :answer-log)
    :consultation/pegs (get consultation :pegs)
@@ -88,6 +89,10 @@
    :miss/pegs (get consultation :pegs)
    :miss/bucket bucket
    :miss/attribution attribution})
+
+(defn ^{:stratum 0} incomplete-read? [read-result]
+  (or (some? (:codex-gap/anomaly read-result))
+      (pos? (get read-result :skipped 0))))
 
 (defn- ^{:stratum 0} write-anomaly [dir e]
   {:codex-gap/anomaly :ledger-write-failed

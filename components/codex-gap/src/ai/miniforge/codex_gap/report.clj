@@ -23,9 +23,9 @@
    §1.2 prohibits — the components stay separately visible so the absent
    one is noticeable. Every slot links its member misses (§4.2): the
    report IS the improvement agenda, and each bucket names its fix
-   channel. Rates whose denominators are not crisply defined in v0
-   (consultation-match, learning latency) are reported as
-   not-instrumented rather than approximated — the vector confesses."
+   channel. Every rate ships beside its counts and member misses, and a
+   slot that cannot be measured says why rather than approximating —
+   the vector confesses."
   (:require [ai.miniforge.codex-gap.messages :as msg]
             [ai.miniforge.codex.interface :as codex]
             [clojure.string :as str]))
@@ -43,25 +43,137 @@
          :unanchored (count (filter #(empty? (:scars %)) problems))
          :speculative (count (filter #(= "speculative" (:confidence %)) problems))}))))
 
+(def ^{:stratum 0} attempt-anomalies
+  "Skip causes where the codex was read but no single board matched the
+   situation: the consultation was attempted and missed (T2 §4.1.1)."
+  #{:situation-unmatched :situation-ambiguous})
+
+(defn- ^{:stratum 0} consultation-kind
+  [{:consultation/keys [status anomaly]}]
+  (cond
+    (= :pinned status)                    :matched
+    (not= :skipped status)                :not-attempted
+    (contains? attempt-anomalies anomaly) :unmatched
+    (nil? anomaly)                        :unclassified
+    :else                                 :not-attempted))
+
+(defn- ^{:stratum 0} consultation-match
+  "§4.1.1 match rate. :rate is nil when nothing was attempted; a :skipped
+   entry with no recorded anomaly is :unclassified, never an attempt.
+   :unreadable counts runs whose consultations could not be read, so a
+   rate over the rest is marked incomplete rather than passed as whole."
+  [consultations unreadable]
+  (let [by-kind   (group-by consultation-kind consultations)
+        matched   (count (get by-kind :matched))
+        unmatched (get by-kind :unmatched [])
+        attempted (+ matched (count unmatched))
+        rate      (when (pos? attempted) (/ (double matched) attempted))]
+    {:matched      matched
+     :attempted    attempted
+     :unclassified (count (get by-kind :unclassified))
+     :unreadable   unreadable
+     :rate         rate
+     :unmatched    (mapv :consultation/situation unmatched)}))
+
+(defn ^{:stratum 0} harvest-decisions
+  "The codex's harvest decisions, or nil when they cannot be read."
+  [codex-dir]
+  (:decisions (codex/harvest-decisions codex-dir)))
+
+(defn- ^{:stratum 0} miss-date [entry]
+  (let [at (:miss/at entry)]
+    (when (string? at)
+      (try (-> (java.time.Instant/parse at)
+               (.atZone java.time.ZoneOffset/UTC)
+               .toLocalDate)
+           (catch java.time.format.DateTimeParseException _ nil)))))
+
+(defn- ^{:stratum 0} earlier-date [current candidate]
+  (if (and current (not (.isAfter ^java.time.LocalDate current candidate)))
+    current
+    candidate))
+
+(defn- ^{:stratum 0} keep-earliest [acc [miss-id decided]]
+  (update acc miss-id earlier-date decided))
+
+(defn- ^{:stratum 0} decision-dates
+  "miss-id -> the earliest decision that names it."
+  [decisions]
+  (reduce keep-earliest {}
+          (for [{:keys [decided misses]} decisions, miss-id misses]
+            [miss-id decided])))
+
+(defn- ^{:stratum 0} median [xs]
+  (when (seq xs)
+    (let [v   (vec (sort xs))
+          mid (quot (count v) 2)]
+      (if (odd? (count v))
+        (double (v mid))
+        (/ (+ (v (dec mid)) (v mid)) 2.0)))))
+
+(defn- ^{:stratum 0} latency-days [dates entry]
+  (let [decided  (get dates (:miss/id entry))
+        recorded (miss-date entry)]
+    (when (and decided recorded)
+      (.between java.time.temporal.ChronoUnit/DAYS recorded decided))))
+
+(defn- ^{:stratum 0} decided-by?
+  "A decision names the miss, and the miss counts toward rates: a
+   :review-queue entry stays out of every rate until resolved (T2 §3.4)."
+  [dates entry]
+  (and (not= :review-queue (:miss/bucket entry))
+       (contains? dates (:miss/id entry))))
+
+(defn- ^{:stratum 0} learning-slot
+  "§4.1.6: median days from miss to harvest decision over decided misses,
+   and the open candidates no decision names. nil `harvest` means the
+   harvest records could not be read."
+  [entries open-candidates harvest]
+  (if (nil? harvest)
+    {:status  :harvest-unavailable
+     :open    (count open-candidates)
+     :misses  (mapv :miss/id open-candidates)}
+    (let [dates     (decision-dates harvest)
+          decided   (filter (partial decided-by? dates) entries)
+          latencies (keep (partial latency-days dates) decided)
+          undated   (- (count decided) (count latencies))
+          open      (remove (partial decided-by? dates) open-candidates)]
+      {:status         :measured
+       :decided        (count decided)
+       :undated        undated
+       :median-days    (median latencies)
+       :decided-misses (mapv :miss/id decided)
+       :open           (count open)
+       :misses         (mapv :miss/id open)})))
+
 (defn ^{:stratum 0} build-report
-  "Pure: ledger entries (+ total skipped-line count and run count) and
-   optional anchoring stats -> the gap vector. Every slot carries its
-   member miss ids."
-  [entries {:keys [skipped run-count anchoring]}]
+  "Pure: ledger entries (+ total skipped-line count, run count, the runs'
+   consultation entries, harvest decisions) and optional anchoring stats
+   -> the gap vector. Every slot carries its member miss ids.
+   :unreadable-ledgers counts runs whose miss ledger was not fully read;
+   it sits at the top level because every slot is computed from those
+   entries, so the whole report, not one slot, is incomplete."
+  [entries {:keys [skipped run-count anchoring consultations
+                   unreadable-consultations unreadable-ledgers harvest]
+            :or   {unreadable-consultations 0
+                   unreadable-ledgers       0}}]
   (let [by-bucket (group-by :miss/bucket entries)
         ids #(mapv :miss/id (get by-bucket % []))
         delivered (get by-bucket :unheeded [])
         pin-reads (frequencies (map #(get-in % [:miss/consultation :pin-read?])
                                     delivered))
+        open-candidates (mapcat #(get by-bucket % []) [:uncovered :review-queue :novel])
         attributed (+ (count (get by-bucket :misrouted []))
                       (count (get by-bucket :undelivered []))
                       (count delivered))]
     {:entry-count (count entries)
      :run-count (or run-count 1)
      :skipped (or skipped 0)
+     :unreadable-ledgers unreadable-ledgers
      :coverage {:covered (count (remove #(= :uncovered (:miss/bucket %)) entries))
                 :total (count entries)
-                :consultation-match-rate :not-instrumented
+                :consultation-match (consultation-match consultations
+                                                        unreadable-consultations)
                 :misses (ids :uncovered)}
      :routing {:misrouted (count (get by-bucket :misrouted []))
                :attributed attributed
@@ -74,15 +186,49 @@
                 :misses (ids :undelivered)}
      :attention {:unheeded (count delivered)
                  :misses (ids :unheeded)}
-     :learning {:status :not-instrumented
-                :open (+ (count (get by-bucket :uncovered []))
-                         (count (get by-bucket :review-queue []))
-                         (count (get by-bucket :novel [])))
-                :misses (vec (concat (ids :uncovered)
-                                     (ids :review-queue)
-                                     (ids :novel)))}
+     :learning (learning-slot entries open-candidates harvest)
      :review-queue {:count (count (get by-bucket :review-queue []))
                     :misses (ids :review-queue)}}))
+
+(defn- ^{:stratum 0} match-text
+  [{:keys [matched attempted unclassified unreadable rate]}]
+  (let [percent (some-> rate (* 100.0) Math/round)]
+    (str (if rate
+           (msg/t :report/match-rate {:matched   matched
+                                      :attempted attempted
+                                      :percent   percent})
+           (msg/t :report/match-none))
+         (if (pos? unclassified)
+           (msg/t :report/match-unclassified-suffix {:n unclassified})
+           "")
+         (if (pos? unreadable)
+           (msg/t :report/match-incomplete-suffix {:n unreadable})
+           ""))))
+
+(defn- ^{:stratum 0} undated-suffix [undated]
+  (if (pos? undated)
+    (msg/t :report/learning-undated-suffix {:n undated})
+    ""))
+
+(defn- ^{:stratum 0} ledger-incomplete-suffix
+  "Runs whose miss ledger was not fully read: every slot below is computed
+   over the entries that were, so the header says the report is partial."
+  [unreadable-ledgers]
+  (if (pos? unreadable-ledgers)
+    (msg/t :report/ledger-incomplete-suffix {:n unreadable-ledgers})
+    ""))
+
+(defn- ^{:stratum 0} learning-text
+  [{:keys [status decided undated median-days open]}]
+  (cond
+    (= :harvest-unavailable status) (msg/t :report/learning-unavailable {:open open})
+    (zero? decided)                 (msg/t :report/learning-none-decided {:open open})
+    (nil? median-days)              (msg/t :report/learning-undated {:decided decided
+                                                                     :open    open})
+    :else                           (msg/t :report/learning {:decided decided
+                                                             :median  median-days
+                                                             :undated (undated-suffix undated)
+                                                             :open    open})))
 
 (defn- ^{:stratum 0} members-line [bucket ids]
   (if (seq ids)
@@ -95,18 +241,22 @@
 (defn ^{:stratum 1} render-report
   "The gap vector as catalog-backed text, one slot per line, member miss
    ids beneath the slots that carry them."
-  [{:keys [entry-count run-count skipped coverage routing anchoring
-           delivery attention learning review-queue]}]
+  [{:keys [entry-count run-count skipped unreadable-ledgers coverage routing
+           anchoring delivery attention learning review-queue]
+    :or   {unreadable-ledgers 0}}]
   (str/join "\n"
     [(msg/t :report/header
             {:entry-count entry-count
              :run-count run-count
              :skipped (if (pos? skipped)
                         (msg/t :report/skipped-suffix {:n skipped})
-                        "")})
+                        "")
+             :incomplete (ledger-incomplete-suffix unreadable-ledgers)})
      (msg/t :report/coverage {:covered (:covered coverage)
-                              :total (:total coverage)})
+                              :total (:total coverage)
+                              :match (match-text (:consultation-match coverage))})
      (members-line :uncovered (:misses coverage))
+     (members-line :unmatched (get-in coverage [:consultation-match :unmatched]))
      (msg/t :report/routing {:misrouted (:misrouted routing)
                              :attributed (:attributed routing)})
      (members-line :misrouted (:misses routing))
@@ -120,7 +270,8 @@
      (members-line :undelivered (:misses delivery))
      (msg/t :report/attention {:unheeded (:unheeded attention)})
      (members-line :unheeded (:misses attention))
-     (msg/t :report/learning {:open (:open learning)})
+     (learning-text learning)
      (members-line :learning (:misses learning))
+     (members-line :decided (:decided-misses learning))
      (msg/t :report/review-queue {:count (:count review-queue)})
      (members-line :review-queue (:misses review-queue))]))

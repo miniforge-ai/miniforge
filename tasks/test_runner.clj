@@ -62,8 +62,9 @@
    hand: a hand list silently left new integration tests unrun.
    projects/miniforge/e2e is left out on purpose — it needs a real claude
    CLI or Docker (see its README)."
-  {"miniforge"      ["test" "integration"]
-   "miniforge-core" ["test"]})
+  {"miniforge"          ["test" "integration"]
+   "miniforge-core"     ["test"]
+   "agent-environments" ["test"]})
 
 (def ^{:stratum 0} ^:private development-test-root
   "Task and tooling tests (tests for tasks/*.clj, build.clj, the dev

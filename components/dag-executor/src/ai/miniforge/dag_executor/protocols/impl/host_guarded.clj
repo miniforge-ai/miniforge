@@ -101,8 +101,8 @@
   ;; Wrap the worktree executor; a run that leaves the host's remotes and
   ;; remote-tracking refs alone releases exactly as the unwrapped executor
   ;; would, and the wrapper still selects as :worktree.
-  (require '[ai.miniforge.dag-executor.protocols.impl.worktree :as worktree])
-  (def guarded (guard-host-git (worktree/create-worktree-executor {})))
+  (require '[ai.miniforge.dag-executor.protocols.impl.worktree.executor :as worktree-executor])
+  (def guarded (guard-host-git (worktree-executor/create-worktree-executor {})))
   (proto/executor-type guarded)
   ;=> :worktree
 

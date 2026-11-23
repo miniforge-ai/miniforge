@@ -33,19 +33,23 @@
    lifecycle and flips the run's control state; every transition comes
    back on the event stream the console already renders.
 
+   ACTION-ID, when the request carries out an N8 control action, goes into
+   the intervention's details, so a cancel reports that action (N3).
+
    Returns the written event, or an anomaly when the verb is unknown or
    the write fails. Nothing is best-effort here: a control the operator
    pressed either reached the audit stream or reports why not."
-  [workflow-id command requested-by]
+  [workflow-id command requested-by & [action-id]]
   (if-let [intervention-type (get support/control-intervention-by-command
                                   (some-> command name str))]
     (try
       (event-stream/request-intervention!
-       {:intervention/type intervention-type
-        :intervention/target-type :workflow
-        :intervention/target-id (str workflow-id)
-        :intervention/requested-by requested-by
-        :intervention/request-source :dashboard})
+       (cond-> {:intervention/type intervention-type
+                :intervention/target-type :workflow
+                :intervention/target-id (str workflow-id)
+                :intervention/requested-by requested-by
+                :intervention/request-source :dashboard}
+         action-id (assoc :intervention/details {:action/id action-id})))
       (catch Exception e
         (when (instance? InterruptedException e)
           (.interrupt (Thread/currentThread)))
@@ -98,7 +102,8 @@
         result (request-workflow-intervention!
                 workflow-id
                 cmd
-                (support/command-requester))]
+                (support/command-requester)
+                (:action/id action))]
     (if (failed-intervention? result)
       result
       {:command cmd
