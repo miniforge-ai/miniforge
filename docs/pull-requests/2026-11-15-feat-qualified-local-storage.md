@@ -67,60 +67,37 @@ ambiguous mount data, no peer proof, and root replacement. Test actual
 JVM/Babashka peers and forced publication on disposable files. Bound native
 storage metadata to a shared process/read deadline and a fixed output limit.
 
-The extended native packet passes 24 tests and 63 assertions in each JVM product,
-Babashka source and a fresh package. It covers the opaque-root contract, actual
-native ACL/metadata behavior, real JVM/Babashka mutual locks, and refusal to skip
-a missing peer runtime or classpath. The same packet is wired into the existing
-hosted Darwin gate. Local positive checks also qualified and resolved a disposable
-APFS root and attached its protected child, with three successful assertions in
-each mode. The Linux backend policy has producer-shaped fixture coverage in #2552.
-These are runtime/storage-contract checks, not power-loss certification or proof
-that an unsupported hosted VM qualifies as persistent authority storage.
-Targeted controls that bypass peer proof, root identity revalidation, or mandatory
-peer admission produce one, one and two assertion failures respectively, with no
-runtime errors, in both JVM and native Babashka. Twelve exact qualification examples
-pass in each. The tooling regression pins product-relative and absolute peer
-classpath entries, including a path containing spaces.
-The real peer-process lock scenario lives in project integration tests, outside
-the fast component packet.
-Root-qualification tests also live in project integration tests because they now
-acquire native directory descriptors. Their lifetime fixture independently releases
-every acquired pin, including an unexpected success under fault injection.
-Denial scenarios retain the production coordinator and OS locks, replacing only
-native peer launch with processes that exit prematurely, never acknowledge, or
-claim a lock they do not hold. Each refuses qualification proof, terminates its
-owned peer and removes its scratch directory. Bypassing exclusion produces one
-assertion failure; disabling peer termination produces four, with zero runtime
-errors on both JVM and Babashka. Fixtures independently clean their own processes
-even when production cleanup is deliberately disabled by those controls.
-Root-replacement coverage includes a swap inside the peer-proof callback, keeping
-both displaced directories alive to prevent inode reuse. Qualification refuses
-the new, unprobed root. Ignoring the original observation fails that assertion
-on both runtimes, with zero errors.
+The prepared composition with the peer's I/O-cleanup fix passes 66 tests /
+304 assertions in each Java 21 product, source Babashka and a fresh package.
+The exact project integration alias passes 20 tests / 62 assertions. The same
+native packet is wired into the hosted Darwin gate. Local positive checks
+qualify and resolve a disposable APFS root, attach a protected child and release
+the owned handle, with four successful assertions in each runtime mode.
+These are runtime/storage-contract checks, not power-loss certification or
+proof that an unsupported hosted VM qualifies as persistent authority storage.
 
-The retained-pin packet passed 44 tests / 127 assertions in each Java 21 product,
-source Babashka and a fresh package before the final read-only-preflight guard.
-Six lifetime fault controls produce 2 / 2 / 1 / 1 / 1 / 2 expected failures with
-zero errors in Java 21 and Babashka. They cover the before-pin identity binding,
+Six lifetime fault controls produce 2 / 2 / 1 / 1 / 1 / 2 expected failures and
+zero errors on Java 21 and Babashka. They cover before-pin identity binding,
 failed-proof resource transfer, late pin closure, closed-before-I/O refusal,
-current identity revalidation and actual native release.
-The final composed packet must be rerun after the unsupported-store preflight
-regression and after consuming the independently reviewed peer-lock foundation.
-No current-head review or merge gate is waived by these local results.
-The owner pass also reproduced a failure-priority defect in the adopted resource
-transfer helper: failed close masked fatal operation errors and interruption
-(three tests, six failures, zero runtime errors before the fix). It now uses
-the existing resource-cleanup interface so fatal/cancellation causes survive
-and independent close failures remain suppressed. The required dependency is
-explicit in every affected product; final composed validation includes these cases.
+current identity revalidation and native release. Six exact qualification
+namespace examples pass in both runtimes. Qualification tests use real native
+directory descriptors; their fixture independently releases every acquired pin,
+including unexpected successes under fault injection. Root replacement is
+checked both during qualification and throughout handle ownership.
+
+Merged PR #2563 supplies the shared resource-transfer failure-priority fix;
+the composed packet retains its fatal/interruption and cleanup-provenance
+regressions. Repeat proof if dependency resolution changes source. No current-head
+review or merge gate is waived by these local results.
 
 ## Deployment plan
 
 Host-only opt-in with trusted, installed launchers and a persistent root.
 Requalify after a controller restart. No cluster access, runtime shutdown,
 experiments or credential actions.
-The documented dependency chain is #2560 → #2559 → this PR. The local checkout
-is composed with pending #2559 at 3bb50af64 while its CI/review cycle runs;
+The documented dependency chain is #2560 → #2559 → this PR, with merged
+foundations #2562 and #2563. The local checkout is composed with pending
+peer PR #2559 at 6190e3a49 while its CI/review cycle runs;
 it will not be published until that prerequisite merges to main and the
 main-based composed diff is within budget and passes every gate. Its explicit
 lock-limit contract replaces the old timing constants; no compatibility arity
