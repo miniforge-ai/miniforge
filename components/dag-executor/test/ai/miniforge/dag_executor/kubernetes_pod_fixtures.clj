@@ -8,6 +8,8 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
+(def ^{:stratum 0} pod-name "mock-capsule-pod")
+
 (defn- ^{:stratum 0} controller [{:keys [job-name job-uid]}]
   {"apiVersion" "batch/v1"
    "kind" "Job"
@@ -24,7 +26,23 @@
 (defn ^{:stratum 0} reply [observed]
   (creation/provider-reply 0 (json/generate-string observed)))
 
+(defn- ^{:stratum 0} list-pod [observed]
+  (creation/provider-reply 0 (get-in observed ["metadata" "name"])))
+
+(defn- ^{:stratum 0} pod-phase [observed]
+  (creation/provider-reply 0 (get-in observed ["status" "phase"])))
+
+(defn- ^{:stratum 0} refuse-query! [& _] (throw (AssertionError.)))
+
+(defn ^{:stratum 0} structured-query? [arguments]
+  (boolean (some #{["-o" "json"]} (partition 2 1 arguments))))
+
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1 :private true} readers
+  {["pods" false] list-pod
+   ["pod" false] pod-phase
+   ["pod" true] reply})
 
 (defn ^{:stratum 1} pod [{:keys [namespace] :as job} pod-name]
   (let [owner (controller job)]
@@ -37,17 +55,21 @@
                  "ownerReferences" [owner]}
      "status" {"phase" "Running"}}))
 
-(defn ^{:stratum 1} capture-created! [state submit! & arguments]
-  (let [reply (apply submit! arguments)
-        created (json/parse-string-strict (:out reply) true)]
-    (reset! state (receipt created))
-    reply))
-
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} capture-created! [state submit! & arguments]
+  (let [reply (apply submit! arguments)
+        created (json/parse-string-strict (:out reply) true)
+        observed (pod (receipt created) pod-name)]
+    (reset! state observed)
+    reply))
+
 (defn ^{:stratum 2} read-pod! [state _until arguments]
-  (let [observed (pod @state (last arguments))]
-    (reply observed)))
+  (let [kind (nth arguments 2 nil)
+        structured? (structured-query? arguments)
+        read! (get readers [kind structured?] refuse-query!)
+        observed @state]
+    (if observed (read! observed) (refuse-query!))))
 
 (comment (pod {:job-name "example"
                :job-uid "example-job"

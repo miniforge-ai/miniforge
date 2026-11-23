@@ -24,6 +24,9 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} observed-or-interrupted [observed]
+  (if (.isInterrupted (Thread/currentThread)) (interrupted) observed))
+
 (defn- ^{:stratum 1} retain-if-live! [cache context receipt pod]
   (if (.isInterrupted (Thread/currentThread))
     (interrupted)
@@ -35,7 +38,8 @@
   [cache context executable timeout-ms receipt candidate]
   (if (.isInterrupted (Thread/currentThread))
     (interrupted)
-    (result/and-then (observation/verify! executable receipt timeout-ms candidate)
-                     (partial retain-if-live! cache context receipt))))
+    (-> (observation/verify! executable receipt timeout-ms candidate)
+        observed-or-interrupted
+        (result/and-then (partial retain-if-live! cache context receipt)))))
 
 (comment (interrupted))
