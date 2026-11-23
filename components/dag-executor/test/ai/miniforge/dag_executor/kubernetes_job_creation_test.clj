@@ -9,6 +9,7 @@
             [ai.miniforge.dag-executor.result :as result]
             [ai.miniforge.dag-executor.kubernetes-creation-fixtures :as fixtures]
             [ai.miniforge.dag-executor.kubernetes-pod-fixtures :as pods]
+            [ai.miniforge.dag-executor.kubernetes-native-fixtures :as native]
             [cheshire.core :as json]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
@@ -54,8 +55,8 @@
 
 (defn- ^{:stratum 0} capture-request! [submitted timeout-ms budget & args]
   (swap! submitted conj (get-in (fixtures/requested args) [:spec :activeDeadlineSeconds]))
-  (is (= "create" (second args)))
-  (is (some #{(str "--request-timeout=" timeout-ms "ms")} args))
+  (is (= "create" (second (second args))))
+  (is (some #{(str "--request-timeout=" timeout-ms "ms")} (second args)))
   (is (= budget (get-in (fixtures/requested args) [:spec :activeDeadlineSeconds])))
   (apply fixtures/response identity args))
 
@@ -100,7 +101,7 @@
 
 (deftest ^{:stratum 1} test-invalid-capsule-budgets-fail-before-provider-io
   (let [instance (kubernetes/create-kubernetes-executor {})]
-    (with-redefs [shell/sh reject-io!]
+    (with-redefs [shell/sh reject-io! command/run! reject-io!]
       (doseq [invalid [nil false (str (:default capsule-budgets))
                        (double (:default capsule-budgets)) 0 -1 (inc' Long/MAX_VALUE)]
               :let [budget (capsule-resources invalid)]]
@@ -110,7 +111,7 @@
                        [:error :code])))))))
 
 (deftest ^{:stratum 1} test-invalid-transport-budgets-are-rejected-at-configuration
-  (with-redefs [shell/sh reject-io!]
+  (with-redefs [shell/sh reject-io! command/run! reject-io!]
     (doseq [key [:kubernetes/creation-request-timeout-ms
                  :kubernetes/pod-observation-request-timeout-ms
                  :kubernetes/pod-ready-timeout-ms
@@ -120,7 +121,7 @@
 
 (deftest ^{:stratum 1} test-interrupted-job-submission-preserves-cancellation
   (let [instance (kubernetes/create-kubernetes-executor {})]
-    (with-redefs [shell/sh interrupted-request
+    (with-redefs [shell/sh reject-io! command/run! interrupted-request
                   client/wait-for-pod-ready reject-io!
                   kubernetes/delete-job reject-io!]
       (try+
@@ -132,7 +133,7 @@
         (finally (Thread/interrupted))))))
 
 (deftest ^{:stratum 1} test-invalid-settings-disable-the-executor-without-provider-io
-  (with-redefs [shell/sh reject-io! client/cluster-info reject-io!]
+  (with-redefs [shell/sh reject-io! command/run! reject-io! client/cluster-info reject-io!]
     (doseq [options [[] false "" (capsule-resources 0)]
             :let [instance (kubernetes/create-kubernetes-executor options)
                   availability (executor/available? instance)
@@ -145,9 +146,10 @@
   (let [instance (kubernetes/create-kubernetes-executor {:namespace "capsules"})
         submitted (atom [])
         created (atom nil)]
-    (with-redefs [shell/sh (partial pods/capture-created! created
-                                   (partial capture-request! submitted shipped-request-timeout-ms (:default capsule-budgets)))
-                  command/run! (partial pods/read-pod! created)
+    (with-redefs [shell/sh reject-io!
+                  command/run! (partial native/dispatch! created
+                                        (partial capture-request! submitted shipped-request-timeout-ms (:default capsule-budgets))
+                                        pods/read-pod!)
                   client/wait-for-pod-ready readiness
                   kubernetes/delete-job reject-io!]
       (let [acquired (executor/acquire-environment! instance (random-uuid) {})
@@ -164,8 +166,8 @@
   (let [instance (kubernetes/create-kubernetes-executor (capsule-resources (:executor capsule-budgets)))
         submitted (atom [])
         created (atom nil)]
-    (with-redefs [shell/sh (partial pods/capture-created! created (partial capture-budget! submitted))
-                  command/run! (partial pods/read-pod! created)
+    (with-redefs [shell/sh reject-io!
+                  command/run! (partial native/dispatch! created (partial capture-budget! submitted) pods/read-pod!)
                   client/wait-for-pod-ready readiness]
       (is (result/ok? (executor/acquire-environment! instance (random-uuid) {})))
       (is (result/ok? (executor/acquire-environment! instance (random-uuid)
@@ -181,11 +183,11 @@
                    #(assoc-in % [:metadata :namespace] "another-namespace")
                    #(assoc-in % [:spec :activeDeadlineSeconds] (:default capsule-budgets))
                    #(assoc % :kind "Pod")]]
-    (with-redefs [client/wait-for-pod-ready reject-io! kubernetes/delete-job reject-io!]
+    (with-redefs [shell/sh reject-io! client/wait-for-pod-ready reject-io! kubernetes/delete-job reject-io!]
       (doseq [reply (concat (map (fn [altered] (partial fixtures/response altered)) mutations)
                             [(constantly {:exit 1 :err "AlreadyExists"})
                              (constantly {:exit 0 :out "not-json"})])]
-        (with-redefs [shell/sh reply]
+        (with-redefs [command/run! reply]
           (is (result/err? (executor/acquire-environment! instance (random-uuid) {}))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -196,9 +198,9 @@
         env-config {:env {:TEST_SECRET fixture-secret}}
         commands (map (partial command-case fixture-secret) provider-error-headers)
         responses (response-cases fixture-secret)]
-    (with-redefs [client/wait-for-pod-ready reject-io! kubernetes/delete-job reject-io!]
+    (with-redefs [shell/sh reject-io! client/wait-for-pod-ready reject-io! kubernetes/delete-job reject-io!]
       (doseq [[reply expected] (concat commands responses)]
-        (with-redefs [shell/sh (partial provider-outcome reply)]
+        (with-redefs [command/run! (partial provider-outcome reply)]
           (let [error (:error (executor/acquire-environment! instance (random-uuid) env-config))]
             (is (= :job-creation-unconfirmed (:code error)))
             (is (= expected (:data error)))
@@ -210,10 +212,11 @@
         submitted (atom [])
         created (atom nil)
         timeout-ms (:kubernetes/creation-request-timeout-ms settings)]
-    (with-redefs [shell/sh (partial pods/capture-created! created
-                                   (partial capture-request! submitted timeout-ms (:default capsule-budgets)))
-                  command/run! (partial expected-owner-readback
-                                        (:kubernetes/pod-observation-request-timeout-ms settings) created)
+    (with-redefs [shell/sh reject-io!
+                  command/run! (partial native/dispatch! created
+                                        (partial capture-request! submitted timeout-ms (:default capsule-budgets))
+                                        (partial expected-owner-readback
+                                                 (:kubernetes/pod-observation-request-timeout-ms settings)))
                   client/wait-for-pod-ready (partial expected-readiness settings)]
       (is (result/ok? (executor/acquire-environment! instance (random-uuid) {}))))))
 

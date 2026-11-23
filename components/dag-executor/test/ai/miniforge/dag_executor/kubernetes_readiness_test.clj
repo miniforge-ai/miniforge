@@ -14,6 +14,7 @@
             [ai.miniforge.dag-executor.result :as result]
             [ai.miniforge.dag-executor.kubernetes-creation-fixtures :as fixtures]
             [ai.miniforge.dag-executor.kubernetes-pod-fixtures :as pods]
+            [ai.miniforge.dag-executor.kubernetes-native-fixtures :as native]
             [clojure.java.shell :as shell]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]]))
@@ -161,8 +162,8 @@
 (deftest ^{:stratum 2} test-shipped-polling-budgets-reach-acquisition
   (let [instance (kubernetes/create-kubernetes-executor {})
         created (atom nil)]
-    (with-redefs [shell/sh (partial pods/capture-created! created (partial fixtures/response identity))
-                  command/run! (partial pods/read-pod! created)
+    (with-redefs [shell/sh refuse-provider!
+                  command/run! (partial native/dispatch! created (partial fixtures/response identity) pods/read-pod!)
                   client/wait-for-pod-ready (partial observe-readiness shipped-readiness-settings)]
       (is (result/ok? (executor/acquire-environment! instance (random-uuid) {}))))))
 
