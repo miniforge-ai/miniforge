@@ -65,6 +65,8 @@
    :execution/current-phase    — Derived projection of the active machine state
    :execution/phase-index      — Derived projection of the active machine state
    :execution/redirect-count   — Derived from machine context
+   :execution/unpersisted-phases — Phases whose boundary persist committed
+                                 nothing; the next boundary commit names them
 
    ### Phase Result Schema
    Entries in :execution/phase-results follow the shape:
@@ -236,11 +238,22 @@
 
 (defn ^{:stratum 0} merge-metrics
   "Merge phase metrics into execution metrics.
-   Nil-safe: treats nil values as 0 to prevent NPE from merge-with +."
+   Nil-safe: treats nil values as 0 to prevent NPE from merge-with +.
+
+   A phase that spent tokens without a `:cost-usd`, or that carries
+   `:cost-unavailable?` itself (a rolled-up DAG run), marks the total
+   `:cost-unavailable? true`. The summed `:cost-usd` then covers only the
+   priced part of the run, and summaries must not show it as the run's
+   measured cost."
   [exec-metrics phase-metrics]
-  (merge-with (fn [a b] (+ (or a 0) (or b 0)))
-              exec-metrics
-              (select-keys phase-metrics [:tokens :cost-usd :duration-ms])))
+  (let [tokens (:tokens phase-metrics)
+        unpriced? (or (true? (:cost-unavailable? phase-metrics))
+                      (and (number? tokens) (pos? tokens)
+                           (nil? (:cost-usd phase-metrics))))]
+    (cond-> (merge-with (fn [a b] (+ (or a 0) (or b 0)))
+                        exec-metrics
+                        (select-keys phase-metrics [:tokens :cost-usd :duration-ms]))
+      unpriced? (assoc :cost-unavailable? true))))
 
 (defn- ^{:stratum 0} ->epoch-millis
   "Coerce a :execution/started-at / :execution/ended-at value to a

@@ -1,0 +1,46 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+(ns ai.miniforge.agent-environment.ledger.printing
+  "Printing that a caller's printer bindings cannot change: the durable
+   ledger's file names and record bytes, and the lease digests, must be the
+   same whatever `*print-length*`, `*print-readably*` or `*print-dup*` the
+   calling thread has bound, or an acknowledged write could later read as
+   absent or corrupt, and one request could digest as another."
+  (:require
+   [ai.miniforge.content-hash.interface :as content-hash]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} plain-printing
+  "Printer settings for EDN that `clojure.edn` reads back as written."
+  {#'*print-length* nil
+   #'*print-level* nil
+   #'*print-meta* false
+   #'*print-namespace-maps* false
+   #'*print-readably* true
+   #'*print-dup* false})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} plain-pr-str
+  [x]
+  (with-bindings plain-printing (pr-str x)))
+
+(defn ^{:stratum 1} plain-content-hash
+  [x]
+  (with-bindings plain-printing (content-hash/content-hash x)))

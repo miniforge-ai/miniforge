@@ -55,7 +55,7 @@
     (doseq [f (reverse (file-seq dir))] (.setLastModified ^java.io.File f at))
     id))
 
-(deftest ^{:stratum 1} root-lookup-passes-over-an-unreadable-event
+(deftest ^{:stratum 1} root-lookup-refuses-to-guess-past-an-unreadable-event
   (fs/with-temp-dir [alternate {:prefix "gc-alternate-root-"}]
     (fs/with-temp-dir [events-dir {:prefix "gc-events-"}]
       (let [id (random-uuid)
@@ -65,8 +65,8 @@
                         (plan-written (str alternate) id
                                       (str (fs/path alternate (str id) "phases" "plan.edn"))))
         (spit newest "not transit")
-        (testing "an older readable announcement names the root"
-          (is (= (str alternate) (gc/run-checkpoint-root id (fs/file events-dir)))))
+        (testing "a newer unreadable announcement may name a different physical location"
+          (is (anomaly/anomaly? (gc/run-checkpoint-root id (fs/file events-dir)))))
         (testing "with none readable the root is unknown, not the default"
           (fs/delete (io/file dir "0000000000000001__000000000000.transit.json"))
           (is (anomaly/anomaly? (gc/run-checkpoint-root id (fs/file events-dir)))))))))

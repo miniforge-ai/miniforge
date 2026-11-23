@@ -6,6 +6,7 @@
    alias in the middle of the write cannot split the phase, snapshot and
    manifest across directories."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.event-stream.interface :as es]
             [ai.miniforge.workflow.boundary.checkpoint-file :as checkpoint-file]
             [ai.miniforge.workflow.checkpoint-store :as store]
             [ai.miniforge.workflow.checkpoint-test-support :as fixture]
@@ -43,6 +44,8 @@
     (is (not (anomaly/anomaly? written)))
     (testing "every file lands under the root resolved before the write"
       (is (= resolved (:checkpoint/root written)))
+      (is (= (es/checkpoint-location resolved (str (fs/path resolved id)))
+             (:checkpoint/location written)))
       (doseq [path [(:checkpoint/phase-path written)
                     (:checkpoint/machine-snapshot-path written)
                     (:checkpoint/manifest-path written)]]
@@ -66,6 +69,8 @@
                   (store/persist-execution-state! ctx))
         resolved (str (fs/real-path first-run))]
     (is (not (anomaly/anomaly? written)))
+    (is (= (es/checkpoint-location (str (fs/real-path root)) resolved)
+           (:checkpoint/location written)))
     (doseq [path [(:checkpoint/phase-path written)
                   (:checkpoint/machine-snapshot-path written)
                   (:checkpoint/manifest-path written)]]

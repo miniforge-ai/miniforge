@@ -5,6 +5,7 @@
   "Real journals and isolated external runner effects for phase event acceptance."
   (:require [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.workflow.checkpoint-store :as checkpoints]
+            [ai.miniforge.workflow.checkpoint-test-support :as fixture]
             [ai.miniforge.workflow.runner :as runner]
             [ai.miniforge.workflow.runner-cleanup :as cleanup]
             [ai.miniforge.workflow.runner-environment :as environment]
@@ -19,13 +20,15 @@
   (swap! calls conj action)
   result)
 
-(defn ^{:stratum 0} run-phase-workflow [stream definition]
+(defn- ^{:stratum 0} run-phase-workflow-at-root [stream definition root]
   (with-redefs [environment/acquire-execution-environment! (constantly nil)
                 environment/persist-workspace-at-phase-boundary! (constantly nil)
                 checkpoints/persist-execution-state! identity
                 cleanup/post-workflow-cleanup! (constantly nil)
                 publishers/start-phase-heartbeat! (constantly nil)]
-    (runner/run-pipeline definition {} {:event-stream stream :skip-lifecycle-events true})))
+    (runner/run-pipeline definition {} {:event-stream stream
+                                       :skip-lifecycle-events true
+                                       :checkpoint/root root})))
 
 (defn ^{:stratum 0} with-stream [verify]
   (fs/with-temp-dir [directory {:prefix "phase-event-"}]
@@ -39,3 +42,11 @@
   (let [stream (events/create-current-event-stream options)]
     (try+ (events/get-events stream)
       (finally (events/close-current-event-stream! stream)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} run-phase-workflow [stream definition]
+  (fixture/call-with-temp-checkpoint-root
+   (partial run-phase-workflow-at-root stream definition)))
+
+(comment ::isolated-phase-event-acceptance)

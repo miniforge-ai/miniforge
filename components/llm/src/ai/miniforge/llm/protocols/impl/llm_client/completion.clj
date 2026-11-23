@@ -31,13 +31,17 @@
 
 (defn ^{:stratum 0} with-client-config
   "`request` with the client's per-call settings: the model, the Ollama
-   context size, and isolation. A client created `:isolated?` isolates
-   every call; a request may also ask for it alone."
-  [request {:keys [model num-ctx isolated?]}]
-  (cond-> request
+   context size, isolation, and Codex network access. A client created
+   `:isolated?` isolates every call; a request may also ask for it alone.
+   Network access is the client's alone: a request's own
+   `:network-access?` is dropped, so only the client's creator (which
+   checked the config and the execution mode) can turn it on."
+  [request {:keys [model num-ctx isolated? network-access?]}]
+  (cond-> (dissoc request :network-access?)
     model (assoc :model model)
     num-ctx (assoc :num-ctx num-ctx)
-    isolated? (assoc :isolated? true)))
+    isolated? (assoc :isolated? true)
+    network-access? (assoc :network-access? true)))
 
 (defn- ^{:stratum 0} run-cli-exec
   "Invoke a CLI exec-fn with cmd plus optional opts. The 1-arity

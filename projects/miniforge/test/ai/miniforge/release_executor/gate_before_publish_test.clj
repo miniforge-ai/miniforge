@@ -21,10 +21,10 @@
    enter -> gates -> leave lifecycle with the release executor's two halves
    stubbed, and checks which half ran."
   (:require
-   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.phase-software-factory.release]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.release-executor.interface :as release-executor]
+   [ai.miniforge.workflow.durable-stream-support :as durable]
    [ai.miniforge.workflow.execution-lifecycle :as lifecycle]
    [babashka.fs :as fs]
    [clojure.java.shell :as shell]
@@ -48,7 +48,7 @@
                                                :output {:review/decision decision}}}}
    :execution/errors []
    :worktree-path worktree
-   :event-stream (es/create-event-stream {:sinks []})})
+   :event-stream (durable/durable-event-stream)})
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -69,7 +69,9 @@
                     release-executor/publish-release
                     (fn [_ _]
                       (swap! calls update :published inc)
-                      {:success? true :artifacts [] :metrics {}})]
+                      {:success? true :metrics {}
+                       :artifacts [{:artifact/content {:pr-number 1
+                                                       :pr-url "https://github.com/o/r/pull/1"}}]})]
         (let [interceptor (phase/get-phase-interceptor {:phase :release})
               [_ phase-result] (lifecycle/execute-phase-lifecycle
                                 interceptor (release-ctx worktree decision))]
@@ -94,3 +96,5 @@
       (is (= 1 prepared))
       (is (= 1 published))
       (is (= :completed (:status phase))))))
+
+(clojure.test/use-fixtures :each durable/with-event-dir-cleanup)

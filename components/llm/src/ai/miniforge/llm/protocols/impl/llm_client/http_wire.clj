@@ -50,6 +50,10 @@
                                   also a subset of `:input-tokens`.
    - `:reasoning-output-tokens`   output tokens spent on reasoning, a subset
                                   of `:output-tokens`.
+   - `:cache-read-input-tokens`,  Anthropic's prompt-cache reads and writes,
+     `:cache-creation-input-tokens`
+                                  counted BESIDE `:input-tokens` (the Claude
+                                  CLI's names and meaning).
    Kept under their own names so no consumer double-counts them."
   ([input-tokens output-tokens]
    (token-usage input-tokens output-tokens nil))
@@ -266,8 +270,13 @@
           ;; token spent on reasoning) and a refusal both arrive as an
           ;; empty 200; the stop reason is what tells them apart.
           (cond-> (if (str/blank? content)
-                    (responses/llm-error :anomalies.agent/llm-error "empty_success_output"
-                               (msg/t :http-provider.system/no-generated-text))
+                    ;; The tokens it consumed stay too, so the call's cost
+                    ;; can be counted.
+                    (cond-> (responses/llm-error :anomalies.agent/llm-error "empty_success_output"
+                                       (msg/t :http-provider.system/no-generated-text))
+                      (seq usage) (assoc :usage usage
+                                         :tokens (+ (get usage :input-tokens 0)
+                                                    (get usage :output-tokens 0))))
                     (responses/llm-success content {:usage usage}))
             (number? cost-usd) (assoc :cost-usd cost-usd)
             stop-reason        (assoc :stop-reason stop-reason)))))))
@@ -277,14 +286,19 @@
 (defn ^{:stratum 2} extract-anthropic
   "Text + usage from an Anthropic Messages response: join the `text`
    content blocks (tool-use and thinking blocks carry no answer text).
-   The finish reason is `stop_reason`."
+   The finish reason is `stop_reason`. Prompt-cache reads and writes,
+   which Anthropic counts beside `input_tokens`, ride along so a cost
+   estimate can see them."
   [body]
   (extraction (->> (:content body)
                    (keep (fn [block] (when (= "text" (:type block)) (:text block))))
                    (str/join))
               (get-in body [:usage :input_tokens])
               (get-in body [:usage :output_tokens])
-              {:finish-reason (:stop_reason body)}))
+              {:usage-extras {:cache-read-input-tokens (get-in body [:usage :cache_read_input_tokens])
+                              :cache-creation-input-tokens
+                              (get-in body [:usage :cache_creation_input_tokens])}
+               :finish-reason (:stop_reason body)}))
 
 (defn ^{:stratum 2} extract-openai
   "Text + usage from an OpenAI Chat Completions response. The finish
@@ -310,14 +324,22 @@
 (defn ^{:stratum 2} extract-gemini
   "Text + usage from a Gemini generateContent response: join the text
    parts of the first candidate. The finish reason is that candidate's
-   `finishReason`."
+   `finishReason`. Gemini counts thinking tokens (`thoughtsTokenCount`)
+   beside the answer's, not inside them, and bills both as output, so
+   `:output-tokens` is their sum and `:reasoning-output-tokens` the
+   thinking part of it."
   [body]
-  (extraction (->> (get-in body [:candidates 0 :content :parts])
-                   (keep :text)
-                   (str/join))
-              (get-in body [:usageMetadata :promptTokenCount])
-              (get-in body [:usageMetadata :candidatesTokenCount])
-              {:finish-reason (get-in body [:candidates 0 :finishReason])}))
+  (let [{:keys [promptTokenCount candidatesTokenCount thoughtsTokenCount]}
+        (:usageMetadata body)]
+    (extraction (->> (get-in body [:candidates 0 :content :parts])
+                     (keep :text)
+                     (str/join))
+                promptTokenCount
+                (when (or (number? candidatesTokenCount) (number? thoughtsTokenCount))
+                  (+ (if (number? candidatesTokenCount) candidatesTokenCount 0)
+                     (if (number? thoughtsTokenCount) thoughtsTokenCount 0)))
+                {:usage-extras {:reasoning-output-tokens thoughtsTokenCount}
+                 :finish-reason (get-in body [:candidates 0 :finishReason])})))
 
 (defn ^{:stratum 2} openrouter-request-body
   "Build an OpenRouter request body: the OpenAI Chat Completions shape,

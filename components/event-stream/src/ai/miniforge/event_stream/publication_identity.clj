@@ -18,6 +18,7 @@
    :phase/progress-status :phase/progress-count :phase/last-progress-at :phase/progress-gap-ms
    :failure/class :workflow/failure-phase :cancel/requested-by :cancel/source :action/id
    :phase/name :machine/state :checkpoint/path :checkpoint/size-bytes :checkpoint/root
+   :checkpoint/location
    :snapshot/path :snapshot/size-bytes :from-state :from-phase :skipping :expected-hash :actual-hash
    :gate/phase :envelope/id :gate/decision-envelope
    :rule/id :rule/status :rule/severity :rule/enforcement

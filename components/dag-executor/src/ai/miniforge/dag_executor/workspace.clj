@@ -37,6 +37,15 @@
   [branch]
   (and (string? branch) (not (str/blank? branch)) (not (str/starts-with? branch "-"))))
 
+(defn- ^{:stratum 0} fetch-cmd
+  "git fetch of `branch` from `remote`. A fetch from a URL updates no
+   remote-tracking ref by itself, so the refspec writes
+   refs/remotes/origin/<branch> for the checkout that follows."
+  [remote branch]
+  (if (= "origin" remote)
+    ["git" "fetch" "origin" branch]
+    ["git" "fetch" remote (str "+refs/heads/" branch ":refs/remotes/origin/" branch)]))
+
 (defn- ^{:stratum 0} failed-step
   "Why the step failed, or nil: the error message when exec-fn returned
    a result/err, the stderr when the exit code is non-zero. A nil step
@@ -58,7 +67,8 @@
    - exec-fn: (fn [cmd] -> result-map) — executes a command in the environment;
               cmd may be a string (passed to sh -c) or a vector (exec'd directly,
               no shell — preferred for user-supplied values to avoid injection)
-   - opts: {:branch string, :message string, :push? bool}
+   - opts: {:branch string, :message string, :remote string, :push? bool}
+     :remote is the remote name or URL to push to (default \"origin\").
      :push? false commits without pushing (default true). A later call
      with :push? true pushes whenever the remote's `refs/heads/<branch>`
      is not HEAD -- a held commit, or a branch never created there --
@@ -68,7 +78,8 @@
    string :branch string}.
    Every git step's exit code is checked: a failed commit or push that
    still reported :persisted? true was a silent loss of work."
-  [exec-fn {:keys [branch message push?] :or {branch "task/unknown" message "phase checkpoint" push? true}}]
+  [exec-fn {:keys [branch message remote push?]
+            :or {branch "task/unknown" message "phase checkpoint" remote "origin" push? true}}]
   (if (not (safe-branch? branch))
     (result/err :invalid-branch (str "Branch must be a non-empty string not starting with '-': " (pr-str branch)))
     (try
@@ -82,7 +93,7 @@
             ;; remote-tracking refs: HEAD reachable from another branch (the
             ;; base, a parent task) says nothing about this one.
             remote-r (when (and push? (not (failed-step status-r "")))
-                       (exec-fn ["git" "ls-remote" "origin" (str "refs/heads/" branch)]))
+                       (exec-fn ["git" "ls-remote" remote (str "refs/heads/" branch)]))
             remote-sha (or (first (str/split (str/trim (get-in remote-r [:data :stdout] "")) #"\s+")) "")
             head-r (when (and remote-r (not has-changes?) (not (failed-step remote-r "")))
                      (exec-fn "git rev-parse HEAD"))
@@ -111,8 +122,8 @@
                 push-r (when (and push? (not (failed-step commit-r "")))
                          (exec-fn (if has-changes?
                                     ["git" "push" (str "--force-with-lease=" branch ":" remote-sha)
-                                     "origin" (str "HEAD:" branch)]
-                                    ["git" "push" "origin" (str "HEAD:" branch)])))
+                                     remote (str "HEAD:" branch)]
+                                    ["git" "push" remote (str "HEAD:" branch)])))
                 sha-r (when (and (not (failed-step commit-r ""))
                                  (or (not push?) (and push-r (not (failed-step push-r "")))))
                         (exec-fn "git rev-parse HEAD"))]
@@ -134,14 +145,15 @@
    - exec-fn: (fn [cmd] -> result-map) — executes a command in the environment;
               cmd may be a string (passed to sh -c) or a vector (exec'd directly,
               no shell — preferred for user-supplied values to avoid injection)
-   - opts: {:branch string}
+   - opts: {:branch string, :remote string}; :remote is the remote name or
+           URL to fetch from (default \"origin\")
 
    Returns result monad with {:restored? bool :commit-sha string :branch string}"
-  [exec-fn {:keys [branch] :or {branch "task/unknown"}}]
+  [exec-fn {:keys [branch remote] :or {branch "task/unknown" remote "origin"}}]
   (if (not (safe-branch? branch))
     (result/err :invalid-branch (str "Branch must be a non-empty string not starting with '-': " (pr-str branch)))
     (try
-      (let [fetch-r (exec-fn ["git" "fetch" "origin" branch])]
+      (let [fetch-r (exec-fn (fetch-cmd remote branch))]
         (if-let [e (failed-step fetch-r "git fetch failed")]
           (result/err :restore-fetch-failed e)
           (let [co-r (exec-fn ["git" "checkout" branch])]

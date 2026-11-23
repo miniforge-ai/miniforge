@@ -33,6 +33,13 @@
 ;; Test fixtures
 (def ^{:stratum 0} mock-response "This is a mock response")
 
+(deftest ^{:stratum 0} backend-credential-env-test
+  (testing "CLI backends name the env their CLI reads, HTTP backends their :api-key-env"
+    (is (= #{"ANTHROPIC_API_KEY" "CLAUDE_CODE_OAUTH_TOKEN"} (llm/backend-credential-env :claude)))
+    (is (= #{"ANTHROPIC_API_KEY" "OPENAI_API_KEY"} (llm/backend-credential-env :opencode)))
+    (is (= #{"OPENAI_API_KEY"} (llm/backend-credential-env :openai-api)))
+    (is (= #{} (llm/backend-credential-env nil)))))
+
 ;; Client creation tests
 (deftest ^{:stratum 0} create-client-test
   (testing "creates client with default backend"
@@ -332,12 +339,27 @@
                   :error {:message "Rate limited"}})
           parsed (impl/parse-codex-stream-line line)]
       (is (true? (:done? parsed)))
-      (is (str/includes? (:delta parsed) "Rate limited"))))
+      (is (= (msg/t :cli-output.system/codex-stream-error {:message "Rate limited"}) (:delta parsed)))))
 
-  (testing "thread.started is ignored"
+  (testing "an error event without a message says so, whether the message is
+            missing or null"
+    (let [unknown (msg/t :cli-output.system/codex-stream-error
+                         {:message (msg/t :cli-output.system/codex-error-unknown)})]
+      (is (str/starts-with? unknown "\n") "the error starts on its own line")
+      (doseq [event [{:type "error"}
+                     {:type "error" :message nil}
+                     {:type "turn.failed" :error {}}
+                     {:type "turn.failed" :error {:message nil}}]]
+        (is (= unknown
+               (:delta (impl/parse-codex-stream-line (json/generate-string event))))
+            (pr-str event)))))
+
+  (testing "thread.started is a heartbeat naming the invocation"
     (let [line (json/generate-string {:type "thread.started" :thread_id "abc"})
           parsed (impl/parse-codex-stream-line line)]
-      (is (nil? parsed)))))
+      (is (true? (:heartbeat parsed)))
+      (is (= "abc" (:invocation-id parsed)))
+      (is (= "" (:delta parsed))))))
 
 (deftest ^{:stratum 0} parse-codex-stream-line-finish-reason-test
   (testing "turn.completed always sets :increment-turns true"
@@ -399,7 +421,18 @@
     (let [resp (impl/parse-cli-output "" 0)]
       (is (not (:success resp)))
       (is (= "empty_success_output" (get-in resp [:error :type])))
-      (is (some? (:anomaly resp))))))
+      (is (= (msg/t :cli-output.system/empty-success-output) (get-in resp [:error :message])))
+      (is (some? (:anomaly resp)))))
+
+  (testing "the CLI's limit notice as its whole output is a rate limit that quotes it"
+    (let [resp (impl/parse-cli-output "You've hit your limit · resets 7pm (America/Los_Angeles)" 0)]
+      (is (= "rate_limit" (get-in resp [:error :type])))
+      (is (= (msg/t :cli-output.system/claude-rate-limited
+                    {:notice "You've hit your limit · resets 7pm (America/Los_Angeles)"})
+             (get-in resp [:error :message])))
+      (is (str/includes? (get-in resp [:error :message])
+                         "You've hit your limit · resets 7pm (America/Los_Angeles)")
+          "the reset-time parse reads the notice inside the message"))))
 
 (deftest ^{:stratum 0} mock-client-response-includes-metrics-test
   (testing "mock client success response has :tokens and :usage"
@@ -887,6 +920,21 @@
                :done? true
                :content "fallback answer"}]
              @chunks)))))
+
+(deftest ^{:stratum 0} complete-stream-impl-empty-stream-fallback-opt-out-test
+  (testing "a request that opts out gets the empty stream back with no second call"
+    (let [buffered-calls (atom 0)
+          client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude
+                   :stream-exec-fn (fn [_cmd _on-line _opts]
+                                     {:out "" :err "stream stderr" :exit 0})
+                   :exec-fn (fn
+                              ([_cmd] (swap! buffered-calls inc) {:out "fallback answer" :err "" :exit 0})
+                              ([_cmd _opts] (swap! buffered-calls inc) {:out "fallback answer" :err "" :exit 0}))})
+          resp (llm/complete-stream client {:prompt "test" :empty-stream-fallback? false}
+                                    (constantly nil))]
+      (is (zero? @buffered-calls))
+      (is (str/blank? (:content resp))))))
 
 (defn- ^{:stratum 0} recording-claude-client
   "A claude client whose exec-fn and stream-exec-fn record every command
@@ -1535,6 +1583,8 @@
                    :stats {:chunks 2 :unique-chunks 2 :files-written 0 :stagnant-cycles 0}}
           client (ai.miniforge.llm.protocols.records.llm-client/create-client
                   {:backend :claude
+                   ;; A priced model, so the cut run's cost can be estimated.
+                   :model "claude-sonnet-4-6"
                    :logger logger
                    :stream-exec-fn (fn [_cmd on-line _opts]
                                      (on-line (tool-line "mcp__context__context_read"))
@@ -1570,6 +1620,29 @@
       (is (not (:success resp)))
       (is (nil? (:usage resp)))
       (is (= 0.42 (:cost-usd resp))))))
+
+(defn- ^{:stratum 0} assistant-frame
+  "A Claude stream-json assistant frame with `text`, written by `model`."
+  [model text]
+  (json/generate-string {:type "assistant"
+                         :message {:model model :content [{:type "text" :text text}]}}))
+
+(defn- ^{:stratum 0} fragment-frame
+  [text]
+  (json/generate-string {:type "stream_event" :event {:delta {:text text}}}))
+
+(defn- ^{:stratum 0} streamed-response
+  "The response of a streamed Claude run that emits `lines` and exits 0."
+  [lines]
+  (let [client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                {:backend :claude
+                 :stream-exec-fn (fn [_cmd on-line _opts]
+                                   (doseq [line lines] (on-line line))
+                                   {:out "" :err "" :exit 0})})]
+    (llm/complete-stream client {:prompt "test"} (fn [_] nil))))
+
+(def ^{:stratum 0} ^:private long-answer
+  (json/generate-string {:claims (repeat 40 {:claim "Shipped the billing service."})}))
 
 (deftest ^{:stratum 0} parse-claude-stream-line-carries-per-message-usage-test
   (testing "assistant events surface :message-usage + :message-id"
@@ -1641,6 +1714,29 @@
       (is (= {:input-tokens 2400 :output-tokens 100} @accumulated-usage)))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} streaming-limit-notice-after-answer-text-test
+  (testing "the CLI's own limit notice after earlier answer text is a rate limit"
+    (let [resp (streamed-response [(assistant-frame "claude-opus-5" long-answer)
+                                   (assistant-frame "<synthetic>" "You've hit your limit · resets 7pm (America/Los_Angeles)")])]
+      (is (< 300 (count long-answer)) "the answer alone is longer than any notice")
+      (is (not (:success resp)))
+      (is (= "rate_limit" (get-in resp [:error :type])))
+      (is (= (msg/t :cli-output.system/claude-rate-limited
+                    {:notice "You've hit your limit · resets 7pm (America/Los_Angeles)"})
+             (get-in resp [:error :message])))))
+  (testing "a model's short final answer that mentions a limit is not a limit"
+    (let [resp (streamed-response [(assistant-frame "claude-opus-5" long-answer)
+                                   (assistant-frame "claude-opus-5" "{\"summary\":\"Added handling for too many requests.\"}")])]
+      (is (:success resp))))
+  (testing "a model answer after the CLI's notice ends the run as a success"
+    (let [resp (streamed-response [(assistant-frame "<synthetic>" "You've hit your limit · resets 7pm (America/Los_Angeles)")
+                                   (assistant-frame "claude-opus-5" long-answer)])]
+      (is (:success resp))))
+  (testing "a streamed fragment that mentions a limit is not a limit"
+    (let [resp (streamed-response [(fragment-frame long-answer)
+                                   (fragment-frame " and retries on rate limit exceeded.")])]
+      (is (:success resp)))))
 
 (deftest ^{:stratum 1} isolated-client-sends-isolation-flags-test
   (testing "an isolated claude client sends the isolation flags on complete and complete-stream"

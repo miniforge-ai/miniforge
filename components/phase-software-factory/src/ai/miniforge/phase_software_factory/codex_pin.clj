@@ -43,6 +43,11 @@
    only fires for paths with an on-disk file."
   ".miniforge/codex-consider.md")
 
+;; Failed lookups are logged too (:source :absent); asking for the pin is not seeing it.
+(defn- ^{:stratum 0} pin-fetch?
+  [{:keys [path source]}]
+  (and (= pin-path path) (not= :absent source)))
+
 (def ^{:stratum 0} phase->situation
   "Which codex situation each phase enters at. This map IS the push
    mechanism's routing: the orchestrator supplies the situation, the codex
@@ -154,7 +159,9 @@
                                    (get phase->secondary-situations phase))
                  content (str/join "\n\n" (cons (:content entry) (map :content secondaries)))
                  pegs (into (vec (:pegs entry)) (mapcat :pegs secondaries))]
-             {:entry {:path (:path entry) :content content} :status :pinned
+             ;; :keep-inline? so a shedding planner (N12 §6) still sees the pin.
+             {:entry {:path (:path entry) :content content :keep-inline? true}
+              :status :pinned
               :anomaly nil :situation situation :pegs (not-empty pegs)})))))))
 
 (defn ^{:stratum 1} landings-outcome
@@ -189,7 +196,8 @@
    `context-reads` is the session's recorded context_read log (§7.4.2), or
    nil when the session did not surface one — then :pin-read? is nil
    (unknown), not false; absence of the record is not evidence of absence
-   of the read.
+   of the read. A recorded lookup of the pin that resolved :absent is not
+   a read: the agent asked and got nothing.
 
    :pegs is the §7.7 per-peg record: one row per peg the consultation
    presented — {:id peg-id
@@ -256,7 +264,7 @@
                                          :landings branch-landings})
                                       pegs)))
               :pin-read? (when (some? context-reads)
-                           (boolean (some #(= pin-path (:path %)) context-reads)))}
+                           (boolean (some pin-fetch? context-reads)))}
        unmatched (assoc :unmatched-answers (vec unmatched))))))
 
 ;------------------------------------------------------------------------------ Layer 2

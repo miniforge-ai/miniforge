@@ -5,7 +5,7 @@
   "Event cleanup keeps an expired workflow directory that a registered
    `retention-hold` still needs."
   (:require [ai.miniforge.event-stream.interface :as es]
-            [ai.miniforge.event-stream.sinks :as sinks]
+            [ai.miniforge.event-stream.sinks.cleanup :as cleanup]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]))
 
@@ -59,7 +59,7 @@
           (let [held (expired-archive! events-dir "wf-held")
                 free (expired-archive! events-dir "wf-free")]
             (reset! held-ids #{"wf-held"})
-            (sinks/cleanup-stale-events! {:events-dir events-dir})
+            (cleanup/cleanup-stale-events! {:events-dir events-dir})
             (testing "the held workflow keeps its events"
               (is (.isDirectory held)))
             (testing "an unheld one is pruned as before"
@@ -72,7 +72,7 @@
         (fn [events-dir]
           (let [archive (expired-archive! events-dir "wf-unknown")]
             (reset! held-ids #{::throws})
-            (sinks/cleanup-stale-events! {:events-dir events-dir})
+            (cleanup/cleanup-stale-events! {:events-dir events-dir})
             (is (.isDirectory archive))))))))
 
 (deftest ^{:stratum 2} a-held-legacy-directory-outlives-its-ttl
@@ -84,7 +84,7 @@
             (aged-file! (io/file dir "20200101T000000Z-abc.json") 30)
             (.setLastModified dir (- (System/currentTimeMillis) (* 30 24 60 60 1000)))
             (reset! held-ids #{"wf-legacy"})
-            (sinks/cleanup-stale-events! {:events-dir events-dir})
+            (cleanup/cleanup-stale-events! {:events-dir events-dir})
             (is (.isDirectory dir))))))))
 
 (comment ::retention-hold)

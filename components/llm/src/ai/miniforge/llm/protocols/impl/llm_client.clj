@@ -31,7 +31,7 @@
    aliases in Layer 0 keep the moved definitions' names here for callers."
   (:require
    [clojure.string :as str]
-   [ai.miniforge.llm.cost :as cost]
+   [ai.miniforge.llm.cost-estimate :as cost-estimate]
    [ai.miniforge.llm.messages :as msg]
    [ai.miniforge.llm.model-registry :as model-registry]
    [ai.miniforge.llm.progress-monitor :as pm]
@@ -274,18 +274,27 @@
    timeout-ms]
   (try+
     (let [initial-result (wait-for-stream-process process timeout-ms)
-          timed-out? (= -1 (:exit initial-result))
-          result (if timed-out?
+          result (cond
+                   ;; The run was cancelled: the wait destroyed the tree.
+                   ;; Wait again only to reap it, keeping the cancellation.
+                   (:timeout initial-result)
+                   (do (wait-for-stream-process process (post-kill-join-timeout-ms))
+                       initial-result)
+
+                   (= -1 (:exit initial-result))
                    (do
                      (subprocess/destroy-process-tree! process)
                      (wait-for-stream-process process (post-kill-join-timeout-ms)))
+
+                   :else
                    initial-result)]
       (doseq [thread [stdin-thread stdout-thread stderr-thread]
               :when thread]
         (.join ^Thread thread subprocess/stream-reader-join-timeout-ms))
-      {:out (or @stdout "")
-       :err (or (not-empty (:err result)) @stderr "")
-       :exit (:exit result)})
+      (cond-> {:out (or @stdout "")
+               :err (or (not-empty (:err result)) @stderr "")
+               :exit (:exit result)}
+        (:timeout result) (assoc :timeout (:timeout result))))
     (catch InterruptedException _
       (subprocess/destroy-process-tree! process)
       (.interrupt (Thread/currentThread))
@@ -344,7 +353,18 @@
         accumulated-tools (atom [])
         accumulated-session-id (atom nil)
         accumulated-stop-reason (atom nil)
-        accumulated-turns (atom nil)]
+        accumulated-turns (atom nil)
+        cli-text (atom nil)
+        ;; The text of the last text message when the CLI wrote it itself
+        ;; (its rate-limit notice), kept apart from the accumulated answer,
+        ;; so a notice after earlier answer text is still read as one. A
+        ;; later message from the model clears it: the notice was not the
+        ;; run's last word.
+        observed-parser (fn [line]
+                          (let [parsed (stream-parser line)]
+                            (when-not (str/blank? (:delta parsed))
+                              (reset! cli-text (:cli-text parsed)))
+                            parsed))]
     (when logger
       (log/info logger :system :agent/streaming-prompt-sent
                 {:data (assoc (prompt-size-telemetry (:system request) prompt)
@@ -358,7 +378,7 @@
                              (prompts/exec-opts-for-prompt-via prompt-via prompt))
           result (stream-fn
                   full-cmd
-                  (stream-with-parser stream-parser on-chunk progress-monitor
+                  (stream-with-parser observed-parser on-chunk progress-monitor
                                       accumulated-content accumulated-usage
                                       accumulated-cost accumulated-tools
                                       accumulated-session-id
@@ -378,10 +398,14 @@
           tool-call-count (count tools)
           final-message-preview (cli-output/message-preview diagnostic-content)
           usage @accumulated-usage
-          fallback-response (when (cli-output/blank-streaming-success? exit-code
-                                                            final-content
-                                                            tool-call-count
-                                                            usage)
+          ;; A caller that journals every provider call sets
+          ;; `:empty-stream-fallback? false`, so an empty stream is
+          ;; returned as it is instead of retried unjournaled.
+          fallback-response (when (and (not (false? (:empty-stream-fallback? request)))
+                                       (cli-output/blank-streaming-success? exit-code
+                                                                            final-content
+                                                                            tool-call-count
+                                                                            usage))
                               (complete-impl client request))]
       (if fallback-response
         (do
@@ -409,24 +433,22 @@
                       {:data {:stop-reason stop-reason :num-turns num-turns
                               :content-length (count final-content)}}))
           ;; Cost fallback: some backends (e.g. older Claude Code
-          ;; CLI versions, codex stream parser) don't surface
+          ;; CLI versions, the codex stream parser) don't surface
           ;; total_cost_usd in the result frame, so
-          ;; @accumulated-cost stays nil and the runner banner
-          ;; reports $0.0000 despite real backend costs. When
-          ;; cost is nil but usage carries tokens, compute the
-          ;; fallback estimate from the model + usage via
-          ;; cost/estimate-cost. Models without pricing in the
-          ;; table return 0.0 (no false-positive cost), so this
-          ;; is a non-decreasing fix — never produces a wrong-
-          ;; direction value.
-          (let [resolved-cost (or @accumulated-cost
-                                  (cost/estimate-cost usage model))]
+          ;; @accumulated-cost stays nil. Then the cost is the table
+          ;; estimate for the effective model where it can be known
+          ;; (`cost-estimate/known-estimate`), else unknown: a partial,
+          ;; cached, unpriced or out-of-range estimate would read
+          ;; downstream as a measured cost (#2378).
+          (let [effective-model (:model request-with-model)
+                resolved-cost (or @accumulated-cost
+                                  (cost-estimate/known-estimate usage effective-model))]
             (if (zero? exit-code)
               (cond-> (streaming-success-response final-content exit-code
                                                   usage resolved-cost
                                                   stop-reason num-turns
                                                   tool-call-count final-message-preview
-                                                  (:err result))
+                                                  (:err result) @cli-text)
                 (seq tools) (assoc :tools-called tools)
                 session-id  (assoc :session-id session-id))
               ;; A run that was cut (timeout) or died still consumed
@@ -444,9 +466,9 @@
                                                  (:model request-with-model)))
                 (seq tools)   (assoc :tools-called tools)
                 ;; Cost is known when the backend reported one
-                ;; (total_cost_usd) or usage lets us estimate it —
-                ;; same two sources the success branch draws on.
-                (or (some? @accumulated-cost) (some? usage))
+                ;; (total_cost_usd) or usage of a priced model lets
+                ;; us estimate it — same as the success branch.
+                (some? resolved-cost)
                 (assoc :cost-usd resolved-cost)
                 session-id    (assoc :session-id session-id)))))))))
 

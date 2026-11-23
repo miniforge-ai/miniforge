@@ -6,8 +6,8 @@
 
 # N5 Delta — Supervisory Control Plane
 
-**Version:** 0.4.0-draft
-**Date:** 2026-10-04
+**Version:** 0.4.1-draft
+**Date:** 2026-11-15
 **Status:** Draft
 **Conformance:** MUST
 
@@ -482,6 +482,7 @@ The TUI MUST support a bounded set of supervisory interventions. These extend N5
 | `pause` | WorkflowRun (running) | Suspends execution |
 | `resume` | WorkflowRun (paused) | Resumes execution |
 | `cancel` | WorkflowRun (active) | Terminates execution |
+| `full-stop` | WorkflowRun | Irreversibly fences workload effects and destroys only its owned runtime (N8 §3.5) |
 | `request-replan` | WorkflowRun | Requests a new planning pass or workflow-selection pass |
 | `waive` | PolicyEvaluation | Creates a Waiver record with reason |
 | `re-evaluate` | PullRequest | Triggers a new PolicyEvaluation |
@@ -500,6 +501,9 @@ Every intervention MUST produce:
 Human-triggered interventions that carry material risk MAY require a
 `pending-human` approval step before dispatch, even when the request was created
 from a UX surface.
+Only authorized full-stop containment MAY proceed during audit outage under N3 §9.1.1.
+Its unavailable durable request or lifecycle record MUST NOT be fabricated; the intervention MUST report failure, not
+successful admission or completion.
 
 ### 7.3 Command/query separation
 
@@ -681,8 +685,11 @@ through without error. Required keys MUST be present and correctly typed.
 
 **Version History:**
 
-0.4.0-draft (2026-10-04): Added the Spec projection of N1's Work Specification
-and clarified intervention admission, lifecycle facts, and snapshot ownership.
+- 0.4.1-draft (2026-11-15): Add the separately authorized `full-stop`
+  intervention. N8 §3.5 owns containment; N3 §9.1.1 owns audit-outage handling.
 
-0.3.0-draft (2026-08-10): Spec-completion pass — metadata normalized to the header form;
-`N5D1.SV.*` conformance requirement IDs and test obligations added.
+- 0.4.0-draft (2026-10-04): Added the Spec projection of N1's Work Specification
+  and clarified intervention admission, lifecycle facts, and snapshot ownership.
+
+- 0.3.0-draft (2026-08-10): Spec-completion pass — metadata normalized to the header form;
+  `N5D1.SV.*` conformance requirement IDs and test obligations added.

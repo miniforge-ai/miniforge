@@ -24,10 +24,12 @@
    InMemoryPackRegistry, and the registry constructor stay in the
    parent namespace; the pure functions they compose live here.
 
-   Layer 0: parse-datever, glob-matches?, decode-signature, dedupe-by-id
-   Layer 1: compare-versions (over parse-datever), rule-applies? (over
-     glob-matches?)
-   Layer 2: latest-version (over compare-versions)"
+   Layer 0: parse-datever, glob-matches?, decode-signature, dedupe-by-id,
+     artifact-paths
+   Layer 1: compare-versions (over parse-datever), artifact-matches-globs?
+     (over glob-matches? and artifact-paths)
+   Layer 2: latest-version (over compare-versions), rule-applies? (over
+     artifact-matches-globs?)"
   (:require
    [clojure.string :as str]))
 
@@ -81,6 +83,14 @@
                 {}
                 rules)))
 
+(defn ^{:stratum 0} artifact-paths
+  "The paths an artifact covers: its `:artifact/paths` when it spans several
+   files, else its single `:artifact/path`, else `[\"\"]` (no path, which
+   matches no path-specific glob)."
+  [artifact]
+  (or (seq (:artifact/paths artifact))
+      [(:artifact/path artifact "")]))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} compare-versions
@@ -91,12 +101,23 @@
         vb (or (parse-datever b) [0 0 0])]
     (compare va vb)))
 
-(defn ^{:stratum 1} rule-applies?
+(defn ^{:stratum 1} artifact-matches-globs?
+  "True when `file-globs` is empty or any of the artifact's paths matches
+   one of them."
+  [file-globs artifact]
+  (letfn [(path-matches? [path] (some #(glob-matches? % path) file-globs))]
+    (boolean (or (empty? file-globs)
+                 (some path-matches? (artifact-paths artifact))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} rule-applies?
   "Check if a rule applies to the given context.
 
    Context map:
    - :task - Task with :task/intent containing :intent/type
-   - :artifact - Artifact with :artifact/path, :artifact/type
+   - :artifact - Artifact with :artifact/path (or :artifact/paths when it
+     spans several files), :artifact/type
    - :repo - Repository with :repo/type
    - :phase - Current workflow phase keyword"
   [rule context]
@@ -109,10 +130,7 @@
          (contains? task-types (get-in context [:task :task/intent :intent/type])))
 
      ;; File glob filter
-     (or (nil? file-globs)
-         (empty? file-globs)
-         (let [path (get-in context [:artifact :artifact/path] "")]
-           (some #(glob-matches? % path) file-globs)))
+     (artifact-matches-globs? file-globs (:artifact context))
 
      ;; Repo type filter
      (or (nil? repo-types)
@@ -123,8 +141,6 @@
      (or (nil? phases)
          (empty? phases)
          (contains? phases (:phase context))))))
-
-;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} latest-version
   "Get the latest version from a collection of version strings."

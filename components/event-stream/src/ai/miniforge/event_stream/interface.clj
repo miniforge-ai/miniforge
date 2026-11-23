@@ -34,7 +34,11 @@
    [ai.miniforge.event-stream.layout-tail :as layout-tail]
    [ai.miniforge.event-stream.operator-requests :as operator-requests]
    [ai.miniforge.event-stream.reader :as reader]
+   [ai.miniforge.event-stream.recovery-location-spec :as recovery-location]
    [ai.miniforge.event-stream.sinks :as sinks]
+   [ai.miniforge.event-stream.sinks.cleanup :as cleanup]
+   [ai.miniforge.event-stream.sinks.file :as file]
+   [ai.miniforge.event-stream.sinks.naming :as naming]
    [ai.miniforge.event-stream.workflow-discovery :as discovery]
    [ai.miniforge.event-stream.timeline :as timeline]))
 
@@ -80,8 +84,16 @@
 
 (def ^{:stratum 0} cancel!
   "Set the control-state atom's :stopped flag true. Returns the new
-   state map."
+   state map. The 2-arity also records the cancel's
+   {:cancel/requested-by :cancel/source :action/id?}; the first record is
+   kept."
   control-state/cancel!)
+
+(def ^{:stratum 0} cancellation
+  "Return the first recorded cancel's
+   {:cancel/requested-by :cancel/source :action/id?} map, or nil when no
+   cancel recorded one."
+  control-state/cancellation)
 
 (def ^{:stratum 0} paused?
   "Return the boolean :paused flag from a control-state atom."
@@ -147,6 +159,20 @@
    running sinks or subscribers."
   stream/publish!)
 
+(def ^{:stratum 0} publish-persisted!
+  "Like publish!, but returns the result only when the event was persisted.
+   A current stream's receipt passes through. On a legacy stream an anomaly or
+   rejection passes through, and the event passes only when the stream has a
+   durable sink (the file sink) and every durable sink wrote it; otherwise an
+   :unavailable anomaly with :publication/reason :no-durable-sink or
+   :sink-write-failed."
+  stream/publish-persisted!)
+
+(def ^{:stratum 0} durable-sink
+  "Mark a legacy-stream sink as persisting each event it returns from without
+   throwing, so publish-persisted! can count it."
+  stream/durable-sink)
+
 (def ^{:stratum 0} replay!
   "Deliver an event another process already stored to a legacy stream's
    log and subscribers without its sinks (also for publishes to this
@@ -185,7 +211,7 @@
    reference this path so archival's live → archived rename moves them
    together. Arities: (workflow-id) defaults base-dir to
    ~/.miniforge/events; (base-dir workflow-id)."
-  sinks/workflow-dir)
+  file/workflow-dir)
 
 (def ^{:stratum 0} retention-hold
   "Multimethod `(retention-hold hold-key workflow-id events-dir)`: register
@@ -193,14 +219,14 @@
    past their TTL while your store still needs them (the event cleanup
    asks every registered hold). Workflow id is the events directory name;
    events-dir is the events root being cleaned."
-  sinks/retention-hold)
+  cleanup/retention-hold)
 
 (def ^{:stratum 0} cleanup-stale-events!
   "`(cleanup-stale-events! {:events-dir dir :ttl-ms ms})`: run the event
    retention pass now, as the file sink does in the background when it is
    created (which runs are archived or pruned: see the sinks namespace).
    Returns the number of files removed."
-  sinks/cleanup-stale-events!)
+  cleanup/cleanup-stale-events!)
 
 (def ^{:stratum 0} default-events-dir
   "The default events root (`~/.miniforge/events`) as a java.io.File —
@@ -230,7 +256,7 @@
 (def ^{:stratum 0} event-file-ms
   "`(event-file-ms file-name)`: the epoch ms an event file name records,
    in any grammar the sink has used; nil for any other name."
-  sinks/event-file-ms)
+  naming/event-file-ms)
 
 (def ^{:stratum 0} serialize-event
   "Serialize an event map to the canonical Transit-JSON wire string —
@@ -338,9 +364,17 @@
   "Construct an N3 governed OPSV effect disposition event."
   opsv/actuation-disposition)
 
+(def ^{:stratum 0} CheckpointLocation
+  "Paired nonempty root/run-directory strings; producers supply validated canonical paths."
+  recovery-location/Location)
+
+(def ^{:stratum 0} checkpoint-location
+  "Construct paired canonical root and physical run-directory metadata from validated paths; no I/O."
+  events/checkpoint-location)
+
 (def ^{:stratum 0} checkpoint-written
   "Construct a checkpoint write fact: stream, workflow UUID, phase, path, byte size,
-   checkpoint root."
+   optional location record (1.1.0) or legacy root string (1.0.0)."
   events/checkpoint-written)
 
 (def ^{:stratum 0} checkpoint-write-failed
@@ -349,7 +383,7 @@
 
 (def ^{:stratum 0} machine-snapshot-written
   "Construct a snapshot write fact: stream, workflow UUID, state, path, byte size,
-   checkpoint root."
+   optional location record (1.1.0) or legacy root string (1.0.0)."
   events/machine-snapshot-written)
 
 (def ^{:stratum 0} machine-snapshot-write-failed
@@ -443,6 +477,18 @@
    :failure/class. Current drafts require the class and may carry
    :workflow/failure-phase in opts."
   events/workflow-failed)
+
+(def ^{:stratum 0} workflow-cancelled
+  "Build and return a :workflow/cancelled event envelope map (N3): a run
+   an operator stopped, reported apart from :workflow/completed and
+   :workflow/failed. Takes the cancel's
+   {:cancel/requested-by :cancel/source :action/id?} and the run's
+   duration in ms. Returns an :invalid-input anomaly when the requester is
+   not a non-blank string, the source is not one N3 names (:cli :api :tui
+   :supervisor :control-action), a :control-action
+   source has no :action/id uuid, or the duration is not a non-negative
+   integer."
+  events/workflow-cancelled)
 
 (def ^{:stratum 0} llm-request
   "Build and return an :llm/request event envelope map for an LLM call

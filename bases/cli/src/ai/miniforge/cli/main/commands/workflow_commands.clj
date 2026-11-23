@@ -28,6 +28,7 @@
    [clojure.string :as str]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.main.commands.intervention-outcome :as outcome]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.main.util :as util]
@@ -44,6 +45,16 @@
 (def ^{:stratum 0} ^:private exit-code-error
   "Process exit code signalling command failure (non-zero)."
   1)
+
+(def ^{:stratum 0} ^:private cancel-confirm-ms
+  "How long `workflow cancel` waits for the run to apply its request. The
+   run's operator consumer polls once a second, so this spans several
+   polls."
+  10000)
+
+(def ^{:stratum 0} ^:private cancel-poll-ms
+  "How often `workflow cancel` reads the run's events while it waits."
+  250)
 
 (defn- ^{:stratum 0} operator-principal
   "Identity stamped on interventions this CLI requests. The OS account
@@ -166,34 +177,71 @@
               (println))))))))
 
 (defn ^{:stratum 1} workflow-cancel-cmd
-  "Cancel a running workflow by requesting a `:cancel` intervention.
+  "Cancel a running workflow by requesting a `:cancel` intervention, and
+   report whether the run applied it.
 
    Writes a `:supervisory/intervention-requested` event into
    `{events-dir}/operator/` — the same governed channel the console and
-   the TUI use. The runner's operator-event consumer routes it through
-   the intervention lifecycle and flips the run's control state; every
-   transition is on the audit stream. (Pre-D-4 this wrote an ungoverned
-   `.edn` command file whose legacy verb was `stop`; the intervention
-   vocabulary names the same operation `:cancel`.)"
+   the TUI use. Writing only queues the request: the operator consumer
+   of the process running that workflow applies it, flips the run's
+   control state, and records each lifecycle step in the run's event
+   directory. This command waits up to `cancel-confirm-ms` for that
+   record. It exits 0 only when the cancel was applied and verified. A
+   failed lifecycle exits non-zero with its reason, without claiming the
+   cancel had no effect (the stop flag can be set before a later step
+   fails). No terminal record in time (a wrong id, a run that has ended,
+   another MINIFORGE_HOME, or a run with no file sink) exits non-zero
+   and says the outcome is unknown. (Pre-D-4 this wrote
+   an ungoverned `.edn` command file whose legacy verb was `stop`; the
+   intervention vocabulary names the same operation `:cancel`.)"
   [opts]
   (let [{:keys [id]} opts]
     (if-not id
       (shared/usage-error! :workflow-cmd/cancel-usage "workflow cancel <id>")
       (try
-        (let [result (es/request-intervention!
+        (let [events-dir (es/default-events-dir)
+              requested-at (System/currentTimeMillis)
+              result (es/request-intervention!
                       {:intervention/type :cancel
                        :intervention/target-type :workflow
                        :intervention/target-id (str id)
                        :intervention/requested-by (operator-principal)
-                       :intervention/request-source :cli})]
+                       :intervention/request-source :cli
+                       :events-dir events-dir})
+              seconds (quot cancel-confirm-ms 1000)]
           (if (anomaly/anomaly? result)
             ;; Non-zero exit on failure: a cancel that never reached the
             ;; operator dir must not look like success to a script.
             (do (display/print-error (messages/t :workflow-cmd/cancel-failed
                                                  {:error (:anomaly/message result)}))
                 (shared/exit! exit-code-error))
-            (display/print-success (messages/t :workflow-cmd/cancel-success
-                                               {:id id}))))
+            (do
+              (println (messages/t :workflow-cmd/cancel-requested {:id id :seconds seconds}))
+              (let [seen (outcome/await-transition
+                          {:events-dir events-dir
+                           :workflow-id (str id)
+                           :intervention-id (:intervention/id result)
+                           :since-ms requested-at
+                           :timeout-ms cancel-confirm-ms
+                           :poll-ms cancel-poll-ms})
+                    state (:intervention/state seen)]
+                (case state
+                  :verified
+                  (display/print-success (messages/t :workflow-cmd/cancel-applied {:id id}))
+
+                  (:failed :rejected)
+                  (do (display/print-error
+                       (messages/t :workflow-cmd/cancel-failed-lifecycle
+                                   {:id id
+                                    :reason (get seen :intervention/reason (name state))}))
+                      (shared/exit! exit-code-error))
+
+                  ;; Nothing terminal in time: usually no process consumed
+                  ;; the request, but a run with no file sink applies it
+                  ;; without a record this command can read.
+                  (do (display/print-error
+                       (messages/t :workflow-cmd/cancel-outcome-unknown {:id id :seconds seconds}))
+                      (shared/exit! exit-code-error)))))))
         (catch Exception e
           (display/print-error (messages/t :workflow-cmd/cancel-failed
                                            {:error (ex-message e)}))

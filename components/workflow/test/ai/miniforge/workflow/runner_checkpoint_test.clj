@@ -79,7 +79,11 @@
                               (es/get-events stream))]
           (is (= 1 (count written)))
           (is (= :plan (:phase/name (first written))))
-        (is (= (:plan (fixture/recorded-paths root (:execution/id ctx)))
+          (is (= "1.1.0" (:event/version (first written))))
+          (is (= (es/checkpoint-location (str (fs/real-path root))
+                                        (str (fs/real-path (fs/path root (str (:execution/id ctx))))))
+                 (:checkpoint/location (first written))))
+          (is (= (:plan (fixture/recorded-paths root (:execution/id ctx)))
                  (:checkpoint/path (first written))))
           (is (pos? (:checkpoint/size-bytes (first written)))))
         (finally (es/close-current-event-stream! stream))))))

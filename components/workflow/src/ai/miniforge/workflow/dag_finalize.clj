@@ -93,6 +93,8 @@
              :total-tokens total-tokens
              :total-cost total-cost
              :total-duration total-duration}
+      ;; A task whose cost is unknown leaves :total-cost incomplete.
+      (some #(true? (:cost-unavailable? %)) metrics) (assoc :cost-unavailable? true)
       (seq pr-infos) (assoc :pr-infos pr-infos)
       (seq worktree-paths) (assoc :worktree-paths worktree-paths))))
 

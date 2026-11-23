@@ -1,0 +1,95 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
+# feat: Enforce exact temporary OPSV experiment grant scopes
+
+## Overview
+
+Implement the grant-scope foundation of approved N7 §5.5 and N10 §1.5.
+API surface class 1: internal EDN, trusted runtime composition.
+Dependent branch from #2385's shared target contract, now merged.
+Integrated main through a033fba25 before full validation; publish against main.
+
+## Motivation
+
+Generic grant containment permits additional proposal bindings. It cannot alone
+prevent generic deployment authority from being reused for an OPSV trial.
+Temporary trial and recovery effects need exact profile admission at the same
+public authorization boundary used by decisions and durable effect commits.
+
+## Changes in Detail
+
+Add the dedicated load-test effect class and closed experiment scope data.
+Reuse the shared Kubernetes target identity without copying its map contract.
+Require complete, exact experiment bindings and operation/class correspondence.
+Keep generic untagged grant behavior unchanged. Expose the typed internal schema
+and route authorization through the profile guard before ordinary grant checks.
+Keep existing deadline equality semantics and pin both the exact edge and the
+first instant after expiry. Legacy commits refuse experiment effects whether
+given unenforced markers or caller-supplied grant snapshots; only the current
+authority path can execute them. Ordinary legacy-effect compatibility remains unchanged.
+
+This foundation does not issue production experiment grants, enable a backend,
+establish target ownership, execute load, or authorize live provider changes.
+Runtime issuance, N4/N8 admission, provider execution, and verified recovery remain separate layers.
+
+Dependency direction: effect-transaction → execution-grant interface → profile
+boundary → shared containment/result factories and scope types → Kubernetes
+target interface. No provider, phase, or workflow dependency enters the grant domain.
+
+## Testing Plan
+
+Use shared factories matching canonical runtime identities. Prove positive
+trial/load/recovery shapes and fail closed for broad, stale, incomplete, changed,
+or cross-class authority. Regress the ordinary grant path and durable commits.
+Run strict kondo, true inferred strata, all affected product contexts, package
+checks, targeted fault injection, and normal signed hooks in the shared slot.
+
+Validated source/test/dependency head b53111f87e306714e89ff98374b9ba0e31cdf375.
+Only evidence documentation follows. Strict kondo has zero warnings/errors;
+all 13 changed namespaces pass declared and truly inferred strata (maximum three).
+Workspace validation and both affected bricks pass in all four product contexts.
+New durable integration passes 7 tests/89 assertions. All 22 scoped OPSV/workflow/N6
+integration suites pass 97 tests/1,240 assertions, with no live provider effects.
+
+Fresh package, no production-source overlay: grant/effect regressions pass
+141 tests/857 assertions on the JVM, including SQL date/time conversion.
+Native OPSV regressions pass 308 tests/1,903 assertions on Babashka.
+The initial Babashka package harness could not load `java.sql.Time`.
+The JVM package run retained those tests. Completed product builds were not repeated.
+All eleven deliberate authority faults cause assertion failures with zero errors.
+Eight new unit tests contain 123 assertions. Their longest measured run took 20.461 milliseconds.
+Committed scans find zero violations across 38 grant, 24 effect, and two project files.
+
+Three published-build counterexample tests produce eight assertion failures with
+zero errors, including revoked-grant snapshots. No missing-API failures substitute
+for evidence. All three normal signed commits pass hooks: 147, 182 and 174
+reportable lines; each smoke 375 tests/1,452 assertions and compatibility 17/775.
+The initial PR was 491/600 reportable lines, with no size or gate exceptions.
+
+CI found the hand-maintained Babashka CLI task classpath lacked the shared target
+source path. Add it explicitly; project dependencies alone do not populate task paths.
+A real CLI-startup regression reproduces the old failure: one assertion failure,
+zero test errors. All ten task entrypoints now load successfully.
+Startup passes one test/two assertions; the existing real hook test passes six assertions.
+Strict lint is clean. All 14 changed namespaces pass true inferred strata, with a maximum of three.
+The correction adds 19 reportable lines; the complete PR is 510/600.
+The failed run is not merged; repeat current-head review and CI after the correction.
+
+## Deployment Plan
+
+No default activation or provider effects. Require the dependency, all normal
+review/CI gates, and owner merge before the next runtime layer.
+
+## Related Issues/PRs
+
+N7 completion; approved contract #2381 and shared target identity #2385.
+
+## Checklist
+
+- [x] Implement and adversarially review exact-profile authorization.
+- [x] Validate source, all affected products, and packaged commits.
+- [ ] Settle review, require fresh full review/CI, and owner-merge.

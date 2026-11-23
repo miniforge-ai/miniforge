@@ -18,6 +18,8 @@
 (ns ai.miniforge.execution-grant.issuance.policy
   "Runtime-owned policies for grants that commit irreversible effects."
   (:require
+   [ai.miniforge.execution-grant.issuance.selection :as selection]
+   [ai.miniforge.execution-grant.opsv-profile :as opsv]
    [ai.miniforge.execution-grant.temporal :as temporal]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -25,6 +27,21 @@
 (def ^{:stratum 0} pull-request-grant-ttl-seconds
   "Fifteen minutes bounds PR mutation authority while allowing provider latency."
   (* 15 60))
+
+(def ^{:stratum 0} runtime-effect-grant-ttl-seconds
+  "Thirty minutes caps provision, deployment, and temporary staging authority."
+  (* 30 60))
+
+(defn- ^{:stratum 0} ttl-millis [request policy]
+  (if (= :opsv/experiment (selection/profile-key request))
+    (get-in request [:opsv/experiment :opsv/duration-ms])
+    (.toMillis (java.time.Duration/ofSeconds (:policy/ttl-seconds policy)))))
+
+(defn ^{:stratum 0} admissible-request? [request policy]
+  (or (not= :opsv/experiment (selection/profile-key request))
+      (and (opsv/admissible? (:effect/class request) request)
+           (<= (get-in request [:opsv/experiment :opsv/duration-ms])
+               (.toMillis (java.time.Duration/ofSeconds (:policy/ttl-seconds policy)))))))
 
 (defn- ^{:stratum 0} workflow-principal
   "Derive the runtime principal; callers cannot choose a grant principal."
@@ -39,7 +56,6 @@
     request))
 
 (defn- ^{:stratum 0} effect-policy
-  "Construct one policy entry while keeping shared authority in one place."
   [ttl-seconds target-scope-keys]
   {:policy/ttl-seconds ttl-seconds
    :policy/scope-keys (into [:effect/id :workflow-run/id] target-scope-keys)
@@ -49,7 +65,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} policies
-  "Explicit issuance policy catalog keyed by irreversible effect class."
+  "Explicit issuance policies keyed by effect class or the temporary staging profile."
   {:effect/merge
    (effect-policy pull-request-grant-ttl-seconds [:pr/repo :pr/number :pr/head-sha])
 
@@ -66,12 +82,15 @@
                   [:pr/repo :pr/number :github/action :github/payload-hash])
 
    :effect/provision
-   (effect-policy (* 30 60)
+   (effect-policy runtime-effect-grant-ttl-seconds
                   [:pulumi/stack :pulumi/stack-dir :pulumi/plan-hash])
 
    :effect/deploy
-   (effect-policy (* 30 60)
-                  [:kustomize-dir :context :namespace :deployment-name])})
+   (effect-policy runtime-effect-grant-ttl-seconds
+                  [:kustomize-dir :context :namespace :deployment-name])
+
+   :opsv/experiment
+   (effect-policy runtime-effect-grant-ttl-seconds [:opsv/experiment])})
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -79,12 +98,16 @@
   "Derive all grant authority from catalog policy and canonical request."
   [request now]
   (let [effect-class (:effect/class request)
-        policy (get policies effect-class)
-        issued-at (temporal/->instant now)]
-    {:principal (workflow-principal (:workflow-run/id request))
+        policy (get policies (selection/profile-key request))
+        issued-at (temporal/->instant now)
+        principal (workflow-principal (:workflow-run/id request))
+        scope (select-keys (normalized-request request) (:policy/scope-keys policy))
+        expires-at (.plusMillis issued-at (ttl-millis request policy))]
+    {:principal principal
      :effect-class effect-class
-     :scope (select-keys (normalized-request request)
-                         (:policy/scope-keys policy))
+     :scope scope
      :constraints (:policy/constraints policy)
      :delegable? (:policy/delegable? policy)
-     :expires-at (.plusSeconds issued-at (:policy/ttl-seconds policy))}))
+     :expires-at expires-at}))
+
+(comment ::bounded-runtime-owned-issuance-options)

@@ -24,6 +24,7 @@
    [ai.miniforge.release-executor.core :as core]
    [ai.miniforge.release-executor.git :as git]
    [ai.miniforge.release-executor.sandbox :as sandbox]
+   [ai.miniforge.release-executor.sandbox.commands :as commands]
    [babashka.process :as process]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
@@ -66,14 +67,17 @@
     @calls))
 
 (defn- ^{:stratum 0} capture-sandbox-exec
-  "Call `f` with sandbox/exec! and sandbox/write-file! captured; returns
+  "Call `f` with exec! (core's sandbox/exec! and the sandbox operations'
+   commands/exec!) and sandbox/write-file! captured; returns
    {:cmds [...] :writes [[path content] ...]}."
   [f]
   (let [cmds   (atom [])
-        writes (atom [])]
-    (with-redefs [sandbox/exec!       (fn [_executor _env-id cmd & _]
-                                        (swap! cmds conj cmd)
-                                        {:success? true :output "abc123"})
+        writes (atom [])
+        exec   (fn [_executor _env-id cmd & _]
+                 (swap! cmds conj cmd)
+                 {:success? true :output "abc123"})]
+    (with-redefs [sandbox/exec!       exec
+                  commands/exec!      exec
                   sandbox/write-file! (fn [_executor _env-id path content]
                                         (swap! writes conj [path content])
                                         {:success? true})]

@@ -18,10 +18,22 @@
   :oci/command-interrupted   "Runtime command interrupted"
   :oci/command-timeout       "Runtime command exceeded {ms}ms deadline — process destroyed"
   :oci/command-timeout-log   "[oci-cli] runtime command timeout {ms}ms exceeded; destroying process tree."
+  :oci/output-limit          "Runtime command output passed the {bytes}-byte capture limit — process stopped"
   :oci/command-failed        "Command failed"
   :oci/command-failed-detail "{prefix}: {command}{stderr}"
   :oci/bootstrap-failed      "Workspace bootstrap failed"
-  :oci/env-name-refused      "Container env names must be plain identifiers ([A-Za-z_][A-Za-z0-9_]*); refused: {names}"
+  :oci/git-too-old           "The task image's git ({version}) is older than 2.31, which per-command git credentials need"
+  :oci/image-env-unreadable  "Cannot read the ENV of image {image}, so an untrusted capsule cannot clear the secrets it sets"
+  :oci/env-line-break        "Container env entries whose name is not a plain identifier or whose value has a line break cannot be passed safely: {names}"
+  :oci/env-name-refused      "Container env names must be plain identifiers ([A-Za-z_][A-Za-z0-9_]*) and not DOCKER_CUSTOM_HEADERS; refused: {names}"
+
+  ;; Kubernetes observations
+  :kubernetes/pod-not-found "No pod found for job"
+  :kubernetes/pod-not-cached "Pod not in cache"
+  :kubernetes/pod-timeout "Timed out waiting for pod to be ready"
+  :kubernetes/pod-interrupted "Pod readiness was interrupted"
+  :kubernetes/pod-ended "Pod ended with status: {phase}"
+  :kubernetes/invalid-defaults "Invalid packaged Kubernetes projection defaults"
 
   ;; State management
   :state/task-not-found          "Task {task-id} not found"

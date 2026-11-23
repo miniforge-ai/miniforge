@@ -36,77 +36,31 @@
       in unchanged lines. Artifact versions not yet written are diffed
       against the base blob of their path the same way.
 
-   Every git call is built by `git-argv` (--literal-pathspecs, unquoted
-   paths, and for diff --no-textconv --no-ext-diff --text --no-color
-   --inter-hunk-context=0) and run by `run`, where a nonzero exit or an
+   Git calls are built and run by `git-change` (its namespace docstring
+   gives the argv defaults and where git runs), where a nonzero exit or an
    executor error reads as nil. Findings beat unreadability: any secret
    found anywhere fails the gate with every finding; only when none is
    found and something could not be read is the result
    :worktree-uninspectable.
 
-   The base is the first resolvable of the artifact's :code/base-refs,
-   the context's :execution/task-base-refs (both the implement phase's
-   resume-aware candidates), the environment's base SHA, then HEAD. Git
-   runs where the checkout is: through :execution/execute-fn in
-   :execution/capsule-workdir for governed runs, else on the host in
-   :execution/worktree-path. With neither, only the artifact is scanned.
+   The base is the first resolvable of `git-change/base-candidates`, then
+   HEAD. With neither an executor nor a worktree path, only the artifact
+   is scanned.
 
    Detection is redaction/pattern-secret-spans: the shared patterns,
    without the payment-card checksum that ordinary numbers in code pass."
-  (:require [ai.miniforge.gate.messages :as msg]
+  (:require [ai.miniforge.gate.git-change :as git-change :refer [git-argv run]]
+            [ai.miniforge.gate.messages :as msg]
             [ai.miniforge.redaction.interface :as redaction]
             [babashka.fs :as fs]
-            [clojure.java.io :as io]
-            [clojure.java.shell :as shell]
-            [clojure.string :as str]
-            [slingshot.slingshot :refer [try+]]))
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} run
-  "Run ARGV where CTX's checkout is and return its stdout, or nil when it
-   cannot be run or exits outside OK-EXITS (default 0). Through
-   :execution/execute-fn in :execution/capsule-workdir (the executor's
-   default when absent) for governed runs; otherwise on the host, in
-   :execution/worktree-path when present."
-  ([ctx argv] (run ctx argv #{0}))
-  ([ctx argv ok-exits]
-   (let [r (try+
-             (if-let [exec! (get ctx :execution/execute-fn)]
-               (let [quote #(str "'" (str/replace (str %) "'" "'\"'\"'") "'")
-                     wd    (get ctx :execution/capsule-workdir)
-                     r     (exec! (get ctx :execution/executor) (get ctx :execution/environment-id)
-                                  (str/join " " (map quote argv)) (cond-> {} wd (assoc :workdir wd)))]
-                 {:exit (get-in r [:data :exit-code] (if (:ok? r) 0 1))
-                  :out  (str (get-in r [:data :stdout] ""))})
-               (let [dir (get ctx :execution/worktree-path)]
-                 (apply shell/sh (concat argv (when dir [:dir (str dir)])))))
-             (catch Exception _ nil))]
-     (when (contains? ok-exits (:exit r))
-       (str (:out r))))))
-
-(defn- ^{:stratum 0} git-argv
-  "The argv for `git SUB ARGS` with the safe defaults every call gets."
-  [sub & args]
-  ;; --no-replace-objects: a push sends the original objects, so the scan
-  ;; must not read through a local refs/replace substitute.
-  (concat ["git" "--no-replace-objects" "--literal-pathspecs" "-c" "core.quotePath=false" sub]
-          (when (= "diff" sub)
-            ["--no-textconv" "--no-ext-diff" "--text" "--no-color" "--inter-hunk-context=0"])
-          args))
-
-(defn ^{:stratum 0} added-lines
-  "[line-number text] for each line a zero-context unified diff adds,
-   numbered in the new version. Public for tests."
-  [diff]
-  (loop [[line & more] (str/split-lines (str diff)) n nil acc []]
-    (cond
-      (nil? line) acc
-      (str/starts-with? line "@@") (recur more (some-> (re-find #"\+(\d+)" line) second parse-long) acc)
-      (and n (str/starts-with? line "+")) (recur more (inc n) (conj acc [n (subs line 1)]))
-      ;; A context line still occupies a line of the new version.
-      (and n (str/starts-with? line " ")) (recur more (inc n) acc)
-      :else (recur more n acc))))
+(def ^{:stratum 0} ^:private scratch-prefix
+  "Name prefix of the temp index file and directory the gate writes, so
+   either is recognisable as its own if left behind."
+  "mf-no-secrets-")
 
 (defn ^{:stratum 0} raw-changes
   "Entries of `git diff-tree -r -z` raw output:
@@ -115,14 +69,6 @@
   (for [[meta path] (partition 2 (remove empty? (str/split (str out) #"\u0000")))
         :let [[old-mode new-mode old new] (str/split (subs meta 1) #" ")]]
     {:path path :old-mode old-mode :new-mode new-mode :old old :new new}))
-
-(defn ^{:stratum 0} scratch-dir
-  "A fresh temp directory only its owner can enter, created with that
-   mode in one step: the base and artifact copies written into it can
-   hold the very credentials being looked for. Public for tests."
-  []
-  (fs/file (fs/create-temp-dir {:prefix "mf-no-secrets-"
-                                :posix-file-permissions "rwx------"})))
 
 (defn- ^{:stratum 0} every-line
   "The set of every line number of TEXT: a version that is new in full."
@@ -142,14 +88,6 @@
           :when hit]
       (cond-> {:file path :line hit} commit (assoc :commit commit)))))
 
-(defn- ^{:stratum 0} base-candidates
-  "Refs to try, in order, for the commit the change is measured from."
-  [artifact ctx]
-  (concat (:code/base-refs artifact)
-          (:execution/task-base-refs ctx)
-          (some-> (get-in ctx [:execution/environment-metadata :base-sha]) vector)
-          ["HEAD"]))
-
 (defn- ^{:stratum 0} artifact-versions
   "{path [content ...]} for what the artifact itself carries: its
    :code/files entries, and :content / :artifact/content under
@@ -168,20 +106,15 @@
   (str (or file (msg/t :no-secrets/artifact-content)) ":" line
        (when commit (str " (" (subs commit 0 (min 12 (count commit))) ")"))))
 
-;------------------------------------------------------------------------------ Layer 1
+(defn- ^{:stratum 0} outgoing-commits
+  "The commits between BASE and HEAD, oldest first, or nil when they
+   cannot be listed."
+  [ctx base]
+  (some->> (run ctx (git-argv "rev-list" "--reverse" (str base "..HEAD")))
+           str/split-lines
+           (remove str/blank?)))
 
-(defn- ^{:stratum 1} resolve-base
-  "The commit the first resolvable candidate names, or nil. A range
-   `A...B` (a resumed workspace) resolves to the merge base of A and B."
-  [ctx candidates]
-  (some (fn [ref]
-          (let [[a b] (str/split ref #"\.\.\." 2)]
-            (some-> (run ctx (if b
-                               (git-argv "merge-base" a b)
-                               (git-argv "rev-parse" "--verify" "--quiet" (str ref "^{commit}"))))
-                    str/trim
-                    not-empty)))
-        (filter #(and (string? %) (not (str/blank? %))) candidates)))
+;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} snapshot-tree
   "The tree a commit of the worktree would record: a copy of the real
@@ -191,7 +124,7 @@
    git dir and is removed."
   [ctx]
   (when-let [git-dir (some-> (run ctx (git-argv "rev-parse" "--absolute-git-dir")) str/trim not-empty)]
-    (let [index (str git-dir "/mf-no-secrets-" (random-uuid) ".index")
+    (let [index (str git-dir "/" scratch-prefix (random-uuid) ".index")
           real  (some-> (run ctx (git-argv "rev-parse" "--git-path" "index")) str/trim not-empty)
           with-index #(concat ["env" (str "GIT_INDEX_FILE=" index)] (apply git-argv %&))]
       (try
@@ -207,19 +140,8 @@
    at BASE (every line when there is no base blob), diffed on the host in
    the owner-only TMP."
   [ctx base path text tmp name]
-  (let [shown (when (and base path) (run ctx (git-argv "cat-file" "blob" (str base ":" path))))
-        old   (if shown (doto (io/file tmp (str name "-base")) (spit shown)) (io/file "/dev/null"))
-        new   (doto (io/file tmp name) (spit text))
-        diff  (run {} (git-argv "diff" "--no-index" "-U0" "--" (str old) (str new)) #{0 1})]
-    (findings path text (if diff (set (map first (added-lines diff))) (every-line text)) nil)))
-
-(defn- ^{:stratum 1} outgoing-commits
-  "The commits between BASE and HEAD, oldest first, or nil when they
-   cannot be listed."
-  [ctx base]
-  (some->> (run ctx (git-argv "rev-list" "--reverse" (str base "..HEAD")))
-           str/split-lines
-           (remove str/blank?)))
+  (let [diff (git-change/version-diff ctx base path text tmp name)]
+    (findings path text (if diff (set (map first (git-change/added-lines diff))) (every-line text)) nil)))
 
 (defn- ^{:stratum 1} changes-findings
   "{:findings [...] :unreadable? bool} for the changes between each
@@ -236,7 +158,7 @@
                                  (nil? content) nil
                                  (or (absent? old) (= "160000" old-mode)) (every-line content)
                                  :else (some->> (run ctx (git-argv "diff" "-U0" old new))
-                                                added-lines (map first) set))]
+                                                git-change/added-lines (map first) set))]
                    (cond
                      skip? acc
                      (nil? added) (assoc acc :unreadable? true)
@@ -255,9 +177,9 @@
    and shown to the agent, so quoting the secret would copy it into both."
   [artifact ctx]
   (let [inspect?  (or (get ctx :execution/execute-fn) (get ctx :execution/worktree-path))
-        base      (when inspect? (resolve-base ctx (base-candidates artifact ctx)))
+        base      (when inspect? (git-change/resolve-base ctx (concat (git-change/base-candidates artifact ctx) ["HEAD"])))
         snapshot  (when base (snapshot-tree ctx))
-        tmp       (scratch-dir)
+        tmp       (git-change/scratch-dir scratch-prefix)
         parts     (try
                     (cond-> [{:findings (vec (for [[i [path texts]] (map-indexed vector (artifact-versions artifact))
                                                    [j text] (map-indexed vector texts)
@@ -291,7 +213,6 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (added-lines "@@ -0,0 +1,2 @@\n+a\n+b\n")
   (check-no-secrets {:code/files [{:path "src/a.py"
                                    :content (str "api_key = '" "abcdefgh12" "'")}]} {})
   :leave-this-here)

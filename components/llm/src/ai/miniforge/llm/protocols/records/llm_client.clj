@@ -21,6 +21,7 @@
    CLIClient - LLM client using CLI backends (claude, cursor, etc.)"
   (:require
    [ai.miniforge.llm.interface.protocols.llm-client :as p]
+   [ai.miniforge.llm.messages :as msg]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
    [ai.miniforge.response.interface :as response]))
 
@@ -63,6 +64,13 @@
                 hooks, plugins, or skills). For single-turn completions
                 that need no tools; claude backend only. A claude call
                 outside an artifact session is isolated without it.
+   - :network-access? - Optional boolean; true lets the commands the
+                Codex agent runs in its workspace-write sandbox reach
+                the network (`-c sandbox_workspace_write.network_access=true`).
+                codex backend only: a non-boolean value, or true on
+                another backend, throws an :anomalies/incorrect anomaly.
+                The caller decides whether a run may have it; the CLI
+                allows it for local runs only.
    - :logger  - Optional logger for request/response logging
    - :exec-fn - Optional execution function override (for testing)
 
@@ -74,19 +82,28 @@
      (create-client {:backend :anthropic-api :model \"claude-opus-4-8\"})"
   ([] (create-client {}))
   ([{:keys [backend logger exec-fn stream-exec-fn model api-key num-ctx
-            base-url isolated?]
+            base-url isolated? network-access?]
      :or {backend :codex}}]
    (when-not (contains? impl/backends backend)
      (response/throw-anomaly! :anomalies/incorrect
                              (str "Unknown backend: " backend)
                              {:backend backend
                               :available (keys impl/backends)}))
+   (when-not (or (not network-access?)
+                 (and (true? network-access?) (= :codex backend)))
+     (response/throw-anomaly! :anomalies/incorrect
+                             (msg/t :client/network-access-invalid
+                                    {:value (pr-str network-access?)
+                                     :backend (pr-str backend)})
+                             {:backend backend
+                              :network-access? network-access?}))
    (->CLIClient (cond-> {:backend backend}
                   model (assoc :model model)
                   api-key (assoc :api-key api-key)
                   num-ctx (assoc :num-ctx num-ctx)
                   base-url (assoc :base-url base-url)
-                  isolated? (assoc :isolated? true))
+                  isolated? (assoc :isolated? true)
+                  network-access? (assoc :network-access? true))
                 logger
                 ;; Normalize so 1-arity user-supplied exec-fns keep
                 ;; working when the impl invokes 2-arity (the

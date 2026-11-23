@@ -3,6 +3,7 @@
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.workflow.deployment-config-integration-test
   (:require [ai.miniforge.event-stream.interface :as events]
+            [ai.miniforge.workflow.durable-stream-support :as durable]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase-deployment.interface]
             [ai.miniforge.phase-deployment.deploy-operations :as deploy-operations]
@@ -137,7 +138,7 @@
   (fs/with-temp-dir [dir {:prefix "deploy-policy-"}]
     (let [calls (atom {:dry-run 0 :apply 0})
           ctx {:execution/id (random-uuid)
-               :event-stream (events/create-event-stream {:sinks []})
+               :event-stream (durable/durable-event-stream)
                :execution/current-phase :deploy
                :execution/input {:kustomize-dir "/repo/k8s/overlays/prod" :namespace "prod"
                                  :app-label "api" :deployment-name "api"}
@@ -180,26 +181,26 @@
 (deftest ^{:stratum 2} provision-applies-only-a-preview-its-gates-passed
   (testing "a preview with changes passes the registered deployment gates and is applied"
     (let [[result applied] (provision {:steps [{:op "create" :type "gcp:storage/bucket:Bucket"}]}
-                                      (provision-context (events/create-event-stream {:sinks []})))]
+                                      (provision-context (durable/durable-event-stream)))]
       (is (= :allow (get-in result [:phase/decision-envelope :envelope/decision])))
       (is (= :completed (:status result)))
       (is (= 1 applied))))
   (testing "an empty preview fails :provision-validated: the denial is never applied"
-    (let [[result applied] (provision {} (provision-context (events/create-event-stream {:sinks []})))]
+    (let [[result applied] (provision {} (provision-context (durable/durable-event-stream)))]
       (is (= :deny (get-in result [:phase/decision-envelope :envelope/decision])))
       (is (= :failed (:status result)))
       (is (zero? applied))))
   (testing "a gate decision the stream rejects is never applied"
-    (let [[result applied] (with-redefs [events/publish! (partial decision-rejecting-publish events/publish!)]
+    (let [[result applied] (with-redefs [events/publish-persisted! (partial decision-rejecting-publish events/publish-persisted!)]
                              (provision {:steps [{:op "create" :type "gcp:storage/bucket:Bucket"}]}
-                                        (provision-context (events/create-event-stream {:sinks []}))))]
+                                        (provision-context (durable/durable-event-stream))))]
       (is (contains? result :phase/decision-unacknowledged))
       (is (= :failed (:status result)))
       (is (zero? applied)))))
 
 (deftest ^{:stratum 2} provision-halts-a-preview-that-destroys-production
   (let [parsed (:parsed (exec/with-parsed-json (assoc (command nil) :stdout destructive-preview-json)))
-        [result applied] (provision parsed (provision-context (events/create-event-stream {:sinks []})))
+        [result applied] (provision parsed (provision-context (durable/durable-event-stream)))
         gate-errors (mapcat :errors (:phase/gate-failures result))]
     (is (= "delete" (get-in parsed [:steps 0 :op])) "precondition: the real JSON parse")
     (is (= :deny (get-in result [:phase/decision-envelope :envelope/decision])))
@@ -225,3 +226,5 @@
       (let [[result calls] (deploy manifest)]
         (is (= {:dry-run 1 :apply 1} calls))
         (is (= :completed (:status result)))))))
+
+(clojure.test/use-fixtures :each durable/with-event-dir-cleanup)
