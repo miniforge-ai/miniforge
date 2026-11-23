@@ -12,6 +12,7 @@
         ai.miniforge/content-hash {:local/root "../../components/content-hash"}
         ai.miniforge/execution-grant {:local/root "../../components/execution-grant"}
         ai.miniforge/file-durability {:local/root "../../components/file-durability"}
+        ai.miniforge/resource-cleanup {:local/root "../../components/resource-cleanup"}
         ai.miniforge/kubernetes-target {:local/root "../../components/kubernetes-target"}
         ai.miniforge/messages {:local/root "../../components/messages"}
         ai.miniforge/tenancy {:local/root "../../components/tenancy"}}
