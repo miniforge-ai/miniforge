@@ -106,6 +106,9 @@ data.
     `:write-failure`. Only java.nio's own exceptions (a file exists, a write
     fails) are caught, at the write in `run-gate!`, and partial-file cleanup
     runs in `finally` rather than catch-and-rethrow.
+22. A Java map or set in scenario output is invalid: it prints in its own
+    iteration order, so equal maps built in a different order would hash
+    differently. Java lists keep their order and are accepted.
 
 From the schema PR's review: the verdict is `vocabulary/report-verdict`, so
 passing rows on a dirty tree, without a commit or without hashes give
@@ -123,7 +126,7 @@ passing rows on a dirty tree, without a commit or without hashes give
    every criterion unrun; an unreported criterion is incomplete; hashes repeat
    across runs; an invalid gate exits 2; an unwritable report exits 1 even
    when every criterion passed; the summary names the verdict and each row.
-3. Locally: 38 tests, 157 assertions, 0 failures. Over the PR budget, with
+3. Locally: 38 tests, 160 assertions, 0 failures. Over the PR budget, with
    the override and its reason in the PR description. Also covered: a pass on
    an unpinned build is incomplete and the summary says why; a short commit
    names the file.
@@ -139,5 +142,6 @@ Builds on the schema PR (#2472, merged). Shared harness for tracker #2421.
 ## Checklist
 
 - [x] A scenario failure is a report, never a pass.
-- [x] Fixture and config hashes repeat across runs.
+- [x] Fixture and config hashes repeat across runs for the same values,
+      number types included (`1` and `1N` are different evidence).
 - [x] Report written as EDN and JSON.

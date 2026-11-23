@@ -140,7 +140,7 @@
         (is (= 1 (qualification/exit-code result)))))))
 
 (deftest ^{:stratum 2} test-unusable-output-is-unrun
-  (testing "given malformed output, a fn or keys the hash would merge (1, 1.0) in the fixtures, a map keyed by a map in the config, a queue in the fixtures, a fn or a lone surrogate in observed state, or an undeclared criterion → invalid output, every criterion unrun"
+  (testing "given malformed output, a fn or keys the hash would merge (1, 1.0) in the fixtures, a map keyed by a map in the config, a queue or a Java map in the fixtures, a fn or a lone surrogate in observed state, or an undeclared criterion → invalid output, every criterion unrun"
     (doseq [scenario [(fn [] {:scenario/results all-pass})
                       (fn [] {:scenario/fixtures {:connector identity}
                               :scenario/config {}
@@ -148,6 +148,7 @@
                       (fn [] {:scenario/fixtures {1 :a 1.0 :b} :scenario/config {} :scenario/results all-pass})
                       (fn [] {:scenario/fixtures {} :scenario/config {{:a 1 :b 2} :x} :scenario/results all-pass})
                       (fn [] {:scenario/fixtures {:queue (conj clojure.lang.PersistentQueue/EMPTY 1)} :scenario/config {} :scenario/results all-pass})
+                      (fn [] {:scenario/fixtures {:m (java.util.LinkedHashMap. {:a 1})} :scenario/config {} :scenario/results all-pass})
                       (scenario-returning (assoc-in all-pass [1 :criterion/observed] {:sink identity}))
                       (scenario-returning (assoc-in all-pass [1 :criterion/observed] {:name "\uD800"}))
                       (scenario-returning (conj all-pass {:criterion/id :c/other

@@ -60,12 +60,15 @@
    `x`, and its plain EDN, the text the report holds, reads back too. A fn
    or other object fails, and so do two keys the canonical order merges
    (`1` and `1.0`), a lone surrogate, which UTF-8 makes `?`, a map keyed by
-   collections, whose key order the hash does not normalize, and a queue,
-   which prints unreadably."
+   collections or a Java map or set, whose order the hash does not
+   normalize, and a queue, which prints unreadably. The hash pins numbers
+   as printed, so `1` and `1N` are different evidence."
   [x]
   (try+
    (let [text (content-hash/canonical-edn x)]
-     (and (not-any? #(and (map? %) (some coll? (keys %))) (tree-seq coll? seq x))
+     (and (not-any? #(or (and (map? %) (some coll? (keys %)))
+                         (and (or (instance? java.util.Map %) (instance? java.util.Set %)) (not (coll? %))))
+                    (tree-seq coll? seq x))
           (= text (String. (.getBytes ^String text "UTF-8") "UTF-8"))
           (= x (edn/read-string text) (edn/read-string (pr-str x)))))
    (catch Exception _
