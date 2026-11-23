@@ -30,7 +30,7 @@ code like this.
 No test changes. This is a pure deletion of a function with no callers.
 A search of `components`, `bases`, `projects`, `development` and `tasks`
 finds no reference to the name after the change. The existing
-`workaround-detector-test` namespace still loads and passes.
+`workaround-detector-test` namespace is expected to be unaffected; CI runs it.
 
 ## Deployment plan
 
