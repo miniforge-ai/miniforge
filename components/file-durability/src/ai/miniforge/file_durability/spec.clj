@@ -2,7 +2,8 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.file-durability.spec
-  (:require [ai.miniforge.file-durability.peer-spec :as peer]))
+  (:require [ai.miniforge.file-durability.peer-spec :as peer]
+            [ai.miniforge.file-durability.qualification-spec :as qualification]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -21,6 +22,6 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(def ^{:stratum 2} QualificationArguments [:tuple DirectoryFile :keyword peer/Peer])
+(def ^{:stratum 2} QualificationArguments [:tuple DirectoryFile :keyword peer/Peer qualification/Limits])
 
 (def ^{:stratum 2} AttachedDirectoryArguments [:tuple DirectoryFile DirectoryFile])

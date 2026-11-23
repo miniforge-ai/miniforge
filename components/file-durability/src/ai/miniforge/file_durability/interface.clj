@@ -50,11 +50,18 @@
 (defn ^{:stratum 0} qualify-local-root!
   "Return an opaque, process-local root or an anomaly. Call from trusted host
    configuration with the other installed runtime and its absolute classpath.
+   Caller supplies finite pin limits and must release the handle after use.
    The host must separately establish persistence of the configured store."
-  [root profile peer]
-  (if (m/validate spec/QualificationArguments [root profile peer])
-    (core/qualify-local-root! root profile peer)
+  [root profile peer limits]
+  (if (m/validate spec/QualificationArguments [root profile peer limits])
+    (core/qualify-local-root! root profile peer limits)
     (boundary/invalid-input :qualify-local-root)))
+
+(defn ^{:stratum 0} release-qualified-root!
+  "Close the native inode pin idempotently; return :qualified-root-released or anomaly.
+   Released handles cannot resolve. The host must not release a handle still in use."
+  [root]
+  (core/release-qualified-root! root))
 
 (defn ^{:stratum 0} resolve-qualified-root
   "Return the unchanged protected root as a Path, or an anomaly."

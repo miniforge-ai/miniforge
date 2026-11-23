@@ -41,6 +41,11 @@
                        {:durability/path (str path)
                         :storage/profile profile}))
 
+(defn ^{:stratum 1} released-root [path]
+  (anomaly/sub-anomaly :unavailable :anomalies.file-durability/released-root
+                       (t :file/released-root)
+                       {:durability/path (str path)}))
+
 (defn- ^{:stratum 1} failure [operation file]
   (anomaly/anomaly :fault (t :file/io-failed)
                    {:durability/operation operation

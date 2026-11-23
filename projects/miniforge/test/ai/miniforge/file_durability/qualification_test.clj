@@ -13,10 +13,12 @@
             [ai.miniforge.file-durability.publication-support :as support]
             [ai.miniforge.file-durability.qualification-fixtures :as fixtures]
             [babashka.fs :as fs]
-            [clojure.test :refer [deftest is]])
+            [clojure.test :refer [deftest is use-fixtures]])
   (:import [java.io File]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(use-fixtures :each fixtures/with-lifetimes!)
 
 (defn- ^{:stratum 0} reject-probe! [& _] (throw (AssertionError.)))
 
@@ -41,7 +43,7 @@
   (with-redefs [store/observe fixtures/candidate
                 publication/check! (constantly :publication-verified)
                 locks/check! (constantly false)]
-    (is (anomaly/anomaly? (durability/qualify-local-root! root fixtures/profile (fixtures/peer root))))))
+    (is (anomaly/anomaly? (durability/qualify-local-root! root fixtures/profile (fixtures/peer root) fixtures/limits)))))
 
 (defn- ^{:stratum 0} verify-forged-handle! [root]
   (is (= :invalid-input (:anomaly/type (durability/resolve-qualified-root (fixtures/peer root))))))
@@ -57,7 +59,7 @@
                           [:peer/classpath (str root File/pathSeparator)]]]
     (is (= :invalid-input
            (:anomaly/type (durability/qualify-local-root!
-                           root fixtures/profile (assoc (fixtures/peer root) field unsafe)))))))
+                           root fixtures/profile (assoc (fixtures/peer root) field unsafe) fixtures/limits))))))
 
 (defn- ^{:stratum 0} verify-access-controls! [root]
   (when (support/posix? root)
@@ -92,11 +94,11 @@
       (durability/prepare-protected-directory! child)
       (fs/create-sym-link alias child)
       (with-redefs [store/observers {[fixtures/profile (System/getProperty "os.name")] reject-probe!}]
-        (is (anomaly/anomaly? (durability/qualify-local-root! alias fixtures/profile (fixtures/peer parent))))))))
+        (is (anomaly/anomaly? (durability/qualify-local-root! alias fixtures/profile (fixtures/peer parent) fixtures/limits)))))))
 
 (defn- ^{:stratum 1} verify-unsupported-store! [root]
   (with-redefs [publication/check! reject-probe! locks/check! reject-probe!]
-    (let [result (durability/qualify-local-root! root :unknown (fixtures/peer root))]
+    (let [result (durability/qualify-local-root! root :unknown (fixtures/peer root) fixtures/limits)]
       (is (= :unavailable (:anomaly/type result)))
       (is (empty? (fs/list-dir root))))))
 
