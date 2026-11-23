@@ -38,9 +38,14 @@ process exit code. Provider output, environment values and exception
 messages are never copied into these diagnostics. Status hints follow
 [kubectl's error formatter](https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/util/helpers.go#L150-L244).
 
-Separate the existing transport polling and resource projection into
-bounded namespaces. Preserve running and terminal readiness outcomes.
-Put relocated operator messages in the runtime catalog.
+Compose with the merged readiness boundary without changing running or
+terminal outcomes. Invalid operator budgets produce an unavailable
+executor before provider access. Keep settings schemas separate from the
+loader, and use named provider callbacks and response factories in tests.
+The default image reference is fully qualified for runtime consistency.
+The public constructor contract now lives on the component interface;
+moving that documentation changes no behavior. Incoming PR documents also
+retain prose-only formatting corrections made by the integration gates.
 
 ## Testing plan
 
@@ -56,23 +61,32 @@ polling interval longer than the total budget. Refuse a late Running
 reply and preserve cancellation both before and during polling.
 
 Both JVM products, Babashka source, and the fresh package passed the
-focused packet: 23 tests / 132 assertions each. The old acquisition path failed four receipt
-assertions. Ignoring an override failed its budget assertion; dropping the
-diagnostic data failed eight assertions. Neither introduced runtime
-errors. Tests also confirm that an interrupted submission preserves the
-interrupt flag. Strict lint, namespace depths, Polylith, and Babashka
-classpaths passed.
+focused packet: 23 tests / 136 assertions each. Dropping the retained UID
+and creation version fails two receipt assertions. Ignoring a task override
+fails its budget assertion. Both controls run on JVM and native Babashka,
+with no runtime errors. Cancellation tests capture the interrupt flag
+before reporting assertions and refuse observation after an interrupted
+successful submission. Strict lint, actual namespace depths, Polylith,
+and normal pre-commit checks pass.
 
 ## Deployment plan
 
 No deployment action or live Kubernetes tests. This change does not
 verify Pod ownership, front-door authority, or successful containment.
-Ordinary release and workload dispatch are unchanged.
+Ordinary release and name-based readiness-failure cleanup are unchanged.
+The creation timeout bounds HTTP requests, not the local CLI process;
+local creation-process containment remains separate work.
 
 ## Related issues/PRs
 
 PR #2528 defines full stop; PR #2534 defines shared controller identity.
-PR #2542 supplies the bounded command prerequisite and lands first.
+PRs #2542 and #2550 supply the merged bounded-readiness prerequisites.
+
+## Checklist
+
+- [x] Four runtime modes and targeted negative controls pass
+- [x] Owner adversarial and applicable standards reviews completed
+- [ ] Current-head CI and full Copilot review pass before merge
 
 [Pinned standards guide](https://github.com/miniforge-ai/miniforge-standards/blob/72f451d3d7e0ad82079610bec61be0399a2b7117/agents.md)
 and [catalog](https://github.com/miniforge-ai/miniforge-standards/blob/72f451d3d7e0ad82079610bec61be0399a2b7117/index.mdc).

@@ -273,18 +273,7 @@
 ;; Factory
 ;; ============================================================================
 (defn ^{:stratum 2} create-kubernetes-executor
-  "Create a Kubernetes executor.
-
-   Config:
-   - :namespace - K8s namespace (default: 'default')
-   - :image - Container image (default: docker.io/library/alpine:latest)
-   - :kubectl-path - Path to kubectl binary
-   - :resources/timeout-seconds - Capsule lifetime, overridable per task
-   - :kubernetes/creation-request-timeout-ms - Provider HTTP request budget
-   - :kubernetes/pod-ready-timeout-ms - Total local readiness deadline
-   - :kubernetes/pod-ready-poll-interval-ms - Readiness polling interval
-
-   Invalid settings produce an unavailable executor; no provider I/O occurs."
+  "Keep rejected budget settings in the registry as a non-dispatching executor."
   [config]
   (let [configured (settings/configure config)]
     (if (result/err? configured)
