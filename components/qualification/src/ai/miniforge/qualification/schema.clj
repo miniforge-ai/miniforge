@@ -54,22 +54,45 @@
    [:error/kind (into [:enum] vocab/failure-kinds)]
    [:error/message vocab/NonBlank]])
 
+(defn- ^{:stratum 0} unique-criterion-ids?
+  "True unless `criteria` is a non-empty sequence that repeats a criterion
+   id. Another shape is left for the map schema to report."
+  [criteria]
+  (or (not (and (sequential? criteria) (seq criteria)))
+      (apply distinct? (map :criterion/id criteria))))
+
+(defn- ^{:stratum 0} failure-leaves-rows-unrun?
+  "True unless `report` names a failure beside a row that is not unrun."
+  [report]
+  (let [criteria (:report/criteria report)]
+    (or (nil? (:report/failure report))
+        (not (sequential? criteria))
+        (every? #(= :status/unrun (:criterion/status %)) criteria))))
+
+(defn- ^{:stratum 0} report-pinned?
+  [report]
+  (vocab/pinned? (:report/build report)
+                 (:report/fixture-hash report)
+                 (:report/config-hash report)))
+
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^{:stratum 1} Gate
-  "A gate: the criteria a qualification run must report on. Criterion ids
-   are unique, so each result counts for one declared criterion only."
-  [:and
-   [:map {:closed true}
-    [:gate/id :qualified-keyword]
-    [:gate/title vocab/NonBlank]
-    [:gate/issue {:optional true} pos-int?]
-    [:gate/criteria [:vector {:min 1} Criterion]]]
-   [:fn {:error/message "criterion ids must be unique"}
-    (fn [gate]
-      (let [criteria (:gate/criteria gate)]
-        (or (not (and (sequential? criteria) (seq criteria)))
-            (apply distinct? (map :criterion/id criteria)))))]])
+(defn- ^{:stratum 1} gate-criterion-ids-unique?
+  [gate]
+  (unique-criterion-ids? (:gate/criteria gate)))
+
+(defn- ^{:stratum 1} report-criterion-ids-unique?
+  [report]
+  (unique-criterion-ids? (:report/criteria report)))
+
+(defn- ^{:stratum 1} stated-verdict-matches-rows?
+  "True when `report` states the verdict its statuses and build give."
+  [report]
+  (let [criteria (:report/criteria report)]
+    (or (not (sequential? criteria))
+        (= (:report/verdict report)
+           (vocab/report-verdict (map :criterion/status criteria)
+                                 (report-pinned? report))))))
 
 (def ^{:stratum 1} CriterionResult
   "What a scenario reports for one criterion."
@@ -81,6 +104,17 @@
         criterion-result-entries))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} Gate
+  "A gate: the criteria a qualification run must report on. Criterion ids
+   are unique, so each result counts for one declared criterion only."
+  [:and
+   [:map {:closed true}
+    [:gate/id :qualified-keyword]
+    [:gate/title vocab/NonBlank]
+    [:gate/issue {:optional true} pos-int?]
+    [:gate/criteria [:vector {:min 1} Criterion]]]
+   [:fn {:error/message "criterion ids must be unique"} gate-criterion-ids-unique?]])
 
 (def ^{:stratum 2} ScenarioOutput
   "What a scenario fn returns. Fixtures and config are data, so the report
@@ -112,26 +146,10 @@
     [:report/criteria [:vector {:min 1} Row]]
     [:report/verdict (into [:enum] vocab/verdicts)]
     [:report/failure {:optional true} Failure]]
-   [:fn {:error/message "criterion ids must be unique"}
-    (fn [report]
-      (let [criteria (:report/criteria report)]
-        (or (not (and (sequential? criteria) (seq criteria)))
-            (apply distinct? (map :criterion/id criteria)))))]
-   [:fn {:error/message "a report with a failure has only unrun rows"}
-    (fn [report]
-      (let [criteria (:report/criteria report)]
-        (or (nil? (:report/failure report))
-            (not (sequential? criteria))
-            (every? #(= :status/unrun (:criterion/status %)) criteria))))]
+   [:fn {:error/message "criterion ids must be unique"} report-criterion-ids-unique?]
+   [:fn {:error/message "a report with a failure has only unrun rows"} failure-leaves-rows-unrun?]
    [:fn {:error/message "verdict must match the criteria statuses and the build"}
-    (fn [report]
-      (let [criteria (:report/criteria report)]
-        (or (not (sequential? criteria))
-            (= (:report/verdict report)
-               (vocab/report-verdict (map :criterion/status criteria)
-                                     (vocab/pinned? (:report/build report)
-                                                    (:report/fixture-hash report)
-                                                    (:report/config-hash report)))))))]])
+    stated-verdict-matches-rows?]])
 
 (comment
   (require '[malli.core :as m])
