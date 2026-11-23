@@ -7,20 +7,17 @@
             [ai.miniforge.artifact.interface :as artifact]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.phase-opsv.event-delivery :as delivery]
+            [ai.miniforge.phase-opsv.exception-policy :as exception-policy]
             [ai.miniforge.phase-opsv.messages :as msg]
-            [ai.miniforge.phase-opsv.runtime-context :as context]))
+            [ai.miniforge.phase-opsv.runtime-context :as context]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} mismatch [expected receipt]
-  (let [deviation {:expected expected
-                   :observed (:environment-fingerprint receipt)
-                   :verification/id (:verification/id receipt)}
-        drift {:opsv/signal :environment-fingerprint
-               :opsv/deviation deviation
-               :opsv/suggested-rerun? true}]
-    (anomaly/anomaly :conflict (msg/ts :verification/environment-mismatch)
-                     {:opsv/environment-drift drift})))
+(defn- ^{:stratum 0} drift-data [deviation]
+  {:opsv/signal :environment-fingerprint
+   :opsv/deviation deviation
+   :opsv/suggested-rerun? true})
 
 (defn- ^{:stratum 0} publish! [ctx stream drift]
   (let [portable (artifact/content-digest drift)
@@ -32,14 +29,26 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} comparison-mismatch [failure receipt]
+  (assoc-in failure [:anomaly/data :opsv/environment-drift]
+            (drift-data (assoc (:anomaly/data failure) :verification/id (:verification/id receipt)))))
+
+(defn ^{:stratum 1} mismatch [expected receipt]
+  (let [deviation {:expected expected
+                   :observed (:environment-fingerprint receipt)
+                   :verification/id (:verification/id receipt)}
+        drift (drift-data deviation)]
+    (anomaly/anomaly :conflict (msg/ts :verification/environment-mismatch)
+                     {:opsv/environment-drift drift})))
+
 (defn- ^{:stratum 1} publish-with-exception-handling! [ctx drift]
-  ;; No slingshot dependency; preserve cancellation and fatal JVM outcomes.
-  (try
+  ;; Preserve cancellation and fatal JVM outcomes at the adapter boundary.
+  (try+
     (when-let [stream (context/stream ctx)] (publish! ctx stream drift))
     (catch InterruptedException interrupted
       (.interrupt (Thread/currentThread))
       (throw interrupted))
-    (catch Exception _
+    (catch exception-policy/nonfatal? _
       (anomaly/anomaly :unavailable (msg/ts :event/publication-failed) {}))))
 
 ;------------------------------------------------------------------------------ Layer 2

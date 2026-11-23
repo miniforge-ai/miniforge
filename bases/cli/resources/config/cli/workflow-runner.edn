@@ -8,5 +8,11 @@
    ;; between failed attempts before the preflight fails closed.
    :attempts 3
    :retry-pause-ms 2000
+   ;; The probe needs no tools: run it off the operator's Claude Code
+   ;; setup (no built-in tools, settings, hooks, plugins, skills, or host
+   ;; MCP servers), as the llm client runs every call outside an artifact
+   ;; session.
    :claude-args ["--output-format" "json"
-                 "--max-turns" "1"]}}}
+                 "--max-turns" "1"
+                 "--tools" "" "--setting-sources" "" "--disable-slash-commands"
+                 "--strict-mcp-config"]}}}

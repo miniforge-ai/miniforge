@@ -112,6 +112,7 @@
   {:workflow/started    :public
    :workflow/completed  :public
    :workflow/failed     :public
+   :workflow/cancelled  :public
    :workflow/phase-started   :public
    :workflow/phase-completed :public
    :workflow/milestone-reached :public

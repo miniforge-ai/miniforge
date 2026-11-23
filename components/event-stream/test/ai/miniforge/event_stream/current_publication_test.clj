@@ -7,6 +7,7 @@
             [ai.miniforge.event-stream.commit-test-support :as support]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.event-stream.publication-store :as store]
+            [ai.miniforge.event-stream.snowflake :as snowflake]
             [ai.miniforge.response.interface :as response]
             [clojure.test :refer [deftest is]]
             [slingshot.slingshot :refer [try+]]))
@@ -44,6 +45,17 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} profile-query-is-not-an-availability-or-authority-check
+  (let [stream (create (store/volatile-store) {})]
+    (is (true? (events/current-event-stream? stream)))
+    (is (= "fixture-journal" (events/current-journal-directory stream)))
+    (events/close-current-event-stream! stream)
+    (is (true? (events/current-event-stream? stream)))
+    (is (= "fixture-journal" (events/current-journal-directory stream)))
+    (doseq [value [nil {} "invalid" (atom nil) (atom []) (atom (sorted-map "unrelated" true))
+                   (events/create-event-stream {:sinks []})]]
+      (is (false? (events/current-event-stream? value))))))
+
 (deftest ^{:stratum 1} creation-requires-explicit-durable-ownership
   (let [calls (atom [])]
     (with-redefs [store/durable-store (partial record! calls)]
@@ -51,6 +63,37 @@
                     {:journal-directory "fixture" :config {}}]]
         (is (anomaly/anomaly? (events/create-current-event-stream opts))))
       (is (empty? @calls)))))
+
+(deftest ^{:stratum 1} profile-queries-refuse-malformed-runtime-state
+  (let [stream (create (store/volatile-store) {})
+        legacy (events/create-event-stream {:sinks []})]
+    (is (true? (events/legacy-event-stream? legacy)))
+    (is (false? (events/legacy-event-stream? stream)))
+    (doseq [path [[:publication :store :commit!] [:publication :store :close!]
+                  [:publication :pending] [:publication :seen] [:sinks] [:events]]]
+      (is (false? (events/current-event-stream? (atom (assoc-in @stream path nil))))))
+    (doseq [value [42 "invalid" (atom {}) (atom {:publication {}})]]
+      (is (false? (events/current-event-stream? value)))
+      (is (false? (events/legacy-event-stream? value))))))
+
+(deftest ^{:stratum 1} generator-contract-is-checked-without-consuming-an-id
+  (let [calls (atom [])
+        generator (snowflake/create-generator {:lease {:worker-id 0} :now-fn #(record! calls :clock)})
+        failure (anomaly/anomaly :unavailable "fixture generator unavailable" {})
+        stream (create (store/volatile-store) {})
+        legacy (events/create-event-stream {:sinks []})]
+    (doseq [value [nil generator failure (response/make-anomaly :anomalies/unavailable "fixture" {})]]
+      (is (events/current-event-stream? (create (store/volatile-store) {:snowflake-generator value})))
+      (is (events/legacy-event-stream? (atom (assoc @legacy :snowflake-generator value)))))
+    (with-redefs [store/durable-store #(record! calls %)]
+      (doseq [value [{} (assoc generator :now-fn nil) (assoc generator :worker-id -1)
+                     (assoc generator :state {}) (assoc generator :state (atom {}))
+                     (assoc generator :state (atom (assoc @(:state generator) :last-seq nil)))]]
+        (is (anomaly/anomaly? (events/create-current-event-stream
+                              {:journal-directory "fixture" :snowflake-generator value})))
+        (is (false? (events/current-event-stream? (atom (assoc @stream :snowflake-generator value)))))
+        (is (false? (events/legacy-event-stream? (atom (assoc @legacy :snowflake-generator value)))))))
+    (is (empty? @calls))))
 
 (deftest ^{:stratum 1} admission-precedes-storage-and-commit-precedes-listeners
   (let [committed (atom [])

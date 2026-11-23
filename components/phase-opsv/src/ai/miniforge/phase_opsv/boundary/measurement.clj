@@ -1,0 +1,53 @@
+;; Title: Miniforge.ai
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;; Licensed under the Apache License, Version 2.0.
+(ns ai.miniforge.phase-opsv.boundary.measurement
+  "Prometheus response validation and numeric decoding at the external boundary."
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.phase-opsv.measurement-schema :as schema]
+            [ai.miniforge.phase-opsv.measurement-window :as window]
+            [ai.miniforge.phase-opsv.messages :as msg]
+            [malli.core :as m]
+            [slingshot.slingshot :refer [try+]]))
+
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} within-size? [request response]
+  (let [series (get-in response ["data" "result"])
+        values (get-in response ["data" "result" 0 "values"])]
+    (and (vector? series) (= 1 (count series))
+         (vector? values) (<= (count values) (:measurement/max-samples request)))))
+
+(defn ^{:stratum 0} invalid-request []
+  (anomaly/anomaly :invalid-input (msg/ts :measurement/invalid-request) {}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} request-failure
+  "Admit the declared window once, before external acquisition or decoding."
+  [request]
+  (when-not (and (m/validate schema/WindowRequest request) (window/bounded? request))
+    (invalid-request)))
+
+(defn ^{:stratum 1} decode-response
+  "Admit external response data for an already admitted request."
+  [request response]
+  (cond
+    (not (within-size? request response)) (window/invalid-response)
+    (not (m/validate schema/RangeResponse response)) (window/invalid-response)
+    :else (try+ (window/decode request response)
+            (catch Exception _ (window/invalid-response)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} decode-window
+  "Decode a parsed Prometheus response against a predeclared bounded grid.
+   Response fields and labels retain native JSON string keys. Require one
+   complete float series without API warnings; return observations, never
+   a verification verdict or execution authority."
+  [request response]
+  (if-let [failure (request-failure request)]
+    failure
+    (decode-response request response)))
+
+(comment ::external-range-response)

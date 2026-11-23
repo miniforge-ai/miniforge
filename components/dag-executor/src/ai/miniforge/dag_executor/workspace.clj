@@ -37,6 +37,15 @@
   [branch]
   (and (string? branch) (not (str/blank? branch)) (not (str/starts-with? branch "-"))))
 
+(defn- ^{:stratum 0} fetch-cmd
+  "git fetch of `branch` from `remote`. A fetch from a URL updates no
+   remote-tracking ref by itself, so the refspec writes
+   refs/remotes/origin/<branch> for the checkout that follows."
+  [remote branch]
+  (if (= "origin" remote)
+    ["git" "fetch" "origin" branch]
+    ["git" "fetch" remote (str "+refs/heads/" branch ":refs/remotes/origin/" branch)]))
+
 (defn- ^{:stratum 0} failed-step
   "Why the step failed, or nil: the error message when exec-fn returned
    a result/err, the stderr when the exit code is non-zero. A nil step
@@ -58,36 +67,72 @@
    - exec-fn: (fn [cmd] -> result-map) — executes a command in the environment;
               cmd may be a string (passed to sh -c) or a vector (exec'd directly,
               no shell — preferred for user-supplied values to avoid injection)
-   - opts: {:branch string, :message string}
+   - opts: {:branch string, :message string, :remote string, :push? bool}
+     :remote is the remote name or URL to push to (default \"origin\").
+     :push? false commits without pushing (default true). A later call
+     with :push? true pushes whenever the remote's `refs/heads/<branch>`
+     is not HEAD -- a held commit, or a branch never created there --
+     even when the worktree is clean.
 
-   Returns result monad with {:persisted? bool :commit-sha string :branch string}.
+   Returns result monad with {:persisted? bool :pushed? bool :commit-sha
+   string :branch string}.
    Every git step's exit code is checked: a failed commit or push that
    still reported :persisted? true was a silent loss of work."
-  [exec-fn {:keys [branch message] :or {branch "task/unknown" message "phase checkpoint"}}]
+  [exec-fn {:keys [branch message remote push?]
+            :or {branch "task/unknown" message "phase checkpoint" remote "origin" push? true}}]
   (if (not (safe-branch? branch))
     (result/err :invalid-branch (str "Branch must be a non-empty string not starting with '-': " (pr-str branch)))
     (try
       (let [add-r (exec-fn "git add -A")
             status-r (when-not (failed-step add-r "") (exec-fn "git status --porcelain"))
-            has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))]
+            has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))
+            ;; Before any push, ask the remote where the destination branch is
+            ;; (empty when it does not exist). A clean worktree still owes a
+            ;; push when that is not HEAD: a commit an earlier :push? false call
+            ;; held back, or a branch never created. The remote, not the
+            ;; remote-tracking refs: HEAD reachable from another branch (the
+            ;; base, a parent task) says nothing about this one.
+            remote-r (when (and push? (not (failed-step status-r "")))
+                       (exec-fn ["git" "ls-remote" remote (str "refs/heads/" branch)]))
+            remote-sha (or (first (str/split (str/trim (get-in remote-r [:data :stdout] "")) #"\s+")) "")
+            head-r (when (and remote-r (not has-changes?) (not (failed-step remote-r "")))
+                     (exec-fn "git rev-parse HEAD"))
+            pending-r (or (when (failed-step remote-r "") remote-r) head-r)
+            pending? (and head-r (not (failed-step head-r ""))
+                          (not= remote-sha (str/trim (get-in head-r [:data :stdout] ""))))]
         (cond
           (failed-step add-r "") (result/err :persist-add-failed (failed-step add-r "git add failed"))
           (failed-step status-r "") (result/err :persist-status-failed (failed-step status-r "git status failed"))
-          (not has-changes?)
+          ;; Not knowing whether a held commit is owed is not "nothing to do".
+          (failed-step pending-r "") (result/err :persist-pending-failed (failed-step pending-r "git ls-remote failed"))
+          (and (not has-changes?) (not pending?))
           (result/ok {:persisted? false :commit-sha nil :no-changes? true :branch branch})
           :else
           ;; Unsigned: a scratch-worktree commit must not depend on the
           ;; operator's signing agent (see worktree tier commit-staged!).
-          (let [commit-r (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)])
-                push-r (when-not (failed-step commit-r "")
-                         (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"]))
-                sha-r (when (and push-r (not (failed-step push-r "")))
+          (let [commit-r (when has-changes?
+                           (exec-fn ["git" "-c" "commit.gpgsign=false" "commit" "-m" (str message)]))
+                ;; Only a fresh checkpoint commit may replace the remote branch
+                ;; (a re-acquired capsule re-clones from the base while an
+                ;; earlier attempt's branch exists), and only from the state
+                ;; just read: --force-with-lease on that SHA, empty meaning
+                ;; "must not exist". With nothing new to commit the push is
+                ;; plain: a missing branch or a local-ahead history goes up,
+                ;; while a remote that moved ahead or diverged rejects it.
+                push-r (when (and push? (not (failed-step commit-r "")))
+                         (exec-fn (if has-changes?
+                                    ["git" "push" (str "--force-with-lease=" branch ":" remote-sha)
+                                     remote (str "HEAD:" branch)]
+                                    ["git" "push" remote (str "HEAD:" branch)])))
+                sha-r (when (and (not (failed-step commit-r ""))
+                                 (or (not push?) (and push-r (not (failed-step push-r "")))))
                         (exec-fn "git rev-parse HEAD"))]
             (cond
               (failed-step commit-r "") (result/err :persist-commit-failed (failed-step commit-r "git commit failed"))
               (failed-step push-r "")   (result/err :persist-push-failed (failed-step push-r "git push failed"))
               (failed-step sha-r "")    (result/err :persist-sha-failed (failed-step sha-r "git rev-parse failed"))
               :else (result/ok {:persisted? true
+                                :pushed? (boolean push?)
                                 :commit-sha (str/trim (get-in sha-r [:data :stdout] ""))
                                 :branch branch})))))
       (catch Exception e
@@ -100,14 +145,15 @@
    - exec-fn: (fn [cmd] -> result-map) — executes a command in the environment;
               cmd may be a string (passed to sh -c) or a vector (exec'd directly,
               no shell — preferred for user-supplied values to avoid injection)
-   - opts: {:branch string}
+   - opts: {:branch string, :remote string}; :remote is the remote name or
+           URL to fetch from (default \"origin\")
 
    Returns result monad with {:restored? bool :commit-sha string :branch string}"
-  [exec-fn {:keys [branch] :or {branch "task/unknown"}}]
+  [exec-fn {:keys [branch remote] :or {branch "task/unknown" remote "origin"}}]
   (if (not (safe-branch? branch))
     (result/err :invalid-branch (str "Branch must be a non-empty string not starting with '-': " (pr-str branch)))
     (try
-      (let [fetch-r (exec-fn ["git" "fetch" "origin" branch])]
+      (let [fetch-r (exec-fn (fetch-cmd remote branch))]
         (if-let [e (failed-step fetch-r "git fetch failed")]
           (result/err :restore-fetch-failed e)
           (let [co-r (exec-fn ["git" "checkout" branch])]

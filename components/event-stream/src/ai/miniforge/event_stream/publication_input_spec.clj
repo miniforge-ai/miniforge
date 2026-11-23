@@ -2,9 +2,14 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0.
 (ns ai.miniforge.event-stream.publication-input-spec
-  "Sequence-free admission contracts for the reconciled chain and supervisory profiles."
+  "Sequence-free admission contracts for reconciled current-write profiles."
   (:require [ai.miniforge.event-stream.chain-spec :as chain]
+            [ai.miniforge.event-stream.gate-draft-spec :as gate]
+            [ai.miniforge.event-stream.heartbeat-draft-spec :as heartbeat]
+            [ai.miniforge.event-stream.opsv-draft-spec :as opsv]
+            [ai.miniforge.event-stream.recovery-draft-spec :as recovery]
             [ai.miniforge.event-stream.supervisory-spec :as supervisory]
+            [ai.miniforge.event-stream.workflow-draft-spec :as workflow]
             [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -42,7 +47,8 @@
 (def ^{:stratum 1} CurrentDraft
   "Only these reconciled profiles are supported; no generic envelope fallback."
   [:and EnvelopeDraft
-   [:or chain/Payload supervisory/InterventionPayload SpecDraft]])
+   [:or chain/Payload supervisory/InterventionPayload SpecDraft opsv/Draft workflow/Draft gate/Draft
+    recovery/Draft heartbeat/Draft]])
 
 (comment
   CurrentDraft)

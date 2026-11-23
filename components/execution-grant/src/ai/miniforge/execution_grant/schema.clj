@@ -39,7 +39,10 @@
    :effect/deploy
    :effect/spend
    :effect/push
-   :effect/pr-create])
+   :effect/pr-create
+   :effect/comment
+   :effect/load-test
+   :effect/provision])
 
 (def ^{:stratum 0} constraint-axes
   "Ceiling axes a grant may carry. Every axis is an upper bound: a

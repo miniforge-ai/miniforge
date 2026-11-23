@@ -30,7 +30,7 @@
    - protocols/executor.clj - Protocol definition
    - protocols/impl/runtime/oci_cli.clj - OCI-CLI implementation (Docker / Podman)
    - protocols/impl/kubernetes.clj - Kubernetes implementation
-   - protocols/impl/worktree.clj - Worktree fallback implementation
+   - protocols/impl/worktree/executor.clj - Worktree fallback implementation
    - protocols/impl/host_guarded.clj - Host-git invariant wrapper"
   (:require
    [ai.miniforge.dag-executor.result :as result]
@@ -38,9 +38,11 @@
    [ai.miniforge.dag-executor.protocols.impl.host-guarded :as host-guarded]
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli.image :as oci-img]
    [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes :as k8s]
-   [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]))
+   [ai.miniforge.dag-executor.protocols.impl.unavailable :as unavailable]
+   [ai.miniforge.dag-executor.protocols.impl.worktree.executor :as worktree-executor]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -98,13 +100,29 @@
    - :network - network to attach to"
   oci-cli/create-oci-cli-executor)
 
-(def ^{:stratum 0} create-kubernetes-executor
-  "Create a Kubernetes executor.
+(defn ^{:stratum 0} create-selected-oci-executor
+  "Create an OCI-CLI executor on the runtime `select-runtime` picks for
+   `config` (N11-delta §3): an explicit :runtime-kind wins, otherwise the
+   auto-probe winner (Podman first, then Docker). The legacy :docker-path
+   alias names a Docker binary, so it counts as an explicit :docker.
 
-   Config:
-   - :namespace - K8s namespace (default: 'default')
-   - :image - Container image for tasks (default: alpine:latest)
-   - :kubectl-path - Path to kubectl binary"
+   When selection fails (no runtime answers, an explicit kind is down, or
+   an :executable override comes without a kind) the slot gets an
+   UnavailableExecutor carrying the selection error: `available?` reports
+   it and `select-executor` skips the slot. A rejected configuration never
+   becomes a usable executor, and nothing switches runtime silently."
+  [config]
+  (let [config    (cond-> config
+                    (and (:docker-path config) (nil? (:runtime-kind config)))
+                    (assoc :runtime-kind :docker))
+        selection (selector/select-runtime config)]
+    (if (result/ok? selection)
+      (oci-cli/create-oci-cli-executor
+       (assoc config :runtime-kind (get-in selection [:data :kind])))
+      (unavailable/->UnavailableExecutor (:error selection)))))
+
+(def ^{:stratum 0} create-kubernetes-executor
+  "Registry constructor; invalid budget settings remain an unavailable protocol instance."
   k8s/create-kubernetes-executor)
 
 (def ^{:stratum 0} create-worktree-executor
@@ -117,7 +135,7 @@
      8+ minutes of working code to a tmpfs cleanup. Opt in via this
      key for ephemeral runs.
    - :max-concurrent - Max concurrent worktrees (default: 4)"
-  worktree/create-worktree-executor)
+  worktree-executor/create-worktree-executor)
 
 ;; ============================================================================
 ;; OCI Image Management
@@ -125,7 +143,7 @@
 (def ^{:stratum 0} task-runner-images
   "Pre-defined task runner images that can be built from bundled Dockerfiles.
    Keys: :minimal (Alpine), :clojure (full tooling)"
-  oci-cli/task-runner-images)
+  oci-img/task-runner-images)
 
 (def ^{:stratum 0} image-exists?
   "Check if a container image exists locally.
@@ -135,18 +153,18 @@
    protocols.impl.runtime.descriptor/make-descriptor. nil falls back to
    the default Docker executable name (preserving the pre-N11-delta call
    sites that pass nil)."
-  oci-cli/image-exists?)
+  oci-img/image-exists?)
 
 (def ^{:stratum 0} build-image!
   "Build a container image from a Dockerfile resource.
    (build-image! descriptor image-name dockerfile-resource-path) -> Result"
-  oci-cli/build-image!)
+  oci-img/build-image!)
 
 (def ^{:stratum 0} ensure-image!
   "Ensure a task runner image exists, building if necessary.
    (ensure-image! descriptor :minimal) -> Result
    (ensure-image! descriptor :clojure :force? true) -> Result"
-  oci-cli/ensure-image!)
+  oci-img/ensure-image!)
 
 (def ^{:stratum 0} ensure-all-images!
   "Ensure all task runner images are available.
@@ -192,7 +210,9 @@
       :docker {:image string :network string ...}
       :worktree {:base-path string :max-concurrent int ...}}
 
-   Returns map of executor-type -> executor instance.
+   Returns map of executor-type -> executor instance. The :docker slot
+   holds the OCI-CLI executor on the selected container runtime (see
+   `create-selected-oci-executor`), Docker or Podman.
 
    The worktree entry is wrapped in the host-git guard. Its environments
    are linked worktrees of the host checkout and share that checkout's
@@ -205,7 +225,7 @@
     (assoc :kubernetes (create-kubernetes-executor (:kubernetes config)))
 
     (:docker config)
-    (assoc :docker (create-docker-executor (:docker config)))
+    (assoc :docker (create-selected-oci-executor (:docker config)))
 
     ;; Worktree is always available as fallback
     true
@@ -347,7 +367,7 @@
     (let [depth-args (when (:depth opts) ["--depth" (str (:depth opts))])
           ;; Use a vector (no shell) + "--" end-of-options separator so git
           ;; cannot interpret a leading-dash repo-url as an option flag.
-          ;; Matches the pattern in protocols/impl/runtime/oci_cli.clj:826.
+          ;; Matches the clone in oci_cli/capsule_git.clj's bootstrap-workspace!.
           clone-cmd (into ["git" "clone"] (concat (or depth-args []) ["--" repo-url "."]))
           clone-result (execute! executor environment-id clone-cmd
                                  {:timeout-ms 300000})]

@@ -26,6 +26,9 @@
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.agent.implementer :as implementer]
+   [ai.miniforge.agent.implementer.code :as impl-code]
+   [ai.miniforge.agent.implementer.prompt :as impl-prompt]
+   [ai.miniforge.agent.implementer.session :as impl-session]
    [ai.miniforge.agent.submission-recovery :as submission-recovery]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.logging.interface :as log]
@@ -110,8 +113,8 @@
     ;; killed the session in ~5s with no output. Parent `.miniforge/` is
     ;; already gitignored in this repo, so moving the file there decouples
     ;; the runtime checkpoint from source control automatically.
-    (let [write! @#'implementer/write-session-checkpoint!
-          read  @#'implementer/read-session-checkpoint
+    (let [write! @#'impl-session/write-session-checkpoint!
+          read  @#'impl-session/read-session-checkpoint
           tmp   (java.io.File/createTempFile "mf-wt-" "")]
       (.delete tmp) (.mkdirs tmp)
       (try
@@ -134,8 +137,8 @@
 
 (deftest ^{:stratum 0} read-session-checkpoint-tolerates-garbage
   (testing "blank content and read errors produce nil, not a bad --resume id"
-    (let [write! @#'implementer/write-session-checkpoint!
-          read  @#'implementer/read-session-checkpoint
+    (let [write! @#'impl-session/write-session-checkpoint!
+          read  @#'impl-session/read-session-checkpoint
           tmp   (java.io.File/createTempFile "mf-wt-" "")]
       (.delete tmp) (.mkdirs tmp)
       (try
@@ -151,7 +154,7 @@
 
 (deftest ^{:stratum 0} base-ref-candidates-avoid-ambiguous-branch-names
   (testing "bare branch names are not used as diff bases"
-    (let [candidates (@#'implementer/base-ref-candidates
+    (let [candidates (@#'impl-session/base-ref-candidates
                       {:execution/environment-metadata {:base-sha "abc123"
                                                         :base-branch "main"}})]
       (is (= ["abc123"
@@ -163,7 +166,7 @@
 
 (deftest ^{:stratum 0} base-ref-candidates-use-resume-merge-base-ranges
   (testing "resumed workspaces compare the original spec base to restored HEAD"
-    (let [candidates (@#'implementer/base-ref-candidates
+    (let [candidates (@#'impl-session/base-ref-candidates
                       {:execution/environment-metadata {:base-sha "task-sha"
                                                         :base-branch "task-restored"}
                        :execution/opts {:resume-workspace {:branch "task-restored"}}
@@ -184,7 +187,7 @@
     (let [artifact {:code/files [{:path "a.clj" :content "" :action :create}
                                  {:path "b.clj" :content "" :action :modify}
                                  {:path "c.clj" :content "" :action :create}]}
-          grouped (implementer/files-by-action artifact)]
+          grouped (impl-code/files-by-action artifact)]
       (is (= 2 (count (:create grouped))))
       (is (= 1 (count (:modify grouped)))))))
 
@@ -196,7 +199,7 @@
                                  {:path "b.clj"
                                   :content "line1\nline2"
                                   :action :modify}]}
-          lines (implementer/total-lines artifact)]
+          lines (impl-code/total-lines artifact)]
       (is (= 5 lines))))
 
   (testing "excludes deleted files from count"
@@ -206,40 +209,40 @@
                                  {:path "b.clj"
                                   :content "should not count"
                                   :action :delete}]}
-          lines (implementer/total-lines artifact)]
+          lines (impl-code/total-lines artifact)]
       (is (= 2 lines)))))
 
 ;; task->text tests
 (deftest ^{:stratum 0} task->text-basic-test
   (testing "string task passes through"
-    (is (= "hello" (implementer/task->text "hello"))))
+    (is (= "hello" (impl-prompt/task->text "hello"))))
 
   (testing "map task uses :task/description"
     (is (= "Implement login"
-           (implementer/task->text {:task/description "Implement login"}))))
+           (impl-prompt/task->text {:task/description "Implement login"}))))
 
   (testing "includes plan when present"
-    (let [text (implementer/task->text {:task/description "Do thing"
+    (let [text (impl-prompt/task->text {:task/description "Do thing"
                                         :task/plan "Step 1: foo\nStep 2: bar"})]
       (is (str/includes? text "Do thing"))
       (is (str/includes? text "## Plan"))
       (is (str/includes? text "Step 1: foo"))))
 
   (testing "includes intent when present"
-    (let [text (implementer/task->text {:task/description "Do thing"
+    (let [text (impl-prompt/task->text {:task/description "Do thing"
                                         :task/intent {:scope ["src/core.clj"]}})]
       (is (str/includes? text "## Intent"))
       (is (str/includes? text "src/core.clj")))))
 
 (deftest ^{:stratum 0} task->text-review-feedback-test
   (testing "includes review feedback as string"
-    (let [text (implementer/task->text {:task/description "Fix it"
+    (let [text (impl-prompt/task->text {:task/description "Fix it"
                                         :task/review-feedback "Missing error handling in login"})]
       (is (str/includes? text "## Review Feedback (MUST FIX)"))
       (is (str/includes? text "Missing error handling in login"))))
 
   (testing "includes review feedback as map"
-    (let [text (implementer/task->text {:task/description "Fix it"
+    (let [text (impl-prompt/task->text {:task/description "Fix it"
                                         :task/review-feedback {:issues ["no validation" "no tests"]}})]
       (is (str/includes? text "## Review Feedback (MUST FIX)"))
       (is (str/includes? text "no validation")))))
@@ -257,7 +260,7 @@
                                 [{:finding/summary missing-group-summary
                                   :finding/group-id missing-group-id
                                   :finding/severity :blocking}]}}
-          text (implementer/task->text {:task/description task-description
+          text (impl-prompt/task->text {:task/description task-description
                                         :task/phase-handoff handoff
                                         :task/review-feedback fallback-feedback})]
       (is (str/includes? text phase-handoff-header))
@@ -269,7 +272,7 @@
 
 (deftest ^{:stratum 0} task->text-verify-failures-test
   (testing "includes verify failures with test-results"
-    (let [text (implementer/task->text
+    (let [text (impl-prompt/task->text
                  {:task/description "Fix failing tests"
                   :task/verify-failures
                   {:test-results {:passed? false
@@ -284,7 +287,7 @@
       (is (str/includes? text "expected: 200"))))
 
   (testing "includes verify failures without test-results"
-    (let [text (implementer/task->text
+    (let [text (impl-prompt/task->text
                  {:task/description "Fix it"
                   :task/verify-failures
                   {:error "Verification timed out"}})]
@@ -293,7 +296,7 @@
       (is (str/includes? text "Verification timed out"))))
 
   (testing "includes both review feedback and verify failures"
-    (let [text (implementer/task->text
+    (let [text (impl-prompt/task->text
                  {:task/description "Fix everything"
                   :task/review-feedback "Add input validation"
                   :task/verify-failures
@@ -304,7 +307,7 @@
       (is (str/includes? text ":fail-count 1"))))
 
   (testing "no verify section when verify-failures is nil"
-    (let [text (implementer/task->text {:task/description "Normal task"})]
+    (let [text (impl-prompt/task->text {:task/description "Normal task"})]
       (is (not (str/includes? text "Test Failures"))))))
 
 ;; Repair tests
@@ -327,7 +330,7 @@
           result (core/repair agent bad-artifact {:files ["empty content"]} {})]
       (is (response/success? result))
       (is (seq (get-in result [:output :code/files 0 :content])))
-      (is (:valid? (implementer/validate-code-artifact (:output result)))))))
+      (is (:valid? (impl-code/validate-code-artifact (:output result)))))))
 
 ;; Full cycle tests
 (deftest ^{:stratum 0} implementer-cycle-test
@@ -341,28 +344,28 @@
 ;; the MCP context cache (Fable #4 context side). Mirrors planner/tester.
 (deftest ^{:stratum 0} implementer-disallowed-tools-contents-test
   (testing "names the native read/search tools (forced onto context_*)"
-    (let [dt @#'implementer/implementer-disallowed-tools]
+    (let [dt @#'impl-session/implementer-disallowed-tools]
       (doseq [t ["Read" "Grep" "Glob" "LS" "Agent"]]
         (is (some #{t} dt) (str "expected " t " in disallowed-tools")))))
 
   (testing "does NOT include the write tools — the implementer's whole job"
-    (let [dt @#'implementer/implementer-disallowed-tools]
+    (let [dt @#'impl-session/implementer-disallowed-tools]
       (doseq [t ["Write" "Edit" "MultiEdit"]]
         (is (nil? (some #{t} dt)) (str t " must stay allowed")))))
 
   (testing "does NOT include the MCP context tools"
-    (let [dt @#'implementer/implementer-disallowed-tools]
+    (let [dt @#'impl-session/implementer-disallowed-tools]
       (doseq [t ["context_read" "context_grep" "context_glob"]]
         (is (nil? (some #{t} dt)) (str "MCP tool " t " must NOT be disallowed")))))
 
   (testing "does NOT (yet) include Bash — kept for build/git; tighten if dogfood
             shows cat/rg-via-Bash cache evasion"
-    (is (nil? (some #{"Bash"} @#'implementer/implementer-disallowed-tools)))))
+    (is (nil? (some #{"Bash"} @#'impl-session/implementer-disallowed-tools)))))
 
 (deftest ^{:stratum 0} task->text-gate-failures-test
   (testing "a prior gate denial renders as an imperative repair section,
             one line per error, gate-tagged"
-    (let [text (implementer/task->text
+    (let [text (impl-prompt/task->text
                 {:task/description "Rename the key"
                  :task/gate-failures
                  [{:gate :stale-references
@@ -374,12 +377,12 @@
       (is (str/includes? text "DENIED by deterministic gates"))))
   (testing "absent gate failures render nothing"
     (is (not (str/includes?
-              (implementer/task->text {:task/description "x"})
+              (impl-prompt/task->text {:task/description "x"})
               "Gate denial")))))
 
 (deftest ^{:stratum 0} task->text-gate-failures-names-failing-tests-test
   (testing "a :tests-pass denial lists each failing test with its location"
-    (let [text (implementer/task->text
+    (let [text (impl-prompt/task->text
                 {:task/description "Fix the ledger"
                  :task/gate-failures
                  [{:gate :tests-pass
@@ -751,16 +754,16 @@
 ;; Validation tests
 (deftest ^{:stratum 1} validate-code-artifact-test
   (testing "valid artifact passes validation"
-    (let [result (implementer/validate-code-artifact valid-code-artifact)]
+    (let [result (impl-code/validate-code-artifact valid-code-artifact)]
       (is (:valid? result))
       (is (nil? (:errors result)))))
 
   (testing "minimal artifact passes validation"
-    (let [result (implementer/validate-code-artifact minimal-code-artifact)]
+    (let [result (impl-code/validate-code-artifact minimal-code-artifact)]
       (is (:valid? result))))
 
   (testing "missing required fields fails validation"
-    (let [result (implementer/validate-code-artifact {:code/files []})]
+    (let [result (impl-code/validate-code-artifact {:code/files []})]
       (is (not (:valid? result)))))
 
   (testing "empty content for :create fails validation"
@@ -768,7 +771,7 @@
                         :code/files [{:path "src/empty.clj"
                                       :content ""
                                       :action :create}]}
-          result (implementer/validate-code-artifact bad-artifact)]
+          result (impl-code/validate-code-artifact bad-artifact)]
       (is (not (:valid? result)))
       (is (contains? (:errors result) :files))))
 
@@ -780,13 +783,13 @@
                                      {:path "src/dup.clj"
                                       :content "(ns dup2)"
                                       :action :modify}]}
-          result (implementer/validate-code-artifact bad-artifact)]
+          result (impl-code/validate-code-artifact bad-artifact)]
       (is (not (:valid? result))))))
 
 ;; Utility tests
 (deftest ^{:stratum 1} code-summary-test
   (testing "returns code summary"
-    (let [summary (implementer/code-summary valid-code-artifact)]
+    (let [summary (impl-code/code-summary valid-code-artifact)]
       (is (uuid? (:id summary)))
       (is (number? (:file-count summary)))
       (is (map? (:actions summary)))

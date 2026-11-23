@@ -37,7 +37,12 @@
 (def ^{:stratum 0} now (Instant/parse "2026-08-01T00:00:00Z"))
 
 (defn- ^{:stratum 0} tmp []
-  (str (.toFile (Files/createTempDirectory "governed" (into-array FileAttribute [])))))
+  (.getCanonicalPath (.toFile (Files/createTempDirectory "governed" (into-array FileAttribute [])))))
+
+(def ^{:stratum 0} target
+  {:pr/repo "miniforge-ai/miniforge"
+   :pr/number 42
+   :pr/head-sha "0123456789abcdef0123456789abcdef01234567"})
 
 (defn- ^{:stratum 0} recording-operations
   "Operations that record every provider invocation instead of shelling
@@ -61,13 +66,14 @@
            :task-id (random-uuid)
            :pr-id 42
            :effect-store-dir (tmp)
-           :grant-breach-dir (tmp)}
+           :grant-breach-dir (tmp)
+           :clock (constantly now)}
           overrides)))
 
 (defn- ^{:stratum 1} transact
   [ctx calls]
   (governed/transact! (recording-operations calls)
-                      "/tmp/worktree" 42 "miniforge-ai/miniforge"
+                      "/tmp/worktree" target {:ready? true :blocking []}
                       {:method :squash} ctx now))
 
 ;------------------------------------------------------------------------------ Layer 2

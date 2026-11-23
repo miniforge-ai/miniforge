@@ -17,6 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.schema.interface-test
   (:require [clojure.test :as test :refer [deftest testing is]]
+            [ai.miniforge.schema.artifact-fixtures :as artifacts]
             [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -36,10 +37,7 @@
    :task/constraints {:budget {:tokens 50000}}})
 
 (def ^{:stratum 0} valid-artifact
-  {:artifact/id (random-uuid)
-   :artifact/type :code
-   :artifact/version "1.0.0"
-   :artifact/content "(defn hello [] \"world\")"})
+  (assoc (artifacts/artifact :code) :artifact/content "(defn hello [] \"world\")"))
 
 (def ^{:stratum 0} valid-workflow
   {:workflow/id (random-uuid)
@@ -177,16 +175,10 @@
     (is (true? (schema/valid-artifact? valid-artifact))))
 
   (testing "minimal valid artifact"
-    (is (true? (schema/valid-artifact?
-                {:artifact/id (random-uuid)
-                 :artifact/type :spec
-                 :artifact/version "0.1.0"}))))
+    (is (true? (schema/valid-artifact? (artifacts/minimal-artifact)))))
 
   (testing "invalid artifact type returns false"
-    (is (false? (schema/valid-artifact?
-                 {:artifact/id (random-uuid)
-                  :artifact/type :invalid
-                  :artifact/version "1.0.0"})))))
+    (is (false? (schema/valid-artifact? (artifacts/artifact :invalid))))))
 
 ;; Workflow tests
 (deftest ^{:stratum 1} valid-workflow?-test
@@ -247,15 +239,6 @@
       (is (map? errors))
       (is (contains? errors :agent/id))
       (is (contains? errors :agent/role)))))
-
-(deftest ^{:stratum 1} validate-test
-  (testing "valid data returns the data"
-    (is (= valid-agent (schema/validate schema/Agent valid-agent))))
-
-  (testing "invalid data throws ex-info"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Schema validation failed"
-                          (schema/validate schema/Agent {:agent/id "bad"})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

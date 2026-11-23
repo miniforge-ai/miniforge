@@ -1,0 +1,68 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
+
+# feat: wire durable chain lifecycle publication
+
+## Overview
+
+Connect sequential chain lifecycle emission to the typed durable event stream through an explicit runtime option.
+
+## Motivation
+
+The existing executor still emits legacy chain events, despite retaining a distinct invocation and resolved composition.
+Current chain events must use that admitted identity and their own chain scope, not the child workflow stream.
+
+## Changes in Detail
+
+- Require durable admission when selecting the current chain event path.
+- Refuse a shared retention/journal directory before allocating a run or writing artifacts.
+- Validate actual current/legacy stream structure and require an existing canonical retention directory before admission.
+- Keep current chain publication separate from legacy child workflow publication.
+- Construct current chain lifecycle drafts from the admitted run and preallocated child identities.
+- Preserve acknowledgment failures and the established failure paths.
+- Return admitted run identity in current-mode failure diagnostics without treating it as a storage acknowledgment.
+
+## Testing Plan
+
+Verify boundary refusal before storage or execution, immutable identity/scope propagation, separate child streams,
+real durable publication, and unchanged legacy behavior.
+Run affected consumers serially, verify the packaged CLI, and perform adversarial standards review.
+
+Four affected product consumers (artifact, event-stream, workflow) passed in 2m20s after the storage fixes.
+The final generator correction passed event-stream/workflow consumers in all four products in 2m28s.
+The final JVM disk suite passed 6 tests/66 assertions. The built CLI jar passed 34 tests/281 assertions
+from an isolated directory with no production source overlay, including the real-storage regressions.
+The explicit Miniforge standards pack reported no changed-line violations across 4,369 scanned files.
+
+Review corrections add malformed stream/store and aliased storage regressions. The corrected focused suite
+includes refusal before invocation allocation for symlinks, dot aliases,
+trailing separators, relative paths, and absent directories. Closed current streams still fail publication
+without falling back to child publication; structural validation does not claim availability or authority.
+Creation and runtime admission share the generator callable/state contract, preserve upstream anomalies,
+and validate without invoking the clock or consuming an event ID. Malformed generators fail before retention.
+
+The adversarial pass traced admission → retention → start acknowledgment → child identity allocation →
+child execution → terminal acknowledgment. It caught shared storage poisoning journal recovery;
+the boundary now refuses that configuration. Fixture construction and lifecycle translation are centralized,
+schema namespaces remain declarative, and the real-storage test helpers have their own stratified namespace.
+
+## Deployment Plan
+
+This bounded slice does not claim full chain conformance: binding-edge provenance, execution-state recovery,
+and default CLI migration remain dependent work.
+No current chain draft may be sent through the legacy publisher, and no unsupported child event may enter the current stream.
+
+## Related Issues/PRs
+
+Base branch: `main`, after merged #2028 and #2027.
+
+## Checklist
+
+- [x] Boundary and lifecycle implementation
+- [x] Unit and real-storage integration coverage
+- [x] Serial consumers and packaged verification
+- [x] Adversarial standards pass and normal signed hooks
+- [ ] Exact-head clean review and all CI before merge

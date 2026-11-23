@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.configurable
   "DAG-based workflow execution using configurable workflows.
 
@@ -33,79 +32,136 @@
    [ai.miniforge.workflow.runner-defaults :as defaults]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants and result helpers
 
-(def zero-metrics
+;; Constants and result helpers
+(def ^{:stratum 0} zero-metrics
   "Canonical zeroed metrics for configurable workflow results.
    Aliases dag-orchestrator's zero-metrics so both layers can't
    drift on what an empty metrics map looks like."
   dag-orch/zero-metrics)
 
-(defn- phase-error
+(defn- ^{:stratum 0} phase-error
   [error-type message & [extra]]
   (cond-> {:type error-type
            :message message}
     extra (merge extra)))
 
-(defn- execution-error
+(defn- ^{:stratum 0} execution-error
   [error-type message & [extra]]
   (cond-> {:type error-type
            :message message}
     extra (merge extra)))
 
-(defn- configurable-success?
+(defn- ^{:stratum 0} configurable-success?
   [phase-result]
   (true? (:success? phase-result)))
 
-(defn- terminal?
+(defn- ^{:stratum 0} terminal?
   [ctx]
   (or (phase/succeeded? ctx)
       (phase/failed? ctx)))
 
-(defn- merge-phase-metrics
-  [exec-metrics phase-metrics]
-  (context/merge-metrics exec-metrics (or phase-metrics zero-metrics)))
-
 ;------------------------------------------------------------------------------ Layer 0.5
 ;; Workflow lookup and normalization
-
-(defn find-phase
+(defn ^{:stratum 0} find-phase
   "Find phase configuration by ID in workflow."
   [workflow phase-id]
   (definition/find-phase workflow phase-id))
 
-(defn- execution-workflow
+(defn- ^{:stratum 0} execution-workflow
   [workflow]
   (definition/execution-workflow workflow))
 
-(defn- workflow-max-phases
+(defn- ^{:stratum 0} workflow-max-phases
   [execution-context]
   (get execution-context :max-phases (defaults/max-phases)))
 
-(defn- phase-not-found-message
+(defn- ^{:stratum 0} phase-not-found-message
   [phase-id]
   (messages/t :configurable/phase-not-found {:phase phase-id}))
 
-(defn- max-phases-message
+(defn- ^{:stratum 0} max-phases-message
   [max-phases]
   (messages/t :status/max-phases {:max-phases max-phases}))
 
-(defn- missing-phase-handler-message
+(defn- ^{:stratum 0} missing-phase-handler-message
   [handler-key]
   (messages/t :configurable/missing-phase-handler {:handler-key handler-key}))
 
-(defn- phase-execution-failed-message
+(defn- ^{:stratum 0} phase-execution-failed-message
   [error-message]
   (messages/t :configurable/phase-execution-failed {:error error-message}))
 
-(defn- dag-execution-failed-message
+(defn- ^{:stratum 0} dag-execution-failed-message
   []
   (messages/t :configurable/dag-execution-failed))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Phase execution
+(defn- ^{:stratum 0} fail-execution
+  [ctx error-map]
+  (-> ctx
+      (update :execution/errors conj error-map)
+      (context/transition-to-failed)))
 
-(defn execute-handler-phase
+;; DAG execution
+(defn ^{:stratum 0} extract-plan-from-result
+  "Extract the first plan artifact from a phase result, if present."
+  [phase-result]
+  (some #(when (or (:plan/id %)
+                   (= :plan (:artifact/type %)))
+           %)
+        (:artifacts phase-result)))
+
+(defn- ^{:stratum 0} pre-completed-dag-task-ids
+  [ctx execution-context]
+  (get-in ctx
+          [:execution/opts :pre-completed-dag-tasks]
+          (get execution-context :pre-completed-dag-tasks #{})))
+
+(defn- ^{:stratum 0} notify-dag-task-start
+  [on-phase-start ctx task-id]
+  (when on-phase-start
+    (on-phase-start ctx
+                    {:phase/id :dag-task
+                     :task-id task-id})))
+
+(defn- ^{:stratum 0} notify-dag-task-complete
+  [on-phase-complete ctx task-id result]
+  (when on-phase-complete
+    (on-phase-complete ctx
+                       {:phase/id :dag-task
+                        :task-id task-id}
+                       result)))
+
+(defn- ^{:stratum 0} dag-parallelization-enabled?
+  [execution-context]
+  (not (:disable-dag-parallelization execution-context)))
+
+(defn- ^{:stratum 0} continue-after-dag
+  [ctx]
+  (let [ctx-with-transition (context/transition-execution ctx :phase/succeed)]
+    [:continue ctx-with-transition]))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} merge-phase-metrics
+  [exec-metrics phase-metrics]
+  (context/merge-metrics exec-metrics (or phase-metrics zero-metrics)))
+
+(defn- ^{:stratum 1} dag-failure-error
+  "The :execution/errors entry for a failed DAG run. An operator cancel is
+   recorded as :dashboard-stop with the stop anomaly's message and data, the
+   entry `execution-dag` and the runner write for the same cancel."
+  [dag-result]
+  (if (:cancelled? dag-result)
+    (let [stop (:error dag-result)]
+      (execution-error :dashboard-stop
+                       (:anomaly/message stop)
+                       {:data (:anomaly/data stop)}))
+    (execution-error :dag-execution-failed
+                     (dag-execution-failed-message))))
+
+;; Phase execution
+(defn ^{:stratum 1} execute-handler-phase
   "Execute a phase using a caller-provided handler from :phase-handlers context."
   [phase-config exec-state execution-context]
   (let [handler-key (:phase/handler phase-config)
@@ -121,14 +177,71 @@
                               :handler handler-key})]
        :metrics zero-metrics})))
 
-(defn- loop-exception-result
+(defn- ^{:stratum 1} loop-exception-result
   [exception]
   (let [message (phase-execution-failed-message (.getMessage exception))]
     {:success false
      :error message
      :metrics zero-metrics}))
 
-(defn- execute-agent-loop
+(defn- ^{:stratum 1} build-successful-phase-result
+  [loop-result phase-config]
+  (let [raw-artifact (:artifact loop-result)
+        metrics (get loop-result :metrics zero-metrics)
+        standard-artifact (factory/build-artifact-for-phase raw-artifact
+                                                            phase-config
+                                                            metrics)]
+    {:success? true
+     :artifacts [standard-artifact]
+     :errors []
+     :metrics metrics}))
+
+(defn- ^{:stratum 1} build-failed-phase-result
+  [loop-result phase-config]
+  (let [metrics (get loop-result :metrics zero-metrics)
+        message (get loop-result :error
+                     (messages/t :configurable/default-phase-error))]
+    {:success? false
+     :artifacts []
+     :errors [(phase-error :phase-failed
+                           message
+                           {:phase (:phase/id phase-config)})]
+     :metrics metrics}))
+
+(defn- ^{:stratum 1} transition-phase-outcome
+  [ctx phase-result]
+  (if (configurable-success? phase-result)
+    (context/transition-execution ctx :phase/succeed)
+    (context/transition-execution ctx :phase/fail)))
+
+(defn- ^{:stratum 1} build-dag-context
+  [ctx execution-context callbacks]
+  (let [{:keys [on-phase-start on-phase-complete]} callbacks
+        pre-completed-ids (pre-completed-dag-task-ids ctx execution-context)]
+    (assoc execution-context
+           :workflow-id (:execution/id ctx)
+           :execution/workflow (:execution/workflow ctx)
+           :pre-completed-ids pre-completed-ids
+           :on-task-start
+           (fn [task-id]
+             (notify-dag-task-start on-phase-start ctx task-id))
+           :on-task-complete
+           (fn [task-id result]
+             (notify-dag-task-complete on-phase-complete ctx task-id result)))))
+
+(defn- ^{:stratum 1} should-parallelize-plan?
+  [phase-id phase-result execution-context]
+  (let [plan (when (= :plan phase-id)
+               (extract-plan-from-result phase-result))]
+    (when (and plan
+               (configurable-success? phase-result)
+               (dag-parallelization-enabled? execution-context)
+               (dag-orch/parallelizable-plan? plan))
+      plan)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} execute-agent-loop
   [phase-config exec-state execution-context]
   (let [phase-agent-instance (factory/create-agent-for-phase phase-config execution-context)
         task (factory/create-task-for-phase phase-config exec-state execution-context)
@@ -143,31 +256,39 @@
       (catch Exception exception
         (loop-exception-result exception)))))
 
-(defn- build-successful-phase-result
-  [loop-result phase-config]
-  (let [raw-artifact (:artifact loop-result)
-        metrics (get loop-result :metrics zero-metrics)
-        standard-artifact (factory/build-artifact-for-phase raw-artifact
-                                                            phase-config
-                                                            metrics)]
-    {:success? true
-     :artifacts [standard-artifact]
-     :errors []
-     :metrics metrics}))
+;; Context mutation
+(defn- ^{:stratum 2} record-phase-result
+  [ctx phase-id phase-result]
+  (let [artifacts (:artifacts phase-result [])
+        errors (:errors phase-result [])
+        metrics (:metrics phase-result zero-metrics)]
+    (-> ctx
+        (assoc-in [:execution/phase-results phase-id] phase-result)
+        (update :execution/artifacts into artifacts)
+        (update :execution/errors into errors)
+        (update :execution/metrics merge-phase-metrics metrics))))
 
-(defn- build-failed-phase-result
-  [loop-result phase-config]
-  (let [metrics (get loop-result :metrics zero-metrics)
-        message (get loop-result :error
-                     (messages/t :configurable/default-phase-error))]
-    {:success? false
-     :artifacts []
-     :errors [(phase-error :phase-failed
-                           message
-                           {:phase (:phase/id phase-config)})]
-     :metrics metrics}))
+(defn ^{:stratum 2} execute-dag-for-plan
+  "Execute plan tasks via the DAG orchestrator and merge results into context."
+  [ctx plan execution-context callbacks]
+  (let [pre-completed-artifacts (get-in ctx [:execution/opts :pre-completed-artifacts] [])
+        dag-context (build-dag-context ctx execution-context callbacks)
+        dag-result (dag-orch/execute-plan-as-dag plan dag-context)
+        pr-infos (:pr-infos dag-result)
+        dag-metrics (get dag-result :metrics zero-metrics)
+        dag-artifacts (concat pre-completed-artifacts
+                              (:artifacts dag-result []))
+        ctx-with-dag (-> ctx
+                         (update :execution/artifacts into dag-artifacts)
+                         (update :execution/metrics merge-phase-metrics dag-metrics)
+                         (assoc-in [:execution/phase-results :dag-execution] dag-result)
+                         (assoc :execution/dag-result dag-result))]
+    (cond-> ctx-with-dag
+      (seq pr-infos) (assoc :execution/dag-pr-infos pr-infos))))
 
-(defn execute-configurable-phase
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} execute-configurable-phase
   "Execute a single phase of a configurable workflow."
   [phase-config exec-state execution-context]
   (let [phase-agent (:phase/agent phase-config)]
@@ -187,120 +308,10 @@
           (build-successful-phase-result loop-result phase-config)
           (build-failed-phase-result loop-result phase-config))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Context mutation
-
-(defn- record-phase-result
-  [ctx phase-id phase-result]
-  (let [artifacts (:artifacts phase-result [])
-        errors (:errors phase-result [])
-        metrics (:metrics phase-result zero-metrics)]
-    (-> ctx
-        (assoc-in [:execution/phase-results phase-id] phase-result)
-        (update :execution/artifacts into artifacts)
-        (update :execution/errors into errors)
-        (update :execution/metrics merge-phase-metrics metrics))))
-
-(defn- fail-execution
-  [ctx error-map]
-  (-> ctx
-      (update :execution/errors conj error-map)
-      (context/transition-to-failed)))
-
-(defn- transition-phase-outcome
-  [ctx phase-result]
-  (if (configurable-success? phase-result)
-    (context/transition-execution ctx :phase/succeed)
-    (context/transition-execution ctx :phase/fail)))
-
-;------------------------------------------------------------------------------ Layer 3
-;; DAG execution
-
-(defn extract-plan-from-result
-  "Extract the first plan artifact from a phase result, if present."
-  [phase-result]
-  (some #(when (or (:plan/id %)
-                   (= :plan (:artifact/type %)))
-           %)
-        (:artifacts phase-result)))
-
-(defn- pre-completed-dag-task-ids
-  [ctx execution-context]
-  (get-in ctx
-          [:execution/opts :pre-completed-dag-tasks]
-          (get execution-context :pre-completed-dag-tasks #{})))
-
-(defn- notify-dag-task-start
-  [on-phase-start ctx task-id]
-  (when on-phase-start
-    (on-phase-start ctx
-                    {:phase/id :dag-task
-                     :task-id task-id})))
-
-(defn- notify-dag-task-complete
-  [on-phase-complete ctx task-id result]
-  (when on-phase-complete
-    (on-phase-complete ctx
-                       {:phase/id :dag-task
-                        :task-id task-id}
-                       result)))
-
-(defn- build-dag-context
-  [ctx execution-context callbacks]
-  (let [{:keys [on-phase-start on-phase-complete]} callbacks
-        pre-completed-ids (pre-completed-dag-task-ids ctx execution-context)]
-    (assoc execution-context
-           :workflow-id (:execution/id ctx)
-           :execution/workflow (:execution/workflow ctx)
-           :pre-completed-ids pre-completed-ids
-           :on-task-start
-           (fn [task-id]
-             (notify-dag-task-start on-phase-start ctx task-id))
-           :on-task-complete
-           (fn [task-id result]
-             (notify-dag-task-complete on-phase-complete ctx task-id result)))))
-
-(defn execute-dag-for-plan
-  "Execute plan tasks via the DAG orchestrator and merge results into context."
-  [ctx plan execution-context callbacks]
-  (let [pre-completed-artifacts (get-in ctx [:execution/opts :pre-completed-artifacts] [])
-        dag-context (build-dag-context ctx execution-context callbacks)
-        dag-result (dag-orch/execute-plan-as-dag plan dag-context)
-        pr-infos (:pr-infos dag-result)
-        dag-metrics (get dag-result :metrics zero-metrics)
-        dag-artifacts (concat pre-completed-artifacts
-                              (:artifacts dag-result []))
-        ctx-with-dag (-> ctx
-                         (update :execution/artifacts into dag-artifacts)
-                         (update :execution/metrics merge-phase-metrics dag-metrics)
-                         (assoc-in [:execution/phase-results :dag-execution] dag-result)
-                         (assoc :execution/dag-result dag-result))]
-    (cond-> ctx-with-dag
-      (seq pr-infos) (assoc :execution/dag-pr-infos pr-infos))))
-
-(defn- dag-parallelization-enabled?
-  [execution-context]
-  (not (:disable-dag-parallelization execution-context)))
-
-(defn- should-parallelize-plan?
-  [phase-id phase-result execution-context]
-  (let [plan (when (= :plan phase-id)
-               (extract-plan-from-result phase-result))]
-    (when (and plan
-               (configurable-success? phase-result)
-               (dag-parallelization-enabled? execution-context)
-               (dag-orch/parallelizable-plan? plan))
-      plan)))
-
-(defn- continue-after-dag
-  [ctx]
-  (let [ctx-with-transition (context/transition-execution ctx :phase/succeed)]
-    [:continue ctx-with-transition]))
-
 ;------------------------------------------------------------------------------ Layer 4
-;; Workflow execution
 
-(defn execute-phase-step
+;; Workflow execution
+(defn ^{:stratum 4} execute-phase-step
   "Execute a single configurable workflow phase."
   [ctx phase-config execution-context callbacks]
   (let [{:keys [on-phase-start on-phase-complete]} callbacks
@@ -313,18 +324,18 @@
         (on-phase-complete ctx-with-result phase-config phase-result))
       (if-let [plan (should-parallelize-plan? phase-id phase-result execution-context)]
         (let [ctx-with-dag (execute-dag-for-plan ctx-with-result plan execution-context callbacks)
-              dag-success? (true? (get-in ctx-with-dag [:execution/dag-result :success?]))]
-          (if dag-success?
+              dag-result (:execution/dag-result ctx-with-dag)]
+          (if (true? (:success? dag-result))
             (continue-after-dag ctx-with-dag)
-            (fail-execution ctx-with-dag
-                            (execution-error :dag-execution-failed
-                                             (dag-execution-failed-message)))))
+            (fail-execution ctx-with-dag (dag-failure-error dag-result))))
         (let [next-ctx (transition-phase-outcome ctx-with-result phase-result)]
           (if (terminal? next-ctx)
             next-ctx
             [:continue next-ctx]))))))
 
-(defn run-configurable-workflow
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} run-configurable-workflow
   "Execute a complete configurable workflow with the compiled execution machine."
   [workflow input execution-context]
   (let [workflow' (execution-workflow workflow)

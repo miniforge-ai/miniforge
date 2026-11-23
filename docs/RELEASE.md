@@ -97,7 +97,16 @@ GitHub Apps are superior to personal access tokens because:
 
 ### Automated Release (Recommended)
 
-Push a version tag to trigger the release workflow:
+From a clean `main` whose latest commit has passed CI, run:
+
+```bash
+bb release
+```
+
+`bb release` runs no tests. It refuses unless you are on `main`, the working tree is clean, and the newest `ci.yml`
+push run on `main` for `HEAD` passed. It then tags `vYYYY.MM.DD.N` plus a `stable-YYYYMMDD` tag and pushes both.
+
+Pushing a version tag by hand does the same as far as the release workflow is concerned:
 
 ```bash
 # Determine version (DateVer: YYYY.MM.DD.N)
@@ -108,14 +117,18 @@ git tag -a "v${VERSION}" -m "Release ${VERSION}"
 git push origin "v${VERSION}"
 ```
 
-This will automatically:
+The release workflow (`.github/workflows/release.yml`) then:
 
-1. Build binaries for all platforms (macOS arm64/x86, Linux arm64/x86,
-   Windows x86_64 — preview)
-2. Generate SHA256 checksums
-3. Create a GitHub release with assets
-4. Update the Homebrew formula in `homebrew-tap`
-5. Publish the scoop manifest (Windows — preview, gated on tester sign-off)
+1. Refuses to continue (`gate` job) unless the tagged commit is on `main` and its newest `ci.yml` push run on `main`
+   passed. It waits up to 40 minutes for a run that is still going.
+2. Rejects a version that is not DateVer.
+3. Builds the CLI jar on macOS arm64 and Linux x86_64 with the version stamped into it.
+   Checks that the jar's `version` command reports that version.
+   Also builds the Windows x86_64 zip as a preview; its failure does not block the release.
+4. Generates SHA256 checksums
+5. Creates a GitHub release with the assets
+6. Updates the Homebrew formula in `homebrew-tap`
+7. Triggers the Scoop bucket's autoupdate, only when the Windows build succeeded
 
 ### Manual Release
 
@@ -150,13 +163,10 @@ After the release workflow completes:
 Visit `https://github.com/miniforge-ai/miniforge/releases` and verify:
 
 - Release was created with correct version
-- All 10 assets are present (8 stable + 2 Windows preview):
+- All 6 assets are present (4 stable + 2 Windows preview). The macOS and Linux assets are Babashka uberjars (the same
+  portable jar, built on each runner), not native executables:
   - `miniforge-macos-arm64`
   - `miniforge-macos-arm64.sha256`
-  - `miniforge-macos-x86_64`
-  - `miniforge-macos-x86_64.sha256`
-  - `miniforge-linux-arm64`
-  - `miniforge-linux-arm64.sha256`
   - `miniforge-linux-x86_64`
   - `miniforge-linux-x86_64.sha256`
   - `miniforge-windows-x86_64.zip` (preview)
@@ -181,21 +191,33 @@ brew tap miniforge-ai/tap
 # Install
 brew install miniforge
 
-# Verify
-miniforge version
+# Verify (prints the release version)
+mf version
 ```
 
 #### Direct Download
 
-```bash
-# macOS ARM64
-curl -L https://github.com/miniforge-ai/miniforge/releases/download/v2026.01.20.1/miniforge-macos-arm64 -o miniforge
-chmod +x miniforge
-./miniforge version
+The jar runs under Babashka (`bb` on your PATH). Download it under its asset name so the `.sha256` file matches, verify
+it, then install it behind an `mf` launcher. The subshell stops at the first failed step, so a failed download or
+checksum installs nothing, and your own shell keeps running:
 
-# Verify checksum
-curl -L https://github.com/miniforge-ai/miniforge/releases/download/v2026.01.20.1/miniforge-macos-arm64.sha256 -o miniforge.sha256
-shasum -a 256 -c miniforge.sha256
+```bash
+# macOS ARM64 (use miniforge-linux-x86_64 on Linux, and sha256sum -c instead of shasum)
+ASSET=miniforge-macos-arm64
+( set -euo pipefail
+  base=https://github.com/miniforge-ai/miniforge/releases/download/v2026.01.20.1
+  curl -fLO "$base/$ASSET"
+  curl -fLO "$base/$ASSET.sha256"
+  shasum -a 256 -c "$ASSET.sha256"
+  mkdir -p ~/.local/lib/miniforge ~/.local/bin
+  mv "$ASSET" ~/.local/lib/miniforge/miniforge.jar
+  printf '%s\n' '#!/bin/sh' \
+    'exec bb --jar "$HOME/.local/lib/miniforge/miniforge.jar" -m ai.miniforge.cli.main "$@"' \
+    > ~/.local/bin/mf
+  chmod +x ~/.local/bin/mf
+  ~/.local/bin/mf version
+)
+# Add ~/.local/bin to your PATH to run mf
 ```
 
 ```powershell
@@ -265,7 +287,11 @@ git push origin "v${VERSION}"
 
 1. Check GitHub Actions logs
 2. Common issues:
-   - Missing `HOMEBREW_TAP_TOKEN` secret
+   - `gate` failed: the tagged commit is not on `main`, or its `ci.yml` run did not pass (or was still running after
+     40 minutes). Fix `main` or wait for CI, then re-run the workflow or tag a passing commit.
+   - `Determine version` failed: the tag or dispatch input is not DateVer (`YYYY.MM.DD.N`)
+   - `Smoke-test the built jar` failed: the jar does not report the release version
+   - Missing `HOMEBREW_APP_ID` / `HOMEBREW_APP_PRIVATE_KEY` secrets
    - Homebrew tap repository doesn't exist
    - Build failures on specific platforms
 
@@ -296,19 +322,19 @@ If users report checksum errors:
 For testing without creating a release:
 
 ```bash
-# Build locally
+# Build locally (reports version "dev"; MINIFORGE_VERSION=2026.01.20.1 bb build:cli stamps a version)
 bb build:cli
 
 # Test
-./dist/miniforge version
-./dist/miniforge help
+bb --jar dist/miniforge.jar -m ai.miniforge.cli.main version
+bb --jar dist/miniforge.jar -m ai.miniforge.cli.main help
 ```
 
 To distribute development builds:
 
 ```bash
 # Upload to a temporary location
-scp dist/miniforge user@server:/tmp/miniforge-dev
+scp dist/miniforge.jar user@server:/tmp/miniforge-dev.jar
 
 # Or use GitHub Actions artifacts from CI builds
 ```

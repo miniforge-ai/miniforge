@@ -30,15 +30,9 @@
    [ai.miniforge.cli.web.sse :as sse]
    [ai.miniforge.cli.web.sse.registry :as registry]))
 
-(use-fixtures :each
-  (fn [f]
-    (reset! registry/streams {})
-    (reset! registry/subscriptions {})
-    (f)
-    (reset! registry/streams {})
-    (reset! registry/subscriptions {})))
-
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private create-event-stream es/create-event-stream)
 
 (deftest ^{:stratum 0} on-open-registers-stream-and-subscription-without-throwing-test
   (testing "the first SSE connect for a workflow-id no longer throws ClassCastException"
@@ -102,3 +96,14 @@
             (registry/unregister! "wf-7")
             (is (= expected-sub-ids @unsubscribed)
                 "both still-open channels' subscriber ids must be unsubscribed, not silently orphaned")))))))
+
+(use-fixtures :each
+  (fn [f]
+    (reset! registry/streams {})
+    (reset! registry/subscriptions {})
+    ;; The registry makes default streams, whose file sink writes under the
+    ;; user's ~/.miniforge/events and prunes it; these tests need none.
+    (with-redefs [es/create-event-stream (fn [& _] (create-event-stream {:sinks []}))]
+      (f))
+    (reset! registry/streams {})
+    (reset! registry/subscriptions {})))

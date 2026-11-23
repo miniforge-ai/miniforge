@@ -24,8 +24,11 @@
    dependency constructors pushed the file over the three-layer
    budget (SL003)."
   (:require
-   [ai.miniforge.event-stream.core :as core]
-   [ai.miniforge.event-stream.transition-keys :as tk]))
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.current-publication :as current]
+   [ai.miniforge.event-stream.messages :as msg]
+   [ai.miniforge.event-stream.transition-keys :as tk]
+   [ai.miniforge.event-stream.workflow-envelope :as envelope]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -51,24 +54,29 @@
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} phase-completed [stream workflow-id phase & [result]]
-  (let [outcome (get result :outcome :success)
+  (let [outcome (get result :outcome (when-not (current/active? stream) :success))
         request (phase-transition-request result)
         redirect-to (or (redirect-target result)
-                        (:redirect-to result))]
-    (-> (core/create-envelope stream :workflow/phase-completed workflow-id
-                         (str (name phase) " phase " (name outcome)))
-        (assoc :workflow/phase phase
-               :phase/outcome outcome)
-        (cond->
-          (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
-          (:review-decision result) (assoc :phase/review-decision (:review-decision result))
-          (:phase/blocked-reason result) (assoc :phase/blocked-reason (:phase/blocked-reason result))
-          (:artifacts result) (assoc :phase/artifacts (:artifacts result))
-          (:error result) (assoc :phase/error (:error result))
-          request (assoc :phase/transition-request request)
-          redirect-to (assoc :phase/redirect-to redirect-to)
-          (:tokens result) (assoc :phase/tokens (:tokens result))
-          (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))
-          (:meta result) (assoc :phase/meta (:meta result))
-          (:phase/termination-reason result)
-          (assoc :phase/termination-reason (:phase/termination-reason result))))))
+                        (:redirect-to result))
+        message (msg/t :workflow/phase-completed {:phase (name phase) :outcome (some-> outcome name)})
+        event (envelope/create stream :workflow/phase-completed workflow-id message {})]
+    (if (anomaly/any-anomaly? event)
+      event
+      (-> event
+          (assoc :workflow/phase phase
+                 :phase/outcome outcome)
+          (cond->
+            (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
+            (:review-decision result) (assoc :phase/review-decision (:review-decision result))
+            (:phase/blocked-reason result) (assoc :phase/blocked-reason (:phase/blocked-reason result))
+            (:artifacts result) (assoc :phase/artifacts (:artifacts result))
+            (:error result) (assoc :phase/error (:error result))
+            request (assoc :phase/transition-request request)
+            redirect-to (assoc :phase/redirect-to redirect-to)
+            (:tokens result) (assoc :phase/tokens (:tokens result))
+            (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))
+            (:meta result) (assoc :phase/meta (:meta result))
+            (:phase/termination-reason result)
+            (assoc :phase/termination-reason (:phase/termination-reason result)))))))
+
+(comment ::phase-completion)

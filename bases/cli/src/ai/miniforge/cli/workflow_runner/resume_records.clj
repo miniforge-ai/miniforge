@@ -37,6 +37,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.messages.interface :as messages]
    [ai.miniforge.operator.interface :as operator]
+   [ai.miniforge.workflow.interface :as workflow]
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -77,14 +78,19 @@
     (try (edn/read-string (slurp f)) (catch Exception _ nil))))
 
 (defn- ^{:stratum 0} write-edn!
-  "Write `data` whole: a temp file, then an atomic rename."
+  "Write `data` whole: a temp file, then an atomic rename. The temp name
+   is unique per call so concurrent writers to one record cannot share,
+   interleave into, or rename away each other's temp file. A write that
+   fails removes its own temp file."
   [^java.io.File f data]
-  (let [tmp (io/file (.getParentFile f) (str (.getName f) ".tmp"))]
+  (let [tmp (io/file (.getParentFile f) (str (.getName f) "." (random-uuid) ".tmp"))]
     (io/make-parents f)
-    (spit tmp (pr-str data))
-    (Files/move (.toPath tmp) (.toPath f)
-                (into-array java.nio.file.CopyOption [StandardCopyOption/ATOMIC_MOVE
-                                                      StandardCopyOption/REPLACE_EXISTING]))))
+    (try
+      (spit tmp (pr-str data))
+      (Files/move (.toPath tmp) (.toPath f)
+                  (into-array java.nio.file.CopyOption [StandardCopyOption/ATOMIC_MOVE
+                                                        StandardCopyOption/REPLACE_EXISTING]))
+      (finally (io/delete-file tmp true)))))
 
 (defn- ^{:stratum 0} read-json
   [^java.io.File f]
@@ -330,9 +336,15 @@
 
 (defn ^{:stratum 2} target-live?
   "The workflow has a live runner: in this process, the runner recorded
-   in its origin (any process on this host), or a live manifest owner."
+   in its origin (any process on this host), a live manifest owner, or a
+   process holding the run's owner lock. An owner lock that cannot be read
+   counts as live: a retry is refused rather than risk two runners."
   [workflow-id]
   (let [origin (origin-record workflow-id)]
     (or (operator/live-runner? workflow-id)
         (process-running? (:pid origin) (:pid-started origin))
-        (manifest-owner-alive? workflow-id))))
+        (manifest-owner-alive? workflow-id)
+        ;; Under the root the run checkpoints in, as the runner locks it.
+        (let [root (workflow/run-checkpoint-root (str workflow-id) (es/default-events-dir))]
+          (or (anomaly/anomaly? root)
+              (some? (workflow/run-owner (str workflow-id) root)))))))

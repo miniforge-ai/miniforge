@@ -10,9 +10,27 @@
   [:event/id :event/type :event/timestamp :event/version :event/parent-id
    :org/id :workspace/id :repo/id :agent/id :agent/instance-id :workflow/id
    :pr/id :pack/id :deployment/id :auth/context
+   :workflow/spec :workflow/intent :workflow/phase :workflow/evidence-bundle-id
+   :routing/trigger-event-id :phase/expected-agent :phase/artifacts
+   :phase/outcome :phase/blocked-reason :phase/transition-request
+   :phase/active-since :heartbeat/activation-id :heartbeat/sequence
+   :heartbeat/observed-at :heartbeat/interval-ms :heartbeat/elapsed-ms
+   :phase/progress-status :phase/progress-count :phase/last-progress-at :phase/progress-gap-ms
+   :failure/class :workflow/failure-phase :cancel/requested-by :cancel/source :action/id
+   :phase/name :machine/state :checkpoint/path :checkpoint/size-bytes :checkpoint/root
+   :checkpoint/location
+   :snapshot/path :snapshot/size-bytes :from-state :from-phase :skipping :expected-hash :actual-hash
+   :gate/phase :envelope/id :gate/decision-envelope
+   :rule/id :rule/status :rule/severity :rule/enforcement
    :chain/run-id :chain/definition-id :chain/definition-version
    :step/id :step/index :step/workflow-id
    :edge/id :edge/from-workflow-id :edge/to-workflow-id
+   :opsv/evidence-bundle-id :opsv/experiment-pack-hash :opsv/targets
+   :opsv/environment-fingerprint :opsv/step-id :opsv/iteration-id :opsv/policy-hash
+   :opsv/diff-artifact-refs :opsv/policy-artifact-ref :opsv/metric-snapshot-artifact-refs
+   :opsv/requested-actuation-mode :opsv/effective-actuation-mode
+   :opsv/governed-effects :opsv/governed-effect :opsv/decision-envelope
+   :opsv/effect-state :opsv/effect-observed :opsv/pr-refs :opsv/apply-refs
    :supervisory/entity-key :intervention/id :intervention/target-id :intervention/requested-by])
 
 (def ^{:stratum 0} ^:private snapshot-fields

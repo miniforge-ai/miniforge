@@ -17,6 +17,7 @@
 ## Using Miniforge
 
 - **[Phase Pipeline](user-guide/phases.md)** -- Explore, Plan, Implement, Verify, Review, Release, Observe
+- **[Pipeline Stages](user-guide/pipeline-stages.md)** -- Data Foundry stage requirements, pass-through, preflight
 - **[Architecture Overview](user-guide/architecture.md)** -- Components, layers, dependency flow
 - **[Deployment](deployment.md)** -- Babashka CLI + jlink TUI, installation, configuration
 - **[GitHub App Setup](GITHUB_APP_SETUP.md)** -- OAuth configuration for PR automation

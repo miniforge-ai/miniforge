@@ -18,6 +18,7 @@
 (ns ai.miniforge.observer.alert-subscriber
   (:require
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.observer.alert-delivery :as delivery]
    [ai.miniforge.observer.alerts :as alerts]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -27,9 +28,6 @@
 
 (defn ^{:stratum 0} rules-from-config [config]
   (vec (get-in config [:observability :alerts] [])))
-
-(defn- ^{:stratum 0} alert-event [workflow-id alert]
-  (assoc (alerts/alert-fired nil workflow-id alert) :workflow/id workflow-id))
 
 (defn ^{:stratum 0} stop-alert-subscriber! [event-stream handle]
   (when-let [id (:subscriber-id handle)]
@@ -57,6 +55,6 @@
         id
         (fn [event]
           (doseq [alert (alerts/evaluate-rules rules event state)]
-            (es/publish! event-stream (alert-event workflow-id alert))))
+            (delivery/deliver! event-stream workflow-id state alert)))
         (partial watched-workflow-event? workflow-id))
        {:subscriber-id id :alert-state state}))))

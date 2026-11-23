@@ -141,3 +141,46 @@
   (let [p (projection/project (workspace goal) :skeptic {})]
     (is (= 12 (:projection/version p)))
     (is (= :full (:projection/visibility p)))))
+
+(deftest ^{:stratum 2} the-ablation-shows-a-participant-its-own-objects
+  (let [ws (workspace (assoc (obj "claim-1" :claim :proposer) :object/participant :proposer-1)
+                      (assoc (obj "claim-2" :claim :proposer) :object/participant :proposer-2))]
+    (is (= ["claim-1"] (ids (:projection/objects
+                             (projection/project ws :proposer-1 {:visibility :none})))))))
+
+(deftest ^{:stratum 2} edges-never-name-a-hidden-object
+  (let [ws (workspace (obj "goal-1" :goal :interpreter :links {:supports #{"claim-9"}})
+                      (obj "claim-9" :claim :skeptic))
+        view (projection/project ws :proposer {:visibility :none})]
+    (is (= ["goal-1"] (ids (:projection/objects view))))
+    (is (empty? (get-in view [:projection/goals 0 :object/links :supports])))))
+
+(deftest ^{:stratum 2} the-read-scope-bounds-every-visibility
+  (let [ws (workspace (obj "goal-1" :goal :interpreter)
+                      (obj "claim-1" :claim :proposer))]
+    (is (= ["goal-1"] (ids (:projection/objects
+                            (projection/project ws :proposer {:visibility :full
+                                                              :readable-ids #{"goal-1"}})))))))
+
+(deftest ^{:stratum 2} a-read-scope-that-hides-the-frame-says-so
+  (let [ws (workspace (obj "goal-1" :goal :interpreter))]
+    (is (= ["goal-1"] (:projection/withheld-frame
+                       (projection/project ws :proposer {:readable-ids #{}}))))
+    (is (= [] (:projection/withheld-frame (projection/project ws :proposer {}))))))
+
+(deftest ^{:stratum 2} a-hidden-replacement-is-never-named
+  (let [old (assoc (obj "decision-1" :decision :proposer :touched-at 5)
+                   :object/participant :proposer-1
+                   :object/superseded-by "decision-2")
+        replacement (assoc (obj "decision-2" :decision :synthesizer :touched-at 5)
+                           :object/participant :synthesizer-1)
+        hidden (projection/project (workspace old replacement) :proposer-1
+                                   {:visibility :none :since 4})
+        shown (projection/project (workspace old replacement) :proposer-1 {:since 4})]
+    (testing "the object list and the delta both drop the hidden replacement id"
+      (is (= ["decision-1"] (ids (:projection/objects hidden))))
+      (is (not (contains? (first (:projection/objects hidden)) :object/superseded-by)))
+      (is (not (contains? (first (:projection/delta hidden)) :object/superseded-by))))
+    (testing "a visible replacement stays named"
+      (is (= "decision-2" (:object/superseded-by (first (:projection/objects shown)))))
+      (is (= "decision-2" (:object/superseded-by (first (:projection/delta shown))))))))

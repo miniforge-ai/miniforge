@@ -17,10 +17,40 @@
 ;; limitations under the License.
 (ns ai.miniforge.bb-test-runner.stable-derived-test
   "Unit tests for `stable-derived`."
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest testing is]]
             [ai.miniforge.bb-test-runner.stable-derived :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private purposeful-git-env
+  "`GIT_*` variables a developer or CI sets on purpose for a test run.
+   None binds a git command to a repository, so the sanitizer keeps each."
+  {"GIT_CONFIG_GLOBAL"       "/tmp/gitconfig"
+   "GIT_CONFIG_SYSTEM"       "/dev/null"
+   "GIT_CONFIG_NOSYSTEM"     "1"
+   "GIT_AUTHOR_NAME"         "CI"
+   "GIT_COMMITTER_EMAIL"     "ci@example.invalid"
+   "GIT_SSH_COMMAND"         "ssh -o BatchMode=yes"
+   "GIT_TERMINAL_PROMPT"     "0"
+   "GIT_CEILING_DIRECTORIES" "/tmp"})
+
+(def ^{:stratum 0} ^:private older-git-local-env-var
+  "Listed by git 2.11 through 2.39 and by no later release, so the
+   installed-git check does not reach it on a current git."
+  "GIT_INTERNAL_SUPER_PREFIX")
+
+(defn- ^{:stratum 0} running-git-local-env-vars
+  "The names the installed git prints for `git rev-parse --local-env-vars`.
+   The command reads no repository, so it runs the same from anywhere.
+   Started with `ProcessBuilder`: other bricks' tests redefine
+   `clojure.java.shell/sh`, and may share this JVM."
+  []
+  (let [process (.start (ProcessBuilder. ["git" "rev-parse" "--local-env-vars"]))]
+    (->> (slurp (.getInputStream process))
+         str/split-lines
+         (remove str/blank?)
+         vec)))
 
 (deftest ^{:stratum 0} test-stable-tag-globs-covers-supported-history
   (testing "stable tag globs cover both historical naming schemes"
@@ -152,6 +182,24 @@
             ["g"]
             ["h"]]
            (sut/bisect-project-groups ["a" "b" "c" "d" "e" "f" "g" "h"])))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} test-sanitize-git-worktree-env-drops-every-variable-the-installed-git-lists
+  (let [names (running-git-local-env-vars)]
+    (testing "given the installed git → it names its repository-binding variables"
+      (is (seq names)))
+    (testing "given an environment that sets every one of them → none survives"
+      (is (= {} (sut/sanitize-git-worktree-env (zipmap names (repeat "inherited"))))))))
+
+(deftest ^{:stratum 1} test-sanitize-git-worktree-env-drops-the-variable-only-older-git-lists
+  (testing "given the name git 2.11 through 2.39 also list → it is dropped"
+    (is (= {} (sut/sanitize-git-worktree-env {older-git-local-env-var "inherited"})))))
+
+(deftest ^{:stratum 1} test-sanitize-git-worktree-env-keeps-variables-set-on-purpose
+  (testing "given GIT_* variables that bind to no repository → all are kept"
+    (is (= purposeful-git-env
+           (sut/sanitize-git-worktree-env purposeful-git-env)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
