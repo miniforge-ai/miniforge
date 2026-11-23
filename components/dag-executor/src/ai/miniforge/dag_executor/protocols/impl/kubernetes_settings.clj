@@ -5,18 +5,22 @@
   "Validate the Kubernetes executor's execution and transport budgets."
   (:require [ai.miniforge.config.interface :as config]
             [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
+            [ai.miniforge.dag-executor.protocols.impl.kubernetes-defaults :as defaults]
             [ai.miniforge.dag-executor.result :as result]
             [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0 :private true} config-resource "config/dag-executor/runtime/kubernetes.edn")
+(def ^{:stratum 0 :private true} config-resource
+  "Package capsule and create-request budgets separately from fixed projection data."
+  "config/dag-executor/runtime/kubernetes.edn")
 
 (def ^{:stratum 0 :private true} capsule-budget-schema
   [:map [:resources/timeout-seconds pos-int?]])
 
 (def ^{:stratum 0 :private true} millis-schema
-  [:int {:min 1 :max Integer/MAX_VALUE}])
+  [:int {:min 1
+         :max Integer/MAX_VALUE}])
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -40,11 +44,16 @@
 (defn ^{:stratum 2} configure
   "Validate packaged defaults and then effective executor settings before provider I/O."
   [overrides]
-  (let [defaults (config/load-config-resource config-resource)
-        effective (merge defaults overrides)]
-    (when-let [invalid (or (m/explain executor-schema defaults)
-                           (m/explain executor-schema effective))]
+  (let [packaged (merge (defaults/data) (config/load-config-resource config-resource))
+        effective (when (or (nil? overrides) (map? overrides)) (merge packaged overrides))
+        invalid (or (m/explain executor-schema packaged)
+                    (m/explain executor-schema effective))]
+    (if invalid
       (let [key (-> invalid :errors first :in first)]
-        (throw (ex-info (messages/t :kubernetes/invalid-setting {:key key})
-                        {:config/key key :config/resource config-resource}))))
-    effective))
+        (result/err :invalid-kubernetes-settings
+                    (messages/t :kubernetes/invalid-setting {:key key})
+                    {:config/key key
+                     :config/resource config-resource}))
+      (result/ok effective))))
+
+(comment (configure {}))

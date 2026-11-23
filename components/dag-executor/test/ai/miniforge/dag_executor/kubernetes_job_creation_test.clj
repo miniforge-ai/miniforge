@@ -27,9 +27,9 @@
 (defn- ^{:stratum 0} reject-io! [& _] (throw (AssertionError.)))
 
 (defn- ^{:stratum 0} invalid-setting [options]
-  (try
-    (kubernetes/create-kubernetes-executor options)
-    (catch clojure.lang.ExceptionInfo e (:config/key (ex-data e)))))
+  (get-in (executor/acquire-environment!
+            (kubernetes/create-kubernetes-executor options) (random-uuid) {})
+          [:error :data :config/key]))
 
 (deftest ^{:stratum 0} resource-projection-preserves-defaults-and-stringifies-cpu
   (is (= {:limits {:memory "1Gi" :cpu "2"}
